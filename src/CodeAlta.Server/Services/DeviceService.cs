@@ -75,6 +75,9 @@ public sealed class DeviceService
     /// <summary>Gets the store of the devices that sign-ins register; null for none.</summary>
     public ISignInStore? SignInStore { get; init; }
 
+    /// <summary>Gets the limits of the attempts in the name of a person (recovery); null for none.</summary>
+    public AuthenticationRateLimiter? RateLimiter { get; init; }
+
     /// <summary>
     /// Gets what tells whether a controller device may revoke a device of another person (<c>doc/fleet/access-control.md</c>):
     /// an owner or admin, or a maintainer for a team machine. Null lets a controller revoke only the devices of its own person.
@@ -369,6 +372,8 @@ public sealed class DeviceService
             throw CoordinatorException.Forbidden(CoordinatorErrorCodes.RecoveryRefused, "The entry is not signed by a recovery key of this server.");
         }
 
+        // The person of the recovery key is known before its signature is checked: attempts in their name are counted, with a slow path.
+        if (RateLimiter is { } limiter) await limiter.RequirePersonAsync(RateLimitedActions.Recover, signer.OwnerPersonId, origin, _store).ConfigureAwait(false);
         var (payload, record) = await ReadEntryAsync(signer, request.DeviceListEntry, cancellationToken).ConfigureAwait(false);
         DeviceListChain.Require(payload.Operation == FleetDeviceListOperations.Add && payload.DeviceId == key.DeviceId && payload.PublicKey == key.Text
             && payload.Kind == FleetDeviceKinds.Controller && payload.OwnerId == signer.OwnerPersonId, "add the device that sends it as a controller device of the person of the recovery key");

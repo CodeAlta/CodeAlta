@@ -116,6 +116,9 @@ public sealed class CoordinatorServerOptions
 
     /// <summary>Gets the thresholds of the health of the machines: how long a problem lasts before its owner is told, how long a machine may be offline.</summary>
     public HealthOptions Health { get; init; } = new();
+
+    /// <summary>Gets the limits of the requests of devices the server does not know yet: setup, sign-in, enrollment, recovery, the hooks' ingress.</summary>
+    public AuthenticationRateLimits RateLimits { get; init; } = new();
 }
 
 /// <summary>What a running server writes in its data root, for <c>altaserver status</c>.</summary>
@@ -417,6 +420,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton(telemetry);
         services.AddSingleton(metrics);
         services.AddSingleton(new NonceCache(time, options.MaxClockSkew * 2 + TimeSpan.FromMinutes(1)));
+        services.AddSingleton(new AuthenticationRateLimiter(options.RateLimits, time));
         services.AddSingleton(provider => new RequestAuthenticator(store, provider.GetRequiredService<NonceCache>(), time, options.MaxClockSkew) { Metrics = metrics });
         services.AddSingleton<PresenceRegistry>();
         services.AddSingleton(_ => new DirectoryHub { Metrics = metrics });
@@ -432,7 +436,10 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton(provider => new SignInService(store, store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<SignInAttempts>(),
             signIn, time));
         services.AddSingleton(provider => new DeviceService(store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<PresenceRegistry>(), time,
-            provider.GetRequiredService<RelayHub>()) { Metrics = metrics, SignInGrants = provider.GetRequiredService<SignInAttempts>(), SignInStore = store });
+            provider.GetRequiredService<RelayHub>())
+        {
+            Metrics = metrics, SignInGrants = provider.GetRequiredService<SignInAttempts>(), SignInStore = store, RateLimiter = provider.GetRequiredService<AuthenticationRateLimiter>(),
+        });
         services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time) { Metrics = metrics });
         services.AddSingleton(_ => new MetadataKeyService(store, time));
         services.AddSingleton(provider => new FleetSecretService(store, store, time) { Presence = provider.GetRequiredService<PresenceRegistry>() });
@@ -496,6 +503,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
         app.UseStatusCodePages();
         app.UseWebSockets();
         app.UseRouting();
+        // Before the body is read or a signature checked: a flood costs the server as little as possible.
+        app.UseMiddleware<RateLimitMiddleware>();
         app.UseMiddleware<DeviceAuthenticationMiddleware>();
         app.MapOpenApi();
         ApiEndpoints.Map(app);

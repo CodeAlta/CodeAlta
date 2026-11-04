@@ -147,6 +147,21 @@ analysis of Matrix showed a malicious server exploiting exactly that).
   today), or from a signed mobile application if one comes; the server serves the phone's page only for Managed spaces,
   where trusting the organization's server is stated. Approvals from the phone follow the same rule.
 
+## Requests before a device is known
+
+Setup, sign-in (its methods, starts, completions, device-code polls, passkey ceremonies), enrollment, recovery and the
+hooks' ingress take requests from devices the server does not know yet. Each is limited:
+
+- **Per address** (an IPv6 address by its /64), in fixed windows counted in memory, before the body is read or a
+  signature checked; **per person** where a request names one before it is proved (the person of a recovery key).
+- Past a limit, the answer is `429` with `Retry-After` and the code `request.rate_limited`; the first refusal of each
+  window is audited, never each request of a flood.
+- **Nobody is locked out for good**: a window ends by itself, and a person past their limit keeps a slow path (one
+  attempt a minute), so a flood in the owner's name slows them down and never shuts them out. Devices the server knows
+  are not counted: they sign their requests.
+- Behind a proxy on the server's loopback (Tailscale Serve, Caddy), every request comes from that one address and the
+  limits are shared; they still end with their window.
+
 ## Credentials
 
 CodeAlta holds a credential only where it signs in itself, and never hands one to anything else

@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization.Metadata;
 using CodeAlta.Fleet.Protocol.Api;
+using CodeAlta.Server.Identity;
 using CodeAlta.Server.Services;
 using CodeAlta.Server.Storage;
 using Microsoft.AspNetCore.Builder;
@@ -21,41 +22,41 @@ internal static class SignInEndpoints
         var signIn = api.MapGroup("/sign-in");
         signIn.MapGet("/methods", async (SignInService service, CancellationToken token)
                 => Results.Json(await service.GetMethodsAsync(token).ConfigureAwait(false), FleetSignInJsonContext.Default.SignInMethodsResponse))
-            .WithMetadata(new AllowUnknownDeviceAttribute())
+            .WithMetadata(new AllowUnknownDeviceAttribute(), new RateLimitedAttribute(RateLimitedActions.SignInMethods))
             .Produces<SignInMethodsResponse>()
             .WithSummary("The ways a person may sign in to this server now; needs no device.");
 
         signIn.MapPost("/start", async (StartSignInRequest? request, HttpContext context, SignInService service) =>
                 Results.Json(await service.StartAsync(request, DeviceAuthenticationMiddleware.GetSigned(context), ApiEndpoints.Origin(context), context, context.RequestAborted)
                     .ConfigureAwait(false), FleetSignInJsonContext.Default.StartSignInResponse))
-            .WithMetadata(new AllowUnknownDeviceAttribute())
+            .WithMetadata(new AllowUnknownDeviceAttribute(), new RateLimitedAttribute(RateLimitedActions.SignInStart))
             .Produces<StartSignInResponse>()
             .WithSummary("Starts a sign-in through the system browser of a device, signed by its key: the address to open, which comes back to its loopback address.");
 
         signIn.MapPost("/complete", async (CompleteSignInRequest? request, HttpContext context, SignInService service) =>
                 Results.Json(await service.CompleteAsync(request, DeviceAuthenticationMiddleware.GetSigned(context), ApiEndpoints.Origin(context), context.RequestAborted)
                     .ConfigureAwait(false), FleetSignInJsonContext.Default.CompleteSignInResponse))
-            .WithMetadata(new AllowUnknownDeviceAttribute())
+            .WithMetadata(new AllowUnknownDeviceAttribute(), new RateLimitedAttribute(RateLimitedActions.SignInComplete))
             .Produces<CompleteSignInResponse>()
             .WithSummary("Completes a sign-in with the code the browser brought back, signed by the key that started it, once: a grant to enroll that device, or a link.");
 
         signIn.MapPost("/poll", async (PollSignInRequest? request, HttpContext context, SignInService service) =>
                 Results.Json(await service.PollAsync(request, DeviceAuthenticationMiddleware.GetSigned(context), ApiEndpoints.Origin(context), context.RequestAborted)
                     .ConfigureAwait(false), FleetSignInJsonContext.Default.PollSignInResponse))
-            .WithMetadata(new AllowUnknownDeviceAttribute())
+            .WithMetadata(new AllowUnknownDeviceAttribute(), new RateLimitedAttribute(RateLimitedActions.SignInPoll))
             .Produces<PollSignInResponse>()
             .WithSummary("Asks whether the person entered the code of a sign-in that uses one (GitHub), signed by the key that started it: pending, or what the sign-in gave, once.");
 
         signIn.MapPost("/passkey/options", async (PasskeyOptionsRequest? request, HttpContext context, SignInService service) =>
                 Results.Json(await service.PasskeyOptionsAsync(request, context).ConfigureAwait(false), FleetSignInJsonContext.Default.PasskeyOptionsResponse))
-            .WithMetadata(new AllowUnknownDeviceAttribute())
+            .WithMetadata(new AllowUnknownDeviceAttribute(), new RateLimitedAttribute(RateLimitedActions.Passkey))
             .Produces<PasskeyOptionsResponse>()
             .WithSummary("The options of the passkey ceremony of the server's sign-in page.");
 
         signIn.MapPost("/passkey/finish", async (PasskeyFinishRequest? request, HttpContext context, SignInService service) =>
                 Results.Json(await service.PasskeyFinishAsync(request, ApiEndpoints.Origin(context), context).ConfigureAwait(false),
                     FleetSignInJsonContext.Default.PasskeyFinishResponse))
-            .WithMetadata(new AllowUnknownDeviceAttribute())
+            .WithMetadata(new AllowUnknownDeviceAttribute(), new RateLimitedAttribute(RateLimitedActions.Passkey))
             .Produces<PasskeyFinishResponse>()
             .WithSummary("Ends the passkey ceremony of the server's sign-in page: where the browser goes back to the device.");
 
