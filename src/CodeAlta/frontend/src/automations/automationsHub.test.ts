@@ -8,7 +8,7 @@ const item = (id: string): AutomationItem => ({
   provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, placement: null, autonomy: null,
 });
 const run = (status: string, sessionId: string | null = "s1"): AutomationRunItem =>
-  ({ id: "r1", automationId: "a", name: "A", sessionId, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status, message: status === "failed" ? "No model." : null, machineId: null, reply: null, output: null });
+  ({ id: "r1", automationId: "a", name: "A", sessionId, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status, message: status === "failed" ? "No model." : null, machineId: null, reply: null, output: null, calls: null });
 const listed = (items: AutomationItem[], change: Partial<AutomationsListResponse> = {}): AutomationsListResponse =>
   ({ status: "ok", paused: false, scanned: true, items, faults: [], runs: [], upcoming: [], ...change });
 const trigger: AutomationTriggerItem = { type: "daily", minute: 0, every: 1, at: ["09:00"], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null };
@@ -47,6 +47,8 @@ function fixture() {
     sampleEvent: (request: object) => answer("sampleEvent", request, { status: "ok", message: null, detail: "PLAT-7 Crash", prompt: "Triage it.\n---\nTitle: Crash", replyTo: "the Jira issue PLAT-7" }),
     tryRun: (request: object) => answer("tryRun", request, { status: "ok", message: null, run: { ...run("running"), trigger: "try" } }),
     hookAddress: (request: object) => answer("hookAddress", request, { status: "ok", message: null, hookId: "abcdefghijklmnopqrstuvwxyz", url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" }),
+    takeOver: (request: object) => answer("takeOver", request, (request as { runId: string }).runId === "r1" ? { status: "ok", message: null, sessionId: "s1" }
+      : { status: "refused", message: "This run is not in progress.", sessionId: null }),
     createHook: (request: object) => answer("createHook", request, { status: "ok", message: null, hookId: "abcdefghijklmnopqrstuvwxyz", url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" }),
     watch: async (request: object, options?: { signal?: AbortSignal }) => {
       calls.push(`watch:${JSON.stringify(request)}`);
@@ -198,6 +200,12 @@ test("a trigger of another tool is tested, sampled, tried and given a hook throu
   assert.ok(calls.includes('tryRun:{"expectedEpoch":"epoch-1","id":"a","triggerIndex":0,"body":null}'));
   assert.deepEqual(await hub.hookAddress("node-1", "abcdefghijklmnopqrstuvwxyz"), { ok: true, message: null, url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" });
   assert.ok(calls.includes('hookAddress:{"expectedEpoch":"epoch-1","machineId":"node-1","hookId":"abcdefghijklmnopqrstuvwxyz"}'));
+  // A dry run tries the automation on its own prompt; a run that waits is taken over, and answers with its session or why not.
+  await hub.tryRun("a", -1, null);
+  assert.ok(calls.includes('tryRun:{"expectedEpoch":"epoch-1","id":"a","triggerIndex":-1,"body":null}'));
+  assert.deepEqual(await hub.takeOver("a", "r1"), { ok: true, message: null, sessionId: "s1" });
+  assert.ok(calls.includes('takeOver:{"expectedEpoch":"epoch-1","id":"a","runId":"r1"}'));
+  assert.deepEqual(await hub.takeOver("a", "r2"), { ok: false, message: "This run is not in progress.", sessionId: null });
   assert.deepEqual(await hub.createHook("node-1", "incident_io", null),
     { ok: true, message: null, hookId: "abcdefghijklmnopqrstuvwxyz", url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" });
 });

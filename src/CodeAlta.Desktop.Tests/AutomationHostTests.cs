@@ -51,6 +51,13 @@ public sealed class AutomationHostTests
         var address = await fixture.Rpc.HookAddressAsync(new(Epoch, "node-1", "abcdefghijklmnopqrstuvwxyz"), default);
         Assert.AreEqual(("refused", (string?)null), (address.Status, address.Url));
         Assert.AreEqual("invalid_request", (await fixture.Rpc.HookAddressAsync(new(Epoch, "node-1", "../../etc"), default)).Status);
+        // A take-over names a run in progress of an automation with autonomy: none is, so it is refused with why.
+        Assert.AreEqual("stale_epoch", (await fixture.Rpc.TakeOverAsync(new("other", saved.Id!, "run-1"), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.TakeOverAsync(new(Epoch, saved.Id!, "run\n1"), default)).Status);
+        Assert.AreEqual("not_found", (await fixture.Rpc.TakeOverAsync(new(Epoch, "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d79", "run-1"), default)).Status);
+        var taken = await fixture.Rpc.TakeOverAsync(new(Epoch, saved.Id!, "run-1"), default);
+        Assert.AreEqual(("refused", (string?)null), (taken.Status, taken.SessionId));
+        StringAssert.Contains(taken.Message, "not in progress");
     }
 
     [TestMethod]

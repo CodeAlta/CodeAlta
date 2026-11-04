@@ -31,12 +31,12 @@ rule 9, roadmap M4. Personal scope now; teams and on-call resolvers plug into th
 
 ## Slices
 
-- [ ] 1. Model: `autonomy` in the configuration (read, write, validate, fingerprint), RPC items, page types; tests.
-- [ ] 2. Host guard: tool guard registry and interceptor composed with the plugins' hooks; held calls as reviews,
+- [x] 1. Model: `autonomy` in the configuration (read, write, validate, fingerprint), RPC items, page types; tests.
+- [x] 2. Host guard: tool guard registry and interceptor composed with the plugins' hooks; held calls as reviews,
   circuit breaker, dry-run fakes; tests.
-- [ ] 3. Engine and runner: guard per run, strict mode check, `waiting` status, timeout watchdog (stop/wait),
+- [x] 3. Engine and runner: guard per run, strict mode check, `waiting` status, timeout watchdog (stop/wait),
   recorded calls, dry run in Try; tests.
-- [ ] 4. Fleet: `waiting` reported, server notification to the router's recipients (owner), `automations.takeOver`
+- [x] 4. Fleet: `waiting` reported, server notification to the router's recipients (owner), `automations.takeOver`
   on the node API; tests.
-- [ ] 5. Desktop: editor Autonomy section, run detail (waiting, Take over, recorded calls), RPC; frontend tests.
+- [x] 5. Desktop: editor Autonomy section, run detail (waiting, Take over, recorded calls), RPC; frontend tests.
 - [ ] 6. Docs (`site/docs`), `codealta-fleet` skill, `alta automation show`; verification.

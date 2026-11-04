@@ -287,6 +287,29 @@ internal sealed class AutomationsService
         }
     }
 
+    /// <summary>
+    /// Takes a run in progress of an automation with autonomy over: what it waits for waits for this person, as long as they
+    /// take, and no approval stops it any more. A run on this computer is taken over here; one on a machine of a server through
+    /// that server, with a request this computer signs. The answer names the session to open, for a run of this computer.
+    /// </summary>
+    [NeoRpcMethod("takeOver")]
+    public async Task<AutomationTakeOverResponse> TakeOverAsync(AutomationTakeOverRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (!AutomationDefinition.IsId(request.Id) || !Identifier(request.RunId)) return new("invalid_request", null, null);
+        if (_automations!.Snapshot.Find(request.Id) is not { } entry) return new("not_found", null, null);
+        if (entry.Definition.RunsOn is not null)
+        {
+            if (_placement is null) return new("refused", "Its machine is reached from no fleet here.", null);
+            var problem = await _placement.TakeOverAsync(entry, request.RunId, cancellationToken).ConfigureAwait(false);
+            return problem is null ? new("ok", null, null) : new("refused", problem, null);
+        }
+
+        return _automations.TakeOver(request.RunId) is { } sessionId ? new("ok", null, sessionId)
+            : new("refused", "This run is not in progress, or its automation does not decide what its runs do without a person.", null);
+    }
+
     /// <summary>The next times a trigger being written would be due, or what is wrong with it.</summary>
     [NeoRpcMethod("preview")]
     public AutomationPreviewResponse Preview(AutomationPreviewRequest request)
@@ -400,7 +423,7 @@ internal sealed class AutomationsService
     private static AutomationRunItem Run(AutomationRun run)
         => new(run.Id, run.AutomationId, run.Name, run.SessionId, run.ProjectId, run.StartedAt, run.EndedAt, run.Trigger, run.Detail, run.Status, run.Message)
         {
-            Reply = run.Reply, Output = run.Output,
+            Reply = run.Reply, Output = run.Output, Calls = run.Calls,
         };
 
     internal static AutomationTriggerItem Trigger(AutomationTrigger trigger)
@@ -684,7 +707,18 @@ internal sealed record AutomationRunItem(string Id, string AutomationId, string?
 
     /// <summary>The answer a try kept instead of writing it back.</summary>
     public string? Output { get; init; }
+
+    /// <summary>The calls of allowed tools a try recorded instead of making them; null for none.</summary>
+    public IReadOnlyList<string>? Calls { get; init; }
 }
+
+/// <param name="Id">The automation.</param>
+/// <param name="RunId">Its run in progress.</param>
+internal sealed record AutomationTakeOverRequest(string? ExpectedEpoch, string Id, string RunId);
+
+/// <param name="Message">Why the run was not taken over.</param>
+/// <param name="SessionId">The session of the run to open, for a run of this computer; null for a run of another machine.</param>
+internal sealed record AutomationTakeOverResponse(string Status, string? Message, string? SessionId);
 
 /// <param name="ProjectId">The project the automation runs in, whose secrets come first; null for a chat.</param>
 /// <param name="Prompt">Unused by the test; kept for one shape of request.</param>
@@ -704,7 +738,7 @@ internal sealed record AutomationSampleRequest(string? ExpectedEpoch, string? Pr
 /// <param name="ReplyTo">Where its answer would be written back; null for nowhere.</param>
 internal sealed record AutomationSampleResponse(string Status, string? Message, string? Detail, string? Prompt, string? ReplyTo);
 
-/// <param name="TriggerIndex">The trigger whose sample event the try runs on.</param>
+/// <param name="TriggerIndex">The trigger whose sample event the try runs on; -1 tries its own prompt, a dry run of an automation with autonomy.</param>
 /// <param name="Body">A webhook: the JSON body of an example event.</param>
 internal sealed record AutomationTryRequest(string? ExpectedEpoch, string Id, int TriggerIndex, string? Body);
 

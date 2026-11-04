@@ -9,7 +9,7 @@ import { TriggerIcon } from "./TriggerIcon";
 import { sessionTime, timelineTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { AutomationEditor } from "./AutomationEditor";
-import { automationTemplates, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, placementLabel, placementProblem, placementWait, runStatusLabel, runTone, runTriggerLabel, runsWithFacts,
+import { automationTemplates, describeAutonomy, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, placementLabel, placementProblem, placementWait, runStatusLabel, runTone, runTriggerLabel, runsWithFacts,
   timelinePosition, timelineRows, triggerTone, waitsToBeAllowed,
   type AutomationForm, type AutomationScope, type AutomationTemplate } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
@@ -142,10 +142,12 @@ function AutomationCard({ item, paused, selected, busy, now, onSelect, onRun, on
   </li>;
 }
 
-function RunList({ runs, sessions, now, named, onOpen }: {
+function RunList({ runs, sessions, now, named, busy, onOpen, onTakeOver }: {
   runs: readonly AutomationRunItem[]; sessions: ReadonlyMap<string, WorkspaceSession>; now: number;
   /** Whether each run says which automation it is of: in the list of all of them. */
-  named: boolean; onOpen: (sessionId: string, projectId: string | null) => void;
+  named: boolean; busy: ReadonlySet<string>; onOpen: (sessionId: string, projectId: string | null) => void;
+  /** Takes a run that waits for a person over. */
+  onTakeOver: (run: AutomationRunItem) => void;
 }) {
   const { t, locale } = useShellLanguage();
   if (runs.length === 0) return <p className="automation-empty">{t("No run yet.")}</p>;
@@ -166,19 +168,28 @@ function RunList({ runs, sessions, now, named, onOpen }: {
         <time dateTime={when.dateTime} title={when.title}>{when.label}</time>
         {(session || remote) && <AppIcon name="chevronRight" size={14} />}
       </>;
+      // A run that waits for a person is taken over from here; the calls a try recorded instead of making them are listed under it.
       return <li key={run.id} data-tone={runTone(run.status)}>
         {session ? <button type="button" className="automation-run" title={t("Open the session")} onClick={() => onOpen(session.id, session.projectId)}>{body}</button>
           : remote ? <button type="button" className="automation-run" title={t("Open the session")} onClick={() => onOpen(remote, run.projectId)}>{body}</button>
           : <div className="automation-run">{body}</div>}
+        {run.status === "waiting" && <div className="automation-run-waits">
+          <span>{t(run.machineId ? "The run waits for you: open its session on its machine to answer it." : "The run waits for you: answer it in its session, or take it over.")}</span>
+          <Button size="small" intent="primary" disabled={busy.has(run.id)} loading={busy.has(run.id)} onClick={() => onTakeOver(run)}>{t("Take over")}</Button>
+        </div>}
+        {run.calls && run.calls.length > 0 && <ul className="automation-run-calls">
+          {run.calls.map((call, index) => <li key={index} title={call}>{t("Recorded, not made: {call}", { call })}</li>)}
+        </ul>}
       </li>;
     })}
   </ul>;
 }
 
-function AutomationDetail({ hub, item, paused, busy, now, sessions, epoch, providers, onRun, onEdit, onAllow, onOpen }: {
-  hub: AutomationsHub; item: AutomationItem; paused: boolean; busy: boolean; now: number; sessions: ReadonlyMap<string, WorkspaceSession>;
+function AutomationDetail({ hub, item, paused, busy, taking, now, sessions, epoch, providers, onRun, onTry, onEdit, onAllow, onOpen, onTakeOver }: {
+  hub: AutomationsHub; item: AutomationItem; paused: boolean; busy: boolean; taking: ReadonlySet<string>; now: number; sessions: ReadonlyMap<string, WorkspaceSession>;
   epoch: string | null | undefined; providers: readonly RunProvider[];
-  onRun: () => void; onEdit: () => void; onAllow: () => void; onOpen: (sessionId: string, projectId: string | null) => void;
+  onRun: () => void; onTry: () => void; onEdit: () => void; onAllow: () => void; onOpen: (sessionId: string, projectId: string | null) => void;
+  onTakeOver: (run: AutomationRunItem) => void;
 }) {
   const { t, locale } = useShellLanguage();
   const [runs, setRuns] = useState<readonly AutomationRunItem[] | null>(null);
@@ -202,6 +213,9 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, epoch, provi
       <span className="automation-card-glyph" data-file-tone={triggerTone(item.triggers[0]?.type)}><TriggerIcon type={item.triggers[0]?.type} size={20} /></span>
       <div><h3>{item.name}</h3><ScopeTag item={item} /></div>
       <Button intent="primary" disabled={busy || !!item.problem} loading={busy} icon={<AppIcon name="play" size={14} />} onClick={onRun}>{t("Run now")}</Button>
+      {/* A try of an automation with autonomy makes none of the calls it would make by itself: it records them on its run. */}
+      {item.autonomy && !item.runsOn && !item.script && <Button disabled={busy || !!item.problem} title={t("A try replaces the tools it calls by itself with fakes: their calls are recorded on the run, not made.")}
+        onClick={onTry}>{t("Try it (dry run)")}</Button>}
       <Button icon={<AppIcon name="edit" size={14} />} onClick={onEdit}>{t("Edit")}</Button>
     </header>
     {item.problem && <Callout intent="warning" compact role="alert">{item.problem}</Callout>}
@@ -225,13 +239,14 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, epoch, provi
       {item.repository && <><dt>{t("Repository")}</dt><dd>{item.repository}</dd></>}
       {/* What its sessions run with besides the defaults, which an automation that came with a project shows before it is allowed. */}
       {runsWith.length > 0 && <><dt>{t("Runs with")}</dt><dd>{runsWith.join(" · ")}</dd></>}
+      {item.autonomy && <><dt>{t("Autonomy")}</dt><dd>{describeAutonomy(item.autonomy, t)}</dd></>}
       <dt>{t("Stored in")}</dt><dd className="automation-file" title={item.file}>{item.file}</dd>
     </dl>
     {item.script ? <><h4>{t("Script")}</h4>
       <pre className="automation-prompt">{item.scriptArguments ? `${item.script}(${item.scriptArguments})` : item.script}</pre></>
       : <><h4>{t("Prompt")}</h4><pre className="automation-prompt">{item.prompt}</pre></>}
     <h4>{t("Runs")}</h4>
-    {runs === null ? <p className="automation-empty"><ActivitySpinner size={13} /></p> : <RunList runs={runs} sessions={sessions} now={now} named={false} onOpen={onOpen} />}
+    {runs === null ? <p className="automation-empty"><ActivitySpinner size={13} /></p> : <RunList runs={runs} sessions={sessions} now={now} named={false} busy={taking} onOpen={onOpen} onTakeOver={onTakeOver} />}
   </section>;
 }
 
@@ -322,6 +337,21 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
     const outcome = await during(item.id, () => hub.setEnabled(item.id, enabled));
     if (!outcome.ok) setNotice(outcome.message ?? t("The automation could not be saved."));
   }
+  async function dryRun(id: string) {
+    setNotice(null);
+    const outcome = await during(id, () => hub.tryRun(id, -1, null));
+    setSelected(id);
+    if (!outcome.ok && !outcome.run) { setNotice(outcome.message ?? t("The automation did not start.")); return; }
+    if (outcome.run?.sessionId) onOpenSession(outcome.run.sessionId, outcome.run.projectId ?? null);
+  }
+  // The session of a run taken over opens: on this computer from the answer, on another machine from the run.
+  async function takeOver(run: AutomationRunItem) {
+    setNotice(null);
+    const outcome = await during(run.id, () => hub.takeOver(run.automationId, run.id));
+    if (!outcome.ok) { setNotice(outcome.message ?? t("The run could not be taken over.")); return; }
+    const sessionId = outcome.sessionId ?? run.sessionId;
+    if (sessionId) onOpenSession(sessionId, run.projectId);
+  }
   const create = (form: AutomationForm) => setEditing(form);
   const fromTemplate = (template: AutomationTemplate) => create({ ...emptyForm(template.project ? projectId : null), name: t(template.name), prompt: template.prompt,
     script: template.script ?? "", scriptArguments: template.scriptArguments ?? "", triggers: template.triggers });
@@ -370,11 +400,12 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
       </div>
       {state.items.length > 0 && <aside className="automations-side">
         {current
-          ? <AutomationDetail hub={hub} item={current} paused={state.paused} busy={busy.has(current.id)} now={now} sessions={byId} epoch={epoch} providers={providers}
-              onRun={() => void run(current.id)} onEdit={() => setEditing(formOf(current))} onAllow={() => void allow(current)} onOpen={onOpenSession} />
+          ? <AutomationDetail hub={hub} item={current} paused={state.paused} busy={busy.has(current.id)} taking={busy} now={now} sessions={byId} epoch={epoch} providers={providers}
+              onRun={() => void run(current.id)} onTry={() => void dryRun(current.id)} onEdit={() => setEditing(formOf(current))} onAllow={() => void allow(current)}
+              onOpen={onOpenSession} onTakeOver={run => void takeOver(run)} />
           : <section className="automation-detail" aria-label={t("Recent runs")}>
               <h4>{t("Recent runs")}</h4>
-              <RunList runs={state.runs} sessions={byId} now={now} named onOpen={onOpenSession} />
+              <RunList runs={state.runs} sessions={byId} now={now} named busy={busy} onOpen={onOpenSession} onTakeOver={run => void takeOver(run)} />
             </section>}
       </aside>}
     </div>

@@ -3,7 +3,7 @@ import test from "node:test";
 import type { AutomationItem, AutomationRunItem, AutomationTriggerItem } from "#neoastra";
 import { locales, translate, type Locale, type MessageKey } from "../localization";
 import { defaultSessionSettings } from "../sessionSettings/sessionSettings";
-import { automationTemplates, canReply, dayName, denseTimeline, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, formProblem, formSettings, inputOf, integrationTypes, isHooked, isIntegration, isSchedule, maximumNameLength, newAutonomy,
+import { automationTemplates, canReply, dayName, denseTimeline, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, formProblem, formSettings, inputOf, integrationTypes, isHooked, isIntegration, isSchedule, maximumNameLength, newAutonomy, describeAutonomy, toolNames,
   maximumPromptLength, needsProject, newTrigger, openableRun, placementLabel, placementProblem, placementWait, scriptArgumentsTemplate, runStatusLabel, runTone, runTriggerLabel, runsWithFacts, secretName, secretReference, sessionOrigin, sessionSettingsOf, timelinePosition, timelineRows, triggerIcon, triggerLabel,
   triggerTone, triggerTypes, type AutomationForm } from "./automations";
 
@@ -15,7 +15,7 @@ const item = (id: string, change: Partial<AutomationItem> = {}): AutomationItem 
   provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, placement: null, autonomy: null, ...change,
 });
 const run = (id: string, sessionId: string | null): AutomationRunItem =>
-  ({ id, automationId: "a", name: "A", sessionId, projectId: null, startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status: "running", message: null, machineId: null, reply: null, output: null });
+  ({ id, automationId: "a", name: "A", sessionId, projectId: null, startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status: "running", message: null, machineId: null, reply: null, output: null, calls: null });
 
 test("a trigger reads as a sentence, and several as one line", () => {
   const read = (value: AutomationTriggerItem, locale: Locale = "en") => describeTrigger(value, (key, parameters) => translate(locale, key, parameters), locale);
@@ -185,6 +185,13 @@ test("the autonomy of an automation goes to the form and back, its tools trimmed
   assert.deepEqual(inputOf({ ...form, autonomy: { ...autonomy, allowedTools: [" k8s_restart_pod ", "  "] } }).autonomy, autonomy);
   // Turned on, it is read only: no tool allowed, approvals to the owner within an hour, then the run stops.
   assert.deepEqual(newAutonomy(), { allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner" });
+  const en = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate("en", key, parameters);
+  assert.equal(describeAutonomy(newAutonomy(), en), "Read only: it asks you before anything else than reading.");
+  assert.equal(describeAutonomy({ ...newAutonomy(), allowedTools: ["jira_comment", "slack_post"] }, en), "It calls jira_comment, slack_post by itself; it asks you for anything else.");
+  assert.deepEqual(toolNames(" jira_comment,slack_post\n jira_comment ,, mcp__github__create_issue "), ["jira_comment", "slack_post", "mcp__github__create_issue"]);
+  // A run that waits for a person is in progress, and says so in every language.
+  assert.equal(runTone("waiting"), "running");
+  for (const locale of locales) assert.notEqual(translate(locale, runStatusLabel("waiting")), translate(locale, "Unknown"), locale);
 });
 
 test("the Agent chip of an automation shows what it runs with, and what it chooses goes back to the form", () => {

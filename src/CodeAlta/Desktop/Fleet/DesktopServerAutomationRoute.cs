@@ -65,6 +65,9 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
     /// <summary>Asks the machine, through the server, to run an automation now.</summary>
     internal Task<AutomationRunDto> RunAsync(FleetSignedAutomationRunRequest signed, CancellationToken cancellationToken) => _client.RunAutomationAsync(signed, cancellationToken);
 
+    /// <summary>Passes a take-over of a run in progress, signed by this computer, to the machine through the server.</summary>
+    internal Task<AutomationRunDto> TakeOverAsync(FleetSignedAutomationRunRequest signed, CancellationToken cancellationToken) => _client.TakeOverAutomationRunAsync(signed, cancellationToken);
+
     /// <summary>Forgets an automation for the machine once it took away what it held.</summary>
     internal Task<AutomationListDto> DeleteAsync(string automationId, string machineId, CancellationToken cancellationToken)
         => _client.DeleteAutomationAsync(automationId, machineId, cancellationToken);

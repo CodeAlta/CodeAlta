@@ -145,10 +145,10 @@ export function describeTriggers(triggers: readonly AutomationTriggerItem[], t: 
 export type RunTone = "running" | "ok" | "failed" | "muted";
 /** How the status of a run is shown. */
 export function runTone(status: string): RunTone {
-  return status === "running" ? "running" : status === "completed" ? "ok" : status === "failed" ? "failed" : "muted";
+  return status === "running" || status === "waiting" ? "running" : status === "completed" ? "ok" : status === "failed" ? "failed" : "muted";
 }
 const statusLabels: Readonly<Record<string, MessageKey>> = {
-  running: "Running", completed: "Completed", failed: "Failed", cancelled: "Cancelled", interrupted: "Interrupted", skipped: "Skipped",
+  running: "Running", waiting: "Waits for you", completed: "Completed", failed: "Failed", cancelled: "Cancelled", interrupted: "Interrupted", skipped: "Skipped",
 };
 export const runStatusLabel = (status: string): MessageKey => statusLabels[status] ?? "Unknown";
 /** What started a run, in words: a run by hand, or the kind of its trigger. */
@@ -179,6 +179,12 @@ export type AutomationForm = Readonly<{
 
 /** The autonomy a person turns on: read only, no tool of another source allowed yet, approvals to the owner, an hour to answer. */
 export const newAutonomy = (): AutomationAutonomyItem => ({ allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner" });
+/** What the runs of an automation with autonomy do without a person, in one line. */
+export const describeAutonomy = (autonomy: AutomationAutonomyItem, t: Translate): string => autonomy.allowedTools.length === 0
+  ? t("Read only: it asks you before anything else than reading.")
+  : t("It calls {tools} by itself; it asks you for anything else.", { tools: autonomy.allowedTools.join(", ") });
+/** The names of tools a person writes, one per comma or line, without repeats. */
+export const toolNames = (text: string): readonly string[] => [...new Set(text.split(/[\s,]+/).map(name => name.trim()).filter(Boolean))];
 
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {

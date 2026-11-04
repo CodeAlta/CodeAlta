@@ -1,0 +1,39 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { AutomationAutonomyItem } from "#neoastra";
+import { locales, translate } from "../localization";
+import { ShellLanguageContext } from "../shellLanguage";
+import { AutonomyFields } from "./AutonomyFields";
+import { newAutonomy } from "./automations";
+
+const never = () => assert.fail("rendering must not act");
+const fields = (autonomy: AutomationAutonomyItem | null, permissionMode: string | null = null, locale: typeof locales[number] = "en") =>
+  renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
+    createElement(AutonomyFields, { autonomy, permissionMode, disabled: false, onChange: never })));
+
+test("off, the autonomy of an automation is one switch; on, it says what its runs do and asks the rest", () => {
+  const off = fields(null);
+  assert.match(off, /Decide what its runs do without a person/);
+  assert.doesNotMatch(off, /automation-allowed-tools|Approvals go to/);
+
+  const on = fields({ ...newAutonomy(), allowedTools: ["jira_comment"], maxCallsPerHour: 5 });
+  assert.match(on, /Its runs read without asking\./);
+  assert.match(on, /id="automation-allowed-tools"[^>]*value="jira_comment"/);
+  assert.match(on, /id="automation-max-calls"[^>]*value="5"/);
+  assert.match(on, /<option value="stop" selected="">then stop the run<\/option><option value="wait">then keep waiting<\/option>/);
+  // The approvals go to the owner; teams come with the access control of the fleet.
+  assert.match(on, /<option value="owner" selected="">Me<\/option><option value="team" disabled="">A team \(with access control\)<\/option>/);
+  assert.match(on, /It calls jira_comment by itself; it asks you for anything else\./);
+  assert.doesNotMatch(on, /role="alert"/);
+});
+
+test("a permission mode that allows everything is pointed out, in every language", () => {
+  assert.match(fields(newAutonomy(), "bypassPermissions"), /role="alert"[\s\S]*Its runs need a permission mode that asks/);
+  assert.doesNotMatch(fields(null, "bypassPermissions"), /role="alert"/);
+  for (const locale of locales) {
+    const html = fields(newAutonomy(), "bypassPermissions", locale);
+    assert.ok(html.includes(translate(locale, "Read only: it asks you before anything else than reading.")) && html.includes(translate(locale, "Tools it calls by itself")), locale);
+  }
+});
