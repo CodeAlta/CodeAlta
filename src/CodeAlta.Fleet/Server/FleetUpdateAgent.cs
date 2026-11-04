@@ -60,6 +60,9 @@ public sealed record FleetUpdateAgentOptions
 
     /// <summary>Gets what sees each report the agent sends to a server, with the link of that server; tests read it.</summary>
     internal Action<string, FleetUpdateReport>? Said { get; init; }
+
+    /// <summary>Gets what sends a report to the server of a link in the place of its connector; tests set it.</summary>
+    internal Func<string, FleetUpdateReport, CancellationToken, Task>? Send { get; init; }
 }
 
 /// <summary>
@@ -105,6 +108,8 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     private bool _resumed;
     private Task _loop = Task.CompletedTask;
     private Task? _applying;
+    // The last report sent or to send: each waits for the one before (Say).
+    private Task _sending = Task.CompletedTask;
     // What stops the download that runs, and its campaign; null when none runs.
     private CancellationTokenSource? _applyStop;
     private string? _applyCampaign;
@@ -987,11 +992,17 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     {
         lock (_gate)
         {
+            // The campaign this node follows is said as it stands now: a report read before a later change (the download
+            // published after the switch it led to) must not reach the server after the report of that change.
+            if (_state.LinkId == linkId && _state.CampaignId == report.CampaignId && ReportOf(_state) is { } current) report = current;
             if (!MaySay(linkId, report)) return;
+            // One report at a time, in the order they are said, each once the server answered: the server handles the
+            // requests of a connection concurrently, and records the last report it handles.
+            _sending = _sending.ContinueWith(_ => SendAsync(linkId, report), CancellationToken.None, TaskContinuationOptions.DenyChildAttach, TaskScheduler.Default)
+                .Unwrap();
         }
 
         _options.Said?.Invoke(linkId, report);
-        _ = SendAsync(linkId, report);
     }
 
     // Once a write succeeded again, each server hears where this node stands for it, held back meanwhile.
@@ -1013,11 +1024,24 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
 
     private async Task SendAsync(string linkId, FleetUpdateReport report)
     {
-        FleetConnector? connector;
-        lock (_gate) connector = _connectors.GetValueOrDefault(linkId);
-        connector ??= _options.Connector?.Invoke(linkId);
-        // Offline, the report goes with the next connection.
-        if (connector is not null) await connector.ReportUpdateAsync(report, _stop.Token).ConfigureAwait(false);
+        try
+        {
+            if (_options.Send is { } send)
+            {
+                await send(linkId, report, _stop.Token).ConfigureAwait(false);
+                return;
+            }
+
+            FleetConnector? connector;
+            lock (_gate) connector = _connectors.GetValueOrDefault(linkId);
+            connector ??= _options.Connector?.Invoke(linkId);
+            // Offline, the report goes with the next connection.
+            if (connector is not null) await connector.ReportUpdateAsync(report, _stop.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+        {
+            // The node stops: its next connection says where it stands.
+        }
     }
 
     private FleetUpdateReport? ReportOf(FleetUpdateAgentState state)
@@ -1189,6 +1213,9 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             catch (OperationCanceledException) { }
         }
 
+        Task sending;
+        lock (_gate) sending = _sending;
+        await sending.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         _stop.Dispose();
     }
 }
