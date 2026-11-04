@@ -350,7 +350,7 @@ public static class FleetBudgetDocuments
     /// Verifies a budget for a machine, as <see cref="TryVerify(FleetSignedBudget?, FleetDeviceListState, string?, out FleetBudgetDefinition?, out string?)"/>
     /// does, with the owner of the machine the signed access document names once it was given to another person
     /// (<see cref="FleetAccessState.OwnerOfMachine"/>): the budgets of its new owner hold there, those of the person the device
-    /// list names no more.
+    /// list names no more. On a machine of a team, those of its maintainers hold (<see cref="FleetAccessState.HoldsValuesOf"/>).
     /// </summary>
     /// <param name="signed">The signed budget.</param>
     /// <param name="devices">The device list as the machine verified it.</param>
@@ -368,8 +368,8 @@ public static class FleetBudgetDocuments
         if (signed is null || string.IsNullOrEmpty(signed.Signature)) return Refuse("the budget does not read", out reason);
         if (!TryRead(signed.Payload, out var read, out reason)) return false;
         if (devices.OrganizationId is { } organization && organization != read.OrganizationId) return Refuse("the budget is of another organization", out reason);
-        if (string.IsNullOrEmpty(machineId) || !devices.Members.ContainsKey(machineId) || FleetAccessState.OwnerOfMachine(access, machineId, devices) is not { } owner
-            || owner != read.PersonId)
+        // A machine of a team takes the budgets of its maintainers (FleetAccessState.HoldsValuesOf), never those of the person the device list names.
+        if (string.IsNullOrEmpty(machineId) || !devices.Members.TryGetValue(machineId, out var self) || !FleetAccessState.HoldsValuesOf(access, self, read.PersonId))
             return Refuse("the budget is of another person than the owner of this machine", out reason);
         if (!IsSigner(devices, read.SignerDeviceId, read.PersonId, out var signer))
             return Refuse("the budget is not signed by a controller device of its person", out reason);

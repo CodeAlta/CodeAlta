@@ -77,9 +77,10 @@ internal sealed partial class DesktopFleetServers
         var notifications = await manager.ListNotificationsAsync(cancellationToken).ConfigureAwait(false);
         var devices = (await client.ListDevicesAsync(cancellationToken).ConfigureAwait(false)).ToDictionary(static device => device.Id, StringComparer.Ordinal);
         var person = list.Members.TryGetValue(client.DeviceId, out var self) && self.OwnerId is { } owner ? owner : string.Empty;
-        // The machines of the person: those the signed access document gives them included, those it gives another person not.
+        // The machines of the person: those the signed access document gives them and those of the teams they maintain included,
+        // those it gives another person and those of a team they do not maintain not.
         var access = secrets.Access?.Invoke();
-        var machines = list.Members.Values.Where(member => FleetAccessState.PersonOf(access, member) == person && member.Kind == FleetDeviceKinds.Node && !list.Removed.Contains(member.DeviceId))
+        var machines = list.Members.Values.Where(member => FleetAccessState.HoldsValuesOf(access, member, person) && member.Kind == FleetDeviceKinds.Node && !list.Removed.Contains(member.DeviceId))
             .OrderBy(member => devices.GetValueOrDefault(member.DeviceId)?.Name ?? member.DeviceId, StringComparer.OrdinalIgnoreCase).ToArray();
         return new DesktopFleetBudgets([.. budgets.Budgets.Select(static budget => (budget, FleetBudgetDocuments.TryRead(budget.Signed.Payload, out var definition, out _) ? definition : null))],
             holds.Holds, notifications.Notifications, devices, machines, await ScopeNamesAsync(linkId, cancellationToken).ConfigureAwait(false));

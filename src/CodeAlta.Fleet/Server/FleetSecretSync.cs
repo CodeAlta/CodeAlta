@@ -267,7 +267,8 @@ public sealed class FleetSecretSync
     {
         var spaces = new Dictionary<string, string>(StringComparer.Ordinal);
         if (_keys is null) return spaces;
-        foreach (var (local, key) in _keys.Current)
+        // On a machine of a team, the spaces of its maintainers and members, each by its own key.
+        foreach (var (local, key) in _keys.SealingKeys)
         {
             if (key.Grant?.SpaceId is { } id) spaces.TryAdd(id, local);
         }

@@ -80,8 +80,9 @@ public static class FleetSecretSealing
 
     /// <summary>
     /// Gives the devices a value of a person goes to, as <see cref="Recipients(FleetDeviceListState, string, IEnumerable{string})"/>
-    /// does, with the machines the signed access document gives that person (<see cref="FleetAccessState.PersonOf"/>), and
-    /// without the machines it gives another person.
+    /// does, with the machines the signed access document gives that person (<see cref="FleetAccessState.PersonOf"/>) and the
+    /// machines of the teams they maintain (<see cref="FleetAccessState.HoldsValuesOf"/>), and without the machines it gives
+    /// another person or a team they do not maintain.
     /// </summary>
     /// <param name="list">The device list as the signer verified it.</param>
     /// <param name="access">The access document as the signer verified it; null for none.</param>
@@ -96,7 +97,7 @@ public static class FleetSecretSealing
         ArgumentNullException.ThrowIfNull(machines);
         var wanted = machines.ToHashSet(StringComparer.Ordinal);
         return [.. list.Members.Values
-            .Where(member => !list.Removed.Contains(member.DeviceId) && FleetAccessState.PersonOf(access, member) == personId
+            .Where(member => !list.Removed.Contains(member.DeviceId) && FleetAccessState.HoldsValuesOf(access, member, personId)
                 && (member.Kind == FleetDeviceKinds.Controller || wanted.Contains(member.DeviceId) && member.Kind != FleetDeviceKinds.Recovery))
             .OrderBy(static member => member.Kind == FleetDeviceKinds.Controller ? 0 : 1).ThenBy(static member => member.DeviceId, StringComparer.Ordinal)
             .Take(MaxRecipients)];
@@ -204,7 +205,7 @@ public static class FleetSecretSealing
         if (!list.Members.TryGetValue(signer.DeviceId, out var self) || self.Kind != FleetDeviceKinds.Controller || self.OwnerId is not { } person)
             throw new ArgumentException("Only a controller device of the list, with its person, seals a value.", nameof(signer));
         if (list.OrganizationId is not { } organization) throw new ArgumentException("The list names no organization yet.", nameof(list));
-        if (recipients.Count is 0 or > MaxRecipients || recipients.Any(recipient => FleetAccessState.PersonOf(access, recipient) != person || list.Removed.Contains(recipient.DeviceId)))
+        if (recipients.Count is 0 or > MaxRecipients || recipients.Any(recipient => !FleetAccessState.HoldsValuesOf(access, recipient, person) || list.Removed.Contains(recipient.DeviceId)))
             throw new ArgumentException($"A value goes to 1 to {MaxRecipients} devices of the signer's person that the list holds.", nameof(recipients));
         var key = FleetMetadataKey.Generate(new FleetKeyGrant(organization, person, binding.Version, Math.Max(1, list.Sequence)) { SpaceId = GrantScope(binding.SecretId) });
         var plain = Encoding.UTF8.GetBytes(value);
@@ -329,7 +330,7 @@ public static class FleetSecretSealing
         ArgumentNullException.ThrowIfNull(list);
         if (!list.Members.TryGetValue(identity.DeviceId, out var self) || self.Kind != FleetDeviceKinds.Controller || self.OwnerId is null)
             throw new ArgumentException("Only a controller device of the list gives a copy.", nameof(identity));
-        if (FleetAccessState.PersonOf(access, recipient) != self.OwnerId || list.Removed.Contains(recipient.DeviceId))
+        if (!FleetAccessState.HoldsValuesOf(access, recipient, self.OwnerId) || list.Removed.Contains(recipient.DeviceId))
             throw new ArgumentException("A copy goes to a device of the same person that the list holds.", nameof(recipient));
         if (!TryOpenKey(own, binding, identity, list, null, out var key, out var parts, out var reason)) throw new InvalidDataException($"The copy of this device does not open: {reason}.");
         // The value is checked before it is given: a copy that does not open for this binding is never passed on.
@@ -396,6 +397,9 @@ public static class FleetSecretSealing
 
     // The grant of a key names the value it is for: a copy of one value never opens as a copy of another.
     private static string GrantScope(string secretId) => GrantPrefix + secretId;
+
+    // Whether the scope a grant names is the one of a value, which a team machine takes from its maintainers only.
+    internal static bool IsValueScope(string? scope) => scope is not null && scope.StartsWith(GrantPrefix, StringComparison.Ordinal);
 
     private static byte[] Associated(string keyId, FleetSecretBinding binding)
         => Encoding.UTF8.GetBytes(string.Create(CultureInfo.InvariantCulture,

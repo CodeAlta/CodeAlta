@@ -67,7 +67,7 @@ snapshot never grants a whole space.
 | Key | Purpose |
 | --- | --- |
 | **Device key** (ECDSA/ECDH P-256, non-exportable where possible) | Signs proofs and requests; receives wrapped keys (ECDH-ES, HKDF, AES-256-GCM). Only controller devices sign device-list entries and delegations ([the device list](#the-device-list)) |
-| **Space metadata key**, with epochs | Seals the space's descriptive metadata (titles, project names) and keys the blind index. A new epoch when a member leaves, or when a machine that held it is given to another person; new data uses it |
+| **Space metadata key**, with epochs | Seals the space's descriptive metadata (titles, project names) and keys the blind index. A new epoch when a member leaves, when a machine that held it is given to another person, or when its person leaves the team of a team machine that held it; new data uses it |
 | **Channel key**, with epochs | Seals the messages of one project's channel, for its members |
 | **Session replica key** (random 256 bits) | Encrypts one session's replica, in segments with derived sub-keys to stay far from AES-GCM nonce limits; wrapped only to the devices allowed to read that session |
 | **Snapshot key** (random, one per snapshot) | Encrypts one shared snapshot; it opens that snapshot and nothing later |
@@ -340,7 +340,9 @@ Starting or driving a session on another machine is remote code execution, by de
   declares it uses is consent and audit, not confinement. An organization offers plugins; a person installs them
   knowingly, and a desktop that also holds personal spaces never receives one by policy alone.
 - **Team machines** run sessions under the team's credentials, with the sandbox required by policy; each person sees
-  only their own sessions there. Per-person credentials on shared machines (short tokens brokered per session) come in
-  milestone 5.
+  only their own sessions there. A team machine has no person of its own: the devices of its maintainers and members
+  wrap their space metadata keys to it, and it seals the title of each session with the key of the person who started it
+  there, never with another person's, and publishes no title for a session without such a person (an automation of the
+  team, local work). Per-person credentials on shared machines (short tokens brokered per session) come in milestone 5.
 - **Roles do not isolate hostile users.** Teams that must not trust each other get separate servers or separate
   machines; the documentation says so.

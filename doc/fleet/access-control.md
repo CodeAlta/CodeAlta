@@ -140,7 +140,11 @@ version. The server keeps a model (roles, teams, owners) that answers the REST A
 version; a signer's console says what changes as it reads it and signs it, and changes made by a maintainer who is not a
 signer wait for one. On a team machine each member sees and drives only the sessions they started there, and its
 maintainers manage it; a suspended person's devices are refused, their sessions there stopped and their automations
-refused. The document also names, per automation, who answers its approvals besides the person who placed it (the
+refused. A team machine has no person of its own, whoever enrolled it: its budgets, environments, values and hooks are
+those of its maintainers, and its maintainers and members give it the metadata keys of their spaces, with which it seals
+the sessions each started there, and nothing for a session without such a person. The person the device list names gets
+nothing of it without a role in the team, and one who leaves the team (signed) seals from then on with a new epoch the
+machine does not hold. The document also names, per automation, who answers its approvals besides the person who placed it (the
 members of the team that owns it, those granted `automation.approve`, each grant with an end date named with its end):
 a machine takes a run over for them, until that end by its own clock, or for a member of its team when it is a team
 machine, and for nobody else than its owner otherwise. It names in the same way who runs an automation by hand besides

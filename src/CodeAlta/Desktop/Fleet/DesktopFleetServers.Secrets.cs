@@ -62,7 +62,7 @@ internal sealed partial class DesktopFleetServers
         var organization = await client.GetOrganizationAsync(cancellationToken).ConfigureAwait(false);
         var person = list.Members.TryGetValue(client.DeviceId, out var self) && self.OwnerId is { } owner ? owner : string.Empty;
         var access = manager.Access?.Invoke();
-        var machines = list.Members.Values.Where(member => FleetAccessState.PersonOf(access, member) == person && member.Kind == FleetDeviceKinds.Node && !list.Removed.Contains(member.DeviceId))
+        var machines = list.Members.Values.Where(member => FleetAccessState.HoldsValuesOf(access, member, person) && member.Kind == FleetDeviceKinds.Node && !list.Removed.Contains(member.DeviceId))
             .OrderBy(member => devices.GetValueOrDefault(member.DeviceId)?.Name ?? member.DeviceId, StringComparer.OrdinalIgnoreCase).ToArray();
         return new DesktopFleetSecrets(secrets.Secrets, environments, approvals.Approvals, devices, organization.People, person, machines,
             await ScopeNamesAsync(linkId, cancellationToken).ConfigureAwait(false), manager);

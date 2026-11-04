@@ -105,11 +105,12 @@ internal sealed class NotificationService
     public async Task TellAsync(string organizationId, string personId, string method, bool controllers, CancellationToken cancellationToken, string? except = null)
     {
         if (Presence is not { } presence) return;
-        // The machines of the person: those given to them included, by their owner record.
+        // The machines of the person: those given to them included, by their owner record, and those of the teams they maintain,
+        // whose budgets they set; never a machine of a team by the person the device list names alone.
         var snapshot = controllers ? null : await MachineOwners.ReadAsync(Access, organizationId, cancellationToken).ConfigureAwait(false);
         foreach (var device in await _store.ListDevicesAsync(organizationId, cancellationToken).ConfigureAwait(false))
         {
-            if (MachineOwners.PersonOf(snapshot, device) != personId || device.Status != DeviceStatuses.Approved || device.Id == except) continue;
+            if (!MachineOwners.HoldsValuesOf(snapshot, device, personId) || device.Status != DeviceStatuses.Approved || device.Id == except) continue;
             if ((device.Kind == FleetDeviceKinds.Controller) != controllers) continue;
             if (presence.Get(device.Id) is { } session) _ = SendAsync(session, method);
         }

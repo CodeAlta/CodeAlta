@@ -298,7 +298,7 @@ public sealed class FleetBudgetGate
             // What the server says is taken only as a newer version this machine verifies: what it leaves out, what does not
             // verify and an older version change nothing that the machine verified (a removal is a signed version too).
             if (link.Devices.Current is { } list)
-                state.Merge(listed, signed => FleetBudgetDocuments.TryVerify(signed, list, link.Devices.Identity.DeviceId, out var budget, out _) ? budget : null);
+                state.Merge(listed, signed => FleetBudgetDocuments.TryVerify(signed, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var budget, out _) ? budget : null);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested
             && exception is FleetServerException or HttpRequestException or OperationCanceledException or FleetDeviceListException)
@@ -310,9 +310,11 @@ public sealed class FleetBudgetGate
     private static FleetBudgetRunScope ScopeOf(FleetBudgetLink link, FleetDeviceListState list, FleetAccessState? access, FleetBudgetRun run)
     {
         var machine = link.Devices.Identity.DeviceId;
-        // The owner the signed access document names once the machine was given to another person, else the device list's.
-        var owner = FleetAccessState.OwnerOfMachine(access, machine, list);
-        var key = link.Keys?.CurrentFor(run.SpaceId);
+        // The owner the signed access document names once the machine was given to another person, else the device list's; a
+        // machine of a team has none, and a run names no person whose space it is: only the budgets of the machine cover it.
+        var team = access?.TeamOf(machine) is not null;
+        var owner = team ? null : FleetAccessState.OwnerOfMachine(access, machine, list);
+        var key = link.Keys?.CurrentFor(run.SpaceId, null);
         var project = key is not null && run.ProjectIdentity is { Length: > 0 } identity ? FleetProjectKeys.Of(key, identity) : null;
         return new FleetBudgetRunScope(machine, owner, key?.Grant?.SpaceId, project);
     }
@@ -496,12 +498,16 @@ public sealed class FleetBudgetLocalSpend : IFleetBudgetSpend
             case FleetBudgetScopeKinds.Machine:
                 return true;
             case FleetBudgetScopeKinds.Space:
-                return link.Keys?.CurrentFor(session.SpaceId)?.Grant?.SpaceId is { } space && space == budget.ScopeId;
+                return KeyOf(link, session)?.Grant?.SpaceId is { } space && space == budget.ScopeId;
             case FleetBudgetScopeKinds.Project:
-                return link.Keys?.CurrentFor(session.SpaceId) is { } key && session.ProjectIdentity is { Length: > 0 } identity
+                return KeyOf(link, session) is { } key && session.ProjectIdentity is { Length: > 0 } identity
                     && FleetProjectKeys.Of(key, identity) == budget.ScopeId;
             default:
                 return false;
         }
     }
+
+    // The key of the space of a session, as it seals it: on a machine of a team, the one of its person, of this server's organization.
+    private static FleetMetadataKey? KeyOf(FleetBudgetLink link, FleetLocalSession session)
+        => link.Keys?.CurrentFor(session.SpaceId, session.PersonOrganizationId is { } of && of == link.Devices.Current?.OrganizationId ? session.PersonId : null);
 }

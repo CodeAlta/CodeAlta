@@ -62,8 +62,11 @@ internal sealed class FleetSecretService
     /// </summary>
     public IAccessStore? Access { get; init; }
 
-    // The person of the calling device: the owner of a machine given to them, else the person its record names.
-    private ValueTask<string?> PersonAsync(DeviceRecord actor, CancellationToken cancellationToken) => MachineOwners.PersonOfAsync(Access, actor, cancellationToken);
+    // The people whose values and environments the calling device takes: its person (the owner of a machine given to them), or on
+    // a machine of a team, the maintainers of the team; never the person the device list names for a team machine by that alone.
+    private async ValueTask<IReadOnlyList<string>> PeopleAsync(DeviceRecord actor, CancellationToken cancellationToken)
+        => actor.Kind == FleetDeviceKinds.Controller ? actor.OwnerPersonId is { } own ? [own] : []
+            : await MachineOwners.ValuePeopleOfAsync(Access, actor, cancellationToken).ConfigureAwait(false);
 
     /// <summary>Lists the values of the calling controller device's person: what is known of each, with the copy sealed for the caller.</summary>
     /// <param name="actor">The calling device.</param>
@@ -86,9 +89,9 @@ internal sealed class FleetSecretService
     {
         ArgumentNullException.ThrowIfNull(actor);
         // The authentication refuses a revoked device already: its copies are never given again.
-        if (actor.Status != DeviceStatuses.Approved || await PersonAsync(actor, cancellationToken).ConfigureAwait(false) is not { } person) return new FleetSecretListDto([]);
+        if (actor.Status != DeviceStatuses.Approved || await PeopleAsync(actor, cancellationToken).ConfigureAwait(false) is not { Count: > 0 } people) return new FleetSecretListDto([]);
         var entries = await _secrets.ListHeldFleetSecretsAsync(actor.OrganizationId, actor.Id, cancellationToken).ConfigureAwait(false);
-        return new FleetSecretListDto([.. entries.Where(entry => entry.Secret.OwnerPersonId == person)
+        return new FleetSecretListDto([.. entries.Where(entry => people.Contains(entry.Secret.OwnerPersonId, StringComparer.Ordinal))
             .Select(entry => ToDto(entry, actor.Id, ImmutableEmpty))]);
     }
 
@@ -202,7 +205,7 @@ internal sealed class FleetSecretService
     public async Task<FleetSecretUseListDto> PublishUsesAsync(DeviceRecord actor, PublishFleetSecretUsesRequest? request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(actor);
-        if (await PersonAsync(actor, cancellationToken).ConfigureAwait(false) is not { } person)
+        if (await PeopleAsync(actor, cancellationToken).ConfigureAwait(false) is not { Count: > 0 } people)
             throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A device of no person uses no value.");
         if (request?.Uses is not { Count: <= MaxUses } uses) throw Invalid($"A publication holds at most {MaxUses} uses.");
         var now = _time.GetUtcNow();
@@ -214,7 +217,7 @@ internal sealed class FleetSecretService
             if (!known.TryGetValue(use.SecretId, out var secret))
                 known[use.SecretId] = secret = (await _secrets.GetFleetSecretAsync(actor.OrganizationId, use.SecretId, cancellationToken).ConfigureAwait(false))?.Secret;
             // A use of a value of another person, or of a value deleted since, is not kept.
-            if (secret is null || secret.OwnerPersonId != person) continue;
+            if (secret is null || !people.Contains(secret.OwnerPersonId, StringComparer.Ordinal)) continue;
             taken.Add(new FleetSecretUseRecord(actor.OrganizationId, use.SecretId, actor.Id, secret.Name, use.Version, use.RunId, use.UsedAt > now ? now : use.UsedAt, now));
         }
 
@@ -243,8 +246,9 @@ internal sealed class FleetSecretService
     public async Task<FleetEnvironmentListDto> ListEnvironmentsAsync(DeviceRecord actor, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(actor);
-        if (await PersonAsync(actor, cancellationToken).ConfigureAwait(false) is not { } person) return new FleetEnvironmentListDto([]);
-        var environments = await _secrets.ListFleetEnvironmentsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false);
+        var environments = new List<FleetEnvironmentRecord>();
+        foreach (var person in await PeopleAsync(actor, cancellationToken).ConfigureAwait(false))
+            environments.AddRange(await _secrets.ListFleetEnvironmentsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false));
         return new FleetEnvironmentListDto([.. environments.Select(static environment => ToDto(environment))]);
     }
 
@@ -280,10 +284,10 @@ internal sealed class FleetSecretService
                 ("labels", string.Join(' ', definition.MachineLabels)), ("automations", string.Join(' ', definition.Automations))));
         if (!await _secrets.PutFleetEnvironmentAsync(record, audit, cancellationToken).ConfigureAwait(false))
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.EnvironmentConflict, "The environment held is as new, or another environment of the person has this name.");
-        // The machines of the person (those given to them included) read their environments again.
+        // The machines of the person (those given to them and those of the teams they maintain included) read their environments again.
         var snapshot = await MachineOwners.ReadAsync(Access, actor.OrganizationId, cancellationToken).ConfigureAwait(false);
         Notify([.. (await _store.ListDevicesAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false))
-            .Where(device => MachineOwners.PersonOf(snapshot, device) == actor.OwnerPersonId && device.Status == DeviceStatuses.Approved).Select(static device => device.Id)], actor.Id);
+            .Where(device => MachineOwners.HoldsValuesOf(snapshot, device, actor.OwnerPersonId) && device.Status == DeviceStatuses.Approved).Select(static device => device.Id)], actor.Id);
         return ToDto(record);
     }
 
@@ -334,9 +338,9 @@ internal sealed class FleetSecretService
     public async Task<FleetApprovalListDto> ListApprovalsAsync(DeviceRecord actor, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(actor);
-        if (await PersonAsync(actor, cancellationToken).ConfigureAwait(false) is not { } person) return new FleetApprovalListDto([]);
+        if (await PeopleAsync(actor, cancellationToken).ConfigureAwait(false) is not { Count: > 0 } people) return new FleetApprovalListDto([]);
         var environments = (await _secrets.ListFleetEnvironmentsAsync(actor.OrganizationId, null, cancellationToken).ConfigureAwait(false))
-            .Where(environment => environment.OwnerPersonId == person || Approvers(environment).Contains(person, StringComparer.Ordinal))
+            .Where(environment => people.Contains(environment.OwnerPersonId, StringComparer.Ordinal) || Approvers(environment).Any(approver => people.Contains(approver, StringComparer.Ordinal)))
             .ToDictionary(static environment => environment.Id, StringComparer.Ordinal);
         var approvals = await _secrets.ListFleetApprovalsAsync(actor.OrganizationId, environments.Keys, MaxListed, cancellationToken).ConfigureAwait(false);
         // A machine sees the approvals of its own runs only.
@@ -396,9 +400,16 @@ internal sealed class FleetSecretService
 
     private async Task<FleetEnvironmentRecord> GetEnvironmentAsync(DeviceRecord actor, string environmentId, CancellationToken cancellationToken)
     {
-        if (!IsText(environmentId, 128) || await PersonAsync(actor, cancellationToken).ConfigureAwait(false) is not { } person) throw EnvironmentNotFound();
-        return (await _secrets.ListFleetEnvironmentsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false))
-            .FirstOrDefault(candidate => candidate.Id == environmentId) ?? throw EnvironmentNotFound();
+        if (!IsText(environmentId, 128)) throw EnvironmentNotFound();
+        // An environment of the person of the device; on a machine of a team, of one of its maintainers.
+        foreach (var person in await PeopleAsync(actor, cancellationToken).ConfigureAwait(false))
+        {
+            if ((await _secrets.ListFleetEnvironmentsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(candidate => candidate.Id == environmentId) is { } environment)
+                return environment;
+        }
+
+        throw EnvironmentNotFound();
     }
 
     private static IReadOnlyList<string> Approvers(FleetEnvironmentRecord environment)
@@ -428,13 +439,14 @@ internal sealed class FleetSecretService
         if (copies.Select(static copy => copy?.DeviceId).Distinct(StringComparer.Ordinal).Count() != copies.Count) throw Invalid("A device gets one copy of a value.");
         var now = _time.GetUtcNow();
         var records = new List<FleetSecretCopyRecord>(copies.Count);
-        // A machine given to another person is theirs: their devices seal values for it, those of the person the device list names no more.
+        // A machine given to another person is theirs: their devices seal values for it, those of the person the device list names no
+        // more; a machine of a team takes the values of its maintainers only.
         var snapshot = await MachineOwners.ReadAsync(Access, actor.OrganizationId, cancellationToken).ConfigureAwait(false);
         foreach (var copy in copies)
         {
             if (copy is null || string.IsNullOrEmpty(copy.DeviceId) || !IsText(copy.Sealed, MaxCopyLength)) throw Invalid($"A copy names a device and holds at most {MaxCopyLength} characters.");
             var device = await _store.GetDeviceAsync(copy.DeviceId, cancellationToken).ConfigureAwait(false);
-            if (device is null || device.OrganizationId != actor.OrganizationId || device.Status != DeviceStatuses.Approved || MachineOwners.PersonOf(snapshot, device) != actor.OwnerPersonId
+            if (device is null || device.OrganizationId != actor.OrganizationId || device.Status != DeviceStatuses.Approved || !MachineOwners.HoldsValuesOf(snapshot, device, actor.OwnerPersonId)
                 || device.Kind == FleetDeviceKinds.Recovery)
             {
                 throw Invalid("A value is sealed only for approved devices of its person.");

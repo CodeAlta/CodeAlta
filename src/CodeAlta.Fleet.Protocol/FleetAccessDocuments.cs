@@ -387,6 +387,41 @@ public sealed record FleetAccessState(
         return member.Kind == FleetDeviceKinds.Node && access is not null && access.PersonalMachines.TryGetValue(member.DeviceId, out var person) ? person : member.OwnerId;
     }
 
+    /// <summary>
+    /// Gets whether a member of the device list takes the values, budgets, environments and hooks of a person
+    /// (<c>doc/fleet/access-control.md</c>, team roles): on a machine of a team, the person is a maintainer of that team, who
+    /// manages it, and not suspended; on any other device, the person is its own (<see cref="PersonOf"/>). The person the device
+    /// list names for a team machine gets nothing of it by that alone.
+    /// </summary>
+    /// <param name="access">The access document, as the device verified it; null for none: the device list decides alone.</param>
+    /// <param name="member">The member of the device list.</param>
+    /// <param name="personId">The person.</param>
+    /// <returns>Whether the device takes them.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="member"/> is null.</exception>
+    public static bool HoldsValuesOf(FleetAccessState? access, FleetDeviceListMember member, string? personId) => Holds(access, member, personId, FleetTeamRoles.Maintainer);
+
+    /// <summary>
+    /// Gets whether a member of the device list takes the metadata keys of a person, which seal the titles of their sessions: on a
+    /// machine of a team, the person is a maintainer or a member of that team, who use it for their own sessions, and not
+    /// suspended; on any other device, the person is its own (<see cref="PersonOf"/>).
+    /// </summary>
+    /// <param name="access">The access document, as the device verified it; null for none: the device list decides alone.</param>
+    /// <param name="member">The member of the device list.</param>
+    /// <param name="personId">The person.</param>
+    /// <returns>Whether the device takes them.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="member"/> is null.</exception>
+    public static bool HoldsKeysOf(FleetAccessState? access, FleetDeviceListMember member, string? personId) => Holds(access, member, personId, null);
+
+    // A team machine holds what the roles of its team give, never by the person the device list names; any other device, its person's.
+    private static bool Holds(FleetAccessState? access, FleetDeviceListMember member, string? personId, string? role)
+    {
+        ArgumentNullException.ThrowIfNull(member);
+        if (personId is null) return false;
+        if (member.Kind == FleetDeviceKinds.Node && access?.TeamOf(member.DeviceId) is { } team)
+            return !access.IsSuspended(personId) && RoleIn(team, personId) is { } held && (role is null || held == role);
+        return PersonOf(access, member) == personId;
+    }
+
     /// <summary>Gets whether a machine is the organization's.</summary>
     /// <param name="deviceId">The device of the machine.</param>
     /// <returns>Whether the document names it a machine of the organization.</returns>

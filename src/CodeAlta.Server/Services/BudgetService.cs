@@ -61,9 +61,6 @@ internal sealed class BudgetService
     /// </summary>
     public IAccessStore? Access { get; init; }
 
-    // The person of a device: the owner of a machine given to them, else the person its record names.
-    private ValueTask<string?> PersonAsync(DeviceRecord device, CancellationToken cancellationToken) => MachineOwners.PersonOfAsync(Access, device, cancellationToken);
-
     /// <summary>Lists the budgets of the calling controller device's person, with their consumption in the current period.</summary>
     /// <param name="actor">The calling device.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
@@ -106,9 +103,10 @@ internal sealed class BudgetService
         if (definition.ScopeKind == FleetBudgetScopeKinds.Machine)
         {
             var machine = await _store.GetDeviceAsync(definition.ScopeId!, cancellationToken).ConfigureAwait(false);
+            // A machine of a team is limited by its maintainers only.
             if (machine is null || machine.OrganizationId != actor.OrganizationId
-                || await PersonAsync(machine, cancellationToken).ConfigureAwait(false) != actor.OwnerPersonId)
-                throw Invalid("A budget of a machine names a machine of its person.");
+                || !await MachineOwners.HoldsValuesOfAsync(Access, machine, actor.OwnerPersonId, cancellationToken).ConfigureAwait(false))
+                throw Invalid("A budget of a machine names a machine of its person, or of a team they maintain.");
         }
 
         var held = await _budgets.ListBudgetsAsync(actor.OrganizationId, actor.OwnerPersonId, cancellationToken).ConfigureAwait(false);
@@ -140,8 +138,11 @@ internal sealed class BudgetService
     public async Task<FleetMachineBudgetListDto> ListForMachineAsync(DeviceRecord actor, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(actor);
-        if (actor.Status != DeviceStatuses.Approved || await PersonAsync(actor, cancellationToken).ConfigureAwait(false) is not { } person) return new FleetMachineBudgetListDto([]);
-        var budgets = await _budgets.ListBudgetsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false);
+        if (actor.Status != DeviceStatuses.Approved) return new FleetMachineBudgetListDto([]);
+        // A machine of a team reads the budgets of its maintainers; any other, those of its person.
+        var budgets = new List<BudgetRecord>();
+        foreach (var person in await MachineOwners.ValuePeopleOfAsync(Access, actor, cancellationToken).ConfigureAwait(false))
+            budgets.AddRange(await _budgets.ListBudgetsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false));
         var now = _time.GetUtcNow();
         var listed = new List<FleetMachineBudgetDto>();
         foreach (var budget in budgets)
@@ -229,10 +230,17 @@ internal sealed class BudgetService
     public async Task<FleetBudgetHoldListDto> ListHoldsAsync(DeviceRecord actor, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(actor);
-        if (actor.OwnerPersonId is null) return new FleetBudgetHoldListDto([]);
+        // A controller device lists the holds of its person's budgets; a machine of a team, of its maintainers'.
+        IReadOnlyList<string> people = actor.Kind == FleetDeviceKinds.Controller ? actor.OwnerPersonId is { } own ? [own] : []
+            : await MachineOwners.ValuePeopleOfAsync(Access, actor, cancellationToken).ConfigureAwait(false);
+        if (people.Count == 0) return new FleetBudgetHoldListDto([]);
         var names = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var budget in await _budgets.ListBudgetsAsync(actor.OrganizationId, actor.OwnerPersonId, cancellationToken).ConfigureAwait(false))
-            names[budget.Id] = FleetBudgetDocuments.TryRead(budget.Payload, out var definition, out _) ? definition.Name : budget.Id;
+        foreach (var person in people)
+        {
+            foreach (var budget in await _budgets.ListBudgetsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false))
+                names[budget.Id] = FleetBudgetDocuments.TryRead(budget.Payload, out var definition, out _) ? definition.Name : budget.Id;
+        }
+
         var holds = await _budgets.ListBudgetHoldsAsync(actor.OrganizationId, names.Keys, MaxListed, cancellationToken).ConfigureAwait(false);
         return new FleetBudgetHoldListDto([.. holds.Where(hold => actor.Kind == FleetDeviceKinds.Controller || hold.MachineId == actor.Id)
             .Select(hold => ToDto(hold, names[hold.BudgetId]))]);
@@ -311,13 +319,16 @@ internal sealed class BudgetService
         ArgumentNullException.ThrowIfNull(device);
         try
         {
-            if (await PersonAsync(device, cancellationToken).ConfigureAwait(false) is not { } person) return;
             var now = _time.GetUtcNow();
-            foreach (var budget in await _budgets.ListBudgetsAsync(device.OrganizationId, person, cancellationToken).ConfigureAwait(false))
+            // The budgets of the person of the machine; of a machine of a team, those of its maintainers.
+            foreach (var person in await MachineOwners.ValuePeopleOfAsync(Access, device, cancellationToken).ConfigureAwait(false))
             {
-                if (budget.Removed || !FleetBudgetDocuments.TryRead(budget.Payload, out var definition, out _)) continue;
-                var usage = await UsageAsync(budget, definition, now, cancellationToken).ConfigureAwait(false);
-                await AlertAsync(budget, definition, usage, exhausted: false, cancellationToken).ConfigureAwait(false);
+                foreach (var budget in await _budgets.ListBudgetsAsync(device.OrganizationId, person, cancellationToken).ConfigureAwait(false))
+                {
+                    if (budget.Removed || !FleetBudgetDocuments.TryRead(budget.Payload, out var definition, out _)) continue;
+                    var usage = await UsageAsync(budget, definition, now, cancellationToken).ConfigureAwait(false);
+                    await AlertAsync(budget, definition, usage, exhausted: false, cancellationToken).ConfigureAwait(false);
+                }
             }
         }
         catch (Exception exception) when (exception is InvalidOperationException or Microsoft.Data.Sqlite.SqliteException or ArgumentException)
@@ -370,9 +381,11 @@ internal sealed class BudgetService
 
     private async Task<(BudgetRecord Budget, FleetBudgetDefinition Definition)> GetOwnAsync(DeviceRecord actor, string id, CancellationToken cancellationToken)
     {
-        if (!IsText(id, 128) || await PersonAsync(actor, cancellationToken).ConfigureAwait(false) is not { } person) throw NotFound();
+        if (!IsText(id, 128)) throw NotFound();
         var budget = await _budgets.GetBudgetAsync(actor.OrganizationId, id, cancellationToken).ConfigureAwait(false);
-        if (budget is null || budget.Removed || budget.OwnerPersonId != person || !FleetBudgetDocuments.TryRead(budget.Payload, out var definition, out _))
+        // A budget of the person of the device; on a machine of a team, of one of its maintainers.
+        if (budget is null || budget.Removed || !await MachineOwners.HoldsValuesOfAsync(Access, actor, budget.OwnerPersonId, cancellationToken).ConfigureAwait(false)
+            || !FleetBudgetDocuments.TryRead(budget.Payload, out var definition, out _))
             throw NotFound();
         return (budget, definition);
     }

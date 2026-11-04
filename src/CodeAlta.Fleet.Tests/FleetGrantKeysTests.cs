@@ -128,6 +128,84 @@ public sealed class FleetGrantKeysTests
     }
 
     [TestMethod]
+    public void ATeamMachine_TakesValuesBudgetsAndEnvironmentsOfItsMaintainers_KeysOfItsPeople_AndNothingOfItsDeviceListPerson()
+    {
+        using var devices = new Devices();
+        var list = devices.List();
+        // The node p1 (Desk) enrolled is a machine of team t1: p2 (Bea) maintains it, p3 (Cy) is a member, p1 is not in it.
+        var access = FleetAccessState.Empty with
+        {
+            Teams = System.Collections.Immutable.ImmutableDictionary.CreateRange([KeyValuePair.Create("t1", new FleetAccessTeam("t1", ["p2"], ["p3"], false))]),
+            Machines = System.Collections.Immutable.ImmutableDictionary.CreateRange([KeyValuePair.Create(devices.Node.DeviceId, "t1")]),
+        };
+        var machine = list.Members[devices.Node.DeviceId];
+        Assert.AreEqual((true, false, false), (FleetAccessState.HoldsValuesOf(access, machine, "p2"), FleetAccessState.HoldsValuesOf(access, machine, "p3"),
+            FleetAccessState.HoldsValuesOf(access, machine, "p1")), "maintainers manage the team machine; members and the device-list person do not");
+        Assert.AreEqual((true, true, false), (FleetAccessState.HoldsKeysOf(access, machine, "p2"), FleetAccessState.HoldsKeysOf(access, machine, "p3"),
+            FleetAccessState.HoldsKeysOf(access, machine, "p1")), "maintainers and members seal their sessions there; the device-list person does not");
+        Assert.IsFalse(FleetAccessState.HoldsValuesOf(access with { Suspended = access.Suspended.Add("p2") }, machine, "p2"), "a suspended maintainer gives nothing");
+        Assert.IsTrue(FleetAccessState.HoldsValuesOf(access, list.Members[devices.Desk.DeviceId], "p1"), "a controller device stays of its person");
+
+        // The keys of a space: those of its maintainers and members open on the machine, never those of the device-list person.
+        var node = PublicKey(devices.Node);
+        FleetMetadataKey KeyOf(string person, string scope) => FleetMetadataKey.Generate(new FleetKeyGrant("org", person, 1, list.Sequence) { SpaceId = scope });
+        foreach (var (signer, person) in new[] { (devices.Bea, "p2"), (devices.Cy, "p3") })
+        {
+            var key = KeyOf(person, "space-" + person);
+            var wrapped = FleetKeyWrap.Wrap(key, node, key.Grant!, signer);
+            Assert.AreEqual(key.Id, FleetKeyWrap.Unwrap(wrapped, key.Id, 1, "space-" + person, devices.Node, list, access).Id, $"the key of {person} opens on the team machine");
+            Assert.IsTrue(FleetKeyWrap.IsGranted(wrapped, key.Id, 1, "space-" + person, devices.Node.DeviceId, list, access));
+        }
+
+        var deskKey = KeyOf("p1", "space-p1");
+        var byDesk = FleetKeyWrap.Wrap(deskKey, node, deskKey.Grant!, devices.Desk);
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetKeyWrap.Unwrap(byDesk, deskKey.Id, 1, "space-p1", devices.Node, list, access), "the device-list person gives it no key");
+        Assert.IsFalse(FleetKeyWrap.IsGranted(byDesk, deskKey.Id, 1, "space-p1", devices.Node.DeviceId, list, access));
+        Assert.AreEqual(deskKey.Id, FleetKeyWrap.Unwrap(byDesk, deskKey.Id, 1, "space-p1", devices.Node, list).Id, "without the document, the device list decides");
+
+        // Values: a maintainer seals them for the machine, which opens them; a member and the device-list person seal none for it.
+        Assert.AreEqual(devices.Node.DeviceId, FleetSecretSealing.Recipients(list, access, "p2", [devices.Node.DeviceId]).Single(member => member.Kind == FleetDeviceKinds.Node).DeviceId);
+        Assert.IsFalse(FleetSecretSealing.Recipients(list, access, "p3", [devices.Node.DeviceId]).Any(member => member.Kind == FleetDeviceKinds.Node));
+        Assert.IsFalse(FleetSecretSealing.Recipients(list, access, "p1", [devices.Node.DeviceId]).Any(member => member.Kind == FleetDeviceKinds.Node));
+        var binding = new FleetSecretBinding("v1", FleetSecretKinds.Secret, "TOKEN", FleetSecretScopeKinds.Person, null, 1, false);
+        var copies = FleetSecretSealing.Seal("s3cret", binding, FleetSecretSealing.Recipients(list, access, "p2", [devices.Node.DeviceId]), list, access, devices.Bea);
+        Assert.IsTrue(FleetSecretSealing.TryOpen(copies.Single(item => item.DeviceId == devices.Node.DeviceId).Sealed, binding, devices.Node, list, access, out var value, out var reason), reason);
+        Assert.AreEqual("s3cret", value);
+        Assert.ThrowsExactly<ArgumentException>(() => FleetSecretSealing.Seal("s3cret", binding, [machine], list, access, devices.Cy), "a member seals no value for the team machine");
+        Assert.ThrowsExactly<ArgumentException>(() => FleetSecretSealing.Seal("s3cret", binding, [machine], list, access, devices.Desk), "nor does the device-list person");
+        // A copy of a value a member wrapped to the machine anyway does not open there: values come from its maintainers only.
+        var memberValue = KeyOf("p3", "secret/v1");
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetKeyWrap.Unwrap(FleetKeyWrap.Wrap(memberValue, node, memberValue.Grant!, devices.Cy), memberValue.Id, 1, "secret/v1",
+            devices.Node, list, access));
+
+        // Budgets and environments: those of its maintainers hold on the machine; those of a member or of the device-list person do not.
+        var time = new DateTimeOffset(2026, 11, 5, 9, 0, 0, TimeSpan.Zero);
+        FleetSignedBudget Budget(DeviceIdentity signer, string person) => FleetBudgetsManager.SignBudget(signer, new FleetBudgetDefinition(FleetBudgetDefinition.CurrentVersion, "org",
+            person, "b-" + person, "Budget", FleetBudgetScopeKinds.Machine, devices.Node.DeviceId, FleetBudgetMeasures.Tokens, 1000, FleetBudgetPeriods.Day, "UTC",
+            FleetBudgetModes.Advisory, FleetBudgetReachedActions.Stop, 1, false, signer.DeviceId, time));
+        Assert.IsTrue(FleetBudgetDocuments.TryVerify(Budget(devices.Bea, "p2"), list, access, devices.Node.DeviceId, out _, out reason), reason);
+        Assert.IsFalse(FleetBudgetDocuments.TryVerify(Budget(devices.Cy, "p3"), list, access, devices.Node.DeviceId, out _, out _));
+        Assert.IsFalse(FleetBudgetDocuments.TryVerify(Budget(devices.Desk, "p1"), list, access, devices.Node.DeviceId, out _, out _));
+        FleetSignedEnvironment Environment(DeviceIdentity signer, string person) => FleetServerClient.SignEnvironment(signer, new FleetEnvironmentDefinition(
+            FleetEnvironmentDefinition.CurrentVersion, "org", person, "e-" + person, "prod", 1, [], [], [], false, signer.DeviceId, time));
+        Assert.IsTrue(FleetEnvironmentDocuments.TryVerify(Environment(devices.Bea, "p2"), list, access, devices.Node.DeviceId, out _, out reason), reason);
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerify(Environment(devices.Cy, "p3"), list, access, devices.Node.DeviceId, out _, out _));
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerify(Environment(devices.Desk, "p1"), list, access, devices.Node.DeviceId, out _, out _));
+
+        // Grants of a session of the machine: signed by a device of the person who started it there, never of another person.
+        var metadata = new FleetSessionMetadata("Fix the parser");
+        var (sealedByCy, cyWraps) = FleetGrantKeys.Seal("org", "g1", "s1", metadata, [PublicKey(devices.Laptop)], list.Sequence, devices.Cy);
+        Assert.AreEqual("Fix the parser", FleetGrantKeys.Open(sealedByCy, cyWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list, access, "p3").Title);
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetGrantKeys.Open(sealedByCy, cyWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list,
+            access, "p2"), "a copy of another person than the one of the session");
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetGrantKeys.Open(sealedByCy, cyWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list,
+            access), "a session of a team machine without its person");
+        var (sealedByDesk, deskWraps) = FleetGrantKeys.Seal("org", "g1", "s1", metadata, [PublicKey(devices.Laptop)], list.Sequence, devices.Desk);
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetGrantKeys.Open(sealedByDesk, deskWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list,
+            access, "p1"), "the device-list person started no session there as a person of the team");
+    }
+
+    [TestMethod]
     public void AnAutomationHandedOverOpensOnTheDevicesOfWhoTakesIt_WhenItsFormerOwnerSignedIt()
     {
         using var devices = new Devices();
