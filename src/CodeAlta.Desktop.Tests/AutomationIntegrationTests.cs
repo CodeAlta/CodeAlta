@@ -254,6 +254,43 @@ public sealed class AutomationIntegrationTests
         Assert.IsFalse(missing.Retry, missing.Message);
     }
 
+    // An event waits at the server while its machine is offline, for a day: the machine takes it then, signed hours ago, once;
+    // older than that, or signed in the future, it is refused. What the machine remembers it took refuses a replay.
+    [TestMethod]
+    public async Task AnEventThatWaitedForItsMachine_IsTakenWithinTheDayTheServerKeepsIt_Once()
+    {
+        await using var fixture = await Fixture.CreateAsync($$"""{ type = "webhook", hook = "{{Hook}}", secret = "${secret:INCIDENT_SIGNING}", fields = ["/action"] }""");
+        var body = """{"action":"triggered"}""";
+
+        fixture.Clock.Now = Noon.AddHours(3);
+        var late = await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "w1"), default);
+        Assert.IsTrue(late.Accepted, late.Message);
+        (await fixture.Runner.NextAsync()).Complete(new(AutomationRun.Completed));
+        StringAssert.Contains((await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "w1"), default)).Message, "taken already");
+
+        fixture.Clock.Now = Noon.AddHours(25);
+        StringAssert.Contains((await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "w2"), default)).Message, "too long ago");
+        fixture.Clock.Now = Noon.AddMinutes(-10);
+        StringAssert.Contains((await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "w3"), default)).Message, "too long ago");
+        Assert.AreEqual(1, fixture.Runner.Starts.Count);
+    }
+
+    // The memory of the events a trigger took is bounded: an event signed before the newest one it had to forget is refused, so
+    // that a forgotten event is never taken again.
+    [TestMethod]
+    public void TheReplayMemory_RefusesWhatItCouldHaveForgotten()
+    {
+        AutomationWatermark? mark = null;
+        for (var index = 0; index < 3; index++) mark = AutomationReplayMemory.Remember(mark, "e" + index, 100 + index, Noon, capacity: 3);
+        Assert.IsFalse(AutomationReplayMemory.Forgotten(mark, 50), "nothing was forgotten yet");
+        mark = AutomationReplayMemory.Remember(mark, "e3", 99, Noon, capacity: 3);
+        CollectionAssert.AreEqual(new[] { "e1", "e2", "e3" }, mark.Seen.ToArray());
+        Assert.IsTrue(AutomationReplayMemory.Forgotten(mark, 100), "e0, signed at 100, was forgotten: what is signed until the newest seen before is refused");
+        Assert.IsTrue(AutomationReplayMemory.Forgotten(mark, 102));
+        Assert.IsFalse(AutomationReplayMemory.Forgotten(mark, 103), "newer than all that was forgotten");
+        Assert.IsFalse(AutomationReplayMemory.Forgotten(mark, null), "an event without a signed time relies on its id");
+    }
+
     [TestMethod]
     public async Task AWebhook_GivesThePromptOnlyItsBoundFields_AndADisabledOneTakesNothing()
     {

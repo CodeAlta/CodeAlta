@@ -453,7 +453,9 @@ incident.io and other tools that push signed webhooks send their events to a hoo
 2. Keep the signing secret of the tool, and for incident.io an API key, in the secrets of that machine.
 3. **Test the connection**, then enable the automation.
 
-- The server keeps each event until the machine takes it, for a day at most, and then only when it came and what the machine did with it. The same event pushed twice runs once.
+- The server keeps each event until the machine takes it, for a day at most, and then only when it came and what the machine did with it. A machine that was offline takes the events of that day when it connects. The same event pushed twice runs once.
+- An incident that incident.io cannot give back for a while (it does not answer) is tried again later instead of being lost.
+- The server keeps the headers of the event and of its signature, never a token or a key the tool sends with it.
 - The server has no signing secret: the machine checks the signature of each event, and an event that does not verify starts nothing. An incident is read again from incident.io before it reaches the session.
 - `alta fleet hook list` lists your hooks with their addresses; `--events <hook>` says what the machine did with the latest events.
 

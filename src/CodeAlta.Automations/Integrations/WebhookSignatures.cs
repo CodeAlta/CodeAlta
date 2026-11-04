@@ -31,6 +31,21 @@ internal static class WebhookSignatures
     /// <param name="now">The clock.</param>
     /// <returns>The id of the event when it verifies; otherwise why not.</returns>
     internal static (string? EventId, string? Problem) Verify(string scheme, string secret, WebhookRequest request, string? header, DateTimeOffset now)
+        => Verify(scheme, secret, request, header, now, Tolerance);
+
+    /// <summary>
+    /// Checks a request that may have waited: a Standard Webhook signed up to <paramref name="maximumAge"/> ago (its machine was
+    /// offline, the server kept it), and no more than <see cref="Tolerance"/> in the future. What its machine remembers it took
+    /// refuses a replay within that age (<see cref="AutomationReplayMemory"/>).
+    /// </summary>
+    /// <param name="scheme">The scheme (<see cref="AutomationSignatures"/>).</param>
+    /// <param name="secret">The signing secret.</param>
+    /// <param name="request">The request.</param>
+    /// <param name="header">The header of <see cref="AutomationSignatures.HmacSha256"/>.</param>
+    /// <param name="now">The clock.</param>
+    /// <param name="maximumAge">How long ago a Standard Webhook may have been signed.</param>
+    /// <returns>The id of the event when it verifies; otherwise why not.</returns>
+    internal static (string? EventId, string? Problem) Verify(string scheme, string secret, WebhookRequest request, string? header, DateTimeOffset now, TimeSpan maximumAge)
     {
         ArgumentException.ThrowIfNullOrEmpty(secret);
         ArgumentNullException.ThrowIfNull(request);
@@ -41,7 +56,7 @@ internal static class WebhookSignatures
                 if (request.Header("webhook-id") is not { Length: > 0 and <= 256 } id || request.Header("webhook-timestamp") is not { } stamp
                     || request.Header("webhook-signature") is not { Length: > 0 } signatures)
                     return (null, "The event has no webhook-id, webhook-timestamp and webhook-signature headers.");
-                if (!long.TryParse(stamp, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds) || (now - DateTimeOffset.FromUnixTimeSeconds(seconds)).Duration() > Tolerance)
+                if (SignedAt(request) is not { } signedAt || now - signedAt > maximumAge || signedAt - now > Tolerance)
                     return (null, "The event was signed too long ago, or in the future.");
                 var key = secret.StartsWith("whsec_", StringComparison.Ordinal) ? FromBase64(secret[6..]) : Encoding.UTF8.GetBytes(secret);
                 if (key is null) return (null, "The signing secret is not the whsec_ secret of the sender.");
@@ -80,6 +95,15 @@ internal static class WebhookSignatures
             default:
                 return (null, $"'{scheme}' is not a signature this machine checks.");
         }
+    }
+
+    /// <summary>When a Standard Webhook was signed (its <c>webhook-timestamp</c>, which its signature covers); null when it says none.</summary>
+    internal static DateTimeOffset? SignedAt(WebhookRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return request.Header("webhook-timestamp") is { } stamp && long.TryParse(stamp, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds)
+            && seconds <= DateTimeOffset.MaxValue.ToUnixTimeSeconds()
+            ? DateTimeOffset.FromUnixTimeSeconds(seconds) : null;
     }
 
     /// <summary>

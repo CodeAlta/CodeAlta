@@ -107,8 +107,53 @@ internal sealed record AutomationWatermark
     /// <summary>The items that already started it, newest last: an item is handled once.</summary>
     public List<string> Seen { get; init; } = [];
 
+    /// <summary>
+    /// For the pushed events signed at a time (Standard Webhooks), the newest such time seen, in Unix seconds: when
+    /// <see cref="Seen"/> forgets an event, <see cref="Floor"/> becomes it (<see cref="AutomationReplayMemory"/>).
+    /// </summary>
+    public long Newest { get; init; }
+
     /// <summary>The last commit seen of each open pull request, by its number.</summary>
     public Dictionary<string, string> Heads { get; init; } = [];
+}
+
+/// <summary>
+/// The memory of the pushed events a trigger took, which refuses a replay: the ids it took, bounded, and for the events signed at
+/// a time, a floor under which an event is refused because its id could have been forgotten. An event that waited for its machine
+/// (a day at the server) is taken once, whenever it comes, and a captured one sent again is not taken again.
+/// </summary>
+internal static class AutomationReplayMemory
+{
+    /// <summary>Whether an event signed at a time is one the memory can no longer tell apart: signed until the newest it forgot.</summary>
+    /// <param name="mark">The memory of the trigger; null for none.</param>
+    /// <param name="signedAt">When the event was signed, in Unix seconds; null for an event that says none (it relies on its id).</param>
+    internal static bool Forgotten(AutomationWatermark? mark, long? signedAt) => signedAt is { } at && mark is { Floor: > 0 } && at <= mark.Floor;
+
+    /// <summary>Remembers an event a trigger took.</summary>
+    /// <param name="mark">The memory of the trigger; null for none.</param>
+    /// <param name="eventId">The event.</param>
+    /// <param name="signedAt">When it was signed, in Unix seconds; null when it says none.</param>
+    /// <param name="now">The clock.</param>
+    /// <param name="capacity">The most ids remembered.</param>
+    /// <returns>The memory with the event.</returns>
+    internal static AutomationWatermark Remember(AutomationWatermark? mark, string eventId, long? signedAt, DateTimeOffset now, int capacity)
+    {
+        var seen = mark?.Seen.ToList() ?? [];
+        seen.Add(eventId);
+        var floor = mark?.Floor ?? 0;
+        // What it forgets was signed no later than the newest it had seen before: that becomes the floor.
+        if (seen.Count > capacity)
+        {
+            seen.RemoveRange(0, seen.Count - capacity);
+            floor = Math.Max(floor, mark?.Newest ?? 0);
+        }
+
+        return new AutomationWatermark
+        {
+            Since = now, Seen = seen, Heads = new Dictionary<string, string>(mark?.Heads ?? [], StringComparer.Ordinal), Floor = floor,
+            Newest = Math.Max(mark?.Newest ?? 0, signedAt ?? 0),
+        };
+    }
 }
 
 /// <summary>

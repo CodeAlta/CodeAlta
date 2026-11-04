@@ -142,23 +142,32 @@ internal sealed partial class AutomationService
         lock (_gate) return _state.Watermark(entry.Id, trigger.Key)?.Seen.Contains(eventId) == true;
     }
 
+    // Whether a pushed event signed at a time is older than what the memory of the trigger still tells apart.
+    private bool Forgotten(AutomationEntry entry, AutomationTrigger trigger, DateTimeOffset? signedAt)
+    {
+        lock (_gate) return AutomationReplayMemory.Forgotten(_state.Watermark(entry.Id, trigger.Key), signedAt?.ToUnixTimeSeconds());
+    }
+
     // Whether a trigger sees a pushed event for the first time: Slack delivers again what it thinks was not acknowledged,
     // a sender retries a webhook. What claims also guards across machines; this guards a host that claims nothing.
-    private bool FirstSeen(AutomationEntry entry, AutomationTrigger trigger, string eventId)
+    private bool FirstSeen(AutomationEntry entry, AutomationTrigger trigger, string eventId, DateTimeOffset? signedAt = null)
     {
         lock (_gate)
         {
             var mark = _state.Watermark(entry.Id, trigger.Key);
-            if (mark is not null && mark.Seen.Contains(eventId)) return false;
-            var seen = mark?.Seen.ToList() ?? [];
-            seen.Add(eventId);
-            if (seen.Count > RememberedEvents) seen.RemoveRange(0, seen.Count - RememberedEvents);
+            var signed = signedAt?.ToUnixTimeSeconds();
+            if (mark is not null && mark.Seen.Contains(eventId) || AutomationReplayMemory.Forgotten(mark, signed)) return false;
             // The threads it answered stay beside the events it saw.
-            var heads = new Dictionary<string, string>(mark?.Heads ?? [], StringComparer.Ordinal);
-            _state.SetWatermark(entry.Id, trigger.Key, new AutomationWatermark { Since = _time.GetUtcNow(), Seen = seen, Heads = heads }, RememberedEvents, RememberedThreads);
+            _state.SetWatermark(entry.Id, trigger.Key, AutomationReplayMemory.Remember(mark, eventId, signed, _time.GetUtcNow(), RememberedEvents), RememberedEvents, RememberedThreads);
             return true;
         }
     }
+
+    /// <summary>
+    /// How long ago an event pushed to a hook of the server may have been signed: the day the server keeps it for an offline
+    /// machine. The memory of what a trigger took refuses a replay within it.
+    /// </summary>
+    internal static readonly TimeSpan HookCatchUp = TimeSpan.FromHours(24);
 
     /// <summary>The most threads of Slack a trigger remembers it answered.</summary>
     internal const int RememberedThreads = 512;
@@ -430,7 +439,9 @@ internal sealed partial class AutomationService
 
             var (secret, missing) = Resolve(entry.ProjectId, trigger.Secret!);
             if (secret is null) { Note(entry, "secret missing", missing!); continue; }
-            var (eventId, refused) = WebhookSignatures.Verify(trigger.Signature ?? AutomationSignatures.Standard, secret, request, trigger.SignatureHeader, _time.GetUtcNow());
+            // An event may have waited for this machine at the server: it is taken within the day the server keeps it, once.
+            var scheme = trigger.Signature ?? AutomationSignatures.Standard;
+            var (eventId, refused) = WebhookSignatures.Verify(scheme, secret, request, trigger.SignatureHeader, _time.GetUtcNow(), HookCatchUp);
             if (eventId is null)
             {
                 // An event that does not verify is not authentic: nothing of it reaches a prompt.
@@ -438,10 +449,17 @@ internal sealed partial class AutomationService
                 continue;
             }
 
+            var signedAt = scheme == AutomationSignatures.Standard ? WebhookSignatures.SignedAt(request) : null;
             if (Seen(entry, trigger, eventId))
             {
                 accepted = true;
                 Note(entry, "taken already", "this event was taken already.");
+                continue;
+            }
+
+            if (Forgotten(entry, trigger, signedAt))
+            {
+                Note(entry, "too old", "it was signed before the newest event this machine had to forget: it could have been taken already.");
                 continue;
             }
 
@@ -461,7 +479,7 @@ internal sealed partial class AutomationService
             }
 
             // The event is taken here, once its run can start: one given again meanwhile (another delivery) is taken once.
-            if (!FirstSeen(entry, trigger, eventId))
+            if (!FirstSeen(entry, trigger, eventId, signedAt))
             {
                 accepted = true;
                 Note(entry, "taken already", "this event was taken already.");
