@@ -43,10 +43,13 @@ const unavailable = async () => { throw new Error("not in this fixture"); };
 // Left, the page is empty; the recovery key of the person links it again.
 let linked = true;
 const api: FleetServerApi = {
-  status: async () => ({ status: "ok", servers: linked ? [server()] : [], deviceId: "device-1", words: "apple river stone" }),
+  status: async () => ({ status: "ok", servers: linked ? [server()] : [], deviceId: "device-1", words: "apple river stone", personName: "Alex Example" }),
   leave: async () => { calls.push(JSON.stringify({ leave: "home" })); linked = false; return { status: "ok", message: null }; },
   recover: async (request: FleetServerRecoverRequest) => {
     calls.push(JSON.stringify({ recover: request.url, words: request.words }));
+    // A word that is no word of a recovery key: the host says its position only.
+    const typo = request.words.split(/\s+/u).filter(Boolean).findIndex(word => word === "zzzz");
+    if (typo >= 0) return { status: "recovery.unknown_word", server: null, message: String(typo + 1), recoveryWords: null };
     if (request.words !== recoveryWords) return { status: "recovery.refused", server: null, message: null, recoveryWords: null };
     linked = true;
     recoveryKey = true;
@@ -110,7 +113,8 @@ const api: FleetServerApi = {
   },
   openSignInPage: async (request: { handle: string }) => { calls.push(JSON.stringify({ openPage: request.handle })); return { status: "ok", message: null }; },
   watch: async () => (async function* () { })(),
-  create: unavailable, join: unavailable, createToken: unavailable, revoke: unavailable, signInMethods: unavailable, joinWithSignIn: unavailable,
+  createToken: async () => { calls.push(JSON.stringify({ token: "home" })); return { status: "ok", token: "JOIN-5678", expiresAt: null, message: null }; },
+  create: unavailable, join: unavailable, revoke: unavailable, signInMethods: unavailable, joinWithSignIn: unavailable,
 };
 Object.assign(window, { fleetFixture: { calls } });
 

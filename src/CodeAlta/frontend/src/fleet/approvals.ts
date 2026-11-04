@@ -8,3 +8,11 @@ export function waitingApprovals(lists: readonly { server: FleetServerView; devi
   return lists.flatMap(({ server, devices }) => devices.filter(device => device.status === "pending").map(device => ({ server, device })))
     .sort((left, right) => left.device.createdAt.localeCompare(right.device.createdAt) || left.device.id.localeCompare(right.device.id));
 }
+
+/** The id of the plugin of the Fleet canvas and of the canvas itself (`DesktopFleetPlugin`). */
+export const fleetCanvasRef = { pluginKey: "fleet", id: "fleet" } as const;
+
+/** The Fleet canvas among the canvases of the window, which the Fleet button opens; null while its plugin does not run. */
+export function fleetCanvasOf<T extends { pluginKey: string; id: string }>(canvases: readonly T[]): T | null {
+  return canvases.find(item => item.pluginKey === fleetCanvasRef.pluginKey && item.id === fleetCanvasRef.id) ?? null;
+}

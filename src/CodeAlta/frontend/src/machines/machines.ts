@@ -66,6 +66,13 @@ export function readMachinePageLink(page: string): string | null {
   return match ? match[1] : null;
 }
 
+/**
+ * Whether this computer reaches a machine only through the relay of its server (a machine added through the server, or
+ * another computer of the person there), not by a pairing of its own: it is one of the person's machines all the same,
+ * but it is not forgotten from here.
+ */
+export const throughServer = (machine: Pick<MachineView, "paired">): boolean => !machine.paired;
+
 /** The machines in the order of the page: online ones first, then by name. */
 export function orderedMachines(machines: readonly MachineView[]): MachineView[] {
   const rank = (machine: MachineView) => ({ online: 0, connecting: 1, offline: 2, unauthorized: 3 })[machineState(machine)];

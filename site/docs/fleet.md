@@ -28,7 +28,7 @@ In CodeAlta Desktop, open **Settings** > **Fleet** > **Machines** and click **Ad
    - **Pair it with this computer**: the node makes a pairing link for this computer, which pairs at once and manages the machine. The six words of its key are shown.
 3. Click **Open its page** to give it projects and look at its providers (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
 
-When a step fails, it says why and what to do: add your key to the SSH agent (`ssh-add`) or copy it to the machine (`ssh-copy-id`), install .NET 10 there, open the port of the node in its firewall. On a Mac, macOS keeps CodeAlta from your local network until you turn it on in **System Settings** > **Privacy & Security** > **Local Network**. **Try again** starts over and changes only what is missing. A computer whose SSH key this one does not know yet asks first: **Trust it and try again**.
+When a step fails, it says why and what to do: add your key to the SSH agent (`ssh-add`) or copy it to the machine (`ssh-copy-id`), install .NET 10 there, open the port of the node in its firewall. On a Mac, macOS asks once to let CodeAlta reach your local network, and keeps it from your machines until you allow it (**System Settings** > **Privacy & Security** > **Local Network**). **Start over** runs every step again from the first and changes only what is missing. A computer whose SSH key this one does not know yet shows the fingerprint of that key (`SHA256:…`): compare it with the one of the machine, then click **Trust it and start over**.
 
 Where CodeAlta Desktop runs on the machine too, the node gets a profile of its own, `~/.alta-node`. **Advanced** sets the port of the node (2585), its profile, the folder it is installed in, and a folder of this computer to install the packages from.
 
@@ -240,10 +240,12 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | **Agents of other machines** | The spaces where agents of other computers may start sessions there and send prompts to its sessions, the sandbox their sessions run in at least, and whether they may bypass permissions ([Let agents start sessions on it](#let-agents-start-sessions-on-it)) |
 | **Labels** | Its [labels](#label-your-machines), which it publishes to its servers: add them, or remove one with its cross |
 | **Projects** | Clone a repository there, add a folder, remove a project |
-| **Providers** | The providers ready on the machine, and its default model. A machine without one cannot start sessions: sign in to a provider on it |
+| **Providers** | Each provider of the machine and whether it is ready; when it is not, why: no key, the secret of the machine it waits for, not signed in. **Add a provider…** and **Add its key…** take its key here: it goes to the machine encrypted from end to end and is kept in its secrets (`PROVIDER_<KEY>_API_KEY`), never in its configuration. **Sign in…** signs in a provider such as GitHub Copilot or xAI on the machine: its code shows here with **Copy**; enter it on the provider's page in your browser. A provider with its own login on the machine (Codex, Claude Code) is signed in there |
 | **Secrets** | Its [secrets and variables](secrets.md), as **Settings** > **Secrets** shows those of this computer: **Add a secret…**, **Rotate** and **Delete** a secret, edit or delete a variable. A value goes to the machine and is never shown back |
 | **Updates** | The version it runs. **Check for updates**, then **Update to** the version found: it switches once no session works |
 | **Log** | **Show the log** reads its last lines |
+
+**Settings** > **Fleet** > **Machines** lists all your machines, whatever the way this computer reaches them: those paired with it, and those added through your server, marked **Through your server**. Both open their page; a machine of the server has nothing to forget here.
 
 The first computer paired with a machine manages it. Give another computer the **Manage** switch on its row to let it manage the machine too; turning it off for **This computer** asks first, since only the owner can give it back. A computer that does not manage the machine sees its providers, and how its owner gives it the permission.
 
@@ -274,11 +276,11 @@ In CodeAlta Desktop, open **Settings** > **Fleet** > **Server** and click **Crea
 - **On this computer**: CodeAlta installs CodeAlta Server here, runs it as a service with `altaserver install` (see [Run a server as a service](#run-a-server-as-a-service)), so that it starts again after a restart, and makes you its owner.
 - **It runs already**: a server you started with `altaserver run`; give its address, its setup code (`altaserver setup-code` prints it on its machine) and your name.
 
-Give **Your name** and an **Organization** (**Home** by default). **Advanced** sets the port (2586), the data folder, the install folder and a folder of packages.
+**Your name** starts as the full name of your account on this computer; change it at will. Give an **Organization** (**Home** by default). **Advanced** sets the port (2586), the data folder, the install folder and a folder of packages.
 
-When the server runs but does not answer from here, the step says what blocks it, with what this computer met: a firewall (on Ubuntu, `sudo ufw allow 2586/tcp` on the machine), a name that does not reach it, a proxy that does not forward to it, or, on a Mac, CodeAlta not allowed in **System Settings** > **Privacy & Security** > **Local Network**. **Try again** starts over and changes only what is missing.
+When the server runs but does not answer from here, the step says what blocks it, with what this computer met: a firewall (on Ubuntu, `sudo ufw allow 2586/tcp` on the machine), a name that does not reach it, a proxy that does not forward to it, or, on a Mac, CodeAlta not allowed in **System Settings** > **Privacy & Security** > **Local Network**. **Start over** runs every step again from the first and changes only what is missing.
 
-Once you are its owner, **Add your machines** lists the machines this computer manages: **Add** has each join the server from itself, and approves it at once. The six words of each are shown.
+Once you are its owner, **Spaces on this server** lists your spaces: a server shows the sessions of a linked space only, yours included, so click **Link all my spaces** or turn on the ones you want. **Add your machines** lists the machines this computer manages: **Add** has each join the server from itself, and approves it at once. The six words of each are shown.
 
 When you click **Done**, CodeAlta shows your **recovery key**: 32 words, shown once. Write them down or click **Copy** and keep them somewhere safe, click **I wrote them down**, and type the two words it asks for.
 
@@ -304,7 +306,7 @@ It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--
 
 - **A machine**: in **Settings** > **Fleet** > **Machines**, **Add a machine…** > **Through my server** shows the command to run on it, `altanode join <address> --token <code>`, which prints the six words of the machine's key. The machines that join list under the command with their words: click **It shows the same words** beside the one whose words the machine printed. Another one is never approved by itself. The **Add a machine…** of the server's card shows the same command for a machine that waits for you to approve it: it appears under the server as a **New device**; click **Approve…**, check that the machine shows the same six words, and click **It shows the same words**.
 - **What waits for you**: when a machine or a computer asks to join, a message comes wherever you are in CodeAlta, with its six words, **Approve** and **Refuse**, and the **Fleet** button of the title bar counts what waits, with the runs held by a [budget](#set-budgets-for-your-machines) and the [problems of your machines](#hear-of-problems-of-your-machines). Approve when the words are the same as on the device.
-- **Another of your computers**: **Join an organization…** with the address of the server, then sign in with a method you linked (a passkey, Microsoft, Google, GitHub) or an enrollment code; it shows six words while it waits, and you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
+- **Another of your computers**: on the server's card, **Invite a computer…** shows the address of the server and an enrollment code, each with **Copy**. On the other computer, open **Settings** > **Fleet** > **Server**, click **Connect to my server…**, give the address and the code (or sign in with a method you linked: a passkey, Microsoft, Google, GitHub), and choose its spaces: all of them by default. It shows six words while it waits, and you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
 
 ### Join an organization
 
@@ -330,13 +332,13 @@ The card of the server shows **Sign-in**: the ways people sign in on a new compu
 
 The recovery key lets you get your keys back on a new computer if every computer of yours that holds them is lost. The card of the server shows **Recovery key**: **Kept** once you have one. **Make a recovery key…** makes one for a server you created before; **New recovery key…** makes another, and the words you kept before stop working. Without your computers and without these words, what was encrypted for them cannot be read again, by you or by the server.
 
-On a new computer, click **Recover with the recovery key…** on the empty **Server** page, or in **Join an organization…**, give the address of the server and type the 32 words: this computer becomes one of yours again, with your keys, without waiting for an approval.
+On a new computer, click **Recover with the recovery key…** on the empty **Server** page, or in **Join an organization…**, give the address of the server and type the 32 words: this computer becomes one of yours again, with your keys, without waiting for an approval. A word that is not a word of a recovery key is named by its position (**Word 7…**), never shown back.
 
-A space publishes to a server only when you choose it: **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server. Each space has a key of its own, so the titles of one space never open with the key of another.
+A space publishes to a server only when you choose it: **Spaces on this server** on the server's card, or **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server. Each space has a key of its own, so the titles of one space never open with the key of another.
 
 To leave a server, click the trash button of its card, then **Leave**: the server removes what this computer published there (its sessions, their titles, its statistics), its copies of your keys and the automations given to it through that server, and its spaces are unlinked. When the server does not answer, this computer leaves anyway and the page says that what it published stays there.
 
-The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions, with their titles, as they change; without a server, it shows the machines paired with this computer. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. The name of a paired machine opens its page. `altanode status` says whether the node is connected to its server.
+The **Fleet** button of the title bar opens the **Fleet** canvas (`/fleet`): the machines of the server and their sessions, with their titles, as they change; without a server, the machines paired with this computer. Its **Settings** button opens **Settings** > **Fleet** > **Server**. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. The name of a machine this computer reaches opens its page. `altanode status` says whether the node is connected to its server.
 
 ### Reach machines through the server
 

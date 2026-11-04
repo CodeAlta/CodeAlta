@@ -21,6 +21,7 @@ const recoveryWords = "acid acorn actor agent alarm album alien alpha amber anch
   + "bamboo banjo barn basil basket beach beacon bear";
 let tries = 0;
 const api: CreateServerApi = {
+  status: async () => ({ status: "ok", servers: [], deviceId: "me", words: null, personName: "Alex Example" }),
   createServer: async request => {
     calls.push(JSON.stringify({ ssh: request.target, address: request.address, port: request.port }));
     const first = ++tries === 1;
@@ -56,7 +57,7 @@ const joinApi: JoinOrganizationApi = {
       recoveryKey: null } };
   },
   status: async () => ({ status: "ok", servers: joinApproved ? [{ id: "corp", url: "https://fleet.contoso.com", organization: "Contoso", link: "approved", connection: "online", problem: null,
-    controller: false, spaces: [], recoveryKey: null } as never] : [], deviceId: "me", words: "cabin onion leopard pigeon peach needle" }),
+    controller: false, spaces: [], recoveryKey: null } as never] : [], deviceId: "me", words: "cabin onion leopard pigeon peach needle", personName: null }),
   // A server whose address names SSO offers its company sign-in and a passkey, one that names GitHub offers GitHub; the others offer none, and take an enrollment code.
   signInMethods: async request => request.url.includes("sso")
     ? { status: "ok", organization: "Contoso", ssoRequired: false, message: null, methods: [{ id: "passkey", name: "Passkey", breakGlass: false }, { id: "company", name: "Contoso", breakGlass: false }] }
@@ -85,12 +86,12 @@ const joinApi: JoinOrganizationApi = {
   linkSpace: async request => { calls.push(JSON.stringify({ link: request.spaceId, server: request.linkId })); return { status: "ok", message: null, space: null } as never; },
 };
 const spacesApi: JoinOrganizationSpacesApi = {
-  list: async () => ({ status: "ok", spaces: [] }),
+  list: async () => ({ status: "ok", spaces: [{ id: "default", name: "Default" }, { id: "home", name: "Home" }] as never }),
   create: async request => { calls.push(JSON.stringify({ space: request.name })); return { status: "ok", message: null, movedSessions: 0, space: { id: "work-1", name: request.name } } as never; },
 };
 let devices: FleetDeviceView[] = [{ id: "box", name: "build-box", kind: "node", status: "pending", online: true, words: "ruby scarf apple ember camera finch", createdAt: "2026-11-03T00:00:00Z" }];
 const approvalsApi: FleetApprovalsApi = {
-  status: async () => ({ status: "ok", deviceId: "me", words: null, servers: [{ id: "home", url: "https://fleet.example", organization: "Home", link: "approved", connection: "online",
+  status: async () => ({ status: "ok", deviceId: "me", words: null, personName: null, servers: [{ id: "home", url: "https://fleet.example", organization: "Home", link: "approved", connection: "online",
     problem: null, controller: true, spaces: [], recoveryKey: true }] }),
   devices: async () => ({ status: "ok", devices, message: null }),
   approve: async request => { calls.push(JSON.stringify({ approve: request.deviceId, words: request.words, kind: request.kind })); devices = devices.map(item => ({ ...item, status: "approved" })); return { status: "ok", device: null, message: null }; },
@@ -107,9 +108,10 @@ function Fixture() {
   Object.assign(window, { serverFixture: { calls, show: setShown, approveJoin: () => { joinApproved = true; } } });
   return <>
     <FleetApprovals epoch={epoch} api={approvalsApi} onOpen={() => calls.push(JSON.stringify({ open: "fleetServer" }))} />
-    {shown === "create" && <CreateServerDialog epoch={epoch} api={api} machinesApi={machinesApi} onExisting={() => calls.push(JSON.stringify({ existing: true }))}
+    {shown === "create" && <CreateServerDialog epoch={epoch} api={api} machinesApi={machinesApi} spacesApi={{ link: { linkSpace: joinApi.linkSpace }, list: spacesApi }} onExisting={() => calls.push(JSON.stringify({ existing: true }))}
       onClose={(created, words) => calls.push(JSON.stringify({ close: created, recoveryWords: words ?? null }))} />}
     {shown === "join" && <JoinOrganizationDialog epoch={epoch} api={joinApi} spaces={spacesApi} onClose={joined => calls.push(JSON.stringify({ closeJoin: joined }))} />}
+    {shown === "joinOwn" && <JoinOrganizationDialog epoch={epoch} kind="own" api={joinApi} spaces={spacesApi} onClose={joined => calls.push(JSON.stringify({ closeJoin: joined }))} />}
   </>;
 }
 

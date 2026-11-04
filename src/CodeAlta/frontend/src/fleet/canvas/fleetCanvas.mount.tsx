@@ -31,6 +31,7 @@ const api: FleetCanvasApi = {
 const actions: FleetCanvasActions = {
   openSession: id => calls.push(JSON.stringify({ session: id })),
   openMachine: id => calls.push(JSON.stringify({ machine: id })),
+  openSettings: page => calls.push(JSON.stringify({ settings: page })),
   runCommand: name => { calls.push(JSON.stringify({ command: name })); return true; },
 };
 Object.assign(window, { fleetCanvasFixture: { calls } });

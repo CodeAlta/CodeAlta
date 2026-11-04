@@ -21,11 +21,11 @@ type WaitingHold = { server: FleetServerView; hold: FleetBudgetHoldView };
 type NewNotification = { server: FleetServerView; notification: FleetNotificationView };
 
 /**
- * The Fleet button of the title bar, for a computer that owns a server: a mark counts what waits for the person (devices to
+ * The Fleet button of the title bar, for a computer linked to a server: it opens the Fleet canvas. On a server it owns, a mark counts what waits for the person (devices to
  * approve, runs held by a budget, notifications of budgets and of the health of machines), and each new one comes as a toast
  * wherever the person is: Approve and Refuse for a device, Continue anyway and Stop for a run, Dismiss for a notification.
  */
-export function FleetApprovals({ epoch, api = fleetServer, onOpen }: { epoch: string | null; api?: FleetApprovalsApi; onOpen: () => void }) {
+export function FleetApprovals({ epoch, api = fleetServer, active = false, onOpen }: { epoch: string | null; api?: FleetApprovalsApi; active?: boolean; onOpen: () => void }) {
   const { t } = useShellLanguage();
   const [servers, setServers] = useState<FleetServerView[]>([]);
   const [waiting, setWaiting] = useState<WaitingApproval[]>([]);
@@ -36,7 +36,9 @@ export function FleetApprovals({ epoch, api = fleetServer, onOpen }: { epoch: st
   const read = useCallback(async (signal: AbortSignal) => {
     if (!epoch) return;
     const status = await api.status({ expectedEpoch: epoch }, { signal, timeoutMilliseconds: 15_000 });
-    const owned = status.servers.filter(server => server.controller && server.link === "approved");
+    // The button shows for any server this computer is approved on; what waits for an owner is read on the servers it owns.
+    const linked = status.servers.filter(server => server.link === "approved");
+    const owned = linked.filter(server => server.controller);
     const lists: { server: FleetServerView; devices: readonly FleetDeviceView[] }[] = [];
     const held: WaitingHold[] = [];
     const fresh: NewNotification[] = [];
@@ -50,7 +52,7 @@ export function FleetApprovals({ epoch, api = fleetServer, onOpen }: { epoch: st
       }
     }
     if (signal.aborted) return;
-    setServers(owned);
+    setServers(linked);
     setWaiting(waitingApprovals(lists));
     setHolds(held);
     setNotes(fresh);
@@ -153,7 +155,7 @@ export function FleetApprovals({ epoch, api = fleetServer, onOpen }: { epoch: st
   const label = count === 0 ? t("Fleet")
     : count === waiting.length ? t(waiting.length === 1 ? "Fleet: {count} device waits for your approval" : "Fleet: {count} devices wait for your approval", { count: waiting.length })
     : t(count === 1 ? "Fleet: 1 thing needs you" : "Fleet: {count} things need you", { count });
-  return <Button variant="minimal" size="small" className="fleet-approvals-button" data-waiting={count > 0 ? "true" : undefined}
+  return <Button variant="minimal" size="small" className="fleet-approvals-button" data-waiting={count > 0 ? "true" : undefined} active={active}
     icon={<span className="fleet-approvals-icon"><AppIcon name="server" size={16} />{count > 0 && <span className="fleet-approvals-mark">{count}</span>}</span>}
     aria-label={label} title={label} onClick={onOpen} />;
 }

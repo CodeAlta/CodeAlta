@@ -62,6 +62,20 @@ public sealed class FleetServerRpcTests
     }
 
     [TestMethod]
+    public void PersonName_IsTheFullNameOfTheAccount_NeverItsBareName()
+    {
+        Assert.AreEqual("Alex Mutel", PersonName.FromPasswd("alex:x:1000:1000:Alex Mutel,,,:/home/alex:/bin/bash"));
+        Assert.IsNull(PersonName.FromPasswd("alex:x:1000:1000::/home/alex:/bin/bash"), "no comment, no name");
+        Assert.IsNull(PersonName.FromPasswd(null));
+        Assert.AreEqual("Alex Mutel", PersonName.Clean("  Alex Mutel\n", "alex"));
+        Assert.IsNull(PersonName.Clean("alex", "alex"), "the account name is not a full name");
+        Assert.IsNull(PersonName.Clean("   ", "alex"));
+        Assert.AreEqual(128, PersonName.Clean(new string('a', 300), "alex")!.Length);
+        // Whatever the system says, reading it never throws.
+        _ = PersonName.ReadOnce()();
+    }
+
+    [TestMethod]
     public async Task CreateLinkApproveAndFollowTheDirectoryOfAServer()
     {
         var token = TestContext.CancellationToken;
@@ -91,13 +105,22 @@ public sealed class FleetServerRpcTests
                 PublishDelay = TimeSpan.FromMilliseconds(20), PollInterval = TimeSpan.FromMilliseconds(200), PendingApprovalRetry = TimeSpan.FromMilliseconds(200),
             });
             var epoch = Guid.NewGuid().ToString("D");
-            var service = new FleetServerService(servers, epoch) { Spaces = host.SpaceCatalog, IsPaired = static _ => false };
+            var service = new FleetServerService(servers, epoch) { Spaces = host.SpaceCatalog, IsPaired = static _ => false, PersonName = static () => "Alex Example" };
 
             var none = await service.StatusAsync(new FleetServerRequest(epoch), token);
             Assert.AreEqual(("ok", 0), (none.Status, none.Servers.Length));
+            Assert.AreEqual("Alex Example", none.PersonName, "the setup proposes the name of the person signed in as the owner's");
             Assert.AreEqual("no_server", service.Directory(new FleetServerDirectoryRequest(epoch)).Status);
             Assert.AreEqual("stale_epoch", (await service.StatusAsync(new FleetServerRequest("other"), token)).Status);
             Assert.AreEqual("invalid_url", (await service.CreateAsync(new FleetServerCreateRequest(epoch, "ftp://fleet", "x", "Alex"), token)).Status);
+            // A mistyped word of a recovery key is said by its position, without the words.
+            using (var generated = FleetRecoveryKey.Generate())
+            {
+                var typed = generated.Words.Split(' ');
+                typed[2] = "zzzz";
+                var mistyped = await service.RecoverAsync(new FleetServerRecoverRequest(epoch, address.ToString(), string.Join(' ', typed)), token);
+                Assert.AreEqual(("recovery.unknown_word", "3"), (mistyped.Status, mistyped.Message));
+            }
 
             var wrong = await service.CreateAsync(new FleetServerCreateRequest(epoch, address.ToString(), "WRONG-CODE", "Alex"), token);
             Assert.AreEqual("setup.invalid_code", wrong.Status, wrong.Message);

@@ -287,6 +287,7 @@ import { FleetServerSettings } from "./fleet/FleetServerSettings";
 import { FleetSecretsSettings } from "./fleet/FleetSecretsSettings";
 import { FleetBudgetsSettings } from "./fleet/FleetBudgetsSettings";
 import { FleetApprovals } from "./fleet/FleetApprovals";
+import { fleetCanvasOf } from "./fleet/approvals";
 import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
 import { newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
 import { MoveToMachineDialog } from "./machines/MoveToMachineDialog";
@@ -409,7 +410,7 @@ import { PluginHostBridgeContext, type PluginHostBridge } from "./pluginScript/h
 import { createCanvasHub, type CanvasClosedInstance, type CanvasOpenRequest } from "./canvases/canvasHub";
 import { createCanvasInstances } from "./canvases/canvasInstances";
 import { CanvasesPanel } from "./canvases/CanvasesPanel";
-import { addCanvasTabToSpace, bringCanvasTab, canvasMenuItems, canvasPlacement, canvasRequestSpace, canvasStatusKey, canvasTabOf, closedCanvasTab, defaultCanvasTarget, newCanvasPrompt, pluginSettingsPage, pluginSettingsPages, pluginSettingsTab, removeCanvasTabFromSpace, samePluginSettingsPage, sessionCanvasMenuEntries, tabCanvases, withCanvasStatus, type CanvasScopeProject, type CanvasSelection, type CanvasTarget, type PluginSettingsPage } from "./canvases/canvasPages";
+import { addCanvasTabToSpace, bringCanvasTab, canvasMenuItems, canvasPlacement, canvasRequestSpace, canvasStatusKey, canvasTabOf, closedCanvasTab, defaultCanvasTarget, newCanvasPrompt, pluginSettingsPage, pluginSettingsPages, pluginSettingsTab, removeCanvasTabFromSpace, samePluginSettingsPage, sessionCanvasMenuEntries, showsCanvas, tabCanvases, withCanvasStatus, type CanvasScopeProject, type CanvasSelection, type CanvasTarget, type PluginSettingsPage } from "./canvases/canvasPages";
 import { createCanvasPluginControl, type CanvasPluginControl } from "./canvases/canvasPlugin";
 import { PluginButtons } from "./pluginButtons/PluginButtons";
 import { SessionRowMenu } from "./pluginButtons/pluginMenu";
@@ -1950,6 +1951,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const declaredCanvases = useSyncExternalStore(canvasHub.subscribeCatalog, canvasHub.getCatalog);
   const canvasCatalog = useMemo(() => tabCanvases(declaredCanvases), [declaredCanvases]);
   const pluginPages = useMemo(() => pluginSettingsPages(declaredCanvases), [declaredCanvases]);
+  const fleetCanvas = useMemo(() => fleetCanvasOf(canvasCatalog), [canvasCatalog]);
   // Opens the tab of a canvas in the space that is shown: one tab for each canvas, project, session and key. A settings page opens in Settings.
   function openCanvas(item: CanvasItem, target: CanvasTarget) {
     if (!owned) return;
@@ -5610,7 +5612,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={`${t("Settings & extensions")} (Ctrl+,)`} onClick={() => navigate("appearance")} /></>} />}
         </WindowBrand>
         {!secondary && <div className="window-actions">
-          <FleetApprovals epoch={owned ? status!.hostEpoch : null} onOpen={() => navigate("fleetServer")} />
+          {/* The Fleet button opens the Fleet canvas, whose Settings button is one click away; Settings while its plugin does not run. */}
+          <FleetApprovals epoch={owned ? status!.hostEpoch : null} active={!!fileTabs.active && !!fleetCanvas && showsCanvas(fileTabs.active, fleetCanvas)}
+            onOpen={() => { if (fleetCanvas) openCanvasHere(fleetCanvas); else navigate("fleetServer"); }} />
           <PluginButtons place="TitleBar" context={pluginButtonContext} />
           {spacesState.available && <SpaceSwitch spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} canEdit={owned} request={spaceMenuRequest}
             onShow={id => { if (showSpace(id)) focusPromptSoon(); }} onCreate={() => setSpaceDialog(true)} onOrganize={() => navigate("spaces")} />}
