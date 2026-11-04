@@ -24,6 +24,14 @@ export const automationAutonomyMessages = {
     "Festlegungen, Grenzen und Vorbedingungen stehen in seiner Konfigurationsdatei; ein Test nennt die Festlegung jedes aufgerufenen Tools.",
     "固定、制限、前提条件は設定ファイルに書きます。試行では呼び出す各ツールの固定値が示されます。",
     "固定、限制和前提条件写在其配置文件中；试运行会给出它调用的每个工具的固定值。"],
+  "Its owner": ["Su propietario", "Son propriétaire", "Sein Eigentümer", "所有者", "其所有者"],
+  "The person on call of its team": ["La persona de guardia de su equipo", "La personne d’astreinte de son équipe", "Die Bereitschaft seines Teams", "チームの当番", "其团队的值班人员"],
+  "On your server, the team that owns it takes turns on call; without a rotation, its whole team answers.": [
+    "En tu servidor, el equipo al que pertenece se turna de guardia; sin rotación, responde todo el equipo.",
+    "Sur votre serveur, l’équipe à qui elle appartient se relaie d’astreinte ; sans roulement, toute l’équipe répond.",
+    "Auf Ihrem Server wechselt sich das Team, dem es gehört, in der Bereitschaft ab; ohne Rotation antwortet das ganze Team.",
+    "サーバー上では所有チームが交代で当番をします。ローテーションがなければチーム全員が回答します。",
+    "在你的服务器上，拥有它的团队轮流值班；没有轮值时，整个团队都会作答。"],
   "Approvals go to": ["Las aprobaciones van a", "Les approbations vont à", "Freigaben gehen an", "承認の送り先", "批准发送给"],
   "Its owner: you, or on your server the team that owns it and those granted to approve it.": [
     "Su propietario: tú, o en tu servidor el equipo al que pertenece y quienes tienen permiso para aprobarla.",

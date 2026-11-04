@@ -35,6 +35,7 @@ Click **New team…** and add its members. A team has **maintainers**, who run i
 
 - **Team machines**: on the row of a machine, click **Give to…** and choose the team; a maintainer accepts it. Each member of the team then starts sessions on it and sees only their own sessions there; its maintainers manage it.
 - **Its machines run the automations of its members**: off by default. Its maintainers' automations run there either way.
+- **On call**: a maintainer turns on **Take turns on call** under the team and chooses the length of a turn. Its people take turns in the order of the team, and the row says who is on call now and until when. An automation of the team whose approvals go to **The person on call of its team** asks that person; without a rotation, it asks the whole team. Someone suspended or no longer in the team is skipped.
 - **Dissolve** gives what the team owned to the organization.
 
 ## Owners and transfers

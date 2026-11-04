@@ -298,8 +298,11 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
 /// </summary>
 internal sealed record AutomationAutonomy
 {
-    /// <summary>Approvals go to the owner of the automation.</summary>
+    /// <summary>Approvals go to the owner of the automation: its person, or the people of the team that owns it.</summary>
     internal const string OwnerApprovers = "owner";
+
+    /// <summary>Approvals go to the person on call of the team that owns the automation, by its rotation on its server.</summary>
+    internal const string OnCallApprovers = "oncall";
 
     /// <summary>A run whose approval waits too long stops.</summary>
     internal const string StopOnTimeout = "stop";
@@ -338,7 +341,7 @@ internal sealed record AutomationAutonomy
     /// <summary>Gets what a run does when an approval waits too long: <see cref="StopOnTimeout"/> or <see cref="WaitOnTimeout"/>.</summary>
     public string OnTimeout { get; init; } = StopOnTimeout;
 
-    /// <summary>Gets who answers the approvals: <see cref="OwnerApprovers"/> now; teams and on-call resolvers come with access control.</summary>
+    /// <summary>Gets who answers the approvals: <see cref="OwnerApprovers"/> or <see cref="OnCallApprovers"/>.</summary>
     public string Approvers { get; init; } = OwnerApprovers;
 
     /// <summary>
@@ -390,7 +393,8 @@ internal sealed record AutomationAutonomy
         if (MaxCallsPerHour is < 1 or > MaximumCallsPerHour) return $"max_calls_per_hour is 1 to {MaximumCallsPerHour}.";
         if (ApprovalTimeout is < 1 or > MaximumTimeout) return $"approval_timeout is 1 to {MaximumTimeout} minutes.";
         if (OnTimeout is not (StopOnTimeout or WaitOnTimeout)) return "on_timeout is stop or wait.";
-        if (Approvers != OwnerApprovers) return "approvers is owner: the approvals of a run go to the owner of the automation (teams and on-call people come with access control).";
+        if (Approvers is not (OwnerApprovers or OnCallApprovers))
+            return "approvers is owner (its person, or the team that owns it) or oncall (the person on call of the team that owns it, by its rotation on its server).";
         return null;
     }
 }

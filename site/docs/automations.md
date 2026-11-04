@@ -147,7 +147,7 @@ In the configuration file, a tool it calls by itself can say more than its name:
 autonomy = { allowed_tools = ["k8s_get_deployment", { name = "k8s_restart_pod", hash = "sha256:…", version = "1.4.2", bounds = { namespace = ["shop"], replicas = { min = 1, max = 5 } }, preconditions = [{ tool = "k8s_get_deployment", arguments = ["namespace", "name"], expect = "available" }] }] }
 ```
 
-The approvals go to the owner of the automation: you, or on a [server](fleet.md#run-your-automations-on-it) the team that owns it and the people granted to approve it. There, a run that waits comes to them as a message too.
+The approvals go to the owner of the automation: you, or on a [server](fleet.md#run-your-automations-on-it) the team that owns it and the people granted to approve it. There, a run that waits comes to them as a message too. Choose **The person on call of its team** (`approvers = "oncall"`) to ask only who of the team is [on call](people-and-access.md#teams-and-team-machines) now.
 
 ## Follow the runs
 

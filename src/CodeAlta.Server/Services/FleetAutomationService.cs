@@ -23,7 +23,7 @@ internal sealed class FleetAutomationService
     /// the team that owns it and who is granted them; the seam where on-call resolvers come too. Null: the person whose
     /// version the server holds.
     /// </summary>
-    internal Func<AutomationRecord, CancellationToken, Task<IReadOnlyList<string>>>? ApprovalRecipients { get; init; }
+    internal Func<AutomationRecord, string?, CancellationToken, Task<IReadOnlyList<string>>>? ApprovalRecipients { get; init; }
 
     /// <summary>
     /// Gets or sets whether a person who did not place an automation answers its approvals, and so takes its runs over: a
@@ -380,7 +380,8 @@ internal sealed class FleetAutomationService
             foreach (var run in records.Where(static run => run.Status == WaitingStatus))
             {
                 if (await _automations.GetAutomationAsync(device.OrganizationId, run.AutomationId, device.Id, cancellationToken).ConfigureAwait(false) is not { } automation) continue;
-                var recipients = ApprovalRecipients is { } resolve ? await resolve(automation, cancellationToken).ConfigureAwait(false) : [automation.OwnerPersonId];
+                var approvers = runs.FirstOrDefault(fact => fact.RunId == run.RunId)?.Approvers is { Length: > 0 and <= 32 } said ? said : null;
+                var recipients = ApprovalRecipients is { } resolve ? await resolve(automation, approvers, cancellationToken).ConfigureAwait(false) : [automation.OwnerPersonId];
                 foreach (var person in recipients.Distinct(StringComparer.Ordinal))
                 {
                     await notifications.NotifyAsync(device.OrganizationId, person, "approval:" + run.RunId, FleetNotificationKinds.Approval, "warning", null, device.Id, null,

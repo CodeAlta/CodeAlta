@@ -44,7 +44,7 @@ public sealed class AutomationAutonomyConfigTests
     [DataRow("""{ allowed_tools = ["a", "a"] }""", "allowed twice")]
     [DataRow("""{ allowed_tools = ["a"], approval_timeout = 0 }""", "approval_timeout is 1")]
     [DataRow("""{ allowed_tools = ["a"], on_timeout = "retry" }""", "stop or wait")]
-    [DataRow("""{ allowed_tools = ["a"], approvers = "team:sre" }""", "teams and on-call people come with access control")]
+    [DataRow("""{ allowed_tools = ["a"], approvers = "team:sre" }""", "approvers is owner (its person, or the team that owns it) or oncall")]
     [DataRow("""{ allowed_tools = ["a"], everything = true }""", "autonomy has no everything")]
     [DataRow("\"yes\"", "autonomy is a table")]
     public void Autonomy_SaysWhatIsWrong(string autonomy, string expected)

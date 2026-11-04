@@ -167,7 +167,8 @@ internal sealed partial class AccessService
     {
         var (snapshot, person) = await ReadAsync(actor, cancellationToken).ConfigureAwait(false);
         Require(snapshot, person, "access.view", AccessTarget.Organization);
-        return new([.. snapshot.Teams.Where(static team => team.DissolvedAt is null).Select(team => ToDto(snapshot, team))]);
+        return new(await WithRotationsAsync(actor.OrganizationId, snapshot, [.. snapshot.Teams.Where(static team => team.DissolvedAt is null).Select(team => ToDto(snapshot, team))],
+            cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>Makes a team; the person who makes it is its first maintainer.</summary>

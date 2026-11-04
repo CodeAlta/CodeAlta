@@ -45,7 +45,29 @@ public sealed record TeamMemberDto(string PersonId, string DisplayName, string R
 /// <param name="RunsMemberAutomations">Whether its machines run the personal automations of its members (off by default).</param>
 /// <param name="Version">The version of the team, raised by each change.</param>
 public sealed record TeamDto(string Id, string Name, DateTimeOffset CreatedAt, IReadOnlyList<TeamMemberDto> Members, IReadOnlyList<string> Machines, bool RunsMemberAutomations,
-    long Version);
+    long Version)
+{
+    /// <summary>Gets its on-call rotation, when it has one and it is listed.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public OnCallRotationDto? OnCall { get; init; }
+}
+
+/// <summary>
+/// The on-call rotation of a team: its people in turn, each for a shift of hours from a start; who is on call answers the
+/// approvals of the team's automations that ask the person on call.
+/// </summary>
+/// <param name="People">Its people, in the order of their turns.</param>
+/// <param name="StartsAt">When the first turn started.</param>
+/// <param name="ShiftHours">How many hours a turn lasts.</param>
+/// <param name="OnCallNow">Who is on call now; null when no one of it is a member of the team now.</param>
+/// <param name="Until">When their turn ends.</param>
+public sealed record OnCallRotationDto(IReadOnlyList<string> People, DateTimeOffset StartsAt, int ShiftHours, string? OnCallNow, DateTimeOffset? Until);
+
+/// <summary>The body of <c>PUT /api/v1/teams/{id}/oncall</c>: the people of the team in turn, and the length of a turn.</summary>
+/// <param name="People">The people, members of the team, in the order of their turns.</param>
+/// <param name="ShiftHours">How many hours a turn lasts, 1 to 168.</param>
+/// <param name="StartsAt">When the first turn starts; null for now.</param>
+public sealed record PutOnCallRotationRequest(IReadOnlyList<string> People, int ShiftHours, DateTimeOffset? StartsAt = null);
 
 /// <summary>A service identity: the identity a team or the organization runs unattended work as; never a password or a subscription.</summary>
 /// <param name="Id">The identity.</param>
@@ -287,6 +309,8 @@ public sealed record AccessListDto<T>(IReadOnlyList<T> Items);
 [JsonSerializable(typeof(SetRoleRequest))]
 [JsonSerializable(typeof(CreateTeamRequest))]
 [JsonSerializable(typeof(UpdateTeamRequest))]
+[JsonSerializable(typeof(PutOnCallRotationRequest))]
+[JsonSerializable(typeof(OnCallRotationDto))]
 [JsonSerializable(typeof(SetTeamMemberRequest))]
 [JsonSerializable(typeof(CreateServiceIdentityRequest))]
 [JsonSerializable(typeof(CreateGrantRequest))]

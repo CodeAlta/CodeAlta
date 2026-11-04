@@ -5,6 +5,9 @@ namespace CodeAlta.Server.Services;
 
 internal sealed partial class AccessService
 {
+    /// <summary>What an automation says when the person on call of the team that owns it answers its approvals.</summary>
+    internal const string OnCallApprovers = "oncall";
+
     /// <summary>
     /// Lists the people told that a run of an automation waits for an approval: its owner, the members of the team that owns
     /// it, and those granted <c>automation.approve</c> on it (<see cref="AccessPolicy.Approvers"/>). The person whose version
@@ -16,15 +19,33 @@ internal sealed partial class AccessService
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The people, never empty.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    internal async Task<IReadOnlyList<string>> ApproversOfAsync(string organizationId, string automationId, string personId, CancellationToken cancellationToken)
+    internal Task<IReadOnlyList<string>> ApproversOfAsync(string organizationId, string automationId, string personId, CancellationToken cancellationToken)
+        => ApproversOfAsync(organizationId, automationId, personId, null, cancellationToken);
+
+    /// <summary>
+    /// Lists the people told that a run waits for an approval, as <see cref="ApproversOfAsync(string, string, string, CancellationToken)"/>
+    /// does; an automation that asks the person on call (<c>approvers = "oncall"</c>) and belongs to a team with an on-call
+    /// rotation asks the person on call of that team now, and everyone else who would answer when no one is on call.
+    /// </summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="automationId">The automation.</param>
+    /// <param name="personId">The person whose signed version the server holds.</param>
+    /// <param name="approvers">Who the automation says answers its approvals, as its run reported it; null for its owner.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The people, never empty.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    internal async Task<IReadOnlyList<string>> ApproversOfAsync(string organizationId, string automationId, string personId, string? approvers, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(organizationId);
         ArgumentNullException.ThrowIfNull(automationId);
         ArgumentNullException.ThrowIfNull(personId);
         var snapshot = await _access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false);
         var (ownerKind, ownerId) = snapshot.Owner(FleetResourceKinds.Automation, automationId) is { } own ? (own.OwnerKind, own.OwnerId) : (FleetPrincipalKinds.Person, personId);
-        var approvers = AccessPolicy.Approvers(snapshot, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), _time.GetUtcNow());
-        return approvers.Count > 0 ? approvers : [personId];
+        if (approvers == OnCallApprovers && ownerKind == FleetPrincipalKinds.Team
+            && await PersonOnCallAsync(organizationId, ownerId, snapshot, cancellationToken).ConfigureAwait(false) is { } onCall)
+            return [onCall];
+        var people = AccessPolicy.Approvers(snapshot, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), _time.GetUtcNow());
+        return people.Count > 0 ? people : [personId];
     }
 
     /// <summary>Gets whether a person answers the approvals of an automation, and so takes its runs over.</summary>

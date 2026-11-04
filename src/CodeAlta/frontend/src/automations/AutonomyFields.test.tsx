@@ -24,7 +24,9 @@ test("off, the autonomy of an automation is one switch; on, it says what its run
   assert.match(on, /id="automation-max-calls"[^>]*value="5"/);
   assert.match(on, /<option value="stop" selected="">then stop the run<\/option><option value="wait">then keep waiting<\/option>/);
   // The approvals follow the owner of the automation, a team on a server.
-  assert.match(on, /Approvals go to<\/span><span class="automation-autonomy-approvers">Its owner: you, or on your server the team that owns it/);
+  assert.match(on, /<option value="owner" selected="">Its owner<\/option><option value="oncall">The person on call of its team<\/option>/);
+  assert.match(on, /Its owner: you, or on your server the team that owns it/);
+  assert.match(fields({ ...newAutonomy(), approvers: "oncall" }), /takes turns on call; without a rotation, its whole team answers/);
   assert.match(on, /It calls jira_comment by itself; it asks you for anything else\./);
   assert.match(on, /Pins, bounds and preconditions are written in its configuration file/);
   const pinned = fields({ ...newAutonomy(), allowedTools: ["k8s_restart_pod"], tools: [{ name: "k8s_restart_pod", version: "1.4.2", hash: null, bounds: [], preconditions: [] }] });

@@ -8,12 +8,13 @@ import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../../Sett
 import { useShellLanguage } from "../../shellLanguage";
 import type { MessageKey } from "../../localization";
 import { serverProblem } from "../fleetServer";
+import { onCallSummary, shiftChoices } from "./access";
 import { assignableRoles, attention, attentionCount, canManagePerson, grantCapabilities, isAdvanced, isContentCapability, managesAccess, nameOf, ownerTargets, parseTarget,
   proposalDetail, roleHints, roleLabels } from "./access";
 
 export type FleetAccessApi = Pick<typeof fleetServer, "status" | "access" | "invitePerson" | "setPersonRole" | "deprovisionPerson" | "createTeam" | "updateTeam" | "dissolveTeam"
   | "setTeamMember" | "createGrant" | "revokeGrant" | "confirmGrantKeys" | "offerTransfer" | "decideTransfer" | "resumeResource" | "createServiceIdentity" | "enableServiceIdentity"
-  | "decideProposal" | "prepareAccessDocument" | "signAccessDocument" | "accessReview">;
+  | "decideProposal" | "prepareAccessDocument" | "signAccessDocument" | "accessReview" | "setOnCall">;
 type Result = Promise<{ status: string; message?: string | null }>;
 type Run = (call: () => Result, done?: MessageKey) => Promise<boolean>;
 type Context = { overview: FleetAccessOverview; api: FleetAccessApi; epoch: string; linkId: string; busy: boolean; run: Run };
@@ -336,7 +337,31 @@ function TeamRow({ context, team }: { context: Context; team: FleetAccessTeamVie
       <Switch checked={team.runsMemberAutomations} disabled={busy} label={t("Its machines run the automations of its members")}
         onChange={event => { const value = event.currentTarget.checked; void run(() => api.updateTeam({ expectedEpoch: epoch, linkId, teamId: team.id, name: null, runsMemberAutomations: value }, call)); }} />
     </div>}
+    <OnCall context={context} team={team} />
   </li>;
+}
+
+/**
+ * Who of a team is on call: its people in turn, in the order of the team, each for a turn of hours. The person on call
+ * answers the approvals of its automations that ask the person on call; without a rotation, the team answers them.
+ */
+function OnCall({ context, team }: { context: Context; team: FleetAccessTeamView }) {
+  const { t, locale } = useShellLanguage();
+  const { api, epoch, linkId, busy, run } = context;
+  const people = team.members.map(member => member.personId);
+  const hours = team.onCall?.shiftHours ?? 12;
+  const set = (rotation: string[] | null, shiftHours: number) => run(() => api.setOnCall({ expectedEpoch: epoch, linkId, teamId: team.id, people: rotation, shiftHours }, call));
+  if (!team.onCall && !team.canManage) return null;
+  return <div className="fleet-access-oncall">
+    <span className={team.onCall ? undefined : "muted-text"}>{team.onCall ? onCallSummary(team.onCall, t, locale)
+      : t("Without a rotation, the automations that ask the person on call ask the whole team.")}</span>
+    {team.canManage && <span className="fleet-access-oncall-actions">
+      <Switch checked={!!team.onCall} disabled={busy || people.length === 0} label={t("Take turns on call")} onChange={event => void set(event.currentTarget.checked ? people : null, hours)} />
+      {team.onCall && <HTMLSelect minimal value={String(hours)} disabled={busy} aria-label={t("Length of a turn on call")}
+        onChange={event => void set(people, Number(event.target.value))}
+        options={shiftChoices.map(choice => ({ value: String(choice), label: choice === 168 ? t("a week") : t("{hours} hours", { hours: choice }) }))} />}
+    </span>}
+  </div>;
 }
 
 /** The machines and automations, their owners, and what was offered from here. */
