@@ -130,6 +130,11 @@ internal sealed class FleetRetryReceipts
 
             work = Task.Run(run);
             receipt.Work = Box(work);
+
+            // A failed call forgets its receipt, so nothing awaits its boxed task again: observe its failure here (the caller
+            // gets it from the call itself), or the finalizer reports it as unobserved.
+            _ = receipt.Work.ContinueWith(static boxed => _ = boxed.Exception, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
 
         // The caller gets the result once its receipt is recorded: a retry after the answer always finds it.

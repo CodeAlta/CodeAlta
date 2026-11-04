@@ -115,6 +115,45 @@ public sealed class FleetRetryReceiptsTests
         Assert.AreEqual("new", (await receipts.RunOnceAsync("a", "{}", TestJson.Default.Item, () => Task.FromResult(new Item("new")))).Value,
             "A key past the lifetime of a retry token is a new request.");
     }
+
+    [TestMethod]
+    public async Task AFailedCall_LeavesNoUnobservedTaskException()
+    {
+        using var folder = new TestFolder();
+        var receipts = new FleetRetryReceipts(folder.Path, new ManualTimeProvider(DateTimeOffset.UtcNow), resultCapacity: 1, keyCapacity: 8);
+        var marker = "unobserved-probe-" + Guid.NewGuid().ToString("N");
+        var unobserved = new List<Exception>();
+        void OnUnobserved(object? sender, UnobservedTaskExceptionEventArgs e)
+        {
+            if (!e.Exception.Flatten().InnerExceptions.Any(inner => inner.Message == marker)) return;
+            lock (unobserved) unobserved.Add(e.Exception);
+            e.SetObserved();
+        }
+
+        TaskScheduler.UnobservedTaskException += OnUnobserved;
+        try
+        {
+            await FailAsync(receipts, marker);
+            for (var round = 0; round < 3; round++)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= OnUnobserved;
+        }
+
+        lock (unobserved) Assert.AreEqual(0, unobserved.Count, string.Join(Environment.NewLine, unobserved));
+
+        // In a method of its own, so that nothing of the call stays reachable from the test when the finalizers run.
+        static async Task FailAsync(FleetRetryReceipts receipts, string marker)
+        {
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => receipts.RunOnceAsync<Item>("failing", "{}", TestJson.Default.Item,
+                () => throw new InvalidOperationException(marker)));
+        }
+    }
 }
 
 /// <summary>A result of a test call.</summary>
