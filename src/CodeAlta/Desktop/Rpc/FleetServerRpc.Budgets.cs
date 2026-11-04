@@ -44,7 +44,7 @@ internal sealed partial class FleetServerService
             var notifications = read.Notifications.Select(notification => new FleetNotificationView(notification.Id, notification.Kind, notification.Severity,
                 notification.BudgetId is { } budget ? names.GetValueOrDefault(budget, notification.Subject ?? budget) : null,
                 notification.MachineId is { } machine ? DeviceName(machine) : null, notification.Problem, notification.Subject, notification.Detail, notification.CreatedAt,
-                notification.ResolvedAt is not null, notification.ReadAt is not null)).ToArray();
+                notification.ResolvedAt is not null, notification.ReadAt is not null) { MachineId = notification.MachineId }).ToArray();
             var spaces = Spaces is null ? [] : await Spaces.LoadAsync(cancellationToken).ConfigureAwait(false);
             return new FleetBudgetsOverview("ok", null, budgets, holds, notifications,
                 [.. read.Machines.Select(machine => new FleetSecretTarget(machine.DeviceId, DeviceName(machine.DeviceId)))],
@@ -151,7 +151,7 @@ internal sealed record FleetBudgetHoldView(string Id, string BudgetId, string Bu
 
 /// <summary>A notification of the person.</summary>
 /// <param name="Id">The notification.</param>
-/// <param name="Kind"><c>budget.warning</c>, <c>budget.reached</c> or <c>health</c>.</param>
+/// <param name="Kind"><c>budget.warning</c>, <c>budget.reached</c>, <c>health</c> or <c>approval</c> (a run waits for the person: the subject is its automation, the detail the run).</param>
 /// <param name="Severity"><c>info</c>, <c>warning</c> or <c>error</c>.</param>
 /// <param name="Budget">The name of the budget, for a budget.</param>
 /// <param name="Machine">The name of the machine, for a problem of a machine.</param>
@@ -162,7 +162,11 @@ internal sealed record FleetBudgetHoldView(string Id, string BudgetId, string Bu
 /// <param name="Resolved">Whether the problem ended.</param>
 /// <param name="Read">Whether the person dismissed it.</param>
 internal sealed record FleetNotificationView(string Id, string Kind, string Severity, string? Budget, string? Machine, string? Problem, string? Subject, string? Detail,
-    DateTimeOffset CreatedAt, bool Resolved, bool Read);
+    DateTimeOffset CreatedAt, bool Resolved, bool Read)
+{
+    /// <summary>Gets the device of the machine, for a problem of a machine or a run on one; null for none.</summary>
+    public string? MachineId { get; init; }
+}
 
 /// <summary>The budgets, the runs that wait and the notifications of a server.</summary>
 /// <param name="Status"><c>ok</c>, the code of the server's refusal, <c>unreachable</c>, <c>not_found</c>, <c>invalid_request</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>

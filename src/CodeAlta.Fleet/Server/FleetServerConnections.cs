@@ -327,7 +327,10 @@ public sealed class FleetServerConnections : IAsyncDisposable
         var source = _options.Source is null ? null : new LinkedSource(_options.Source, linked);
         FleetConnector? created = null;
         // One anchored verifier of the server's device list for the link: the trust of relays, the keys and the signatures follow it.
-        var devices = new FleetOrganizationDevices(link.Address, _options.Identity, Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName));
+        var devices = new FleetOrganizationDevices(link.Address, _options.Identity, Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName))
+        {
+            CertificatePin = link.CertificatePin,
+        };
         var options = new FleetConnectorOptions
         {
             ServerAddress = link.Address,
@@ -344,6 +347,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
             Devices = devices,
             MetadataKeys = new FleetMetadataKeyring(devices),
             DeviceListPinPath = Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName),
+            CertificatePin = link.CertificatePin,
             AccessPinPath = Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationAccess.PinFileName),
             AccessChanged = _options.AccessChanged is { } accessChanged ? state => accessChanged(link.Id, state) : null,
             AccessRead = _options.AccessRead is { } accessRead ? () => accessRead(link.Id) : null,
@@ -437,7 +441,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
     {
         try
         {
-            using var client = new FleetServerClient(link.Address, _options.Identity);
+            using var client = new FleetServerClient(link.Address, _options.Identity, null, null, link.CertificatePin);
             var organization = await client.GetOrganizationAsync(_stop.Token).ConfigureAwait(false);
             _store.Update(link.Id, current => current with { OrganizationId = organization.Id, OrganizationName = organization.Name });
             _seen = File.GetLastWriteTimeUtc(_store.FilePath);

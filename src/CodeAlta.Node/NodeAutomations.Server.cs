@@ -142,14 +142,15 @@ internal sealed partial class NodeAutomations
         ArgumentNullException.ThrowIfNull(devices);
         ArgumentNullException.ThrowIfNull(signed);
         if (DeviceId is not { } self) return (null, "This machine does not know its own device yet.");
-        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(), MayAsk(linkId, signed, devices, self),
-                out var request, out var reason))
+        var mayAsk = MayAsk(linkId, signed, devices, self);
+        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(),
+                mayAsk is null ? null : (_, person) => mayAsk(person), out var request, out var reason))
         {
             Log($"A run asked through the server was refused: {reason}.");
             return (null, reason);
         }
 
-        if (request.Action is not null)
+        if (request.Action is not (null or FleetAutomationRunRequest.TryAction))
         {
             Log($"A run of {request.AutomationId} asked through the server was refused: the request takes a run over, it does not run the automation.");
             return (null, "the request takes a run over");
@@ -162,28 +163,38 @@ internal sealed partial class NodeAutomations
         }
 
         // As a run asked directly: answered at once when a budget holds it, which the reports of the runs tell the server.
-        var run = await RunByHandAsync(request.AutomationId, request.RunId, cancellationToken).ConfigureAwait(false);
-        if (run is not null) Log($"{request.SignerDeviceId} ran the automation {request.AutomationId} through the server: {run.Status}.");
+        var dryRun = request.Action == FleetAutomationRunRequest.TryAction;
+        var run = await RunByHandAsync(request.AutomationId, request.RunId, dryRun, cancellationToken).ConfigureAwait(false);
+        if (run is not null) Log($"{request.SignerDeviceId} {(dryRun ? "tried" : "ran")} the automation {request.AutomationId} through the server: {run.Status}.");
         return (run, run is null ? "the automation is not on this machine" : null);
     }
 
     /// <summary>
     /// Takes a run in progress over for the person who asked it through the server of a link: the request must verify as a
-    /// run asked by hand does (a controller device of the owner of this machine, for this machine, within minutes), take a
-    /// run over, and name a run of an automation this node holds from that server. The run then waits for that person.
+    /// run asked by hand does (a controller device of the owner of this machine, or of a person the signed access document
+    /// lets take the run over, for this machine, within minutes), take a run over, and name a run of an automation this node
+    /// holds from that server. The run then waits for that person.
     /// </summary>
     /// <param name="linkId">The server link it came through.</param>
     /// <param name="devices">The device list of that server, as this node verified it now.</param>
     /// <param name="organizationId">The organization of that server.</param>
     /// <param name="signed">The signed request.</param>
+    /// <param name="access">
+    /// The signed access document as this node verified it: the approvers it names for the automation, and the people of the
+    /// team of this machine when it is a team's, take a run over too; null: only the owner of this machine.
+    /// </param>
     /// <returns>Why the request was refused; null once the run was taken over.</returns>
-    internal string? TakeOverFromServer(string linkId, FleetDeviceListState devices, string? organizationId, FleetSignedAutomationRunRequest signed)
+    internal string? TakeOverFromServer(string linkId, FleetDeviceListState devices, string? organizationId, FleetSignedAutomationRunRequest signed, FleetAccessState? access = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(linkId);
         ArgumentNullException.ThrowIfNull(devices);
         ArgumentNullException.ThrowIfNull(signed);
         if (DeviceId is not { } self) return "This machine does not know its own device yet.";
-        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(), MayAsk(linkId, signed, devices, self),
+        var mayAsk = MayAsk(linkId, signed, devices, self);
+        var owner = devices.Members.TryGetValue(self, out var machine) ? machine.OwnerId : null;
+        var now = _options.TimeProvider.GetUtcNow();
+        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, now,
+                (read, person) => (mayAsk is not null ? mayAsk(person) : person == owner) || MayTakeOver(access ?? ServerAccess?.Invoke(linkId), self, read, person, now),
                 out var request, out var reason))
         {
             Log($"A take-over asked through the server was refused: {reason}.");
@@ -206,6 +217,21 @@ internal sealed partial class NodeAutomations
         if (version.IsOrganizationScope) return access?.OrganizationServices.FirstOrDefault();
         return version.TeamId is { } team ? access?.Teams.GetValueOrDefault(team)?.Services?.FirstOrDefault() : null;
     }
+
+    /// <summary>
+    /// Gets whether a person who does not own this machine takes a run of it over: the signed access document names them among
+    /// the approvers of the automation, or this is a team machine and they are of its team. A suspended person takes nothing
+    /// over, and nothing else than a take-over is let through.
+    /// </summary>
+    /// <param name="access">The signed access document as this node verified it; null: nobody.</param>
+    /// <param name="machineId">The device of this machine.</param>
+    /// <param name="request">The request, as read.</param>
+    /// <param name="personId">The person of the device that signed it.</param>
+    /// <param name="now">The time of this machine: an approval granted until a time holds before it only.</param>
+    /// <returns>Whether they may.</returns>
+    internal static bool MayTakeOver(FleetAccessState? access, string machineId, FleetAutomationRunRequest request, string personId, DateTimeOffset now)
+        => request.Action == FleetAutomationRunRequest.TakeOverAction && access is not null && !access.IsSuspended(personId)
+            && (access.Approves(request.AutomationId, personId, now) || access.TeamOf(machineId) is { } team && FleetAccessState.RoleIn(team, personId) is not null);
 
     /// <summary>Reports to the server of a link the runs of the automations it gave this node: all of the latest ones, or only those that changed.</summary>
     /// <param name="linkId">The server link.</param>
@@ -244,6 +270,10 @@ internal sealed partial class NodeAutomations
                         Message = run.Status is AutomationRun.Failed or AutomationRun.Skipped ? run.Message : null,
                         InputTokens = run.InputTokens, OutputTokens = run.OutputTokens, Cost = run.Cost, CostUnit = run.CostUnit,
                         ActingAs = ActingAs(linkId, id),
+                        // Who answers a run that waits, when the automation does not say its owner: the server routes the approval.
+                        Approvers = run.Status == AutomationRun.Waiting && Engine.Snapshot.Find(id)?.Definition.Autonomy is { Approvers: not AutomationAutonomy.OwnerApprovers } autonomy
+                            ? autonomy.Approvers : null,
+                        OnCall = run.Status == AutomationRun.Waiting ? run.OnCall : null,
                     };
                     var key = $"{fact.Status}|{fact.EndedAt?.ToUnixTimeMilliseconds()}|{fact.SessionId}|{fact.Number}|{fact.InputTokens}|{fact.OutputTokens}|{fact.Cost}|{fact.ActingAs}";
                     if (!reported.TryGetValue(run.Id, out var known) || known != key) changed.Add((fact, key));

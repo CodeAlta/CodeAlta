@@ -81,6 +81,9 @@ public sealed class GroupRoleMapper : ISignInRoleMapper
 /// </summary>
 public sealed class SignInService : IDisposable
 {
+    // How long a confirmation works: the fresh confirmation of a dangerous action (doc/fleet/identity.md) lasts 10 to 15 minutes.
+    private static readonly TimeSpan ConfirmationLifetime = TimeSpan.FromMinutes(10);
+
     private const int MaxGroupRoles = 200;
     private static readonly string[] DefaultEnabled = [FleetSignInMethods.Passkey, FleetSignInMethods.Microsoft, FleetSignInMethods.Google, FleetSignInMethods.GitHub];
 
@@ -183,7 +186,15 @@ public sealed class SignInService : IDisposable
                 throw Invalid("The groups claim is not the name of a claim.");
             var name = string.IsNullOrWhiteSpace(given.DisplayName) ? null : SetupService.RequireName(given.DisplayName, "displayName");
             var groupRoles = given.GroupRoles is null ? held.Document.Company?.GroupRoles : GroupRoles(given.GroupRoles);
-            company = new CompanyDocument(issuer.AbsoluteUri.TrimEnd('/'), given.ClientId.Trim(), name, claim, groupRoles is { Length: > 0 } ? groupRoles : null);
+            // Neither named keeps the ones held, as for the group roles: a client that does not know them changes nothing of them.
+            var keepAllowed = given.AllowedDomains is null && given.AllowedTenants is null && held.Document.Company is not null;
+            var domains = keepAllowed ? held.Document.Company!.AllowedDomains ?? [] : ReadAllowed(given.AllowedDomains, IsDomain, "An allowed domain is not a domain name (contoso.com).");
+            var tenants = keepAllowed ? held.Document.Company!.AllowedTenants ?? [] : ReadAllowed(given.AllowedTenants, IsTenant, "An allowed tenant is not a tenant id.");
+            // An identity provider serves more than one company: the server lets in only the domains and tenants named.
+            if (domains.Length == 0 && tenants.Length == 0) throw Invalid("Company sign-in needs the email domains or the tenant ids it lets in.");
+            // Entra ID gives emails it did not verify: only its tenant id proves the company.
+            if (IsEntraId(issuer) && tenants.Length == 0) throw Invalid("Company sign-in with Entra ID needs the tenant ids it lets in.");
+            company = new CompanyDocument(issuer.AbsoluteUri.TrimEnd('/'), given.ClientId.Trim(), name, claim, groupRoles is { Length: > 0 } ? groupRoles : null, domains, tenants);
             if (given.ClientSecret is not null) secret = given.ClientSecret.Length == 0 ? null : given.ClientSecret;
             if (secret is { Length: > 2048 }) throw Invalid("The client secret is too long.");
             // A provider that does not answer is refused now rather than at the first sign-in of a person.
@@ -214,9 +225,17 @@ public sealed class SignInService : IDisposable
         }
 
         var document = new SignInSettingsDocument(enabled, company, request.RequireSso, request.RequireSso ? breakGlass : null);
+        // Changing the company sign-in is a dangerous action: the owner signed in again from this device a few minutes ago.
+        // The confirmation is taken last, so that a change refused for another reason does not use it up.
+        if (ChangesCompanySignIn(held.Document, document, !string.Equals(secret, held.Secret, StringComparison.Ordinal)) && !IsConfirmed(request, actor, owner))
+        {
+            throw CoordinatorException.Forbidden(SignInErrorCodes.ConfirmationRequired,
+                "Changing the company sign-in needs you to sign in again, or to approve it on another of your devices.", "confirm");
+        }
         var record = new SignInSettingsRecord(actor.OrganizationId, JsonSerializer.Serialize(document, SignInSettingsJsonContext.Default.SignInSettingsDocument), secret,
             held.Version + 1, _time.GetUtcNow());
-        var details = JsonSerializer.Serialize(new SignInSettingsAudit(enabled, company?.Issuer, request.RequireSso), SignInSettingsJsonContext.Default.SignInSettingsAudit);
+        var details = JsonSerializer.Serialize(new SignInSettingsAudit(enabled, company?.Issuer, request.RequireSso, company?.AllowedDomains, company?.AllowedTenants),
+            SignInSettingsJsonContext.Default.SignInSettingsAudit);
         if (!await _signIn.SetSignInSettingsAsync(record, origin.Audit("sign_in.settings.set", actor, actor.OrganizationId, details: details), cancellationToken)
                 .ConfigureAwait(false))
             throw CoordinatorException.Conflict(SignInErrorCodes.SettingsInvalid, "The sign-in settings changed meanwhile: read them again.");
@@ -240,7 +259,7 @@ public sealed class SignInService : IDisposable
         if (request is null || !FleetDevicePublicKey.TryParse(request.PublicKey, out var key))
             throw Invalid("The request needs a method, the public key of the device and its loopback redirect.");
         var purpose = request.Purpose ?? FleetSignInPurposes.Enroll;
-        if (purpose is not (FleetSignInPurposes.Enroll or FleetSignInPurposes.Link)) throw Invalid("purpose must be 'enroll' or 'link'.");
+        if (purpose is not (FleetSignInPurposes.Enroll or FleetSignInPurposes.Link or FleetSignInPurposes.Confirm)) throw Invalid("purpose must be 'enroll', 'link' or 'confirm'.");
         // A device code has no redirect: the device polls instead.
         var deviceFlow = FleetSignInMethods.UsesDeviceCode(request.Method);
         var redirect = deviceFlow ? string.Empty : RequireLoopbackRedirect(request.RedirectUri);
@@ -248,9 +267,9 @@ public sealed class SignInService : IDisposable
             ?? throw CoordinatorException.NotFound(CoordinatorErrorCodes.NotSetUp, "The server is not set up.");
 
         string? linking = null;
-        if (purpose == FleetSignInPurposes.Link)
+        if (purpose is FleetSignInPurposes.Link or FleetSignInPurposes.Confirm)
         {
-            // A link is made by a person on one of their approved controller devices, never by a device the server does not know.
+            // A link or a confirmation is made by a person on one of their approved controller devices, never by a device the server does not know.
             var actor = await _authenticator.AuthenticateAsync(signed, cancellationToken).ConfigureAwait(false);
             if (actor.Id != key.DeviceId || actor.Kind != FleetDeviceKinds.Controller || actor.OwnerPersonId is null)
                 throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A sign-in method is linked from an approved controller device of its person.");
@@ -375,7 +394,7 @@ public sealed class SignInService : IDisposable
                 throw await RefuseAsync(origin, signed.DeviceId, attempt.Method, exception.Code, exception.Message, cancellationToken).ConfigureAwait(false);
             }
 
-            (person, login) = await ResolvePersonAsync(attempt, identity, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
+            (person, login) = await ResolvePersonAsync(attempt, settings, identity, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
         }
 
         return await FinishAsync(attempt, settings, person, login, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
@@ -432,7 +451,7 @@ public sealed class SignInService : IDisposable
         if (attempt is null)
             throw await RefuseAsync(origin, signed.DeviceId, pending.Method, SignInErrorCodes.AttemptInvalid, "The sign-in expired: start again.", cancellationToken)
                 .ConfigureAwait(false);
-        var (person, login) = await ResolvePersonAsync(attempt, result.Identity!, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
+        var (person, login) = await ResolvePersonAsync(attempt, settings, result.Identity!, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
         return new PollSignInResponse(false, result.Interval, await FinishAsync(attempt, settings, person, login, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false));
     }
 
@@ -442,7 +461,7 @@ public sealed class SignInService : IDisposable
     {
         if (!FleetDevicePublicKey.TryParse(pending.PublicKey, out var started)) throw new InvalidOperationException("An attempt without its key.");
         _authenticator.VerifyWithKey(signed, started);
-        if (pending.Purpose == FleetSignInPurposes.Link
+        if (pending.Purpose is FleetSignInPurposes.Link or FleetSignInPurposes.Confirm
             && await _store.GetDeviceAsync(pending.DeviceId, cancellationToken).ConfigureAwait(false) is not { Status: DeviceStatuses.Approved, Kind: FleetDeviceKinds.Controller })
         {
             throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A sign-in method is linked from an approved controller device of its person.");
@@ -475,9 +494,19 @@ public sealed class SignInService : IDisposable
         var devices = await _store.ListDevicesAsync(attempt.OrganizationId, cancellationToken).ConfigureAwait(false);
         var hasDevices = devices.Any(other => other.OwnerPersonId == person.Id && other.Kind == FleetDeviceKinds.Controller && other.Status == DeviceStatuses.Approved);
         var answer = new SignInPersonDto(person.Id, person.DisplayName, login?.Email, hasDevices);
+        // A confirmation proves the person of the device that asked, signed in again: another person's sign-in confirms nothing.
+        if (attempt.Purpose == FleetSignInPurposes.Confirm && person.Id != attempt.LinkingPersonId)
+            throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.NotLinked, "This sign-in is not one of yours: confirm with a method linked to you.",
+                cancellationToken, person.Id).ConfigureAwait(false);
         await _store.AppendAuditAsync(new AuditEntry("sign_in.complete", AuditEntry.Success, person.Id, deviceId, attempt.Method, origin.SourceAddress, origin.RequestId,
             $"{{\"purpose\":\"{attempt.Purpose}\"}}"), cancellationToken).ConfigureAwait(false);
         if (attempt.Purpose == FleetSignInPurposes.Link) return new CompleteSignInResponse(attempt.Method, answer, null, null, true);
+        if (attempt.Purpose == FleetSignInPurposes.Confirm)
+        {
+            var until = _time.GetUtcNow() + ConfirmationLifetime;
+            return new CompleteSignInResponse(attempt.Method, answer, _attempts.Confirm(new SignInGrant(attempt.OrganizationId, person.Id, attempt.DeviceId, attempt.Method, until)),
+                until, false);
+        }
 
         var expires = _time.GetUtcNow() + _options.GrantLifetime;
         var grant = _attempts.Grant(new SignInGrant(attempt.OrganizationId, person.Id, attempt.DeviceId, attempt.Method, expires));
@@ -575,9 +604,13 @@ public sealed class SignInService : IDisposable
         _passkeys.Dispose();
     }
 
-    private async Task<(PersonRecord Person, LoginRecord Login)> ResolvePersonAsync(SignInAttempt attempt, ExternalIdentity identity, RequestOrigin origin, string? deviceId,
-        CancellationToken cancellationToken)
+    private async Task<(PersonRecord Person, LoginRecord Login)> ResolvePersonAsync(SignInAttempt attempt, HeldSettings settings, ExternalIdentity identity, RequestOrigin origin,
+        string? deviceId, CancellationToken cancellationToken)
     {
+        // Every company sign-in, of a new person or of one already linked, is of a domain or a tenant the owner named.
+        if (attempt.Method == FleetSignInMethods.Company && !IsAllowed(settings.Document.Company, identity))
+            throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.IdentityNotAllowed,
+                "This account is not of the domains or tenants your organization lets in.", cancellationToken).ConfigureAwait(false);
         var now = _time.GetUtcNow();
         var groups = identity.Groups.Count == 0 ? null : JsonSerializer.Serialize(identity.Groups.ToArray(), SignInSettingsJsonContext.Default.StringArray);
         var name = Truncate(identity.Email ?? identity.Name ?? identity.Subject);
@@ -594,6 +627,11 @@ public sealed class SignInService : IDisposable
             if (outcome == LoginLinkOutcome.AlreadyLinked) await _signIn.UpdateLoginAsync(login, cancellationToken).ConfigureAwait(false);
             return (person, login);
         }
+
+        // A confirmation signs in with a method already linked to the person of the device; it links and creates nothing.
+        if (attempt.Purpose == FleetSignInPurposes.Confirm && (existing is null || existing.PersonId != attempt.LinkingPersonId))
+            throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.NotLinked, "This account is not linked to you: confirm with a method linked to you.",
+                cancellationToken).ConfigureAwait(false);
 
         if (existing is not null)
         {
@@ -679,7 +717,8 @@ public sealed class SignInService : IDisposable
 
     private SignInSettingsDto ToDto(HeldSettings settings)
         => new(Describe(settings.Document), settings.Document.Company is { } company
-                ? new CompanySignInDto(company.Issuer, company.ClientId, settings.Secret is not null, company.DisplayName, company.GroupsClaim, company.GroupRoles ?? [])
+                ? new CompanySignInDto(company.Issuer, company.ClientId, settings.Secret is not null, company.DisplayName, company.GroupsClaim, company.GroupRoles ?? [],
+                    company.AllowedDomains ?? [], company.AllowedTenants ?? [])
                 : null,
             settings.Document.RequireSso, settings.Document.BreakGlassPersonId, settings.Version, settings.UpdatedAt);
 
@@ -711,7 +750,8 @@ public sealed class SignInService : IDisposable
             .ConfigureAwait(false);
         var status = code switch
         {
-            SignInErrorCodes.MethodDisabled or SignInErrorCodes.SsoRequired or SignInErrorCodes.NotLinked or SignInErrorCodes.LinkedElsewhere => StatusCodes.Status403Forbidden,
+            SignInErrorCodes.MethodDisabled or SignInErrorCodes.SsoRequired or SignInErrorCodes.NotLinked or SignInErrorCodes.LinkedElsewhere
+                or SignInErrorCodes.IdentityNotAllowed => StatusCodes.Status403Forbidden,
             SignInErrorCodes.ProviderUnavailable => StatusCodes.Status502BadGateway,
             _ => StatusCodes.Status401Unauthorized,
         };
@@ -719,6 +759,154 @@ public sealed class SignInService : IDisposable
     }
 
     private static CoordinatorException Invalid(string message) => CoordinatorException.BadRequest(SignInErrorCodes.SettingsInvalid, message);
+
+    // A change of the company sign-in is confirmed by a fresh sign-in of its owner from this device, or by an approval of
+    // exactly this change that another controller device of the owner signed; either works once.
+    private bool IsConfirmed(SetSignInSettingsRequest request, DeviceRecord actor, PersonRecord owner)
+    {
+        if (request.ApprovalId is { } id)
+        {
+            var approval = _attempts.TakeApproval(id, actor.Id);
+            return approval is not null && approval.PersonId == owner.Id && approval.OrganizationId == actor.OrganizationId
+                && CryptographicEquals(approval.Digest, FleetSignInApprovals.Digest(FleetSignInApprovals.Describe(request with { Confirmation = null, ApprovalId = null })));
+        }
+
+        return _attempts.TakeConfirmation(request.Confirmation, actor.Id)?.PersonId == owner.Id;
+    }
+
+    /// <summary>
+    /// Asks another controller device of the caller's person to approve a change of the company sign-in: the change, its
+    /// client secret by its hash only, waits 10 minutes for <see cref="ApproveAsync"/>.
+    /// </summary>
+    /// <param name="actor">The calling device, which alone applies the change once approved.</param>
+    /// <param name="request">The change, as it will be sent to <c>PUT /api/v1/sign-in/settings</c>.</param>
+    /// <param name="origin">Where it comes from.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The approval that waits.</returns>
+    /// <exception cref="CoordinatorException">The caller is not an owner's controller device, the change does not read, or too many wait.</exception>
+    public async Task<SignInApprovalDto> RequestApprovalAsync(DeviceRecord actor, SetSignInSettingsRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(origin);
+        var owner = await RequireOwnerAsync(actor, cancellationToken).ConfigureAwait(false);
+        if (request?.EnabledMethods is null) throw Invalid("The request needs the change to approve.");
+        var change = FleetSignInApprovals.Describe(request with { Confirmation = null, ApprovalId = null });
+        var approval = new SignInApprovalRequest
+        {
+            Id = SignInAttempts.NewSecret(), OrganizationId = actor.OrganizationId, PersonId = owner.Id, RequesterDeviceId = actor.Id, RequesterName = actor.Name, Change = change,
+            Digest = FleetSignInApprovals.Digest(change), ExpiresAt = _time.GetUtcNow() + ConfirmationLifetime,
+        };
+        if (!_attempts.AddApproval(approval)) throw new CoordinatorException(StatusCodes.Status503ServiceUnavailable, SignInErrorCodes.Busy, "Too many changes wait for an approval.");
+        await _store.AppendAuditAsync(origin.Audit("sign_in.approval.request", actor, actor.OrganizationId, details: $"{{\"digest\":\"{approval.Digest}\"}}"), cancellationToken)
+            .ConfigureAwait(false);
+        return ToDto(approval);
+    }
+
+    /// <summary>Lists the changes of the company sign-in that wait for an approval of the caller's person.</summary>
+    /// <param name="actor">The calling device.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The approvals.</returns>
+    /// <exception cref="CoordinatorException">The caller is not an owner's controller device.</exception>
+    public async Task<ListResponse<SignInApprovalDto>> ListApprovalsAsync(DeviceRecord actor, CancellationToken cancellationToken)
+    {
+        var owner = await RequireOwnerAsync(actor, cancellationToken).ConfigureAwait(false);
+        return new ListResponse<SignInApprovalDto>([.. _attempts.ListApprovals(owner.Id).Where(approval => approval.OrganizationId == actor.OrganizationId).Select(ToDto)]);
+    }
+
+    /// <summary>Reads an approval of the caller's person.</summary>
+    /// <param name="actor">The calling device.</param>
+    /// <param name="id">The approval.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The approval.</returns>
+    /// <exception cref="CoordinatorException">The caller is not an owner's controller device, or no approval of their person has that id.</exception>
+    public async Task<SignInApprovalDto> GetApprovalAsync(DeviceRecord actor, string id, CancellationToken cancellationToken)
+    {
+        var owner = await RequireOwnerAsync(actor, cancellationToken).ConfigureAwait(false);
+        return ToDto(RequireApproval(id, owner, actor));
+    }
+
+    /// <summary>
+    /// Approves a change of the company sign-in with the approval this device signed: another controller device of the person
+    /// who asks, which computed the digest of the change from what it was shown.
+    /// </summary>
+    /// <param name="actor">The approving device.</param>
+    /// <param name="id">The approval.</param>
+    /// <param name="signed">The signed approval.</param>
+    /// <param name="origin">Where it comes from.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The approval, approved.</returns>
+    /// <exception cref="CoordinatorException">The caller is not an owner's controller device, is the device that asks, the approval is unknown, or the signed approval does not hold.</exception>
+    public async Task<SignInApprovalDto> ApproveAsync(DeviceRecord actor, string id, FleetSignedSignInApproval? signed, RequestOrigin origin, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(origin);
+        var owner = await RequireOwnerAsync(actor, cancellationToken).ConfigureAwait(false);
+        var approval = RequireApproval(id, owner, actor);
+        if (approval.RequesterDeviceId == actor.Id)
+            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "Another of your devices approves the change: the one that asks for it does not.");
+        if (signed is null || string.IsNullOrEmpty(signed.Signature) || !FleetSignInApprovals.TryParse(signed.Payload, out var parsed)
+            || !FleetDevicePublicKey.TryParse(actor.PublicKey, out var key) || !key.Verify(FleetSignInApprovals.GetSignedBytes(signed.Payload), signed.Signature))
+            throw Invalid("The approval is not signed by the calling device.");
+        if (parsed.Version != 1 || parsed.OrganizationId != actor.OrganizationId || parsed.ApprovalId != approval.Id || parsed.RequesterDeviceId != approval.RequesterDeviceId
+            || parsed.SignerDeviceId != actor.Id || !CryptographicEquals(parsed.Digest, approval.Digest) || (parsed.Time - _time.GetUtcNow()).Duration() > TimeSpan.FromMinutes(5))
+            throw Invalid("The approval is not of this change, or not of now.");
+        approval.ApprovedBy = actor.Id;
+        await _store.AppendAuditAsync(origin.Audit("sign_in.approval.approve", actor, approval.RequesterDeviceId,
+            details: $"{{\"digest\":\"{approval.Digest}\",\"signature\":\"{signed.Signature}\"}}"), cancellationToken).ConfigureAwait(false);
+        return ToDto(approval);
+    }
+
+    private SignInApprovalRequest RequireApproval(string id, PersonRecord owner, DeviceRecord actor)
+        => _attempts.FindApproval(id) is { } approval && approval.PersonId == owner.Id && approval.OrganizationId == actor.OrganizationId
+            ? approval
+            : throw CoordinatorException.NotFound(SignInErrorCodes.AttemptInvalid, "No change waits for an approval with this id: it was used, or it expired.");
+
+    private static SignInApprovalDto ToDto(SignInApprovalRequest approval)
+        => new(approval.Id, approval.ApprovedBy is null ? "pending" : "approved", approval.RequesterDeviceId, approval.RequesterName, approval.Change, approval.Digest,
+            approval.ExpiresAt, approval.ApprovedBy);
+
+    // What makes a change one of the company sign-in: its provider, its secret, who it lets in, the roles its groups
+    // give, whether it is on or required, and the break-glass owner. The other methods are turned on and off without a confirmation.
+    private static bool ChangesCompanySignIn(SignInSettingsDocument before, SignInSettingsDocument after, bool secretChanged)
+    {
+        if (secretChanged || before.RequireSso != after.RequireSso || before.BreakGlassPersonId != after.BreakGlassPersonId
+            || before.Enabled.Contains(FleetSignInMethods.Company) != after.Enabled.Contains(FleetSignInMethods.Company)) return true;
+        if (before.Company is not { } was || after.Company is not { } now) return before.Company is not null || after.Company is not null;
+        return was.Issuer != now.Issuer || was.ClientId != now.ClientId || was.GroupsClaim != now.GroupsClaim || was.DisplayName != now.DisplayName
+            || !(was.AllowedDomains ?? []).SequenceEqual(now.AllowedDomains ?? [], StringComparer.Ordinal)
+            || !(was.AllowedTenants ?? []).SequenceEqual(now.AllowedTenants ?? [], StringComparer.Ordinal)
+            || !(was.GroupRoles ?? []).SequenceEqual(now.GroupRoles ?? []);
+    }
+
+    // A tenant named must be the account's; a domain named must be the one of its verified email. Both, when both are named.
+    // Settings kept before the owner had to name them let nobody in.
+    internal static bool IsAllowed(CompanyDocument? company, ExternalIdentity identity)
+    {
+        if (company is null) return false;
+        var domains = company.AllowedDomains ?? [];
+        var tenants = company.AllowedTenants ?? [];
+        if (domains.Length == 0 && tenants.Length == 0) return false;
+        if (tenants.Length > 0 && (identity.TenantId is not { Length: > 0 } tenant || !tenants.Contains(tenant, StringComparer.OrdinalIgnoreCase))) return false;
+        if (domains.Length == 0) return true;
+        if (!identity.EmailVerified || identity.Email is not { } email) return false;
+        var at = email.LastIndexOf('@');
+        return at > 0 && at < email.Length - 1 && domains.Contains(email[(at + 1)..], StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string[] ReadAllowed(IReadOnlyList<string>? values, Func<string, bool> valid, string message)
+    {
+        if (values is null) return [];
+        var read = values.Select(static value => value?.Trim().ToLowerInvariant() ?? string.Empty).Where(static value => value.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
+        if (read.Length > 50 || read.Any(value => !valid(value))) throw Invalid(message);
+        return read;
+    }
+
+    private static bool IsDomain(string value)
+        => value.Length <= 253 && value.Contains('.', StringComparison.Ordinal) && !value.StartsWith('.') && !value.EndsWith('.')
+            && value.Split('.').All(static label => label.Length is > 0 and <= 63 && !label.StartsWith('-') && !label.EndsWith('-') && label.All(static c => char.IsAsciiLetterOrDigit(c) || c == '-'));
+
+    private static bool IsTenant(string value) => value.Length <= 64 && value.All(static c => char.IsAsciiLetterOrDigit(c) || c is '-' or '.' or '_');
+
+    private static bool IsEntraId(Uri issuer) => issuer.Host.Equals("login.microsoftonline.com", StringComparison.OrdinalIgnoreCase)
+        || issuer.Host.Equals("login.microsoft.com", StringComparison.OrdinalIgnoreCase) || issuer.Host.Equals("sts.windows.net", StringComparison.OrdinalIgnoreCase);
 
     private static bool CryptographicEquals(string left, string right)
         => System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(left), System.Text.Encoding.UTF8.GetBytes(right));
@@ -762,10 +950,13 @@ internal sealed record SignInSettingsDocument(string[] Enabled, CompanyDocument?
 /// <param name="DisplayName">Its name for people.</param>
 /// <param name="GroupsClaim">The claim of the groups.</param>
 /// <param name="GroupRoles">The groups that give a role, or null.</param>
-internal sealed record CompanyDocument(string Issuer, string ClientId, string? DisplayName, string GroupsClaim, GroupRoleDto[]? GroupRoles = null);
+/// <param name="AllowedDomains">The email domains it lets in; null in settings kept before they were named.</param>
+/// <param name="AllowedTenants">The tenant ids it lets in; null in settings kept before they were named.</param>
+internal sealed record CompanyDocument(string Issuer, string ClientId, string? DisplayName, string GroupsClaim, GroupRoleDto[]? GroupRoles = null, string[]? AllowedDomains = null,
+    string[]? AllowedTenants = null);
 
 /// <summary>What the audit log records of a change of the settings, never a secret.</summary>
-internal sealed record SignInSettingsAudit(string[] Enabled, string? Issuer, bool RequireSso);
+internal sealed record SignInSettingsAudit(string[] Enabled, string? Issuer, bool RequireSso, string[]? AllowedDomains = null, string[]? AllowedTenants = null);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(SignInSettingsDocument))]

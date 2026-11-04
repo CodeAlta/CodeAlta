@@ -28,7 +28,7 @@ const company: FleetAccessOverview = {
   document: { number: 3, signedBy: "Alex", signedAt: "2026-11-03T09:00:00Z", pending: ["Max is a member of Infra", "Sam is suspended: their work stops on team machines"] },
   people: [{ ...me, teams: [{ teamId: "infra", teamName: "Infra", role: "maintainer" }] }, person("max", "Max", "member", { teams: [{ teamId: "infra", teamName: "Infra", role: "member" }] }),
     person("ada", "Ada", "admin"), person("sam", "Sam", "member", { status: "suspended" })],
-  teams: [{ id: "infra", name: "Infra", runsMemberAutomations: false, canManage: true, machines: [{ id: "box", name: "Build box" }],
+  teams: [{ id: "infra", name: "Infra", runsMemberAutomations: false, canManage: true, machines: [{ id: "box", name: "Build box" }], onCall: null,
     members: [{ personId: "alex", name: "Alex", role: "maintainer" }, { personId: "max", name: "Max", role: "member" }] }],
   identities: [{ id: "svc", name: "infra-bot", ownerKind: "team", ownerName: "Infra", enabled: false }],
   providers: [{ id: "infra-anthropic", ownerKind: "team", ownerName: "Infra", name: "Infra Anthropic", type: "anthropic", endpoint: null, models: ["claude-sonnet-5-5"],
@@ -54,13 +54,13 @@ const record = (name: string) => async (request: Record<string, unknown>) => {
 };
 const api: FleetAccessApi = {
   status: async () => ({ status: "ok", servers: [{ id: "home", url: "https://home.example", organization: "Home", link: "approved", connection: "online", problem: null,
-    controller: true, spaces: [], recoveryKey: true }], deviceId: "desktop", words: "apple river stone", personName: null }) as never,
+    controller: true, spaces: [], recoveryKey: true, shareUrl: null }], deviceId: "desktop", words: "apple river stone", personName: null }) as never,
   access: async () => overview,
   invitePerson: async request => { calls.push(JSON.stringify({ invite: { name: request.name, role: request.role } }));
     return { status: "ok", message: null, token: "aet_example-code", expiresAt: "2026-11-07T09:00:00Z", serverUrl: "https://home.example" }; },
   setPersonRole: record("role") as never, deprovisionPerson: async request => { calls.push(JSON.stringify({ deprovision: { personId: request.personId,
     successorKind: request.successorKind, successorId: request.successorId } })); return { status: "ok", message: null, transferred: 1, notRevoked: [] }; },
-  createTeam: record("createTeam") as never, updateTeam: record("updateTeam") as never, dissolveTeam: record("dissolveTeam") as never, setTeamMember: record("member") as never,
+  createTeam: record("createTeam") as never, updateTeam: record("updateTeam") as never, dissolveTeam: record("dissolveTeam") as never, setTeamMember: record("member") as never, setOnCall: record("oncall") as never,
   createGrant: record("grant") as never, revokeGrant: record("revokeGrant") as never, confirmGrantKeys: record("keys") as never, offerTransfer: record("offer") as never,
   decideTransfer: record("transfer") as never, resumeResource: record("resume") as never, createServiceIdentity: record("identity") as never,
   enableServiceIdentity: record("enable") as never, decideProposal: record("proposal") as never,

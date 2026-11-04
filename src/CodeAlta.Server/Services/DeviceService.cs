@@ -78,6 +78,9 @@ public sealed class DeviceService
     /// <summary>Gets what is told, with its organization, that a device was approved or revoked: grants of sealed content are keyed again for it; null tells nobody.</summary>
     public Action<string>? DevicesChanged { get; init; }
 
+    /// <summary>Gets the limits of the attempts in the name of a person (recovery); null for none.</summary>
+    public AuthenticationRateLimiter? RateLimiter { get; init; }
+
     /// <summary>
     /// Gets what tells whether a controller device may revoke a device of another person (<c>doc/fleet/access-control.md</c>):
     /// an owner or admin, or a maintainer for a team machine. Null lets a controller revoke only the devices of its own person.
@@ -378,6 +381,8 @@ public sealed class DeviceService
             throw CoordinatorException.Forbidden(CoordinatorErrorCodes.RecoveryRefused, "The entry is not signed by a recovery key of this server.");
         }
 
+        // The person of the recovery key is known before its signature is checked: attempts in their name are counted, with a slow path.
+        if (RateLimiter is { } limiter) await limiter.RequirePersonAsync(RateLimitedActions.Recover, signer.OwnerPersonId, origin, _store).ConfigureAwait(false);
         var (payload, record) = await ReadEntryAsync(signer, request.DeviceListEntry, cancellationToken).ConfigureAwait(false);
         DeviceListChain.Require(payload.Operation == FleetDeviceListOperations.Add && payload.DeviceId == key.DeviceId && payload.PublicKey == key.Text
             && payload.Kind == FleetDeviceKinds.Controller && payload.OwnerId == signer.OwnerPersonId, "add the device that sends it as a controller device of the person of the recovery key");
@@ -452,7 +457,8 @@ public sealed class DeviceService
         var person = actor.OwnerPersonId is null ? null : await _store.GetPersonAsync(actor.OwnerPersonId, cancellationToken).ConfigureAwait(false);
         if (person is null || person.Role != PersonRoles.Owner) return false;
         var entries = await _store.ListDeviceListAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false);
-        var list = FleetDeviceListVerifier.Verify(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), actor.OrganizationId);
+        var list = FleetDeviceListVerifier.Verify(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), actor.OrganizationId,
+            FleetDeviceListMode.Tolerant);
         if (!list.IsValid) return false;
         var state = list.State;
         if (!state.Members.TryGetValue(actor.Id, out var signer) || signer.OwnerId != actor.OwnerPersonId) return false;

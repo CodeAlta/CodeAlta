@@ -39,6 +39,40 @@ public sealed class IntegrationClientTests
     }
 
     [TestMethod]
+    public async Task OnCall_IsReadFromIncidentIoPagerDutyAndOpsgenie_WithTheTokenOfEach()
+    {
+        var now = new DateTimeOffset(2026, 11, 4, 12, 0, 0, TimeSpan.Zero);
+        var fake = new FakeToolServer()
+            .On(HttpMethod.Get, "/v2/schedule_entries", """{"schedule_entries":{"final":[{"user":{"email":"mia@acme.test","name":"Mia"}},{"user":{"email":"mia@acme.test","name":"Mia"}}]}}""")
+            .On(HttpMethod.Get, "/oncalls", """{"oncalls":[{"user":{"email":"max@acme.test","name":"Max"}}]}""")
+            .On(HttpMethod.Get, "/v2/schedules/sre/on-calls", """{"data":{"onCallRecipients":["ana@acme.test","bob"]}}""");
+        using var http = new HttpClient(fake);
+        var client = new OnCallClient(http, new Uri("https://incident.test/"), new Uri("https://pagerduty.test/"), new Uri("https://opsgenie.test/"));
+
+        var incident = (await client.OnCallAsync(OnCallClient.IncidentIo, "01SCHED", "inc-key", null, now, CancellationToken.None)).Value!;
+        CollectionAssert.AreEqual(new[] { new OnCallPerson("mia@acme.test", "Mia") }, incident.ToArray(), "the same person once");
+        var pagerDuty = (await client.OnCallAsync(OnCallClient.PagerDuty, "PSCHED", "pd-key", null, now, CancellationToken.None)).Value!;
+        CollectionAssert.AreEqual(new[] { new OnCallPerson("max@acme.test", "Max") }, pagerDuty.ToArray());
+        var opsgenie = (await client.OnCallAsync(OnCallClient.Opsgenie, "sre", "og-key", "eu", now, CancellationToken.None)).Value!;
+        CollectionAssert.AreEqual(new[] { new OnCallPerson("ana@acme.test", null), new OnCallPerson(null, "bob") }, opsgenie.ToArray());
+
+        Assert.AreEqual("Bearer inc-key", fake.To("/v2/schedule_entries").Single().Authorization);
+        StringAssert.Contains(fake.To("/v2/schedule_entries").Single().Uri.Query, "schedule_id=01SCHED");
+        Assert.AreEqual("Token token=pd-key", fake.To("/oncalls").Single().Authorization);
+        StringAssert.Contains(Uri.UnescapeDataString(fake.To("/oncalls").Single().Uri.Query), "schedule_ids[]=PSCHED");
+        Assert.AreEqual("GenieKey og-key", fake.To("/v2/schedules/sre/on-calls").Single().Authorization);
+        Assert.IsTrue(fake.Requests.All(request => request.Uri.Host is "incident.test" or "pagerduty.test" or "opsgenie.test"), "each token goes to its tool only");
+
+        // A tool that answers something else, or an unknown source, says so, with no token in the words.
+        var broken = new FakeToolServer().On(HttpMethod.Get, "/oncalls", """{"error":{"message":"Invalid token"}}""");
+        using var brokenHttp = new HttpClient(broken);
+        var failed = await new OnCallClient(brokenHttp, pagerDuty: new Uri("https://pagerduty.test/")).OnCallAsync(OnCallClient.PagerDuty, "P", "pd-key", null, now, CancellationToken.None);
+        Assert.IsNotNull(failed.Problem);
+        Assert.IsFalse(failed.Problem.Contains("pd-key", StringComparison.Ordinal));
+        StringAssert.Contains((await client.OnCallAsync("victorops", "x", "k", null, now, CancellationToken.None)).Problem, "incident_io, pagerduty or opsgenie");
+    }
+
+    [TestMethod]
     public async Task Jira_ReadsEveryPageOfAQuery_UpToItsCap()
     {
         var pages = 0;

@@ -1,3 +1,4 @@
+using System.Buffers.Text;
 using System.Net.Http.Json;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
@@ -17,10 +18,24 @@ public sealed partial class FleetServerClient
     /// <exception cref="ArgumentNullException"><paramref name="serverAddress"/> is null.</exception>
     /// <exception cref="FleetServerException">The server refused the call.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public static async Task<SignInMethodsResponse> GetSignInMethodsAsync(Uri serverAddress, HttpMessageHandler? handler = null, CancellationToken cancellationToken = default)
+    public static Task<SignInMethodsResponse> GetSignInMethodsAsync(Uri serverAddress, HttpMessageHandler? handler = null, CancellationToken cancellationToken = default)
+        => GetSignInMethodsAsync(serverAddress, handler, null, cancellationToken);
+
+    /// <summary>Reads the ways a person may sign in to a server that may pin its own certificate; the call needs no device.</summary>
+    /// <param name="serverAddress">The address of the server.</param>
+    /// <param name="handler">The HTTP handler; null for the usual one, or the pinned one.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate (<see cref="FleetServerCertificates"/>); null to validate it as usual.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The methods.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="serverAddress"/> is null.</exception>
+    /// <exception cref="FleetServerException">The server refused the call.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer, or presents another certificate than the pinned one.</exception>
+    public static async Task<SignInMethodsResponse> GetSignInMethodsAsync(Uri serverAddress, HttpMessageHandler? handler, string? certificatePin, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(serverAddress);
-        using var http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
+        using var http = handler is not null ? new HttpClient(handler, disposeHandler: false)
+            : certificatePin is not null ? new HttpClient(FleetServerCertificates.CreateHandler(certificatePin), disposeHandler: true)
+            : new HttpClient();
         http.Timeout = TimeSpan.FromSeconds(30);
         using var response = await http.GetAsync(new Uri(serverAddress, "api/v1/sign-in/methods"), cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
@@ -110,6 +125,68 @@ public sealed partial class FleetServerClient
         ArgumentNullException.ThrowIfNull(request);
         return SendAsync(HttpMethod.Put, "api/v1/sign-in/settings", Body(request, FleetSignInJsonContext.Default.SetSignInSettingsRequest), FleetSignInJsonContext.Default.SignInSettingsDto,
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Asks another controller device of this device's person to approve a change of the company sign-in, which this device
+    /// then applies with <see cref="SetSignInSettingsAsync"/> naming the approval.
+    /// </summary>
+    /// <param name="request">The change, as it will be applied.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approval that waits.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<SignInApprovalDto> RequestSignInApprovalAsync(SetSignInSettingsRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return SendAsync(HttpMethod.Post, "api/v1/sign-in/settings/approvals", Body(request, FleetSignInJsonContext.Default.SetSignInSettingsRequest),
+            FleetSignInJsonContext.Default.SignInApprovalDto, cancellationToken);
+    }
+
+    /// <summary>Reads an approval of this device's person.</summary>
+    /// <param name="id">The approval.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approval.</returns>
+    /// <exception cref="FleetServerException">The server refused (<c>sign_in.invalid_attempt</c> once used or expired).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<SignInApprovalDto> GetSignInApprovalAsync(string id, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(id);
+        return SendAsync(HttpMethod.Get, "api/v1/sign-in/settings/approvals/" + Uri.EscapeDataString(id), null, FleetSignInJsonContext.Default.SignInApprovalDto, cancellationToken);
+    }
+
+    /// <summary>Lists the changes of the company sign-in that wait for an approval of this device's person.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approvals.</returns>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<IReadOnlyList<SignInApprovalDto>> ListSignInApprovalsAsync(CancellationToken cancellationToken = default)
+        => (await SendAsync(HttpMethod.Get, "api/v1/sign-in/settings/approvals", null, FleetSignInJsonContext.Default.ListResponseSignInApprovalDto, cancellationToken)
+            .ConfigureAwait(false)).Items;
+
+    /// <summary>
+    /// Approves a change another device of this device's person asks for: this device computes the digest of the change
+    /// it was shown, refuses one that does not match what the server says, and signs that digest.
+    /// </summary>
+    /// <param name="approval">The approval, as listed.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approval, approved.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="approval"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The change does not have the digest the server gives: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<SignInApprovalDto> ApproveSignInChangeAsync(SignInApprovalDto approval, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(approval);
+        var digest = FleetSignInApprovals.Digest(approval.Change);
+        if (!string.Equals(digest, approval.Digest, StringComparison.Ordinal))
+            throw new InvalidOperationException("The change shown is not the one the server would apply: nothing was signed.");
+        var organization = await GetOrganizationAsync(cancellationToken).ConfigureAwait(false);
+        var payload = FleetSignInApprovals.Serialize(new FleetSignInApproval(1, organization.Id, approval.Id, approval.RequesterDeviceId, digest, DeviceId, Now()));
+        var signed = new FleetSignedSignInApproval(payload, Base64Url.EncodeToString(_identity.SignData(FleetSignInApprovals.GetSignedBytes(payload))));
+        return await SendAsync(HttpMethod.Post, $"api/v1/sign-in/settings/approvals/{Uri.EscapeDataString(approval.Id)}/approve",
+            Body(signed, FleetSignInJsonContext.Default.FleetSignedSignInApproval), FleetSignInJsonContext.Default.SignInApprovalDto, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Lists the sign-in methods and passkeys linked to the person of this device.</summary>

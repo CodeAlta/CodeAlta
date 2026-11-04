@@ -66,6 +66,8 @@ internal sealed class OtlpForwarder : IDisposable
         }
 
         if (!FleetTelemetrySignals.IsKnown(signal)) throw CoordinatorException.NotFound(CoordinatorErrorCodes.TelemetryNotForwarded, "The signals are traces, metrics and logs.");
+        // Up to 8 MiB a request: only a device of the server makes it read one.
+        await _authenticator.PrecheckAsync(context.Request, context.RequestAborted).ConfigureAwait(false);
         var body = await ReadBodyAsync(context).ConfigureAwait(false);
         // The key first: who is not a device of the organization learns nothing of the setting.
         await _authenticator.AuthenticateAsync(SignedRequestData.From(context.Request, FleetSignedRequest.HashBody(body)), context.RequestAborted).ConfigureAwait(false);

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { FleetAccessOverview } from "#neoastra";
-import { assignableRoles, attention, attentionCount, canManagePerson, isAdvanced, isContentCapability, ownerTargets, parseTarget, proposalDetail, providerId } from "./access";
+import { translate, type MessageKey } from "../../localization";
+import { assignableRoles, attention, attentionCount, canManagePerson, isAdvanced, isContentCapability, onCallSummary, ownerTargets, parseTarget, proposalDetail, providerId } from "./access";
 
 const person = (id: string, name: string, role: string, extra: Partial<FleetAccessOverview["people"][number]> = {}) =>
   ({ id, name, role, status: "active", devices: 1, teams: [], joined: true, isMe: false, ...extra });
@@ -15,7 +16,7 @@ const home: FleetAccessOverview = {
 
 test("a household stays simple; an owner gives every role and an admin all but owner and admin", () => {
   assert.equal(isAdvanced(home), false);
-  assert.equal(isAdvanced({ ...home, teams: [{ id: "t", name: "Infra", members: [], machines: [], runsMemberAutomations: false, canManage: true }] }), true);
+  assert.equal(isAdvanced({ ...home, teams: [{ id: "t", name: "Infra", members: [], machines: [], runsMemberAutomations: false, canManage: true, onCall: null }] }), true);
   assert.deepEqual(assignableRoles(home), ["owner", "admin", "member", "auditor", "guest"]);
   const admin = { ...home, me: person("ada", "Ada", "admin", { isMe: true }) };
   assert.deepEqual(assignableRoles(admin), ["member", "auditor", "guest"]);
@@ -45,7 +46,11 @@ test("what waits for the person: changes to sign, transfers to take, proposals, 
 });
 
 test("a resource goes to the organization, a team or another active person who joined", () => {
-  const withTeam = { ...home, teams: [{ id: "t", name: "Infra", members: [], machines: [], runsMemberAutomations: false, canManage: true }] };
+  const say = (key: MessageKey, values?: Readonly<Record<string, string | number>>) => translate("en", key, values);
+  assert.match(onCallSummary({ people: ["Mia", "Max"], shiftHours: 12, onCallNow: "Max", until: "2026-11-04T21:00:00Z" }, say, "en-US"),
+    /^On call now: Max, until .+ · turns of 12 hours: Mia, Max$/);
+  assert.equal(onCallSummary({ people: ["Old"], shiftHours: 24, onCallNow: null, until: null }, say, "en-US"), "No one of its rotation is in the team now · turns of 24 hours: Old");
+  const withTeam = { ...home, teams: [{ id: "t", name: "Infra", members: [], machines: [], runsMemberAutomations: false, canManage: true, onCall: null }] };
   assert.deepEqual(ownerTargets(withTeam, { ownerKind: "person", ownerId: "alex" }).map(target => target.value), ["organization:", "team:t", "person:bea"]);
   assert.deepEqual(parseTarget("team:t"), { kind: "team", id: "t" });
   assert.deepEqual(parseTarget("organization:"), { kind: "organization", id: null });

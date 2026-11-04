@@ -1,6 +1,6 @@
 // What the page knows of an automation without asking the host: how a trigger reads, what a form holds, the
 // templates a new one can start from.
-import type { AutomationAutonomyItem, AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem, SessionOptionsChoice } from "#neoastra";
+import type { AutomationAllowedToolItem, AutomationAutonomyItem, AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem, SessionOptionsChoice } from "#neoastra";
 import type { IconName } from "../AppIcon";
 import type { Locale, MessageKey } from "../localization";
 import { permissionModeName } from "../permissionModes";
@@ -182,7 +182,24 @@ export type AutomationForm = Readonly<{
 }>;
 
 /** The autonomy a person turns on: read only, no tool of another source allowed yet, approvals to the owner, an hour to answer. */
-export const newAutonomy = (): AutomationAutonomyItem => ({ allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner" });
+export const newAutonomy = (): AutomationAutonomyItem => ({ allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner", tools: null, onCall: null });
+// The tools it allows, trimmed, and the pins, bounds and preconditions of those it still allows.
+function autonomyInput(autonomy: AutomationAutonomyItem): AutomationAutonomyItem {
+  const allowedTools = autonomy.allowedTools.map(tool => tool.trim()).filter(Boolean);
+  const tools = (autonomy.tools ?? []).filter(tool => allowedTools.includes(tool.name));
+  return { ...autonomy, allowedTools, tools: tools.length > 0 ? tools : null };
+}
+
+/** What an allowed tool must be and stay within, in words: its pin, the arguments it bounds, how many preconditions; null for a tool allowed by its name alone. */
+export function describeAllowedTool(tool: AutomationAllowedToolItem, t: Translate): string | null {
+  const parts = [
+    tool.hash || tool.version ? t(tool.version ? "pinned to {version}" : "pinned", { version: tool.version ?? "" }) : null,
+    tool.bounds.length > 0 ? t("bounds on {arguments}", { arguments: tool.bounds.map(bound => bound.argument).join(", ") }) : null,
+    tool.preconditions.length > 0 ? t(tool.preconditions.length === 1 ? "checks {tools} first" : "checks {tools} first", { tools: tool.preconditions.map(item => item.tool).join(", ") }) : null,
+  ].filter((part): part is string => !!part);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 /** What the runs of an automation with autonomy do without a person, in one line. */
 export const describeAutonomy = (autonomy: AutomationAutonomyItem, t: Translate): string => autonomy.allowedTools.length === 0
   ? t("Read only: it asks you before anything else than reading.")
@@ -288,7 +305,7 @@ export function inputOf(form: AutomationForm): AutomationInput {
     runsOn: form.storeInProject ? null : form.runsOn,
     // Published to a team or the organization of the machine it runs on; on this computer it stays the person's.
     publishTo: form.storeInProject || !form.runsOn ? null : form.publishTo ?? null,
-    autonomy: form.autonomy ? { ...form.autonomy, allowedTools: form.autonomy.allowedTools.map(tool => tool.trim()).filter(Boolean) } : null,
+    autonomy: form.autonomy ? autonomyInput(form.autonomy) : null,
     // An automation that is run by hand misses nothing.
     catchUp: form.catchUp && form.triggers.length > 0,
     triggers: form.triggers.map(trigger => ({ ...trigger, at: [...trigger.at].sort(), expression: trigger.type === "cron" ? (trigger.expression ?? "").trim() : null,

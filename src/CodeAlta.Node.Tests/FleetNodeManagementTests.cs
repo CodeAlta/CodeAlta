@@ -15,23 +15,26 @@ public sealed class FleetNodeManagementTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
-    public async Task FirstDevice_ManagesTheNode_TheNextOnesDoNot_UnlessTheirLinkSaysSo()
+    public async Task OnlyALinkMadeToManageGivesManage_TheFirstDeviceIncluded_AndADeviceThatManagedKeepsIt()
     {
         await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);
         var token = TestContext.CancellationToken;
 
+        // The first device that pairs is not trusted with the node's devices, secrets and updates unless its owner asked.
         await fixture.PairAsync(fixture.Owner, "laptop", manages: false, token);
         await fixture.PairAsync(fixture.Other, "phone", manages: false, token);
         await fixture.PairAsync(fixture.Third, "tablet", manages: true, token);
 
         var trusted = fixture.Fleet.Service.TrustedDevices;
-        Assert.IsTrue(trusted.FindTrusted(fixture.Owner.Fingerprint)!.Permissions.HasFlag(DevicePermissions.Manage), "The first device of a node is its owner's.");
+        Assert.IsFalse(trusted.FindTrusted(fixture.Owner.Fingerprint)!.Permissions.HasFlag(DevicePermissions.Manage), "The first device does not manage the node unasked.");
         Assert.IsFalse(trusted.FindTrusted(fixture.Other.Fingerprint)!.Permissions.HasFlag(DevicePermissions.Manage), "A later device does not manage it unasked.");
         Assert.IsTrue(trusted.FindTrusted(fixture.Third.Fingerprint)!.Permissions.HasFlag(DevicePermissions.Manage), "A link made with --manage gives it.");
 
-        // Paired again, the first device keeps managing it.
+        // Paired again, a device that manages keeps managing it; one that did not, still does not.
+        await fixture.PairAsync(fixture.Third, "tablet", manages: false, token);
+        Assert.IsTrue(trusted.FindTrusted(fixture.Third.Fingerprint)!.Permissions.HasFlag(DevicePermissions.Manage));
         await fixture.PairAsync(fixture.Owner, "laptop", manages: false, token);
-        Assert.IsTrue(trusted.FindTrusted(fixture.Owner.Fingerprint)!.Permissions.HasFlag(DevicePermissions.Manage));
+        Assert.IsFalse(trusted.FindTrusted(fixture.Owner.Fingerprint)!.Permissions.HasFlag(DevicePermissions.Manage));
     }
 
     [TestMethod]
@@ -39,7 +42,7 @@ public sealed class FleetNodeManagementTests
     {
         await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);
         var token = TestContext.CancellationToken;
-        var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: false, token);
+        var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: true, token);
         var otherMachine = await fixture.PairAsync(fixture.Other, "phone", manages: false, token);
 
         await using var manager = await FleetNodeClient.ConnectAsync(ownerMachine, fixture.Owner, token);
@@ -101,7 +104,7 @@ public sealed class FleetNodeManagementTests
         var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(fixture.Node.Host.CatalogOptions.GlobalRoot);
         try
         {
-            var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: false, token);
+            var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: true, token);
             var otherMachine = await fixture.PairAsync(fixture.Other, "phone", manages: false, token);
             await using var manager = await FleetNodeClient.ConnectAsync(ownerMachine, fixture.Owner, token);
             await using var other = await FleetNodeClient.ConnectAsync(otherMachine, fixture.Other, token);
@@ -153,7 +156,7 @@ public sealed class FleetNodeManagementTests
         var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(fixture.Node.Host.CatalogOptions.GlobalRoot);
         try
         {
-            var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: false, token);
+            var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: true, token);
             var otherMachine = await fixture.PairAsync(fixture.Other, "phone", manages: false, token);
             await using var manager = await FleetNodeClient.ConnectAsync(ownerMachine, fixture.Owner, token);
             await using var other = await FleetNodeClient.ConnectAsync(otherMachine, fixture.Other, token);
@@ -230,7 +233,7 @@ public sealed class FleetNodeManagementTests
     {
         await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);
         var token = TestContext.CancellationToken;
-        var machine = await fixture.PairAsync(fixture.Owner, "laptop", manages: false, token);
+        var machine = await fixture.PairAsync(fixture.Owner, "laptop", manages: true, token);
         await using (var manager = await FleetNodeClient.ConnectAsync(machine, fixture.Owner, token))
         {
             await manager.SetDevicePermissionsAsync(new FleetDevicePermissionsParams(fixture.Owner.DeviceId, [], ["manage"]), token);
@@ -256,7 +259,7 @@ public sealed class FleetNodeManagementTests
         using var desktop = new CodeAlta.Fleet.Server.FleetServerClient(address, fixture.Owner);
         await desktop.SetUpAsync(server.SetupCode!.Code, "Alex", "Desktop", "Home", token);
         var enrollment = await desktop.CreateEnrollmentTokenAsync(null, "managed-node", token);
-        var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: false, token);
+        var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: true, token);
         var otherMachine = await fixture.PairAsync(fixture.Other, "phone", manages: false, token);
         await using var manager = await FleetNodeClient.ConnectAsync(ownerMachine, fixture.Owner, token);
         await using var other = await FleetNodeClient.ConnectAsync(otherMachine, fixture.Other, token);

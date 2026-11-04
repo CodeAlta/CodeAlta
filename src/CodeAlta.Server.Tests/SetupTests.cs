@@ -43,6 +43,41 @@ public sealed class SetupTests
     }
 
     [TestMethod]
+    public async Task AServerRefusesPlainHttpBeyondTheLoopbackUnlessForced()
+    {
+        // Before it binds anything: no port is opened on the networks of the machine.
+        foreach (var url in new[] { "http://0.0.0.0:0", "http://[::]:0", "http://*:0", "http://+:0", "http://192.168.1.20:0", "http://fleet.example:0" })
+        {
+            using var root = new TempDirectory();
+            var refused = await Assert.ThrowsExactlyAsync<ArgumentException>(() => CoordinatorServer.StartAsync(new CoordinatorServerOptions
+            {
+                DataRoot = root.Path, Urls = [url], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+            }));
+            StringAssert.Contains(refused.Message, ServerBindings.AllowInsecureHttpOption, url);
+        }
+
+        foreach (var url in new[] { "http://127.0.0.1:2586", "http://[::1]:2586", "http://localhost:2586", "https://0.0.0.0:443" })
+            ServerBindings.Require([url], allowInsecureHttp: false);
+        ServerBindings.Require(["http://0.0.0.0:2586"], allowInsecureHttp: true);
+    }
+
+    [TestMethod]
+    public async Task BehindATrustedProxyACallerOfAnotherMachineDoesNotSetTheServerUp()
+    {
+        await using var server = await ServerFixture.StartAsync(configure: options => new CoordinatorServerOptions
+        {
+            DataRoot = options.DataRoot, Urls = options.Urls, TimeProvider = options.TimeProvider, ConfigureLogging = options.ConfigureLogging,
+            EnvironmentVariable = options.EnvironmentVariable, TrustedProxies = ["127.0.0.1", "::1"],
+        });
+        using var owner = new TestDevice("Desktop");
+        var request = new SetupRequest(server.SetupCode, "Alex", owner.Name, owner.PublicKey, owner.FirstEntry(server.Clock.Now));
+        var remote = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/setup", request, tamper: message => message.Headers.Add("X-Forwarded-For", "198.51.100.7"));
+        Assert.AreEqual((HttpStatusCode.Forbidden, CoordinatorErrorCodes.SetupNotLocal), (remote.Status, remote.Code), "the proxy forwards a caller of another machine");
+        var local = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/setup", request);
+        Assert.AreEqual(HttpStatusCode.Created, local.Status, local.Body.ToString());
+    }
+
+    [TestMethod]
     public async Task AWrongCodeIsRefusedAndFiveDropTheCode()
     {
         await using var server = await ServerFixture.StartAsync();

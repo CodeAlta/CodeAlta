@@ -92,6 +92,9 @@ internal sealed record McpRuntimeTool
 
     // Who may call it, `model`, `app` or both (McpApps); null when the server does not say, which is both.
     public IReadOnlyList<string>? Visibility { get; init; }
+
+    // The version its server gives of itself, which an automation pins an allowed tool to; null when it gives none.
+    public string? ServerVersion { get; init; }
 }
 
 internal sealed record McpRuntimeToolSearchResult
@@ -780,7 +783,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
                 var runtimeTool = new McpRuntimeTool
                 {
                     Server = key, Name = tool.Name, Alias = tool.Alias, Title = tool.Title, Description = tool.Description, InputSchema = schema,
-                    UiResourceUri = tool.UiResourceUri, Visibility = tool.Visibility,
+                    UiResourceUri = tool.UiResourceUri, Visibility = tool.Visibility, ServerVersion = list.ServerVersion,
                 };
                 if (StaysLoaded(context.Policy, serverPolicy, tool.Name) && loaded.Count < maximumLoaded) loaded.Add(runtimeTool);
                 else deferred.Add(runtimeTool);
@@ -820,7 +823,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
             {
                 Server = key, Name = tool.Name, Alias = tool.Alias, Title = tool.Title, Description = tool.Description, InputSchema = tool.InputSchema!.Value,
                 Enabled = disabledReason is null && context.Policy.Enabled, DisabledReason = disabledReason,
-                UiResourceUri = tool.UiResourceUri, Visibility = tool.Visibility,
+                UiResourceUri = tool.UiResourceUri, Visibility = tool.Visibility, ServerVersion = list.ServerVersion,
             };
         })];
     }
@@ -985,7 +988,9 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
             client = await McpClient.CreateAsync(transport, CreateClientOptions(browserLogin, budget, AdvertiseApps, LoadsSkills), NullLoggerFactory.Instance, timeout.Token).ConfigureAwait(false);
             transport = null;
             var listedTools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
-            var tools = ConvertTools(key, serverAliasPart, listedTools.ToArray(), context.Policy, serverPolicy);
+            var serverVersion = string.IsNullOrWhiteSpace(client.ServerInfo?.Version) ? null : client.ServerInfo.Version;
+            IReadOnlyList<McpRuntimeTool> tools = [.. ConvertTools(key, serverAliasPart, listedTools.ToArray(), context.Policy, serverPolicy)
+                .Select(tool => tool with { ServerVersion = serverVersion })];
             var variant = VariantOf(definition, serverAliasPart, context.Request.Environment);
             WriteToolList(context, effective.Definition, tools, variant);
             // The skills are listed with the tools, never a file of them: a file is read only when a skill is loaded.

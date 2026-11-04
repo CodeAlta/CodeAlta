@@ -15,6 +15,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Documents a newer minor signed: what the rules of this one must keep verifying (FleetVersionSkewTests). -->
+    <None Include="Golden\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Kestrel serves the WebSocket endpoint of the end-to-end tests, on the loopback. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\CodeAlta.Fleet.Protocol\CodeAlta.Fleet.Protocol.csproj" />

@@ -32,7 +32,10 @@ internal sealed partial class DesktopFleetServers
         var link = _store.List().FirstOrDefault(candidate => candidate.Id == linkId) ?? throw new KeyNotFoundException($"No server link has the id '{linkId}'.");
         var devices = Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.Devices is { } running && running.ServerAddress == link.Address && Handler is null
             ? running
-            : new FleetOrganizationDevices(link.Address, Identity(), Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName), Handler);
+            : new FleetOrganizationDevices(link.Address, Identity(), Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName), Handler)
+            {
+                CertificatePin = link.CertificatePin,
+            };
         return new FleetSecretsManager(devices);
     }
 

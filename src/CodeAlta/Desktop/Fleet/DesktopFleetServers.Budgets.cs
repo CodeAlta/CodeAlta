@@ -1,6 +1,7 @@
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Fleet.Server;
+using CodeAlta.LiveTool;
 
 namespace CodeAlta.Desktop.Fleet;
 
@@ -24,6 +25,37 @@ internal sealed partial class DesktopFleetServers
     /// <returns>The manager, over the anchored device list of the link.</returns>
     /// <exception cref="KeyNotFoundException">No such link.</exception>
     public FleetBudgetsManager BudgetsOf(string linkId) => new(SecretsOf(linkId).Devices);
+
+    /// <summary>
+    /// Lists the runs of machines of the servers that wait for this computer's person: the messages of kind approval they did
+    /// not dismiss, whose problem lasts, each naming its automation, machine and run. A server that does not answer lists none.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the reads.</param>
+    /// <returns>The runs, by server.</returns>
+    public async Task<IReadOnlyList<AltaWaitingRun>> WaitingRunsAsync(CancellationToken cancellationToken)
+    {
+        var runs = new List<AltaWaitingRun>();
+        foreach (var connection in Connections)
+        {
+            try
+            {
+                var read = await ReadBudgetsAsync(connection.Link.Id, cancellationToken).ConfigureAwait(false);
+                foreach (var notification in read.Notifications.Where(static notification => notification.Kind == FleetNotificationKinds.Approval && notification.ReadAt is null
+                    && notification.ResolvedAt is null && notification is { Subject.Length: > 0, Detail.Length: > 0, MachineId.Length: > 0 }))
+                {
+                    runs.Add(new AltaWaitingRun(notification.Detail!, notification.Subject!, null, notification.MachineId,
+                        read.Devices.GetValueOrDefault(notification.MachineId!)?.Name ?? notification.MachineId, null, notification.CreatedAt));
+                }
+            }
+            catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or FleetDeviceListException or KeyNotFoundException
+                or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                // A server that does not answer now tells it again at the next read.
+            }
+        }
+
+        return runs;
+    }
 
     /// <summary>Reads the budgets, holds and notifications of this computer's person at a server.</summary>
     /// <param name="linkId">The link.</param>

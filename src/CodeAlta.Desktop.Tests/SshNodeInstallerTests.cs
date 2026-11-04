@@ -92,7 +92,7 @@ public sealed class SshNodeInstallerTests
         StringAssert.Contains(ssh.Scripts[1], "TOOLS=\"$HOME\"/'.dotnet/tools'");
         StringAssert.Contains(ssh.Scripts[2], "install --listen-all --port 2690");
         Assert.IsFalse(ssh.Scripts[2].Contains("--data-root", StringComparison.Ordinal), "~/.alta when no desktop runs there");
-        StringAssert.Contains(ssh.Scripts[3], "pair --manage --minutes 5");
+        StringAssert.Contains(ssh.Scripts[3], "pair --minutes 5", "the desktop manages the machine only when the person ticks it");
         Assert.IsTrue(ssh.Scripts.All(static script => !script.Contains('\r')), "sh reads no carriage return");
     }
 
@@ -106,7 +106,7 @@ public sealed class SshNodeInstallerTests
         ssh.Answers.Enqueue(new SshResult(0, Link + "\n", ""));
         var steps = new List<SshSetupProgress>();
 
-        await new SshNodeInstaller(ssh, "4.0.0").RunAsync(new SshNodeSetupRequest { Target = new SshTarget("me", "mac", null), ToolPath = "/tmp/t" },
+        await new SshNodeInstaller(ssh, "4.0.0").RunAsync(new SshNodeSetupRequest { Target = new SshTarget("me", "mac", null), ToolPath = "/tmp/t", Manage = true },
             (_, _) => Task.FromResult("mac-1"), steps.Add, TestContext.CancellationToken);
 
         StringAssert.Contains(steps.Single(static step => step is { Step: "check", State: "done" }).Detail, "~/.alta-node");
@@ -173,8 +173,8 @@ public sealed class SshNodeInstallerTests
         // The same for a server set up over SSH.
         ssh.Answers.Enqueue(new SshResult(SshResult.ConnectionFailed, "", "Host key verification failed.\n"));
         var server = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
-            new SshServerSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _) => Task.FromResult<ReachProblem?>(null),
-            (_, _, _, _) => Task.FromResult("link"), static _ => { }, TestContext.CancellationToken));
+            new SshServerSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _, _) => Task.FromResult<ReachProblem?>(null),
+            (_, _, _, _, _) => Task.FromResult("link"), static _ => { }, TestContext.CancellationToken));
         Assert.AreEqual("SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)", server.Message);
     }
 

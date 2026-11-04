@@ -34,11 +34,17 @@ public sealed class FleetSignInEndToEndTests
         {
             await using var provider = await FakeOidcProvider.StartAsync(clientId: "contoso-codealta", clientSecret: "contoso-secret");
             provider.Account = new FakeAccount("sam-oid", "sam@contoso.example", "Sam Rivera", ["0b1e-engineering"]);
+            await using var github = await FakeGitHubDeviceFlow.StartAsync();
+            github.Interval = 1;
             await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
             {
                 DataRoot = At("server"), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
                 // A server whose Microsoft client is a placeholder (a build without CodeAlta's registered app) does not offer it.
-                SignIn = new SignInOptions { AllowLoopbackHttpProviders = true, Microsoft = new SignInClient(PublicSignInClients.PlaceholderPrefix + "microsoft") },
+                SignIn = new SignInOptions
+                {
+                    AllowLoopbackHttpProviders = true, GitHub = new SignInClient(github.ClientId), GitHubAddress = github.Address, GitHubApiAddress = github.Address,
+                    Microsoft = new SignInClient(PublicSignInClients.PlaceholderPrefix + "microsoft"),
+                },
             }, token);
             var address = server.Addresses.First(static uri => uri.Scheme == "http").ToString();
 
@@ -53,8 +59,20 @@ public sealed class FleetSignInEndToEndTests
             var held = await owner.SignInSettingsAsync(new FleetServerLinkRequest(ownerEpoch, linkId), token);
             Assert.AreEqual("ok", held.Status, held.Message);
             Assert.IsFalse(held.Settings!.Methods.Single(static method => method.Id == "microsoft").Available, "a placeholder client is not offered");
-            var set = await owner.SetSignInSettingsAsync(new FleetSignInSettingsRequest(ownerEpoch, linkId, held.Settings.Version, ["company", "passkey"],
-                provider.Issuer.AbsoluteUri, provider.ClientId, provider.ClientSecret, "Contoso", null, false, [new FleetSignInGroupRoleView("0b1e-engineering", "auditor")]), token);
+            var change = new FleetSignInSettingsRequest(ownerEpoch, linkId, held.Settings.Version, ["company", "passkey"],
+                provider.Issuer.AbsoluteUri, provider.ClientId, provider.ClientSecret, "Contoso", null, false, [new FleetSignInGroupRoleView("0b1e-engineering", "auditor")],
+                AllowedDomains: ["contoso.example"]);
+            Assert.AreEqual("sign_in.confirmation_required", (await owner.SetSignInSettingsAsync(change, token)).Status, "changing the company sign-in needs the owner to sign in again");
+
+            // The owner links their GitHub account, then confirms with it: a code to enter at GitHub, and the change goes on.
+            var octo = new FakeAccount("octo-alex", "alex@example.com", "Alex Martin", [], 4242);
+            var linkCode = (await owner.StartSignInCodeAsync(new FleetSignInCodeRequest(ownerEpoch, "github", null, linkId), token)).Code!;
+            github.Approve(linkCode.UserCode, octo);
+            Assert.AreEqual("ok", (await owner.LinkSignInAsync(new FleetSignInLinkRequest(ownerEpoch, linkId, "github", linkCode.Handle), token)).Status);
+            var confirmCode = await owner.StartSignInCodeAsync(new FleetSignInCodeRequest(ownerEpoch, "github", null, linkId, "confirm"), token);
+            Assert.AreEqual("ok", confirmCode.Status, confirmCode.Message);
+            github.Approve(confirmCode.Code!.UserCode, octo);
+            var set = await owner.SetSignInSettingsAsync(change with { ConfirmWith = "github", Handle = confirmCode.Code.Handle }, token);
             Assert.AreEqual("ok", set.Status, set.Message);
             Assert.IsTrue(set.Settings!.HasClientSecret);
             Assert.AreEqual(("0b1e-engineering", "auditor"), (set.Settings.GroupRoles.Single().Group, set.Settings.GroupRoles.Single().Role));

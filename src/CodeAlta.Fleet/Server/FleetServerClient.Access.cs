@@ -106,6 +106,35 @@ public sealed partial class FleetServerClient
         return SendAsync(HttpMethod.Patch, $"api/v1/teams/{Uri.EscapeDataString(teamId)}", Body(request, AccessJson.UpdateTeamRequest), AccessJson.TeamDto, cancellationToken);
     }
 
+    /// <summary>Sets the on-call rotation of a team: its people in turn, each for a shift of hours.</summary>
+    /// <param name="teamId">The team.</param>
+    /// <param name="request">The people and the length of a turn.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The team with its rotation.</returns>
+    /// <exception cref="ArgumentException"><paramref name="teamId"/> is empty.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
+    /// <exception cref="FleetServerException">The server refused it.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<TeamDto> SetOnCallAsync(string teamId, PutOnCallRotationRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(teamId);
+        ArgumentNullException.ThrowIfNull(request);
+        return SendAsync(HttpMethod.Put, $"api/v1/teams/{Uri.EscapeDataString(teamId)}/oncall", Body(request, AccessJson.PutOnCallRotationRequest), AccessJson.TeamDto, cancellationToken);
+    }
+
+    /// <summary>Takes the on-call rotation of a team away.</summary>
+    /// <param name="teamId">The team.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The team.</returns>
+    /// <exception cref="ArgumentException"><paramref name="teamId"/> is empty.</exception>
+    /// <exception cref="FleetServerException">The server refused it.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<TeamDto> ClearOnCallAsync(string teamId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(teamId);
+        return SendAsync(HttpMethod.Delete, $"api/v1/teams/{Uri.EscapeDataString(teamId)}/oncall", null, AccessJson.TeamDto, cancellationToken);
+    }
+
     /// <summary>Dissolves a team: what it owned goes to the organization.</summary>
     /// <param name="teamId">The team.</param>
     /// <param name="cancellationToken">Cancels the call.</param>

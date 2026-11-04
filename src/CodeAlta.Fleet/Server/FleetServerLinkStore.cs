@@ -28,7 +28,7 @@ public static class FleetServerLinkStates
 /// address in their own settings.
 /// </summary>
 /// <param name="Id">The id of the link: the folder of its outbox under <c>fleet/servers/</c>.</param>
-/// <param name="Url">The address of the server (<see cref="FleetServerAddress.Format"/>).</param>
+/// <param name="Url">The address of the server (<see cref="FleetServerAddress.Format(Uri)"/>).</param>
 /// <param name="OrganizationId">The id of the organization of the server, once known.</param>
 /// <param name="OrganizationName">The name of the organization, once known.</param>
 /// <param name="DeviceId">The id of this device at the server.</param>
@@ -36,6 +36,7 @@ public static class FleetServerLinkStates
 /// <param name="State">How the device stands (<see cref="FleetServerLinkStates"/>).</param>
 /// <param name="CreatedAt">When the link was made.</param>
 /// <param name="UpdatedAt">When it last changed.</param>
+/// <param name="CertificatePin">The pin of the server's own certificate (<c>altaserver run --tls self</c>), which every connection to it checks; null for one that validates as usual.</param>
 public sealed record FleetServerLink(
     string Id,
     string Url,
@@ -45,8 +46,13 @@ public sealed record FleetServerLink(
     string Kind,
     string State,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt)
+    DateTimeOffset UpdatedAt,
+    string? CertificatePin = null)
 {
+    /// <summary>Gets the address with its pin, as it is given to a person or another machine.</summary>
+    [JsonIgnore]
+    public string ShareableUrl => FleetServerAddress.Format(Address, CertificatePin);
+
     /// <summary>Gets the address of the server.</summary>
     [JsonIgnore]
     public Uri Address => FleetServerAddress.TryParse(Url, out var address) ? address : throw new InvalidDataException($"The server link '{Id}' has no valid address.");

@@ -95,6 +95,12 @@ public sealed class AutomationPlacementTests
         var remote = await service.RunAsync(First, CancellationToken.None);
         Assert.AreEqual(("remote-run", First), (remote!.Id, placement.Ran.Single().Id));
         Assert.AreEqual(0, runner.Starts.Count, "Nothing runs here.");
+        // A try of its own prompt is asked of its machine too, as a dry run; a try on a sample event stays refused.
+        var (tried, problem) = await service.TryAsync(First, -1, null, CancellationToken.None);
+        Assert.IsNull(problem);
+        Assert.AreEqual(AutomationService.TryTrigger, tried!.Trigger);
+        CollectionAssert.AreEqual(new[] { false, true }, placement.DryRuns);
+        Assert.AreEqual(0, runner.Starts.Count, "Nothing runs here.");
 
         // The machine is part of what the automation is, and written back as it was read.
         Assert.AreNotEqual(entry.Definition.Fingerprint(), (entry.Definition with { RunsOn = null }).Fingerprint());
@@ -197,10 +203,15 @@ public sealed class AutomationPlacementTests
     {
         internal List<AutomationEntry> Ran { get; } = [];
 
-        public Task<AutomationRun> RunAsync(AutomationEntry entry, CancellationToken cancellationToken)
+        internal List<bool> DryRuns { get; } = [];
+
+        public Task<AutomationRun> RunAsync(AutomationEntry entry, CancellationToken cancellationToken) => RunAsync(entry, false, cancellationToken);
+
+        public Task<AutomationRun> RunAsync(AutomationEntry entry, bool dryRun, CancellationToken cancellationToken)
         {
-            Ran.Add(entry);
-            return Task.FromResult(new AutomationRun("remote-run", entry.Id, Noon, "manual") { Status = AutomationRun.Running });
+            if (!dryRun) Ran.Add(entry);
+            DryRuns.Add(dryRun);
+            return Task.FromResult(new AutomationRun("remote-run", entry.Id, Noon, dryRun ? AutomationService.TryTrigger : "manual") { Status = AutomationRun.Running });
         }
 
         public string? WaitsHere(string id) => null;

@@ -1,4 +1,4 @@
-import type { ApprovalMark, ApprovalRequest, Live } from "./contract";
+import type { ApprovalAutomation, ApprovalMark, ApprovalRequest, Live } from "./contract";
 
 // What sessions ask permission for, without the DOM: what the list says of them, and what a card says of a request.
 
@@ -23,5 +23,11 @@ export function approvalSubject(request: ApprovalRequest): string {
 }
 
 /** What tells a card to draw itself again, so that what the user reads does not move while nothing changed. */
-export const approvalKey = (request: ApprovalRequest, hasMore: boolean, sending: boolean, armed: boolean, note: string): string =>
-  JSON.stringify([request.id, request.kind, approvalSubject(request), request.workingDirectory, request.reason, request.shortened, request.outsideSandbox, hasMore, sending, armed, note]);
+export const approvalKey = (request: ApprovalRequest, hasMore: boolean, sending: boolean, armed: boolean, note: string, takeOver = ""): string =>
+  JSON.stringify([request.id, request.kind, approvalSubject(request), request.workingDirectory, request.reason, request.shortened, request.outsideSandbox, hasMore, sending, armed, note, takeOver]);
+
+/** What a card says of the run of an automation that waits for the person, who can take it over; null when none waits. */
+export function approvalTakeOver(automation: ApprovalAutomation | null | undefined): string | null {
+  if (!automation?.waiting || !automation.runId) return null;
+  return `${automation.name ?? "An automation"} waits for you. Take its run over and nothing stops it while you decide.`;
+}

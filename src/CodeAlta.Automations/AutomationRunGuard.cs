@@ -140,25 +140,67 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
         // What the host runs keeps the guards of the host; what an agent CLI runs itself keeps its own prompts.
         if (call.RunByAgent || AutomationAutonomy.HostTools.Contains(tool, StringComparer.Ordinal)) return AgentToolCallDecision.Allow;
         var shown = Shown(tool, call.Invocation.Arguments);
-        string reason;
-        if (_autonomy.Allows(tool))
+        if (!_autonomy.Allows(tool))
         {
-            if (DryRun)
+            return await AskAsync(tool, shown, $"The automation '{_entry.Definition.Name}' may not call {tool} by itself: allow this call once, or deny it.",
+                call.WorkingDirectory, cancellationToken).ConfigureAwait(false);
+        }
+
+        var rules = _autonomy.Tool(tool);
+        if (DryRun)
+        {
+            // A try makes no call, preconditions included; it says what a pin would name, for the person to write it.
+            Recorded?.Invoke(shown);
+            var pin = call.Spec is { } spec ? $" Its pin: hash = \"{AutomationAllowedTool.HashOf(spec)}\"{(spec.Version is { } version ? $", version = \"{version}\"" : string.Empty)}." : string.Empty;
+            return AgentToolCallDecision.Block($"This is a try of the automation: the call of {tool} was recorded and not made.{pin} Go on as if it had succeeded, and say what you would do next.");
+        }
+
+        // What its pin and bounds do not hold, and what the circuit breaker stops, waits for a person; a precondition that
+        // fails stops the call, and is read again after an approval that waited.
+        var held = rules?.CheckPin(call.Spec) ?? rules?.CheckBounds(call.Invocation.Arguments);
+        if (held is null)
+        {
+            if (_breaker.TryTake(_entry.Id, _autonomy.MaxCallsPerHour, _time.GetUtcNow()))
+                return await PreconditionsAsync(rules, call, cancellationToken).ConfigureAwait(false) is { } failed ? NotMade(tool, failed) : AgentToolCallDecision.Allow;
+            held = $"it called its allowed tools {_autonomy.MaxCallsPerHour} times in the last hour, and its circuit breaker asks a person";
+        }
+
+        var decision = await AskAsync(tool, shown, $"The automation '{_entry.Definition.Name}' may not make this call of {tool} by itself: {held}. Allow it once, or deny it.",
+            call.WorkingDirectory, cancellationToken).ConfigureAwait(false);
+        if (decision.BlockMessage is not null) return decision;
+        return await PreconditionsAsync(rules, call, cancellationToken).ConfigureAwait(false) is { } stale ? NotMade(tool, stale) : decision;
+    }
+
+    // Calls the preconditions of an allowed tool, each a tool of the session that reads the target: why one does not hold, or null.
+    private static async Task<string?> PreconditionsAsync(AutomationAllowedTool? rules, AgentToolHookCall call, CancellationToken cancellationToken)
+    {
+        if (rules is null) return null;
+        foreach (var precondition in rules.Preconditions)
+        {
+            if (call.FindTool?.Invoke(precondition.Tool) is not { } tool) return $"{precondition.Tool}, which checks it first, is not a tool of this session";
+            AgentToolResult result;
+            try
             {
-                Recorded?.Invoke(shown);
-                return AgentToolCallDecision.Block($"This is a try of the automation: the call of {tool} was recorded and not made. Go on as if it had succeeded, and say what you would do next.");
+                result = await tool.Handler(call.Invocation with
+                {
+                    ToolName = precondition.Tool, ToolCallId = call.Invocation.ToolCallId + "-precondition", Arguments = precondition.ArgumentsOf(call.Invocation.Arguments),
+                }, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                return $"{precondition.Tool}, which checks it first, failed: {AutomationText.Line(exception.Message, 200)}";
             }
 
-            if (_breaker.TryTake(_entry.Id, _autonomy.MaxCallsPerHour, _time.GetUtcNow())) return AgentToolCallDecision.Allow;
-            reason = $"The automation '{_entry.Definition.Name}' called its allowed tools {_autonomy.MaxCallsPerHour} times in the last hour: its circuit breaker asks a person for this call.";
-        }
-        else
-        {
-            reason = $"The automation '{_entry.Definition.Name}' may not call {tool} by itself: allow this call once, or deny it.";
+            var said = string.Join('\n', result.Items.OfType<AgentToolResultItem.Text>().Select(static item => item.Value));
+            if (!result.Success || !said.Contains(precondition.Expect.Trim(), StringComparison.OrdinalIgnoreCase))
+                return $"{precondition.Tool} did not say “{precondition.Expect.Trim()}”{(result.Success ? string.Empty : ": " + AutomationText.Line(result.Error ?? said, 200))}";
         }
 
-        return await AskAsync(tool, shown, reason, call.WorkingDirectory, cancellationToken).ConfigureAwait(false);
+        return null;
     }
+
+    private static AgentToolCallDecision NotMade(string tool, string why)
+        => AgentToolCallDecision.Block($"The call of {tool} was not made: {why}. Its target is not as it must be to act; say what you found instead.");
 
     private async Task<AgentToolCallDecision> AskAsync(string tool, string shown, string reason, string? folder, CancellationToken cancellationToken)
     {

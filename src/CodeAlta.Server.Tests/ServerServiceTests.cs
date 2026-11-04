@@ -23,7 +23,11 @@ public sealed class ServerServiceTests
         var root = Path.Combine(machine.Root, "data");
         var app = Application(machine, "/home/alice/.dotnet/tools/altaserver", out var output, out var error);
 
-        Assert.AreEqual(ServerExitCodes.Success, await app.RunAsync(["install", "--data-root", root, "--urls", "http://0.0.0.0:2690"]), error.ToString());
+        // Plain HTTP beyond the loopback is refused before a service is installed, unless forced.
+        Assert.AreEqual(ServerExitCodes.InvalidUsage, await app.RunAsync(["install", "--data-root", root, "--urls", "http://0.0.0.0:2690"]));
+        StringAssert.Contains(error.ToString(), "--allow-insecure-http");
+        Assert.AreEqual(0, machine.Commands.Count, "nothing was installed");
+        Assert.AreEqual(ServerExitCodes.Success, await app.RunAsync(["install", "--data-root", root, "--urls", "http://0.0.0.0:2690", "--allow-insecure-http"]), error.ToString());
 
         var name = ServiceDefinition.ServiceName(UpdateProduct.Server, root, defaultProfile: false, developer: false);
         StringAssert.Matches(name, new System.Text.RegularExpressions.Regex("^altaserver-[0-9a-f]{8}$"), "one service per data root");
@@ -32,7 +36,7 @@ public sealed class ServerServiceTests
         StringAssert.Contains(unit, "Description=CodeAlta Server (altaserver)\n");
         StringAssert.Contains(unit, "# Written by altaserver install; altaserver uninstall removes it.");
         StringAssert.Contains(unit, "ExecStart=/home/alice/.dotnet/tools/altaserver run --data-root " + ServiceDefinition.SystemdQuote(new ServerPaths(root).DataRoot, command: true)
-            + " --urls http://0.0.0.0:2690\n");
+            + " --urls http://0.0.0.0:2690 --allow-insecure-http\n");
         StringAssert.Contains(unit, "Environment=DOTNET_ROOT=/home/alice/.dotnet\n");
         StringAssert.Contains(unit, "RestartPreventExitStatus=2\n");
         CollectionAssert.AreEqual(new[]

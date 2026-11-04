@@ -964,7 +964,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 };
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
-                    new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
+                    new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions, placement,
+                        fleetServers is { } waitingServers ? waitingServers.WaitingRunsAsync : null), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
                     // A command a session starts in the background, what it types in a terminal, the command it gives an
                     // automation and the plugin it builds are reviewed by nobody: only a session whose requests are all
                     // approved does any of it. A caller that is no session (a client of the MCP server) has the policy
@@ -1055,7 +1056,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     if (fleet is not null && fleetServers is not null)
                     {
                         // A machine this computer manages joins a server this computer owns, and is approved here.
-                        machinesService.ServerAddress = linkId => fleetServers.Connections.FirstOrDefault(connection => connection.Link.Id == linkId)?.Link.Url;
+                        machinesService.ServerAddress = linkId => fleetServers.Connections.FirstOrDefault(connection => connection.Link.Id == linkId)?.Link.ShareableUrl;
                         // A machine of a team or of the organization lets in who its signed access document names.
                         machinesService.OwnerOfMachine = fleetServers.OwnerOfMachineAsync;
                         // The names of the people a machine lets in, from the servers this computer is linked to.

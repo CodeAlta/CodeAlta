@@ -47,7 +47,17 @@ internal sealed partial class DesktopFleetServers
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public Task<SignInMethodsResponse> GetSignInMethodsAsync(Uri address, CancellationToken cancellationToken)
-        => FleetServerClient.GetSignInMethodsAsync(address, Handler, cancellationToken);
+        => GetSignInMethodsAsync(address, null, cancellationToken);
+
+    /// <summary>Reads the ways a person may sign in to a server that may pin its own certificate.</summary>
+    /// <param name="address">The address of the server.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate; null for one that validates as usual.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The methods.</returns>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer, or presents another certificate than the pinned one.</exception>
+    public Task<SignInMethodsResponse> GetSignInMethodsAsync(Uri address, string? certificatePin, CancellationToken cancellationToken)
+        => FleetServerClient.GetSignInMethodsAsync(address, Handler, certificatePin, cancellationToken);
 
     /// <summary>
     /// Starts a sign-in with a code (GitHub) to join a server: the server asks the provider for the code the person enters;
@@ -62,12 +72,26 @@ internal sealed partial class DesktopFleetServers
     /// <exception cref="DesktopSignInException">Too many sign-ins wait.</exception>
     /// <exception cref="FleetServerException">The server refused, or gave no usable code.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public Task<FleetSignInCode> StartJoinCodeAsync(Uri address, string method, CancellationToken cancellationToken)
+    public Task<FleetSignInCode> StartJoinCodeAsync(Uri address, string method, CancellationToken cancellationToken) => StartJoinCodeAsync(address, method, null, cancellationToken);
+
+    /// <summary>Starts a sign-in with a code (GitHub) to join a server that may pin its own certificate.</summary>
+    /// <param name="address">The address of the server.</param>
+    /// <param name="method">The method; one that uses a device code.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate; null for one that validates as usual.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The code, and its handle.</returns>
+    /// <exception cref="ArgumentException">The method does not use a device code.</exception>
+    /// <exception cref="InvalidOperationException">This computer is linked to that server already.</exception>
+    /// <exception cref="DesktopSignInException">Too many sign-ins wait.</exception>
+    /// <exception cref="FleetServerException">The server refused, or gave no usable code.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<FleetSignInCode> StartJoinCodeAsync(Uri address, string method, string? certificatePin, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(address);
         ObjectDisposedException.ThrowIf(_disposed, this);
         RequireNoLink(address);
-        return StartCodeAsync(new FleetServerClient(address, Identity(), Handler), FleetServerAddress.Format(address), method, FleetSignInPurposes.Enroll, cancellationToken);
+        return StartCodeAsync(new FleetServerClient(address, Identity(), Handler, null, certificatePin), FleetServerAddress.Format(address), method, FleetSignInPurposes.Enroll,
+            cancellationToken);
     }
 
     /// <summary>
@@ -87,6 +111,63 @@ internal sealed partial class DesktopFleetServers
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         return StartCodeAsync(Client(linkId), linkId, method, FleetSignInPurposes.Link, cancellationToken);
+    }
+
+    /// <summary>
+    /// Starts a sign-in with a code (GitHub) by which the person of this computer confirms a dangerous action at a server;
+    /// <see cref="ConfirmSignInAsync"/> with its handle then waits for it.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="method">The method; one that uses a device code.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The code, and its handle.</returns>
+    /// <exception cref="ArgumentException">The method does not use a device code.</exception>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="DesktopSignInException">Too many sign-ins wait.</exception>
+    /// <exception cref="FleetServerException">The server refused, or gave no usable code.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<FleetSignInCode> StartConfirmCodeAsync(string linkId, string method, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return StartCodeAsync(Client(linkId), linkId, method, FleetSignInPurposes.Confirm, cancellationToken);
+    }
+
+    /// <summary>
+    /// The person of this computer signs in again at a server with a method linked to them, through the system browser
+    /// (or, for a method that uses a code, by entering the code of <paramref name="handle"/>), to confirm a dangerous
+    /// action: the single-use confirmation the server gives, which only this computer presents, a few minutes.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="method">The method.</param>
+    /// <param name="handle">The handle <see cref="StartConfirmCodeAsync"/> gave, for a method that uses a code; null otherwise.</param>
+    /// <param name="cancellationToken">Cancels the sign-in.</param>
+    /// <returns>The confirmation.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="DesktopSignInException">The browser did not open, the person cancelled, the code is not one that waits, or the sign-in expired.</exception>
+    /// <exception cref="FleetServerException">The server refused (a method not linked to the person, among others).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<string> ConfirmSignInAsync(string linkId, string method, string? handle, CancellationToken cancellationToken)
+    {
+        CompleteSignInResponse signedIn;
+        if (FleetSignInMethods.UsesDeviceCode(method))
+        {
+            var pending = TakeCode(handle, linkId, method, FleetSignInPurposes.Confirm);
+            try
+            {
+                signedIn = await WaitForCodeAsync(pending, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                Release(pending);
+            }
+        }
+        else
+        {
+            using var client = Client(linkId);
+            signedIn = await SignInThroughBrowserAsync(client, method, FleetSignInPurposes.Confirm, cancellationToken).ConfigureAwait(false);
+        }
+
+        return signedIn.Grant ?? throw new FleetServerException(HttpStatusCode.OK, FleetServerException.HttpErrorCode, null, "The server gave no confirmation.");
     }
 
     /// <summary>Opens, in the browser of the system, the page where the person enters the code of a sign-in that waits.</summary>
@@ -110,14 +191,29 @@ internal sealed partial class DesktopFleetServers
     /// <exception cref="DesktopSignInException">The browser did not open, the person cancelled, the code is not one that waits, or the sign-in expired.</exception>
     /// <exception cref="FleetServerException">The server refused the sign-in or the enrollment.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<(FleetServerLink Link, SignInPersonDto Person)> JoinWithSignInAsync(Uri address, string method, string? handle, CancellationToken cancellationToken)
+    public Task<(FleetServerLink Link, SignInPersonDto Person)> JoinWithSignInAsync(Uri address, string method, string? handle, CancellationToken cancellationToken)
+        => JoinWithSignInAsync(address, method, handle, null, cancellationToken);
+
+    /// <summary>Joins a server that may pin its own certificate by signing in (<see cref="JoinWithSignInAsync(Uri, string, string?, CancellationToken)"/>).</summary>
+    /// <param name="address">The address of the server.</param>
+    /// <param name="method">The method (<see cref="FleetSignInMethods"/>).</param>
+    /// <param name="handle">The handle <see cref="StartJoinCodeAsync(Uri, string, string?, CancellationToken)"/> gave, for a method that uses a code; null otherwise.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate, which the link keeps; null for one that validates as usual.</param>
+    /// <param name="cancellationToken">Cancels the sign-in (the person gave up).</param>
+    /// <returns>The link, pending, and the person who signed in.</returns>
+    /// <exception cref="InvalidOperationException">This computer is linked to that server already.</exception>
+    /// <exception cref="DesktopSignInException">The browser did not open, the person cancelled, the code is not one that waits, or the sign-in expired.</exception>
+    /// <exception cref="FleetServerException">The server refused the sign-in or the enrollment.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<(FleetServerLink Link, SignInPersonDto Person)> JoinWithSignInAsync(Uri address, string method, string? handle, string? certificatePin,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(address);
         ObjectDisposedException.ThrowIf(_disposed, this);
         RequireNoLink(address);
         var identity = Identity();
         var pending = FleetSignInMethods.UsesDeviceCode(method) ? TakeCode(handle, FleetServerAddress.Format(address), method, FleetSignInPurposes.Enroll) : null;
-        using var owned = pending is null ? new FleetServerClient(address, identity, Handler) : null;
+        using var owned = pending is null ? new FleetServerClient(address, identity, Handler, null, certificatePin) : null;
         var client = pending?.Client ?? owned!;
         try
         {
@@ -134,7 +230,7 @@ internal sealed partial class DesktopFleetServers
                 var device = await client.EnrollWithSignInAsync(signedIn.Grant, _deviceName, cancellationToken).ConfigureAwait(false);
                 var now = DateTimeOffset.UtcNow;
                 var link = new FleetServerLink(FleetServerLinkStore.NewId(), FleetServerAddress.Format(address), null, null, identity.DeviceId, device.Kind,
-                    FleetServerLinkStates.Pending, now, now);
+                    FleetServerLinkStates.Pending, now, now, certificatePin ?? pending?.Client.CertificatePin);
                 _store.Save(link);
                 await EnsureConnectionsAsync(cancellationToken).ConfigureAwait(false);
                 return (link, signedIn.Person);
@@ -207,6 +303,73 @@ internal sealed partial class DesktopFleetServers
     {
         using var client = Client(linkId);
         return await client.SetSignInSettingsAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Asks another computer of this computer's person to approve a change of the company sign-in, and waits until it did
+    /// (at most the 10 minutes an approval waits).
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="change">The change, as it will be applied.</param>
+    /// <param name="cancellationToken">Cancels the wait (the person gave up).</param>
+    /// <returns>The id of the approval, to apply the change with.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="DesktopSignInException">The approval did not come before it expired.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<string> ApproveOnAnotherDeviceAsync(string linkId, SetSignInSettingsRequest change, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        var asked = await client.RequestSignInApprovalAsync(change, cancellationToken).ConfigureAwait(false);
+        while (true)
+        {
+            if (DateTimeOffset.UtcNow >= asked.ExpiresAt) throw new DesktopSignInException("sign_in.timeout", "No other computer approved the change in time: start it again.");
+            await Task.Delay(ApprovalPollInterval, cancellationToken).ConfigureAwait(false);
+            SignInApprovalDto read;
+            try
+            {
+                read = await client.GetSignInApprovalAsync(asked.Id, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FleetServerException exception) when (exception.Code == "sign_in.invalid_attempt")
+            {
+                throw new DesktopSignInException("sign_in.timeout", "No other computer approved the change in time: start it again.");
+            }
+
+            if (read.Status == "approved") return asked.Id;
+        }
+    }
+
+    /// <summary>Gets how often a change that waits for an approval is read again.</summary>
+    internal TimeSpan ApprovalPollInterval { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>Lists the changes of the company sign-in that wait for an approval of this computer's person at a server.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approvals other computers of the person ask for.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<IReadOnlyList<SignInApprovalDto>> ListSignInApprovalsAsync(string linkId, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        return [.. (await client.ListSignInApprovalsAsync(cancellationToken).ConfigureAwait(false)).Where(approval => approval.RequesterDeviceId != client.DeviceId && approval.Status == "pending")];
+    }
+
+    /// <summary>Approves from this computer a change of the company sign-in another computer of its person asks for.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="approvalId">The approval.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>A task that completes once approved.</returns>
+    /// <exception cref="KeyNotFoundException">No such link, or no such approval.</exception>
+    /// <exception cref="InvalidOperationException">The change shown is not the one the server would apply: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task ApproveSignInChangeAsync(string linkId, string approvalId, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        var approval = (await client.ListSignInApprovalsAsync(cancellationToken).ConfigureAwait(false)).FirstOrDefault(approval => approval.Id == approvalId)
+            ?? throw new KeyNotFoundException("No change waits for this approval.");
+        await client.ApproveSignInChangeAsync(approval, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Lists the sign-in methods linked to the person of this computer at a server.</summary>

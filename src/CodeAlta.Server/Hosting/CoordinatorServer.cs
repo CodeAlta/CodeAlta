@@ -37,6 +37,18 @@ public sealed class CoordinatorServerOptions
     /// <summary>Gets the password of <see cref="CertificatePath"/>, or <see langword="null"/>.</summary>
     public string? CertificatePassword { get; init; }
 
+    /// <summary>
+    /// Gets whether an <c>http://</c> address beyond the loopback is allowed (<c>--allow-insecure-http</c>): off by default,
+    /// so that a server reached from other machines has TLS, its own or that of what is put in front of it.
+    /// </summary>
+    public bool AllowInsecureHttp { get; init; }
+
+    /// <summary>
+    /// Gets whether the <c>https://</c> addresses use a certificate the server makes once and keeps (<c>--own-certificate</c>),
+    /// when <see cref="CertificatePath"/> names none: no system trusts it, its clients pin its key (<see cref="CoordinatorServer.CertificatePin"/>).
+    /// </summary>
+    public bool OwnCertificate { get; init; }
+
     /// <summary>Gets how long a setup code works.</summary>
     public TimeSpan SetupCodeLifetime { get; init; } = TimeSpan.FromMinutes(30);
 
@@ -116,6 +128,15 @@ public sealed class CoordinatorServerOptions
 
     /// <summary>Gets the thresholds of the health of the machines: how long a problem lasts before its owner is told, how long a machine may be offline.</summary>
     public HealthOptions Health { get; init; } = new();
+
+    /// <summary>Gets the limits of the requests of devices the server does not know yet: setup, sign-in, enrollment, recovery, the hooks' ingress.</summary>
+    public AuthenticationRateLimits RateLimits { get; init; } = new();
+
+    /// <summary>
+    /// Gets the reverse proxies in front of the server whose <c>X-Forwarded-For</c> it believes (<c>--trusted-proxy</c>):
+    /// addresses or networks; empty (the default) to count every request by its peer.
+    /// </summary>
+    public IReadOnlyList<string> TrustedProxies { get; init; } = [];
 }
 
 /// <summary>What a running server writes in its data root, for <c>altaserver status</c>.</summary>
@@ -123,7 +144,8 @@ public sealed class CoordinatorServerOptions
 /// <param name="Urls">The addresses it listens on.</param>
 /// <param name="StartedAt">When it started.</param>
 /// <param name="Version">Its version.</param>
-public sealed record ServerState(int ProcessId, IReadOnlyList<string> Urls, DateTimeOffset StartedAt, string Version);
+/// <param name="CertificatePin">The pin of the certificate of its <c>https://</c> addresses (<see cref="CodeAlta.Fleet.Protocol.FleetServerCertificates"/>), or null.</param>
+public sealed record ServerState(int ProcessId, IReadOnlyList<string> Urls, DateTimeOffset StartedAt, string Version, string? CertificatePin = null);
 
 /// <summary>
 /// CodeAlta Server: one process with Kestrel, the REST API, the control connection, the store and the in-memory
@@ -144,8 +166,9 @@ public sealed class CoordinatorServer : IAsyncDisposable
     private int _disposed;
 
     private CoordinatorServer(WebApplication app, ICoordinatorStore store, FileStream dataRootLock, ServerPaths paths, IReadOnlyList<Uri> addresses, SetupCode? setupCode,
-        ServerTelemetry telemetry)
+        ServerTelemetry telemetry, string? certificatePin)
     {
+        CertificatePin = certificatePin;
         _app = app;
         _store = store;
         _lock = dataRootLock;
@@ -160,6 +183,12 @@ public sealed class CoordinatorServer : IAsyncDisposable
 
     /// <summary>Gets the setup code made at the start of a server without an owner, or <see langword="null"/>.</summary>
     public SetupCode? SetupCode { get; }
+
+    /// <summary>
+    /// Gets the pin of the certificate of the <c>https://</c> addresses (<see cref="CodeAlta.Fleet.Protocol.FleetServerCertificates"/>):
+    /// what a client of a server with its own certificate is given beside the address; null without <c>https://</c>.
+    /// </summary>
+    public string? CertificatePin { get; }
 
     /// <summary>Gets the files of the server.</summary>
     public ServerPaths Paths => _paths;
@@ -201,12 +230,15 @@ public sealed class CoordinatorServer : IAsyncDisposable
         SqliteCoordinatorStore? store = null;
         ServerMetrics? metrics = null;
         ServerTelemetry? telemetry = null;
+        X509Certificate2? certificate = null;
         try
         {
+            var sealer = ServerSecretSealer.Create(paths.KeysRoot);
             store = new SqliteCoordinatorStore(new SqliteCoordinatorStoreOptions
             {
                 DatabasePath = paths.DatabasePath,
                 TimeProvider = options.TimeProvider,
+                Sealer = sealer,
                 ObserveOperation = (operation, duration, failed) => metrics?.StoreOperation(operation, duration, failed),
             });
             var created = store;
@@ -220,7 +252,10 @@ public sealed class CoordinatorServer : IAsyncDisposable
             if (organization is null) setupCode = codes.GetOrCreate(options.SetupCodeLifetime);
             else codes.Consume();
 
-            var app = Build(options, store, codes, telemetry);
+            var urls = options.Urls.Count == 0 ? [CoordinatorServerOptions.DefaultUrl] : options.Urls;
+            ServerBindings.Require(urls, options.AllowInsecureHttp);
+            certificate = Certificate(options, urls, paths, sealer, time);
+            var app = Build(options, urls, store, codes, telemetry, certificate);
             try
             {
                 telemetry.SetLog(app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Telemetry"));
@@ -243,12 +278,14 @@ public sealed class CoordinatorServer : IAsyncDisposable
             }
 
             var addresses = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Select(static address => new Uri(address)).ToArray();
-            var server = new CoordinatorServer(app, store, dataRootLock, paths, addresses, setupCode, telemetry);
+            var server = new CoordinatorServer(app, store, dataRootLock, paths, addresses, setupCode, telemetry,
+                certificate is null ? null : CodeAlta.Fleet.Protocol.FleetServerCertificates.Pin(certificate));
             server.WriteState(time.GetUtcNow());
             return server;
         }
         catch
         {
+            certificate?.Dispose();
             telemetry?.Dispose();
             metrics?.Dispose();
             if (store is not null) await store.DisposeAsync().ConfigureAwait(false);
@@ -342,7 +379,19 @@ public sealed class CoordinatorServer : IAsyncDisposable
         }
     }
 
-    private static WebApplication Build(CoordinatorServerOptions options, SqliteCoordinatorStore store, SetupCodeStore codes, ServerTelemetry telemetry)
+    // The certificate of the https:// addresses: the file the owner gave, or the one the server keeps of its own; none
+    // without https://.
+    private static X509Certificate2? Certificate(CoordinatorServerOptions options, IReadOnlyList<string> urls, ServerPaths paths, ServerSecretSealer sealer, TimeProvider time)
+    {
+        if (!urls.Any(static url => url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))) return null;
+        if (!string.IsNullOrEmpty(options.CertificatePath)) return X509CertificateLoader.LoadPkcs12FromFile(options.CertificatePath, options.CertificatePassword);
+        if (options.OwnCertificate) return ServerOwnCertificate.LoadOrCreate(paths, sealer, time);
+        throw new ArgumentException("An https:// address needs a certificate: --certificate with a file, or --own-certificate for one the server makes and its devices pin.",
+            nameof(options));
+    }
+
+    private static WebApplication Build(CoordinatorServerOptions options, IReadOnlyList<string> urls, SqliteCoordinatorStore store, SetupCodeStore codes, ServerTelemetry telemetry,
+        X509Certificate2? certificate)
     {
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ContentRootPath = AppContext.BaseDirectory, Args = [] });
         if (options.ConfigureLogging is not null)
@@ -359,19 +408,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
         // The records of the log also go to the collector, when the telemetry sends logs.
         builder.Logging.AddProvider(telemetry.Runtime);
 
-        var urls = options.Urls.Count == 0 ? [CoordinatorServerOptions.DefaultUrl] : options.Urls;
-        foreach (var url in urls)
+        if (certificate is not null)
         {
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
-            {
-                throw new ArgumentException($"'{url}' is not an http:// or https:// address.", nameof(options));
-            }
-        }
-
-        if (urls.Any(static url => url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
-        {
-            if (string.IsNullOrEmpty(options.CertificatePath)) throw new ArgumentException("An https:// address needs a certificate (--certificate).", nameof(options));
-            var certificate = X509CertificateLoader.LoadPkcs12FromFile(options.CertificatePath, options.CertificatePassword);
             builder.WebHost.UseKestrelHttpsConfiguration();
             builder.WebHost.ConfigureKestrel(kestrel => kestrel.ConfigureHttpsDefaults(https => https.ServerCertificate = certificate));
         }
@@ -417,6 +455,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton(telemetry);
         services.AddSingleton(metrics);
         services.AddSingleton(new NonceCache(time, options.MaxClockSkew * 2 + TimeSpan.FromMinutes(1)));
+        services.AddSingleton(new AuthenticationRateLimiter(options.RateLimits, time));
+        services.AddSingleton(new TrustedProxies(options.TrustedProxies));
         services.AddSingleton(provider => new RequestAuthenticator(store, provider.GetRequiredService<NonceCache>(), time, options.MaxClockSkew) { Metrics = metrics });
         services.AddSingleton<PresenceRegistry>();
         services.AddSingleton(new DirectoryVisibility(store, store, time));
@@ -435,7 +475,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton(provider => new DeviceService(store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<RelayHub>())
         {
-            Metrics = metrics, SignInGrants = provider.GetRequiredService<SignInAttempts>(), SignInStore = store,
+            Metrics = metrics, SignInGrants = provider.GetRequiredService<SignInAttempts>(), SignInStore = store, RateLimiter = provider.GetRequiredService<AuthenticationRateLimiter>(),
             // A device approved or revoked: the computers of owners key their grants of sealed content again for the devices of the grantees.
             DevicesChanged = organization => provider.GetRequiredService<AccessService>().Changed(organization),
         });
@@ -464,7 +504,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         {
             var access = new AccessService(store, store, store, provider.GetRequiredService<NotificationService>(), time)
             {
-                Visibility = provider.GetRequiredService<DirectoryVisibility>(),
+                Visibility = provider.GetRequiredService<DirectoryVisibility>(), OnCall = store, Logins = store,
             };
             var devices = provider.GetRequiredService<DeviceService>();
             var presence = provider.GetRequiredService<PresenceRegistry>();
@@ -487,8 +527,10 @@ public sealed class CoordinatorServer : IAsyncDisposable
             Access = store,
             // The approvals of an automation go to its owner, the members of the team that owns it, and who is granted them.
             Notifications = provider.GetRequiredService<NotificationService>(),
-            ApprovalRecipients = (automation, token) => provider.GetRequiredService<AccessService>().ApproversOfAsync(automation.OrganizationId, automation.AutomationId,
-                automation.OwnerPersonId, token),
+            ApprovalRecipients = (automation, run, token) => provider.GetRequiredService<AccessService>().ApproversOfAsync(automation.OrganizationId, automation.AutomationId,
+                automation.OwnerPersonId, run?.Approvers, run?.OnCall, token),
+            MayTakeOver = (automation, person, token) => provider.GetRequiredService<AccessService>().ApprovesAsync(automation.OrganizationId, automation.AutomationId,
+                automation.OwnerPersonId, person, token),
         });
         services.AddSingleton(provider => new HookService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Hooks")));
@@ -512,6 +554,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
         app.UseStatusCodePages();
         app.UseWebSockets();
         app.UseRouting();
+        // Before the body is read or a signature checked: a flood costs the server as little as possible.
+        app.UseMiddleware<RateLimitMiddleware>();
         app.UseMiddleware<DeviceAuthenticationMiddleware>();
         app.MapOpenApi();
         ApiEndpoints.Map(app);
@@ -543,7 +587,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
 
     private void WriteState(DateTimeOffset startedAt)
     {
-        var state = new ServerState(Environment.ProcessId, Addresses.Select(static address => address.ToString().TrimEnd('/')).ToArray(), startedAt, ServerVersion.Current);
+        var state = new ServerState(Environment.ProcessId, Addresses.Select(static address => address.ToString().TrimEnd('/')).ToArray(), startedAt, ServerVersion.Current,
+            CertificatePin);
         var temporary = _paths.StatePath + ".tmp";
         File.WriteAllText(temporary, JsonSerializer.Serialize(state, ServerStateJsonContext.Default.ServerState));
         File.Move(temporary, _paths.StatePath, overwrite: true);

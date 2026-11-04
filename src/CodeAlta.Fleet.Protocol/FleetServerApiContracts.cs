@@ -267,14 +267,19 @@ public sealed record AddMetadataKeyWrapsRequest(IReadOnlyList<MetadataKeyWrapDto
 /// the server route).
 /// </summary>
 /// <param name="Settings">The signed setting, or null when the fleet has none.</param>
-/// <param name="ServerHeaders">The headers the server sends to the collector on the server route, or null.</param>
+/// <param name="ServerHeaders">
+/// The names of the headers the server sends to the collector on the server route, each with an empty value: the server
+/// never gives their values back. Null for none.
+/// </param>
 /// <param name="UpdatedAt">When it was last set, or null.</param>
 public sealed record TelemetrySettingsDto(FleetSignedTelemetrySettings? Settings, IReadOnlyDictionary<string, string>? ServerHeaders, DateTimeOffset? UpdatedAt);
 
 /// <summary>The body of <c>PUT /api/v1/telemetry</c>: a setting the calling controller device signed, numbered after the one held.</summary>
 /// <param name="Settings">The signed setting.</param>
 /// <param name="ServerHeaders">The headers the server sends to the collector on the server route (API keys); never pushed to machines.</param>
-public sealed record SetTelemetrySettingsRequest(FleetSignedTelemetrySettings Settings, IReadOnlyDictionary<string, string>? ServerHeaders = null);
+/// <param name="KeepServerHeaders">The names of headers of the server route the server holds whose values it keeps, as the owner does not know them.</param>
+public sealed record SetTelemetrySettingsRequest(FleetSignedTelemetrySettings Settings, IReadOnlyDictionary<string, string>? ServerHeaders = null,
+    IReadOnlyList<string>? KeepServerHeaders = null);
 
 /// <summary>A machine in an update campaign.</summary>
 /// <param name="DeviceId">The device of the node.</param>

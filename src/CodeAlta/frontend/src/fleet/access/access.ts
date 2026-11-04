@@ -1,7 +1,18 @@
 // The logic of Settings > Fleet > People and access, without DOM: what waits for the person, which roles they may give, what a
 // grant may name, and how the page stays simple at home (doc/fleet/access-control.md, "At home").
-import type { FleetAccessOverview, FleetAccessOwnerView, FleetAccessPersonView, FleetAccessTransferView } from "#neoastra";
+import type { FleetAccessOnCallView, FleetAccessOverview, FleetAccessOwnerView, FleetAccessPersonView, FleetAccessTransferView } from "#neoastra";
 import type { MessageKey } from "../../localization";
+
+/** The lengths of a turn on call a team chooses from, in hours. */
+export const shiftChoices: readonly number[] = [8, 12, 24, 168];
+
+/** What the on-call rotation of a team says on its row: who is on call now and until when, then the turns. */
+export function onCallSummary(onCall: FleetAccessOnCallView, say: (key: MessageKey, values?: Readonly<Record<string, string | number>>) => string, locale: string): string {
+  const until = onCall.until ? new Date(onCall.until).toLocaleString(locale, { weekday: "short", hour: "2-digit", minute: "2-digit" }) : null;
+  const now = onCall.onCallNow ? until ? say("On call now: {name}, until {time}", { name: onCall.onCallNow, time: until }) : say("On call now: {name}", { name: onCall.onCallNow })
+    : say("No one of its rotation is in the team now");
+  return `${now} · ${say("turns of {hours} hours: {names}", { hours: onCall.shiftHours, names: onCall.people.join(", ") })}`;
+}
 
 /** The roles of the organization, from the widest, with their names on the page. */
 export const roleLabels: Readonly<Record<string, MessageKey>> = Object.freeze({

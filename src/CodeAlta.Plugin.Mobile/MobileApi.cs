@@ -289,6 +289,44 @@ internal sealed partial class MobileApi(IPluginAltaService alta, MobileSessions 
         return new JsonObject { ["ok"] = result.Error is null, ["mode"] = mode, ["error"] = result.Error };
     }
 
+    /// <summary>
+    /// The runs that wait for the user: of this computer, and of the machines of their servers that told them, such as a run
+    /// of a team they are in. Each says what takes it over.
+    /// </summary>
+    internal async Task<JsonObject> WaitingAsync(CancellationToken cancellationToken)
+    {
+        var result = await MobileAlta.RunAsync(alta, ["automation", "waiting"], null, cancellationToken).ConfigureAwait(false);
+        var runs = new JsonArray();
+        foreach (var record in result.OfType("alta.automation.waiting"))
+        {
+            runs.Add(new JsonObject
+            {
+                ["runId"] = MobileAlta.Text(record, "runId"), ["automationId"] = MobileAlta.Text(record, "automationId"), ["name"] = MobileAlta.Text(record, "name"),
+                ["machineId"] = MobileAlta.Text(record, "machineId"), ["machine"] = MobileAlta.Text(record, "machine"), ["sessionId"] = MobileAlta.Text(record, "sessionId"),
+                ["since"] = MobileAlta.Text(record, "since"),
+            });
+        }
+
+        return new JsonObject { ["runs"] = runs, ["error"] = result.Error };
+    }
+
+    /// <summary>
+    /// Takes a run that waits over for the user: <c>{ runId, machineId?, automationId? }</c>, a run of a machine of a server
+    /// naming both; the computer signs it and the server and the machine check that the user may.
+    /// </summary>
+    internal async Task<JsonObject> TakeOverRunAsync(JsonObject body, CancellationToken cancellationToken)
+    {
+        var runId = MobileAlta.Text(body, "runId");
+        var machineId = MobileAlta.Text(body, "machineId");
+        var automationId = MobileAlta.Text(body, "automationId");
+        if (!IsId(runId) || machineId is not null && !IsId(machineId) || automationId is not null && !IsId(automationId) || (machineId is null) != (automationId is null))
+            return new JsonObject { ["ok"] = false, ["error"] = "The run is not named." };
+        List<string> args = ["automation", "takeover", runId!];
+        if (machineId is not null) args.AddRange(["--machine", machineId, "--automation", automationId!]);
+        var result = await MobileAlta.RunAsync(alta, args, null, cancellationToken).ConfigureAwait(false);
+        return new JsonObject { ["ok"] = result.Error is null, ["error"] = result.Error };
+    }
+
     /// <summary>Stops the running turn, as the desktop's Abort.</summary>
     internal async Task<JsonObject?> AbortAsync(string id, CancellationToken cancellationToken)
     {

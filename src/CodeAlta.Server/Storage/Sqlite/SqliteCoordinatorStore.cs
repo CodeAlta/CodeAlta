@@ -29,6 +29,12 @@ public sealed class SqliteCoordinatorStoreOptions
     /// (for a write, its wait in the queue included) and whether it failed; null for nothing.
     /// </summary>
     public Action<string, TimeSpan, bool>? ObserveOperation { get; init; }
+
+    /// <summary>
+    /// Gets what seals the secrets the server uses itself (the company's client secret, the collector's headers) before
+    /// they are written; null for a store that writes none (a tool beside the server), which refuses to write one.
+    /// </summary>
+    public ServerSecretSealer? Sealer { get; init; }
 }
 
 /// <summary>
@@ -44,6 +50,8 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
 {
     private const string MigrationResourcePrefix = "CodeAlta.Server.Storage.Sqlite.Migrations.";
     private const string FactsStream = "facts";
+    private const string ClientSecretPurpose = "sign_in.company_client_secret";
+    private const string ServerHeadersPurpose = "telemetry.server_headers";
     private const string InventoryStream = "inventory";
 
     private readonly SqliteCoordinatorStoreOptions _options;
@@ -115,6 +123,7 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
                 Execute(writer, null, "PRAGMA foreign_keys=ON;");
                 Execute(writer, null, "PRAGMA busy_timeout=5000;");
                 Migrate(writer);
+                SealSecretsKeptInClear(writer);
             }
             catch
             {
@@ -643,9 +652,9 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
     {
         ArgumentException.ThrowIfNullOrEmpty(organizationId);
         return ReadAsync(connection => QuerySingle(connection, null,
-            "SELECT organization_id, seq, payload, signature, signer_device_id, server_headers, updated_at FROM telemetry_settings WHERE organization_id = $org",
-            static reader => new TelemetrySettingsRecord(reader.GetString(0), reader.GetInt64(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
-                GetNullableString(reader, 5), FromTime(reader.GetInt64(6))), ("$org", organizationId)), cancellationToken);
+            "SELECT organization_id, seq, payload, signature, signer_device_id, server_headers_sealed, updated_at FROM telemetry_settings WHERE organization_id = $org",
+            reader => new TelemetrySettingsRecord(reader.GetString(0), reader.GetInt64(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                Unseal(GetNullableString(reader, 5), ServerHeadersPurpose, reader.GetString(0)), FromTime(reader.GetInt64(6))), ("$org", organizationId)), cancellationToken);
     }
 
     /// <inheritdoc />
@@ -653,17 +662,18 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(audit);
+        var headers = Seal(settings.ServerHeaders, ServerHeadersPurpose, settings.OrganizationId);
         return WriteAsync((connection, transaction) =>
         {
             // A setting replaces only an older one: two owners that sign at once do not undo each other silently.
             var changed = Execute(connection, transaction,
-                "INSERT INTO telemetry_settings (organization_id, seq, payload, signature, signer_device_id, server_headers, updated_at) " +
+                "INSERT INTO telemetry_settings (organization_id, seq, payload, signature, signer_device_id, server_headers_sealed, updated_at) " +
                 "VALUES ($org, $seq, $payload, $signature, $signer, $headers, $at) " +
                 "ON CONFLICT (organization_id) DO UPDATE SET seq = excluded.seq, payload = excluded.payload, signature = excluded.signature, " +
-                "signer_device_id = excluded.signer_device_id, server_headers = excluded.server_headers, updated_at = excluded.updated_at " +
+                "signer_device_id = excluded.signer_device_id, server_headers = NULL, server_headers_sealed = excluded.server_headers_sealed, updated_at = excluded.updated_at " +
                 "WHERE telemetry_settings.seq < excluded.seq",
                 ("$org", settings.OrganizationId), ("$seq", settings.Sequence), ("$payload", settings.Payload), ("$signature", settings.Signature),
-                ("$signer", settings.SignerDeviceId), ("$headers", settings.ServerHeaders), ("$at", ToTime(settings.UpdatedAt)));
+                ("$signer", settings.SignerDeviceId), ("$headers", headers), ("$at", ToTime(settings.UpdatedAt)));
             if (changed == 0) return false;
             AppendAudit(connection, transaction, audit);
             return true;
@@ -990,6 +1000,54 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
             item.Run(connection);
         }
     }
+
+    // What a version before the migration "sealed_secrets" kept in clear is sealed at the start, in one transaction, and
+    // the clear text is overwritten in the file (secure_delete) and gone from the write-ahead log (a checkpoint that
+    // truncates it). Without a sealer it waits for the next start of a server.
+    private void SealSecretsKeptInClear(SqliteConnection connection)
+    {
+        if (_options.Sealer is not { } sealer) return;
+        var secrets = QueryList(connection, null, "SELECT organization_id, company_client_secret FROM sign_in_settings WHERE company_client_secret IS NOT NULL",
+            static reader => (Organization: reader.GetString(0), Value: reader.GetString(1)));
+        var headers = QueryList(connection, null, "SELECT organization_id, server_headers FROM telemetry_settings WHERE server_headers IS NOT NULL",
+            static reader => (Organization: reader.GetString(0), Value: reader.GetString(1)));
+        if (secrets.Count == 0 && headers.Count == 0) return;
+        Execute(connection, null, "PRAGMA secure_delete=ON;");
+        try
+        {
+            using (var transaction = connection.BeginTransaction())
+            {
+                foreach (var (organization, value) in secrets)
+                {
+                    Execute(connection, transaction, "UPDATE sign_in_settings SET company_client_secret_sealed = $sealed, company_client_secret = NULL WHERE organization_id = $org",
+                        ("$sealed", sealer.Seal(value, ClientSecretPurpose, organization)), ("$org", organization));
+                }
+
+                foreach (var (organization, value) in headers)
+                {
+                    Execute(connection, transaction, "UPDATE telemetry_settings SET server_headers_sealed = $sealed, server_headers = NULL WHERE organization_id = $org",
+                        ("$sealed", sealer.Seal(value, ServerHeadersPurpose, organization)), ("$org", organization));
+                }
+
+                transaction.Commit();
+            }
+
+            Execute(connection, null, "PRAGMA wal_checkpoint(TRUNCATE);");
+        }
+        finally
+        {
+            Execute(connection, null, "PRAGMA secure_delete=OFF;");
+        }
+    }
+
+    // A secret is written sealed, never in clear: a store without a sealer refuses it.
+    private string? Seal(string? value, string purpose, string organizationId)
+    {
+        if (value is null) return null;
+        return (_options.Sealer ?? throw new InvalidOperationException("This store has no sealer: it does not write the secrets of the server.")).Seal(value, purpose, organizationId);
+    }
+
+    private string? Unseal(string? sealedValue, string purpose, string organizationId) => _options.Sealer?.Unseal(sealedValue, purpose, organizationId);
 
     private void Migrate(SqliteConnection connection)
     {

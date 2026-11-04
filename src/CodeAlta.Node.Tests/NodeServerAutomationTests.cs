@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Buffers.Text;
 using CodeAlta.Automations;
 using CodeAlta.Fleet.Identity;
@@ -123,6 +124,14 @@ public sealed class NodeServerAutomationTests
             Assert.AreEqual("no run of this automation with autonomy is in progress with this id", automations.TakeOverFromServer(link, list, setup.Organization.Id, takeOver));
             StringAssert.Contains(automations.TakeOverFromServer(link, list, setup.Organization.Id, takeOver with { Signature = request.Signature }), "signature");
 
+            // A try asked through the server is a dry run of the automation on this machine.
+            var tryId = Guid.CreateVersion7().ToString("N");
+            var tryRequest = FleetAutomationSigning.SignRun(desktopKey, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, setup.Organization.Id, Id, nodeId,
+                tryId, string.Empty, string.Empty, clock.Now) { Action = FleetAutomationRunRequest.TryAction });
+            var tried = await automations.RunFromServerAsync(link, list, setup.Organization.Id, tryRequest, token);
+            Assert.AreEqual((tryId, AutomationService.TryTrigger, (string?)null), (tried.Run?.Id, tried.Run?.Trigger, tried.Refused));
+            await WaitForAsync(() => Task.FromResult(automations.Engine.Runs(Id, 50).FirstOrDefault(run => run.Id == tryId && !run.InProgress)), token);
+
             // Run now while a budget of the machine holds new runs: the machine answers at once that the run waits for Continue
             // anyway, and reports it so to the server, which the desktop reads; continued, the run goes on.
             var decision = new TaskCompletionSource<CodeAlta.Fleet.Server.FleetBudgetAdmission>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -168,6 +177,30 @@ public sealed class NodeServerAutomationTests
             await servers.DisposeAsync();
             if (server is not null) await server.DisposeAsync();
         }
+    }
+
+    [TestMethod]
+    public void AnotherPersonTakesARunOver_WhenTheSignedAccessDocumentSaysSo()
+    {
+        var access = FleetAccessState.Empty with
+        {
+            Teams = new Dictionary<string, FleetAccessTeam> { ["infra"] = new("infra", ["mia"], ["max"], false) }.ToImmutableDictionary(StringComparer.Ordinal),
+            Machines = new Dictionary<string, string> { ["team-node"] = "infra" }.ToImmutableDictionary(StringComparer.Ordinal),
+            Suspended = ["old"],
+            Approvers = FleetAccessState.ApproversOf([new FleetAccessApprovers("a1", ["oncall", "old", "temp"])]),
+            ApproversUntil = FleetAccessState.UntilOf([new FleetAccessApprovers("a1", ["temp"]) { Until = new Dictionary<string, DateTimeOffset> { ["temp"] = Noon.AddHours(1) } }]),
+        };
+        var takeOver = new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, "org", "a1", "node", "run-1", "d", "k", Noon) { Action = FleetAutomationRunRequest.TakeOverAction };
+
+        Assert.IsTrue(NodeAutomations.MayTakeOver(access, "node", takeOver, "oncall", Noon), "an approver the document names");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver with { AutomationId = "a2" }, "oncall", Noon), "for that automation only");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver, "old", Noon), "a suspended person");
+        Assert.IsTrue(NodeAutomations.MayTakeOver(access, "team-node", takeOver with { AutomationId = "a2" }, "max", Noon), "a member of the team of a team machine");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver with { AutomationId = "a2" }, "max", Noon), "not on a machine of another");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver with { Action = null }, "oncall", Noon), "a run by hand stays the owner's");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(null, "node", takeOver, "oncall", Noon), "no document: nobody else");
+        Assert.IsTrue(NodeAutomations.MayTakeOver(access, "node", takeOver, "temp", Noon.AddMinutes(59)), "granted until a time, before it");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver, "temp", Noon.AddHours(1)), "and not from it, by the clock of the machine");
     }
 
     [TestMethod]

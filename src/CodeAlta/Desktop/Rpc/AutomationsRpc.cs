@@ -323,16 +323,24 @@ internal sealed class AutomationsService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null);
         if (!AutomationDefinition.IsId(request.Id) || !Identifier(request.RunId)) return new("invalid_request", null, null);
-        if (_automations!.Snapshot.Find(request.Id) is not { } entry) return new("not_found", null, null);
-        if (entry.Definition.RunsOn is not null)
-        {
-            if (_placement is null) return new("refused", "Its machine is reached from no fleet here.", null);
-            var problem = await _placement.TakeOverAsync(entry, request.RunId, cancellationToken).ConfigureAwait(false);
-            return problem is null ? new("ok", null, null) : new("refused", problem, null);
-        }
+        var (status, message, sessionId) = await AutomationTakeOvers.TakeOverAsync(_automations!, _placement, request.Id, request.RunId, cancellationToken).ConfigureAwait(false);
+        return new(status, message, sessionId);
+    }
 
-        return _automations.TakeOver(request.RunId) is { } sessionId ? new("ok", null, sessionId)
-            : new("refused", "This run is not in progress, or its automation does not decide what its runs do without a person.", null);
+    /// <summary>
+    /// Takes a run that waits on a machine of a server over, by the ids of the message of that server: for a person who answers
+    /// the approvals of an automation without having placed it (a member of the team that owns it, a person granted to approve
+    /// it), as for its owner. The server and the machine check who may.
+    /// </summary>
+    [NeoRpcMethod("takeOverOnMachine")]
+    public async Task<AutomationTakeOverResponse> TakeOverOnMachineAsync(AutomationTakeOverOnMachineRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (!AutomationDefinition.IsId(request.Id) || !Identifier(request.MachineId) || !Identifier(request.RunId)) return new("invalid_request", null, null);
+        if (_placement is null) return new("refused", "Its machine is reached from no fleet here.", null);
+        var problem = await _placement.TakeOverAsync(request.Id, request.MachineId, request.RunId, cancellationToken).ConfigureAwait(false);
+        return problem is null ? new("ok", null, null) : new("refused", problem, null);
     }
 
     /// <summary>The next times a trigger being written would be due, or what is wrong with it.</summary>
@@ -444,7 +452,27 @@ internal sealed class AutomationsService
     private static bool Identifier(string? value) => value is { Length: > 0 and <= 256 } && !value.Any(char.IsControl);
 
     private static AutomationAutonomyItem? Autonomy(AutomationAutonomy? autonomy)
-        => autonomy is null ? null : new(autonomy.AllowedTools, autonomy.MaxCallsPerHour, autonomy.ApprovalTimeout, autonomy.OnTimeout, autonomy.Approvers);
+        => autonomy is null ? null : new(autonomy.AllowedTools, autonomy.MaxCallsPerHour, autonomy.ApprovalTimeout, autonomy.OnTimeout, autonomy.Approvers)
+        {
+            Tools = autonomy.Tools.Count == 0 ? null : [.. autonomy.Tools.Select(static tool => new AutomationAllowedToolItem(tool.Name, tool.Version, tool.Hash,
+                [.. tool.Bounds.Select(static bound => new AutomationToolBoundItem(bound.Argument, bound.Values, Decimal(bound.Min), Decimal(bound.Max)))],
+                [.. tool.Preconditions.Select(static precondition => new AutomationToolPreconditionItem(precondition.Tool, precondition.Arguments, precondition.Expect))]))],
+            OnCall = autonomy.OnCall is { } onCall ? new AutomationOnCallItem(onCall.Source, onCall.Schedule, onCall.Token, onCall.Region) : null,
+        };
+
+    // A bound as the page shows it, as a decimal: one beyond what a decimal holds (7.9e28) is none a person writes for an argument.
+    private static decimal? Decimal(double? value) => value is { } number && double.IsFinite(number) && Math.Abs(number) < 7.9e27 ? (decimal)number : null;
+
+    // What the page gives back of the tools an autonomy describes, for those it still allows.
+    private static IReadOnlyList<AutomationAllowedTool> Tools(AutomationAutonomyItem autonomy)
+        => [.. (autonomy.Tools ?? []).Where(tool => tool is not null && (autonomy.AllowedTools ?? []).Contains(tool.Name, StringComparer.Ordinal)).Select(static tool =>
+            new AutomationAllowedTool(tool.Name.Trim())
+            {
+                Version = Blank(tool.Version), Hash = Blank(tool.Hash)?.ToLowerInvariant(),
+                Bounds = [.. (tool.Bounds ?? []).Select(static bound => new AutomationToolBound(bound.Argument) { Values = bound.Values, Min = (double?)bound.Min, Max = (double?)bound.Max })],
+                Preconditions = [.. (tool.Preconditions ?? []).Select(static precondition =>
+                    new AutomationToolPrecondition(precondition.Tool) { Arguments = precondition.Arguments ?? [], Expect = precondition.Expect ?? string.Empty })],
+            }).Where(static tool => tool.HasDetails)];
 
     private static AutomationRunItem Run(AutomationRun run)
         => new(run.Id, run.AutomationId, run.Name, run.SessionId, run.ProjectId, run.StartedAt, run.EndedAt, run.Trigger, run.Detail, run.Status, run.Message)
@@ -518,6 +546,9 @@ internal sealed class AutomationsService
                 ApprovalTimeout = autonomy.ApprovalTimeout,
                 OnTimeout = Blank(autonomy.OnTimeout) ?? AutomationAutonomy.StopOnTimeout,
                 Approvers = Blank(autonomy.Approvers) ?? AutomationAutonomy.OwnerApprovers,
+                Tools = Tools(autonomy),
+                OnCall = autonomy.OnCall is { } onCall && autonomy.Approvers == AutomationAutonomy.OnCallApprovers
+                    ? new AutomationOnCall(onCall.Source.Trim(), onCall.Schedule.Trim(), onCall.Token.Trim()) { Region = Blank(onCall.Region) } : null,
             } : null,
             CatchUp = input.CatchUp,
             Triggers = triggers,
@@ -695,7 +726,40 @@ internal sealed record AutomationItem(string Id, string Name, bool Enabled, stri
 /// <param name="ApprovalTimeout">How many minutes an approval waits; null for as long as it takes.</param>
 /// <param name="OnTimeout"><c>stop</c> or <c>wait</c>.</param>
 /// <param name="Approvers"><c>owner</c>.</param>
-internal sealed record AutomationAutonomyItem(IReadOnlyList<string> AllowedTools, int? MaxCallsPerHour, int? ApprovalTimeout, string OnTimeout, string Approvers);
+internal sealed record AutomationAutonomyItem(IReadOnlyList<string> AllowedTools, int? MaxCallsPerHour, int? ApprovalTimeout, string OnTimeout, string Approvers)
+{
+    /// <summary>Gets what the allowed tools that say more than their name are pinned to and bounded by; null for none.</summary>
+    public IReadOnlyList<AutomationAllowedToolItem>? Tools { get; init; }
+
+    /// <summary>Gets the schedule of the on-call tool its runs read who is on call from; null for the rotation of its team.</summary>
+    public AutomationOnCallItem? OnCall { get; init; }
+}
+
+/// <param name="Source"><c>incident_io</c>, <c>pagerduty</c> or <c>opsgenie</c>.</param>
+/// <param name="Schedule">The id of the schedule in that tool.</param>
+/// <param name="Token">The <c>${secret:NAME}</c> reference of its token.</param>
+/// <param name="Region">For Opsgenie, <c>eu</c> or <c>us</c>; null for the United States.</param>
+internal sealed record AutomationOnCallItem(string Source, string Schedule, string Token, string? Region);
+
+/// <summary>An allowed tool that says more than its name.</summary>
+/// <param name="Name">The tool.</param>
+/// <param name="Version">The version of its server it is pinned to; null for any.</param>
+/// <param name="Hash">The hash of its definition it is pinned to; null for any.</param>
+/// <param name="Bounds">The bounds of its arguments.</param>
+/// <param name="Preconditions">The tools it calls first.</param>
+internal sealed record AutomationAllowedToolItem(string Name, string? Version, string? Hash, IReadOnlyList<AutomationToolBoundItem> Bounds,
+    IReadOnlyList<AutomationToolPreconditionItem> Preconditions);
+
+/// <param name="Argument">The argument.</param>
+/// <param name="Values">The values it may take; null for any.</param>
+/// <param name="Min">The least number; null for none.</param>
+/// <param name="Max">The greatest number; null for none.</param>
+internal sealed record AutomationToolBoundItem(string Argument, IReadOnlyList<string>? Values, decimal? Min, decimal? Max);
+
+/// <param name="Tool">The tool it calls.</param>
+/// <param name="Arguments">The arguments of the call it passes on.</param>
+/// <param name="Expect">What its answer must contain.</param>
+internal sealed record AutomationToolPreconditionItem(string Tool, IReadOnlyList<string> Arguments, string Expect);
 
 /// <summary>Where an automation that runs on a paired machine stands there.</summary>
 /// <param name="MachineId">The machine.</param>
@@ -760,6 +824,11 @@ internal sealed record AutomationRunItem(string Id, string AutomationId, string?
 /// <param name="Id">The automation.</param>
 /// <param name="RunId">Its run in progress.</param>
 internal sealed record AutomationTakeOverRequest(string? ExpectedEpoch, string Id, string RunId);
+
+/// <param name="Id">The automation.</param>
+/// <param name="MachineId">The machine that runs it.</param>
+/// <param name="RunId">Its run that waits.</param>
+internal sealed record AutomationTakeOverOnMachineRequest(string? ExpectedEpoch, string Id, string MachineId, string RunId);
 
 /// <param name="Message">Why the run was not taken over.</param>
 /// <param name="SessionId">The session of the run to open, for a run of this computer; null for a run of another machine.</param>

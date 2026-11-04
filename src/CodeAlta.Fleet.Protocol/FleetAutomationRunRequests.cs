@@ -34,6 +34,12 @@ public sealed record FleetAutomationRunRequest(
     public const string TakeOverAction = "takeover";
 
     /// <summary>
+    /// The action of a request that tries the automation (<see cref="Action"/>): a dry run, whose tools it calls by itself are
+    /// replaced by fakes that record their calls on the run instead of making them.
+    /// </summary>
+    public const string TryAction = "try";
+
+    /// <summary>
     /// Gets what the request asks of the run: null to run the automation now (the run takes <see cref="RunId"/>), or
     /// <see cref="TakeOverAction"/> to take the run in progress with <see cref="RunId"/> over: what it waits for waits for
     /// that person, and no approval stops it any more. The signature covers it: one request is never the other. Not
@@ -111,7 +117,7 @@ public static class FleetAutomationRunRequestDocuments
             return false;
         }
 
-        if (read.Action is not (null or FleetAutomationRunRequest.TakeOverAction))
+        if (read.Action is not (null or FleetAutomationRunRequest.TakeOverAction or FleetAutomationRunRequest.TryAction))
         {
             reason = "the action of the run request is not known";
             return false;
@@ -140,22 +146,24 @@ public static class FleetAutomationRunRequestDocuments
         => TryVerify(signed, devices, organizationId, machineId, now, null, out request, out reason);
 
     /// <summary>
-    /// Verifies a request for a machine of an organization, as <see cref="TryVerify(FleetSignedAutomationRunRequest?, FleetDeviceListState, string?, string?, DateTimeOffset, out FleetAutomationRunRequest?, out string?)"/>
-    /// does, with the rule of who may ask it: on a machine of a team, the maintainers of the team for its automations, as the
-    /// access document the machine verified says.
+    /// Verifies a request as <see cref="TryVerify(FleetSignedAutomationRunRequest?, FleetDeviceListState, string?, string?, DateTimeOffset, out FleetAutomationRunRequest?, out string?)"/>
+    /// does, with the rule of the machine of who may make it in the place of the owner of the machine: on a machine of a team, the
+    /// maintainers of the team for its automations, or an approver of the automation the signed access document names, taking
+    /// a run over, as the access document the machine verified says.
     /// </summary>
     /// <param name="signed">The signed request.</param>
     /// <param name="devices">The device list as the machine verified and anchored it.</param>
     /// <param name="organizationId">The organization of the server the machine is linked to.</param>
     /// <param name="machineId">The device of the machine that verifies.</param>
     /// <param name="now">The time of the machine.</param>
-    /// <param name="mayAsk">Says whether the person of the signing device may ask it; null for the person the device list names for the machine.</param>
+    /// <param name="mayAsk">Says whether the person of the signing device may make the request read; null for the person the device list
+    /// names for the machine only.</param>
     /// <param name="request">The request, when it verifies.</param>
     /// <param name="reason">Why it does not verify, or null.</param>
     /// <returns>Whether it verifies.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
     public static bool TryVerify(FleetSignedAutomationRunRequest? signed, FleetDeviceListState devices, string? organizationId, string? machineId, DateTimeOffset now,
-        Func<string?, bool>? mayAsk, [NotNullWhen(true)] out FleetAutomationRunRequest? request, [NotNullWhen(false)] out string? reason)
+        Func<FleetAutomationRunRequest, string, bool>? mayAsk, [NotNullWhen(true)] out FleetAutomationRunRequest? request, [NotNullWhen(false)] out string? reason)
     {
         ArgumentNullException.ThrowIfNull(devices);
         request = null;
@@ -168,7 +176,8 @@ public static class FleetAutomationRunRequestDocuments
         if ((now - read.Time).Duration() > MaxSkew) return Refuse("the run request was signed too long ago, or in the future", out reason);
         if (!devices.Members.TryGetValue(read.SignerDeviceId, out var signer) || signer.Kind != FleetDeviceKinds.Controller || devices.Removed.Contains(read.SignerDeviceId))
             return Refuse("the run request is not signed by a controller device of the organization", out reason);
-        if (mayAsk is not null ? !mayAsk(signer.OwnerId) : !devices.Members.TryGetValue(machineId, out var self) || self.OwnerId is null || self.OwnerId != signer.OwnerId)
+        if (signer.OwnerId is not { } person
+            || (mayAsk is not null ? !mayAsk(read, person) : !devices.Members.TryGetValue(machineId, out var self) || self.OwnerId != person))
             return Refuse("the run request is signed by a device of another person than the owner of this machine", out reason);
         if (read.SignerKey != signer.Key.Text || !signer.Key.Verify(GetSignedBytes(signed.Payload), signed.Signature))
             return Refuse("the signature does not verify with the key the device list holds for its signer", out reason);

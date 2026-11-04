@@ -101,6 +101,16 @@ internal static class AccessEndpoints
             .Produces<TeamDto>()
             .WithSummary("Takes a person out of a team.");
 
+        api.MapPut("/teams/{id}/oncall", (string id, PutOnCallRotationRequest? request, HttpContext context, AccessService access) =>
+                Audited(context, "team.oncall", id, json.TeamDto, actor => access.SetOnCallAsync(actor, id, request, ApiEndpoints.Origin(context), context.RequestAborted)))
+            .Produces<TeamDto>()
+            .WithSummary("Sets the on-call rotation of a team: its people in turn, each for a shift of hours. Who is on call answers the approvals of its automations that ask the person on call.");
+
+        api.MapDelete("/teams/{id}/oncall", (string id, HttpContext context, AccessService access) =>
+                Audited(context, "team.oncall.clear", id, json.TeamDto, actor => access.ClearOnCallAsync(actor, id, ApiEndpoints.Origin(context), context.RequestAborted)))
+            .Produces<TeamDto>()
+            .WithSummary("Takes the on-call rotation of a team away.");
+
         api.MapGet("/service-identities", (HttpContext context, AccessService access) =>
                 Read(context, json.AccessListDtoServiceIdentityDto, actor => access.ListServiceIdentitiesAsync(actor, context.RequestAborted)))
             .Produces<AccessListDto<ServiceIdentityDto>>()

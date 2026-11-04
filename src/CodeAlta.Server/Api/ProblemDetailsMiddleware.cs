@@ -18,7 +18,7 @@ internal sealed class ProblemDetailsMiddleware(RequestDelegate next, IProblemDet
         }
         catch (CoordinatorException exception) when (!context.Response.HasStarted)
         {
-            await WriteAsync(context, exception.Status, exception.Code, exception.Hint, exception.Message).ConfigureAwait(false);
+            await WriteAsync(context, exception.Status, exception.Code, exception.Hint, exception.Message, exception.RetryAfterSeconds).ConfigureAwait(false);
         }
         catch (BadHttpRequestException exception) when (!context.Response.HasStarted)
         {
@@ -28,10 +28,11 @@ internal sealed class ProblemDetailsMiddleware(RequestDelegate next, IProblemDet
         }
     }
 
-    private async Task WriteAsync(HttpContext context, int status, string code, string? hint, string detail)
+    private async Task WriteAsync(HttpContext context, int status, string code, string? hint, string detail, int? retryAfter = null)
     {
         context.Response.Clear();
         context.Response.StatusCode = status;
+        if (retryAfter is { } seconds) context.Response.Headers.RetryAfter = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
         if (status == StatusCodes.Status401Unauthorized)
         {
             // RFC 9110: a 401 names how to authenticate.
@@ -47,6 +48,7 @@ internal sealed class ProblemDetailsMiddleware(RequestDelegate next, IProblemDet
         };
         details.Extensions["code"] = code;
         if (hint is not null) details.Extensions["hint"] = hint;
+        if (retryAfter is { } delay) details.Extensions["retryAfter"] = delay;
         details.Extensions["requestId"] = context.TraceIdentifier;
         await problems.WriteAsync(new ProblemDetailsContext { HttpContext = context, ProblemDetails = details }).ConfigureAwait(false);
     }

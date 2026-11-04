@@ -132,7 +132,19 @@ internal sealed class NodeServerAutomations(NodeAutomations automations, DeviceI
             return;
         }
 
-        automations.TakeOverFromServer(link.Id, devices, link.OrganizationId ?? devices.OrganizationId, request);
+        // Who else than the owner of this machine takes a run over is said by the signed access document, read again first.
+        FleetAccessState? access;
+        try
+        {
+            access = await connector.Access.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or TaskCanceledException or FleetAccessDocumentException
+            or FleetDeviceListException && !cancellationToken.IsCancellationRequested)
+        {
+            access = connector.Access.Current;
+        }
+
+        automations.TakeOverFromServer(link.Id, devices, link.OrganizationId ?? devices.OrganizationId, request, access);
     }
 
     /// <inheritdoc />

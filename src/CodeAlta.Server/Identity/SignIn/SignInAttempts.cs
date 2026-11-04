@@ -67,6 +67,12 @@ public static class SignInErrorCodes
 
     /// <summary>Too many sign-ins wait at once.</summary>
     public const string Busy = "sign_in.busy";
+
+    /// <summary>The change touches the company sign-in: the person signs in again first (<c>FleetSignInPurposes.Confirm</c>).</summary>
+    public const string ConfirmationRequired = "sign_in.confirmation_required";
+
+    /// <summary>The company's provider proved an identity outside the domains and tenants the owner named.</summary>
+    public const string IdentityNotAllowed = "sign_in.identity_not_allowed";
 }
 
 /// <summary>A sign-in that waits for the browser.</summary>
@@ -148,6 +154,37 @@ public sealed class SignInAttempt
     public string? PasskeyPersonId { get; set; }
 }
 
+/// <summary>A change of the company sign-in that waits for another controller device of its owner to approve it, in memory.</summary>
+public sealed class SignInApprovalRequest
+{
+    /// <summary>Gets the id of the approval.</summary>
+    public required string Id { get; init; }
+
+    /// <summary>Gets the organization.</summary>
+    public required string OrganizationId { get; init; }
+
+    /// <summary>Gets the person whose devices ask and approve.</summary>
+    public required string PersonId { get; init; }
+
+    /// <summary>Gets the device that asks for the change, which alone applies it.</summary>
+    public required string RequesterDeviceId { get; init; }
+
+    /// <summary>Gets the name of that device.</summary>
+    public string? RequesterName { get; init; }
+
+    /// <summary>Gets the change, its client secret by its hash only.</summary>
+    public required Fleet.Protocol.Api.SignInChangeDto Change { get; init; }
+
+    /// <summary>Gets the digest of the change.</summary>
+    public required string Digest { get; init; }
+
+    /// <summary>Gets when it stops working.</summary>
+    public required DateTimeOffset ExpiresAt { get; init; }
+
+    /// <summary>Gets or sets the device that approved it, or null while it waits.</summary>
+    public string? ApprovedBy { get; set; }
+}
+
 /// <summary>The grant of a sign-in: it lets one device enroll as a controller device of one person, once.</summary>
 /// <param name="OrganizationId">The organization.</param>
 /// <param name="PersonId">The person.</param>
@@ -163,9 +200,12 @@ public sealed record SignInGrant(string OrganizationId, string PersonId, string 
 public sealed class SignInAttempts
 {
     private const string GrantPrefix = "asg_";
+    private const string ConfirmationPrefix = "asc_";
 
     private readonly ConcurrentDictionary<string, SignInAttempt> _attempts = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SignInGrant> _grants = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, SignInGrant> _confirmations = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, SignInApprovalRequest> _approvals = new(StringComparer.Ordinal);
     private readonly TimeProvider _time;
     private readonly int _capacity;
 
@@ -255,9 +295,79 @@ public sealed class SignInAttempts
         return grant.ExpiresAt > _time.GetUtcNow() ? grant : null;
     }
 
+    /// <summary>Gives the confirmation of a sign-in that confirms an action.</summary>
+    /// <param name="confirmation">The person and the device who signed in again.</param>
+    /// <returns>Its value, shown once to the device.</returns>
+    public string Confirm(SignInGrant confirmation)
+    {
+        ArgumentNullException.ThrowIfNull(confirmation);
+        Sweep();
+        var value = ConfirmationPrefix + NewSecret();
+        _confirmations[Hash(value)] = confirmation;
+        return value;
+    }
+
+    /// <summary>Takes a confirmation for the device it was given to; it works once.</summary>
+    /// <param name="value">The value of the confirmation.</param>
+    /// <param name="deviceId">The device that presents it.</param>
+    /// <returns>The confirmation, or null when it is unknown, used, expired, or of another device.</returns>
+    public SignInGrant? TakeConfirmation(string? value, string deviceId)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length > 128) return null;
+        var hash = Hash(value);
+        if (!_confirmations.TryGetValue(hash, out var confirmation) || !string.Equals(confirmation.DeviceId, deviceId, StringComparison.Ordinal)) return null;
+        if (!_confirmations.TryRemove(hash, out confirmation)) return null;
+        return confirmation.ExpiresAt > _time.GetUtcNow() ? confirmation : null;
+    }
+
+    /// <summary>Keeps a change that waits for an approval.</summary>
+    /// <param name="approval">The change.</param>
+    /// <returns>Whether it is kept; false when too many wait.</returns>
+    public bool AddApproval(SignInApprovalRequest approval)
+    {
+        ArgumentNullException.ThrowIfNull(approval);
+        Sweep();
+        return _approvals.Count < _capacity && _approvals.TryAdd(approval.Id, approval);
+    }
+
+    /// <summary>Finds an approval that has not expired.</summary>
+    /// <param name="id">Its id.</param>
+    /// <returns>The approval, or null.</returns>
+    public SignInApprovalRequest? FindApproval(string? id)
+        => !string.IsNullOrEmpty(id) && _approvals.TryGetValue(id, out var approval) && approval.ExpiresAt > _time.GetUtcNow() ? approval : null;
+
+    /// <summary>Lists the approvals of a person that have not expired.</summary>
+    /// <param name="personId">The person.</param>
+    /// <returns>The approvals.</returns>
+    public IReadOnlyList<SignInApprovalRequest> ListApprovals(string personId)
+    {
+        Sweep();
+        return [.. _approvals.Values.Where(approval => approval.PersonId == personId).OrderBy(static approval => approval.ExpiresAt)];
+    }
+
+    /// <summary>Takes an approved change for the device that asked for it; it works once.</summary>
+    /// <param name="id">Its id.</param>
+    /// <param name="deviceId">The device that applies the change.</param>
+    /// <returns>The approval, or null when it is unknown, not approved, expired, or of another device.</returns>
+    public SignInApprovalRequest? TakeApproval(string? id, string deviceId)
+    {
+        if (FindApproval(id) is not { ApprovedBy: not null } approval || approval.RequesterDeviceId != deviceId) return null;
+        return _approvals.TryRemove(approval.Id, out var taken) ? taken : null;
+    }
+
     private void Sweep()
     {
         var now = _time.GetUtcNow();
+        foreach (var pair in _approvals)
+        {
+            if (pair.Value.ExpiresAt <= now) _approvals.TryRemove(pair.Key, out _);
+        }
+
+        foreach (var pair in _confirmations)
+        {
+            if (pair.Value.ExpiresAt <= now) _confirmations.TryRemove(pair.Key, out _);
+        }
+
         foreach (var pair in _attempts)
         {
             if (pair.Value.ExpiresAt <= now) _attempts.TryRemove(pair.Key, out _);

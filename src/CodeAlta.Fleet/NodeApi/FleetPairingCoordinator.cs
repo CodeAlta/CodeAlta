@@ -101,8 +101,10 @@ public sealed class FleetPairingCoordinator
 
     /// <summary>
     /// Redeems the open offer for a device that proved its key over TLS, and trusts that device with
-    /// <see cref="DefaultPermissions"/>, and <see cref="DevicePermissions.Manage"/> when the offer was made for a manager or
-    /// the node never had a paired device (the first one is the owner's).
+    /// <see cref="DefaultPermissions"/>, and <see cref="DevicePermissions.Manage"/> only when the offer was made for a manager
+    /// (<c>altanode pair --manage</c>, which the owner asks for) or the device managed the node already: the first device of a
+    /// node gets it no more than the next ones, so a link seen by someone else never hands over the node's devices,
+    /// secrets and updates.
     /// </summary>
     /// <param name="secret">The secret the client gave.</param>
     /// <param name="deviceName">The name the client gives itself.</param>
@@ -121,10 +123,9 @@ public sealed class FleetPairingCoordinator
         }
 
         if (result != PairingRedeemResult.Accepted) return (null, result);
-        // A device paired again keeps the manage permission it had; the first device of a node that never had one is its owner's.
-        var known = _trusted.List(includeRevoked: true);
-        var previous = known.FirstOrDefault(device => device.Fingerprint == fingerprint && !device.IsRevoked);
-        if (manages || known.Count == 0 || previous?.Permissions.HasFlag(DevicePermissions.Manage) == true) manages = true;
+        // A device paired again keeps the manage permission it had; otherwise only an offer made to manage gives it.
+        var previous = _trusted.List(includeRevoked: true).FirstOrDefault(device => device.Fingerprint == fingerprint && !device.IsRevoked);
+        if (previous?.Permissions.HasFlag(DevicePermissions.Manage) == true) manages = true;
         var device = _trusted.Add(name, fingerprint, manages ? DefaultPermissions | DevicePermissions.Manage : DefaultPermissions);
         TaskCompletionSource<FleetPairingOutcome>? outcome;
         lock (_gate)

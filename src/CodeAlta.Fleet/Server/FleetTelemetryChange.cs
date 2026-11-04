@@ -3,7 +3,7 @@ using CodeAlta.Fleet.Protocol;
 namespace CodeAlta.Fleet.Server;
 
 /// <summary>
-/// What an owner sets for the telemetry of the fleet, before <see cref="FleetServerClient.SetTelemetryAsync"/> numbers it,
+/// What an owner sets for the telemetry of the fleet, before <c>FleetServerClient.SetTelemetryAsync</c> numbers it,
 /// names the organization and this device, and signs it (<see cref="FleetTelemetrySettings"/>).
 /// </summary>
 /// <param name="Enabled">Whether the machines send at all.</param>

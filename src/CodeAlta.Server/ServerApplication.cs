@@ -108,7 +108,11 @@ public sealed class ServerApplication
             "and the control connection of devices (/fleet/v1) on http://127.0.0.1:2586.",
             "Plain HTTP is for the loopback. To reach it from other machines, keep it on",
             "the loopback behind Tailscale Serve, Caddy or the TLS of your platform (the",
-            "usual way), or give it a certificate and an https:// address.",
+            "usual way), or give it an https:// address with a certificate: a file of",
+            "yours (--certificate), or one it makes and keeps (--own-certificate), which",
+            "no browser trusts and its devices pin: the address to give them, with the",
+            "pin, is printed at the start and by altaserver status. An http:// address",
+            "beyond the loopback is refused unless --allow-insecure-http forces it.",
             _,
             "Until it has an owner, the server prints a one-time setup code and accepts",
             "its setup from this machine only (altaserver setup-code prints it again).",
@@ -119,6 +123,9 @@ public sealed class ServerApplication
             { "urls=", "The {ADDRESSES} to listen on, separated by ';' (http:// or https://)", v => run.Urls = v },
             { "certificate=", "A PKCS #12 {FILE} for the https:// addresses", v => run.Certificate = v },
             { "certificate-password-env=", "The environment {VARIABLE} that holds the certificate's password", v => run.CertificatePasswordVariable = v },
+            { "own-certificate", "Without --certificate, make (once) and keep a certificate of the server's own for the https:// addresses, which its devices pin", v => run.OwnCertificate = v is not null },
+            { "allow-insecure-http", "Allow http:// addresses beyond the loopback, on a network you trust", v => run.AllowInsecureHttp = v is not null },
+            { "trusted-proxy=", "The {ADDRESSES} of the reverse proxies in front of the server, separated by ';' (127.0.0.1;::1 for Tailscale Serve or Caddy here): their X-Forwarded-For names the caller the limits count", v => run.TrustedProxies = v },
         };
         AddDataRoot(runCommand, run);
         runCommand.Add((_, _) => RunServerAsync(run));
@@ -157,6 +164,9 @@ public sealed class ServerApplication
             { "urls=", "The {ADDRESSES} to listen on, separated by ';' (http:// or https://)", v => install.Urls = v },
             { "certificate=", "A PKCS #12 {FILE} for the https:// addresses", v => install.Certificate = v },
             { "certificate-password-env=", "The environment {VARIABLE} that holds the certificate's password", v => install.CertificatePasswordVariable = v },
+            { "own-certificate", "Without --certificate, a certificate of the server's own, which its devices pin", v => install.OwnCertificate = v is not null },
+            { "allow-insecure-http", "Allow http:// addresses beyond the loopback, on a network you trust", v => install.AllowInsecureHttp = v is not null },
+            { "trusted-proxy=", "The {ADDRESSES} of the reverse proxies in front of the server, separated by ';'", v => install.TrustedProxies = v },
             { "user", "A service of the current user (the default)", v => install.User = v is not null },
             { "system", "A service of the system, started at boot, that runs as --account", v => install.System = v is not null },
             { "account=", "The {ACCOUNT} a --system service runs as", v => install.Account = v },
@@ -224,6 +234,25 @@ public sealed class ServerApplication
         AddDataRoot(updateCommand, update);
         updateCommand.Add((_, _) => UpdateAsync(update));
 
+        var backups = new BackupsOptions();
+        var backupsCommand = new Command("backups", "List the backups of the database, and delete those that keep secrets in clear")
+        {
+            new CommandUsage("Usage: {NAME} [--delete-unsealed] [options]"),
+            _,
+            "Lists the copies of the database in backups/ of the data root (taken before",
+            "each update) and whether each keeps the client secret of the company's",
+            "sign-in or the headers of the telemetry collector in clear: a version",
+            "before the server sealed them took those. --delete-unsealed deletes them,",
+            "but the one a version on trial rolls back to, which goes once the trial",
+            "ends. A copy taken since holds them sealed: it opens with the key ring of",
+            "keys/ only, which a backup of the data root keeps beside it.",
+            _,
+            "Options:",
+            { "delete-unsealed", "Delete the backups that keep secrets in clear", v => backups.DeleteUnsealed = v is not null },
+        };
+        AddDataRoot(backupsCommand, backups);
+        backupsCommand.Add((_, _) => BackupsAsync(backups));
+
         return new CommandApp("altaserver", config: new CommandConfig { OutputFactory = static _ => DefaultCommandOutput.Instance })
         {
             new CommandUsage("Usage: {NAME} <command> [options]"),
@@ -240,6 +269,7 @@ public sealed class ServerApplication
             uninstallCommand,
             setupCommand,
             updateCommand,
+            backupsCommand,
             _,
             "Options:",
             new HelpOption(),
@@ -336,6 +366,9 @@ public sealed class ServerApplication
                 Urls = urls,
                 CertificatePath = options.Certificate,
                 CertificatePassword = password,
+                AllowInsecureHttp = options.AllowInsecureHttp,
+                OwnCertificate = options.OwnCertificate,
+                TrustedProxies = Proxies(options.TrustedProxies),
                 UpdateStatus = () => updates?.Status(),
                 // The last step of a campaign of the fleet: the same self-update as altaserver update, with the signed hash.
                 ApplyUpdate = (request, requestedBy, token) => updates is { } self
@@ -362,6 +395,16 @@ public sealed class ServerApplication
         await using (server.ConfigureAwait(false))
         {
             await _output.WriteLineAsync($"CodeAlta Server {ServerVersion.Current} listens on {string.Join(", ", server.Addresses.Select(static address => address.ToString().TrimEnd('/')))} (data root {paths.DataRoot}).").ConfigureAwait(false);
+            if (server.CertificatePin is { } pin)
+                await _output.WriteLineAsync($"Certificate: {pin} (devices reach the server at its https:// address followed by #pin={pin}).").ConfigureAwait(false);
+            // Copies an older version took before the server sealed its secrets keep them in clear: said once, with what to do.
+            if (ServerBackups.FindUnsealed(paths) is { Count: > 0 } unsealed)
+            {
+                await _error.WriteLineAsync($"altaserver: {unsealed.Count} backup{(unsealed.Count == 1 ? "" : "s")} in {paths.BackupsRoot} keep the client secret of the company's sign-in or the " +
+                    "headers of the telemetry collector in clear (a version before the server sealed them took them): altaserver backups --delete-unsealed deletes them.")
+                    .ConfigureAwait(false);
+            }
+
             if (server.SetupCode is { } code)
             {
                 await _output.WriteLineAsync($"No owner yet. Setup code: {code.Code} (until {code.ExpiresAt.ToLocalTime():t}, from this machine only; altaserver setup-code prints it again).")
@@ -619,12 +662,16 @@ public sealed class ServerApplication
 
         await _output.WriteLineAsync($"CodeAlta Server {state.Version}, process {state.ProcessId}, since {state.StartedAt.ToLocalTime():g}").ConfigureAwait(false);
         await _output.WriteLineAsync($"Listens on {string.Join(", ", state.Urls)}").ConfigureAwait(false);
+        // The pin a device is given beside the https:// address: the key of the certificate it then trusts, alone.
+        if (state.CertificatePin is { } pin) await _output.WriteLineAsync($"Certificate: {pin}").ConfigureAwait(false);
         var address = state.Urls.FirstOrDefault(static url => url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) ?? state.Urls.FirstOrDefault();
         if (address is not null)
         {
             try
             {
-                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+                using var client = state.CertificatePin is { } pinned && address.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                    ? new HttpClient(CodeAlta.Fleet.Protocol.FleetServerCertificates.CreateHandler(pinned), disposeHandler: true) { Timeout = TimeSpan.FromSeconds(3) }
+                    : new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
                 var health = await client.GetFromJsonAsync(new Uri(Reachable(new Uri(address)), "api/v1/server/health"), ServerApiJsonContext.Default.ServerHealthDto)
                     .ConfigureAwait(false);
                 await _output.WriteLineAsync(health is null ? "Health: no answer" : $"Health: {health.Status}, {(health.SetUp ? "set up" : "no owner yet (altaserver setup-code)")}, schema {health.SchemaVersion}")
@@ -727,6 +774,13 @@ public sealed class ServerApplication
         else if (!options.System && options.Account is not null) usage = "--account goes with --system only.";
         else if (options.Port is not null && (!int.TryParse(options.Port, NumberStyles.None, CultureInfo.InvariantCulture, out var port) || port is < 1 or > 65535))
             usage = $"--port needs a port from 1 to 65535: '{options.Port}'.";
+        else if (options.TrustedProxies is { } proxies && !TryReadProxies(proxies, out var proxyProblem)) usage = proxyProblem;
+        else if (options.Urls is { } urls)
+        {
+            // A service that would refuse to start is refused before it is installed.
+            try { ServerBindings.Require(urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), options.AllowInsecureHttp); }
+            catch (ArgumentException exception) { usage = exception.Message; }
+        }
         if (usage is not null)
         {
             await _error.WriteLineAsync("altaserver: " + usage).ConfigureAwait(false);
@@ -766,6 +820,9 @@ public sealed class ServerApplication
         if (options.Urls is { } urls) arguments.AddRange(["--urls", urls]);
         if (options.Certificate is { } certificate) arguments.AddRange(["--certificate", Path.GetFullPath(certificate)]);
         if (options.CertificatePasswordVariable is { } variable) arguments.AddRange(["--certificate-password-env", variable]);
+        if (options.AllowInsecureHttp) arguments.Add(ServerBindings.AllowInsecureHttpOption);
+        if (options.OwnCertificate) arguments.Add("--own-certificate");
+        if (options.TrustedProxies is { } proxies) arguments.AddRange(["--trusted-proxy", proxies]);
         var system = scope == ServiceScope.System;
         return new ServiceRequest
         {
@@ -855,6 +912,30 @@ public sealed class ServerApplication
         public string? Certificate { get; set; }
 
         public string? CertificatePasswordVariable { get; set; }
+
+        public bool AllowInsecureHttp { get; set; }
+
+        public bool OwnCertificate { get; set; }
+
+        public string? TrustedProxies { get; set; }
+    }
+
+    private static string[] Proxies(string? text) => text is null ? [] : text.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static bool TryReadProxies(string text, out string? problem)
+    {
+        try
+        {
+            // The addresses must read as the server reads them at its start.
+            var proxies = new TrustedProxies(Proxies(text));
+            problem = proxies.Any ? null : "--trusted-proxy names no address.";
+            return problem is null;
+        }
+        catch (ArgumentException exception)
+        {
+            problem = exception.Message;
+            return false;
+        }
     }
 
     /// <summary>The options of <c>install</c> and <c>uninstall</c>: those of the <c>run</c> the service starts, and whom it runs as.</summary>
@@ -867,6 +948,38 @@ public sealed class ServerApplication
         public string? Account { get; set; }
 
         public bool DryRun { get; set; }
+    }
+
+    private sealed class BackupsOptions : DataRootOptions
+    {
+        public bool DeleteUnsealed { get; set; }
+    }
+
+    private async ValueTask<int> BackupsAsync(BackupsOptions options)
+    {
+        if (!options.TryResolve(_error, out var paths)) return ServerExitCodes.InvalidUsage;
+        var list = ServerBackups.List(paths!);
+        if (list.Count == 0) await _output.WriteLineAsync($"No backup in {paths!.BackupsRoot}.").ConfigureAwait(false);
+        foreach (var backup in list)
+        {
+            var state = !backup.Unsealed ? "no secret in clear" : backup.KeptForTrial is { } version ? $"secrets in clear, kept while {version} is on trial" : "secrets in clear";
+            await _output.WriteLineAsync($"{Path.GetFileName(backup.Path)}: {state}").ConfigureAwait(false);
+        }
+
+        if (!options.DeleteUnsealed) return ServerExitCodes.Success;
+        try
+        {
+            var (deleted, kept) = ServerBackups.DeleteUnsealed(paths!);
+            foreach (var file in deleted) await _output.WriteLineAsync($"Deleted {Path.GetFileName(file)}.").ConfigureAwait(false);
+            foreach (var backup in kept)
+                await _output.WriteLineAsync($"Kept {Path.GetFileName(backup.Path)}: {backup.KeptForTrial} rolls back to it while on trial; run this again once it confirmed.").ConfigureAwait(false);
+            return ServerExitCodes.Success;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            await _error.WriteLineAsync($"altaserver backups: {exception.Message}").ConfigureAwait(false);
+            return ServerExitCodes.Failure;
+        }
     }
 
     private sealed class SetupCodeOptions : DataRootOptions
