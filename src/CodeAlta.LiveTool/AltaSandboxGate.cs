@@ -35,6 +35,9 @@ internal static class AltaSandboxGate
         "session set_worktree",
         // The fleet is read; what starts or changes work on another machine is refused (doc/fleet/security-and-privacy.md, rule 8).
         "fleet machine", "fleet move status", "fleet automation list", "fleet automation runs", "fleet statistics", "fleet update status", "fleet health",
+        // People and access are read; a proposal is not made from a sandbox.
+        "fleet access show", "fleet access people", "fleet access teams", "fleet access grants", "fleet access owners", "fleet access transfers", "fleet access review",
+        "fleet access proposals",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Gets the sandbox of a session, or null when it is not sandboxed.</summary>

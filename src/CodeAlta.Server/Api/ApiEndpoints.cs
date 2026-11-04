@@ -170,8 +170,9 @@ internal static class ApiEndpoints
             .Produces<MetadataKeyDto>()
             .WithSummary("Adds copies of a metadata key, wrapped by a controller device that holds it, for devices of its person that have none.");
 
-        api.MapGet("/audit", async (long? after, int? limit, HttpContext context, ICoordinatorStore store) =>
+        api.MapGet("/audit", async (long? after, int? limit, HttpContext context, ICoordinatorStore store, AccessService access) =>
             {
+                await access.RequireOrganizationAsync(DeviceAuthenticationMiddleware.GetDevice(context), "audit.read", context.RequestAborted).ConfigureAwait(false);
                 var size = Math.Clamp(limit ?? 100, 1, MaxAuditPage);
                 var records = await store.ListAuditAsync(Math.Max(0, after ?? 0), size, context.RequestAborted).ConfigureAwait(false);
                 var next = records.Count == size ? records[^1].Sequence.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
@@ -179,8 +180,9 @@ internal static class ApiEndpoints
             })
             .WithSummary("The audit log, by sequence; 'after' is the cursor of the next page.");
 
-        api.MapGet("/audit/verify", async (HttpContext context, ICoordinatorStore store) =>
+        api.MapGet("/audit/verify", async (HttpContext context, ICoordinatorStore store, AccessService access) =>
             {
+                await access.RequireOrganizationAsync(DeviceAuthenticationMiddleware.GetDevice(context), "audit.read", context.RequestAborted).ConfigureAwait(false);
                 var verification = await store.VerifyAuditAsync(context.RequestAborted).ConfigureAwait(false);
                 return new AuditVerificationDto(verification.IsValid, verification.Count, verification.BrokenAt);
             })
@@ -225,6 +227,7 @@ internal static class ApiEndpoints
         SecretEndpoints.Map(api);
         SignInEndpoints.Map(api, app);
         BudgetEndpoints.Map(api);
+        AccessEndpoints.Map(api);
 
         app.MapPost(FleetTelemetryPaths.Forward + "/{signal}", (string signal, HttpContext context, OtlpForwarder forwarder) => forwarder.HandleAsync(context, signal))
             .ExcludeFromDescription();

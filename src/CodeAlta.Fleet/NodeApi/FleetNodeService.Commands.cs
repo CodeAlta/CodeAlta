@@ -22,7 +22,15 @@ public sealed partial class FleetNodeService
             throw new FleetException(FleetErrorCodes.InvalidParams, null, $"A title has 1 to {MaxTitleLength} characters.");
         if (parameters.Agent is not null) return CreateAgentSessionAsync(call, parameters);
         var retryKey = RetryKey(call);
-        return Once(call, FleetNodeJsonContext.Default.FleetCreateSessionResult, () => CreateSessionCoreAsync(retryKey, parameters));
+        return CreateRecordedAsync(call, Once(call, FleetNodeJsonContext.Default.FleetCreateSessionResult, () => CreateSessionCoreAsync(retryKey, parameters)));
+    }
+
+    // A session started through a team membership is its person's: recorded before its result returns, so that their next call finds it.
+    private async Task<FleetCreateSessionResult> CreateRecordedAsync(FleetNodeCall call, Task<FleetCreateSessionResult> created)
+    {
+        var result = await created.ConfigureAwait(false);
+        RecordPrincipal(call.Device, result.SessionId);
+        return result;
     }
 
     private async Task<FleetCreateSessionResult> CreateSessionCoreAsync(string retryKey, FleetCreateSessionParams parameters)

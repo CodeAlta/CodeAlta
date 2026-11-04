@@ -96,6 +96,9 @@ public sealed class RequestAuthenticator
                 throw CoordinatorException.Forbidden(FleetErrorCodes.Revoked, "The device was revoked.");
         }
 
+        // A person who left is refused on every device of theirs at once, before the console signs their devices out of the list.
+        if (device.OwnerPersonId is { } owner && await _store.GetPersonAsync(owner, cancellationToken).ConfigureAwait(false) is { IsActive: false })
+            throw CoordinatorException.Forbidden(FleetErrorCodes.Revoked, "The person of this device is suspended.");
         return device;
     }
 

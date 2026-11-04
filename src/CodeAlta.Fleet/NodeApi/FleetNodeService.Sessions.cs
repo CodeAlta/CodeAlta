@@ -139,6 +139,8 @@ public sealed partial class FleetNodeService
         foreach (var session in snapshot.Sessions.OrderByDescending(static value => value.UpdatedAt).ThenByDescending(static value => value.SessionId, StringComparer.Ordinal))
         {
             if (movedAway.Contains(session.SessionId) || session.ViewState?.Options?.Private == true) continue;
+            // On a team machine a person sees only the sessions they started here.
+            if (call.Device is { OwnSessionsOnly: true } device && !Principals.Owns(session.SessionId, device.PersonId)) continue;
             var archived = session.ViewState?.Archived == true;
             if (archived && !parameters.IncludeArchived) continue;
             var (kind, project, space) = Scope(session, snapshot);

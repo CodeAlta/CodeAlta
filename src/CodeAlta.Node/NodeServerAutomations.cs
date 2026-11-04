@@ -46,6 +46,17 @@ internal sealed class NodeServerAutomations(NodeAutomations automations, DeviceI
             return;
         }
 
+        // The access document too: a version of a suspended person, or one a team machine does not run, is refused.
+        try
+        {
+            await connector.Access.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or TaskCanceledException or FleetAccessDocumentException
+            or FleetDeviceListException && !cancellationToken.IsCancellationRequested)
+        {
+            Log($"The access document of {link.Url} could not be read again: {exception.Message}");
+        }
+
         var organization = link.OrganizationId ?? devices.OrganizationId;
         var acks = new List<FleetAutomationAck>(delivery.Versions.Count);
         foreach (var signed in delivery.Versions)

@@ -1,6 +1,6 @@
 ---
 name: codealta-fleet
-description: Use this skill to work with the CodeAlta fleet - the machines this computer is paired with or reaches through a CodeAlta Server - to pick a machine for a task (capabilities, labels, readiness, load), start or steer a session on another machine, move a session, place or run an automation on a machine, and read the statistics, updates, health and devices of the fleet.
+description: Use this skill to work with the CodeAlta fleet - the machines this computer is paired with or reaches through a CodeAlta Server - to pick a machine for a task (capabilities, labels, readiness, load), start or steer a session on another machine, move a session, place or run an automation on a machine, read the statistics, updates, health and devices of the fleet, and read people and access (roles, teams, grants, owners) to propose a change for a person to apply.
 ---
 
 # The CodeAlta fleet
@@ -45,11 +45,23 @@ A machine that is not ready is not chosen. Say why to the user when no machine f
 - `alta fleet machine devices <machine>` lists the devices of a machine this computer manages and what each may do there.
 - `alta fleet secret list <machine>` lists the secrets and variables of a machine this computer manages by name (without a machine, of this computer): check that a machine has what a task there names as `${secret:NAME}` before you start it.
 
+## People and access
+
+At a CodeAlta Server, `alta fleet access` reads who is who and who may do what, as far as the person of this computer may see:
+
+- `alta fleet access show` says who the person is there (`role`, `teams`, `capabilities`), whether they sign the access document, and the changes that wait for a signer (`pending`): machines see those once an owner or an admin signs them.
+- `alta fleet access people`, `alta fleet access teams`, `alta fleet access grants` list people (role, status, teams), teams (maintainers, members, team machines) and grants.
+- `alta fleet access owners` lists machines and automations with their owners: those `paused` wait for their owner to resume them, those whose `ownerSuspended` is true were owned by someone who left and need a new owner.
+- `alta fleet access transfers` lists the transfers that concern the person; `alta fleet access review` lists who can do what (for owners, admins and auditors).
+- `alta fleet access propose <kind> --summary "<why>" --stdin` records a change for a person to apply (`role`, `team-member`, `grant`, `transfer`, `team`), the request as a JSON object on stdin (`alta fleet access propose --help` gives each). It changes nothing by itself: tell the user it waits for them in Settings > Fleet > People and access.
+
+A team machine runs the sessions of its team's members, each seeing only their own, and the automations of its maintainers. When a machine refuses work with `not_allowed`, read `alta fleet access show` and `owners` to say who can help.
+
 ## Rules
 
 - **Never more power than the person.** Every command has the access of the person of this computer, and a session you start has your permission mode and your sandbox at most.
 - **The fleet is never a way out of a sandbox.** Your sandbox and your permission mode are the floor of what you start or drive on another machine; a sandboxed session reads the fleet and starts, moves or places nothing elsewhere, and one whose sandbox does not allow the fleet (`sandbox.fleetDenied`, as `strict`) does not even read it.
-- **Access is read only.** Devices, permissions, grants, pairing and policies are changed by a person, in Settings > Fleet: propose the change, do not look for another way to make it.
+- **Access is read only.** Devices, permissions, roles, teams, grants, transfers, pairing and policies are changed by a person, in Settings > Fleet: propose the change with `alta fleet access propose`, do not look for another way to make it.
 - **Secrets are names.** You never read, set or send the value of a secret, nor put one in a prompt: the user sets it, here or on the machine.
 - **What runs unattended waits for a person.** An automation you create stays disabled, you enable none (`automation.needsPerson`), and you place a disabled one only: a person enables it; a person starts an update campaign (`alta fleet update start` is refused with `fleet.needsPerson`).
 - On `fleet.needsPerson` or `fleet.notAllowed`, stop that step and tell the user what you would do and why. A Private session reaches no other machine.

@@ -484,6 +484,11 @@ public sealed partial class FleetNodeService : IAsyncDisposable
                 parameters = JsonSerializer.Deserialize("{}", parametersType)!;
             }
 
+            // On a team machine a person reaches only the sessions they started here; the moves of the machine are not theirs to read.
+            if (device is { OwnSessionsOnly: true } && method == FleetNodeMethods.MovesList)
+                throw new FleetException(FleetErrorCodes.Forbidden, null, "The moves of a team machine are for its owner's devices.");
+            RequireOwnSession(device, parameters);
+
             TResult result;
             try
             {
