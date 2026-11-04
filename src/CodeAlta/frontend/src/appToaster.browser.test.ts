@@ -42,6 +42,27 @@ test("Keyed toasts replace in place, stay apart by key, and a dismissed key show
   }, options);
 });
 
+test("A toast is above a window of the app and can be clicked there, and goes back to the page once it closes", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    // A window of the app is a modal <dialog>: above any z-index, and the rest of the page is inert under it.
+    await page.evaluate(`(() => { const d = document.createElement("dialog"); d.id = "window"; d.style.cssText = "width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0";
+      document.body.append(d); d.showModal(); window.acted = 0; })()`);
+    await page.evaluate(`${f}.show({ message: "pc-ai asks to join", timeout: 0, action: { text: "Approve", onClick: () => { window.acted++; } } }, "join")`);
+    await page.until(`${f}.messages().includes("pc-ai asks to join")`, "the toast");
+    const hit = `(() => { const button = [...document.querySelectorAll(".app-toaster .bp6-toast .bp6-button")].find(b => b.textContent === "Approve");
+      const r = button.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!top && button.contains(top); })()`;
+    await page.until(hit, "the button of the toast to be what a press there reaches, not the window");
+    await page.evaluate(`document.elementFromPoint(...(() => { const r = document.querySelector(".app-toaster .bp6-toast .bp6-button").getBoundingClientRect(); return [r.left + 4, r.top + 4]; })()).click()`);
+    assert.equal(await page.evaluate<number>("window.acted"), 1);
+
+    await page.evaluate(`${f}.show({ message: "still here", timeout: 0 }, "kept")`);
+    await page.evaluate(`document.getElementById("window").close()`);
+    await page.until(`document.querySelector(".app-toaster-layer")?.parentElement === document.body && document.querySelector(".app-toaster-layer").matches(":popover-open")`,
+      "the toasts to go back to the page with the window closed");
+    assert.ok(await page.evaluate<boolean>(`${f}.messages().includes("still here")`));
+  }, options);
+});
+
 test("A toast without a key is a toast of its own", { skip: !edge, timeout: 120_000 }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`${f}.show({ message: "one", timeout: 0 }); ${f}.show({ message: "one", timeout: 0 })`);
