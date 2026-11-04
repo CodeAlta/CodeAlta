@@ -61,6 +61,13 @@ public sealed class FleetOrganizationDevices
     /// <summary>Gets the HTTP handler of the calls, for tests; null for the usual one.</summary>
     internal HttpMessageHandler? Handler { get; }
 
+    /// <summary>Gets the pin of the server's own certificate (<see cref="FleetServerCertificates"/>), or null for one that validates as usual.</summary>
+    public string? CertificatePin { get; init; }
+
+    /// <summary>Creates a client of the server, signed by this device, that checks the pin of its certificate when it has one.</summary>
+    /// <returns>The client; the caller disposes it.</returns>
+    internal FleetServerClient CreateClient() => new(ServerAddress, Identity, Handler, null, CertificatePin);
+
     /// <summary>
     /// Reads the device list from the server again, verifies it, and checks it against the anchor: the same first entry,
     /// and the entries verified before, unchanged, at its start. The checkpoint then moves to its last entry.
@@ -76,7 +83,7 @@ public sealed class FleetOrganizationDevices
         try
         {
             var anchor = Newer(await ReadPinAsync(cancellationToken).ConfigureAwait(false), _checkpoint);
-            using var client = new FleetServerClient(ServerAddress, Identity, Handler);
+            using var client = CreateClient();
             var organization = anchor?.Organization ?? (await client.GetOrganizationAsync(cancellationToken).ConfigureAwait(false)).Id;
             var entries = await client.GetDeviceListAsync(cancellationToken).ConfigureAwait(false);
             var list = FleetServerClient.VerifyDeviceList(entries, organization);
@@ -108,7 +115,7 @@ public sealed class FleetOrganizationDevices
         DeviceDto device;
         try
         {
-            using var client = new FleetServerClient(ServerAddress, Identity, Handler);
+            using var client = CreateClient();
             device = await client.GetDeviceAsync(deviceId, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or TaskCanceledException

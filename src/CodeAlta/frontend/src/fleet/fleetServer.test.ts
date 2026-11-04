@@ -13,7 +13,7 @@ const machine = (id: string, look: Partial<FleetMachineView> = {}): FleetMachine
 const session = (id: string, machineId: string, state: string, updatedAt: string, look: Partial<FleetSessionView> = {}): FleetSessionView => ({ id, machineId, state,
   providerType: "anthropic", model: "claude-opus-5-5", createdAt: "2026-11-03T08:00:00Z", updatedAt, turns: 0, tokens: 0, canOpen: false, title: null, ...look });
 const server = (id: string, look: Partial<FleetServerView> = {}): FleetServerView => ({ id, url: `https://${id}.example`, organization: null, link: "approved",
-  connection: "online", problem: null, controller: true, spaces: [], recoveryKey: null, stop: null, ...look });
+  connection: "online", problem: null, controller: true, spaces: [], recoveryKey: null, shareUrl: null, stop: null, ...look });
 
 test("the connection of a server reads as words and an intent; what the host does not say is offline", () => {
   assert.equal(serverConnection(server("a", { connection: "pending" })), "pending");

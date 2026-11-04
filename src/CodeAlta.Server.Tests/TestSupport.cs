@@ -181,6 +181,25 @@ internal sealed class ServerFixture : IAsyncDisposable
 
     public T GetService<T>() where T : notnull => Server.Services.GetRequiredService<T>();
 
+    /// <summary>Whether the files of the database (its write-ahead log included) hold a text, as UTF-8 bytes.</summary>
+    public bool DatabaseHolds(string text) => DatabaseFilesHold(Server.Paths.DatabasePath, text);
+
+    /// <summary>Whether the files of a SQLite database (its write-ahead log included) hold a text, as UTF-8 bytes.</summary>
+    public static bool DatabaseFilesHold(string databasePath, string text)
+    {
+        var needle = Encoding.UTF8.GetBytes(text);
+        foreach (var path in new[] { databasePath, databasePath + "-wal" })
+        {
+            if (!File.Exists(path)) continue;
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var copy = new MemoryStream();
+            stream.CopyTo(copy);
+            if (copy.GetBuffer().AsSpan(0, (int)copy.Length).IndexOf(needle) >= 0) return true;
+        }
+
+        return false;
+    }
+
     /// <summary>Sends a request signed by a device, with the time of the clock unless one is given.</summary>
     public async Task<ApiAnswer> SendAsync(TestDevice? device, HttpMethod method, string path, object? body = null, Action<HttpRequestMessage>? tamper = null,
         long? timestamp = null, string? nonce = null)
@@ -268,13 +287,13 @@ internal sealed class ServerFixture : IAsyncDisposable
 
     /// <summary>Makes the entry that follows the last one of the device list, signed by a controller.</summary>
     public async Task<FleetSignedDeviceListEntry> NextEntryAsync(TestDevice signer, string operation, string deviceId, string? publicKey, string? kind, string? ownerId,
-        string organizationId)
+        string organizationId, string? signerOwnerId = null)
     {
         var list = await SendAsync(signer, HttpMethod.Get, "/api/v1/device-list");
         Assert.AreEqual(HttpStatusCode.OK, list.Status, list.Body.ToString());
         var last = list.Read<ListResponse<DeviceListEntryDto>>().Items[^1];
         return signer.SignEntry(new FleetDeviceListEntryPayload(1, organizationId, last.Sequence + 1, last.Hash, operation, deviceId, publicKey, kind, ownerId, signer.DeviceId,
-            Clock.Now));
+            Clock.Now, signerOwnerId));
     }
 
     /// <summary>Sets up an owner and approves a node; returns the setup and the node.</summary>

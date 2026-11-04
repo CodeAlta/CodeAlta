@@ -35,7 +35,7 @@ public sealed class FleetGrantKeyring
     /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
     public async Task<int> RefreshAsync(CancellationToken cancellationToken)
     {
-        using var client = new FleetServerClient(_devices.ServerAddress, _devices.Identity, _devices.Handler);
+        using var client = _devices.CreateClient();
         var keys = await client.ListGrantKeysAsync(cancellationToken).ConfigureAwait(false);
         if (keys.Items.Count == 0)
         {

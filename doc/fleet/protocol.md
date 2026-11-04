@@ -128,6 +128,15 @@ follows carries the state.
 - Within 4.x, fields are only added, never repurposed or removed; unknown fields and events are ignored; an unknown
   method answers `method_not_found`. Features are announced (`features` in the welcome), never inferred from a version.
 - `protocol {min, max}` in the handshake; a breaking change is a new major version, announced in the release notes.
+- **Signed documents** (device-list entries, the access document, settings and policies) keep their format version
+  within 4.x and grow by fields only; a verifier reads past the fields it does not know. A device *replays* the device
+  list tolerantly: an authentic entry (chain, organization, a controller signer and its signature hold) whose operation,
+  device class or addition its rules do not understand stays in the chain without effect, adds no member, and is shown
+  as skipped; the removal of such a device still counts as a removal. What a device *signs* and what a server *keeps*
+  must be understood (strict), so a newer feature waits for the server that knows it. A revocation is always a
+  `remove` of the device, never a new operation, so that no older verifier misses one. A golden file of documents a
+  newer minor signed (`CodeAlta.Fleet.Protocol.Tests/Golden`) is verified by every build; once released it does not
+  change.
 
 ## Services
 
@@ -140,7 +149,7 @@ follows carries the state.
 | `providers` | `status`, `signIn.start` (device code flows), `signIn.poll` |
 | `sessions` | `list`, `watch` (display stream), `history` (windows), `create`, `send`, `queue`, `steer`, `abort`, `answerAsk`, `answerPermission`, `jobs.list`, `jobs.output`, `jobs.stop`, `image`, `archive`, `restore`, `fork` |
 | `moves` | `offer`, `accept`, `transfer`, `commit`, `abort` |
-| `automations` | `put` (an automation as one table of `config.toml`, with the repository key of its project), `remove`, `list`, `run`, `runs`: the automations a paired device assigns to the node (**Runs on**), with the `automate` permission |
+| `automations` | `put` (an automation as one table of `config.toml`, with the repository key of its project), `remove`, `list`, `run` (with `dryRun` for a try), `runs`: the automations a paired device assigns to the node (**Runs on**), with the `automate` permission |
 | `terminal` | `open` (a setup terminal, owner only, audited), `input`, `resize`, `close` |
 
 They map onto what the desktop's RPC services already call (owned commands, the display projection, history
@@ -156,7 +165,7 @@ windows, asks, permissions, jobs); the node API is that surface, made remote, pl
 | `statistics` | `publish`, `withdraw` (statistics sets, [statistics](statistics.md#publication-rows-not-increments)) |
 | `relay` | `open`, `incoming`, `accept`, `close` |
 | `telemetry` | `settings`: the fleet's telemetry setting, signed by a controller device, sent when a device connects and when an owner changes it ([observability](observability.md#where-telemetry-goes)) |
-| `automations` | `assigned` (the versions a controller device of the machine's person signed, sealed for the machine and the person's controllers, removals included; sent when one is stored for a machine online, and on each connection until acknowledged), `ack` (taken or refused, with the reason), `claim` (a due time, before its run: one run per automation and due time, whatever the machine; a node whose server does not answer runs the time it claimed itself; the same run claiming again renews its lease while it works), `runs` (run facts: version, trigger, status, times, session, tokens and cost, and when each automation is next due; never the prompt, the answer or what the trigger was about), `run` (a run asked by hand, signed by a controller device of the person for the machine and a run id, sent to the machine online; the machine refuses a request signed more than minutes away from its time, and runs a run id once), `takeOver` (the same signed request with `action = "takeover"`, for a run in progress that waits for a person: its approvals then wait for that person, and no timeout stops it) ([orchestration](orchestration.md#placement-and-dispatch)) |
+| `automations` | `assigned` (the versions a controller device of the machine's person signed, sealed for the machine and the person's controllers, removals included; sent when one is stored for a machine online, and on each connection until acknowledged), `ack` (taken or refused, with the reason), `claim` (a due time, before its run: one run per automation and due time, whatever the machine; a node whose server does not answer runs the time it claimed itself; the same run claiming again renews its lease while it works), `runs` (run facts: version, trigger, status, times, session, tokens and cost, and when each automation is next due; never the prompt, the answer or what the trigger was about), `run` (a run asked by hand, signed by a controller device of the person for the machine and a run id, sent to the machine online; the machine refuses a request signed more than minutes away from its time, and runs a run id once), `run` with `action = "try"` tries the automation instead (a dry run, the calls of its allowed tools recorded in its session, never sent), `takeOver` (the same signed request with `action = "takeover"`, for a run in progress that waits for a person: its approvals then wait for that person, and no timeout stops it) ([orchestration](orchestration.md#placement-and-dispatch)) |
 | `hooks` | `event` (an event a hook of the server received for this machine, as it was pushed: headers and body; sent when it arrives for a machine online, and on each connection while it waits, a day at most; at least once), `ack` (taken by an automation, or refused with why, such as a signature that does not verify; the server then keeps only the facts) ([orchestration](orchestration.md#triggers)) |
 | `update` | `instruction` (a campaign's signed manifest, or the signed automatic policy and its version), `cancel`, `policy` (the fleet's signed update policy, any mode, sent on each connection and each change), `report` (where the node stands; `updated` once its trial confirmed) ([deployment](deployment.md#updates)) |
 | `ownership` | `commit` (a move), `takeover`, `changed` |
@@ -189,7 +198,8 @@ The management plane, and the whole surface of the console ([console](console.md
   `Alta-Timestamp` (Unix milliseconds) and `Alta-Nonce` go with `Alta-Signature`. The signature is ECDSA P-256 over
   the method, the path and query, the timestamp, the nonce, the SHA-256 of the body and the device id. The server
   refuses a time more than 5 minutes from its own and a nonce it has seen in that window. The host is not signed,
-  because proxies change it. Setup and enrollment are signed by the key in their body.
+  because proxies change it. The headers, the time and the device are checked before the body is read (the REST API,
+  the OTLP ingress), so that who is not a device of the server never makes it buffer a body. Setup and enrollment are signed by the key in their body.
 - **Conventions**: JSON in camelCase with source-generated contracts; cursor pagination; `ETag` and `If-Match` for
   updates; an `Idempotency-Key` on creations; errors as problem details (RFC 9457) with a stable code and a hint; rate
   limits; `traceparent` on every call.
@@ -202,12 +212,12 @@ The management plane, and the whole surface of the console ([console](console.md
 - **Automations**: `GET /api/v1/automations` (the caller's person's, per machine: the facts the server reads, where each
   delivery stands, the version as signed), `PUT /api/v1/automations/{id}` (a version or a removal a controller device of
   the machine's owner signed, sealed, never in clear; never replaced by one that is not newer), `DELETE
-  .../{id}?machine=` (forgets a removal the machine acknowledged), `POST .../{id}/run` (a signed run by hand, passed to the machine online), `POST .../{id}/runs/{runId}/takeover` (a signed take-over of a run that waits), `GET .../{id}/runs`. A run reported `waiting` is told to the people who answer its approvals (its owner, the members of the team that owns it, those granted `automation.approve` on it) once, as a notification of kind `approval`.
+  .../{id}?machine=` (forgets a removal the machine acknowledged), `POST .../{id}/run` (a signed run by hand, passed to the machine online), `POST .../{id}/runs/{runId}/takeover` (a signed take-over of a run that waits), `GET .../{id}/runs`. A run reported `waiting` (with `approvers = "oncall"` when its automation asks the person on call of its team, and `onCall`, the emails and names its on-call tool gave the machine, which the server matches only among the people who answer its approvals) is told to the people who answer its approvals (its owner, the members of the team that owns it, those granted `automation.approve` on it) once, as a notification of kind `approval`.
 - **Access**: `GET /api/v1/access/self`, `people` (`POST` invites, `PUT .../{id}/role`, `POST .../{id}/deprovision`),
-  `teams` (and `.../{id}/members/{personId}`), `service-identities`, `grants` (`POST .../{id}/keys` once a device of the
+  `teams` (and `.../{id}/members/{personId}`, `PUT`/`DELETE .../{id}/oncall` for the rotation of who is on call), `service-identities`, `grants` (`POST .../{id}/keys` once a device of the
   owner of sealed content wrapped its keys), `owners` (`POST .../{kind}/{id}/resume`), `transfers` (`.../accept`,
   `decline`, `cancel`), `access/review`, `access/proposals` (changes agents propose), and the signed access document:
-  `GET /api/v1/access/documents?after=`, `GET /api/v1/access/draft`, `POST /api/v1/access/documents`. The event
+  `GET /api/v1/access/documents?after=`, `GET /api/v1/access/draft`, `POST /api/v1/access/documents`; a version may name `approvers` (per automation, the people who answer its approvals and take its runs over), left out when it names none. The event
   `access.changed` tells devices to read again ([access control](access-control.md#the-signed-access-document)).
 - **Policy**: `GET /api/v1/policies?after=` (the versions of the signed policy, its rules and its kill switch, which every
   device verifies) and `POST /api/v1/policies` (the next version, signed by the calling controller device of a signer). The

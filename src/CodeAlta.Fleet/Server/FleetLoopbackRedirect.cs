@@ -10,36 +10,78 @@ namespace CodeAlta.Fleet.Server;
 /// <param name="Error">The error the provider gave (<c>access_denied</c> when the person cancelled), or null.</param>
 public sealed record FleetLoopbackAnswer(string? Code, string? State, string? Error);
 
+/// <summary>The name a loopback redirect gives the browser to come back to.</summary>
+public enum FleetLoopbackHost
+{
+    /// <summary><c>http://127.0.0.1:&lt;port&gt;/callback</c>: the clients CodeAlta registers (Microsoft, Google).</summary>
+    IPAddress,
+
+    /// <summary>
+    /// <c>http://localhost:&lt;port&gt;/callback</c>: a company's own client, since Entra ID's Web platform registers only
+    /// <c>https://</c> or <c>http://localhost</c> addresses. A browser may resolve the name to IPv4 or IPv6: both are listened on.
+    /// </summary>
+    Localhost,
+}
+
 /// <summary>
-/// The loopback redirect of a sign-in through the system browser (RFC 8252): a listener on <c>127.0.0.1</c> and a port
-/// of the system, which answers the one request that brings the code back with a page that sends the person back to
-/// CodeAlta. It reads nothing but the request line, needs no URL reservation, and closes once answered or disposed.
+/// The loopback redirect of a sign-in through the system browser (RFC 8252): a listener on the loopback and a port of the
+/// system, which answers the one request that brings the code back with a page that sends the person back to CodeAlta.
+/// It reads nothing but the request line, needs no URL reservation, and closes once answered or disposed.
 /// </summary>
 public sealed class FleetLoopbackRedirect : IDisposable
 {
     private const string CallbackPath = "/callback";
     private const int MaxRequestLine = 8192;
+    private const int PortAttempts = 8;
 
-    private readonly TcpListener _listener;
+    private readonly TcpListener[] _listeners;
     private int _disposed;
 
-    private FleetLoopbackRedirect(TcpListener listener)
+    private FleetLoopbackRedirect(TcpListener[] listeners, string host)
     {
-        _listener = listener;
-        RedirectUri = $"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}{CallbackPath}";
+        _listeners = listeners;
+        RedirectUri = $"http://{host}:{((IPEndPoint)listeners[0].LocalEndpoint).Port}{CallbackPath}";
     }
 
     /// <summary>Gets the address the browser comes back to.</summary>
     public string RedirectUri { get; }
 
-    /// <summary>Starts a listener on the loopback, on a port the system gives.</summary>
+    /// <summary>Starts a listener on <c>127.0.0.1</c>, on a port the system gives.</summary>
     /// <returns>The listener.</returns>
     /// <exception cref="SocketException">No port can be listened on.</exception>
-    public static FleetLoopbackRedirect Start()
+    public static FleetLoopbackRedirect Start() => Start(FleetLoopbackHost.IPAddress);
+
+    /// <summary>Starts a listener on the loopback, on a port the system gives, for the name of <paramref name="host"/>.</summary>
+    /// <param name="host">The name the browser comes back to.</param>
+    /// <returns>The listener.</returns>
+    /// <exception cref="SocketException">No port can be listened on.</exception>
+    public static FleetLoopbackRedirect Start(FleetLoopbackHost host)
     {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        return new FleetLoopbackRedirect(listener);
+        if (host != FleetLoopbackHost.Localhost)
+        {
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            return new FleetLoopbackRedirect([listener], "127.0.0.1");
+        }
+
+        // localhost: the same port on 127.0.0.1 and [::1] (where the system has IPv6), so the browser finds it whichever it resolves.
+        for (var attempt = 0; ; attempt++)
+        {
+            var v4 = new TcpListener(IPAddress.Loopback, 0);
+            v4.Start();
+            if (!Socket.OSSupportsIPv6) return new FleetLoopbackRedirect([v4], "localhost");
+            var v6 = new TcpListener(IPAddress.IPv6Loopback, ((IPEndPoint)v4.LocalEndpoint).Port);
+            try
+            {
+                v6.Start();
+                return new FleetLoopbackRedirect([v4, v6], "localhost");
+            }
+            catch (SocketException) when (attempt < PortAttempts)
+            {
+                // That port is taken on IPv6: another one.
+                v4.Stop();
+            }
+        }
     }
 
     /// <summary>Waits for the browser to come back with the state of the sign-in; other requests (an icon) get a 404.</summary>
@@ -50,9 +92,33 @@ public sealed class FleetLoopbackRedirect : IDisposable
     public async Task<FleetLoopbackAnswer> WaitAsync(string state, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(state);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var accepting = _listeners.Select(listener => listener.AcceptTcpClientAsync(stop.Token).AsTask()).ToArray();
+        try
+        {
+            return await WaitAsync(state, accepting, stop.Token, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // The listeners that did not get the request stop waiting; a connection one accepted meanwhile is closed.
+            await stop.CancelAsync().ConfigureAwait(false);
+            foreach (var pending in accepting)
+            {
+                try { (await pending.ConfigureAwait(false)).Dispose(); }
+                catch (Exception exception) when (exception is OperationCanceledException or SocketException or ObjectDisposedException) { }
+            }
+        }
+    }
+
+    private async Task<FleetLoopbackAnswer> WaitAsync(string state, Task<TcpClient>[] accepting, CancellationToken acceptToken, CancellationToken cancellationToken)
+    {
         while (true)
         {
-            using var client = await _listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
+            var accepted = await Task.WhenAny(accepting).ConfigureAwait(false);
+            var index = Array.IndexOf(accepting, accepted);
+            using var client = await accepted.ConfigureAwait(false);
+            // That listener waits for the next request while this one is read.
+            accepting[index] = _listeners[index].AcceptTcpClientAsync(acceptToken).AsTask();
             using var reading = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             reading.CancelAfter(TimeSpan.FromSeconds(10));
             var stream = client.GetStream();
@@ -82,7 +148,8 @@ public sealed class FleetLoopbackRedirect : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 0) _listener.Stop();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        foreach (var listener in _listeners) listener.Stop();
     }
 
     private static FleetLoopbackAnswer? Parse(string? line)

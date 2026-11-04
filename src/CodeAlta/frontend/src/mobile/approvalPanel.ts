@@ -1,6 +1,6 @@
 import { ApiError, failureText, SignedOutError, type Api } from "./api";
-import { approvalKey, approvalMarkKey, approvalQuestion, approvalSubject } from "./approval";
-import type { ApprovalRequest, Live } from "./contract";
+import { approvalKey, approvalMarkKey, approvalQuestion, approvalSubject, approvalTakeOver } from "./approval";
+import type { ApprovalAutomation, ApprovalRequest, Live } from "./contract";
 import { el, icon } from "./dom";
 
 /** How long the choices of a request stay off once it shows: a tap meant for the request before does not answer it. */
@@ -17,7 +17,7 @@ export function createApprovalPanel(options: Readonly<{
   window: Window & typeof globalThis;
   /** The place of the card, `#approval`. */
   root: HTMLElement;
-  api: Pick<Api, "permissions" | "resolvePermission">;
+  api: Pick<Api, "permissions" | "resolvePermission"> & Partial<Pick<Api, "takeOver">>;
   /** The name of the computer, which a failure names. */
   host: string;
   /** The session on screen, or null. */
@@ -30,9 +30,9 @@ export function createApprovalPanel(options: Readonly<{
   onResize: () => void;
 }>) {
   const { document, root } = options;
-  type State = { requests: readonly ApprovalRequest[]; hasMore: boolean; sending: boolean; note: string; armedFor: string | null };
+  type State = { requests: readonly ApprovalRequest[]; hasMore: boolean; sending: boolean; note: string; armedFor: string | null; automation: ApprovalAutomation | null };
   const states = new Map<string, State>(), reads = new Map<string, number>(), marks = new Map<string, string>();
-  const stateOf = (id: string) => states.get(id) ?? (states.set(id, { requests: [], hasMore: false, sending: false, note: "", armedFor: null }), states.get(id)!);
+  const stateOf = (id: string) => states.get(id) ?? (states.set(id, { requests: [], hasMore: false, sending: false, note: "", armedFor: null, automation: null }), states.get(id)!);
   const changed = (id: string) => { if (options.current() === id) options.onChange(id); };
   let drawn = "", arming: { id: string; timer: number } | null = null;
 
@@ -53,6 +53,27 @@ export function createApprovalPanel(options: Readonly<{
     const state = stateOf(id);
     state.requests = page.requests ?? [];
     state.hasMore = !!page.hasMore;
+    state.automation = page.automation ?? null;
+    changed(id);
+  }
+
+  // The run of an automation that waits for the person: taken over, what it asks waits for them, and no timeout stops it.
+  async function takeOver(id: string) {
+    const state = stateOf(id);
+    if (state.sending || !options.api.takeOver) return;
+    state.sending = true;
+    state.note = "";
+    changed(id);
+    try {
+      const result = await options.api.takeOver(id);
+      state.note = result.ok ? "You took the run over: it waits for you as long as you take." : result.error ?? "The run was not taken over.";
+      if (result.ok && state.automation) state.automation = { ...state.automation, waiting: false };
+    } catch (error) {
+      if (error instanceof SignedOutError) return;
+      state.note = `The run was not taken over: ${failureText(error, options.host)}`;
+    } finally {
+      state.sending = false;
+    }
     changed(id);
   }
 
@@ -79,7 +100,8 @@ export function createApprovalPanel(options: Readonly<{
 
   function draw(id: string, state: State, request: ApprovalRequest) {
     const armed = state.armedFor === request.id;
-    const key = approvalKey(request, state.hasMore, state.sending, armed, state.note);
+    const waits = options.api.takeOver ? approvalTakeOver(state.automation) : null;
+    const key = approvalKey(request, state.hasMore, state.sending, armed, state.note, waits ?? "");
     if (drawn === `${id}\n${key}`) return;
     drawn = `${id}\n${key}`;
     const card = el(document, "div", "approval-card");
@@ -107,6 +129,16 @@ export function createApprovalPanel(options: Readonly<{
       actions.append(button);
     }
     card.append(actions);
+    if (waits) {
+      const line = el(document, "div", "approval-takeover");
+      const button = el(document, "button", "ghost", "Take over");
+      button.type = "button";
+      button.dataset.action = "takeover";
+      button.disabled = state.sending;
+      button.addEventListener("click", () => void takeOver(id));
+      line.append(el(document, "p", "approval-detail", waits), button);
+      card.append(line);
+    }
     if (state.hasMore || state.requests.length > 1) card.append(el(document, "p", "approval-detail", "More requests are waiting after this one."));
     root.replaceChildren(card);
     options.onResize();

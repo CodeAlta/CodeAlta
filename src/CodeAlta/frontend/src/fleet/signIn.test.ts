@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { FleetSignInSettingsView } from "#neoastra";
-import { orderedSignInMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
+import { allowedValues, orderedSignInMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
 
 const settings = (look: Partial<FleetSignInSettingsView> = {}): FleetSignInSettingsView => ({ methods: [
   { id: "company", name: "Contoso", enabled: true, available: true }, { id: "passkey", name: "Passkey", enabled: true, available: true },
   { id: "microsoft", name: "Microsoft", enabled: true, available: false }, { id: "google", name: "Google", enabled: false, available: true },
   { id: "github", name: "GitHub", enabled: true, available: true }], issuer: "https://login.contoso.example", clientId: "client", hasClientSecret: true, displayName: "Contoso",
-  groupsClaim: "groups", groupRoles: [{ group: "g-admins", role: "admin" }], requireSso: false, version: 3, updatedAt: null, ...look });
+  groupsClaim: "groups", groupRoles: [{ group: "g-admins", role: "admin" }], requireSso: false, version: 3, updatedAt: null, allowedDomains: ["contoso.example"], allowedTenants: [],
+  ...look });
 
 test("the groups that give roles name each group once, by its id", () => {
   const draft = signInDraft(settings());
@@ -38,6 +39,14 @@ test("company sign-in needs an https issuer and a client id, and requiring it ne
   assert.equal(signInDraftProblem({ ...draft, enabled: ["passkey"], requireSso: true }), "Requiring company sign-in needs company sign-in on.");
 });
 
+test("company sign-in names the domains or the tenants it lets in", () => {
+  const draft = signInDraft(settings());
+  assert.equal(draft.allowedDomains, "contoso.example");
+  assert.equal(signInDraftProblem({ ...draft, allowedDomains: " , " }), "Company sign-in needs the email domains or the tenant ids it lets in.");
+  assert.equal(signInDraftProblem({ ...draft, allowedDomains: "", allowedTenants: "tenant-a" }), null);
+  assert.deepEqual(allowedValues(" Contoso.com, fabrikam.com;contoso.com\nexample.org "), ["contoso.com", "fabrikam.com", "example.org"]);
+});
+
 test("the row says the methods people may use now, or that company sign-in is required", () => {
   assert.deepEqual(signInSummary(settings()), { key: "Sign in with {methods}", methods: "Contoso, Passkey, GitHub" }, "Microsoft is not registered, Google is off");
   assert.equal(signInSummary(settings({ requireSso: true })).key, "Company sign-in required");
@@ -51,6 +60,16 @@ test("the refusals of sign-in say what to do, and the other statuses are left to
   assert.equal(signInProblem("sign_in.denied"), "The sign-in was refused at the provider.");
   assert.equal(signInProblem("sign_in.expired"), "The code expired before it was entered: start the sign-in again.");
   assert.equal(signInProblem("unreachable"), null);
+  assert.equal(signInProblem("sign_in.last_way_in"), "This is your last way to sign in, and you have no recovery key: make your recovery key first, or link another way.");
+  assert.equal(signInProblem("sign_in.managed_by_organization"), "Managed by your organization: an admin removes a person in People and access");
+  assert.equal(signInProblem("sign_in.login_not_found"), "This way to sign in was removed already.");
+});
+
+test("a linked account or a passkey is removed from the row; a company account is the organization's, and an older server gives no id", () => {
+  const login = (method: string, id: string | null = "a_1") => ({ method, name: "alex@example.com", createdAt: "2026-11-04T08:00:00Z", lastUsedAt: null, id });
+  for (const method of ["passkey", "microsoft", "google", "github"]) assert.equal(removableLogin(login(method)), true, method);
+  assert.equal(removableLogin(login("company")), false);
+  assert.equal(removableLogin(login("microsoft", null)), false);
 });
 
 test("a GitHub code is shown only when it is a short printable code with an https:// page", () => {

@@ -83,6 +83,73 @@ public sealed class AutomationRunGuardTests
     }
 
     [TestMethod]
+    public async Task APinnedBoundedTool_RunsAsItWasPinned_WithinItsBounds_OnceItsPreconditionHolds()
+    {
+        var spec = new AgentToolSpec("k8s_restart_pod", "Restarts a pod.", JsonDocument.Parse("""{ "type": "object" }""").RootElement.Clone()) { Version = "1.4.2" };
+        var hash = AutomationAllowedTool.HashOf(spec);
+        StringAssert.StartsWith(hash, "sha256:");
+        Assert.AreEqual(hash, AutomationAllowedTool.HashOf(spec with { InputSchema = JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone() }), "the spaces of the schema do not count");
+        var state = "available";
+        var reads = new List<string>();
+        var read = new AgentToolDefinition(new AgentToolSpec("k8s_get_deployment", "Reads a deployment.", JsonDocument.Parse("{}").RootElement.Clone()), (invocation, _) =>
+        {
+            reads.Add(invocation.Arguments.GetRawText());
+            return Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text($"deployment api: {state}")]));
+        });
+        var autonomy = new AutomationAutonomy
+        {
+            AllowedTools = ["k8s_restart_pod", "k8s_get_deployment"],
+            Tools =
+            [
+                new AutomationAllowedTool("k8s_restart_pod")
+                {
+                    Hash = hash, Version = "1.4.2",
+                    Bounds = [new AutomationToolBound("namespace") { Values = ["shop"] }, new AutomationToolBound("replicas") { Min = 1, Max = 5 }],
+                    Preconditions = [new AutomationToolPrecondition("k8s_get_deployment") { Arguments = ["namespace"], Expect = "Available" }],
+                },
+            ],
+        };
+        Assert.IsNull(autonomy.Validate());
+        var asker = new Asker { Answer = AgentPermissionDecisionKind.AllowOnce };
+        var guard = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(), asker.AskAsync, new AutomationClock { Now = Noon }, dryRun: false);
+        AgentToolHookCall Restart(string arguments, AgentToolSpec? as_ = null) => AgentToolHookCall.Create(
+            new AgentToolInvocation(new ModelProviderId("scripted"), "s1", "call-1", "k8s_restart_pod", JsonDocument.Parse(arguments).RootElement.Clone()), as_ ?? spec, "/work",
+            AgentToolHookCapabilities.All) with { FindTool = name => name == read.Spec.Name ? read : null };
+
+        Assert.IsNull((await guard.BeforeToolCallAsync(Restart("""{"namespace":"shop","replicas":3,"pod":"api-7"}"""), default)).BlockMessage, "as pinned, within its bounds");
+        CollectionAssert.AreEqual(new[] { """{"namespace":"shop"}""" }, reads, "its precondition read the target first, with the arguments it names");
+        Assert.AreEqual(0, asker.Asked.Count);
+
+        // Out of its bounds, or not as it was pinned: a person decides, then its precondition is read again before it acts.
+        foreach (var (arguments, changed, why) in new[]
+        {
+            ("""{"namespace":"payments","replicas":3}""", (AgentToolSpec?)null, "namespace is payments, not one of shop"),
+            ("""{"namespace":"shop","replicas":9}""", null, "replicas is 9, more than 5"),
+            ("""{"namespace":"shop"}""", null, "replicas is not given"),
+            ("""{"namespace":"shop","replicas":3}""", spec with { Description = "Restarts every pod." }, "definition of k8s_restart_pod changed since it was pinned"),
+            ("""{"namespace":"shop","replicas":3}""", spec with { Version = "2.0.0" }, "version 2.0.0, not 1.4.2"),
+        })
+        {
+            asker.Asked.Clear();
+            Assert.IsNull((await guard.BeforeToolCallAsync(Restart(arguments, changed), default)).BlockMessage, why);
+            StringAssert.Contains(asker.Asked.Single().Reason, why);
+        }
+
+        // A target that is not as it must be: the call is not made, and a person's approval does not make it either.
+        state = "degraded";
+        StringAssert.Contains((await guard.BeforeToolCallAsync(Restart("""{"namespace":"shop","replicas":3}"""), default)).BlockMessage, "was not made: k8s_get_deployment did not say");
+        asker.Asked.Clear();
+        StringAssert.Contains((await guard.BeforeToolCallAsync(Restart("""{"namespace":"shop","replicas":9}"""), default)).BlockMessage, "was not made");
+        Assert.AreEqual(1, asker.Asked.Count, "asked, then read again after the approval");
+
+        // A try makes no call, preconditions included, and says what its pin would be.
+        var trying = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(), asker.AskAsync, new AutomationClock { Now = Noon }, dryRun: true);
+        reads.Clear();
+        StringAssert.Contains((await trying.BeforeToolCallAsync(Restart("""{"namespace":"payments"}"""), default)).BlockMessage, $"hash = \"{hash}\", version = \"1.4.2\"");
+        Assert.AreEqual(0, reads.Count);
+    }
+
+    [TestMethod]
     public async Task ATry_RecordsTheCallsOfItsAllowedTools_AndMakesNone()
     {
         var asker = new Asker();
@@ -164,10 +231,19 @@ public sealed class AutomationRunGuardTests
         const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77";
 
         var run = (await service.RunAsync(Id, default))!;
+        Task<(string Status, string? Message, string? SessionId)> TakeOver(string runId) => AutomationTakeOvers.TakeOverAsync(service, null, null, runId, default);
         var held = runner.Guard!.BeforeToolCallAsync(Call("k8s_delete_namespace"), default).AsTask();
         Assert.AreEqual(AutomationRun.Waiting, service.Runs(Id, 1)[0].Status, "the run waits for a person");
-        Assert.AreEqual("session-1", service.TakeOver(run.Id));
+        // A person takes it over by the id of the run alone, as the phone does.
+        Assert.AreEqual(("not_found", (string?)null), await TakeOver("run-unknown") is var unknown ? (unknown.Status, unknown.SessionId) : default);
+        Assert.AreEqual(("ok", "session-1"), await TakeOver(run.Id) is var taken ? (taken.Status, taken.SessionId) : default);
         Assert.IsTrue(service.IsTakenOver(run.Id));
+        // What waits for the person: this run, and the run of a team on a machine of a server, which a server told them of.
+        var teamRun = new CodeAlta.LiveTool.AltaWaitingRun("run-team", Id, null, "node-1", "Build box", null, Noon.AddMinutes(-5));
+        var alta = new DesktopAltaAutomations(service, null!, true, null, _ => Task.FromResult<IReadOnlyList<CodeAlta.LiveTool.AltaWaitingRun>>([teamRun]));
+        var listed = await alta.ListWaitingAsync(default);
+        Assert.AreEqual(("run-team", "node-1"), (listed.Single(other => other.MachineId is not null).RunId, listed.Single(other => other.MachineId is not null).MachineId));
+        Assert.AreEqual(run.Id, listed.Single(other => other.MachineId is null).RunId);
         Assert.AreEqual("Taken over by a person.", service.Runs(Id, 1)[0].Message);
         asker.Held.SetResult(new(AgentPermissionDecisionKind.AllowOnce));
         await held;
@@ -188,6 +264,24 @@ public sealed class AutomationRunGuardTests
         await runner2.Guard.BeforeToolCallAsync(Call("k8s_restart_pod"), default);
         CollectionAssert.AreEqual(new[] { """k8s_restart_pod {"namespace":"shop","pod":"api-7"}""" }, trying.Runs(Id, 1)[0].Calls!.ToArray());
         runner2.Completion.SetResult(new(AutomationRun.Completed));
+
+        // A script of the library is tried the same way: its session runs it, and the calls of the script go through the guard.
+        File.WriteAllText(Path.Combine(root.Path, "script.toml"), """
+            [automations.0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d78]
+            name = "Scripted diagnosis"
+            prompt = ""
+            script = "diagnose"
+            autonomy = { allowed_tools = ["k8s_restart_pod"] }
+            """);
+        var runner3 = new GuardedRunner(new Asker());
+        await using var scripted = new AutomationService(Path.Combine(root.Path, "script.toml"), _ => Task.FromResult<IReadOnlyList<CodeAlta.Catalog.ProjectDescriptor>>([]),
+            new AutomationStateStore(Path.Combine(root.Path, "state3.json"), false), runner3, new AutomationClock { Now = Noon }, TimeZoneInfo.Utc);
+        await scripted.RefreshAsync();
+        var (script, scriptProblem) = await scripted.TryAsync("0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d78", -1, null, default);
+        Assert.IsNull(scriptProblem);
+        Assert.AreEqual(AutomationService.TryTrigger, script!.Trigger);
+        Assert.IsTrue(runner3.Guard!.DryRun, "the script's run is a dry run");
+        runner3.Completion.SetResult(new(AutomationRun.Completed));
     }
 
     /// <summary>A clock whose timers fire when a test moves it.</summary>

@@ -4,7 +4,7 @@ import type { FleetBudgetHoldView, FleetServerView } from "#neoastra";
 import { continueHeldRun, heldRunToastKey } from "./approvals";
 
 const server = (id: string, controller: boolean): FleetServerView => ({ id, url: `https://${id}.example`, organization: id, link: "approved", connection: "online",
-  problem: null, controller, spaces: [], recoveryKey: true, stop: null }) as FleetServerView;
+  problem: null, controller, spaces: [], recoveryKey: true, shareUrl: null, stop: null }) as FleetServerView;
 const hold = (id: string, runId: string, status = "waiting"): FleetBudgetHoldView => ({ id, budgetId: "b1", budgetName: "Home", machine: "Mac mini", runId, title: null,
   status, requestedAt: "2026-11-04T09:00:00Z" });
 

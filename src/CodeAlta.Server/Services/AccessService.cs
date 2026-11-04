@@ -170,7 +170,8 @@ internal sealed partial class AccessService
     {
         var (snapshot, person) = await ReadAsync(actor, cancellationToken).ConfigureAwait(false);
         Require(snapshot, person, "access.view", AccessTarget.Organization);
-        return new([.. snapshot.Teams.Where(static team => team.DissolvedAt is null).Select(team => ToDto(snapshot, team))]);
+        return new(await WithRotationsAsync(actor.OrganizationId, snapshot, [.. snapshot.Teams.Where(static team => team.DissolvedAt is null).Select(team => ToDto(snapshot, team))],
+            cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>Makes a team; the person who makes it is its first maintainer.</summary>
@@ -651,6 +652,23 @@ internal sealed partial class AccessService
         if (AccessPolicy.Allows(snapshot, person.Id, "access.manage", AccessTarget.Organization, now)) return true;
         return device.Kind == FleetDeviceKinds.Node && snapshot.Owner(FleetResourceKinds.Machine, device.Id) is { OwnerKind: FleetPrincipalKinds.Team } owner
             && AccessPolicy.Allows(snapshot, person.Id, "machine.manage", AccessTarget.Resource(FleetResourceKinds.Machine, device.Id, owner.OwnerKind, owner.OwnerId), now);
+    }
+
+    /// <summary>Gets whether a controller device manages the people of the organization (<c>access.manage</c>): an owner or an admin.</summary>
+    /// <param name="actor">The calling device.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>Whether it does.</returns>
+    public async Task<bool> MayManagePeopleAsync(DeviceRecord actor, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var (snapshot, person) = await ReadAsync(actor, cancellationToken).ConfigureAwait(false);
+            return AccessPolicy.Allows(snapshot, person.Id, "access.manage", AccessTarget.Organization, _time.GetUtcNow());
+        }
+        catch (CoordinatorException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Reads the access of the organization and the calling device's person, who must be an active person on a controller device.</summary>

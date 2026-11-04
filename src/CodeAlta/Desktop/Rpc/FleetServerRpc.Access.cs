@@ -48,7 +48,7 @@ internal sealed partial class FleetServerService
             var invitation = await _servers!.AccessCallAsync(request.LinkId,
                 (client, token) => client.InvitePersonAsync(new InvitePersonRequest(request.Name.Trim(), request.Role), token), cancellationToken).ConfigureAwait(false);
             ChangedLocally?.Invoke();
-            return new("ok", null, invitation.Token, invitation.ExpiresAt, _servers.Connections.FirstOrDefault(connection => connection.Link.Id == request.LinkId)?.Link.Url);
+            return new("ok", null, invitation.Token, invitation.ExpiresAt, _servers.Connections.FirstOrDefault(connection => connection.Link.Id == request.LinkId)?.Link.ShareableUrl);
         }
         catch (Exception exception) when (Failure(exception) is { } failure)
         {
@@ -126,6 +126,20 @@ internal sealed partial class FleetServerService
                 return new FleetSecretActionResult("invalid_request", null);
             await _servers!.AccessCallAsync(request.LinkId, (client, token) => client.SetTeamMemberAsync(request.TeamId, request.PersonId, request.Role, token), cancellationToken)
                 .ConfigureAwait(false);
+            return new FleetSecretActionResult("ok", null);
+        });
+
+    /// <summary>Sets the on-call rotation of a team, its people in turn; no people take it away.</summary>
+    [NeoRpcMethod("setOnCall")]
+    public Task<FleetSecretActionResult> SetOnCallAsync(FleetAccessOnCallRequest request, CancellationToken cancellationToken)
+        => SecretActionAsync(request?.ExpectedEpoch, request?.LinkId, async () =>
+        {
+            if (string.IsNullOrEmpty(request!.TeamId) || request.People is { Length: > 50 } || request.People?.Any(string.IsNullOrWhiteSpace) == true
+                || request.People is { Length: > 0 } && request.ShiftHours is < 1 or > 168)
+                return new FleetSecretActionResult("invalid_request", null);
+            await _servers!.AccessCallAsync(request.LinkId, (client, token) => request.People is { Length: > 0 } people
+                ? client.SetOnCallAsync(request.TeamId, new PutOnCallRotationRequest(people, request.ShiftHours), token)
+                : client.ClearOnCallAsync(request.TeamId, token), cancellationToken).ConfigureAwait(false);
             return new FleetSecretActionResult("ok", null);
         });
 
@@ -391,7 +405,11 @@ internal sealed partial class FleetServerService
             [.. read.People.Select(Person)],
             [.. read.Teams.Select(team => new FleetAccessTeamView(team.Id, team.Name,
                 [.. team.Members.Select(static member => new FleetAccessMemberView(member.PersonId, member.DisplayName, member.Role))],
-                [.. team.Machines.Select(machine => new FleetSecretTarget(machine, Device(machine)))], team.RunsMemberAutomations, administers || maintains.Contains(team.Id)))],
+                [.. team.Machines.Select(machine => new FleetSecretTarget(machine, Device(machine)))], team.RunsMemberAutomations, administers || maintains.Contains(team.Id))
+            {
+                OnCall = team.OnCall is { } rotation ? new FleetAccessOnCallView([.. rotation.People.Select(id => people.GetValueOrDefault(id, id))], rotation.ShiftHours,
+                    rotation.OnCallNow is { } now ? people.GetValueOrDefault(now, now) : null, rotation.Until) : null,
+            })],
             [.. read.Identities.Select(identity => new FleetAccessIdentityView(identity.Id, identity.Name, identity.OwnerKind, Named(identity.OwnerKind, identity.OwnerId),
                 identity.Enabled))],
             [.. read.Grants.Select(grant => new FleetAccessGrantView(grant.Id, grant.SubjectKind, grant.SubjectId, Named(grant.SubjectKind, grant.SubjectId), grant.Capability,
@@ -518,7 +536,23 @@ internal sealed record FleetAccessMembershipView(string TeamId, string TeamName,
 /// <param name="Machines">Its team machines.</param>
 /// <param name="RunsMemberAutomations">Whether its machines run the automations of its members.</param>
 /// <param name="CanManage">Whether this computer's person manages it.</param>
-internal sealed record FleetAccessTeamView(string Id, string Name, FleetAccessMemberView[] Members, FleetSecretTarget[] Machines, bool RunsMemberAutomations, bool CanManage);
+internal sealed record FleetAccessTeamView(string Id, string Name, FleetAccessMemberView[] Members, FleetSecretTarget[] Machines, bool RunsMemberAutomations, bool CanManage)
+{
+    /// <summary>Gets its on-call rotation; null for none.</summary>
+    public FleetAccessOnCallView? OnCall { get; init; }
+}
+
+/// <summary>The on-call rotation of a team, as the page shows it.</summary>
+/// <param name="People">The names of its people, in the order of their turns.</param>
+/// <param name="ShiftHours">How many hours a turn lasts.</param>
+/// <param name="OnCallNow">The name of who is on call now; null for no one.</param>
+/// <param name="Until">When their turn ends.</param>
+internal sealed record FleetAccessOnCallView(string[] People, int ShiftHours, string? OnCallNow, DateTimeOffset? Until);
+
+/// <param name="TeamId">The team.</param>
+/// <param name="People">Its people in the order of their turns; empty to take the rotation away.</param>
+/// <param name="ShiftHours">How many hours a turn lasts.</param>
+internal sealed record FleetAccessOnCallRequest(string? ExpectedEpoch, string LinkId, string TeamId, string[]? People, int ShiftHours);
 
 /// <summary>A member of a team.</summary>
 /// <param name="PersonId">The person.</param>

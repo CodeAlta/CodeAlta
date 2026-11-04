@@ -130,14 +130,24 @@ An automation runs unattended. Turn on **Autonomy** in the editor to decide what
 - Its runs read freely. A command or an edit follows the permission mode of its sessions, which must be one that asks: one that allows everything is refused. Any other tool, such as one of an MCP server or a plugin, waits for your approval unless it is listed in **Tools it calls by itself**.
 - **Calls in an hour, at most** stops those tools after that many calls, all runs together: the next call waits for you.
 - A run that waits for you says **Waits for you** in its list of runs, and in its session you answer as for any session. **Minutes an approval waits** stops the run once that time is over, or keeps it waiting. Leave it empty to wait as long as it takes.
-- **Take over** on a run that waits opens its session and makes it yours: nothing stops it any more, and what it asks waits for you.
-- **Try it (dry run)** runs it once, but the tools it calls by itself are not called: each call is recorded on the run instead, under **Recorded, not made**.
+- **Take over** on a run that waits opens its session and makes it yours: nothing stops it any more, and what it asks waits for you. The [phone](plugins/mobile.md) offers it too, under the request of the run.
+- **Try it (dry run)** runs it once, a script too, but the tools it calls by itself are not called: each call is recorded on the run instead, under **Recorded, not made**. One that runs on another machine is tried there: the calls are in the session of the run on that machine.
 
 ```toml
 autonomy = { allowed_tools = ["k8s_restart_pod"], max_calls_per_hour = 3, approval_timeout = 30, on_timeout = "stop", approvers = "owner" }
 ```
 
-The approvals go to the owner of the automation: you, or on a [server](fleet.md#run-your-automations-on-it) the team that owns it and the people granted to approve it. There, a run that waits comes to them as a message too.
+In the configuration file, a tool it calls by itself can say more than its name:
+
+- **A pin**: `hash` is the hash of the definition of the tool, and `version` the version of its MCP server. A try says both for each tool it calls. A call of a tool that changed since you pinned it waits for you.
+- **Bounds**: the values an argument may take, or its `min` and `max`. A call outside them waits for you.
+- **Preconditions**: another tool it allows, which reads the target first, called with the arguments it names; its answer must contain what it `expect`s. When it does not, the call is not made, also after you approved it.
+
+```toml
+autonomy = { allowed_tools = ["k8s_get_deployment", { name = "k8s_restart_pod", hash = "sha256:…", version = "1.4.2", bounds = { namespace = ["shop"], replicas = { min = 1, max = 5 } }, preconditions = [{ tool = "k8s_get_deployment", arguments = ["namespace", "name"], expect = "available" }] }] }
+```
+
+The approvals go to the owner of the automation: you, or on a [server](fleet.md#run-your-automations-on-it) the team that owns it and the people granted to approve it. There, a run that waits comes to them as a message too. Choose **The person on call of its team** (`approvers = "oncall"`) to ask only who of the team is [on call](people-and-access.md#teams-and-team-machines) now. To read who is on call from incident.io, PagerDuty or Opsgenie instead, add to its autonomy in the file `oncall = { source = "pagerduty", schedule = "<schedule id>", token = "${secret:NAME}" }` (`source` is `incident_io`, `pagerduty` or `opsgenie`, with `region = "eu"` for Opsgenie in Europe). The machine reads the schedule with that secret when a run starts. The person it names is asked if they answer the approvals of the automation; otherwise the rotation of the team is.
 
 ## Follow the runs
 

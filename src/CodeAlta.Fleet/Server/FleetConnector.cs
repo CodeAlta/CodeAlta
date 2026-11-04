@@ -116,6 +116,13 @@ public sealed partial class FleetConnectorOptions
     public string? DeviceListPinPath { get; init; }
 
     /// <summary>
+    /// Gets the pin of the server's own certificate (<c>altaserver run --tls self</c>, <see cref="FleetServerCertificates"/>):
+    /// the control connection, the relays and the calls of the device list then trust that key only. Null validates the
+    /// certificate as usual.
+    /// </summary>
+    public string? CertificatePin { get; init; }
+
+    /// <summary>
     /// Gets the anchored device list of the server, shared with <see cref="MetadataKeys"/> so that trust, signatures and
     /// keys follow one verifier; null makes one on <see cref="DeviceListPinPath"/>.
     /// </summary>
@@ -232,7 +239,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
                 ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(options.OutboxPath)) ?? ".", "statistics.json"));
         }
 
-        Devices = options.Devices ?? options.MetadataKeys?.Devices ?? new FleetOrganizationDevices(options.ServerAddress, options.Identity, options.DeviceListPinPath);
+        Devices = options.Devices ?? options.MetadataKeys?.Devices ?? new FleetOrganizationDevices(options.ServerAddress, options.Identity, options.DeviceListPinPath) { CertificatePin = options.CertificatePin };
         InitializeAccess();
         InitializePolicy();
     }
@@ -317,7 +324,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
         var ticket = await connection.SendRequestAsync(FleetServerMethods.RelayOpen, new FleetRelayOpen(targetDeviceId), FleetServerJsonContext.Default.FleetRelayOpen,
             FleetServerJsonContext.Default.FleetRelayTicket, null, cancellationToken).ConfigureAwait(false)
             ?? throw new FleetException(FleetErrorCodes.ProtocolError, null, "The server gave no ticket for the relay.");
-        var stream = await FleetRelayStreams.ConnectAsync(_options.ServerAddress, ticket, _options.Identity, _options.TimeProvider, cancellationToken).ConfigureAwait(false);
+        var stream = await FleetRelayStreams.ConnectAsync(_options.ServerAddress, ticket, _options.Identity, _options.TimeProvider, _options.CertificatePin, cancellationToken).ConfigureAwait(false);
         return _options.WrapRelayStream is { } wrap ? wrap(stream) : stream;
     }
 
@@ -415,7 +422,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
         var address = FleetServerAddress.ControlAddress(_options.ServerAddress);
         var transport = _options.ConnectTransport is { } connect
             ? await connect(address, stop).ConfigureAwait(false)
-            : await FleetWebSocketTransport.ConnectAsync(address, null, stop).ConfigureAwait(false);
+            : await FleetWebSocketTransport.ConnectAsync(address, socket => FleetServerCertificates.Configure(socket, _options.CertificatePin), stop).ConfigureAwait(false);
         FleetWelcome welcome;
         try
         {
@@ -614,7 +621,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
             var ticket = await connection.SendRequestAsync(FleetServerMethods.RelayAccept, new FleetRelayRef(incoming.RelayId), FleetServerJsonContext.Default.FleetRelayRef,
                 FleetServerJsonContext.Default.FleetRelayTicket, null, stop).ConfigureAwait(false);
             if (ticket is null) return;
-            var stream = await FleetRelayStreams.ConnectAsync(_options.ServerAddress, ticket, _options.Identity, _options.TimeProvider, stop).ConfigureAwait(false);
+            var stream = await FleetRelayStreams.ConnectAsync(_options.ServerAddress, ticket, _options.Identity, _options.TimeProvider, _options.CertificatePin, stop).ConfigureAwait(false);
             if (_options.WrapRelayStream is { } wrap) stream = wrap(stream);
             await accept(incoming, stream, stop).ConfigureAwait(false);
         }

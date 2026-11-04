@@ -48,6 +48,19 @@ public enum LoginLinkOutcome
     LinkedElsewhere,
 }
 
+/// <summary>What happened to the removal of a way to sign in.</summary>
+public enum LoginRemovalOutcome
+{
+    /// <summary>It was removed.</summary>
+    Removed,
+
+    /// <summary>It was not there (any more).</summary>
+    NotFound,
+
+    /// <summary>It is the last way in of the person, which the caller asked to keep.</summary>
+    LastWayIn,
+}
+
 /// <summary>
 /// The store of sign-in (<c>doc/fleet/identity.md</c>): the settings of the organization, the methods linked to people,
 /// their passkeys, the people company sign-in creates, and the devices a sign-in registers.
@@ -87,6 +100,22 @@ public interface ISignInStore
     /// <param name="cancellationToken">Cancels the write.</param>
     /// <returns>What happened.</returns>
     ValueTask<LoginLinkOutcome> LinkLoginAsync(LoginRecord login, AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes an account linked to a person: it signs nobody in afterwards.</summary>
+    /// <param name="login">The login.</param>
+    /// <param name="keepLastWayIn">Whether to refuse when it is the last account or passkey of its person, checked in the same write.</param>
+    /// <param name="audit">The audit event.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>What happened.</returns>
+    ValueTask<LoginRemovalOutcome> RemoveLoginAsync(LoginRecord login, bool keepLastWayIn, AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes a passkey of a person: it signs nobody in afterwards.</summary>
+    /// <param name="passkey">The passkey.</param>
+    /// <param name="keepLastWayIn">Whether to refuse when it is the last account or passkey of its person, checked in the same write.</param>
+    /// <param name="audit">The audit event.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>What happened.</returns>
+    ValueTask<LoginRemovalOutcome> RemovePasskeyAsync(PasskeyRecord passkey, bool keepLastWayIn, AuditEntry audit, CancellationToken cancellationToken = default);
 
     /// <summary>Records a sign-in of a linked account: its email, name and groups as the provider gave them now.</summary>
     /// <param name="login">The login as it is now.</param>

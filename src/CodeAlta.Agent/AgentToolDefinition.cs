@@ -101,6 +101,12 @@ public sealed record AgentToolSpec
     public JsonElement? OutputSchema { get; init; }
 
     /// <summary>
+    /// Gets the version of what implements the tool, as its source says it (the version an MCP server gives of itself),
+    /// or null when unknown: what an automation pins an allowed tool to, besides the hash of its definition.
+    /// </summary>
+    public string? Version { get; init; }
+
+    /// <summary>
     /// Gets the name of the tool in the scripts of Code Mode, within its <see cref="Group"/> (the MCP tool's own name, where
     /// <see cref="Name"/> is an alias), or null to use <see cref="Name"/>.
     /// </summary>

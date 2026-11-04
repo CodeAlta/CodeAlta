@@ -46,9 +46,11 @@ elsewhere, pairing and stopping the node excepted: status, devices and their per
 (`control.log`), the self-update (`control.update`, as `altanode update`, its switch recorded as asked by
 `manage:<device>`), and joining a server (`control.servers.join`, as `altanode join`, with a token the managing device
 made; the node enrolls with its own key, so that the device approves the node by the id the node gave it). It is what the machine page of CodeAlta Desktop uses, so that managing a node never needs its
-terminal. `manage` is given to the first device that pairs with a node that never had one (the owner's, the one that
-installed it), to the device a pairing link made with `altanode pair --manage` adds, and by a device that has it or the
-owner on the machine (`altanode permissions <device> --allow manage`); a device paired again keeps it. Each call is
+terminal. `manage` is given only when asked: to the device a pairing link made with `altanode pair --manage` adds (the
+desktop's **Add a machine** over SSH makes one when the person ticks **Manage it from this computer**, off by
+default), and by a device that has it or the owner on the machine (`altanode permissions <device> --allow manage`); a
+device paired again keeps it. Being the first device that pairs gives nothing more: a plain link seen by someone else
+never hands over the node's devices, secrets and updates. Each call is
 checked against the trusted devices at that moment, as every other method is; a member of the organization reached
 through a server's relay never has it. The answer to a manager that reduces or revokes its own device goes first, then
 its channel closes.

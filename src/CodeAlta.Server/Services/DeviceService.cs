@@ -75,6 +75,9 @@ public sealed class DeviceService
     /// <summary>Gets the store of the devices that sign-ins register; null for none.</summary>
     public ISignInStore? SignInStore { get; init; }
 
+    /// <summary>Gets the limits of the attempts in the name of a person (recovery); null for none.</summary>
+    public AuthenticationRateLimiter? RateLimiter { get; init; }
+
     /// <summary>
     /// Gets what tells whether a controller device may revoke a device of another person (<c>doc/fleet/access-control.md</c>):
     /// an owner or admin, or a maintainer for a team machine. Null lets a controller revoke only the devices of its own person.
@@ -231,7 +234,7 @@ public sealed class DeviceService
         var firstOfPerson = false;
         if (device.Kind == FleetDeviceKinds.Controller && (device.OwnerPersonId is null || device.OwnerPersonId != actor.OwnerPersonId))
         {
-            firstOfPerson = device.OwnerPersonId is not null && await IsOwnerApprovingFirstDeviceAsync(actor, device, cancellationToken).ConfigureAwait(false);
+            firstOfPerson = device.OwnerPersonId is not null && await IsOwnerApprovingFirstDeviceAsync(actor, device, request?.DeviceListEntry, cancellationToken).ConfigureAwait(false);
             if (!firstOfPerson)
                 throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A controller device is approved by a controller device of its own person, or by the owner for a person's first device.");
         }
@@ -375,6 +378,8 @@ public sealed class DeviceService
             throw CoordinatorException.Forbidden(CoordinatorErrorCodes.RecoveryRefused, "The entry is not signed by a recovery key of this server.");
         }
 
+        // The person of the recovery key is known before its signature is checked: attempts in their name are counted, with a slow path.
+        if (RateLimiter is { } limiter) await limiter.RequirePersonAsync(RateLimitedActions.Recover, signer.OwnerPersonId, origin, _store).ConfigureAwait(false);
         var (payload, record) = await ReadEntryAsync(signer, request.DeviceListEntry, cancellationToken).ConfigureAwait(false);
         DeviceListChain.Require(payload.Operation == FleetDeviceListOperations.Add && payload.DeviceId == key.DeviceId && payload.PublicKey == key.Text
             && payload.Kind == FleetDeviceKinds.Controller && payload.OwnerId == signer.OwnerPersonId, "add the device that sends it as a controller device of the person of the recovery key");
@@ -444,16 +449,23 @@ public sealed class DeviceService
 
     // The owner who set the server up signs people in: their controller device, already bound to their person in the
     // list (so that this entry cannot bind it to another), adds the first device of a person who holds none.
-    private async Task<bool> IsOwnerApprovingFirstDeviceAsync(DeviceRecord actor, DeviceRecord device, CancellationToken cancellationToken)
+    private async Task<bool> IsOwnerApprovingFirstDeviceAsync(DeviceRecord actor, DeviceRecord device, FleetSignedDeviceListEntry? entry, CancellationToken cancellationToken)
     {
         var person = actor.OwnerPersonId is null ? null : await _store.GetPersonAsync(actor.OwnerPersonId, cancellationToken).ConfigureAwait(false);
         if (person is null || person.Role != PersonRoles.Owner) return false;
         var entries = await _store.ListDeviceListAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false);
-        var list = FleetDeviceListVerifier.Verify(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), actor.OrganizationId);
+        var list = FleetDeviceListVerifier.Verify(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), actor.OrganizationId,
+            FleetDeviceListMode.Tolerant);
         if (!list.IsValid) return false;
         var state = list.State;
-        if (!state.Members.TryGetValue(actor.Id, out var signer) || signer.OwnerId != actor.OwnerPersonId) return false;
-        var first = state.FirstDeviceId is { } id ? state.Tenures.GetValueOrDefault(id)?.Member.OwnerId : null;
+        if (!state.Members.TryGetValue(actor.Id, out var signer)) return false;
+        // The owner's first device, whose person the list does not know yet (its first entry named none), names it in the
+        // entry ("sowner"), so that every device's replay gives it to the owner rather than to the person it adds.
+        var named = signer.OwnerId is null && actor.Id == state.FirstDeviceId && FleetDeviceListEntries.TryParsePayload(entry?.Payload, out var payload)
+            ? payload!.SignerOwnerId
+            : null;
+        if ((signer.OwnerId ?? named) != actor.OwnerPersonId) return false;
+        var first = state.FirstDeviceId is { } id ? state.Tenures.GetValueOrDefault(id)?.Member.OwnerId ?? (id == actor.Id ? named : null) : null;
         return first == actor.OwnerPersonId && !state.Members.Values.Any(member => member.OwnerId == device.OwnerPersonId);
     }
 

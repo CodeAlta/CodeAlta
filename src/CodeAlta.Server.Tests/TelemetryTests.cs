@@ -193,6 +193,19 @@ public sealed class TelemetryTests
         Assert.AreEqual(HttpStatusCode.OK, set.Status, set.Body.ToString());
         var received = await pushed.Reader.ReadAsync().AsTask().WaitAsync(Waits.Hang);
         Assert.IsFalse(received.Payload.Contains("server-secret", StringComparison.Ordinal), "the headers of the server route never go to the machines");
+        Assert.IsFalse(fixture.DatabaseHolds("server-secret"), "the headers of the server route are sealed in the database");
+        var read = await fixture.SendAsync(owner, HttpMethod.Get, "/api/v1/telemetry");
+        Assert.IsFalse(read.Body.ToString().Contains("server-secret", StringComparison.Ordinal), "no API gives the value back, not even to the owner");
+        Assert.AreEqual(string.Empty, read.Read<TelemetrySettingsDto>().ServerHeaders!["x-api-key"], "its name only");
+
+        // The owner changes the setting and keeps the header by its name: the server keeps its value.
+        signed = owner.SignTelemetry(Settings(owner, setup.Organization.Id, 2, receiver.Endpoint, FleetTelemetryRoutes.Server,
+            [FleetTelemetrySignals.Traces, FleetTelemetrySignals.Metrics]));
+        var unknown = await fixture.SendAsync(owner, HttpMethod.Put, "/api/v1/telemetry", new SetTelemetrySettingsRequest(signed, null, ["x-other"]));
+        Assert.AreEqual((HttpStatusCode.BadRequest, CoordinatorErrorCodes.TelemetryInvalid), (unknown.Status, unknown.Code), "only a header held is kept");
+        var kept = await fixture.SendAsync(owner, HttpMethod.Put, "/api/v1/telemetry", new SetTelemetrySettingsRequest(signed, null, ["X-Api-Key"]));
+        Assert.AreEqual(HttpStatusCode.OK, kept.Status, kept.Body.ToString());
+        await pushed.Reader.ReadAsync().AsTask().WaitAsync(Waits.Hang);
 
         byte[] body = [0x0A, 0x03, 0x01, 0x02, 0x03, 0x42];
         Assert.AreEqual(HttpStatusCode.Unauthorized, await fixture.PostBytesAsync(null, "/otlp/v1/traces", body), "an unsigned request is refused");

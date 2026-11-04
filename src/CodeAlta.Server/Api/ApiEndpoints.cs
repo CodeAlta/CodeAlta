@@ -1,6 +1,7 @@
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Server.Control;
 using CodeAlta.Server.Hosting;
+using CodeAlta.Server.Identity;
 using CodeAlta.Server.Services;
 using CodeAlta.Server.Storage;
 using Microsoft.AspNetCore.Builder;
@@ -40,14 +41,14 @@ internal static class ApiEndpoints
                 telemetry.Apply(null, response.Organization.Id);
                 return Results.Json(response, ServerApiJsonContext.Default.SetupResponse, statusCode: StatusCodes.Status201Created);
             })
-            .WithMetadata(new AllowUnknownDeviceAttribute())
+            .WithMetadata(new AllowUnknownDeviceAttribute(), new RateLimitedAttribute(RateLimitedActions.Setup))
             .Produces<SetupResponse>(StatusCodes.Status201Created)
             .WithSummary("Sets the server up with its one-time code, from its own machine: the organization, its owner and the owner's first controller device.");
 
         api.MapPost("/enroll", async (EnrollRequest? request, HttpContext context, DeviceService devices) =>
                 Results.Json(await devices.EnrollAsync(request, DeviceAuthenticationMiddleware.GetSigned(context), Origin(context), context.RequestAborted).ConfigureAwait(false),
                     ServerApiJsonContext.Default.EnrollResponse, statusCode: StatusCodes.Status201Created))
-            .WithMetadata(new AllowUnknownDeviceAttribute())
+            .WithMetadata(new AllowUnknownDeviceAttribute(), new RateLimitedAttribute(RateLimitedActions.Enroll))
             .Produces<EnrollResponse>(StatusCodes.Status201Created)
             .WithSummary("Registers a machine's key as a pending device with an enrollment token; the request is signed by that key.");
 
@@ -110,7 +111,7 @@ internal static class ApiEndpoints
         api.MapPost("/recover", async (RecoverRequest? request, HttpContext context, DeviceService devices) =>
                 Results.Json(await devices.RecoverAsync(request, DeviceAuthenticationMiddleware.GetSigned(context), Origin(context), context.RequestAborted).ConfigureAwait(false),
                     ServerApiJsonContext.Default.DeviceDto, statusCode: StatusCodes.Status201Created))
-            .WithMetadata(new AllowUnknownDeviceAttribute())
+            .WithMetadata(new AllowUnknownDeviceAttribute(), new RateLimitedAttribute(RateLimitedActions.Recover))
             .Produces<DeviceDto>(StatusCodes.Status201Created)
             .WithSummary("Signs a new device in as a controller device of a person with the entry the person's recovery key signed; the request is signed by the new device's key.");
 
@@ -238,7 +239,13 @@ internal static class ApiEndpoints
     private static UpdateCampaignDto Visible(UpdateCampaignDto campaign, DirectoryScope scope)
         => campaign with { Machines = [.. campaign.Machines.Where(machine => scope.SeesMachine(machine.DeviceId))] };
 
-    internal static RequestOrigin Origin(HttpContext context) => new(context.Connection.RemoteIpAddress, context.TraceIdentifier);
+    internal static RequestOrigin Origin(HttpContext context)
+    {
+        var peer = context.Connection.RemoteIpAddress;
+        // The caller behind a trusted proxy, for the rate limits and the audit log; the peer otherwise.
+        var client = context.RequestServices.GetService<TrustedProxies>() is { Any: true } proxies ? proxies.ClientOf(peer, context.Request.Headers) : peer;
+        return new RequestOrigin(peer, context.TraceIdentifier) { ClientAddress = client };
+    }
 
     // A refused mutation is audited too, with its code: a device that tries what it may not do leaves a trace.
     private static async Task<IResult> AuditedAsync<T>(HttpContext context, string action, string? target, Func<DeviceRecord, Task<T>> mutate,

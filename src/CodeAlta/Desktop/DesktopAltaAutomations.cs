@@ -14,7 +14,11 @@ namespace CodeAlta.Desktop;
 /// Whether a session may give an automation a command to run: not in a host that has the user review the commands
 /// of its sessions.
 /// </param>
-internal sealed class DesktopAltaAutomations(AutomationService automations, ProjectCatalog projects, bool acceptsCommands = true) : IAltaAutomations
+/// <param name="placement">What places automations on machines, which takes their runs over through their servers; null without a fleet.</param>
+/// <param name="serverWaiting">The runs of machines of servers that wait for this computer's person, from the messages of those servers; null without servers.</param>
+internal sealed class DesktopAltaAutomations(AutomationService automations, ProjectCatalog projects, bool acceptsCommands = true, Fleet.DesktopAutomationPlacement? placement = null,
+    Func<CancellationToken, Task<IReadOnlyList<AltaWaitingRun>>>? serverWaiting = null)
+    : IAltaAutomations
 {
     private const string CommandDenied = "This host has the user review the commands of its sessions: a session cannot create or enable an automation that runs a command. The user creates it in the Automations tab.";
 
@@ -23,6 +27,52 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
 
     /// <inheritdoc />
     public IReadOnlyList<AltaAutomationRun> ListRuns(string? id, int limit) => [.. automations.Runs(id, Math.Clamp(limit, 1, 1000)).Select(Run)];
+
+    /// <inheritdoc />
+    public async Task<AltaAutomationChange> TakeOverAsync(string runId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(runId) || runId.Length > 256 || runId.Any(char.IsControl)) return new("not_found");
+        var (status, message, sessionId) = await AutomationTakeOvers.TakeOverAsync(automations, placement, null, runId.Trim(), cancellationToken).ConfigureAwait(false);
+        return new(status, sessionId, message);
+    }
+
+    /// <inheritdoc />
+    public async Task<AltaAutomationChange> TakeOverAsync(string runId, string machineId, string automationId, CancellationToken cancellationToken)
+    {
+        if (!IsName(runId) || !IsName(machineId) || !AutomationDefinition.IsId(automationId)) return new("not_found");
+        if (placement is null) return new("refused", null, "Its machine is reached from no fleet here.");
+        var problem = await placement.TakeOverAsync(automationId, machineId, runId.Trim(), cancellationToken).ConfigureAwait(false);
+        return problem is null ? new("ok") : new("refused", null, problem);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<AltaWaitingRun>> ListWaitingAsync(CancellationToken cancellationToken)
+    {
+        var waiting = new List<AltaWaitingRun>();
+        foreach (var run in automations.Runs(null, 1000).Where(static run => run.Status == AutomationRun.Waiting))
+            waiting.Add(new AltaWaitingRun(run.Id, run.AutomationId, run.Name, null, null, run.SessionId, run.StartedAt));
+        if (placement is not null)
+        {
+            foreach (var entry in automations.Snapshot.Entries.Where(static entry => entry.Definition.RunsOn is not null))
+            {
+                foreach (var run in placement.Runs(entry.Id).Where(static run => run.Status == AutomationRun.Waiting))
+                    waiting.Add(new AltaWaitingRun(run.Id, entry.Id, entry.Definition.Name, entry.Definition.RunsOn, null, run.SessionId, run.StartedAt));
+            }
+        }
+
+        // What the servers told the person waits, unless this computer already lists that run.
+        if (serverWaiting is not null)
+        {
+            foreach (var run in await serverWaiting(cancellationToken).ConfigureAwait(false))
+            {
+                if (!waiting.Any(other => other.RunId == run.RunId)) waiting.Add(run);
+            }
+        }
+
+        return [.. waiting.OrderByDescending(static run => run.Since)];
+    }
+
+    private static bool IsName(string? text) => text is { Length: > 0 and <= 256 } && !text.Any(char.IsControl);
 
     /// <inheritdoc />
     public AltaAutomationRun? FindRunOfSession(string sessionId)

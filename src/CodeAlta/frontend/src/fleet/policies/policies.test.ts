@@ -34,7 +34,7 @@ test("lists, minutes and stops", () => {
 
 test("the window shows the first stop a server holds", () => {
   const server = (id: string, stop: FleetServerView["stop"]): FleetServerView => ({ id, url: `https://${id}.example`, organization: id, link: "approved", connection: "online", problem: null,
-    controller: true, spaces: [], recoveryKey: null, stop });
+    controller: true, spaces: [], recoveryKey: null, shareUrl: null, stop });
   assert.equal(bannerOf([server("home", null)]), null);
   const banner = bannerOf([server("home", null), server("work", { scope: "machines", reason: "Runaway job", machines: 2, teams: 0, since: null, number: 4 })]);
   assert.deepEqual([banner?.server.id, banner?.label, banner?.values], ["work", "Fleet stopped: {count} machines", { count: 2 }]);

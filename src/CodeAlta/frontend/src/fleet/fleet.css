@@ -130,12 +130,15 @@
 .join-organization-methods.muted-text { flex-direction: row; align-items: center; gap: 8px; }
 .fleet-sign-in-code p { margin: 0 0 6px; }
 .fleet-sign-in-code-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.fleet-sign-in-confirm-methods { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .fleet-server-sign-in { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: start; gap: 8px; padding-left: 28px; color: var(--muted); }
 .fleet-sign-in-main { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
 .fleet-sign-in-main strong { color: var(--text); font-weight: 500; }
 .fleet-sign-in-main .bp6-callout { flex-basis: 100%; }
 .fleet-sign-in-summary { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .fleet-sign-in-logins { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; font-size: 12px; }
+.fleet-sign-in-login { position: relative; display: inline-flex; }
+.fleet-sign-in-login-remove:disabled { cursor: default; opacity: 0.3; }
 .fleet-sign-in-dialog { width: min(560px, calc(100vw - 32px)); }
 .fleet-sign-in-groups { display: grid; gap: 6px; justify-items: start; }
 .fleet-sign-in-group { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; width: 100%; }

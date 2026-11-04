@@ -137,6 +137,42 @@ public sealed class FleetDeviceListVerifierTests
     }
 
     [TestMethod]
+    public void TheOwnersOnlyDeviceNamesItsPerson_ToAddAnotherPersonsFirstDevice_AndANameOnceKnownDoesNotChange()
+    {
+        using var desktop = new Key();
+        using var laptop = new Key();
+        using var second = new Key();
+        using var node = new Key();
+
+        // Its first entry names no person: without "sowner", the device it adds would make the desktop that person's.
+        var unnamed = new Chain();
+        unnamed.Add(desktop.First());
+        unnamed.Add(desktop, FleetDeviceListOperations.Add, laptop, FleetDeviceKinds.Controller, "person-2");
+        Assert.AreEqual("person-2", FleetDeviceListVerifier.VerifyOrThrow(unnamed.Entries, Organization).Members[desktop.Id].OwnerId, "the rule an older list follows");
+
+        // Named, the desktop is the owner's and adds the first device of the other person; that device adds its next ones.
+        var named = new Chain();
+        named.Add(desktop.First());
+        named.Add(desktop.Sign(Payload(2, named.LastHash, FleetDeviceListOperations.Add, laptop, FleetDeviceKinds.Controller, "person-2", desktop) with { SignerOwnerId = Owner }));
+        named.Add(laptop, FleetDeviceListOperations.Add, second, FleetDeviceKinds.Controller, "person-2");
+        var state = FleetDeviceListVerifier.VerifyOrThrow(named.Entries, Organization);
+        Assert.AreEqual((Owner, "person-2", "person-2"), (state.Members[desktop.Id].OwnerId, state.Members[laptop.Id].OwnerId, state.Members[second.Id].OwnerId));
+        named.Add(desktop, FleetDeviceListOperations.Add, node, FleetDeviceKinds.Node, Owner);
+        Assert.IsTrue(FleetDeviceListVerifier.Verify(named.Entries, Organization).IsValid, "the desktop goes on adding the owner's devices");
+
+        // Once known, a signer's person stays: an entry that names another is refused.
+        var renamed = new Chain();
+        renamed.Add(desktop.First());
+        renamed.Add(desktop, FleetDeviceListOperations.Add, node, FleetDeviceKinds.Node, Owner);
+        renamed.Add(desktop.Sign(Payload(3, renamed.LastHash, FleetDeviceListOperations.Add, laptop, FleetDeviceKinds.Controller, "person-2", desktop) with { SignerOwnerId = "person-2" }));
+        AssertBroken(renamed, 3, "it names another person for its signer");
+
+        // An entry without the field reads as it always did: the payload text of an older device does not change.
+        StringAssert.DoesNotMatch(FleetDeviceListEntries.SerializePayload(Payload(2, "h", FleetDeviceListOperations.Add, laptop, FleetDeviceKinds.Controller, Owner, desktop)),
+            new System.Text.RegularExpressions.Regex("sowner"));
+    }
+
+    [TestMethod]
     public void ARecoveryKeySignsInANewControllerOfItsPersonAndNothingElse()
     {
         using var desktop = new Key();

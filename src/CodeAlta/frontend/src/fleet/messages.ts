@@ -40,6 +40,18 @@ export const fleetMessages = {
   "The server did not answer: what this computer published there stays on it.": ["El servidor no respondió: lo que este ordenador publicó allí se queda en él.", "Le serveur n’a pas répondu : ce que cet ordinateur y a publié y reste.", "Der Server hat nicht geantwortet: Was dieser Computer dort veröffentlicht hat, bleibt dort.", "サーバーが応答しませんでした。このコンピューターがそこに公開したものはサーバーに残ります。", "服务器没有响应：本机在其上发布的内容仍保留在服务器上。"],
   "New device": ["Dispositivo nuevo", "Nouvel appareil", "Neues Gerät", "新しいデバイス", "新设备"],
   "Approve…": ["Aprobar…", "Approuver…", "Genehmigen…", "承認…", "批准…"],
+  "An entry of the device list comes from a newer version of CodeAlta and was skipped: update CodeAlta.": [
+    "Una entrada de la lista de dispositivos viene de una versión más reciente de CodeAlta y se omitió: actualiza CodeAlta.",
+    "Une entrée de la liste des appareils vient d’une version plus récente de CodeAlta et a été ignorée : mettez CodeAlta à jour.",
+    "Ein Eintrag der Geräteliste stammt von einer neueren CodeAlta-Version und wurde übersprungen: aktualisiere CodeAlta.",
+    "デバイス一覧の 1 件は新しい CodeAlta によるもので、スキップされました。CodeAlta を更新してください。",
+    "设备列表中有 1 个条目来自更新版本的 CodeAlta，已跳过：请更新 CodeAlta。"],
+  "{count} entries of the device list come from a newer version of CodeAlta and were skipped: update CodeAlta.": [
+    "{count} entradas de la lista de dispositivos vienen de una versión más reciente de CodeAlta y se omitieron: actualiza CodeAlta.",
+    "{count} entrées de la liste des appareils viennent d’une version plus récente de CodeAlta et ont été ignorées : mettez CodeAlta à jour.",
+    "{count} Einträge der Geräteliste stammen von einer neueren CodeAlta-Version und wurden übersprungen: aktualisiere CodeAlta.",
+    "デバイス一覧の {count} 件は新しい CodeAlta によるもので、スキップされました。CodeAlta を更新してください。",
+    "设备列表中有 {count} 个条目来自更新版本的 CodeAlta，已跳过：请更新 CodeAlta。"],
   "Does {name} show these words?": ["¿Muestra {name} estas palabras?", "{name} affiche-t-il ces mots ?", "Zeigt {name} diese Wörter?", "{name} にこれらの単語が表示されていますか?", "{name} 是否显示这些词语？"],
   "It shows the same words": ["Muestra las mismas palabras", "Il affiche les mêmes mots", "Es zeigt dieselben Wörter", "同じ単語が表示されています", "它显示相同的词语"],
   "Your other computer shows these words before it approves this one:": ["Tu otro ordenador muestra estas palabras antes de aprobar este:", "Votre autre ordinateur affiche ces mots avant d’approuver celui-ci :", "Ihr anderer Computer zeigt diese Wörter, bevor er diesen genehmigt:", "もう一方のコンピューターは、このコンピューターを承認する前にこれらの単語を表示します:", "你的另一台计算机在批准本机前会显示这些词语："],

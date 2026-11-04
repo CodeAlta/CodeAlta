@@ -50,7 +50,7 @@ internal static class HookEndpoints
                 var receipt = await hooks.ReceiveAsync(id, context.Request.Headers, body, context.RequestAborted).ConfigureAwait(false);
                 return Results.Json(receipt, FleetHookApiJsonContext.Default.HookReceiptDto, statusCode: StatusCodes.Status202Accepted);
             })
-            .WithMetadata(new AllowUnknownDeviceAttribute())
+            .WithMetadata(new AllowUnknownDeviceAttribute(), new Identity.RateLimitedAttribute(Identity.RateLimitedActions.HookIngress))
             .Produces<HookReceiptDto>(StatusCodes.Status202Accepted)
             .WithSummary("The ingress of a hook: a tool pushes an event; it is kept once and handed to the hook's machine, which checks the sender's signature.");
     }

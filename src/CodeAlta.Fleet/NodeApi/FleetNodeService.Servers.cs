@@ -26,8 +26,8 @@ public sealed partial class FleetNodeService
     // connections follow the links of its folder, and wait for the approval there), and links its default space.
     private async Task<FleetServerJoinResult> ControlJoinServerAsync(FleetNodeCall call, FleetServerJoinParams parameters, CancellationToken cancellationToken)
     {
-        if (!FleetServerAddress.TryParse(parameters.Url, out var address))
-            throw new FleetException(FleetErrorCodes.InvalidParams, null, "This is not the address of a server (http:// or https://).");
+        if (!FleetServerAddress.TryParse(parameters.Url, out var address, out var certificatePin))
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, "This is not the address of a server (http:// or https://, with the #pin= of its own certificate if it has one).");
         if (parameters.Token is not { Length: > 0 and <= 256 } token)
             throw new FleetException(FleetErrorCodes.InvalidParams, null, "An enrollment token is needed.");
         string name;
@@ -41,7 +41,7 @@ public sealed partial class FleetNodeService
             return new FleetServerJoinResult(existing.DeviceId, name, words, AlreadyLinked: true);
 
         Protocol.Api.DeviceDto device;
-        using (var client = new FleetServerClient(address, _options.Identity, ServerHandler))
+        using (var client = new FleetServerClient(address, _options.Identity, ServerHandler, null, certificatePin))
         {
             try
             {
@@ -59,7 +59,7 @@ public sealed partial class FleetNodeService
 
         var now = _options.TimeProvider.GetUtcNow();
         store.Save(new FleetServerLink(store.Find(url)?.Id ?? FleetServerLinkStore.NewId(), url, null, null, _options.Identity.DeviceId, FleetDeviceKinds.Node,
-            FleetServerLinkStates.Pending, now, now));
+            FleetServerLinkStates.Pending, now, now, certificatePin));
         var spaces = await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
         if (spaces.FirstOrDefault(static space => space.IsDefault) is { } space)
         {

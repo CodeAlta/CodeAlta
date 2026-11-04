@@ -74,7 +74,7 @@ public sealed class FleetOrganizationAccess
         await _refresh.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var client = new FleetServerClient(Devices.ServerAddress, Devices.Identity, Devices.Handler);
+            using var client = Devices.CreateClient();
             // Verified before in this process: only the versions after it are read, each checked to follow the one before it. An
             // answer that does not start right after it (a gap, a fork, a server that lists from the start) is verified whole below.
             if (Volatile.Read(ref _current) is { Number: > 0, OrganizationId: { } known } held
@@ -151,7 +151,7 @@ public sealed class FleetOrganizationAccess
     public async Task<FleetAccessDraft?> PrepareAsync(CancellationToken cancellationToken)
     {
         var state = await RefreshAsync(cancellationToken).ConfigureAwait(false);
-        using var client = new FleetServerClient(Devices.ServerAddress, Devices.Identity, Devices.Handler);
+        using var client = Devices.CreateClient();
         var draft = await client.GetAccessDraftAsync(cancellationToken).ConfigureAwait(false);
         var document = draft.Document;
         if (document.Number != state.Number + 1 || !string.Equals(document.Previous, state.LastHash, StringComparison.Ordinal) || document.OrganizationId != state.OrganizationId
@@ -177,7 +177,7 @@ public sealed class FleetOrganizationAccess
         ArgumentNullException.ThrowIfNull(draft);
         var text = FleetAccessDocuments.Serialize(draft.Document with { SignerDeviceId = Devices.Identity.DeviceId });
         var signed = new FleetSignedAccessDocument(text, System.Buffers.Text.Base64Url.EncodeToString(Devices.Identity.SignData(FleetAccessDocuments.GetSignedBytes(text))));
-        using (var client = new FleetServerClient(Devices.ServerAddress, Devices.Identity, Devices.Handler))
+        using (var client = Devices.CreateClient())
             await client.AppendAccessDocumentAsync(signed, cancellationToken).ConfigureAwait(false);
         return await RefreshAsync(cancellationToken).ConfigureAwait(false);
     }

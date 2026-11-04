@@ -15,6 +15,33 @@ public sealed record FleetDeviceListMember(string DeviceId, string Kind, FleetDe
 /// <param name="RemovedAt">The sequence of the entry that removed it; null while it is a member.</param>
 public sealed record FleetDeviceListTenure(FleetDeviceListMember Member, long AddedAt, long? RemovedAt);
 
+/// <summary>
+/// How a verifier reads entries of the device list (<c>doc/fleet/protocol.md</c>, versions): a list it replays to trust its
+/// members, or an entry it is about to sign or keep.
+/// </summary>
+public enum FleetDeviceListMode
+{
+    /// <summary>
+    /// Every entry must be one these rules understand: what a device checks before it signs an entry, and a server before
+    /// it keeps one. An entry of a newer version of the rules is refused until the verifier knows them.
+    /// </summary>
+    Strict,
+
+    /// <summary>
+    /// An authentic entry these rules do not understand (an operation or a class of device they do not know, an addition
+    /// they do not allow) stays in the chain without effect: it adds no member, and the list goes on after it. What a device
+    /// replays to trust a list that a newer version may have extended. Authenticity is never relaxed: the chain, the
+    /// organization, the signer and its signature hold as in <see cref="Strict"/>.
+    /// </summary>
+    Tolerant,
+}
+
+/// <summary>An entry a tolerant verifier kept in the chain without effect.</summary>
+/// <param name="Sequence">Its position.</param>
+/// <param name="DeviceId">The device it names.</param>
+/// <param name="Reason">Why these rules do not understand it.</param>
+public sealed record FleetDeviceListSkippedEntry(long Sequence, string DeviceId, string Reason);
+
 /// <summary>A device list as a verifier replayed it: its members after its last entry, and where the next entry goes.</summary>
 /// <param name="OrganizationId">The organization the entries after the first name; null while the list has one entry.</param>
 /// <param name="Sequence">The sequence of the last entry, 0 for an empty list.</param>
@@ -49,6 +76,15 @@ public sealed record FleetDeviceListState(
     /// it: what a device was by an earlier entry of the list, as the list itself authenticates it.
     /// </summary>
     public ImmutableDictionary<string, FleetDeviceListTenure> Tenures { get; init; } = ImmutableDictionary.Create<string, FleetDeviceListTenure>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Gets the devices named by entries these rules did not understand (<see cref="FleetDeviceListMode.Tolerant"/>): never
+    /// members here, never added again, and their removal counts as a removal.
+    /// </summary>
+    public ImmutableHashSet<string> Unrecognized { get; init; } = ImmutableHashSet.Create<string>(StringComparer.Ordinal);
+
+    /// <summary>Gets the entries kept in the chain without effect, in order, for a person to see.</summary>
+    public ImmutableList<FleetDeviceListSkippedEntry> Skipped { get; init; } = [];
 
     /// <summary>
     /// Gets a device as the list held it at an entry from <paramref name="sequence"/> on: a member now, or one that a later
@@ -129,6 +165,15 @@ public static class FleetDeviceListVerifier
     /// <returns>Whether the list holds, where it breaks, and the list up to there.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
     public static FleetDeviceListVerification Verify(IEnumerable<FleetSignedDeviceListEntry> entries, string? organizationId = null)
+        => Verify(entries, organizationId, FleetDeviceListMode.Strict);
+
+    /// <summary>Replays a device list from its first entry, with the entries these rules do not understand read as <paramref name="mode"/> says.</summary>
+    /// <param name="entries">The signed entries, in order.</param>
+    /// <param name="organizationId">The organization the list must name; null to take the one its second entry names.</param>
+    /// <param name="mode">How an entry these rules do not understand is read.</param>
+    /// <returns>Whether the list holds, where it breaks, and the list up to there.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
+    public static FleetDeviceListVerification Verify(IEnumerable<FleetSignedDeviceListEntry> entries, string? organizationId, FleetDeviceListMode mode)
     {
         ArgumentNullException.ThrowIfNull(entries);
         var state = FleetDeviceListState.Empty;
@@ -136,7 +181,7 @@ public static class FleetDeviceListVerifier
         foreach (var entry in entries)
         {
             count++;
-            if (!TryAppend(state, entry, organizationId, out var next, out var reason)) return new(false, count, count, reason, state);
+            if (!TryAppend(state, entry, organizationId, mode, out var next, out var reason)) return new(false, count, count, reason, state);
             state = next;
         }
 
@@ -150,8 +195,18 @@ public static class FleetDeviceListVerifier
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
     /// <exception cref="FleetDeviceListException">An entry does not hold, or the list is empty.</exception>
     public static FleetDeviceListState VerifyOrThrow(IEnumerable<FleetSignedDeviceListEntry> entries, string? organizationId = null)
+        => VerifyOrThrow(entries, organizationId, FleetDeviceListMode.Strict);
+
+    /// <summary>Replays a device list and throws when it does not hold, with the entries these rules do not understand read as <paramref name="mode"/> says.</summary>
+    /// <param name="entries">The signed entries, in order.</param>
+    /// <param name="organizationId">The organization the list must name; null to take the one its second entry names.</param>
+    /// <param name="mode">How an entry these rules do not understand is read.</param>
+    /// <returns>The list after its last entry.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
+    /// <exception cref="FleetDeviceListException">An entry does not hold, or the list is empty.</exception>
+    public static FleetDeviceListState VerifyOrThrow(IEnumerable<FleetSignedDeviceListEntry> entries, string? organizationId, FleetDeviceListMode mode)
     {
-        var verification = Verify(entries, organizationId);
+        var verification = Verify(entries, organizationId, mode);
         if (!verification.IsValid) throw new FleetDeviceListException(verification.BrokenAt!.Value, verification.Reason!);
         if (verification.Count == 0) throw new FleetDeviceListException(1, "the list is empty");
         return verification.State;
@@ -167,14 +222,28 @@ public static class FleetDeviceListVerifier
     /// <exception cref="ArgumentNullException"><paramref name="state"/> is <see langword="null"/>.</exception>
     public static bool TryAppend(FleetDeviceListState state, FleetSignedDeviceListEntry? entry, string? organizationId, out FleetDeviceListState next,
         out string? reason)
+        => TryAppend(state, entry, organizationId, FleetDeviceListMode.Strict, out next, out reason);
+
+    /// <summary>Checks one entry after a list and gives the list with it, with an entry these rules do not understand read as <paramref name="mode"/> says.</summary>
+    /// <param name="state">The list before the entry.</param>
+    /// <param name="entry">The signed entry.</param>
+    /// <param name="organizationId">The organization the list must name; null to take the one the list names.</param>
+    /// <param name="mode">How an entry these rules do not understand is read.</param>
+    /// <param name="next">The list with the entry, or <paramref name="state"/> when it does not hold.</param>
+    /// <param name="reason">Why the entry does not hold, or <see langword="null"/>.</param>
+    /// <returns>Whether the entry holds.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="state"/> is <see langword="null"/>.</exception>
+    public static bool TryAppend(FleetDeviceListState state, FleetSignedDeviceListEntry? entry, string? organizationId, FleetDeviceListMode mode,
+        out FleetDeviceListState next, out string? reason)
     {
         ArgumentNullException.ThrowIfNull(state);
         next = state;
-        reason = Check(state, entry, organizationId, ref next);
+        reason = Check(state, entry, organizationId, mode, ref next);
         return reason is null;
     }
 
-    private static string? Check(FleetDeviceListState state, FleetSignedDeviceListEntry? entry, string? organizationId, ref FleetDeviceListState next)
+    private static string? Check(FleetDeviceListState state, FleetSignedDeviceListEntry? entry, string? organizationId, FleetDeviceListMode mode,
+        ref FleetDeviceListState next)
     {
         if (entry is null || string.IsNullOrEmpty(entry.Payload) || entry.Payload.Length > MaxPayloadLength
             || !FleetDeviceListEntries.TryParsePayload(entry.Payload, out var payload) || payload!.Version != FleetDeviceListEntryPayload.CurrentVersion)
@@ -216,24 +285,43 @@ public static class FleetDeviceListVerifier
         var members = state.Members;
         var removed = state.Removed;
         var tenures = state.Tenures;
+        // An authentic entry these rules do not understand: a tolerant verifier keeps it in the chain, without effect.
+        string? Skip(string why, ref FleetDeviceListState next)
+        {
+            if (mode != FleetDeviceListMode.Tolerant) return why;
+            next = state with
+            {
+                OrganizationId = organization, Sequence = payload.Sequence, LastHash = hash,
+                Unrecognized = payload.Operation == FleetDeviceListOperations.Add ? state.Unrecognized.Add(payload.DeviceId) : state.Unrecognized,
+                Skipped = state.Skipped.Add(new FleetDeviceListSkippedEntry(payload.Sequence, payload.DeviceId, why)),
+            };
+            return null;
+        }
+
         switch (payload.Operation)
         {
             case FleetDeviceListOperations.Add:
-                if (members.ContainsKey(payload.DeviceId) || removed.Contains(payload.DeviceId)) return "it adds a device that is or was in the list";
-                if (!FleetDeviceKinds.IsMember(payload.Kind)) return "it adds a device of no known class";
+                if (members.ContainsKey(payload.DeviceId) || removed.Contains(payload.DeviceId) || state.Unrecognized.Contains(payload.DeviceId))
+                    return "it adds a device that is or was in the list";
+                if (!FleetDeviceKinds.IsMember(payload.Kind)) return Skip("it adds a device of no known class", ref next);
                 if (!FleetDevicePublicKey.TryParse(payload.PublicKey, out var added) || added.DeviceId != payload.DeviceId) return "the added device's key does not give its id";
-                if (string.IsNullOrEmpty(payload.OwnerId)) return "it adds a device without its person";
+                if (string.IsNullOrEmpty(payload.OwnerId)) return Skip("it adds a device without its person", ref next);
                 // A recovery key signs in a new controller device of its person, when every device is lost, and nothing else.
                 if (signer.Kind == FleetDeviceKinds.Recovery && payload.Kind != FleetDeviceKinds.Controller) return "a recovery key adds controller devices only";
-                // The person of the first device is the one its first entry names.
+                // The person of the first device is the one its first entry names as its own ("sowner"), else the one of the
+                // device that entry adds; once known, an entry does not name another.
                 if (signer.OwnerId is null)
                 {
-                    members = members.SetItem(signer.DeviceId, signer = signer with { OwnerId = payload.OwnerId });
+                    members = members.SetItem(signer.DeviceId, signer = signer with { OwnerId = payload.SignerOwnerId ?? payload.OwnerId });
                     tenures = tenures.SetItem(signer.DeviceId, tenures.TryGetValue(signer.DeviceId, out var tenure) ? tenure with { Member = signer } : new(signer, 1, null));
                 }
+                else if (payload.SignerOwnerId is not null && !string.Equals(payload.SignerOwnerId, signer.OwnerId, StringComparison.Ordinal))
+                {
+                    return "it names another person for its signer";
+                }
 
-                if (!string.Equals(signer.OwnerId, payload.OwnerId, StringComparison.Ordinal) && !AddsFirstDeviceOfPerson(state, members, signer, payload))
-                    return "a controller device adds devices of its own person only";
+                if (!string.Equals(signer.OwnerId, payload.OwnerId, StringComparison.Ordinal) && !AddsFirstDeviceOfPerson(state, tenures, members, signer, payload))
+                    return Skip("a controller device adds devices of its own person only", ref next);
                 if (payload.Kind == FleetDeviceKinds.Recovery && members.Values.Any(member => member.Kind == FleetDeviceKinds.Recovery && member.OwnerId == payload.OwnerId))
                     return "the person has a recovery key already: the old one leaves the list first";
                 var joined = new FleetDeviceListMember(payload.DeviceId, payload.Kind!, added, payload.OwnerId);
@@ -242,6 +330,17 @@ public static class FleetDeviceListVerifier
                 break;
             case FleetDeviceListOperations.Remove:
                 if (signer.Kind == FleetDeviceKinds.Recovery) return "a recovery key removes no device";
+                if (state.Unrecognized.Contains(payload.DeviceId) && !removed.Contains(payload.DeviceId))
+                {
+                    // A device these rules never made a member leaves: the keys given before may have reached it, so the removal counts.
+                    next = state with
+                    {
+                        OrganizationId = organization, Sequence = payload.Sequence, LastHash = hash, Removed = removed.Add(payload.DeviceId),
+                        LastRemovalSequence = payload.Sequence,
+                    };
+                    return null;
+                }
+
                 if (!members.TryGetValue(payload.DeviceId, out var gone)) return "it removes a device that is not in the list";
                 if (gone.Kind == FleetDeviceKinds.Controller && members.Values.Count(static member => member.Kind == FleetDeviceKinds.Controller) <= 1)
                     return "it removes the last controller device";
@@ -252,7 +351,7 @@ public static class FleetDeviceListVerifier
                     : new FleetDeviceListTenure(gone, 0, payload.Sequence));
                 break;
             default:
-                return $"its operation '{payload.Operation}' is unknown";
+                return Skip($"its operation '{payload.Operation}' is unknown", ref next);
         }
 
         next = new FleetDeviceListState(organization, payload.Sequence, hash, members, removed)
@@ -261,6 +360,8 @@ public static class FleetDeviceListVerifier
             FirstHash = state.FirstHash,
             LastRemovalSequence = payload.Operation == FleetDeviceListOperations.Remove ? payload.Sequence : state.LastRemovalSequence,
             Tenures = tenures,
+            Unrecognized = state.Unrecognized,
+            Skipped = state.Skipped,
         };
         return null;
     }
@@ -268,11 +369,12 @@ public static class FleetDeviceListVerifier
     // The owner signs people in (doc/fleet/identity.md, a new device): a controller device of the person of the first
     // entry (the owner who set the server up) adds the first controller device of another person, one who holds no
     // member of the list, such as a person whom company sign-in created. That device then signs the person's next ones.
-    private static bool AddsFirstDeviceOfPerson(FleetDeviceListState state, ImmutableDictionary<string, FleetDeviceListMember> members, FleetDeviceListMember signer,
-        FleetDeviceListEntryPayload payload)
+    private static bool AddsFirstDeviceOfPerson(FleetDeviceListState state, ImmutableDictionary<string, FleetDeviceListTenure> tenures,
+        ImmutableDictionary<string, FleetDeviceListMember> members, FleetDeviceListMember signer, FleetDeviceListEntryPayload payload)
     {
         if (signer.Kind != FleetDeviceKinds.Controller || payload.Kind != FleetDeviceKinds.Controller || string.IsNullOrEmpty(payload.OwnerId)) return false;
-        var owner = state.FirstDeviceId is { } first && state.Tenures.TryGetValue(first, out var tenure) ? tenure.Member.OwnerId
+        // The tenures as this entry left them: the first device's person may be the one this entry named.
+        var owner = state.FirstDeviceId is { } first && tenures.TryGetValue(first, out var tenure) ? tenure.Member.OwnerId
             : state.FirstDeviceId is { } id && members.TryGetValue(id, out var member) ? member.OwnerId : null;
         return owner is not null && string.Equals(signer.OwnerId, owner, StringComparison.Ordinal)
             && !members.Values.Any(other => string.Equals(other.OwnerId, payload.OwnerId, StringComparison.Ordinal));

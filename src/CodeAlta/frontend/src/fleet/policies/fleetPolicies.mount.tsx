@@ -39,7 +39,7 @@ const overview = (): FleetPolicyOverview => ({
   ],
 });
 const server = (): FleetServerView => ({ id: "home", url: "https://fleet.example", organization: "Example", link: "approved", connection: "online", problem: null, controller: true,
-  spaces: [], recoveryKey: true, stop: stop ? { scope: stop.scope, reason: stop.reason, machines: stop.machines.length, teams: stop.teams.length, since: "2026-11-04T14:02:00Z", number } : null });
+  spaces: [], recoveryKey: true, shareUrl: null, stop: stop ? { scope: stop.scope, reason: stop.reason, machines: stop.machines.length, teams: stop.teams.length, since: "2026-11-04T14:02:00Z", number } : null });
 
 const api: FleetPoliciesApi = {
   status: async () => ({ status: "ok", servers: [server()], deviceId: "desktop", words: "apple river stone", personName: null }) as never,

@@ -36,7 +36,7 @@ let devices: FleetDeviceView[] = [{ id: "me", name: "desktop", kind: "controller
 let polls = 0;
 const serverApi: AddMachineServerApi = {
   status: async () => ({ status: "ok", deviceId: "me", words: null, personName: null, servers: [{ id: "home", url: "https://fleet.example", organization: "Home", link: "approved",
-    connection: "online", problem: null, controller: true, spaces: [], recoveryKey: true, stop: null }] }),
+    connection: "online", problem: null, controller: true, spaces: [], recoveryKey: true, shareUrl: null, stop: null }] }),
   createToken: async () => { calls.push(JSON.stringify({ token: "home" })); return { status: "ok", token: "JOIN-1234", expiresAt: null, message: null }; },
   devices: async () => {
     // A node of the server's own making comes first, at the second read after the code; the machine the person added comes after it.
@@ -44,7 +44,7 @@ const serverApi: AddMachineServerApi = {
       createdAt: "2026-11-03T00:00:00Z" }];
     if (polls === 5) devices = [...devices, { id: "box", name: "build-box", kind: "node", status: "pending", online: true, words: "maple orbit tiger cloud amber stone",
       createdAt: "2026-11-03T00:00:01Z" }];
-    return { status: "ok", devices, message: null };
+    return { status: "ok", devices, message: null, skippedEntries: 0 };
   },
   approve: async request => {
     calls.push(JSON.stringify({ approve: request.deviceId, kind: request.kind, words: request.words }));

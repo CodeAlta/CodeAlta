@@ -73,7 +73,19 @@ export type ApprovalRequest = Readonly<{
 }>;
 
 /** The first permission requests of a session. */
-export type ApprovalPage = Readonly<{ requests: readonly ApprovalRequest[]; hasMore: boolean; error: string | null }>;
+export type ApprovalPage = Readonly<{ requests: readonly ApprovalRequest[]; hasMore: boolean; error: string | null; automation?: ApprovalAutomation | null }>;
+
+/** The run of the automation that started a session, and whether it waits for the person: they can take it over. */
+export type ApprovalAutomation = Readonly<{ runId: string | null; name: string | null; waiting: boolean }>;
+
+/** A run that waits for the person: of this computer, or of a machine of their server that told them, such as a run of their team. */
+export type WaitingRun = Readonly<{ runId: string; automationId: string; name: string | null; machineId: string | null; machine: string | null; sessionId: string | null; since: string | null }>;
+
+/** The runs that wait for the person. */
+export type WaitingPage = Readonly<{ runs: readonly WaitingRun[]; error: string | null }>;
+
+/** What became of a take-over of a run. */
+export type TakeOverResult = Readonly<{ ok: boolean; error: string | null }>;
 
 /** An answer to a permission request. */
 export type ApprovalAnswer = Readonly<{ requestId: string; decision: "allow_once" | "deny" }>;

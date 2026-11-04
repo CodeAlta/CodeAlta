@@ -177,7 +177,21 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     /// <exception cref="InvalidOperationException">This instance is linked to that server already.</exception>
     public Task<FleetServerLink> CreateServerAsync(Uri address, string code, string ownerName, string? organizationName, CancellationToken cancellationToken)
-        => CreateServerAsync(address, address, code, ownerName, organizationName, cancellationToken);
+        => CreateServerAsync(address, address, code, ownerName, organizationName, null, cancellationToken);
+
+    /// <summary>Sets a server up with its one-time code, through the same address as its machines, that may pin its own certificate.</summary>
+    /// <param name="address">The address of the server.</param>
+    /// <param name="code">The setup code (<c>altaserver setup-code</c>).</param>
+    /// <param name="ownerName">The name of the owner.</param>
+    /// <param name="organizationName">The name of the organization; null for the owner's.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate, which the link keeps; null for one that validates as usual.</param>
+    /// <param name="cancellationToken">Cancels the setup.</param>
+    /// <returns>The link.</returns>
+    /// <exception cref="FleetServerException">The server refused the setup.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    /// <exception cref="InvalidOperationException">This instance is linked to that server already.</exception>
+    public Task<FleetServerLink> CreateServerAsync(Uri address, string code, string ownerName, string? organizationName, string? certificatePin, CancellationToken cancellationToken)
+        => CreateServerAsync(address, address, code, ownerName, organizationName, certificatePin, cancellationToken);
 
     /// <summary>
     /// Sets up a server through another address than the one its machines use: a port forwarded over SSH to its loopback,
@@ -193,7 +207,26 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// <exception cref="FleetServerException">The server refused the setup.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     /// <exception cref="IOException">The pin of the device list cannot be written: no link is made.</exception>
-    public async Task<FleetServerLink> CreateServerAsync(Uri address, Uri setupAddress, string code, string ownerName, string? organizationName, CancellationToken cancellationToken)
+    public Task<FleetServerLink> CreateServerAsync(Uri address, Uri setupAddress, string code, string ownerName, string? organizationName, CancellationToken cancellationToken)
+        => CreateServerAsync(address, setupAddress, code, ownerName, organizationName, null, cancellationToken);
+
+    /// <summary>
+    /// Sets up a server through another address than the one its machines use (a port forwarded over SSH to its
+    /// loopback), when the server may pin its own certificate: the setup and the link both check it.
+    /// </summary>
+    /// <param name="address">The address the link keeps.</param>
+    /// <param name="setupAddress">The address of the setup.</param>
+    /// <param name="code">The setup code.</param>
+    /// <param name="ownerName">The name of the owner.</param>
+    /// <param name="organizationName">The name of the organization; null for the server's default.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate (<c>altaserver run --own-certificate</c>); null for one that validates as usual.</param>
+    /// <param name="cancellationToken">Cancels the setup.</param>
+    /// <returns>The link, approved, its device list pinned to the first entry this desktop signed.</returns>
+    /// <exception cref="FleetServerException">The server refused the setup.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer, or presents another certificate than the pinned one.</exception>
+    /// <exception cref="IOException">The pin of the device list cannot be written: no link is made.</exception>
+    public async Task<FleetServerLink> CreateServerAsync(Uri address, Uri setupAddress, string code, string ownerName, string? organizationName, string? certificatePin,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(setupAddress);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -209,7 +242,7 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             {
                 // The first entry this desktop signs, and the organization the setup made, anchor the link before it exists:
                 // the connector then refuses a list of the server's making, from its first read on.
-                using var client = new FleetServerClient(setupAddress, identity, Handler);
+                using var client = new FleetServerClient(setupAddress, identity, Handler, null, certificatePin);
                 setup = await client.SetUpAsync(code, ownerName, _deviceName, organizationName, Path.Combine(folder, FleetOrganizationDevices.PinFileName), cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -222,7 +255,7 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
 
             var now = DateTimeOffset.UtcNow;
             var link = new FleetServerLink(id, FleetServerAddress.Format(address), setup.Organization.Id, setup.Organization.Name, identity.DeviceId,
-                FleetDeviceKinds.Controller, FleetServerLinkStates.Approved, now, now);
+                FleetDeviceKinds.Controller, FleetServerLinkStates.Approved, now, now, certificatePin);
             _store.Save(link);
             await EnsureConnectionsAsync(cancellationToken).ConfigureAwait(false);
             return link;
@@ -244,7 +277,18 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// <exception cref="FleetServerException">The server refused the token.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     /// <exception cref="InvalidOperationException">This instance is linked to that server already.</exception>
-    public async Task<FleetServerLink> JoinAsync(Uri address, string token, CancellationToken cancellationToken)
+    public Task<FleetServerLink> JoinAsync(Uri address, string token, CancellationToken cancellationToken) => JoinAsync(address, token, null, cancellationToken);
+
+    /// <summary>Joins a server that may pin its own certificate with an enrollment token, as a controller device of the person who made the token.</summary>
+    /// <param name="address">The address of the server.</param>
+    /// <param name="token">The enrollment token.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate, which the link keeps; null for one that validates as usual.</param>
+    /// <param name="cancellationToken">Cancels the enrollment.</param>
+    /// <returns>The link, pending.</returns>
+    /// <exception cref="FleetServerException">The server refused the token.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer, or presents another certificate than the pinned one.</exception>
+    /// <exception cref="InvalidOperationException">This instance is linked to that server already.</exception>
+    public async Task<FleetServerLink> JoinAsync(Uri address, string token, string? certificatePin, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -252,11 +296,11 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             RequireNoLink(address);
             var identity = Identity();
-            using var client = new FleetServerClient(address, identity, Handler);
+            using var client = new FleetServerClient(address, identity, Handler, null, certificatePin);
             var device = await client.EnrollAsync(token, _deviceName, FleetDeviceKinds.Controller, cancellationToken).ConfigureAwait(false);
             var now = DateTimeOffset.UtcNow;
             var link = new FleetServerLink(FleetServerLinkStore.NewId(), FleetServerAddress.Format(address), null, null, identity.DeviceId, device.Kind,
-                FleetServerLinkStates.Pending, now, now);
+                FleetServerLinkStates.Pending, now, now, certificatePin);
             _store.Save(link);
             await EnsureConnectionsAsync(cancellationToken).ConfigureAwait(false);
             return link;
@@ -343,6 +387,23 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
         return await client.ListDevicesAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Counts the entries of the device list of a server that a newer version of CodeAlta wrote and this one skipped
+    /// (<c>doc/fleet/protocol.md</c>, versions): they gave no trust here, and updating CodeAlta reads them.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>How many entries were skipped.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetDeviceListException">The list does not verify.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<int> CountSkippedDeviceListEntriesAsync(string linkId, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        return (await client.ReadVerifiedDeviceListAsync(cancellationToken: cancellationToken).ConfigureAwait(false)).Skipped.Count;
+    }
+
     /// <summary>Reads the telemetry setting of the fleet of a server, with the headers only the server holds; an owner's controller device only.</summary>
     /// <param name="linkId">The link.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
@@ -360,6 +421,7 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// <param name="linkId">The link.</param>
     /// <param name="change">What the setting says.</param>
     /// <param name="serverHeaders">The headers only the server holds, for the server route; null for none.</param>
+    /// <param name="keepServerHeaders">The names of the headers of the server route whose held values the server keeps; null for none.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The setting as the server holds it now.</returns>
     /// <exception cref="KeyNotFoundException">No such link.</exception>
@@ -368,10 +430,10 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<TelemetrySettingsDto> SetTelemetryAsync(string linkId, FleetTelemetryChange change, IReadOnlyDictionary<string, string>? serverHeaders,
-        CancellationToken cancellationToken)
+        IReadOnlyList<string>? keepServerHeaders, CancellationToken cancellationToken)
     {
         using var client = Client(linkId);
-        return await client.SetTelemetryAsync(change, serverHeaders, cancellationToken).ConfigureAwait(false);
+        return await client.SetTelemetryAsync(change, serverHeaders, keepServerHeaders, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Reads the updates of the fleet of a server: its versions, its policy, its recent campaigns; a controller device only.</summary>
@@ -577,7 +639,21 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     /// <exception cref="InvalidOperationException">This instance is linked to that server already.</exception>
-    public async Task<FleetServerLink> RecoverAsync(Uri address, string words, CancellationToken cancellationToken)
+    public Task<FleetServerLink> RecoverAsync(Uri address, string words, CancellationToken cancellationToken) => RecoverAsync(address, words, null, cancellationToken);
+
+    /// <summary>Recovers a server that may pin its own certificate with the recovery key of a person whose devices are all lost.</summary>
+    /// <param name="address">The address of the server.</param>
+    /// <param name="words">The words of the recovery key.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate, which the link keeps; null for one that validates as usual.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>The link.</returns>
+    /// <exception cref="ArgumentException">The words are not 32 words of the list.</exception>
+    /// <exception cref="FleetRecoveryException">The words are not the recovery key of a person of the server.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not start with the anchor the recovery key sealed.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer, or presents another certificate than the pinned one.</exception>
+    /// <exception cref="InvalidOperationException">This instance is linked to that server already.</exception>
+    public async Task<FleetServerLink> RecoverAsync(Uri address, string words, string? certificatePin, CancellationToken cancellationToken)
     {
         if (!FleetRecoveryKey.TryParse(words, out var key)) throw new ArgumentException("A recovery key is 32 words of its list.", nameof(words));
         using var recovery = key;
@@ -592,8 +668,8 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             FleetRecoveryResult result;
             try
             {
-                result = await FleetRecovery.RecoverAsync(address, recovery, identity, _deviceName, Path.Combine(folder, FleetOrganizationDevices.PinFileName), Handler, cancellationToken)
-                    .ConfigureAwait(false);
+                result = await FleetRecovery.RecoverAsync(address, recovery, identity, _deviceName, Path.Combine(folder, FleetOrganizationDevices.PinFileName), Handler,
+                    certificatePin, cancellationToken).ConfigureAwait(false);
             }
             catch
             {
@@ -604,7 +680,7 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
 
             var now = DateTimeOffset.UtcNow;
             var link = new FleetServerLink(id, FleetServerAddress.Format(address), result.OrganizationId, result.OrganizationName, identity.DeviceId, FleetDeviceKinds.Controller,
-                FleetServerLinkStates.Approved, now, now);
+                FleetServerLinkStates.Approved, now, now, certificatePin);
             _store.Save(link);
             await EnsureConnectionsAsync(cancellationToken).ConfigureAwait(false);
             return link;
@@ -740,8 +816,11 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
         var identity = Identity();
         var devices = Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.Devices is { } running && running.ServerAddress == link.Address && Handler is null
             ? running
-            : new FleetOrganizationDevices(link.Address, identity, Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName), Handler);
-        return new FleetServerClient(link.Address, identity, Handler) { DeviceList = devices };
+            : new FleetOrganizationDevices(link.Address, identity, Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName), Handler)
+            {
+                CertificatePin = link.CertificatePin,
+            };
+        return new FleetServerClient(link.Address, identity, Handler, null, link.CertificatePin) { DeviceList = devices };
     }
 
     // The key of this device: the one of pairing, made on first use.

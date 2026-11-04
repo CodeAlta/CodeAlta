@@ -104,8 +104,9 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         return await FleetNodeClient.PairAsync(offer, ViewerIdentity, "viewer", ViewerMachines, cancellationToken);
     }
 
-    /// <summary>A pairing link of the node, as <c>altanode pair</c> prints it.</summary>
-    public string CreatePairingLink() => Service.Pairing.CreateOffer("test-node", Addresses, TimeSpan.FromMinutes(1)).Offer.ToUri();
+    /// <summary>A pairing link of the node, as <c>altanode pair --manage</c> prints it (<c>altanode pair</c> without <paramref name="manages"/>).</summary>
+    /// <param name="manages">Whether the computer that redeems it manages the node, as its owner asked.</param>
+    public string CreatePairingLink(bool manages = true) => Service.Pairing.CreateOffer("test-node", Addresses, TimeSpan.FromMinutes(1), manages).Offer.ToUri();
 
     public async ValueTask DisposeAsync()
     {

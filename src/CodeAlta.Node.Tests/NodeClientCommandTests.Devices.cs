@@ -26,7 +26,7 @@ public sealed partial class NodeClientCommandTests
         {
             var pairOutput = new CapturingWriter();
             var pairError = new CapturingWriter();
-            var pairing = Client(pairOutput, pairError).RunAsync(["pair", "--data-root", root.DataRoot, "--minutes", "1"]);
+            var pairing = Client(pairOutput, pairError).RunAsync(["pair", "--data-root", root.DataRoot, "--minutes", "1", "--manage"]);
             var link = await WaitForAsync(() => LinkPattern().Match(pairOutput.Text) is { Success: true } match ? match.Value : null, pairing, pairError, token);
             var (code, output, error) = await RunAsync(["connect", link, "--data-root", viewerRoot, "--name", "viewer"]);
             Assert.AreEqual(NodeExitCodes.Success, code, error);
@@ -56,7 +56,7 @@ public sealed partial class NodeClientCommandTests
 
             (code, output, error) = await RunAsync(["permissions", "viewer", "--data-root", root.DataRoot]);
             Assert.AreEqual(NodeExitCodes.Success, code, error);
-            StringAssert.Contains(output, "may view, drive, start, manage.", "The first device of a node manages it.");
+            StringAssert.Contains(output, "may view, drive, start, manage.", "A link made with --manage gives it.");
 
             (code, output, error) = await RunAsync(["permissions", viewerIdentity.DeviceId[..6], "--allow", "move", "--data-root", root.DataRoot]);
             Assert.AreEqual(NodeExitCodes.Success, code, error);

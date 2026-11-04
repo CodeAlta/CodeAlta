@@ -329,15 +329,32 @@ internal static class AutomationConfig
         autonomy = null;
         foreach (var key in table.Keys)
         {
-            if (key is not ("allowed_tools" or "max_calls_per_hour" or "approval_timeout" or "on_timeout" or "approvers"))
+            if (key is not ("allowed_tools" or "max_calls_per_hour" or "approval_timeout" or "on_timeout" or "approvers" or "oncall"))
             {
-                problem = $"autonomy has no {key}: allowed_tools, max_calls_per_hour, approval_timeout, on_timeout or approvers.";
+                problem = $"autonomy has no {key}: allowed_tools, max_calls_per_hour, approval_timeout, on_timeout, approvers or oncall.";
                 return false;
             }
         }
 
-        if (!TryTexts(table, "allowed_tools", out var tools, out problem) || !TryText(table, "on_timeout", out var onTimeout, out problem)
+        if (!AutomationToolConfig.TryRead(table, out var tools, out var described, out problem) || !TryText(table, "on_timeout", out var onTimeout, out problem)
             || !TryText(table, "approvers", out var approvers, out problem)) return false;
+        AutomationOnCall? onCall = null;
+        if (table.TryGetValue("oncall", out var onCallValue))
+        {
+            if (onCallValue is not TomlTable onCallTable || onCallTable.Keys.Any(static key => key is not ("source" or "schedule" or "token" or "region"))
+                || !TryText(onCallTable, "source", out var source, out problem) || !TryText(onCallTable, "schedule", out var schedule, out problem)
+                || !TryText(onCallTable, "token", out var token, out problem) || !TryText(onCallTable, "region", out var region, out problem))
+            {
+                problem ??= "oncall is a table: { source = \"pagerduty\", schedule = \"…\", token = \"${secret:NAME}\" }, with region = \"eu\" for Opsgenie in Europe.";
+                return false;
+            }
+
+            onCall = new AutomationOnCall((source ?? string.Empty).Trim().ToLowerInvariant(), (schedule ?? string.Empty).Trim(), (token ?? string.Empty).Trim())
+            {
+                Region = Blank(region)?.ToLowerInvariant(),
+            };
+        }
+
         int? calls = null, timeout = null;
         foreach (var (key, assign) in new (string, Action<int>)[] { ("max_calls_per_hour", value => calls = value), ("approval_timeout", value => timeout = value) })
         {
@@ -358,17 +375,25 @@ internal static class AutomationConfig
             ApprovalTimeout = timeout,
             OnTimeout = Blank(onTimeout)?.ToLowerInvariant() ?? AutomationAutonomy.StopOnTimeout,
             Approvers = Blank(approvers)?.ToLowerInvariant() ?? AutomationAutonomy.OwnerApprovers,
+            Tools = described,
+            OnCall = onCall,
         };
         return true;
     }
 
     private static string Format(AutomationAutonomy autonomy)
     {
-        var builder = new StringBuilder("{ allowed_tools = [").Append(string.Join(", ", autonomy.AllowedTools.Select(Quote))).Append(']');
+        var builder = new StringBuilder("{ allowed_tools = ").Append(AutomationToolConfig.Format(autonomy));
         if (autonomy.MaxCallsPerHour is { } calls) builder.Append(", max_calls_per_hour = ").Append(calls.ToString(CultureInfo.InvariantCulture));
         if (autonomy.ApprovalTimeout is { } timeout) builder.Append(", approval_timeout = ").Append(timeout.ToString(CultureInfo.InvariantCulture));
         if (autonomy.OnTimeout != AutomationAutonomy.StopOnTimeout) builder.Append(", on_timeout = ").Append(Quote(autonomy.OnTimeout));
         if (autonomy.Approvers != AutomationAutonomy.OwnerApprovers) builder.Append(", approvers = ").Append(Quote(autonomy.Approvers));
+        if (autonomy.OnCall is { } onCall)
+        {
+            builder.Append(", oncall = { source = ").Append(Quote(onCall.Source)).Append(", schedule = ").Append(Quote(onCall.Schedule)).Append(", token = ").Append(Quote(onCall.Token));
+            if (onCall.Region is { } region) builder.Append(", region = ").Append(Quote(region));
+            builder.Append(" }");
+        }
         return builder.Append(" }").ToString();
     }
 

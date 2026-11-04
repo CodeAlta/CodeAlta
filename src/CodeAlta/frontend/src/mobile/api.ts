@@ -1,4 +1,4 @@
-import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, LatestEventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, Session, SessionChoices, SessionPage } from "./contract";
+import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, LatestEventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, Session, SessionChoices, SessionPage, TakeOverResult, WaitingPage, WaitingRun } from "./contract";
 
 /** What the page says when the server no longer knows this phone. */
 export const signedOutMessage = "This phone is no longer connected: scan the QR code of the Mobile tab again.";
@@ -169,6 +169,13 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     /** What the session asks permission for; an answer that did not reach it says why in its result, not as an error. */
     permissions: (id: string) => call<ApprovalPage>("GET", `${session(id)}/permissions`),
     resolvePermission: (id: string, answer: ApprovalAnswer) => call<ApprovalResult>("POST", `${session(id)}/permissions/resolve`, answer),
+    /** Takes over the run of the automation that started the session, while it waits for the person. */
+    takeOver: (id: string) => call<TakeOverResult>("POST", `${session(id)}/takeover`, {}),
+    /** The runs that wait for the person, of this computer and of the machines of their servers. */
+    waiting: () => call<WaitingPage>("GET", "/api/automations/waiting"),
+    /** Takes a run that waits over; one of a machine of a server is signed by the computer for the person. */
+    takeOverRun: (run: WaitingRun) => call<TakeOverResult>("POST", "/api/automations/takeover",
+      run.machineId ? { runId: run.runId, machineId: run.machineId, automationId: run.automationId } : { runId: run.runId }),
     diagram: (body: Readonly<{ svg: string; background?: string; text?: string; dark?: boolean }>) => call<{ url?: string }>("POST", "/api/diagrams", body),
   };
 }

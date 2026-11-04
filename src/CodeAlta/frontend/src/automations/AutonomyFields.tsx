@@ -3,7 +3,10 @@ import { Callout, FormGroup, HTMLSelect, InputGroup, NumericInput, Switch } from
 import type { AutomationAutonomyItem } from "#neoastra";
 import { bypassPermissionMode } from "../permissionModes";
 import { useShellLanguage } from "../shellLanguage";
-import { describeAutonomy, newAutonomy, toolNames } from "./automations";
+import { describeAllowedTool, describeAutonomy, newAutonomy, toolNames } from "./automations";
+
+// The on-call tools an automation reads who is on call from, by the names people know them by.
+const onCallSources: Readonly<Record<string, string>> = { incident_io: "incident.io", pagerduty: "PagerDuty", opsgenie: "Opsgenie" };
 
 /**
  * What the runs of an automation do without a person: off, its runs work as any session of its permission mode; on,
@@ -29,6 +32,15 @@ export function AutonomyFields({ autonomy, permissionMode, disabled, onChange }:
         <label htmlFor="automation-allowed-tools">{t("Tools it calls by itself")}</label>
         <InputGroup id="automation-allowed-tools" value={tools} disabled={disabled} spellCheck={false} placeholder="jira_comment, mcp__github__create_issue"
           onChange={event => { setTools(event.target.value); set({ allowedTools: toolNames(event.target.value) }); }} />
+        {/* What a tool is pinned to and bounded by is written in the file: the form shows it and keeps it while the tool stays allowed. */}
+        <span />
+        <div className="automation-autonomy-tools">
+          {(autonomy.tools ?? []).filter(tool => autonomy.allowedTools.includes(tool.name)).map(tool => {
+            const said = describeAllowedTool(tool, t);
+            return said && <p key={tool.name}><code>{tool.name}</code> {said}</p>;
+          })}
+          <p>{t("Pins, bounds and preconditions are written in its configuration file; a try says the pin of each tool it calls.")}</p>
+        </div>
         <label htmlFor="automation-max-calls">{t("Calls in an hour, at most")}</label>
         <NumericInput id="automation-max-calls" min={1} max={10000} value={autonomy.maxCallsPerHour ?? ""} disabled={disabled} buttonPosition="none" placeholder="—"
           onValueChange={value => set({ maxCallsPerHour: Number.isFinite(value) && value > 0 ? Math.round(value) : null })} />
@@ -41,8 +53,17 @@ export function AutonomyFields({ autonomy, permissionMode, disabled, onChange }:
           </HTMLSelect>
         </div>
         {/* The approvals follow the owner of the automation: on a server, a team that owns it and who is granted to approve it. */}
-        <span className="automation-autonomy-label">{t("Approvals go to")}</span>
-        <span className="automation-autonomy-approvers">{t("Its owner: you, or on your server the team that owns it and those granted to approve it.")}</span>
+        <label htmlFor="automation-approvers">{t("Approvals go to")}</label>
+        <div className="automation-autonomy-approvers-field">
+          <HTMLSelect id="automation-approvers" value={autonomy.approvers} disabled={disabled} onChange={event => set({ approvers: event.target.value })}>
+            <option value="owner">{t("Its owner")}</option><option value="oncall">{t("The person on call of its team")}</option>
+          </HTMLSelect>
+          <span className="automation-autonomy-approvers">{autonomy.approvers === "oncall" && autonomy.onCall
+            ? t("Who is on call comes from the schedule {schedule} of {source}, read with its secret on the machine; else from the rotation of its team.",
+              { schedule: autonomy.onCall.schedule, source: onCallSources[autonomy.onCall.source] ?? autonomy.onCall.source })
+            : t(autonomy.approvers === "oncall" ? "On your server, the team that owns it takes turns on call; without a rotation, its whole team answers."
+              : "Its owner: you, or on your server the team that owns it and those granted to approve it.")}</span>
+        </div>
       </div>
       <p className="automation-autonomy-summary">{describeAutonomy(autonomy, t)}</p>
       {permissionMode === bypassPermissionMode && <Callout intent="warning" compact role="alert">

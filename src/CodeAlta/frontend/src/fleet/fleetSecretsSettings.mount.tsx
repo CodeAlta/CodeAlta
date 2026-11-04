@@ -33,7 +33,7 @@ let overview: FleetSecretsOverview = {
 const ok = async () => ({ status: "ok", message: null });
 const api: FleetSecretsApi = {
   status: async () => ({ status: "ok", servers: [{ id: "home", url: "https://fleet.example", organization: "Home", link: "approved", connection: "online", problem: null,
-    controller: true, spaces: [], recoveryKey: true, stop: null }], deviceId: "desktop", words: "apple river stone", personName: null }),
+    controller: true, spaces: [], recoveryKey: true, shareUrl: null, stop: null }], deviceId: "desktop", words: "apple river stone", personName: null }),
   secrets: async () => overview,
   setSecret: async (request: FleetSecretSetRequest) => { calls.push(JSON.stringify({ set: { ...request, expectedEpoch: undefined, linkId: undefined } })); return ok(); },
   rotateSecret: async (request: FleetSecretRotateRequest) => { calls.push(JSON.stringify({ rotate: request.id, value: request.value })); return ok(); },

@@ -23,8 +23,10 @@ namespace CodeAlta.Server.Tests.SignIn;
 /// <param name="GitHubId">Its numeric id at <see cref="FakeGitHubDeviceFlow"/>.</param>
 /// <param name="GivenName">Its first name, sent as the optional <c>given_name</c> claim; null to leave it out.</param>
 /// <param name="FamilyName">Its last name, sent as the optional <c>family_name</c> claim; null to leave it out.</param>
+/// <param name="EmailVerified">Whether its ID token says the email is verified.</param>
+/// <param name="TenantId">Its tenant (the <c>tid</c> claim), or null for none.</param>
 internal sealed record FakeAccount(string Subject, string Email, string? Name, IReadOnlyList<string> Groups, long GitHubId = 0, string? GivenName = null,
-    string? FamilyName = null);
+    string? FamilyName = null, bool EmailVerified = true, string? TenantId = null);
 
 /// <summary>
 /// An OpenID Connect provider in the process of a test, on the loopback: discovery, an authorization endpoint that
@@ -214,11 +216,13 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
         var claims = new Dictionary<string, object>
         {
             ["sub"] = grant.Account.Subject, ["email"] = grant.Account.Email, ["groups"] = grant.Account.Groups.ToArray(),
+            ["email_verified"] = grant.Account.EmailVerified,
         };
         // A provider may leave the name out (a Microsoft personal account without a display name) and send its parts.
         if (grant.Account.Name is { } name) claims["name"] = name;
         if (grant.Account.GivenName is { } given) claims["given_name"] = given;
         if (grant.Account.FamilyName is { } family) claims["family_name"] = family;
+        if (grant.Account.TenantId is { } tenant) claims["tid"] = tenant;
         if ((Nonce ?? grant.Nonce) is { } nonce) claims["nonce"] = nonce;
         var expires = now + Lifetime;
         var descriptor = new SecurityTokenDescriptor

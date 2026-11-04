@@ -9,6 +9,9 @@ const choose = (selector: string, value: string) => `(() => { const select = doc
   Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, ${JSON.stringify(value)});
   select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
 
+// What the page asked the host, in order.
+const calls = async (page: { evaluate: (script: string) => Promise<unknown> }) => (await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call));
+
 // Types in an input as the user does: React reads the input event.
 const type = (selector: string, value: string) => `(() => { const input = document.querySelector(${JSON.stringify(selector)});
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});
@@ -28,6 +31,39 @@ test("Invite a computer… shows the address and the code alone, each with Copy;
 
     await page.clickText(".fleet-server-card .bp6-button", "Add a machine…");
     await page.until(`document.querySelector('.fleet-token-dialog.fleet-token-machine input')?.value === 'altanode join https://fleet.example --token JOIN-5678'`, "the command");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("the devices say when entries of the device list come from a newer version of CodeAlta, which this one skipped", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-device-row')`, "the devices");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-device-list-skipped')`), null, "nothing to say while none is skipped");
+    // A newer version extended the list: the next read of the devices says it, and how to read them.
+    await page.evaluate(`window.fleetFixture.skip(2)`);
+    await page.clickText(".fleet-device-row .bp6-button", "Approve…");
+    await page.clickText(".bp6-popover .bp6-button", "It shows the same words");
+    await page.until(`document.querySelector('.fleet-device-list-skipped')`, "the skipped entries");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-device-list-skipped').textContent`),
+      "2 entries of the device list come from a newer version of CodeAlta and were skipped: update CodeAlta.");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("another computer of the owner asks to change the company sign-in: this one shows the change and approves it", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
+    await page.evaluate(`window.fleetFixture.ask()`);
+    // The row reads again now and then; Link… and back is not needed: a change of the page reads it at once.
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.clickText(".bp6-menu-item", "Add a passkey");
+    await page.until(`document.querySelector('.fleet-sign-in-approval')`, "the change to approve");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-approval li')].map(item => item.textContent)`),
+      ["https://login.contoso.example · contoso-client", "Email domains let in: contoso.example", "Require company sign-in", "A new client secret"]);
+    assert.match(await page.evaluate(`document.querySelector('.fleet-sign-in-approval').textContent`) as string, /^Office desktop asks to change the company sign-in\./u);
+    await page.clickText(".fleet-sign-in-approval .bp6-button", "Approve");
+    await page.until(`!document.querySelector('.fleet-sign-in-approval')`, "approved");
+    assert.ok((await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).some(call => call.includes('"approved":"approval-1"')));
     assert.deepEqual(page.problems, []);
   }, options);
 });
@@ -198,6 +234,47 @@ test("a computer without a server recovers with the 32 words of the recovery key
   }, options);
 });
 
+test("each linked account has its mark and a remove button asking beside the row; a company account has none, and Link… still offers an account already linked", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
+    await page.evaluate(`window.fleetFixture.logins()`);
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.clickText(".bp6-menu-item", "Add a passkey");
+    await page.until(`document.querySelectorAll('.fleet-sign-in-logins .bp6-tag').length === 3`, "the ways in of the person");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-login')].map(row => [row.textContent, !!row.querySelector('svg'),
+      row.querySelector('.fleet-sign-in-login-remove')?.getAttribute('aria-label') ?? null])`), [
+      ["Company sign-in · alex@contoso.example", true, null],
+      ["Microsoft · alex@outlook.com", true, "Remove Microsoft · alex@outlook.com"],
+      ["Passkey · Passkey on Windows", true, "Remove Passkey · Passkey on Windows"]], "each with its mark; the company's account without a remove button");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-sign-in-login .bp6-tag').title`),
+      "Managed by your organization: an admin removes a person in People and access");
+
+    // Link… still offers an account already linked: linking it again refreshes its name.
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.until(`[...document.querySelectorAll('.bp6-menu-item')].some(item => item.textContent === 'Link Microsoft')`, "Microsoft offered again");
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.until(`!document.querySelector('.bp6-menu-item')`, "the menu closed");
+
+    // Remove asks beside the row; Remove does it, and the row lists what is left.
+    await page.evaluate(`document.querySelector('[aria-label="Remove Microsoft · alex@outlook.com"]').click()`);
+    await page.until(`document.querySelector('.confirm-form strong')?.textContent === 'Remove Microsoft from your ways to sign in?'`, "the question");
+    assert.equal(await page.evaluate(`document.querySelector('.confirm-form .confirm-subject').textContent`), "alex@outlook.com");
+    await page.shot("fleet-sign-in-remove");
+    await page.clickText(".confirm-form .bp6-button", "Remove");
+    await page.until(`document.querySelectorAll('.fleet-sign-in-logins .bp6-tag').length === 2 && !document.querySelector('.confirm-form')`, "removed");
+
+    // The last way in of an owner without a recovery key stays: the question says why, and Cancel leaves it.
+    await page.evaluate(`document.querySelector('[aria-label="Remove Passkey · Passkey on Windows"]').click()`);
+    await page.until(`document.querySelector('.confirm-form')`, "the question");
+    await page.clickText(".confirm-form .bp6-button", "Remove");
+    await page.until(`document.querySelector('.confirm-form .confirm-error')?.textContent.startsWith('This is your last way to sign in')`, "why it stays");
+    await page.clickText(".confirm-form .bp6-button", "Cancel");
+    await page.until(`!document.querySelector('.confirm-form')`, "cancelled");
+    assert.deepEqual((await calls(page)).filter(call => call.removeLogin), [{ removeLogin: "a_microsoft" }, { removeLogin: "p_windows" }]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the owner links a passkey, turns company sign-in on and requires it, and the page never holds the secret", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
@@ -234,13 +311,21 @@ test("the owner links a passkey, turns company sign-in on and requires it, and t
       const set = (input, value) => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); };
       set(inputs[0], 'https://login.contoso.example/v2.0'); set(inputs[1], 'contoso-client'); set(inputs[2], 'the-secret'); set(inputs[3], 'Contoso'); return true; })()`);
     await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-dialog .bp6-switch')].find(label => label.textContent === 'Require company sign-in').querySelector('input').click()`);
+    // Whose accounts it lets in is named: nothing named is refused.
+    await page.until(`document.querySelector('.fleet-sign-in-dialog [role=alert]')?.textContent === 'Company sign-in needs the email domains or the tenant ids it lets in.'`, "the domains are needed");
+    await page.evaluate(`(() => { const input = [...document.querySelectorAll('.fleet-sign-in-dialog .fleet-server-form .bp6-input')][5];
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Contoso.example, fabrikam.example'); input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
     await page.until(`!document.querySelector('.fleet-sign-in-dialog [role=alert]')`, "the form holds");
     await page.shot("fleet-sign-in-dialog");
+    // Changing the company sign-in asks the owner to sign in again, with a method linked to them.
     await page.clickText(".fleet-sign-in-dialog .bp6-button", "Save");
+    await page.until(`[...document.querySelectorAll('.fleet-sign-in-confirm-methods .bp6-button')].some(button => button.textContent === 'Continue with Passkey')`, "the confirmation asked");
+    await page.clickText(".fleet-sign-in-confirm-methods .bp6-button", "Continue with Passkey");
     await page.until(`!document.querySelector('.fleet-sign-in-dialog')`, "the form closes");
     const saved = (await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call)).filter(call => call.signIn || call.linkSignIn);
-    assert.deepEqual(saved, [{ linkSignIn: "passkey" }, { linkSignIn: "github" }, { signIn: { version: 0, enabled: ["passkey", "microsoft", "google", "github", "company"],
-      issuer: "https://login.contoso.example/v2.0", clientId: "contoso-client", secret: "the-secret", name: "Contoso", requireSso: true } }]);
+    const change = { version: 0, enabled: ["passkey", "microsoft", "google", "github", "company"], issuer: "https://login.contoso.example/v2.0", clientId: "contoso-client",
+      secret: "the-secret", name: "Contoso", requireSso: true, domains: ["contoso.example", "fabrikam.example"] };
+    assert.deepEqual(saved, [{ linkSignIn: "passkey" }, { linkSignIn: "github" }, { signIn: { ...change, confirmWith: null } }, { signIn: { ...change, confirmWith: "passkey" } }]);
     await page.until(`document.querySelector('.fleet-sign-in-summary')?.textContent === 'Company sign-in required'`, "the row read again");
     await page.clickText(".fleet-server-sign-in .bp6-button", "Change…");
     await page.until(`document.querySelector('.fleet-sign-in-dialog input[type=password]')`, "the form again");

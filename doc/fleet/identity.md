@@ -83,6 +83,11 @@ to it.
   id), **Google** (keyed on `sub`; `hd` names a Workspace domain), **GitHub** (the device flow of the CodeAlta GitHub
   App, no ID token: the server reads the numeric user id and the name through the API with the user token, once, and
   keeps neither the token nor the login, which its person can change and give away), Apple later.
+- **Removing** a linked account or a passkey (`DELETE /api/v1/sign-in/logins/{id}`, the person's own, or anyone's for
+  `access.manage`) makes it sign nobody in; the ids are opaque hashes, never the issuer, subject or credential id. Two
+  are kept: the last way in of an owner without a recovery key (`sign_in.last_way_in`, checked in the same write), and a
+  company account (`sign_in.managed_by_organization`), which would only come back as a new person at its next sign-in:
+  a person leaves through deprovisioning. There is no sign-out: the server keeps no session, a device key acts.
 - A self-hosted server has its own host name, so it cannot use a redirect address registered once for everyone. The
   **desktop signs in through the system browser** with public client ids that the CodeAlta project registers and
   maintains, and a loopback redirect to itself. The server makes the state, the nonce and the PKCE verifier, and
@@ -115,8 +120,15 @@ to it.
 - An organization configures its OpenID Connect provider (Entra ID, Okta, Google Workspace, Keycloak...); SAML is not
   planned.
 - The owner sets its issuer, client id and secret; the server reads its discovery document before keeping them, and
-  never gives the secret back. The redirect registered at the provider is the loopback of the desktop
-  (`http://127.0.0.1`, any port).
+  never gives the secret back. The redirect registered at the provider is the loopback of the desktop under the name
+  `localhost` (`http://localhost/callback`, any port; the desktop listens on IPv4 and IPv6), since Entra ID's Web platform
+  registers only `https://` or `http://localhost` addresses; CodeAlta's own clients come back to `127.0.0.1`.
+- **Only the company's own accounts.** A provider serves more than one company (Google, the multi-tenant endpoints of
+  Entra ID, a shared Okta), so the owner names the **email domains** and the **tenant ids** it lets in, at least one.
+  The server checks every company sign-in, a person's first and the next ones: a tenant named must be the token's
+  `tid`; a domain named must be the one of its `email` claim with `email_verified` true (never `preferred_username`).
+  Entra ID needs its tenant ids, since its emails are not verified. An identity outside is refused and audited, and no
+  person is made for it.
 - **Enforcement**: the organization requires its company sign-in, and no other way signs a new device in, except
   the passkey of one **break-glass Owner**.
 - People are created at their first sign-in, as members; the groups of each sign-in are kept with its login, and map
@@ -171,6 +183,19 @@ the audit log, changing SSO, revoking everything: each asks for a fresh confirma
 or an approval on another of the person's devices), valid 10 to 15 minutes. A household owner therefore keeps one
 account: no separate administrator account, and a stolen browser session or a hijacked agent cannot reconfigure the
 fleet.
+
+Changing the company sign-in (its provider, secret, domains and tenants, the roles its groups give, whether it is on
+or required, the break-glass owner) needs it today, one way or the other, each working once:
+
+- **Sign in again**: the owner's controller device signs in with a method linked to its person (purpose `confirm`, a
+  passkey, a linked account or the company's own sign-in), which gives a single-use confirmation bound to that device
+  for 10 minutes.
+- **Approve on another device**: the device asks for an approval of exactly this change; another approved controller
+  device of the same person is shown the change (the client secret by its SHA-256 only), recomputes its digest itself,
+  refuses one that does not match, and signs that digest. The approval binds to the change and to the device that asks,
+  lasts 10 minutes and is audited with its signature; the server cannot have it sign another change than the one shown.
+
+A signed request alone is not enough, and a refused change does not use the confirmation up.
 
 ## Agents acting for people
 

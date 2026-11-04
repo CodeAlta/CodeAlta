@@ -32,9 +32,12 @@ public sealed class CoordinatorException : Exception
     /// <summary>Gets the hint, or <see langword="null"/>.</summary>
     public string? Hint { get; }
 
+    /// <summary>Gets when to retry, in seconds, for a refusal that says so (a rate limit); answered as <c>Retry-After</c>.</summary>
+    public int? RetryAfterSeconds { get; init; }
+
     /// <summary>Gets the error of the fleet protocol with the same code.</summary>
     /// <returns>The error.</returns>
-    public FleetError ToFleetError() => new(Code, Hint, Message);
+    public FleetError ToFleetError() => new(Code, Hint, Message, RetryAfterSeconds);
 
     internal static CoordinatorException BadRequest(string code, string message) => new(StatusCodes.Status400BadRequest, code, message);
 
@@ -110,6 +113,9 @@ public static class CoordinatorErrorCodes
 
     /// <summary>The body of a request does not read.</summary>
     public const string InvalidBody = "request.invalid_body";
+
+    /// <summary>Too many attempts from this address, or in the name of this person: retry after the delay the answer gives.</summary>
+    public const string RateLimited = "request.rate_limited";
 
     /// <summary>No device has that id.</summary>
     public const string DeviceNotFound = "device.not_found";

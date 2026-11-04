@@ -19,6 +19,9 @@ test("over SSH, the assistant shows each step, says what to do when ssh does not
     await page.until(`document.querySelector('.add-machine-field input')`, "the SSH form");
     assert.equal(await page.evaluate(`[...document.querySelectorAll('.add-machine-dialog .bp6-button')].find(button => button.textContent === 'Add the machine').disabled`), true);
     await page.evaluate(type(".add-machine-field input", "me@pc-ai"));
+    // Managing the machine from here is asked: off until the person ticks it.
+    assert.equal(await page.evaluate(`document.querySelector('.add-machine-manage input').checked`), false);
+    await page.evaluate(`document.querySelector('.add-machine-manage input').click()`);
     await page.clickText(".add-machine-dialog .bp6-button", "Add the machine");
 
     // ssh does not know the computer: the step fails with what to do and the key to compare, and the setup starts over trusting it.

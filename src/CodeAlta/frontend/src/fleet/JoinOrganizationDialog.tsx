@@ -95,7 +95,7 @@ export function JoinOrganizationDialog({ epoch, kind = "organization", api = fle
       // GitHub: a code to enter at GitHub first, then the wait for it under its handle.
       let handle: string | null = null;
       if (method.id === "github") {
-        const started = await api.startSignInCode({ expectedEpoch: epoch, method: method.id, url, linkId: null }, { signal: abort.signal, timeoutMilliseconds: 30_000 });
+        const started = await api.startSignInCode({ expectedEpoch: epoch, method: method.id, url, linkId: null, purpose: null }, { signal: abort.signal, timeoutMilliseconds: 30_000 });
         if (abort.signal.aborted) return;
         const code = started.status === "ok" ? signInCode(started.code) : null;
         if (!code) { setProblem({ key: signInProblem(started.status) ?? serverProblem(started.status) ?? "The operation did not complete.", detail: started.message }); return; }

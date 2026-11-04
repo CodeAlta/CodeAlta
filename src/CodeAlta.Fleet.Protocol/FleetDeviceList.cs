@@ -45,7 +45,7 @@ public static class FleetDeviceListOperations
 
 /// <summary>
 /// What an entry of the device list says, signed by a controller device:
-/// <c>{ "v", "org", "seq", "prev", "op", "device", "key", "kind", "owner", "signer", "time" }</c>.
+/// <c>{ "v", "org", "seq", "prev", "op", "device", "key", "kind", "owner", "signer", "time" }</c>, and <c>"sowner"</c> when the signer names its own person.
 /// </summary>
 /// <remarks>
 /// Entries form a chain: each names the hash of the one before it (<see cref="FleetDeviceListEntries.Hash"/>) and the next
@@ -65,6 +65,11 @@ public static class FleetDeviceListOperations
 /// <param name="OwnerId">The person who owns an added device, or <see langword="null"/> for the first entry.</param>
 /// <param name="SignerDeviceId">The controller device that signs the entry.</param>
 /// <param name="Time">When the signer made the entry; for display, never for ordering.</param>
+/// <param name="SignerOwnerId">
+/// The person of the signer, which the owner's first device names while the list does not know it yet (its first entry,
+/// made before the person existed, names none): it then adds the first device of another person without being taken for
+/// that person's. Omitted otherwise; an older verifier ignores it.
+/// </param>
 public sealed record FleetDeviceListEntryPayload(
     [property: JsonPropertyName("v")] int Version,
     [property: JsonPropertyName("org")] string? OrganizationId,
@@ -76,7 +81,8 @@ public sealed record FleetDeviceListEntryPayload(
     [property: JsonPropertyName("kind")] string? Kind,
     [property: JsonPropertyName("owner")] string? OwnerId,
     [property: JsonPropertyName("signer")] string SignerDeviceId,
-    [property: JsonPropertyName("time")] DateTimeOffset Time)
+    [property: JsonPropertyName("time")] DateTimeOffset Time,
+    [property: JsonPropertyName("sowner"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SignerOwnerId = null)
 {
     /// <summary>The version of the format this library writes.</summary>
     public const int CurrentVersion = 1;

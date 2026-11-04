@@ -30,6 +30,48 @@ public static class FleetServerAddress
         return true;
     }
 
+    /// <summary>The fragment that carries the pin of a server's own certificate in its address: <c>https://host:2586#pin=sha256:…</c>.</summary>
+    public const string PinFragment = "#pin=";
+
+    /// <summary>
+    /// Reads the address of a server as a person or another machine gives it, with the pin of the server's own certificate
+    /// when it has one (<c>https://box:2586#pin=sha256:…</c>, <see cref="FleetServerCertificates"/>).
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="address">The address, without its pin.</param>
+    /// <param name="certificatePin">The pin, or null for a server whose certificate validates as usual.</param>
+    /// <returns>Whether the text is the address of a server, with a pin that reads when it has one.</returns>
+    public static bool TryParse(string? text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Uri? address, out string? certificatePin)
+    {
+        certificatePin = null;
+        var value = text?.Trim() ?? string.Empty;
+        var at = value.IndexOf(PinFragment, StringComparison.Ordinal);
+        if (at >= 0)
+        {
+            var pin = value[(at + PinFragment.Length)..];
+            if (!FleetServerCertificates.IsPin(pin))
+            {
+                address = null;
+                return false;
+            }
+
+            certificatePin = pin;
+            value = value[..at];
+        }
+
+        if (TryParse(value, out address) && (certificatePin is null || address.Scheme == "https")) return true;
+        address = null;
+        certificatePin = null;
+        return false;
+    }
+
+    /// <summary>Gets the text of an address with the pin of its certificate, as it is given to a person or another machine.</summary>
+    /// <param name="address">The address.</param>
+    /// <param name="certificatePin">The pin, or null.</param>
+    /// <returns>The text.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="address"/> is null.</exception>
+    public static string Format(Uri address, string? certificatePin) => certificatePin is null ? Format(address) : Format(address) + PinFragment + certificatePin;
+
     /// <summary>Gets the text of an address as it is stored and shown: without the final <c>/</c> of an empty path.</summary>
     /// <param name="address">The address.</param>
     /// <returns>The text.</returns>
@@ -70,12 +112,25 @@ public sealed partial class FleetServerClient : IDisposable
     private readonly HttpMessageHandler? _handler;
 
     /// <summary>Initializes a new instance of the <see cref="FleetServerClient"/> class.</summary>
-    /// <param name="serverAddress">The address of the server (<see cref="FleetServerAddress.TryParse"/>).</param>
+    /// <param name="serverAddress">The address of the server (<see cref="FleetServerAddress.TryParse(string?, out Uri?)"/>).</param>
     /// <param name="identity">The key of this device; the caller keeps and disposes it.</param>
     /// <param name="handler">The HTTP handler, such as the one of a test server; null for the usual one.</param>
     /// <param name="time">The clock of the signatures; null for the system clock.</param>
     /// <exception cref="ArgumentNullException"><paramref name="serverAddress"/> or <paramref name="identity"/> is null.</exception>
     public FleetServerClient(Uri serverAddress, DeviceIdentity identity, HttpMessageHandler? handler = null, TimeProvider? time = null)
+        : this(serverAddress, identity, handler, time, null)
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="FleetServerClient"/> class for a server that may pin its own certificate.</summary>
+    /// <param name="serverAddress">The address of the server (<see cref="FleetServerAddress.TryParse(string?, out Uri?)"/>).</param>
+    /// <param name="identity">The key of this device; the caller keeps and disposes it.</param>
+    /// <param name="handler">The HTTP handler, such as the one of a test server; null for the usual one, or the pinned one.</param>
+    /// <param name="time">The clock of the signatures; null for the system clock.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate (<see cref="FleetServerCertificates"/>); null to validate it as usual.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="serverAddress"/> or <paramref name="identity"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="certificatePin"/> is not a pin.</exception>
+    public FleetServerClient(Uri serverAddress, DeviceIdentity identity, HttpMessageHandler? handler, TimeProvider? time, string? certificatePin)
     {
         ArgumentNullException.ThrowIfNull(serverAddress);
         ArgumentNullException.ThrowIfNull(identity);
@@ -83,10 +138,17 @@ public sealed partial class FleetServerClient : IDisposable
         _identity = identity;
         _time = time ?? TimeProvider.System;
         _handler = handler;
-        _http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
+        CertificatePin = certificatePin;
+        // A pinned server is reached through a handler of this client that trusts its key only (a given handler, of a test, wins).
+        _http = handler is not null ? new HttpClient(handler, disposeHandler: false)
+            : certificatePin is not null ? new HttpClient(FleetServerCertificates.CreateHandler(certificatePin), disposeHandler: true)
+            : new HttpClient();
         _http.Timeout = TimeSpan.FromSeconds(30);
         _ownsHttp = true;
     }
+
+    /// <summary>Gets the pin of the server's own certificate, or null.</summary>
+    public string? CertificatePin { get; }
 
     /// <summary>Gets the address of the server.</summary>
     public Uri ServerAddress { get; }
@@ -293,12 +355,13 @@ public sealed partial class FleetServerClient : IDisposable
                 throw new FleetDeviceListException(index + 1, "the server's sequence or hash of the entry does not match the entry");
         }
 
-        return FleetDeviceListVerifier.VerifyOrThrow(list.Select(static item => item.Entry), organizationId);
+        // A list a newer version extended stays readable: what these rules do not understand adds no member (doc/fleet/protocol.md, versions).
+        return FleetDeviceListVerifier.VerifyOrThrow(list.Select(static item => item.Entry), organizationId, FleetDeviceListMode.Tolerant);
     }
 
     // The list as the anchor of this server verifies it: the one every entry signed here follows.
     private Task<FleetDeviceListState> ReadAnchoredDeviceListAsync(CancellationToken cancellationToken)
-        => (DeviceList ?? new FleetOrganizationDevices(ServerAddress, _identity, null, _handler)).RefreshAsync(cancellationToken);
+        => (DeviceList ?? new FleetOrganizationDevices(ServerAddress, _identity, null, _handler) { CertificatePin = CertificatePin }).RefreshAsync(cancellationToken);
 
     /// <summary>Gets a device from the anchored device list (<see cref="DeviceList"/>): the key to trust for it, whatever the server's tables say.</summary>
     /// <param name="deviceId">The device.</param>
@@ -520,8 +583,26 @@ public sealed partial class FleetServerClient : IDisposable
     /// <exception cref="FleetDeviceListException">This device is not a controller device of the device list it verified: nothing was signed.</exception>
     /// <exception cref="FleetServerException">The server refused the setting.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<TelemetrySettingsDto> SetTelemetryAsync(FleetTelemetryChange change, IReadOnlyDictionary<string, string>? serverHeaders,
+    public Task<TelemetrySettingsDto> SetTelemetryAsync(FleetTelemetryChange change, IReadOnlyDictionary<string, string>? serverHeaders,
         CancellationToken cancellationToken = default)
+        => SetTelemetryAsync(change, serverHeaders, null, cancellationToken);
+
+    /// <summary>
+    /// Sets the telemetry of the fleet, keeping by their names headers of the server route the server holds: their values
+    /// never come back to a device.
+    /// </summary>
+    /// <param name="change">What the setting says.</param>
+    /// <param name="serverHeaders">The headers of the collector only the server holds, for the server route; null for none.</param>
+    /// <param name="keepServerHeaders">The names of the headers of the server route whose held values are kept; null for none.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The setting as the server holds it now.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="change"/> is null.</exception>
+    /// <exception cref="ArgumentException">The setting does not hold.</exception>
+    /// <exception cref="FleetDeviceListException">This device is not a controller device of the device list it verified: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused the setting.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<TelemetrySettingsDto> SetTelemetryAsync(FleetTelemetryChange change, IReadOnlyDictionary<string, string>? serverHeaders,
+        IReadOnlyList<string>? keepServerHeaders, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(change);
         var organization = await GetOrganizationAsync(cancellationToken).ConfigureAwait(false);
@@ -536,7 +617,7 @@ public sealed partial class FleetServerClient : IDisposable
             if (!FleetTelemetrySettingsDocuments.TryValidate(settings, out var reason)) throw new ArgumentException($"The telemetry setting does not hold: {reason}.", nameof(change));
             var text = FleetTelemetrySettingsDocuments.Serialize(settings);
             var request = new SetTelemetrySettingsRequest(new FleetSignedTelemetrySettings(text, Base64Url.EncodeToString(_identity.SignData(FleetTelemetrySettingsDocuments.GetSignedBytes(text)))),
-                serverHeaders is { Count: > 0 } ? serverHeaders : null);
+                serverHeaders is { Count: > 0 } ? serverHeaders : null, keepServerHeaders is { Count: > 0 } ? keepServerHeaders : null);
             try
             {
                 return await SendAsync(HttpMethod.Put, "api/v1/telemetry", Body(request, ServerApiJsonContext.Default.SetTelemetrySettingsRequest),
@@ -688,12 +769,15 @@ public sealed partial class FleetServerClient : IDisposable
                 throw new FleetDeviceListException(state.Sequence, "the server names another organization than its device list");
             if (!state.IsController(DeviceId))
                 throw new FleetDeviceListException(state.Sequence, "this device is not a controller device of the list, so it signs no entry");
-            // A device of another person is signed only by a device the list already gives to its own person: an entry of
-            // a device not yet bound would bind it to that other person.
-            if (owner is not null && owner != self.OwnerId && state.Members[DeviceId].OwnerId != self.OwnerId)
+            // A device of another person is signed only by a device the list gives to its own person. The owner's first
+            // device, which the list knows by no person yet (its first entry named none), names its own in the entry: else
+            // the entry would give it to the person of the device it adds.
+            var bound = state.Members[DeviceId].OwnerId;
+            var naming = bound is null && state.FirstDeviceId == DeviceId ? self.OwnerId : null;
+            if (owner is not null && owner != self.OwnerId && (bound ?? naming) != self.OwnerId)
                 throw new FleetDeviceListException(state.Sequence, "this device signs a device of another person only once the list gives it to its own person");
             var entry = Sign(new FleetDeviceListEntryPayload(FleetDeviceListEntryPayload.CurrentVersion, organization.Id, state.Sequence + 1, state.LastHash, operation, deviceId,
-                key, kind, owner, DeviceId, Now()));
+                key, kind, owner, DeviceId, Now(), naming));
             if (!FleetDeviceListVerifier.TryAppend(state, entry, organization.Id, out _, out var reason))
                 throw new FleetDeviceListException(state.Sequence + 1, $"the entry this device would sign does not hold ({reason})");
             try

@@ -620,15 +620,18 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     }
 
     /// <inheritdoc />
-    public async Task<FleetAutomationRunInfo> RunAsync(FleetAutomationCaller caller, string id, CancellationToken cancellationToken)
+    public Task<FleetAutomationRunInfo> RunAsync(FleetAutomationCaller caller, string id, CancellationToken cancellationToken) => RunAsync(caller, id, false, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<FleetAutomationRunInfo> RunAsync(FleetAutomationCaller caller, string id, bool dryRun, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         if (Engine.Snapshot.Find(id) is not { Source.IsAssigned: true })
             throw new FleetException(FleetNodeErrorCodes.AutomationNotFound, null, "No automation of yours on this machine has that id.");
-        var run = await RunByHandAsync(id, Guid.CreateVersion7().ToString("N"), cancellationToken).ConfigureAwait(false)
+        var run = await RunByHandAsync(id, Guid.CreateVersion7().ToString("N"), dryRun, cancellationToken).ConfigureAwait(false)
             ?? throw new FleetException(FleetNodeErrorCodes.AutomationNotFound, null, "No automation of yours on this machine has that id.");
-        Log($"{caller.Name} ({caller.DeviceId}) ran the automation {id}: {run.Status}.");
+        Log($"{caller.Name} ({caller.DeviceId}) {(dryRun ? "tried" : "ran")} the automation {id}: {run.Status}.");
         return Describe(run);
     }
 
@@ -639,15 +642,16 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     /// </summary>
     /// <param name="id">The automation.</param>
     /// <param name="runId">The id of the run.</param>
+    /// <param name="dryRun">Whether it is a dry run, whose tools it calls by itself record their calls instead of making them.</param>
     /// <param name="cancellationToken">Cancels the wait for the answer, not the run.</param>
     /// <returns>The run; null for an automation that does not exist.</returns>
-    private async Task<AutomationRun?> RunByHandAsync(string id, string runId, CancellationToken cancellationToken)
+    private async Task<AutomationRun?> RunByHandAsync(string id, string runId, bool dryRun, CancellationToken cancellationToken)
     {
         var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _holdWaiters[runId] = held;
         try
         {
-            var running = Engine.RunAsync(id, runId, Engine.Stopping);
+            var running = Engine.RunAsync(id, runId, dryRun, Engine.Stopping);
             if (await Task.WhenAny(running, held.Task).WaitAsync(cancellationToken).ConfigureAwait(false) != running
                 && Engine.Runs(id, MaximumRuns).FirstOrDefault(candidate => candidate.Id == runId) is { Status: AutomationRun.Held } waiting)
             {

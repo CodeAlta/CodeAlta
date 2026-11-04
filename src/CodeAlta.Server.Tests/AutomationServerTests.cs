@@ -252,6 +252,11 @@ public sealed class AutomationServerTests
             "does not take a run over");
         StringAssert.Contains((await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/run", new RunAutomationRequest(request))).Body.ToString(),
             "sent to its run");
+        // A try is a run, asked of the machine as a dry run.
+        var tryRun = TakeOver(FleetAutomationRunRequest.TryAction, "run-10");
+        Assert.IsFalse(tryRun.Payload.Contains("takeover", StringComparison.Ordinal));
+        var tried = await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/run", new RunAutomationRequest(tryRun));
+        Assert.IsTrue(tried.Status is HttpStatusCode.Accepted or HttpStatusCode.OK, tried.Body.ToString());
         StringAssert.Contains((await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-8/takeover", new RunAutomationRequest(request))).Body.ToString(),
             "another automation or run");
         // A request to run reads as before: no action is written.

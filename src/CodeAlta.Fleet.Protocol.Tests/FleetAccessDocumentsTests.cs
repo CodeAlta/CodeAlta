@@ -138,6 +138,76 @@ public sealed class FleetAccessDocumentsTests
         Assert.IsFalse(FleetAutomationVersionDocuments.Serialize(personal).Contains("scope", StringComparison.Ordinal), "a personal version writes the format as before");
     }
 
+    [TestMethod]
+    public void TheApproversOfAnAutomation_AreSignedWithTheDocument_AndLetTheMachineTakeASignedTakeOverFromThem()
+    {
+        using var world = new World();
+        var first = world.Founder.Sign(Document(1, null, 4, owners: ["alex"]));
+        Assert.IsFalse(first.Payload.Contains("approvers", StringComparison.Ordinal), "a version without approvers reads as before");
+        var chain = new List<FleetSignedAccessDocument> { first };
+        chain.Add(world.Founder.Sign(Document(2, Hash(chain), 4, owners: ["alex"]) with { Approvers = [new FleetAccessApprovers("a1", ["bea"])] }));
+        var state = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
+        Assert.AreEqual(2, state.Number);
+        Assert.IsTrue(state.Approves("a1", "bea", Time));
+        Assert.IsFalse(state.Approves("a2", "bea", Time), "for that automation only");
+        Assert.IsFalse((state with { Suspended = ["bea"] }).Approves("a1", "bea", Time), "a suspended person approves nothing");
+
+        AssertBroken([first, world.Founder.Sign(Document(2, Hash([first]), 4, owners: ["alex"], suspended: ["bea"]) with { Approvers = [new FleetAccessApprovers("a1", ["bea"])] })],
+            world, 2, "a suspended person answers approvals");
+        AssertBroken([first, world.Founder.Sign(Document(2, Hash([first]), 4, owners: ["alex"]) with { Approvers = [new FleetAccessApprovers("a1", ["bea", "bea"])] })],
+            world, 2, "the approvers of an automation do not hold");
+        var names = new Dictionary<string, string> { ["bea"] = "Bea", ["a1"] = "Nightly" };
+        CollectionAssert.AreEqual(new[] { "Bea answers the approvals of Nightly and takes its runs over" },
+            FleetAccessDocuments.Describe(FleetAccessDocuments.Verify([first], world.Devices, Organization).State, Document(2, null, 4, owners: ["alex"]) with
+            {
+                Approvers = [new FleetAccessApprovers("a1", ["bea"])],
+            }, id => names.GetValueOrDefault(id)).ToArray());
+        CollectionAssert.AreEqual(new[] { "Bea no longer answers the approvals of Nightly" }, FleetAccessDocuments.Describe(state, Document(3, null, 4, owners: ["alex"]), id => names.GetValueOrDefault(id)).ToArray());
+        Assert.IsTrue(FleetAccessDocuments.SaySame(state, Document(3, null, 4, owners: ["alex"]) with { Approvers = [new FleetAccessApprovers("a1", ["bea"])] }));
+        Assert.IsFalse(FleetAccessDocuments.SaySame(state, Document(3, null, 4, owners: ["alex"])));
+
+        // A take-over Bea signs for Alex's node: refused as before, unless the machine says Bea may make it.
+        var text = FleetAutomationRunRequestDocuments.Serialize(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, Organization, "a1", world.Node.Id, "run-1",
+            world.Bea.Id, world.Bea.PublicKey, Time) { Action = FleetAutomationRunRequest.TakeOverAction });
+        var signed = new FleetSignedAutomationRunRequest(text, world.Bea.SignBytes(FleetAutomationRunRequestDocuments.GetSignedBytes(text)));
+        Assert.IsFalse(FleetAutomationRunRequestDocuments.TryVerify(signed, world.Devices, Organization, world.Node.Id, Time, out _, out var refused));
+        Assert.AreEqual("the run request is signed by a device of another person than the owner of this machine", refused);
+        Assert.IsTrue(FleetAutomationRunRequestDocuments.TryVerify(signed, world.Devices, Organization, world.Node.Id, Time,
+            (request, person) => state.Approves(request.AutomationId, person, Time), out var taken, out var reason), reason);
+        Assert.AreEqual("run-1", taken.RunId);
+        Assert.IsFalse(FleetAutomationRunRequestDocuments.TryVerify(signed with { Signature = first.Signature }, world.Devices, Organization, world.Node.Id, Time,
+            (request, person) => state.Approves(request.AutomationId, person, Time), out _, out _), "the signature is still checked");
+    }
+
+    [TestMethod]
+    public void AnApproverGrantedUntilATime_IsSignedWithItsEnd_AndApprovesNothingAfterIt()
+    {
+        using var world = new World();
+        var first = world.Founder.Sign(Document(1, null, 4, owners: ["alex"]));
+        var end = Time.AddDays(2);
+        var granted = new FleetAccessApprovers("a1", ["bea", "cy"]) { Until = new Dictionary<string, DateTimeOffset> { ["cy"] = end } };
+        var second = world.Founder.Sign(Document(2, FleetAccessDocuments.Hash(first), 4, owners: ["alex"]) with { Approvers = [granted] });
+        Assert.IsFalse(world.Founder.Sign(Document(1, null, 4, owners: ["alex"]) with { Approvers = [new FleetAccessApprovers("a1", ["bea"])] }).Payload.Contains("until", StringComparison.Ordinal),
+            "an approver without an end writes none");
+        var state = FleetAccessDocuments.Verify([first, second], world.Devices, Organization).State;
+
+        Assert.IsTrue(state.Approves("a1", "cy", end.AddMinutes(-1)));
+        Assert.IsFalse(state.Approves("a1", "cy", end), "at its end, and after it, it approves nothing");
+        Assert.IsTrue(state.Approves("a1", "bea", end.AddYears(1)), "without an end, as long as the document names them");
+        var names = new Dictionary<string, string> { ["cy"] = "Cy", ["a1"] = "Nightly" };
+        StringAssert.Contains(FleetAccessDocuments.Describe(FleetAccessDocuments.Verify([first], world.Devices, Organization).State, Document(2, null, 4, owners: ["alex"]) with { Approvers = [granted] },
+            id => names.GetValueOrDefault(id)).Single(line => line.StartsWith("Cy", StringComparison.Ordinal)), "until");
+        Assert.IsFalse(FleetAccessDocuments.SaySame(state, Document(3, null, 4, owners: ["alex"]) with
+        {
+            Approvers = [granted with { Until = new Dictionary<string, DateTimeOffset> { ["cy"] = end.AddDays(1) } }],
+        }), "another end is another version to sign");
+        Assert.IsTrue(FleetAccessDocuments.SaySame(state, Document(3, null, 4, owners: ["alex"]) with { Approvers = [granted] }));
+        AssertBroken([first, world.Founder.Sign(Document(2, FleetAccessDocuments.Hash(first), 4, owners: ["alex"]) with
+        {
+            Approvers = [new FleetAccessApprovers("a1", ["bea"]) { Until = new Dictionary<string, DateTimeOffset> { ["cy"] = end } }],
+        })], world, 2, "the approvers of an automation do not hold");
+    }
+
     private static void AssertBroken(IReadOnlyList<FleetSignedAccessDocument> chain, World world, long at, string reason, string organization = Organization,
         FleetDeviceListState? devices = null)
     {
@@ -228,6 +298,9 @@ public sealed class FleetAccessDocumentsTests
 
         public string SignVersion(string text)
             => Base64Url.EncodeToString(_key.SignData(FleetAutomationVersionDocuments.GetSignedBytes(text), HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
+
+        public string SignBytes(byte[] bytes)
+            => Base64Url.EncodeToString(_key.SignData(bytes, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
 
         public void Dispose() => _key.Dispose();
     }
