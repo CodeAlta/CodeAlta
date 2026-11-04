@@ -90,8 +90,9 @@ public sealed class FleetSecretsManager
     }
 
     /// <summary>
-    /// Rotates a value: its next version, sealed for the machines that hold it now and are still in the list (a revoked
-    /// machine is not given the new one) and for the person's controller devices; the machines take it at their next run.
+    /// Rotates a value: its next version, sealed for the machines that hold it now by a grant a controller device of the
+    /// person signed and are still in the list (a revoked machine is not given the new one, nor a holder the server lists
+    /// by itself) and for the person's controller devices; the machines take it at their next run.
     /// </summary>
     /// <param name="id">The id of the value.</param>
     /// <param name="value">The new value.</param>
@@ -111,7 +112,8 @@ public sealed class FleetSecretsManager
         using var client = Client();
         var held = await FindAsync(client, id, cancellationToken).ConfigureAwait(false);
         var binding = FleetSecretBinding.Of(held) with { Version = held.Version + 1 };
-        var copies = FleetSecretSealing.Seal(value, binding, FleetSecretSealing.Recipients(list, person, held.Holders), list, _devices.Identity);
+        var granted = FleetSecretSealing.GrantedHolders(held, list).Intersect(held.Holders, StringComparer.Ordinal);
+        var copies = FleetSecretSealing.Seal(value, binding, FleetSecretSealing.Recipients(list, person, granted), list, _devices.Identity);
         return await client.PutSecretAsync(id, new SetFleetSecretRequest(held.Kind, held.Name, held.Scope, binding.Version, held.HostOnly, copies), cancellationToken)
             .ConfigureAwait(false);
     }

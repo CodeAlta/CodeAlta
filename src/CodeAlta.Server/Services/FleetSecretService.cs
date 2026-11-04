@@ -66,7 +66,7 @@ internal sealed class FleetSecretService
         RequireController(actor);
         var entries = await _secrets.ListFleetSecretsAsync(actor.OrganizationId, actor.OwnerPersonId!, cancellationToken).ConfigureAwait(false);
         var revoked = await RevokedAsync(actor, cancellationToken).ConfigureAwait(false);
-        return new FleetSecretListDto([.. entries.Select(entry => ToDto(entry, actor.Id, revoked))]);
+        return new FleetSecretListDto([.. entries.Select(entry => ToDto(entry, actor.Id, revoked, holderCopies: true))]);
     }
 
     /// <summary>Lists the values the calling device holds a copy of the current version of, each with its copy only.</summary>
@@ -443,7 +443,7 @@ internal sealed class FleetSecretService
     private async Task<FleetSecretDto> GetDtoAsync(DeviceRecord actor, string id, CancellationToken cancellationToken)
     {
         var entry = await GetOwnAsync(actor, id, cancellationToken).ConfigureAwait(false);
-        return ToDto(entry, actor.Id, await RevokedAsync(actor, cancellationToken).ConfigureAwait(false));
+        return ToDto(entry, actor.Id, await RevokedAsync(actor, cancellationToken).ConfigureAwait(false), holderCopies: true);
     }
 
     // The devices of the organization revoked: one that held a copy of the current version flags the value for rotation.
@@ -479,13 +479,15 @@ internal sealed class FleetSecretService
     private static bool VerifiedBy(DeviceRecord actor, byte[] signed, string? signature)
         => FleetDevicePublicKey.TryParse(actor.PublicKey, out var key) && key.Verify(signed, signature);
 
-    private static FleetSecretDto ToDto(FleetSecretEntry entry, string deviceId, IReadOnlySet<string> revoked)
+    // A controller device of the person gets the copies of the holders too: their signed grants tell it who a controller gave the value to.
+    private static FleetSecretDto ToDto(FleetSecretEntry entry, string deviceId, IReadOnlySet<string> revoked, bool holderCopies = false)
     {
         var secret = entry.Secret;
         var holders = entry.Copies.Select(static copy => copy.DeviceId).ToArray();
         return new FleetSecretDto(secret.Id, secret.Kind, secret.Name, new FleetSecretScopeDto(secret.ScopeKind, secret.ScopeId.Length == 0 ? null : secret.ScopeId), secret.Version,
             secret.HostOnly, secret.SetByDeviceId, secret.SetByPersonId, secret.SetAt, secret.CreatedAt, [.. holders.Where(holder => !revoked.Contains(holder))],
-            [.. holders.Where(revoked.Contains)], entry.Copies.FirstOrDefault(copy => copy.DeviceId == deviceId)?.Sealed);
+            [.. holders.Where(revoked.Contains)], entry.Copies.FirstOrDefault(copy => copy.DeviceId == deviceId)?.Sealed,
+            holderCopies ? [.. entry.Copies.Where(copy => !revoked.Contains(copy.DeviceId)).Select(static copy => new FleetSecretCopyDto(copy.DeviceId, copy.Sealed))] : null);
     }
 
     private static FleetSecretUseDto ToDto(FleetSecretUseRecord use) => new(use.SecretId, use.Name, use.Version, use.RunId, use.UsedAt, use.MachineId);

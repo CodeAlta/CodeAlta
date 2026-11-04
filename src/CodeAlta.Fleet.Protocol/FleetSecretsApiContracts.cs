@@ -111,8 +111,14 @@ public sealed record AddFleetSecretCopiesRequest(int Version, IReadOnlyList<Flee
 /// <param name="Holders">The devices that hold a copy of its current version.</param>
 /// <param name="Flagged">The devices revoked while they held a copy of its current version: it needs a rotation.</param>
 /// <param name="Copy">The copy of the calling device; null when it holds none.</param>
+/// <param name="HolderCopies">
+/// The copies of the current version the holders have, for a controller device of the person: each carries the grant a
+/// controller device signed, which tells which machines a controller gave the value to (a rotation seals for those only,
+/// never for a holder the server lists by itself); null for a machine, and from a server of an older version.
+/// </param>
 public sealed record FleetSecretDto(string Id, string Kind, string Name, FleetSecretScopeDto Scope, int Version, bool HostOnly, string SetByDeviceId, string? SetByPersonId,
-    DateTimeOffset SetAt, DateTimeOffset CreatedAt, IReadOnlyList<string> Holders, IReadOnlyList<string> Flagged, string? Copy);
+    DateTimeOffset SetAt, DateTimeOffset CreatedAt, IReadOnlyList<string> Holders, IReadOnlyList<string> Flagged, string? Copy,
+    IReadOnlyList<FleetSecretCopyDto>? HolderCopies = null);
 
 /// <summary>Named values.</summary>
 /// <param name="Secrets">The values.</param>
