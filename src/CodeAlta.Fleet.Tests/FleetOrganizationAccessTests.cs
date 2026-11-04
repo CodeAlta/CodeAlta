@@ -83,6 +83,30 @@ public sealed class FleetOrganizationAccessTests
     }
 
     [TestMethod]
+    public async Task ATeamStopStillReachesATeamMachine_RestartedWhileItsServerIsGone()
+    {
+        using var world = new World();
+        using var folder = new TestFolder();
+        var pin = Path.Combine(folder.Path, "link", FleetOrganizationAccess.PinFileName);
+        var server = world.Server();
+        server.Documents.Add(world.Sign(world.Desktop, 1, null, owners: ["p1"], teams: [new FleetAccessTeam("t1", ["p2"], [], false)],
+            machines: [new FleetAccessMachine(world.Node.DeviceId, "t1")], suspended: ["p3"]));
+        await new FleetOrganizationAccess(new FleetOrganizationDevices(new Uri("http://server.test/"), world.Node, null, server), pin).RefreshAsync(CancellationToken.None);
+
+        // Restarted offline: the version it verified decides before any read, as the policy it kept does.
+        var restarted = new FleetOrganizationAccess(new FleetOrganizationDevices(new Uri("http://127.0.0.1:9/"), world.Node), pin);
+        Assert.AreEqual(("t1", true), (restarted.Current?.TeamOf(world.Node.DeviceId)?.Id, restarted.Current?.IsSuspended("p3")));
+        var stop = FleetPolicyState.Empty with { Number = 1, Stop = new FleetPolicyStop(FleetPolicyStopScopes.Teams, [], ["t1"]) };
+        Assert.IsTrue(stop.Stops(world.Node.DeviceId, restarted.Current), "a team stop reaches the team machine offline");
+        Assert.IsTrue(stop.Stops(world.Node.DeviceId, null), "an access document not known is no personal machine: the strictest reading");
+
+        // A pin whose kept version was changed is not trusted: nothing decides before the next read.
+        var text = File.ReadAllText(pin).Replace("t1", "t2", StringComparison.Ordinal);
+        File.WriteAllText(pin, text);
+        Assert.IsNull(new FleetOrganizationAccess(new FleetOrganizationDevices(new Uri("http://127.0.0.1:9/"), world.Node), pin).Current);
+    }
+
+    [TestMethod]
     public void ATeamMachineRunsTheAutomationsOfItsMaintainers_ThoseOfItsMembersWhenAllowed_AndNoneOfASuspendedPerson()
     {
         using var world = new World();

@@ -155,7 +155,10 @@ public sealed record FleetPolicyState(
 
     /// <summary>Gets whether the kill switch stops the work of the fleet on a machine.</summary>
     /// <param name="deviceId">The device of the machine.</param>
-    /// <param name="access">The access document the machine verified, which says the team of a team machine; null when none.</param>
+    /// <param name="access">
+    /// The access document the machine verified, which says the team of a team machine; null when it is not known, which a stop
+    /// of teams reads strictly: it reaches the machine.
+    /// </param>
     /// <returns>Whether its work stops.</returns>
     public bool Stops(string deviceId, FleetAccessState? access)
     {
@@ -165,7 +168,8 @@ public sealed record FleetPolicyState(
             null => false,
             { Scope: FleetPolicyStopScopes.Fleet } => true,
             { Scope: FleetPolicyStopScopes.Machines } stop => stop.Machines.Contains(deviceId, StringComparer.Ordinal),
-            { Scope: FleetPolicyStopScopes.Teams } stop => access?.Machines.TryGetValue(deviceId, out var team) == true && stop.Teams.Contains(team, StringComparer.Ordinal),
+            // An access document not known is no personal machine: the stop of teams reaches it, the strictest reading.
+            { Scope: FleetPolicyStopScopes.Teams } stop => access is null || access.Machines.TryGetValue(deviceId, out var team) && stop.Teams.Contains(team, StringComparer.Ordinal),
             // A scope no version knows reaches every machine: the strictest reading.
             _ => true,
         };

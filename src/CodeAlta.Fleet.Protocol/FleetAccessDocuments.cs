@@ -381,20 +381,37 @@ public static class FleetAccessDocuments
         reason = Check(state, signed, devices, organizationId, out var document);
         if (reason is not null) return false;
         var hash = Hash(signed!);
-        next = new FleetAccessState(document!.OrganizationId, document.Number, hash, document.DeviceListSequence,
+        next = StateOf(document!, hash, state.FirstHash ?? hash);
+        return true;
+    }
+
+    /// <summary>
+    /// Gets the state a version leaves: each version says the whole document. For a version the caller verified before and kept
+    /// in a place it trusts (the pin of its link), so that what it says decides while the server is unreachable after a restart.
+    /// </summary>
+    /// <param name="document">The version.</param>
+    /// <param name="hash">Its hash.</param>
+    /// <param name="firstHash">The hash of the first version of its chain.</param>
+    /// <returns>The state.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static FleetAccessState StateOf(FleetAccessDocument document, string hash, string firstHash)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(hash);
+        ArgumentNullException.ThrowIfNull(firstHash);
+        return new FleetAccessState(document.OrganizationId, document.Number, hash, document.DeviceListSequence,
             [.. document.Owners], [.. document.Signers],
             document.Teams.ToImmutableDictionary(static team => team.Id, StringComparer.Ordinal),
             document.Machines.ToImmutableDictionary(static machine => machine.DeviceId, static machine => machine.TeamId, StringComparer.Ordinal),
             [.. document.Suspended])
         {
-            FirstHash = state.FirstHash ?? hash,
+            FirstHash = firstHash,
             OrganizationMachines = [.. document.OrganizationMachines ?? []],
             OrganizationServices = [.. document.OrganizationServices ?? []],
             Automations = (document.Automations ?? []).ToImmutableDictionary(static automation => automation.Id, StringComparer.Ordinal),
             Approvers = FleetAccessState.ApproversOf(document.Approvers),
             ApproversUntil = FleetAccessState.UntilOf(document.Approvers),
         };
-        return true;
     }
 
     /// <summary>Reads a signed version and checks it was signed by a given device, apart from the chain: what a server checks before it keeps one.</summary>

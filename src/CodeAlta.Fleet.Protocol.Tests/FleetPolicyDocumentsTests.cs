@@ -83,7 +83,9 @@ public sealed class FleetPolicyDocumentsTests
         Assert.IsTrue(With(new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [])).Stops(world.Founder.Id, null));
         Assert.IsTrue(With(new FleetPolicyStop(FleetPolicyStopScopes.Machines, [world.Founder.Id], [])).Stops(world.Founder.Id, null));
         Assert.IsFalse(With(new FleetPolicyStop(FleetPolicyStopScopes.Machines, [world.Founder.Id], [])).Stops(world.Node.Id, null));
-        Assert.IsFalse(With(new FleetPolicyStop(FleetPolicyStopScopes.Teams, [], ["infra"])).Stops(world.Node.Id, null), "without an access document no machine is a team's");
+        Assert.IsTrue(With(new FleetPolicyStop(FleetPolicyStopScopes.Teams, [], ["infra"])).Stops(world.Node.Id, null),
+            "an access document not known says no team: the strictest reading, as for a scope no version knows");
+        Assert.IsFalse(With(new FleetPolicyStop(FleetPolicyStopScopes.Teams, [], ["infra"])).Stops(world.Node.Id, FleetAccessState.Empty), "an organization that signed none has no team machine");
         Assert.IsTrue(With(new FleetPolicyStop("future-scope", [], [])).Stops(world.Node.Id, null), "a scope no version knows reaches every machine");
         Assert.IsFalse(FleetPolicyState.Empty.Stops(world.Node.Id, world.Access));
     }
