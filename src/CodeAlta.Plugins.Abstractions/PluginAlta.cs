@@ -118,6 +118,13 @@ public sealed record PluginAltaCommandContext
     public Func<CodeAlta.Agent.AgentToolSpec, System.Text.Json.JsonElement, CancellationToken, ValueTask<string?>>? CheckSourceToolCallAsync { get; init; }
 
     /// <summary>
+    /// Gets what tells whether a guard checks the tool calls of the session that calls the command now, so that a command reads
+    /// the tool it would check (an MCP server describes it) only then; <see langword="null"/> where it cannot be told: a
+    /// command then checks every call through <see cref="CheckSourceToolCallAsync"/>.
+    /// </summary>
+    public Func<CancellationToken, ValueTask<bool>>? HasSourceToolGuardAsync { get; init; }
+
+    /// <summary>
     /// Gets what asks the user to allow what the command would do, on the card of the session that calls it, in every
     /// permission mode for a request no mode answers (<see cref="CodeAlta.Agent.AgentSkillPermissionRequest"/>). The host
     /// gives the request the session and its provider. The answer is

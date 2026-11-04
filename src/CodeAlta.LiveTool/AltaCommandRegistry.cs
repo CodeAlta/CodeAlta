@@ -63,13 +63,13 @@ public sealed class AltaCommandRegistry
     {
         if (context.Caller.Kind != "agent" || context.Caller.SourceSessionId is not { Length: > 0 } sessionId || string.IsNullOrWhiteSpace(path)
             || string.Equals(path, McpToolCallPath, StringComparison.OrdinalIgnoreCase)
-            || context.Services.Get<CodeAlta.Orchestration.Runtime.SessionRuntimeService>()?.ToolGuards is not { } guards
-            || await guards.FindAsync(sessionId, context.CancellationToken).ConfigureAwait(false) is null)
+            || context.Services.Get<CodeAlta.Orchestration.Runtime.SessionRuntimeService>()?.ToolGuards is not { } guards)
             return null;
         var contributionContext = new AltaCommandContributionContext { Invocation = context };
         var policy = _contributors.OfType<PluginAltaCommandContributor>().SelectMany(contributor => contributor.GetCommandPolicies(contributionContext))
             .FirstOrDefault(candidate => string.Equals(candidate.Path, path, StringComparison.OrdinalIgnoreCase));
-        if (policy is not { IsMutating: true }) return null;
+        // The guard of the session is looked up for a command of a plugin that changes something only.
+        if (policy is not { IsMutating: true } || await guards.FindAsync(sessionId, context.CancellationToken).ConfigureAwait(false) is null) return null;
         using var buffer = new MemoryStream();
         using (var writer = new System.Text.Json.Utf8JsonWriter(buffer))
         {

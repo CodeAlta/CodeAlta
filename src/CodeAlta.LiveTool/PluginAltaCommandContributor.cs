@@ -157,6 +157,10 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
                 && invocation.Services.Get<CodeAlta.Orchestration.Runtime.SessionRuntimeService>()?.ToolGuards is { } guards
                 ? (spec, arguments, token) => guards.CheckAsync(guardedId, spec, arguments, invocation.Cwd, token)
                 : null,
+            HasSourceToolGuardAsync = invocation.Caller.Kind == "agent" && invocation.Caller.SourceSessionId is { Length: > 0 } callerId
+                && invocation.Services.Get<CodeAlta.Orchestration.Runtime.SessionRuntimeService>()?.ToolGuards is { } callerGuards
+                ? async token => await callerGuards.FindAsync(callerId, token).ConfigureAwait(false) is not null
+                : null,
             // An agent of a session asks on the card of its session; no other caller has one to be asked on.
             RequestPermissionAsync = invocation.Caller.Kind == "agent" && invocation.Caller.SourceSessionId is { Length: > 0 } sessionId
                 && invocation.Services.Get<CodeAlta.Orchestration.Runtime.SessionRuntimeService>() is { } runtime

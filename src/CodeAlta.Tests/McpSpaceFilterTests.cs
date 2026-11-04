@@ -174,6 +174,7 @@ public sealed partial class McpRuntimeServiceTests
         var contribution = plugin.GetAltaCommands().Single();
         var checkedCalls = new List<(string Tool, string Arguments)>();
         string? refusal = "The automation may not call mcp__tiny__echo by itself.";
+        var guarded = true;
         async Task<(int ExitCode, string Stdout)> RunAsync(params string[] args)
         {
             var stdout = new StringWriter(CultureInfo.InvariantCulture);
@@ -185,6 +186,7 @@ public sealed partial class McpRuntimeServiceTests
                     checkedCalls.Add((spec.Name, arguments.GetRawText()));
                     return ValueTask.FromResult(refusal);
                 },
+                HasSourceToolGuardAsync = _ => ValueTask.FromResult(guarded),
             };
             var app = new CommandApp("alta", "test") { contribution.CreateCommandNode(context) };
             return (await app.RunAsync(["mcp", .. args], new CommandRunConfig { Out = TextWriter.Null, Error = stderr }), stdout.ToString());
@@ -207,6 +209,12 @@ public sealed partial class McpRuntimeServiceTests
         var (allowedExit, allowed) = await RunAsync("tool", "call", "--server", "tiny", "--tool", "echo", "--arguments", "{\"text\":\"hi\"}");
         Assert.AreEqual(0, allowedExit, allowed);
         Assert.Contains("\"type\":\"alta.mcp.tool.call\"", allowed);
+        Assert.HasCount(2, checkedCalls);
+
+        // A session no guard checks is not checked: its call is made as it is, without describing the tool first.
+        (guarded, refusal) = (false, "never asked");
+        var (plainExit, plain) = await RunAsync("tool", "call", "--server", "tiny", "--tool", "echo", "--arguments", "{\"text\":\"hi\"}");
+        Assert.AreEqual(0, plainExit, plain);
         Assert.HasCount(2, checkedCalls);
     }
 

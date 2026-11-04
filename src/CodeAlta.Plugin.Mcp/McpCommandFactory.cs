@@ -975,7 +975,8 @@ internal static class McpCommandFactory
     private static async ValueTask<int?> RefuseByGuardAsync(PluginAltaCommandContext context, McpCommandFactoryOptions options, string serverKey, string toolName,
         string? argumentsJson)
     {
-        if (context.CheckSourceToolCallAsync is not { } check)
+        if (context.CheckSourceToolCallAsync is not { } check
+            || context.HasSourceToolGuardAsync is { } guarded && !await guarded(context.CancellationToken).ConfigureAwait(false))
         {
             return null;
         }
