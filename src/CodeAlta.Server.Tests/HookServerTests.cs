@@ -115,6 +115,27 @@ public sealed class HookServerTests
                 FleetHookServerJsonContext.Default.FleetHookAcks));
         }
 
+        // An event the machine cannot take for now (its source did not answer it) stays, and is handed again when it connects.
+        var (_, again) = await PushAsync(fixture, hook.Path, """{"n":4}""", "d");
+        var retried = Channel.CreateUnbounded<FleetHookEvent>();
+        var (retrying, _) = await ConnectAsync(fixture, node, retried);
+        await using (retrying)
+        {
+            Assert.AreEqual(again.DeliveryId, (await NextAsync(retried)).DeliveryId);
+            await retrying.SendRequestAsync(FleetHookMethods.Ack, JsonSerializer.SerializeToElement(new FleetHookAcks([new FleetHookAck(again.DeliveryId, false, "x: retry") { Retry = true }]),
+                FleetHookServerJsonContext.Default.FleetHookAcks));
+        }
+
+        Assert.AreEqual(HookEventStates.Pending, (await EventsAsync(fixture, owner, hook.Id)).Single(item => item.DeliveryId == again.DeliveryId).State);
+        var handedAgain = Channel.CreateUnbounded<FleetHookEvent>();
+        var (reconnected, _) = await ConnectAsync(fixture, node, handedAgain);
+        await using (reconnected)
+        {
+            Assert.AreEqual(again.DeliveryId, (await NextAsync(handedAgain)).DeliveryId);
+            await reconnected.SendRequestAsync(FleetHookMethods.Ack, JsonSerializer.SerializeToElement(new FleetHookAcks([new FleetHookAck(again.DeliveryId, true, "x: started")]),
+                FleetHookServerJsonContext.Default.FleetHookAcks));
+        }
+
         var (_, late) = await PushAsync(fixture, hook.Path, """{"n":2}""", "b");
         fixture.Clock.Advance(TimeSpan.FromHours(25));
         // A day later, it is no longer handed over: it expired.

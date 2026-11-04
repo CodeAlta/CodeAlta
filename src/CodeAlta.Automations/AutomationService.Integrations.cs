@@ -136,6 +136,12 @@ internal sealed partial class AutomationService
     /// <summary>The most ids of pushed events a trigger remembers, so that an event delivered twice runs once.</summary>
     internal const int RememberedEvents = 500;
 
+    // Whether a trigger took a pushed event already, without taking it.
+    private bool Seen(AutomationEntry entry, AutomationTrigger trigger, string eventId)
+    {
+        lock (_gate) return _state.Watermark(entry.Id, trigger.Key)?.Seen.Contains(eventId) == true;
+    }
+
     // Whether a trigger sees a pushed event for the first time: Slack delivers again what it thinks was not acknowledged,
     // a sender retries a webhook. What claims also guards across machines; this guards a host that claims nothing.
     private bool FirstSeen(AutomationEntry entry, AutomationTrigger trigger, string eventId)
@@ -407,6 +413,7 @@ internal sealed partial class AutomationService
         var outcomes = new List<string>();
         var reports = new List<string>();
         var accepted = false;
+        var retry = false;
         void Note(AutomationEntry entry, string code, string message)
         {
             outcomes.Add($"{entry.Definition.Name}: {message}");
@@ -431,19 +438,33 @@ internal sealed partial class AutomationService
                 continue;
             }
 
-            if (!FirstSeen(entry, trigger, eventId))
+            if (Seen(entry, trigger, eventId))
             {
                 accepted = true;
                 Note(entry, "taken already", "this event was taken already.");
                 continue;
             }
 
-            var (sample, problem) = trigger.Kind == AutomationTriggerKind.IncidentIo
+            var (sample, problem, transient) = trigger.Kind == AutomationTriggerKind.IncidentIo
                 ? await IncidentSampleAsync(entry.ProjectId, entry.Definition.Prompt, trigger, request.Body, cancellationToken).ConfigureAwait(false)
-                : (WebhookSample(entry.Definition.Prompt, trigger, eventId, request.Body), null);
+                : (WebhookSample(entry.Definition.Prompt, trigger, eventId, request.Body), null, false);
             if (sample is null)
             {
-                Note(entry, "event refused", problem!);
+                // A source that does not answer for now leaves the event to be given again: it is not taken yet.
+                if (transient)
+                {
+                    retry = true;
+                    Note(entry, "retry", problem! + " It is tried again when the server gives it again.");
+                }
+                else Note(entry, "event refused", problem!);
+                continue;
+            }
+
+            // The event is taken here, once its run can start: one given again meanwhile (another delivery) is taken once.
+            if (!FirstSeen(entry, trigger, eventId))
+            {
+                accepted = true;
+                Note(entry, "taken already", "this event was taken already.");
                 continue;
             }
 
@@ -452,14 +473,21 @@ internal sealed partial class AutomationService
             else Note(entry, "not started", "not started (see its runs).");
         }
 
-        return new(accepted, AutomationText.Line(string.Join(" ", outcomes), 500), AutomationText.Line(string.Join("; ", reports), 500));
+        return new(accepted, AutomationText.Line(string.Join(" ", outcomes), 500), AutomationText.Line(string.Join("; ", reports), 500)) { Retry = retry };
     }
 
     /// <summary>What a machine did with an event a hook of the server received.</summary>
     /// <param name="Accepted">Whether an automation took it (its signature verified).</param>
     /// <param name="Message">What happened, for the log of this machine: the names of the automations, and why.</param>
     /// <param name="Report">What happened, for the record of the server: each automation by its id, in a word.</param>
-    internal sealed record AutomationHookReceipt(bool Accepted, string Message, string Report);
+    internal sealed record AutomationHookReceipt(bool Accepted, string Message, string Report)
+    {
+        /// <summary>
+        /// Gets whether an automation could not take the event for now (its source did not answer): the server gives it again
+        /// later rather than forget it. The automations that took it take it once.
+        /// </summary>
+        public bool Retry { get; init; }
+    }
 
     /// <summary>Tests the connection of a trigger as the editor writes it: the credentials it names, and what it watches.</summary>
     /// <param name="projectId">The project the automation runs in, whose secrets come first; null for a chat.</param>
@@ -704,7 +732,10 @@ internal sealed partial class AutomationService
         }
     }
 
-    private async Task<(AutomationSample? Sample, string? Problem)> IncidentSampleAsync(string? projectId, string prompt, AutomationTrigger trigger, byte[] body, CancellationToken cancellationToken)
+    // The sample of an incident: the incident read again from incident.io. Transient when incident.io did not answer for now, so
+    // that the event is given again rather than taken for good.
+    private async Task<(AutomationSample? Sample, string? Problem, bool Transient)> IncidentSampleAsync(string? projectId, string prompt, AutomationTrigger trigger, byte[] body,
+        CancellationToken cancellationToken)
     {
         (string Id, bool Declared)? named;
         try
@@ -714,18 +745,19 @@ internal sealed partial class AutomationService
         }
         catch (JsonException)
         {
-            return (null, "The event is not JSON.");
+            return (null, "The event is not JSON.", false);
         }
 
-        if (named is not { } read) return (null, "The event is not about an incident declared or updated.");
-        if (read.Declared != (trigger.Event == "declared")) return (null, $"The event is {(read.Declared ? "a declaration" : "an update")}: the trigger starts on {(trigger.Event == "declared" ? "declarations" : "updates")}.");
+        if (named is not { } read) return (null, "The event is not about an incident declared or updated.", false);
+        if (read.Declared != (trigger.Event == "declared"))
+            return (null, $"The event is {(read.Declared ? "a declaration" : "an update")}: the trigger starts on {(trigger.Event == "declared" ? "declarations" : "updates")}.", false);
         var (key, missing) = Resolve(projectId, trigger.ApiKey!);
-        if (key is null) return (null, missing);
+        if (key is null) return (null, missing, false);
         // The incident read again from incident.io with this machine's key: the copy the prompt gets, not the one pushed.
         var fetched = await new IncidentIoClient(Integrations!.Http, Integrations.IncidentApi).IncidentAsync(key, read.Id, cancellationToken).ConfigureAwait(false);
-        if (fetched.Value is not { } incident) return (null, fetched.Problem);
+        if (fetched.Value is not { } incident) return (null, fetched.Problem, fetched.Transient);
         var reply = trigger.Reply ? new AutomationReplyTarget(trigger, $"the timeline of {incident.Reference ?? incident.Id}") { IncidentId = incident.Id } : null;
-        return (new AutomationSample(IncidentDetail(incident), IncidentPrompt(prompt, incident, read.Declared, reply), reply), null);
+        return (new AutomationSample(IncidentDetail(incident), IncidentPrompt(prompt, incident, read.Declared, reply), reply), null, false);
     }
 
     private static AutomationSample WebhookSample(string prompt, AutomationTrigger trigger, string eventId, byte[] body)

@@ -70,7 +70,15 @@ public sealed record FleetHookAcks(IReadOnlyList<FleetHookAck> Acks);
 /// <param name="DeliveryId">The delivery.</param>
 /// <param name="Accepted">Whether an automation of the machine took it (its signature verified).</param>
 /// <param name="Message">What happened, in a line, without the event's content.</param>
-public sealed record FleetHookAck(string DeliveryId, bool Accepted, string? Message);
+public sealed record FleetHookAck(string DeliveryId, bool Accepted, string? Message)
+{
+    /// <summary>
+    /// Gets whether the machine could not take the event for now (its source did not answer when read again): the server keeps
+    /// it, and gives it again later, until it expires, rather than forget it. Null or false: the answer is final. A server that
+    /// does not know it records the answer as final, as before.
+    /// </summary>
+    public bool? Retry { get; init; }
+}
 
 /// <summary>The source-generated contracts of the hook methods of the control connection.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

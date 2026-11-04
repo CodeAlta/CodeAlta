@@ -163,7 +163,10 @@ internal sealed class NodeServerAutomations(NodeAutomations automations, DeviceI
                 cancellationToken).ConfigureAwait(false);
         if (!receipt.Accepted) Log($"An event of the hook {received.HookId} from {link.Url} was not taken: {receipt.Message}");
         // The server records the report: the automations by their ids, never their names (they are sealed in a Private space).
-        await connector.AcknowledgeHookEventsAsync(new FleetHookAcks([new FleetHookAck(received.DeliveryId, receipt.Accepted, receipt.Report)]), cancellationToken).ConfigureAwait(false);
+        await connector.AcknowledgeHookEventsAsync(new FleetHookAcks([new FleetHookAck(received.DeliveryId, receipt.Accepted, receipt.Report)
+            {
+                Retry = receipt.Retry ? true : null,
+            }]), cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

@@ -224,6 +224,36 @@ public sealed class AutomationIntegrationTests
         Assert.IsFalse((await fixture.Service.ReceiveHookAsync("hzzzzzzzzzzzzzzzzzz", Signed(body, "msg_2"), default)).Accepted);
     }
 
+    // A source that does not answer for a while does not consume the event: the machine asks the server to give it again, and
+    // the event is taken once its source answers; a refusal that does not pass is final.
+    [TestMethod]
+    public async Task AnIncidentThatCannotBeReadAgainForAWhile_IsGivenAgain_NotTakenForGood()
+    {
+        await using var fixture = await Fixture.CreateAsync($$"""{ type = "incident_io", hook = "{{Hook}}", secret = "${secret:INCIDENT_SIGNING}", api_key = "${secret:INCIDENT_KEY}" }""");
+        fixture.Tools.On(HttpMethod.Get, "/v2/incidents/01INC", """{"errors":[{"message":"unavailable"}]}""", HttpStatusCode.ServiceUnavailable);
+        var body = """{"event_type":"public_incident.incident_created_v2","public_incident.incident_created_v2":{"id":"01INC"}}""";
+
+        var unavailable = await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "msg_1"), default);
+        Assert.IsFalse(unavailable.Accepted, unavailable.Message);
+        Assert.IsTrue(unavailable.Retry, "a source that does not answer is tried again");
+        Assert.AreEqual($"{First}: retry", unavailable.Report);
+        Assert.AreEqual(0, fixture.Runner.Starts.Count);
+
+        // incident.io answers again: the same delivery starts the run, once.
+        fixture.Tools.On(HttpMethod.Get, "/v2/incidents/01INC", """{"incident":{"id":"01INC","reference":"INC-42","name":"Checkout errors"}}""");
+        var taken = await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "msg_1"), default);
+        Assert.IsTrue(taken.Accepted, taken.Message);
+        Assert.IsFalse(taken.Retry);
+        Assert.AreEqual($"{First}: started", taken.Report);
+        (await fixture.Runner.NextAsync()).Complete(new(AutomationRun.Completed));
+
+        // An incident that is not found is refused for good.
+        fixture.Tools.On(HttpMethod.Get, "/v2/incidents/02INC", """{"errors":[{"message":"not found"}]}""", HttpStatusCode.NotFound);
+        var missing = await fixture.Service.ReceiveHookAsync(Hook, Signed(body.Replace("01INC", "02INC", StringComparison.Ordinal), "msg_2"), default);
+        Assert.IsFalse(missing.Accepted);
+        Assert.IsFalse(missing.Retry, missing.Message);
+    }
+
     [TestMethod]
     public async Task AWebhook_GivesThePromptOnlyItsBoundFields_AndADisabledOneTakesNothing()
     {

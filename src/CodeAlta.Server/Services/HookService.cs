@@ -227,6 +227,13 @@ internal sealed class HookService
         var now = _time.GetUtcNow();
         foreach (var ack in list)
         {
+            // Not taken for now (its source did not answer the machine): the event stays, and is given again, until it expires.
+            if (ack.Retry == true)
+            {
+                _logger.LogInformation("{Device} will take the hook event {Delivery} later", device.Id, ack.DeliveryId);
+                continue;
+            }
+
             var message = ack.Message is { } text ? text.ReplaceLineEndings(" ").Trim() is var line && line.Length > 500 ? line[..500] : line : null;
             await _hooks.AnswerHookEventAsync(device.OrganizationId, device.Id, ack.DeliveryId, ack.Accepted ? HookEventStates.Accepted : HookEventStates.Refused, message, now,
                 cancellationToken).ConfigureAwait(false);
