@@ -2,7 +2,7 @@
 // its telemetry through it. Driven by fleetServerSettings.browser.test.ts through `fleetFixture`: what the page asks is recorded.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { FleetDeviceView, FleetServerDeviceRequest, FleetServerRecoverRequest, FleetServerView, FleetSignInLinkRequest, FleetSignInLoginView, FleetSignInSettingsRequest,
+import type { FleetDeviceView, FleetServerDeviceRequest, FleetServerRecoverRequest, FleetServerView, FleetSignInApprovalView, FleetSignInLinkRequest, FleetSignInLoginView, FleetSignInSettingsRequest,
   FleetSignInSettingsView, FleetTelemetryRequest, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyRequest, FleetUpdateStartRequest, FleetUpdatesView } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { FleetServerSettings, type FleetServerApi } from "./FleetServerSettings";
@@ -13,12 +13,16 @@ const calls: string[] = [];
 // The owner has no recovery key yet; a laptop of theirs waits for its approval.
 let recoveryKey = false;
 const server = (): FleetServerView => ({ id: "home", url: "https://fleet.example", organization: "Home", link: "approved", connection: "online", problem: null, controller: true,
-  spaces: [], recoveryKey });
+  spaces: [], recoveryKey, shareUrl: null });
 const recoveryWords = "acid acorn actor agent alarm album alien alpha amber anchor angel ankle apple apron arena arrow atlas attic autumn award bacon badge bagel baker "
   + "bamboo banjo barn basil basket beach beacon bear";
 const pending: FleetDeviceView = { id: "laptop", name: "Laptop", kind: "controller", status: "pending", online: false, words: "otter river robin saddle salmon pearl",
   createdAt: "2026-11-03T08:00:00Z" };
 let devices: FleetDeviceView[] = [pending];
+// Entries of the device list a newer version wrote, which the host skipped; a test sets them.
+let skippedEntries = 0;
+// Changes of the company sign-in another computer of the owner asks this one to approve; a test adds one.
+let approvals: FleetSignInApprovalView[] = [];
 // The clipboard of the page is recorded, as headless Edge refuses to write the real one.
 Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => { calls.push(JSON.stringify({ copied: text })); } } });
 let telemetry: FleetTelemetryView = { enabled: true, endpoint: "https://otlp.example:4318", protocol: "http/protobuf", route: "server", signals: ["traces", "metrics"],
@@ -37,7 +41,7 @@ let signIn: FleetSignInSettingsView = { methods: [
   { id: "company", name: "Company sign-in", enabled: false, available: false }, { id: "passkey", name: "Passkey", enabled: true, available: true },
   { id: "microsoft", name: "Microsoft", enabled: true, available: true }, { id: "google", name: "Google", enabled: true, available: false },
   { id: "github", name: "GitHub", enabled: true, available: true }], issuer: null, clientId: null, hasClientSecret: false, displayName: null, groupsClaim: "groups", groupRoles: [],
-  requireSso: false, version: 0, updatedAt: null };
+  requireSso: false, version: 0, updatedAt: null, allowedDomains: [], allowedTenants: [] };
 let logins: FleetSignInLoginView[] = [];
 const unavailable = async () => { throw new Error("not in this fixture"); };
 // Left, the page is empty; the recovery key of the person links it again.
@@ -55,7 +59,7 @@ const api: FleetServerApi = {
     recoveryKey = true;
     return { status: "ok", server: server(), message: null, recoveryWords: null };
   },
-  devices: async () => ({ status: "ok", devices, message: null }),
+  devices: async () => ({ status: "ok", devices, message: null, skippedEntries }),
   approve: async (request: FleetServerDeviceRequest) => {
     calls.push(JSON.stringify({ approve: request.deviceId, words: request.words, kind: request.kind }));
     devices = devices.map(device => device.id === request.deviceId ? { ...device, status: "approved" } : device);
@@ -89,14 +93,21 @@ const api: FleetServerApi = {
     updates = { ...updates, policy: { ...updates.policy, mode: request.mode, pinnedVersion: request.pinnedVersion, window: request.window, timeZone: request.timeZone } };
     return { status: "ok", message: null };
   },
-  signInSettings: async () => ({ status: "ok", settings: signIn, logins, message: null }),
+  signInSettings: async () => ({ status: "ok", settings: signIn, logins, message: null, approvals }),
+  approveSignInChange: async (request: { approvalId: string }) => {
+    calls.push(JSON.stringify({ approved: request.approvalId }));
+    approvals = approvals.filter(approval => approval.id !== request.approvalId);
+    return { status: "ok", message: null };
+  },
   setSignInSettings: async (request: FleetSignInSettingsRequest) => {
     calls.push(JSON.stringify({ signIn: { version: request.version, enabled: request.enabled, issuer: request.issuer, clientId: request.clientId, secret: request.clientSecret,
-      name: request.displayName, requireSso: request.requireSso } }));
+      name: request.displayName, requireSso: request.requireSso, domains: request.allowedDomains, confirmWith: request.confirmWith } }));
+    // As the server: a change of the company sign-in waits for the owner to sign in again.
+    if (request.issuer !== signIn.issuer && !request.confirmWith) return { status: "sign_in.confirmation_required", settings: null, logins: [], message: null, approvals: null };
     signIn = { ...signIn, version: signIn.version + 1, issuer: request.issuer, clientId: request.clientId, hasClientSecret: !!request.clientSecret, displayName: request.displayName,
-      requireSso: request.requireSso, methods: signIn.methods.map(method => ({ ...method, enabled: request.enabled.includes(method.id),
+      requireSso: request.requireSso, allowedDomains: request.allowedDomains ?? [], methods: signIn.methods.map(method => ({ ...method, enabled: request.enabled.includes(method.id),
         name: method.id === "company" ? request.displayName ?? method.name : method.name, available: method.id === "company" ? !!request.issuer : method.available })) };
-    return { status: "ok", settings: signIn, logins: [], message: null };
+    return { status: "ok", settings: signIn, logins: [], message: null, approvals: null };
   },
   // GitHub gives a code and waits for the person, until Cancel; the others link at once.
   startSignInCode: async () => ({ status: "ok", message: null, code: { handle: "0123456789abcdef0123456789abcdef", userCode: "WDJB-MJHT",
@@ -116,7 +127,9 @@ const api: FleetServerApi = {
   createToken: async () => { calls.push(JSON.stringify({ token: "home" })); return { status: "ok", token: "JOIN-5678", expiresAt: null, message: null }; },
   create: unavailable, join: unavailable, revoke: unavailable, signInMethods: unavailable, joinWithSignIn: unavailable,
 };
-Object.assign(window, { fleetFixture: { calls } });
+Object.assign(window, { fleetFixture: { calls, skip: (count: number) => { skippedEntries = count; },
+  ask: () => { approvals = [{ id: "approval-1", requestedBy: "Office desktop", issuer: "https://login.contoso.example", clientId: "contoso-client", secretChanges: true,
+    allowedDomains: ["contoso.example"], allowedTenants: [], requireSso: true, enabled: ["company", "passkey"], expiresAt: "2026-11-04T12:10:00Z" }]; } } });
 
 createRoot(document.getElementById("root")!).render(<StrictMode>
   <ShellLanguageContext.Provider value={{ locale: "en", choice: "en", setLanguage: () => {} }}>

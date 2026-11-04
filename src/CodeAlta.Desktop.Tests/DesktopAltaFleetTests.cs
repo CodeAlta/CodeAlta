@@ -52,7 +52,7 @@ public sealed class DesktopAltaFleetTests
 
         var devices = await alta.ListDevicesAsync(paired.DeviceId, token);
         Assert.AreEqual("ok", devices.Status, devices.Message);
-        CollectionAssert.Contains(devices.Items.Single(static device => device.IsThisComputer).Permissions.ToArray(), "manage", "The first computer paired with a node manages it.");
+        CollectionAssert.Contains(devices.Items.Single(static device => device.IsThisComputer).Permissions.ToArray(), "manage", "A link made to manage the node gives it.");
         Assert.AreEqual("this_computer", (await alta.ListSessionsAsync("desktop-pc", 10, token)).Status);
         Assert.AreEqual("ok", (await alta.ListSessionsAsync("test-node", 10, token)).Status);
 

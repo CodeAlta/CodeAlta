@@ -30,10 +30,13 @@ internal sealed class DeviceAuthenticationMiddleware(RequestDelegate next, Reque
             return;
         }
 
+        var authenticated = context.GetEndpoint()?.Metadata.GetMetadata<AllowUnknownDeviceAttribute>() is null;
+        // Who is not a device of the server is refused before its body is read: no one else makes the server buffer one.
+        if (authenticated) await authenticator.PrecheckAsync(context.Request, context.RequestAborted).ConfigureAwait(false);
         var body = await ReadBodyAsync(context).ConfigureAwait(false);
         var signed = SignedRequestData.From(context.Request, FleetSignedRequest.HashBody(body));
         context.Items[SignedKey] = signed;
-        if (context.GetEndpoint()?.Metadata.GetMetadata<AllowUnknownDeviceAttribute>() is null)
+        if (authenticated)
         {
             var device = await authenticator.AuthenticateAsync(signed, context.RequestAborted).ConfigureAwait(false);
             context.Items[DeviceKey] = device;

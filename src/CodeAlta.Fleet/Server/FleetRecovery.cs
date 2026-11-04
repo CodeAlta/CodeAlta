@@ -47,8 +47,27 @@ public static class FleetRecovery
     /// <exception cref="FleetDeviceListException">The device list does not start with the anchor or does not verify: nothing was signed.</exception>
     /// <exception cref="FleetServerException">The server refused a call.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public static async Task<FleetRecoveryResult> RecoverAsync(Uri server, FleetRecoveryKey key, DeviceIdentity device, string deviceName, string pinPath,
+    public static Task<FleetRecoveryResult> RecoverAsync(Uri server, FleetRecoveryKey key, DeviceIdentity device, string deviceName, string pinPath,
         HttpMessageHandler? handler, CancellationToken cancellationToken)
+        => RecoverAsync(server, key, device, deviceName, pinPath, handler, null, cancellationToken);
+
+    /// <summary>Signs this device in with a recovery key at a server that may pin its own certificate, and gives it the keys of its person.</summary>
+    /// <param name="server">The address of the server.</param>
+    /// <param name="key">The recovery key, from the words the person kept.</param>
+    /// <param name="device">The key of this device.</param>
+    /// <param name="deviceName">The name of this device.</param>
+    /// <param name="pinPath">The file of the anchor of the device list in the folder of the link this device makes.</param>
+    /// <param name="handler">The HTTP handler, for tests; null for the usual one.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate (<see cref="FleetServerCertificates"/>); null to validate it as usual.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>The organization, the person, and how many keys this device got.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="FleetRecoveryException">The words are not the recovery key of a person of this server, or the server gave an anchor the key did not seal.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not start with the anchor or does not verify: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused a call.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public static async Task<FleetRecoveryResult> RecoverAsync(Uri server, FleetRecoveryKey key, DeviceIdentity device, string deviceName, string pinPath,
+        HttpMessageHandler? handler, string? certificatePin, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(key);
@@ -56,7 +75,7 @@ public static class FleetRecovery
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceName);
         ArgumentException.ThrowIfNullOrWhiteSpace(pinPath);
         using var recovery = key.CreateIdentity();
-        using var asRecovery = new FleetServerClient(server, recovery, handler);
+        using var asRecovery = new FleetServerClient(server, recovery, handler, null, certificatePin);
         string sealedAnchor;
         try
         {
@@ -71,7 +90,7 @@ public static class FleetRecovery
         if (!key.TryOpenAnchor(sealedAnchor, out var organizationId, out var root))
             throw new FleetRecoveryException("The server gave an anchor of the device list this recovery key did not seal.");
         FleetOrganizationDevices.Anchor(pinPath, root!, organizationId!);
-        var devices = new FleetOrganizationDevices(server, recovery, pinPath, handler);
+        var devices = new FleetOrganizationDevices(server, recovery, pinPath, handler) { CertificatePin = certificatePin };
         var list = await devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
         if (list.OrganizationId != organizationId || !list.Members.TryGetValue(recovery.DeviceId, out var member) || member.Kind != FleetDeviceKinds.Recovery
             || member.OwnerId is not { } person)
@@ -81,7 +100,7 @@ public static class FleetRecovery
 
         if (!FleetDevicePublicKey.TryParse(Convert.ToBase64String(device.ExportSubjectPublicKeyInfo()), out var devicePublic))
             throw new InvalidOperationException("The key of this device does not read.");
-        using var asDevice = new FleetServerClient(server, device, handler);
+        using var asDevice = new FleetServerClient(server, device, handler, null, certificatePin);
         for (var attempt = 0; !list.Members.ContainsKey(device.DeviceId); attempt++)
         {
             var entry = asRecovery.SignRecoveredDevice(list, organizationId!, person, devicePublic);

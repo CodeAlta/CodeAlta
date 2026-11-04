@@ -63,7 +63,7 @@ public static class DeviceListChain
             var signed = new FleetSignedDeviceListEntry(record.Payload, record.Signature);
             // The row agrees with the entry it keeps: its position and its hash.
             if (record.Sequence != count || !string.Equals(record.Hash, FleetDeviceListEntries.Hash(signed), StringComparison.Ordinal)
-                || !FleetDeviceListVerifier.TryAppend(state, signed, count == 1 ? null : record.OrganizationId, out var next, out _))
+                || !FleetDeviceListVerifier.TryAppend(state, signed, count == 1 ? null : record.OrganizationId, FleetDeviceListMode.Tolerant, out var next, out _))
             {
                 return Result(false, count, record.Sequence, state);
             }
@@ -83,8 +83,9 @@ public static class DeviceListChain
     {
         ArgumentNullException.ThrowIfNull(entries);
         ArgumentNullException.ThrowIfNull(entry);
+        // The list kept is replayed as devices replay it; the new entry is one this server must understand to keep it.
         var replayed = FleetDeviceListVerifier.Verify(entries.Select(static record => new FleetSignedDeviceListEntry(record.Payload, record.Signature)),
-            entries.Count > 0 ? entries[0].OrganizationId : null);
+            entries.Count > 0 ? entries[0].OrganizationId : null, FleetDeviceListMode.Tolerant);
         if (!replayed.IsValid) throw new InvalidOperationException($"The device list of the server does not verify at entry {replayed.BrokenAt}: {replayed.Reason}.");
         if (!FleetDeviceListVerifier.TryAppend(replayed.State, entry, entries.Count > 0 ? entries[0].OrganizationId : null, out _, out var reason))
             throw CoordinatorException.BadRequest(CoordinatorErrorCodes.EntryInvalid, $"The device-list entry would not verify on the devices: {reason}.");

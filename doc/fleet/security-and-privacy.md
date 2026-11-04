@@ -82,6 +82,15 @@ snapshot never grants a whole space.
   person linked a space of the same id. A space that is unlinked seals nothing more with its key.
 - Revoking someone's access rotates the keys they held (a new epoch); what they already read cannot be taken back,
   and deleting ciphertext at the server does not revoke copies a recipient made.
+- **The server's own secrets** are the few it must use itself: the client secret of the company's sign-in and the
+  headers it sends to the telemetry collector. The database keeps them sealed (ASP.NET Core Data Protection, a key
+  ring in `keys/` of the data root, protected by DPAPI on Windows and readable by the server's account only
+  elsewhere), each for one use and one organization; no API gives them back, not even to the owner (the names of the
+  headers only), and no log or audit record holds them. A value an older version kept in clear is sealed at the next
+  start and overwritten in the file. A database without its key ring reads them as unset: the owner sets them again.
+  A backup taken since holds them sealed; one an older version took (`backups/`, before an update) may hold them in
+  clear: the server says so once at its start, and `altaserver backups --delete-unsealed` deletes those, but the one a
+  version on trial rolls back to.
 - **Account recovery is not encryption recovery.** Regaining the Owner role on a server (`altaserver recover-owner`, on
   the server's own terminal) never needs the recovery key of encrypted data, which never goes to the server; that key
   restores keys on a device, locally.
@@ -111,7 +120,8 @@ analysis of Matrix showed a malicious server exploiting exactly that).
   server up. Team machines are signed in by a signer. An enrollment
   token only lets a machine register its public key; it becomes a member when a signer signs that key.
 - Devices accept a new member only with a valid signature chain, so the server cannot add a device to receive keys
-  (Tailscale's Tailnet Lock is the precedent).
+  (Tailscale's Tailnet Lock is the precedent). An authentic entry a device's rules do not understand (a newer version
+  wrote it) gives no trust and does not break the list ([versions](protocol.md#versions)).
 - Each device anchors the list of each server: it pins the first entry and keeps a checkpoint, the sequence and hash
   of the last entry it accepted, which a later list must hold at the same place. A server can neither swap the
   organization under a device nor answer an older list that takes back a removal. What a device trusts, the entries
@@ -137,7 +147,20 @@ analysis of Matrix showed a malicious server exploiting exactly that).
 
 ## Channels
 
-- **To the server**: TLS, and a proof of possession of the device key on every request.
+- **To the server**: TLS, and a proof of possession of the device key on every request. The server serves plain HTTP
+  on its loopback only, behind what terminates TLS in front of it (Tailscale Serve, Caddy, a platform), or `https://`
+  with a certificate; an `http://` address beyond the loopback is refused at the start unless its owner forces it
+  (`--allow-insecure-http`), which the desktop's **Create my server** does only for the unencrypted local network
+  chosen explicitly.
+- **A server's own certificate** (`--own-certificate`): without a certificate authority, the server makes a
+  self-signed key once, kept sealed with its key ring in the data root and never replaced by itself. Its clients pin
+  the SHA-256 of that public key (`sha256:…`, given beside the address as `https://host:port#pin=…`), as devices pin
+  each other's keys: a pinned client accepts that key only, whatever the names, dates or chain of the certificate, and
+  rejects any other, and the link keeps the pin for every later connection (REST, control connection, relays,
+  telemetry). The pin must come over a trusted channel: **Create my server** reads it over SSH from `altaserver status`
+  on the machine, and `altanode join` or an invitation gets it with the address from a controller device. A server
+  that lost its key ring cannot open its certificate and refuses to start rather than make a new key its devices would
+  refuse.
 - **Between devices** (a viewer and a node, a move, a live share): TLS 1.3 inside the direct connection or the relay,
   the node's key pinned from pairing or from the signed device list, and the viewer's device proof bound to the
   channel. The relay sees ciphertext.
@@ -146,6 +169,24 @@ analysis of Matrix showed a malicious server exploiting exactly that).
   in Private spaces, the phone's page comes from a machine the person owns (a node serving it, as the desktop does
   today), or from a signed mobile application if one comes; the server serves the phone's page only for Managed spaces,
   where trusting the organization's server is stated. Approvals from the phone follow the same rule.
+
+## Requests before a device is known
+
+Setup, sign-in (its methods, starts, completions, device-code polls, passkey ceremonies), enrollment, recovery and the
+hooks' ingress take requests from devices the server does not know yet. Each is limited:
+
+- **Per address** (an IPv6 address by its /64), in fixed windows counted in memory, before the body is read or a
+  signature checked; **per person** where a request names one before it is proved (the person of a recovery key).
+- Past a limit, the answer is `429` with `Retry-After` and the code `request.rate_limited`; the first refusal of each
+  window is audited, never each request of a flood.
+- **Nobody is locked out for good**: a window ends by itself, and a person past their limit keeps a slow path (one
+  attempt a minute), so a flood in the owner's name slows them down and never shuts them out. Devices the server knows
+  are not counted: they sign their requests.
+- Behind a proxy on the server's loopback (Tailscale Serve, Caddy), every request comes from that one address and the
+  limits are shared, unless the owner names the proxy (`--trusted-proxy 127.0.0.1;::1`, addresses or networks). Only a
+  request whose peer is a trusted proxy has its `X-Forwarded-For` read, from its right end past the trusted proxies of
+  the chain, so what a caller writes before the proxy is never believed; that address is what the limits count and the
+  audit records, and a caller of another machine behind the proxy is not "this machine" for setup.
 
 ## Credentials
 

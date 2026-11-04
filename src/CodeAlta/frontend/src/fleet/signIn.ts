@@ -27,6 +27,8 @@ export function signInProblem(status: string): MessageKey | null {
     case "sign_in.linked_elsewhere": return "This account is linked to another person of the organization.";
     case "sign_in.provider_unavailable": return "The sign-in provider does not answer.";
     case "sign_in.invalid_settings": return "These sign-in settings do not hold.";
+    case "sign_in.approval_mismatch": return "The change shown is not the one the server would apply: nothing was approved.";
+    case "sign_in.identity_not_allowed": return "This account is not of the domains or tenants your organization lets in.";
     case "sign_in.code_refused": case "sign_in.invalid_token": case "sign_in.wrong_audience": case "sign_in.wrong_issuer": case "sign_in.wrong_nonce":
     case "sign_in.token_expired": case "sign_in.invalid_passkey": case "sign_in.state_mismatch": case "sign_in.invalid_grant":
       return "The sign-in did not verify: start it again.";
@@ -57,17 +59,27 @@ export interface SignInDraft {
   groupsClaim: string;
   /** The groups that give a role at each company sign-in. */
   groupRoles: { group: string; role: string }[];
+  /** The email domains company sign-in lets in, separated by commas or spaces. */
+  allowedDomains: string;
+  /** The tenant ids company sign-in lets in, separated by commas or spaces. */
+  allowedTenants: string;
   requireSso: boolean;
 }
 
 /** The roles a group may give: every role but owner, from the widest. */
 export const groupRoleChoices = ["admin", "member", "auditor", "guest"] as const;
 
+/** The values of a list typed with commas or spaces, trimmed, in lower case, once each. */
+export function allowedValues(text: string): string[] {
+  return [...new Set(text.split(/[\s,;]+/u).map(value => value.trim().toLowerCase()).filter(value => value.length > 0))];
+}
+
 /** The draft of settings as the server holds them. */
 export function signInDraft(view: FleetSignInSettingsView): SignInDraft {
   return {
     enabled: view.methods.filter(method => method.enabled).map(method => method.id), issuer: view.issuer ?? "", clientId: view.clientId ?? "", clientSecret: "",
-    displayName: view.displayName ?? "", groupsClaim: view.groupsClaim || "groups", groupRoles: (view.groupRoles ?? []).map(role => ({ ...role })), requireSso: view.requireSso,
+    displayName: view.displayName ?? "", groupsClaim: view.groupsClaim || "groups", groupRoles: (view.groupRoles ?? []).map(role => ({ ...role })),
+    allowedDomains: (view.allowedDomains ?? []).join(", "), allowedTenants: (view.allowedTenants ?? []).join(", "), requireSso: view.requireSso,
   };
 }
 
@@ -84,6 +96,7 @@ export function signInDraftProblem(draft: SignInDraft): MessageKey | null {
     if (!url || url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) || url.search || url.hash)
       return "The issuer is an https:// address.";
     if (!draft.clientId.trim()) return "Company sign-in needs its client id.";
+    if (allowedValues(draft.allowedDomains).length === 0 && allowedValues(draft.allowedTenants).length === 0) return "Company sign-in needs the email domains or the tenant ids it lets in.";
   } else if (draft.enabled.includes("company")) {
     return "Company sign-in needs its issuer and client id.";
   }

@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Callout, Dialog, DialogBody, DialogFooter, HTMLSelect, InputGroup, Menu, MenuItem, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { fleetServer, type FleetServerView, type FleetSignInLoginView, type FleetSignInSettingsView } from "#neoastra";
+import { fleetServer, type FleetServerView, type FleetSignInApprovalView, type FleetSignInLoginView, type FleetSignInSettingsView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { serverProblem } from "./fleetServer";
-import { groupRoleChoices, hasCompany, linkableMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
+import { allowedValues, groupRoleChoices, hasCompany, linkableMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
 import { SignInCode } from "./SignInCode";
 import { SignInMethodIcon } from "./SignInMethodIcon";
 
 /** The calls of the sign-in of a server. */
-export type FleetSignInApi = Pick<typeof fleetServer, "signInSettings" | "setSignInSettings" | "linkSignIn" | "startSignInCode" | "openSignInPage">;
+export type FleetSignInApi = Pick<typeof fleetServer, "signInSettings" | "setSignInSettings" | "linkSignIn" | "startSignInCode" | "openSignInPage" | "approveSignInChange">;
+
+// How often an owner's computer reads again whether another computer of theirs asks it to approve a change.
+const approvalsPollMilliseconds = 15_000;
 
 const methodNames: Record<string, string> = { microsoft: "Microsoft", google: "Google", github: "GitHub" };
 
@@ -24,6 +27,9 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
   const { t } = useShellLanguage();
   const [settings, setSettings] = useState<FleetSignInSettingsView | null>(null);
   const [logins, setLogins] = useState<readonly FleetSignInLoginView[] | null>(null);
+  // Changes of the company sign-in another computer of this person asks this one to approve.
+  const [approvals, setApprovals] = useState<readonly FleetSignInApprovalView[]>([]);
+  const [approving, setApproving] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
   const [deviceCode, setDeviceCode] = useState<Code | null>(null);
@@ -37,9 +43,28 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       if (abort.signal.aborted) return;
       setSettings(value.status === "ok" ? value.settings : null);
       setLogins(value.status === "ok" ? value.logins : null);
+      setApprovals(value.status === "ok" ? value.approvals ?? [] : []);
     }, () => { if (!abort.signal.aborted) { setSettings(null); setLogins(null); } });
     return () => abort.abort();
   }, [api, epoch, server.id, revision, generation]);
+  // An owner's computer reads again now and then: another of their computers may ask it to approve a change.
+  const owner = !!settings;
+  useEffect(() => {
+    if (!owner) return;
+    const timer = setInterval(() => setGeneration(value => value + 1), approvalsPollMilliseconds);
+    return () => clearInterval(timer);
+  }, [owner]);
+
+  async function approve(approval: FleetSignInApprovalView) {
+    setApproving(approval.id);
+    setProblem(null);
+    try {
+      const result = await api.approveSignInChange({ expectedEpoch: epoch, linkId: server.id, approvalId: approval.id }, { timeoutMilliseconds: 30_000 });
+      if (result.status !== "ok") setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
+    } catch {
+      setProblem({ key: "The server does not answer." });
+    } finally { setApproving(null); setGeneration(value => value + 1); }
+  }
 
   async function link(method: string) {
     const abort = new AbortController();
@@ -50,7 +75,7 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       // GitHub: a code to enter at GitHub first, then the wait for it under its handle.
       let handle: string | null = null;
       if (method === "github") {
-        const started = await api.startSignInCode({ expectedEpoch: epoch, method, url: null, linkId: server.id }, { signal: abort.signal, timeoutMilliseconds: 30_000 });
+        const started = await api.startSignInCode({ expectedEpoch: epoch, method, url: null, linkId: server.id, purpose: null }, { signal: abort.signal, timeoutMilliseconds: 30_000 });
         if (abort.signal.aborted) return;
         const code = started.status === "ok" ? signInCode(started.code) : null;
         if (!code) { setProblem({ key: signInProblem(started.status) ?? serverProblem(started.status) ?? "The operation did not complete.", detail: started.message }); return; }
@@ -92,6 +117,18 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       </span>
       {linking && (deviceCode ? <SignInCode epoch={epoch} code={deviceCode} api={api} onCancel={cancelLink} />
         : <span className="muted-text">{t("Finish signing in in your browser…")}</span>)}
+      {approvals.map(approval => <Callout key={approval.id} compact intent="primary" className="fleet-sign-in-approval">
+        <div>{t("{device} asks to change the company sign-in.", { device: approval.requestedBy })}</div>
+        <ul className="muted-text">
+          <li>{approval.issuer ? `${approval.issuer} · ${approval.clientId ?? ""}` : t("Company sign-in removed")}</li>
+          {approval.allowedDomains.length > 0 && <li>{t("Email domains let in")}: {approval.allowedDomains.join(", ")}</li>}
+          {approval.allowedTenants.length > 0 && <li>{t("Tenant ids let in")}: {approval.allowedTenants.join(", ")}</li>}
+          {approval.requireSso && <li>{t("Require company sign-in")}</li>}
+          {approval.secretChanges && <li>{t("A new client secret")}</li>}
+        </ul>
+        <Button size="small" intent="primary" disabled={!!approving} icon={approving === approval.id ? <ActivitySpinner size={12} /> : undefined}
+          text={t("Approve")} onClick={() => void approve(approval)} />
+      </Callout>)}
       {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
     </div>
     <PopoverNext placement="bottom-end" content={<Menu>
@@ -101,7 +138,7 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       <Button size="small" variant="minimal" disabled={!!linking} icon={linking ? <ActivitySpinner size={14} /> : undefined}>{t("Link…")}</Button>
     </PopoverNext>
     {settings && <Button size="small" variant="minimal" onClick={() => setEditing(true)}>{t("Change…")}</Button>}
-    {editing && settings && <SignInDialog server={server} epoch={epoch} api={api} view={settings}
+    {editing && settings && <SignInDialog server={server} epoch={epoch} api={api} view={settings} logins={logins}
       onClose={changed => { setEditing(false); if (changed) setGeneration(value => value + 1); }} />}
   </div>;
 }
@@ -128,33 +165,56 @@ function GroupRoles({ draft, working, update }: { draft: SignInDraft; working: b
   </div>;
 }
 
-/** How people sign in to the organization: the methods, the company's OpenID Connect provider and whether it is required. */
-function SignInDialog({ server, epoch, api, view, onClose }: {
-  server: FleetServerView; epoch: string; api: Pick<FleetSignInApi, "setSignInSettings">; view: FleetSignInSettingsView; onClose: (changed: boolean) => void;
+/**
+ * How people sign in to the organization: the methods, the company's OpenID Connect provider and whether it is required.
+ * A change of the company sign-in asks the owner to sign in again first, with a method linked to them.
+ */
+function SignInDialog({ server, epoch, api, view, logins, onClose }: {
+  server: FleetServerView; epoch: string; api: Pick<FleetSignInApi, "setSignInSettings" | "startSignInCode" | "openSignInPage">; view: FleetSignInSettingsView;
+  logins: readonly FleetSignInLoginView[]; onClose: (changed: boolean) => void;
 }) {
   const { t } = useShellLanguage();
   const [draft, setDraft] = useState<SignInDraft>(() => signInDraft(view));
   const [working, setWorking] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmCode, setConfirmCode] = useState<Code | null>(null);
+  // The way the change waits to be confirmed: a method to sign in again with, or "device" for another computer's approval.
+  const [waitingOn, setWaitingOn] = useState<string | null>(null);
   const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
+  // The methods the owner may confirm with: the ones linked to them, once each.
+  const confirmWith = [...new Set(logins.map(login => login.method))];
   const invalid = signInDraftProblem(draft);
   const update = (change: Partial<SignInDraft>) => setDraft(value => ({ ...value, ...change }));
   const toggle = (method: string, on: boolean) => update({ enabled: on ? [...draft.enabled.filter(item => item !== method), method] : draft.enabled.filter(item => item !== method) });
-  async function save() {
+  async function save(method: string | null = null) {
     if (invalid) return;
     setWorking(true);
+    setWaitingOn(method);
     setProblem(null);
     try {
+      // GitHub confirms with a code to enter at GitHub, shown here while the host waits for it.
+      let handle: string | null = null;
+      if (method === "github") {
+        const started = await api.startSignInCode({ expectedEpoch: epoch, method, url: null, linkId: server.id, purpose: "confirm" }, { timeoutMilliseconds: 30_000 });
+        const code = started.status === "ok" ? signInCode(started.code) : null;
+        if (!code) { setProblem({ key: signInProblem(started.status) ?? serverProblem(started.status) ?? "The operation did not complete.", detail: started.message }); return; }
+        setConfirmCode(code);
+        handle = code.handle;
+      }
       const company = hasCompany(draft);
       const result = await api.setSignInSettings({ expectedEpoch: epoch, linkId: server.id, version: view.version, enabled: draft.enabled,
         issuer: company ? draft.issuer.trim() : null, clientId: company ? draft.clientId.trim() : null, clientSecret: company && draft.clientSecret ? draft.clientSecret : null,
         displayName: company ? draft.displayName.trim() || null : null, groupsClaim: company ? draft.groupsClaim.trim() || null : null, requireSso: draft.requireSso,
-        groupRoles: company ? draft.groupRoles.map(role => ({ group: role.group.trim(), role: role.role })) : null },
-        { timeoutMilliseconds: 60_000 });
+        groupRoles: company ? draft.groupRoles.map(role => ({ group: role.group.trim(), role: role.role })) : null,
+        allowedDomains: company ? allowedValues(draft.allowedDomains) : null, allowedTenants: company ? allowedValues(draft.allowedTenants) : null,
+        confirmWith: method, handle },
+        { timeoutMilliseconds: method ? 11 * 60_000 : 60_000 });
       if (result.status === "ok") { onClose(true); return; }
+      if (result.status === "sign_in.confirmation_required") { setConfirming(true); return; }
       setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
     } catch {
       setProblem({ key: "The server does not answer." });
-    } finally { setWorking(false); }
+    } finally { setWorking(false); setConfirmCode(null); setWaitingOn(null); }
   }
   const company = view.methods.find(method => method.id === "company");
   return <Dialog isOpen className="fleet-sign-in-dialog" title={t("How people sign in")} canOutsideClickClose={false} onClose={() => { if (!working) onClose(false); }}>
@@ -182,12 +242,29 @@ function SignInDialog({ server, epoch, api, view, onClose }: {
           <label><span>{t("Groups claim")}</span>
             <InputGroup value={draft.groupsClaim} disabled={working} spellCheck={false} onChange={event => update({ groupsClaim: event.target.value })} /></label>
         </div>
+        <div className="fleet-telemetry-choices">
+          <label><span>{t("Email domains let in")}</span>
+            <InputGroup value={draft.allowedDomains} disabled={working} placeholder="contoso.com" spellCheck={false}
+              onChange={event => update({ allowedDomains: event.target.value })} /></label>
+          <label><span>{t("Tenant ids let in")}</span>
+            <InputGroup value={draft.allowedTenants} disabled={working} placeholder={t("Required for Entra ID")} spellCheck={false}
+              onChange={event => update({ allowedTenants: event.target.value })} /></label>
+        </div>
         <small className="muted-text">{t("Redirect to register at the provider: http://127.0.0.1 (any port).")}</small>
         {hasCompany(draft) && <GroupRoles draft={draft} working={working} update={update} />}
         <Switch checked={draft.requireSso} disabled={working} label={t("Require company sign-in")} onChange={event => update({ requireSso: event.currentTarget.checked })} />
         {draft.requireSso && <small className="muted-text">{t("Only company sign-in lets a new computer in; your passkey stays as the owner's way in.")}</small>}
         <button type="submit" hidden />
       </form>
+      {confirming && <Callout compact intent="primary" role="status" className="fleet-sign-in-confirm">
+        {t("Changing the company sign-in needs you to sign in again, or to approve it on another of your computers.")}
+        <div className="fleet-sign-in-confirm-methods">{confirmWith.map(method => <Button key={method} size="small" disabled={working}
+          text={t("Continue with {method}", { method: method === "passkey" ? t("Passkey") : methodNames[method] ?? method })} onClick={() => void save(method)} />)}
+          <Button size="small" disabled={working} text={t("Approve on another of my computers")} onClick={() => void save("device")} /></div>
+        {working && confirmCode && <SignInCode epoch={epoch} code={confirmCode} api={api} />}
+        {working && waitingOn === "device" && <div className="muted-text">{t("On another of your computers, approve the change in Settings > Fleet > Server.")}</div>}
+        {working && !confirmCode && waitingOn && waitingOn !== "device" && <div className="muted-text">{t("Finish signing in in your browser…")}</div>}
+      </Callout>}
       {(problem ?? (invalid ? { key: invalid } : null)) && <Callout compact intent="warning" role="alert">{t((problem ?? { key: invalid! }).key)}
         {problem?.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
     </DialogBody>

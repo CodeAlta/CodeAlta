@@ -27,4 +27,10 @@ test("an address is read as typed, https by default", () => {
   assert.equal(organizationAddressOf("fleet.example.com/"), "https://fleet.example.com");
   assert.equal(organizationAddressOf("http://box:2586"), "http://box:2586");
   assert.equal(organizationAddressOf("https://user@x"), "");
+  // The pin of a server's own certificate stays with its address, for https:// only; any other fragment is no address.
+  const pin = "#pin=sha256:" + "A".repeat(43);
+  assert.equal(organizationAddressOf("box:2586" + pin), "https://box:2586" + pin);
+  assert.equal(organizationAddressOf("http://box:2586" + pin), "");
+  assert.equal(organizationAddressOf("https://box:2586#pin=sha256:short"), "");
+  assert.equal(organizationAddressOf("https://box:2586#top"), "");
 });

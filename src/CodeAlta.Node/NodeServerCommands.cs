@@ -46,9 +46,10 @@ internal sealed class NodeServerCommands(TextWriter output, TextWriter error)
     public async ValueTask<int> JoinAsync(NodeJoinOptions options)
     {
         if (options.Profile.Resolve(out var invalid) is not { } profile) return await UsageAsync(invalid!).ConfigureAwait(false);
-        if (options.Words.Count != 1 || !FleetServerAddress.TryParse(options.Words[0], out var address))
+        if (options.Words.Count != 1 || !FleetServerAddress.TryParse(options.Words[0], out var address, out var certificatePin))
         {
-            return await UsageAsync("join needs the address of the server, http:// or https://: altanode join https://fleet.example --token <token>.").ConfigureAwait(false);
+            return await UsageAsync("join needs the address of the server, http:// or https:// (with the #pin=sha256:... of a server with its own certificate): " +
+                "altanode join https://fleet.example --token <token>.").ConfigureAwait(false);
         }
 
         if (string.IsNullOrWhiteSpace(options.Token)) return await UsageAsync("join needs the enrollment --token an admin of the server made.").ConfigureAwait(false);
@@ -72,7 +73,7 @@ internal sealed class NodeServerCommands(TextWriter output, TextWriter error)
                 : await WaitAsync(store, existing, address, identity).ConfigureAwait(false);
         }
 
-        using var client = new FleetServerClient(address, identity, Handler);
+        using var client = new FleetServerClient(address, identity, Handler, null, certificatePin);
         Fleet.Protocol.Api.DeviceDto device;
         try
         {
@@ -91,7 +92,7 @@ internal sealed class NodeServerCommands(TextWriter output, TextWriter error)
 
         var now = DateTimeOffset.UtcNow;
         var link = new FleetServerLink(store.Find(url)?.Id ?? FleetServerLinkStore.NewId(), url, null, null, identity.DeviceId, FleetDeviceKinds.Node,
-            FleetServerLinkStates.Pending, now, now);
+            FleetServerLinkStates.Pending, now, now, certificatePin);
         store.Save(link);
         foreach (var space in linkedSpaces)
         {
@@ -149,7 +150,7 @@ internal sealed class NodeServerCommands(TextWriter output, TextWriter error)
     private async Task<int> WaitAsync(FleetServerLinkStore store, FleetServerLink link, Uri address, DeviceIdentity identity)
     {
         await output.WriteLineAsync("Waiting for the approval... (Ctrl+C stops waiting; the node keeps asking while it runs)").ConfigureAwait(false);
-        using var client = new FleetServerClient(address, identity, Handler);
+        using var client = new FleetServerClient(address, identity, Handler, null, link.CertificatePin);
         while (true)
         {
             try

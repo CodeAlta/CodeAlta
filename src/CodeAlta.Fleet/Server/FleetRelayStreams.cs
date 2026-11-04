@@ -49,7 +49,20 @@ public static class FleetRelayStreams
     /// <returns>The stream of the relay; disposing it closes the relay.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="WebSocketException">The server refused the side (a ticket used or expired, a signature it does not take) or does not answer.</exception>
-    public static async Task<Stream> ConnectAsync(Uri server, FleetRelayTicket ticket, DeviceIdentity identity, TimeProvider? time, CancellationToken cancellationToken)
+    public static Task<Stream> ConnectAsync(Uri server, FleetRelayTicket ticket, DeviceIdentity identity, TimeProvider? time, CancellationToken cancellationToken)
+        => ConnectAsync(server, ticket, identity, time, null, cancellationToken);
+
+    /// <summary>Opens the side of a relay on a server that may pin its own certificate.</summary>
+    /// <param name="server">The address of the server.</param>
+    /// <param name="ticket">The ticket of this side.</param>
+    /// <param name="identity">The key of this device, which signs the upgrade.</param>
+    /// <param name="time">The clock of the signature; null for the system's.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate (<see cref="FleetServerCertificates"/>); null to validate it as usual.</param>
+    /// <param name="cancellationToken">Cancels the connection.</param>
+    /// <returns>The stream of the relay; disposing it closes the relay.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="WebSocketException">The server refused the side, does not answer, or presents another certificate than the pinned one.</exception>
+    public static async Task<Stream> ConnectAsync(Uri server, FleetRelayTicket ticket, DeviceIdentity identity, TimeProvider? time, string? certificatePin, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(ticket);
@@ -67,6 +80,7 @@ public static class FleetRelayStreams
             socket.Options.SetRequestHeader(FleetSignedRequest.SignatureHeader, Base64Url.EncodeToString(identity.SignData(signed)));
             // The channel inside has its own heartbeat; the relay is a pipe.
             socket.Options.KeepAliveInterval = TimeSpan.Zero;
+            FleetServerCertificates.Configure(socket.Options, certificatePin);
             await socket.ConnectAsync(address, cancellationToken).ConfigureAwait(false);
             return WebSocketStream.Create(socket, WebSocketMessageType.Binary, CloseTimeout);
         }

@@ -20,7 +20,16 @@ test("Create my server leads with a machine over SSH, says what blocks it from h
     // The owner's name starts as the full name of the person signed in to this computer.
     assert.equal(await page.evaluate(`document.querySelector(".create-server-dialog input[aria-label='Your name']").value`), "Alex Example");
     await page.evaluate(type(".create-server-dialog input[aria-label='Your name']", "Alex"));
-    assert.equal(await page.evaluate(`document.querySelector('.create-server-reach code').textContent`), "http://box:2586", "the address the machines will use");
+    // An address in front of the server is the default; on the local network, the server's own certificate comes first, and
+    // plain HTTP is chosen knowingly, each with what it means.
+    assert.equal(await page.evaluate(`document.querySelector('.create-server-reach input:checked').value`), "address");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.create-server-reach code')].map(code => code.textContent)`), ["https://box:2586", "http://box:2586"],
+      "the addresses the machines will use");
+    await page.evaluate(`document.querySelector('.create-server-reach input[value=encrypted]').click()`);
+    await page.until(`document.querySelector('.create-server-reach-note')?.textContent.includes('every device checks it at each connection')`, "what the certificate of its own means");
+    await page.shot("create-server-encrypted");
+    await page.evaluate(`document.querySelector('.create-server-reach input[value=network]').click()`);
+    await page.until(`document.querySelector('.create-server-reach-note')?.textContent.startsWith('Anyone on the network can read')`, "what plain HTTP means");
     await page.clickText(".create-server-dialog .bp6-button", "Create my server");
 
     await page.until(`document.querySelector('.create-server-dialog .add-machine-failure')`, "the reach fails");
@@ -35,7 +44,8 @@ test("Create my server leads with a machine over SSH, says what blocks it from h
     await page.clickText(".create-server-machines .bp6-button", "Add");
     await page.until(`document.querySelector('.create-server-joined')?.textContent.startsWith('Joined')`, "the machine joined");
     await page.shot("create-server-done");
-    assert.deepEqual((await calls(page)).filter(call => call.ssh || call.join || call.link), [{ ssh: "me@box", address: null, port: 2586 }, { ssh: "me@box", address: null, port: 2586 },
+    assert.deepEqual((await calls(page)).filter(call => call.ssh || call.join || call.link), [{ ssh: "me@box", address: null, port: 2586, ownCertificate: false },
+      { ssh: "me@box", address: null, port: 2586, ownCertificate: false },
       { link: "default", server: "link-1" }, { link: "home", server: "link-1" }, { join: "mac", link: "link-1" }]);
     // The owner's recovery key came with the server: Done gives its words to the page, which shows them once.
     assert.equal(await page.evaluate(`document.querySelector('.create-server-dialog .create-server-recovery-note')?.textContent`), "Done shows your recovery key next, once.");

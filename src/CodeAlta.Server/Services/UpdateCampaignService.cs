@@ -533,7 +533,8 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         FleetDeviceListState devices;
         try
         {
-            devices = FleetDeviceListVerifier.VerifyOrThrow(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), campaign.OrganizationId);
+            devices = FleetDeviceListVerifier.VerifyOrThrow(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), campaign.OrganizationId,
+                FleetDeviceListMode.Tolerant);
         }
         catch (FleetDeviceListException exception)
         {

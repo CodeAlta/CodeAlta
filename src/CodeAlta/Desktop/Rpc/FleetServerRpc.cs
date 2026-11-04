@@ -67,13 +67,13 @@ internal sealed partial class FleetServerService
     public async Task<FleetServerResult> CreateAsync(FleetServerCreateRequest request, CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
-        if (!FleetServerAddress.TryParse(request!.Url, out var address)) return new("invalid_url", null, null);
+        if (!FleetServerAddress.TryParse(request!.Url, out var address, out var pin)) return new("invalid_url", null, null);
         if (request.Code is not { Length: > 0 and <= 128 } code || request.OwnerName is not { Length: > 0 and <= 128 } owner || request.OrganizationName is { Length: > 128 })
             return new("invalid_request", null, null);
         return await ActAsync(async () =>
         {
             var link = await _servers!.CreateServerAsync(address, code, owner, string.IsNullOrWhiteSpace(request.OrganizationName) ? null : request.OrganizationName,
-                cancellationToken).ConfigureAwait(false);
+                pin, cancellationToken).ConfigureAwait(false);
             return Result(link) with { RecoveryWords = await TryCreateRecoveryKeyAsync(link.Id, cancellationToken).ConfigureAwait(false) };
         }).ConfigureAwait(false);
     }
@@ -90,12 +90,12 @@ internal sealed partial class FleetServerService
     public async Task<FleetServerResult> RecoverAsync(FleetServerRecoverRequest request, CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
-        if (!FleetServerAddress.TryParse(request!.Url, out var address)) return new("invalid_url", null, null);
+        if (!FleetServerAddress.TryParse(request!.Url, out var address, out var pin)) return new("invalid_url", null, null);
         if (request.Words is not { Length: > 0 and <= 1024 } words) return new("invalid_request", null, null);
         // A word that is no word of a recovery key is said by its position: the person checks that one, and no word is repeated.
         if (FleetRecoveryKey.UnknownWordPosition(words) is > 0 and var position)
             return new("recovery.unknown_word", null, position.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        return await ActAsync(async () => Result(await _servers!.RecoverAsync(address, words, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
+        return await ActAsync(async () => Result(await _servers!.RecoverAsync(address, words, pin, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
     }
 
     /// <summary>Makes the recovery key of this computer's person at a server: its words, shown once; one made before stops working.</summary>
@@ -121,9 +121,9 @@ internal sealed partial class FleetServerService
     public async Task<FleetServerResult> JoinAsync(FleetServerJoinRequest request, CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
-        if (!FleetServerAddress.TryParse(request!.Url, out var address)) return new("invalid_url", null, null);
+        if (!FleetServerAddress.TryParse(request!.Url, out var address, out var pin)) return new("invalid_url", null, null);
         if (request.Token is not { Length: > 0 and <= 256 } token) return new("invalid_request", null, null);
-        return await ActAsync(async () => Result(await _servers!.JoinAsync(address, token.Trim(), cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
+        return await ActAsync(async () => Result(await _servers!.JoinAsync(address, token.Trim(), pin, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
     }
 
     /// <summary>Leaves a server: the link goes, and the spaces linked to it are unlinked.</summary>
@@ -171,9 +171,14 @@ internal sealed partial class FleetServerService
         try
         {
             var devices = await _servers!.ListDevicesAsync(request.LinkId, cancellationToken).ConfigureAwait(false);
+            // Entries a newer version wrote, which this one skipped: the card says to update CodeAlta. A list that does not
+            // verify is said where this computer signs after it; the devices are listed all the same.
+            var skipped = 0;
+            try { skipped = await _servers.CountSkippedDeviceListEntriesAsync(request.LinkId, cancellationToken).ConfigureAwait(false); }
+            catch (FleetDeviceListException) { }
             // The recovery key is a member of the list, not a device: the server's card says whether there is one.
             return new("ok", [.. devices.Where(static device => device.Kind != FleetDeviceKinds.Recovery).OrderBy(static device => device.Status == "pending" ? 0 : device.Status == "approved" ? 1 : 2)
-                .ThenByDescending(static device => device.CreatedAt).Select(device => DeviceView(device))], null);
+                .ThenByDescending(static device => device.CreatedAt).Select(device => DeviceView(device))], null, skipped);
         }
         catch (Exception exception) when (Failure(exception) is { } failure)
         {
@@ -228,21 +233,31 @@ internal sealed partial class FleetServerService
         {
             var held = await _servers!.GetTelemetryAsync(request.LinkId, cancellationToken).ConfigureAwait(false);
             var current = HeldHeaders(held);
+            var server = request.Route == FleetTelemetryRoutes.Server;
+            var heldOnServer = HeldServerRoute(held);
             var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var keep = new List<string>();
             foreach (var edit in request.Headers)
             {
                 var name = edit?.Name?.Trim();
-                if (string.IsNullOrEmpty(name) || headers.ContainsKey(name)) return new("invalid_request", null, $"'{name}' is not a header, or is there twice.");
-                var value = edit!.Value ?? current.GetValueOrDefault(name);
+                if (string.IsNullOrEmpty(name) || headers.ContainsKey(name) || keep.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    return new("invalid_request", null, $"'{name}' is not a header, or is there twice.");
+                // The server never gives back the values of the headers of its route: one kept on that route is kept by its name.
+                if (edit!.Value is null && server && heldOnServer && current.ContainsKey(name))
+                {
+                    keep.Add(name);
+                    continue;
+                }
+
+                var value = edit.Value ?? (heldOnServer ? null : current.GetValueOrDefault(name));
                 if (value is null) return new("invalid_request", null, $"The header '{name}' has no value.");
                 headers[name] = value.Trim();
             }
 
-            var server = request.Route == FleetTelemetryRoutes.Server;
             var change = new FleetTelemetryChange(request.Enabled, string.IsNullOrWhiteSpace(request.Endpoint) ? null : request.Endpoint.Trim().TrimEnd('/'), request.Protocol,
                 request.Route, [.. request.Signals.Distinct(StringComparer.Ordinal)], server ? null : headers,
                 string.IsNullOrWhiteSpace(request.Environment) ? null : request.Environment.Trim());
-            var set = await _servers.SetTelemetryAsync(request.LinkId, change, server ? headers : null, cancellationToken).ConfigureAwait(false);
+            var set = await _servers.SetTelemetryAsync(request.LinkId, change, server ? headers : null, server ? keep : null, cancellationToken).ConfigureAwait(false);
             ChangedLocally?.Invoke();
             return new("ok", TelemetryView(set), null);
         }
@@ -543,7 +558,7 @@ internal sealed partial class FleetServerService
         var link = connection.Link;
         return new FleetServerView(link.Id, link.Url, link.OrganizationName, link.State, State(connection), connection.Connector?.LastError?.Message,
             link.IsController, [.. spaces.Where(space => link.IsServer(space.Settings.Fleet?.Server)).Select(static space => space.Id)],
-            link.IsController ? DesktopFleetServers.HasRecoveryKey(connection) : null);
+            link.IsController ? DesktopFleetServers.HasRecoveryKey(connection) : null, link.CertificatePin is null ? null : link.ShareableUrl);
     }
 
     // The state of a link's connection, as the page names it.
@@ -601,7 +616,12 @@ internal sealed partial class FleetServerService
             parsed.Environment, settings.UpdatedAt is { } updated ? Time(updated) : null);
     }
 
-    // The headers the setting uses: those of a direct route are signed in it, those of the server route only the server holds.
+    // Whether the setting held sends through the server: its headers are then names only, the server keeps their values.
+    private static bool HeldServerRoute(TelemetrySettingsDto settings)
+        => settings.Settings is { } signed && FleetTelemetrySettingsDocuments.TryParse(signed.Payload, out var parsed) && parsed.Route == FleetTelemetryRoutes.Server;
+
+    // The headers the setting uses: those of a direct route are signed in it, those of the server route only the server
+    // holds, and it gives their names only.
     private static Dictionary<string, string> HeldHeaders(TelemetrySettingsDto settings)
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -687,8 +707,10 @@ internal sealed record FleetServerRequest(string ExpectedEpoch);
 /// <param name="Controller">Whether this device may make tokens and approve devices there.</param>
 /// <param name="Spaces">The spaces that publish to it.</param>
 /// <param name="RecoveryKey">Whether the person of this computer has a recovery key there, for an owner's computer; null when unknown or not asked.</param>
+/// <param name="ShareUrl">The address to give a machine or a person (<c>altanode join</c>, an invitation): <paramref name="Url"/>, with the
+/// <c>#pin=</c> of a server's own certificate when it has one; null when it is <paramref name="Url"/>.</param>
 internal sealed record FleetServerView(string Id, string Url, string? Organization, string Link, string Connection, string? Problem, bool Controller, string[] Spaces,
-    bool? RecoveryKey = null);
+    bool? RecoveryKey = null, string? ShareUrl = null);
 
 /// <summary>The servers of this instance.</summary>
 /// <param name="Status"><c>ok</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
@@ -781,7 +803,8 @@ internal sealed record FleetDeviceView(string Id, string Name, string Kind, stri
 /// <param name="Status"><c>ok</c>, the code of the server's refusal, <c>unreachable</c>, <c>not_found</c>, <c>invalid_request</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
 /// <param name="Devices">The devices, the pending ones first.</param>
 /// <param name="Message">What the failure said.</param>
-internal sealed record FleetServerDevicesResult(string Status, FleetDeviceView[] Devices, string? Message);
+/// <param name="SkippedEntries">How many entries of the device list a newer version of CodeAlta wrote, which this one skipped: none gives trust here.</param>
+internal sealed record FleetServerDevicesResult(string Status, FleetDeviceView[] Devices, string? Message, int SkippedEntries = 0);
 
 /// <summary>A request about a device of a server.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>

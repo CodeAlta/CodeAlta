@@ -48,7 +48,7 @@ internal sealed partial class FleetServerService
             var invitation = await _servers!.AccessCallAsync(request.LinkId,
                 (client, token) => client.InvitePersonAsync(new InvitePersonRequest(request.Name.Trim(), request.Role), token), cancellationToken).ConfigureAwait(false);
             ChangedLocally?.Invoke();
-            return new("ok", null, invitation.Token, invitation.ExpiresAt, _servers.Connections.FirstOrDefault(connection => connection.Link.Id == request.LinkId)?.Link.Url);
+            return new("ok", null, invitation.Token, invitation.ExpiresAt, _servers.Connections.FirstOrDefault(connection => connection.Link.Id == request.LinkId)?.Link.ShareableUrl);
         }
         catch (Exception exception) when (Failure(exception) is { } failure)
         {

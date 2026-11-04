@@ -20,12 +20,12 @@ In CodeAlta Desktop, open **Settings** > **Fleet** > **Machines** and click **Ad
 
 ### Over SSH
 
-1. Type the computer as you would after `ssh`: `user@host`, `user@host:port`, or a host of your SSH configuration. **Name** is optional: the machine's own name by default.
+1. Type the computer as you would after `ssh`: `user@host`, `user@host:port`, or a host of your SSH configuration. **Name** is optional: the machine's own name by default. Tick **Manage it from this computer** to change its devices, projects, secrets and updates from here.
 2. Click **Add the machine**. CodeAlta signs in with your SSH keys and agent (the OpenSSH client of your system, without asking for a password), then shows each step as it goes:
    - **Connect over SSH**, and **Check the system and .NET**: Linux or macOS, x64 or Arm64, and .NET 10 there;
    - **Install CodeAlta Node**: the .NET tool in `~/.dotnet/tools`, or the package of its system where only the .NET runtime is;
    - **Start it as a service**: `altanode install --listen-all`, a `systemd --user` unit (with lingering) on Linux, a LaunchAgent on macOS;
-   - **Pair it with this computer**: the node makes a pairing link for this computer, which pairs at once and manages the machine. The six words of its key are shown.
+   - **Pair it with this computer**: the node makes a pairing link for this computer, which pairs at once (and manages the machine, when you ticked it). The six words of its key are shown.
 3. Click **Open its page** to give it projects and look at its providers (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
 
 When a step fails, it says why and what to do: add your key to the SSH agent (`ssh-add`) or copy it to the machine (`ssh-copy-id`), install .NET 10 there, open the port of the node in its firewall. On a Mac, macOS asks once to let CodeAlta reach your local network, and keeps it from your machines until you allow it (**System Settings** > **Privacy & Security** > **Local Network**). **Start over** runs every step again from the first and changes only what is missing. A computer whose SSH key this one does not know yet shows the fingerprint of that key (`SHA256:…`): compare it with the one of the machine, then click **Trust it and start over**.
@@ -110,7 +110,7 @@ If the new version does not start and connect within two minutes, the node goes 
 
 `dotnet tool update` works too: once the tool is newer than the version `altanode update` installed, the tool's version runs from the next start of the node.
 
-`altaserver update` does the same for CodeAlta Server: it first copies its database to the `backups` folder of its data root, and puts that copy back if the new version has to be undone.
+`altaserver update` does the same for CodeAlta Server: it first copies its database to the `backups` folder of its data root, and puts that copy back if the new version has to be undone. The server keeps the secrets it uses itself (the client secret of your company's sign-in, the headers of your telemetry collector) encrypted with a key of its `keys` folder: keep that folder with your copies of the database. A copy made by a version before 4.0 may hold them in clear: the server tells you when it starts, and `altaserver backups --delete-unsealed` deletes those copies.
 
 To allow only some feeds on a machine, list them in `fleet/update.json` of the profile (`update.json` of the data root for the server): `{ "source": "https://my-mirror/v3/index.json", "allowedSources": ["https://my-mirror/v3/index.json"] }`. Add `"fleet": false` to update that machine only by hand.
 
@@ -146,7 +146,7 @@ A machine linked to a CodeAlta Server publishes its labels there: the **Fleet** 
 
 The link works once and expires after 10 minutes (`altanode pair --minutes <n>` gives it more). Pairing again with a new link replaces the machine, for example after its address changed.
 
-A paired computer may see the sessions of the machine, drive them and start new ones. Moving sessions to the machine stays off (see [Move a session](#move-a-session)). The first computer paired with a new machine also manages it: its row says **Managed from here** (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
+A paired computer may see the sessions of the machine, drive them and start new ones. Moving sessions to the machine stays off (see [Move a session](#move-a-session)). A computer also manages the machine only when you ask, the first one included: `altanode pair --manage` makes a link for that, and **Add a machine…** > **Over SSH** has **Manage it from this computer** (off until you tick it). Its row then says **Managed from here** (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
 
 ## See and drive its sessions
 
@@ -251,7 +251,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 
 **Settings** > **Fleet** > **Machines** lists all your machines, whatever the way this computer reaches them: those paired with it, and those added through your server, marked **Through your server**. Both open their page; a machine of the server has nothing to forget here.
 
-The first computer paired with a machine manages it. Give another computer the **Manage** switch on its row to let it manage the machine too; turning it off for **This computer** asks first, since only the owner can give it back. A computer that does not manage the machine sees its providers, and how its owner gives it the permission.
+A computer manages a machine when its pairing asked for it (`altanode pair --manage`, or **Manage it from this computer** over SSH). Give another computer the **Manage** switch on its row to let it manage the machine too; turning it off for **This computer** asks first, since only the owner can give it back. A computer that does not manage the machine sees its providers, and how its owner gives it the permission.
 
 On the machine itself, the same is done with:
 
@@ -276,7 +276,7 @@ A CodeAlta Server shows the machines of all your computers, whether they are onl
 
 In CodeAlta Desktop, open **Settings** > **Fleet** > **Server** and click **Create my server…**. Choose where it runs:
 
-- **On a machine over SSH**, the usual place: an always-on Linux or macOS machine you reach with `ssh`. Give it as `user@host`, and how your machines reach it: **The local network** (`http://host:2586`, the server listens on every network of the machine), or **An address I put in front of it**, a domain or Tailscale Serve that forwards to the server, which then stays on the machine's own loopback. CodeAlta checks the system and .NET there, installs CodeAlta Server, starts it as a service with `altaserver install` (a `systemd --user` unit with lingering, or a LaunchAgent), checks that it answers from this computer at that address, then reads its setup code over SSH and makes you its owner. Nothing to copy.
+- **On a machine over SSH**, the usual place: an always-on Linux or macOS machine you reach with `ssh`. Give it as `user@host`, and how your machines reach it: **An address I put in front of it** (the default), a domain or Tailscale Serve that forwards to the server over HTTPS, which then stays on the machine's own loopback; **The local network, encrypted with the server's own certificate** (`https://host:2586`), when nothing stands in front of it: the server makes a certificate of its own, CodeAlta reads its fingerprint over SSH, and every device checks it at each connection, so nothing travels in clear and no other machine can pass for the server; or **The local network, not encrypted** (`http://host:2586`, plain HTTP), only on a network you trust. CodeAlta checks the system and .NET there, installs CodeAlta Server, starts it as a service with `altaserver install` (a `systemd --user` unit with lingering, or a LaunchAgent), checks that it answers from this computer at that address, then reads its setup code over SSH and makes you its owner. Nothing to copy.
 - **On this computer**: CodeAlta installs CodeAlta Server here, runs it as a service with `altaserver install` (see [Run a server as a service](#run-a-server-as-a-service)), so that it starts again after a restart, and makes you its owner.
 - **It runs already**: a server you started with `altaserver run`; give its address, its setup code (`altaserver setup-code` prints it on its machine) and your name. A setup code typed in **Connect to my server…** by mistake is recognized: CodeAlta says the server has no owner yet, and **Set it up…** opens this form with the address.
 
@@ -293,10 +293,10 @@ When you click **Done**, CodeAlta shows your **recovery key**: 32 words, shown o
 A server you installed yourself (`dotnet tool install -g CodeAlta.Server`) starts again after a restart once it runs as a service:
 
 ```sh
-altaserver install --urls http://0.0.0.0:2586
+altaserver install
 ```
 
-It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--certificate`) and sets up one service per data root:
+It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--certificate`, `--own-certificate`) and sets up one service per data root. The server listens on `http://127.0.0.1:2586`: put Tailscale Serve, Caddy or the TLS of your platform in front of it, or give it an `https://` address with a certificate, a file of yours (`--certificate`) or one it makes and keeps (`--own-certificate`). No browser trusts a certificate of its own: `altaserver status` prints its pin (`Certificate: sha256:…`), and devices are given the address with it, `https://host:2586#pin=sha256:…`, in **Join an organization**, **It runs already** or `altanode join`; the address CodeAlta shows for a machine or a person to join carries it already. A plain `http://` address beyond the loopback is refused, unless `--allow-insecure-http` forces it on a network you trust. Behind Tailscale Serve or Caddy on the same machine, add `--trusted-proxy "127.0.0.1;::1"`: the server then limits the attempts of each caller by the address the proxy forwards, and its audit names them, instead of counting everyone as the proxy.
 
 | System | What `altaserver install` sets up |
 | --- | --- |
@@ -311,6 +311,7 @@ It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--
 - **A machine**: in **Settings** > **Fleet** > **Machines**, **Add a machine…** > **Through my server** shows the command to run on it, `altanode join <address> --token <code>`, which prints the six words of the machine's key. The machines that join list under the command with their words: click **It shows the same words** beside the one whose words the machine printed. Another one is never approved by itself. The **Add a machine…** of the server's card shows the same command for a machine that waits for you to approve it: it appears under the server as a **New device**; click **Approve…**, check that the machine shows the same six words, and click **It shows the same words**.
 - **What waits for you**: when a machine or a computer asks to join, a message comes wherever you are in CodeAlta, with its six words, **Approve** and **Refuse**, and the **Fleet** button of the title bar counts what waits, with the runs held by a [budget](#set-budgets-for-your-machines), the [problems of your machines](#hear-of-problems-of-your-machines) and the sessions of your machines that wait for you. Approve when the words are the same as on the device.
 - **Another of your computers**: on the server's card, **Invite a computer…** shows the address of the server and an enrollment code, each with **Copy**. On the other computer, open **Settings** > **Fleet** > **Server**, click **Connect to my server…**, give the address and the code (or sign in with a method you linked: a passkey, Microsoft, Google, GitHub), and choose its spaces: all of them by default. It shows six words while it waits, and you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
+- **Entries from a newer version**: when computers of your fleet run a newer CodeAlta than this one, the devices of the server's card may say that entries of the device list come from a newer version and were skipped. This computer trusts none of the devices they add until you update CodeAlta here.
 
 ### Join an organization
 
@@ -330,7 +331,7 @@ Signing in proves who you are; it does not let this computer in by itself. A dev
 The card of the server shows **Sign-in**: the ways people sign in on a new computer, and the ones linked to you.
 
 - **Link…** adds a way to sign in to you, from a computer already approved: **Add a passkey** (the server's page opens in your browser) or **Link Microsoft**, **Google**, **GitHub** (a code to enter at GitHub, as when you join). An account signs nobody in until someone linked it. The server keeps only the id and the name of a GitHub account, never its login or a token.
-- On the owner's computer, **Change…** turns each method on or off and sets the company's sign-in: its **Issuer** (the OpenID Connect address of Entra ID, Okta, Google Workspace, Keycloak...), the **Client id** and **Client secret** you registered there, with the redirect `http://127.0.0.1` (any port), and the **Groups claim**. The secret is never shown again. People sign in with it the first time without an invitation; their first computer waits for your approval.
+- On the owner's computer, **Change…** turns each method on or off and sets the company's sign-in: its **Issuer** (the OpenID Connect address of Entra ID, Okta, Google Workspace, Keycloak...), the **Client id** and **Client secret** you registered there, with the redirect `http://127.0.0.1` (any port), and the **Groups claim**. The secret is never shown again. **Email domains let in** and **Tenant ids let in** say whose accounts it accepts: give at least one, and the tenant id for Entra ID. An account of another domain or tenant is refused. People sign in with it the first time without an invitation; their first computer waits for your approval. Saving a change of the company sign-in asks you to confirm it: **Continue with** a passkey or an account linked to you, or **Approve on another of my computers**, and approve it there: the **Sign-in** row of the server's card on your other computer shows what changes, with **Approve**.
 - **Roles from groups** gives a role to the members of a group of your company, by the id of the group in the groups claim: **Add a group**, then choose **Admin**, **Member**, **Auditor** or **Guest**. At each company sign-in a person gets the widest role among their groups, or member when they are in none. No group makes an owner, and owners keep their role.
 - **Require company sign-in** leaves only the company's sign-in for a new computer, and your passkey as the owner's way in.
 
@@ -485,6 +486,7 @@ An agent works with your access and never more:
 
 - **Remote sessions run code on the machine.** A paired computer can start agents there that use its tools, as you would sitting at it. Pair only your own computers, and revoke the ones you no longer use.
 - **Keys are pinned.** Each computer has its own key. Pairing records the key of the other side, and every connection checks it: a machine that presents another key is refused. The six words let you check, at pairing, that the link comes from the machine you think. Through a server, the key comes from the list of devices your own computers signed, never from the server alone, and a device revoked there is refused.
+- **Attempts are limited.** A server refuses for a while the sign-ins, enrollment codes, recoveries and setup codes that come too often from one address, and the recoveries in the name of one person: CodeAlta says when to try again, within a minute.
 - **Permission requests wait for a person.** The node never grants a permission request by itself: you answer it from a paired computer or on the machine.
 - **Credentials stay where they are.** Each machine signs in to its providers itself; nothing is copied from your desktop. The keys and tokens a machine needs are its own [secrets](secrets.md#on-a-machine-with-altanode), set on it with `altanode secrets`, or values your computer seals for it through a server, which the server cannot read ([secrets of your machines](secrets.md#secrets-of-your-machines-with-a-server)).
 - **Choose where the node listens.** By default it listens on the machine itself only. `--listen-all` opens it to every network the machine is on: prefer a private network you control.

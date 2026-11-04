@@ -32,6 +32,39 @@ test("Invite a computer… shows the address and the code alone, each with Copy;
   }, options);
 });
 
+test("the devices say when entries of the device list come from a newer version of CodeAlta, which this one skipped", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-device-row')`, "the devices");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-device-list-skipped')`), null, "nothing to say while none is skipped");
+    // A newer version extended the list: the next read of the devices says it, and how to read them.
+    await page.evaluate(`window.fleetFixture.skip(2)`);
+    await page.clickText(".fleet-device-row .bp6-button", "Approve…");
+    await page.clickText(".bp6-popover .bp6-button", "It shows the same words");
+    await page.until(`document.querySelector('.fleet-device-list-skipped')`, "the skipped entries");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-device-list-skipped').textContent`),
+      "2 entries of the device list come from a newer version of CodeAlta and were skipped: update CodeAlta.");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("another computer of the owner asks to change the company sign-in: this one shows the change and approves it", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
+    await page.evaluate(`window.fleetFixture.ask()`);
+    // The row reads again now and then; Link… and back is not needed: a change of the page reads it at once.
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.clickText(".bp6-menu-item", "Add a passkey");
+    await page.until(`document.querySelector('.fleet-sign-in-approval')`, "the change to approve");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-approval li')].map(item => item.textContent)`),
+      ["https://login.contoso.example · contoso-client", "Email domains let in: contoso.example", "Require company sign-in", "A new client secret"]);
+    assert.match(await page.evaluate(`document.querySelector('.fleet-sign-in-approval').textContent`) as string, /^Office desktop asks to change the company sign-in\./u);
+    await page.clickText(".fleet-sign-in-approval .bp6-button", "Approve");
+    await page.until(`!document.querySelector('.fleet-sign-in-approval')`, "approved");
+    assert.ok((await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).some(call => call.includes('"approved":"approval-1"')));
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the owner's computer updates the fleet at a time it chooses, follows the campaign, cancels it and sets the policy", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     // The card of the server says its version and its policy.
@@ -234,13 +267,21 @@ test("the owner links a passkey, turns company sign-in on and requires it, and t
       const set = (input, value) => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); };
       set(inputs[0], 'https://login.contoso.example/v2.0'); set(inputs[1], 'contoso-client'); set(inputs[2], 'the-secret'); set(inputs[3], 'Contoso'); return true; })()`);
     await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-dialog .bp6-switch')].find(label => label.textContent === 'Require company sign-in').querySelector('input').click()`);
+    // Whose accounts it lets in is named: nothing named is refused.
+    await page.until(`document.querySelector('.fleet-sign-in-dialog [role=alert]')?.textContent === 'Company sign-in needs the email domains or the tenant ids it lets in.'`, "the domains are needed");
+    await page.evaluate(`(() => { const input = [...document.querySelectorAll('.fleet-sign-in-dialog .fleet-server-form .bp6-input')][5];
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Contoso.example, fabrikam.example'); input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
     await page.until(`!document.querySelector('.fleet-sign-in-dialog [role=alert]')`, "the form holds");
     await page.shot("fleet-sign-in-dialog");
+    // Changing the company sign-in asks the owner to sign in again, with a method linked to them.
     await page.clickText(".fleet-sign-in-dialog .bp6-button", "Save");
+    await page.until(`[...document.querySelectorAll('.fleet-sign-in-confirm-methods .bp6-button')].some(button => button.textContent === 'Continue with Passkey')`, "the confirmation asked");
+    await page.clickText(".fleet-sign-in-confirm-methods .bp6-button", "Continue with Passkey");
     await page.until(`!document.querySelector('.fleet-sign-in-dialog')`, "the form closes");
     const saved = (await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call)).filter(call => call.signIn || call.linkSignIn);
-    assert.deepEqual(saved, [{ linkSignIn: "passkey" }, { linkSignIn: "github" }, { signIn: { version: 0, enabled: ["passkey", "microsoft", "google", "github", "company"],
-      issuer: "https://login.contoso.example/v2.0", clientId: "contoso-client", secret: "the-secret", name: "Contoso", requireSso: true } }]);
+    const change = { version: 0, enabled: ["passkey", "microsoft", "google", "github", "company"], issuer: "https://login.contoso.example/v2.0", clientId: "contoso-client",
+      secret: "the-secret", name: "Contoso", requireSso: true, domains: ["contoso.example", "fabrikam.example"] };
+    assert.deepEqual(saved, [{ linkSignIn: "passkey" }, { linkSignIn: "github" }, { signIn: { ...change, confirmWith: null } }, { signIn: { ...change, confirmWith: "passkey" } }]);
     await page.until(`document.querySelector('.fleet-sign-in-summary')?.textContent === 'Company sign-in required'`, "the row read again");
     await page.clickText(".fleet-server-sign-in .bp6-button", "Change…");
     await page.until(`document.querySelector('.fleet-sign-in-dialog input[type=password]')`, "the form again");

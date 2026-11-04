@@ -13,8 +13,9 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
     {
         ArgumentException.ThrowIfNullOrEmpty(organizationId);
         return ReadAsync(connection => QuerySingle(connection, null,
-            "SELECT organization_id, settings, company_client_secret, version, updated_at FROM sign_in_settings WHERE organization_id = $org",
-            static reader => new SignInSettingsRecord(reader.GetString(0), reader.GetString(1), GetNullableString(reader, 2), reader.GetInt64(3), FromTime(reader.GetInt64(4))),
+            "SELECT organization_id, settings, company_client_secret_sealed, version, updated_at FROM sign_in_settings WHERE organization_id = $org",
+            reader => new SignInSettingsRecord(reader.GetString(0), reader.GetString(1), Unseal(GetNullableString(reader, 2), ClientSecretPurpose, reader.GetString(0)),
+                reader.GetInt64(3), FromTime(reader.GetInt64(4))),
             ("$org", organizationId)), cancellationToken);
     }
 
@@ -23,6 +24,7 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(audit);
+        var secret = Seal(settings.CompanyClientSecret, ClientSecretPurpose, settings.OrganizationId);
         return WriteAsync((connection, transaction) =>
         {
             // The settings change only from the version they name: two owners editing at once do not overwrite each other.
@@ -30,10 +32,10 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
                 ("$org", settings.OrganizationId));
             if (settings.Version != held + 1) return false;
             Execute(connection, transaction,
-                "INSERT INTO sign_in_settings (organization_id, settings, company_client_secret, version, updated_at) VALUES ($org, $settings, $secret, $version, $at) " +
-                "ON CONFLICT (organization_id) DO UPDATE SET settings = excluded.settings, company_client_secret = excluded.company_client_secret, " +
-                "version = excluded.version, updated_at = excluded.updated_at",
-                ("$org", settings.OrganizationId), ("$settings", settings.Settings), ("$secret", settings.CompanyClientSecret), ("$version", settings.Version),
+                "INSERT INTO sign_in_settings (organization_id, settings, company_client_secret_sealed, version, updated_at) VALUES ($org, $settings, $secret, $version, $at) " +
+                "ON CONFLICT (organization_id) DO UPDATE SET settings = excluded.settings, company_client_secret = NULL, " +
+                "company_client_secret_sealed = excluded.company_client_secret_sealed, version = excluded.version, updated_at = excluded.updated_at",
+                ("$org", settings.OrganizationId), ("$settings", settings.Settings), ("$secret", secret), ("$version", settings.Version),
                 ("$at", ToTime(settings.UpdatedAt)));
             AppendAudit(connection, transaction, audit);
             return true;
