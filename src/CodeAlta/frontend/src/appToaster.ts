@@ -36,6 +36,7 @@ function appToaster(): AppToaster {
 // A window of the app is a modal <dialog>: it is in the top layer, above any z-index, and makes the rest of the page inert.
 // The toasts are shown in a popover layer, inside the topmost open modal dialog when there is one, shown after it so that
 // they are above it and can be clicked (a machine that asks to join while Settings is open); back on the page once it closes.
+// Over a window they start below its title bar, whose buttons (Close) stay within reach.
 function raise(layer: HTMLElement): void {
   const modals = Array.from(document.querySelectorAll("dialog")).filter(dialog => dialog.open && dialog.matches(":modal"));
   const host = modals.at(-1) ?? document.body;
@@ -43,6 +44,9 @@ function raise(layer: HTMLElement): void {
     host.append(layer);
     if (host !== document.body) host.addEventListener("close", () => raise(layer), { once: true });
   }
+  const bar = host === document.body ? null : host.querySelector<HTMLElement>(".app-window-titlebar");
+  if (bar) layer.style.setProperty("--app-toaster-top", `${Math.round(bar.getBoundingClientRect().bottom + 8)}px`);
+  else layer.style.removeProperty("--app-toaster-top");
   if (!layer.matches(":popover-open")) layer.showPopover();
 }
 
