@@ -5,12 +5,12 @@ import { AppIcon } from "../AppIcon";
 import { dismissToast, showToast } from "../appToaster";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
-import { keyWords } from "./fleetServer";
+import { keyWords, waitingRuns } from "./fleetServer";
 import { continueHeldRun, heldRunToastKey, waitingApprovals, type HeldRunOutcome, type WaitingApproval } from "./approvals";
 import { newNotifications, notificationIntent, notificationPhrase, waitingHolds } from "./budgets";
 
 /** The calls of the Fleet button. */
-export type FleetApprovalsApi = Pick<typeof fleetServer, "status" | "devices" | "approve" | "revoke" | "watch" | "budgets" | "continueRun" | "stopRun" | "readNotification">;
+export type FleetApprovalsApi = Pick<typeof fleetServer, "status" | "devices" | "approve" | "revoke" | "watch" | "budgets" | "continueRun" | "stopRun" | "readNotification" | "directory">;
 
 // How often the devices of the servers are read again, beside the changes the host says.
 const ReadInterval = 20_000;
@@ -32,6 +32,8 @@ export function FleetApprovals({ epoch, api = fleetServer, onOpen }: { epoch: st
   const [waiting, setWaiting] = useState<WaitingApproval[]>([]);
   const [holds, setHolds] = useState<WaitingHold[]>([]);
   const [notes, setNotes] = useState<NewNotification[]>([]);
+  // The sessions of other machines that wait for the person: a question, a command or a file change to allow.
+  const [runs, setRuns] = useState(0);
   // What a toast was shown for: each comes once.
   const announced = useRef(new Set<string>());
   // The toasts this window takes away itself, whose closing is not the person's: the others closed with their ✕ are dismissed.
@@ -55,7 +57,10 @@ export function FleetApprovals({ epoch, api = fleetServer, onOpen }: { epoch: st
         fresh.push(...newNotifications(budgets).map(notification => ({ server, notification })));
       }
     }
+    // The directory of the server, or of the machines paired with this computer without one.
+    const directory = await api.directory({ expectedEpoch: epoch, linkId: null }, { signal, timeoutMilliseconds: 15_000 }).catch(() => null);
     if (signal.aborted) return;
+    setRuns(directory ? waitingRuns(directory.machines, directory.sessions) : 0);
     setServers(owned);
     setWaiting(waitingApprovals(lists));
     setHolds(held);
@@ -165,8 +170,8 @@ export function FleetApprovals({ epoch, api = fleetServer, onOpen }: { epoch: st
     }
   }, [act, close, decide, dismiss, holds, markRead, notes, t, waiting]);
 
-  if (!epoch || servers.length === 0) return null;
-  const count = waiting.length + holds.length + notes.length;
+  if (!epoch || (servers.length === 0 && runs === 0)) return null;
+  const count = waiting.length + holds.length + notes.length + runs;
   const label = count === 0 ? t("Fleet")
     : count === waiting.length ? t(waiting.length === 1 ? "Fleet: {count} device waits for your approval" : "Fleet: {count} devices wait for your approval", { count: waiting.length })
     : t(count === 1 ? "Fleet: 1 thing needs you" : "Fleet: {count} things need you", { count });

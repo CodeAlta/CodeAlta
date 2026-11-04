@@ -157,6 +157,8 @@ The sessions of a paired machine are listed in the Explorer with your own, with 
 
 Open one: its tab is the tab of any session. You read its timeline as it works, answer its questions and permission requests, send it prompts, steer it and stop it. The provider and the model are the ones the machine gives it.
 
+A session of a machine that asks a question, or waits for you to allow a command or a change, is marked as waiting within a few seconds: its row in the Explorer, **wait for you** on the Fleet canvas, and the mark of the **Fleet** button of the title bar.
+
 What works on the files of a project (the code editor, Changes, terminals, worktrees) is not offered for a session of another machine: its folder is on that machine. Renaming, forking, archiving and deleting it are not offered either. Pictures and files attached to a prompt are not sent to another machine.
 
 While a machine is offline, its sessions stay listed with what was last known of them, and CodeAlta connects again by itself.
@@ -303,7 +305,7 @@ It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--
 ### Add machines and computers
 
 - **A machine**: in **Settings** > **Fleet** > **Machines**, **Add a machine…** > **Through my server** shows the command to run on it, `altanode join <address> --token <code>`, which prints the six words of the machine's key. The machines that join list under the command with their words: click **It shows the same words** beside the one whose words the machine printed. Another one is never approved by itself. The **Add a machine…** of the server's card shows the same command for a machine that waits for you to approve it: it appears under the server as a **New device**; click **Approve…**, check that the machine shows the same six words, and click **It shows the same words**.
-- **What waits for you**: when a machine or a computer asks to join, a message comes wherever you are in CodeAlta, with its six words, **Approve** and **Refuse**, and the **Fleet** button of the title bar counts what waits, with the runs held by a [budget](#set-budgets-for-your-machines) and the [problems of your machines](#hear-of-problems-of-your-machines). Approve when the words are the same as on the device.
+- **What waits for you**: when a machine or a computer asks to join, a message comes wherever you are in CodeAlta, with its six words, **Approve** and **Refuse**, and the **Fleet** button of the title bar counts what waits, with the runs held by a [budget](#set-budgets-for-your-machines), the [problems of your machines](#hear-of-problems-of-your-machines) and the sessions of your machines that wait for you. Approve when the words are the same as on the device.
 - **Another of your computers**: **Join an organization…** with the address of the server, then sign in with a method you linked (a passkey, Microsoft, Google, GitHub) or an enrollment code; it shows six words while it waits, and you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
 
 ### Join an organization

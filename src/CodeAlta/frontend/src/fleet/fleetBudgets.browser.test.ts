@@ -102,6 +102,18 @@ test("a session started on a machine whose budget holds its prompt says it waits
     }, options);
   });
 
+test("a session of another machine that waits for a command to allow is counted in the mark of the Fleet button", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-hold-row')`, "the page");
+    // A session of this computer that waits is marked in its own window; one of the Mac mini is the Fleet's.
+    await page.evaluate(`window.fleetBudgetsFixture.waitRun()`);
+    await page.evaluate(`window.fleetBudgetsFixture.showButton()`);
+    await page.until(`document.querySelector('.fleet-approvals-button')?.getAttribute('aria-label') === 'Fleet: 3 things need you'`, "the run, the hold and the notification");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-approvals-mark').textContent`), "3");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("a run held by a budget is continued anyway from the Fleet button's toast, the notification is dismissed, and the page stays whole when narrow",
   { skip: !edge, timeout: 90_000 }, async () => {
     await withCanvas(async page => {

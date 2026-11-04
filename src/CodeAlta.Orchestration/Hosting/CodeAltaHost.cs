@@ -259,6 +259,18 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <summary>Gets the host-owned text-send and abort admission service; completion is not transcript completion.</summary>
     public OwnedSessionCommandService Commands { get; }
 
+    /// <summary>
+    /// Lists the sessions that wait for a person: a question a session asked, a command or a file change to allow, a form to
+    /// fill, a conversation held by another process. A session that waits for several is listed once.
+    /// </summary>
+    /// <returns>The ids of the sessions.</returns>
+    public async ValueTask<IReadOnlyList<string>> ListSessionsWaitingForPersonAsync()
+    {
+        var reviews = await RuntimeService.Permissions.ListWaitingSessionsAsync().ConfigureAwait(false);
+        var held = await RuntimeService.ConversationHolds.ListWaitingSessionsAsync().ConfigureAwait(false);
+        return [.. Commands.Asks.ListWaitingSessions().Concat(reviews).Concat(held).Distinct(StringComparer.OrdinalIgnoreCase)];
+    }
+
     /// <summary>Gets host-owned admission and drainage for up to eight actual cached workspace reads.</summary>
     public OwnedSessionWorkspace WorkspaceReads { get; }
 

@@ -918,6 +918,8 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.IsFalse(allowed.IsCompleted);
         Assert.AreEqual("inert fixture command", entry.Request.Command);
         CollectionAssert.AreEqual(new[] { f.SessionId }, (await f.Observe(permissions.ListWaitingSessionsAsync().AsTask())).ToArray());
+        // What the host lists to other machines and to its servers as waiting for a person: a command to allow too, not only a question.
+        CollectionAssert.AreEqual(new[] { f.SessionId }, (await f.Observe(f.Host.ListSessionsWaitingForPersonAsync().AsTask())).ToArray());
         Assert.IsTrue(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
         Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(allowed)).Kind);
 

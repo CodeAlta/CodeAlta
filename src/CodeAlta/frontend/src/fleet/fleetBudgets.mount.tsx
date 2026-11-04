@@ -47,16 +47,21 @@ const api: FleetBudgetsApi = {
     return ok();
   },
 };
+// The directory of the server: the sessions of the machines, one of which a test makes wait for a command to allow.
+let waitingRun = false;
+const directory = async () => ({ status: "ok", linkId: "home", url: "https://fleet.example", organization: "Home", connection: "online",
+  machines: [{ id: "desktop", name: "This PC", isThisComputer: true }, { id: "mac", name: "Mac mini", isThisComputer: false }],
+  sessions: [{ id: "s-local", machineId: "desktop", state: "requires_action" }, ...(waitingRun ? [{ id: "s-mac", machineId: "mac", state: "requires_action" }] : [])] }) as never;
 const buttonApi: FleetApprovalsApi = {
   status, devices: async () => ({ status: "ok", devices: [], message: null }), approve: ok as never, revoke: ok as never, watch: async () => (async function* () { })(),
-  budgets: api.budgets, continueRun: api.continueRun, stopRun: api.stopRun, readNotification: api.readNotification,
+  budgets: api.budgets, continueRun: api.continueRun, stopRun: api.stopRun, readNotification: api.readNotification, directory,
 };
 // The width of the page of the Settings window: about 1250 CSS pixels in a window of 1600, about 430 in one of 900.
 function Fixture() {
   const [width, setWidth] = useState(1250);
   const [shown, setShown] = useState(false);
   // hideButton then showButton is a start of the window again: a new Fleet button that reads the server anew.
-  Object.assign(window, { fleetBudgetsFixture: { setWidth, calls, showButton: () => setShown(true), hideButton: () => setShown(false),
+  Object.assign(window, { fleetBudgetsFixture: { setWidth, calls, showButton: () => setShown(true), hideButton: () => setShown(false), waitRun: () => { waitingRun = true; },
     // What the page says when a session started on the Mac mini has its first prompt held by Home tokens (the run of the hold is the session).
     heldStart: () => showHeldStartToast({ epoch: "12345678-1234-1234-1234-123456789abc", runId: "run-1", api: buttonApi, say: (key, values) => translate("en", key, values),
       message: translate("en", "The session was started on {name}. Its prompt waits for a reached budget of the machine: it is sent once you continue it anyway.", { name: "Mac mini" }) }) } });
