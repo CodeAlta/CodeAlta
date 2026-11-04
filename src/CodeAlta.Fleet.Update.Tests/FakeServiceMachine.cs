@@ -51,6 +51,9 @@ internal sealed class FakeServiceMachine : IDisposable
     /// </summary>
     public int LaunchdPrintsWhileStopping { get; set; }
 
+    /// <summary>Gets or sets what happens on the machine when a command runs, given as typed: a service that stops on its bootout.</summary>
+    public Action<string>? CommandRan { get; set; }
+
     /// <summary>Gets how long the manager slept between its commands.</summary>
     public TimeSpan Slept { get; private set; }
 
@@ -97,6 +100,7 @@ internal sealed class FakeServiceMachine : IDisposable
         lock (_gate)
         {
             Commands.Add(string.Join(' ', new[] { fileName }.Concat(arguments)));
+            CommandRan?.Invoke(Commands[^1]);
             switch (fileName, arguments.FirstOrDefault(static argument => !argument.StartsWith("--", StringComparison.Ordinal)))
             {
                 case ("schtasks", "/Create"):

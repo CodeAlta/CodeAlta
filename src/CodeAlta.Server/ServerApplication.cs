@@ -654,7 +654,9 @@ public sealed class ServerApplication
         var code = manager.Install(plan, _output, _error);
         if (code != ServiceManager.Success) return ServerExitCodes.Failure;
         await _output.WriteLineAsync(ServiceExecutableLocator.Describe(UpdateProduct.Server, (ServiceExecutable ?? LocateExecutable)()!)).ConfigureAwait(false);
-        if (running is not null && plan.Spec.Scope == ServiceScope.User)
+        // The server of the service it replaced stopped with it (launchd, systemd): only a server that still holds the data
+        // root keeps the new one waiting.
+        if (running is not null && plan.Spec.Scope == ServiceScope.User && CoordinatorServer.IsRunning(paths!) && CoordinatorServer.ReadState(paths!)?.ProcessId == running.ProcessId)
         {
             await _output.WriteLineAsync($"A server already runs on {paths!.DataRoot} (process {running.ProcessId}): the service's server starts once it exits "
                 + "(one server runs per data root).").ConfigureAwait(false);

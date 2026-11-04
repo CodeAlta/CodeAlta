@@ -64,6 +64,31 @@ public sealed class NodeManagementCommandTests
     }
 
     [TestMethod]
+    public async Task Install_Again_NamesOnlyAnInstanceThatStillHoldsTheProfile()
+    {
+        using var root = new NodeTestRoot();
+        using var machine = new FakeServiceMachine(ServicePlatform.MacOS);
+        Assert.AreEqual(NodeExitCodes.Success, (await RunAsync(machine, ["install", "--data-root", root.DataRoot])).Code);
+        var lockPath = root.Profile().LockFilePath;
+        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+        File.WriteAllText(lockPath, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        // An instance the service does not stop keeps the profile: the service's node starts once it exits.
+        var (code, output, error) = await RunAsync(machine, ["install", "--data-root", root.DataRoot]);
+        Assert.AreEqual(NodeExitCodes.Success, code, error);
+        StringAssert.Contains(output, "The service's node starts once that instance exits");
+
+        // The service's own node stops on the bootout of install again, and launchd starts the new one: nothing to wait for.
+        machine.CommandRan = command =>
+        {
+            if (command.StartsWith("launchctl bootout", StringComparison.Ordinal)) File.Delete(lockPath);
+        };
+        (code, output, error) = await RunAsync(machine, ["install", "--data-root", root.DataRoot, "--port", "2601"]);
+        Assert.AreEqual(NodeExitCodes.Success, code, error);
+        Assert.IsFalse(output.Contains("starts once that instance exits", StringComparison.Ordinal), output);
+    }
+
+    [TestMethod]
     public async Task Install_RefusesWhatTheOsCannotDo_WithExitOne()
     {
         using var root = new NodeTestRoot();

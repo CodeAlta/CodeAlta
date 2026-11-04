@@ -119,6 +119,39 @@ public sealed class ServerServiceTests
     }
 
     [TestMethod]
+    public async Task MacOS_InstallAgain_NamesOnlyAServerThatStillHoldsTheDataRoot()
+    {
+        var token = TestContext.CancellationToken;
+        using var machine = new FakeServiceMachine(ServicePlatform.MacOS);
+        var root = Path.Combine(machine.Root, "data");
+        var app = Application(machine, "/Users/alice/.dotnet/tools/altaserver", out var output, out var error);
+        var started = new TaskCompletionSource<Action>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = new ServerApplication(TextWriter.Synchronized(new StringWriter()), TextWriter.Synchronized(new StringWriter()))
+        {
+            Started = (_, stop) => started.TrySetResult(stop),
+            ConfigureServer = static options => new CoordinatorServerOptions { DataRoot = options.DataRoot, Urls = options.Urls, ConfigureLogging = static _ => { } },
+        };
+        var running = server.RunAsync(["run", "--data-root", root, "--urls", "http://127.0.0.1:0"]);
+        var stop = await started.Task.WaitAsync(TimeSpan.FromSeconds(30), token);
+
+        // A server the service does not stop keeps the data root: the service's server starts once it exits.
+        Assert.AreEqual(ServerExitCodes.Success, await app.RunAsync(["install", "--data-root", root]), error.ToString());
+        StringAssert.Contains(output.ToString(), "A server already runs on ");
+
+        // The service's own server stops on the bootout of install again, and launchd starts the new one: nothing to wait for.
+        machine.CommandRan = command =>
+        {
+            if (!command.StartsWith("launchctl bootout", StringComparison.Ordinal)) return;
+            stop();
+            running.Wait(TimeSpan.FromSeconds(30), token);
+        };
+        output.GetStringBuilder().Clear();
+        Assert.AreEqual(ServerExitCodes.Success, await app.RunAsync(["install", "--data-root", root, "--port", "2691"]), error.ToString());
+        Assert.IsTrue(running.IsCompleted);
+        Assert.IsFalse(output.ToString().Contains("already runs", StringComparison.Ordinal), output.ToString());
+    }
+
+    [TestMethod]
     public async Task ARequestToStopLeftFromBefore_DoesNotStopTheNextServer()
     {
         var token = TestContext.CancellationToken;
