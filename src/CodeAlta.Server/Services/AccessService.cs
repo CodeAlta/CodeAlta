@@ -34,6 +34,9 @@ internal sealed partial class AccessService
     private const string InvitationPrefix = "aet_";
     private const int MaxSummaryLength = 500;
     private const int MaxPayloadLength = 8192;
+    private const int MaxSealedLength = 65536;
+    private const int MaxWraps = 200;
+    private const int MaxWrappedLength = 8192;
 
     private readonly ICoordinatorStore _store;
     private readonly IAccessStore _access;
@@ -393,7 +396,8 @@ internal sealed partial class AccessService
         if (!subjectKnown) throw NotFound("The subject of the grant is not known, or is suspended.");
         var content = FleetCapabilities.IsContent(request.Capability);
         if (content && request.ScopeKind != FleetScopeKinds.Resource) throw Invalid("Content is granted on one resource, never on a scope: reading content does not flow down.");
-        if (request.Sealed && !content) throw Invalid("Only a grant of content is sealed.");
+        if (request.Sealed && (request.Capability != "session.view-content" || request.ScopeId?.StartsWith("session:", StringComparison.Ordinal) != true))
+            throw Invalid("Only a grant of the content of a session is sealed: its keys go to the grantee.");
         if (request.ExpiresAt is { } expires && expires <= _time.GetUtcNow()) throw Invalid("expiresAt is in the past.");
         var target = await GrantTargetAsync(actor.OrganizationId, snapshot, request.ScopeKind, request.ScopeId, cancellationToken).ConfigureAwait(false);
         var manager = request.ScopeKind == FleetScopeKinds.Resource && target.ResourceKind is { } kind ? ManageCapability(kind) : "access.manage";
@@ -440,11 +444,12 @@ internal sealed partial class AccessService
     /// </summary>
     /// <param name="actor">The calling controller device: one of the owner of the resource.</param>
     /// <param name="grantId">The grant.</param>
+    /// <param name="request">For a grant of a session: its metadata sealed for the grant, and the copy of the key for each device of the grantee.</param>
     /// <param name="origin">Where the request comes from.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>The grant, active.</returns>
-    /// <exception cref="CoordinatorException">The caller is not a device of the owner, or the grant does not wait for its keys.</exception>
-    public async Task<GrantDto> ConfirmGrantKeysAsync(DeviceRecord actor, string grantId, RequestOrigin origin, CancellationToken cancellationToken)
+    /// <exception cref="CoordinatorException">The caller is not a device of the owner, the keys do not hold, or the grant does not wait for its keys.</exception>
+    public async Task<GrantDto> ConfirmGrantKeysAsync(DeviceRecord actor, string grantId, ConfirmGrantKeysRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
     {
         var (snapshot, person) = await ReadAsync(actor, cancellationToken).ConfigureAwait(false);
         var grant = snapshot.Grants.FirstOrDefault(other => other.Id == grantId) ?? throw NotFound("No grant has this id.");
@@ -453,11 +458,63 @@ internal sealed partial class AccessService
         var holds = target.OwnerKind == FleetPrincipalKinds.Person ? target.OwnerId == person.Id
             : target.OwnerKind == FleetPrincipalKinds.Team && target.OwnerId is { } team && snapshot.TeamRole(team, person.Id) == FleetTeamRoles.Maintainer;
         if (!holds) throw Denied("Only a device of the owner of the content holds its keys and confirms them.");
+        if (grant.Capability == "session.view-content")
+        {
+            // The keys of a session: its metadata sealed for the grant, and the copy of the key for each device of the grantee only.
+            if (request is null || string.IsNullOrEmpty(request.Sealed) || request.Sealed.Length > MaxSealedLength || request.Wraps is not { Count: > 0 and <= MaxWraps })
+                throw Invalid("The keys of a grant of a session are its sealed metadata and a copy of its key for each device of the grantee.");
+            var recipients = await GranteeDevicesAsync(actor.OrganizationId, snapshot, grant, cancellationToken).ConfigureAwait(false);
+            if (request.Wraps.Any(wrap => wrap is null || !recipients.Contains(wrap.DeviceId) || string.IsNullOrEmpty(wrap.Wrapped) || wrap.Wrapped.Length > MaxWrappedLength)
+                || request.Wraps.Select(static wrap => wrap.DeviceId).Distinct(StringComparer.Ordinal).Count() != request.Wraps.Count)
+                throw Invalid("A copy of the key goes once to each device of the grantee, and to no other.");
+            var keyed = await _access.ActivateGrantKeysAsync(grantId, request.Sealed, [.. request.Wraps.Select(static wrap => (wrap.DeviceId, wrap.Wrapped))], _time.GetUtcNow(),
+                origin.Audit("grant.keys", actor, grantId, details: GrantDetails(grant)), cancellationToken).ConfigureAwait(false)
+                ?? throw CoordinatorException.Conflict(CoordinatorErrorCodes.AccessConflict, "The grant changed meanwhile: read it again.");
+            Changed(actor.OrganizationId);
+            return ToDto(keyed);
+        }
+
         var active = await _access.SetGrantStatusAsync(grantId, FleetGrantStatuses.PendingKeys, FleetGrantStatuses.Active, _time.GetUtcNow(),
             origin.Audit("grant.keys", actor, grantId, details: GrantDetails(grant)), cancellationToken).ConfigureAwait(false)
             ?? throw CoordinatorException.Conflict(CoordinatorErrorCodes.AccessConflict, "The grant changed meanwhile: read it again.");
         Changed(actor.OrganizationId);
         return ToDto(active);
+    }
+
+    /// <summary>Lists what grants of sealed content give the calling device: the sealed metadata of each session, and its copy of the key.</summary>
+    /// <param name="actor">The calling controller device.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The keys.</returns>
+    /// <exception cref="CoordinatorException">The caller is not a controller device of an active person.</exception>
+    public async Task<AccessListDto<GrantKeyDto>> ListGrantKeysAsync(DeviceRecord actor, CancellationToken cancellationToken)
+    {
+        _ = await ReadAsync(actor, cancellationToken).ConfigureAwait(false);
+        var keys = await _access.ListGrantKeysAsync(actor.Id, cancellationToken).ConfigureAwait(false);
+        if (keys.Count == 0) return new([]);
+        var sessions = (await _store.ListSessionsAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false)).ToDictionary(static session => session.Id, StringComparer.Ordinal);
+        var listed = new List<GrantKeyDto>(keys.Count);
+        foreach (var (grantId, scopeId, sealedText, wrapped) in keys)
+        {
+            if (scopeId is not { } scope || !scope.StartsWith("session:", StringComparison.Ordinal)) continue;
+            var sessionId = scope["session:".Length..];
+            if (sessions.TryGetValue(sessionId, out var session)) listed.Add(new GrantKeyDto(grantId, sessionId, session.MachineId, sealedText, wrapped));
+        }
+
+        return new(listed);
+    }
+
+    // The devices the keys of a grant go to: the approved controller devices of its person, or of the members of its team.
+    private async Task<HashSet<string>> GranteeDevicesAsync(string organizationId, AccessSnapshot snapshot, GrantRecord grant, CancellationToken cancellationToken)
+    {
+        var people = grant.SubjectKind switch
+        {
+            FleetPrincipalKinds.Person => new HashSet<string>([grant.SubjectId], StringComparer.Ordinal),
+            FleetPrincipalKinds.Team => snapshot.Members.Where(member => member.TeamId == grant.SubjectId).Select(static member => member.PersonId).ToHashSet(StringComparer.Ordinal),
+            _ => [],
+        };
+        var devices = await _store.ListDevicesAsync(organizationId, cancellationToken).ConfigureAwait(false);
+        return devices.Where(device => device.Kind == FleetDeviceKinds.Controller && device.Status == DeviceStatuses.Approved && device.OwnerPersonId is { } owner
+            && people.Contains(owner) && snapshot.Person(owner) is { IsActive: true }).Select(static device => device.Id).ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>

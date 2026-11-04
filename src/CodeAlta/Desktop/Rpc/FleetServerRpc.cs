@@ -490,11 +490,13 @@ internal sealed partial class FleetServerService
         var openable = machines.Where(static machine => machine.IsThisComputer || machine.IsReachable).Select(static machine => machine.Id).ToHashSet(StringComparer.Ordinal);
         // Titles travel sealed with the metadata key of their space: opened here, in the host, never by the server.
         var keys = connection.Connector?.MetadataKeys;
+        // A session of another person shared with this one opens with the keys of its grant.
+        var granted = connection.Connector?.GrantKeys;
         var sessions = directory.Sessions.Values.OrderByDescending(static session => session.Fact.UpdatedAt).Take(500).Select(session =>
         {
             var fact = session.Fact;
             var counts = fact.Counts ?? new FleetSessionCounts();
-            var title = keys is not null && keys.TryOpen(fact.SessionId, fact.SealedMetadata, out var metadata) ? metadata!.Title : null;
+            var title = keys is not null && keys.TryOpen(fact.SessionId, fact.SealedMetadata, out var metadata) ? metadata!.Title : granted?.Find(fact.SessionId)?.Title;
             return new FleetSessionView(fact.SessionId, session.MachineId, fact.State, fact.ProviderType, fact.Model, Time(fact.CreatedAt), Time(fact.UpdatedAt),
                 Clamp(counts.Turns), Clamp(counts.InputTokens + counts.OutputTokens), openable.Contains(session.MachineId), title);
         }).ToArray();

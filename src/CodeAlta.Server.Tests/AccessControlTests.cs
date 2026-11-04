@@ -96,15 +96,30 @@ public sealed class AccessControlTests
         var scoped = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
             new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "session.view-content", FleetScopeKinds.Team, team.Id));
         Assert.AreEqual((HttpStatusCode.BadRequest, CoordinatorErrorCodes.AccessInvalid), (scoped.Status, scoped.Code), "content never flows down a scope");
-        var byAdmin = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
-            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "machine.logs", FleetScopeKinds.Resource, "machine:" + machine.Id, Sealed: true));
-        Assert.AreEqual(HttpStatusCode.Created, byAdmin.Status, "the owner of the machine grants its log");
-        var pending = byAdmin.Read<GrantDto>();
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "machine.logs", FleetScopeKinds.Resource, "machine:" + machine.Id, Sealed: true))).Status,
+            "what is sealed for a grant is the content of a session");
+        await PublishSessionAsync(server, node, "s1");
+        var byOwner = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "session.view-content", FleetScopeKinds.Resource, "session:s1", Sealed: true));
+        Assert.AreEqual(HttpStatusCode.Created, byOwner.Status, byOwner.Body.ToString());
+        var pending = byOwner.Read<GrantDto>();
         Assert.AreEqual(FleetGrantStatuses.PendingKeys, pending.Status, "sealed content waits for a device that holds its keys");
-        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys")).Status,
-            "only a device of the owner of the content confirms its keys");
-        var active = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys");
+        var keys = new ConfirmGrantKeysRequest("sealed", [new GrantKeyWrapDto(max.DeviceId, "wrapped")]);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys", keys)).Status,
+            "only a device of the owner of the content gives its keys");
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys")).Status,
+            "the keys of a session are given, not only said to be");
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys",
+            new ConfirmGrantKeysRequest("sealed", [new GrantKeyWrapDto(mia.DeviceId, "wrapped")]))).Status, "a copy goes to the devices of the grantee only");
+        var active = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys", keys);
+        Assert.AreEqual(HttpStatusCode.OK, active.Status, active.Body.ToString());
         Assert.AreEqual(FleetGrantStatuses.Active, active.Read<GrantDto>().Status);
+        var given = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grant-keys")).Read<AccessListDto<GrantKeyDto>>().Items.Single();
+        Assert.AreEqual((pending.Id, "s1", machine.Id, "sealed", "wrapped"), (given.GrantId, given.SessionId, given.MachineId, given.Sealed, given.Wrapped));
+        Assert.AreEqual(0, (await server.SendAsync(mia, HttpMethod.Get, "/api/v1/grant-keys")).Read<AccessListDto<GrantKeyDto>>().Items.Count, "nothing for another person");
+        var listed = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/sessions")).Read<ListResponse<SessionDto>>().Items;
+        Assert.AreEqual("s1", listed.Single().Id, "the grantee sees the session whose content they were given");
         var teamGrant = await server.SendAsync(mia, HttpMethod.Post, "/api/v1/grants",
             new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "automation.edit", FleetScopeKinds.Team, team.Id));
         Assert.AreEqual(HttpStatusCode.Created, teamGrant.Status, "a maintainer grants on the team");
@@ -113,6 +128,7 @@ public sealed class AccessControlTests
         var maxGrants = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grants")).Read<AccessListDto<GrantDto>>();
         Assert.AreEqual(2, maxGrants.Items.Count, "a person sees the grants made to them");
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(max, HttpMethod.Delete, $"/api/v1/grants/{pending.Id}")).Status, "and may give one back");
+        Assert.AreEqual(0, (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grant-keys")).Read<AccessListDto<GrantKeyDto>>().Items.Count, "its keys go with it");
 
         var review = await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/review");
         Assert.AreEqual(HttpStatusCode.OK, review.Status, review.Body.ToString());
@@ -284,6 +300,15 @@ public sealed class AccessControlTests
         var approved = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{device.DeviceId}/approve", new DeviceListChangeRequest(entry));
         Assert.AreEqual(HttpStatusCode.OK, approved.Status, approved.Body.ToString());
         return (device, invitation.Person.Id);
+    }
+
+    // A machine publishes the fact of one session, as its control connection does.
+    private static async Task PublishSessionAsync(ServerFixture server, TestDevice machine, string sessionId)
+    {
+        var cursors = await server.GetService<ICoordinatorStore>().GetPublicationCursorsAsync(machine.DeviceId);
+        var device = (await server.GetService<ICoordinatorStore>().GetDeviceAsync(machine.DeviceId))!;
+        await server.GetService<CodeAlta.Server.Services.PublicationService>().PublishFactsAsync(device, new FleetFactsPublish(Math.Max(cursors.Facts, cursors.Inventory) + 1,
+            [new FleetSessionFact(sessionId, 1, 1, "idle", server.Clock.Now, server.Clock.Now, "anthropic", "claude", new FleetSessionCounts(1, 0, 10, 5))]), CancellationToken.None);
     }
 
     internal static async Task<ApiAnswer> SignDraftAsync(ServerFixture server, TestDevice signer)

@@ -18,7 +18,7 @@ const household: FleetAccessOverview = {
   status: "ok", message: null, me, capabilities: ["access.manage", "access.review", "access.sign", "access.view", "audit.read"], signer: true, advanced: false,
   document: { number: 0, signedBy: null, signedAt: null, pending: [] },
   people: [me, person("bea", "Bea", "member"), person("cy", "Cy", "member", { joined: false, devices: 0 })],
-  teams: [], identities: [], grants: [], transfers: [], proposals: [],
+  teams: [], identities: [], grants: [], transfers: [], proposals: [], sessions: [{ id: "s1", title: "Fix the parser", machineName: "Mac mini" }],
   owners: [{ kind: "machine", id: "mini", name: "Mac mini", ownerKind: "person", ownerId: "alex", ownerName: "Alex", author: null, paused: false, ownerSuspended: false, canAct: true }],
   serverUrl: "https://home.example",
 };
@@ -31,7 +31,7 @@ const company: FleetAccessOverview = {
   teams: [{ id: "infra", name: "Infra", runsMemberAutomations: false, canManage: true, machines: [{ id: "box", name: "Build box" }],
     members: [{ personId: "alex", name: "Alex", role: "maintainer" }, { personId: "max", name: "Max", role: "member" }] }],
   identities: [{ id: "svc", name: "infra-bot", ownerKind: "team", ownerName: "Infra", enabled: false }],
-  grants: [{ id: "g1", subjectKind: "person", subjectId: "ada", subjectName: "Ada", capability: "machine.logs", scopeKind: "resource", scopeId: "machine:box", scopeName: "Build box",
+  grants: [{ id: "g1", subjectKind: "person", subjectId: "ada", subjectName: "Ada", capability: "session.view-content", scopeKind: "resource", scopeId: "session:s1", scopeName: "Fix the parser",
     status: "pending_keys", expiresAt: null }],
   owners: [
     { kind: "machine", id: "box", name: "Build box", ownerKind: "team", ownerId: "infra", ownerName: "Infra", author: null, paused: false, ownerSuspended: false, canAct: true },

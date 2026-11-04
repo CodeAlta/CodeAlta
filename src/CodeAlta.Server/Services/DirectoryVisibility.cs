@@ -160,8 +160,10 @@ internal sealed class DirectoryScope
 
         // A session a person started on a team machine is theirs; one without a person (a run of the team) is the team's.
         var (sessionKind, sessionOwner) = kind == FleetPrincipalKinds.Team && personId is not null ? (FleetPrincipalKinds.Person, personId) : (kind, owner);
-        return sessionOwner is not null && AccessPolicy.Allows(_snapshot, _person.Id, "session.view-facts",
-            AccessTarget.Resource(FleetResourceKinds.Session, sessionId, sessionKind, sessionOwner), _now);
+        if (sessionOwner is null) return false;
+        // A grant of its content lists the session too: its sealed title opens with the keys of that grant.
+        var target = AccessTarget.Resource(FleetResourceKinds.Session, sessionId, sessionKind, sessionOwner);
+        return AccessPolicy.Allows(_snapshot, _person.Id, "session.view-facts", target, _now) || AccessPolicy.Allows(_snapshot, _person.Id, "session.view-content", target, _now);
     }
 
     /// <summary>Gets whether the viewer sees a device (its name, its presence): its own devices, the machines it sees, everything for the broad roles.</summary>

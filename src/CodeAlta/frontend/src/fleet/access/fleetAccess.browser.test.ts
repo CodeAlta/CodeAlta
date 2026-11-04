@@ -86,7 +86,7 @@ test("in an organization what waits is reviewed and signed, a transfer taken, a 
       { deprovision: { personId: "max", successorKind: "team", successorId: "infra" } },
     ]);
     assert.equal(await page.evaluate(`document.querySelector('[data-person=Sam] .bp6-intent-danger')?.textContent`), "Suspended");
-    assert.equal(await page.evaluate(`document.querySelector('[data-grant="machine.logs"] .bp6-tag')?.textContent`), "Waiting for keys");
+    assert.equal(await page.evaluate(`document.querySelector('[data-grant="session.view-content"] .bp6-tag')?.textContent`), "Waiting for keys");
 
     // A window of 900 by 650: rows wrap, none overflows.
     await page.evaluate(`window.fleetAccessFixture.setWidth(430)`);

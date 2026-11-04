@@ -10,7 +10,7 @@ const home: FleetAccessOverview = {
   status: "ok", message: null, me: person("alex", "Alex", "owner", { isMe: true }), capabilities: ["access.manage", "access.sign", "access.view"], signer: true, advanced: false,
   document: { number: 0, signedBy: null, signedAt: null, pending: [] },
   people: [person("alex", "Alex", "owner", { isMe: true }), person("bea", "Bea", "member"), person("cy", "Cy", "member", { joined: false, devices: 0 })],
-  teams: [], identities: [], grants: [], owners: [], transfers: [], proposals: [], serverUrl: "https://home.example",
+  teams: [], identities: [], grants: [], owners: [], transfers: [], proposals: [], serverUrl: "https://home.example", sessions: [],
 };
 
 test("a household stays simple; an owner gives every role and an admin all but owner and admin", () => {

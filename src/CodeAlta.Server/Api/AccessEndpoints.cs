@@ -139,10 +139,15 @@ internal static class AccessEndpoints
             .Produces<GrantDto>()
             .WithSummary("Takes a grant back.");
 
-        api.MapPost("/grants/{id}/keys", (string id, HttpContext context, AccessService access) =>
-                Audited(context, "grant.keys", id, json.GrantDto, actor => access.ConfirmGrantKeysAsync(actor, id, ApiEndpoints.Origin(context), context.RequestAborted)))
+        api.MapPost("/grants/{id}/keys", (string id, ConfirmGrantKeysRequest? request, HttpContext context, AccessService access) =>
+                Audited(context, "grant.keys", id, json.GrantDto, actor => access.ConfirmGrantKeysAsync(actor, id, request, ApiEndpoints.Origin(context), context.RequestAborted)))
             .Produces<GrantDto>()
             .WithSummary("Confirms, from a device of the owner of sealed content, that its keys were wrapped to the subject's devices: the grant then applies.");
+
+        api.MapGet("/grant-keys", (HttpContext context, AccessService access) =>
+                Read(context, json.AccessListDtoGrantKeyDto, actor => access.ListGrantKeysAsync(actor, context.RequestAborted)))
+            .Produces<AccessListDto<GrantKeyDto>>()
+            .WithSummary("What grants of sealed content give the calling device: the sealed metadata of each session and its copy of the key, which only that device opens.");
 
         api.MapGet("/owners", (HttpContext context, AccessService access) =>
                 Read(context, json.AccessListDtoResourceOwnerDto, actor => access.ListOwnersAsync(actor, context.RequestAborted)))

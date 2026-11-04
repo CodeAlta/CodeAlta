@@ -100,6 +100,9 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
             // Their teams raise their versions: the next signed document says they left.
             Execute(connection, transaction, "UPDATE teams SET version = version + 1 WHERE id IN (SELECT team_id FROM team_members WHERE person_id = $id)", ("$id", personId));
             Execute(connection, transaction, "DELETE FROM team_members WHERE person_id = $id", ("$id", personId));
+            Execute(connection, transaction, "DELETE FROM grant_keys WHERE grant_id IN (SELECT id FROM grants WHERE organization_id = $org AND subject_kind = $person " +
+                "AND subject_id = $id) OR device_id IN (SELECT id FROM devices WHERE owner_person_id = $id)", ("$org", organizationId), ("$person", FleetPrincipalKinds.Person),
+                ("$id", personId));
             Execute(connection, transaction, "UPDATE grants SET status = $revoked, revoked_at = $at WHERE organization_id = $org AND subject_kind = $person AND subject_id = $id " +
                 "AND status <> $revoked", ("$revoked", FleetGrantStatuses.Revoked), ("$at", ToTime(now)), ("$org", organizationId), ("$person", FleetPrincipalKinds.Person),
                 ("$id", personId));
@@ -208,9 +211,46 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
             var changed = Execute(connection, transaction, "UPDATE grants SET status = $status, revoked_at = $revokedAt WHERE id = $id AND status = $expected",
                 ("$status", status), ("$revokedAt", status == FleetGrantStatuses.Revoked ? ToTime(at) : null), ("$id", grantId), ("$expected", expected));
             if (changed == 0) return null;
+            if (status == FleetGrantStatuses.Revoked) Execute(connection, transaction, "DELETE FROM grant_keys WHERE grant_id = $id", ("$id", grantId));
             AppendAudit(connection, transaction, audit);
             return QuerySingle(connection, transaction, GrantColumns + " WHERE id = $id", ReadGrant, ("$id", grantId));
         }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<GrantRecord?> ActivateGrantKeysAsync(string grantId, string sealedText, IReadOnlyList<(string DeviceId, string Wrapped)> wraps, DateTimeOffset at,
+        AuditEntry audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(grantId);
+        ArgumentNullException.ThrowIfNull(sealedText);
+        ArgumentNullException.ThrowIfNull(wraps);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync((connection, transaction) =>
+        {
+            var changed = Execute(connection, transaction, "UPDATE grants SET status = $active WHERE id = $id AND status = $pending",
+                ("$active", FleetGrantStatuses.Active), ("$id", grantId), ("$pending", FleetGrantStatuses.PendingKeys));
+            if (changed == 0) return null;
+            foreach (var (deviceId, wrapped) in wraps)
+            {
+                Execute(connection, transaction, "INSERT INTO grant_keys (grant_id, device_id, sealed, wrapped, created_at) VALUES ($grant, $device, $sealed, $wrapped, $at) " +
+                    "ON CONFLICT (grant_id, device_id) DO UPDATE SET sealed = excluded.sealed, wrapped = excluded.wrapped, created_at = excluded.created_at",
+                    ("$grant", grantId), ("$device", deviceId), ("$sealed", sealedText), ("$wrapped", wrapped), ("$at", ToTime(at)));
+            }
+
+            AppendAudit(connection, transaction, audit);
+            return QuerySingle(connection, transaction, GrantColumns + " WHERE id = $id", ReadGrant, ("$id", grantId));
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<(string GrantId, string? ScopeId, string Sealed, string Wrapped)>> ListGrantKeysAsync(string deviceId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        return ReadAsync(connection => QueryList(connection, null,
+            "SELECT k.grant_id, g.scope_id, k.sealed, k.wrapped FROM grant_keys k JOIN grants g ON g.id = k.grant_id WHERE k.device_id = $device AND g.status = $active",
+            static reader => (reader.GetString(0), GetNullableString(reader, 1), reader.GetString(2), reader.GetString(3)), ("$device", deviceId),
+            ("$active", FleetGrantStatuses.Active)), cancellationToken);
     }
 
     /// <inheritdoc />

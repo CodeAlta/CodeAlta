@@ -221,6 +221,31 @@ public sealed partial class FleetServerClient
         return SendAsync(HttpMethod.Post, $"api/v1/grants/{Uri.EscapeDataString(grantId)}/keys", null, AccessJson.GrantDto, cancellationToken);
     }
 
+    /// <summary>Activates a grant of sealed session content with its keys: the sealed metadata and a copy of its key for each device of the grantee.</summary>
+    /// <param name="grantId">The grant.</param>
+    /// <param name="request">The keys.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The grant, active.</returns>
+    /// <exception cref="ArgumentException"><paramref name="grantId"/> is empty.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
+    /// <exception cref="FleetServerException">The server refused it.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<GrantDto> ConfirmGrantKeysAsync(string grantId, ConfirmGrantKeysRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(grantId);
+        ArgumentNullException.ThrowIfNull(request);
+        return SendAsync(HttpMethod.Post, $"api/v1/grants/{Uri.EscapeDataString(grantId)}/keys", Body(request, AccessJson.ConfirmGrantKeysRequest), AccessJson.GrantDto,
+            cancellationToken);
+    }
+
+    /// <summary>Lists what grants of sealed content give this device: the sealed metadata of sessions and this device's copies of their keys.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The keys, which this device verifies and opens.</returns>
+    /// <exception cref="FleetServerException">The server refused the call.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<AccessListDto<GrantKeyDto>> ListGrantKeysAsync(CancellationToken cancellationToken = default)
+        => SendAsync(HttpMethod.Get, "api/v1/grant-keys", null, AccessJson.AccessListDtoGrantKeyDto, cancellationToken);
+
     /// <summary>Lists the resources this person may see and their owners.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The resources.</returns>

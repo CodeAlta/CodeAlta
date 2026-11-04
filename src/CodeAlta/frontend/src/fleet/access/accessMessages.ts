@@ -67,6 +67,13 @@ export const fleetAccessMessages = {
   "Remove from the organization": ["Quitar de la organización", "Retirer de l’organisation", "Aus der Organisation entfernen", "組織から削除", "移出组织"],
   "The organization": ["La organización", "L’organisation", "Die Organisation", "組織", "组织"],
   "Team {name}": ["Equipo {name}", "Équipe {name}", "Team {name}", "チーム {name}", "团队 {name}"],
+  "Session: {name}": ["Sesión: {name}", "Session : {name}", "Sitzung: {name}", "セッション: {name}", "会话：{name}"],
+  "Only your own sessions whose title this computer opens are shared from here.": [
+    "Desde aquí solo se comparten tus propias sesiones cuyo título abre este equipo.",
+    "Seules vos propres sessions dont cet ordinateur ouvre le titre se partagent d’ici.",
+    "Von hier werden nur deine eigenen Sitzungen geteilt, deren Titel dieser Computer öffnet.",
+    "ここから共有できるのは、このコンピューターがタイトルを開ける自分のセッションだけです。",
+    "这里只能共享你自己的、且本电脑能打开其标题的会话。"],
   "New team…": ["Nuevo equipo…", "Nouvelle équipe…", "Neues Team…", "新しいチーム…", "新建团队…"],
   "No team yet.": ["Aún no hay equipos.", "Aucune équipe pour l’instant.", "Noch kein Team.", "まだチームはありません。", "尚无团队。"],
   "A team shares machines and automations; its maintainers run them.": ["Un equipo comparte máquinas y automatizaciones; sus responsables las gestionan.",

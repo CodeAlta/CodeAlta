@@ -259,6 +259,27 @@ public sealed record CreateAccessProposalRequest(string Kind, string Summary, st
 /// <param name="State"><c>applied</c> once the person applied it, or <c>dismissed</c>.</param>
 public sealed record DecideAccessProposalRequest(string State);
 
+/// <summary>The copy of the key of a grant of sealed content for one device of the grantee.</summary>
+/// <param name="DeviceId">The device.</param>
+/// <param name="Wrapped">The key, wrapped to that device and signed by the device that gives it.</param>
+public sealed record GrantKeyWrapDto(string DeviceId, string Wrapped);
+
+/// <summary>
+/// The body of <c>POST /api/v1/grants/{id}/keys</c> for a grant of sealed session content: the metadata of the session sealed with
+/// a key made for the grant, and that key wrapped to each device of the grantee, by a device of the owner of the session.
+/// </summary>
+/// <param name="Sealed">The sealed metadata, which the server cannot open.</param>
+/// <param name="Wraps">The copies of its key.</param>
+public sealed record ConfirmGrantKeysRequest(string Sealed, IReadOnlyList<GrantKeyWrapDto> Wraps);
+
+/// <summary>What a grant of sealed content gives the calling device: the sealed metadata of a session and the copy of its key for that device.</summary>
+/// <param name="GrantId">The grant.</param>
+/// <param name="SessionId">The session.</param>
+/// <param name="MachineId">The machine of the session, whose owner gave the key.</param>
+/// <param name="Sealed">The sealed metadata.</param>
+/// <param name="Wrapped">The copy of its key for the calling device.</param>
+public sealed record GrantKeyDto(string GrantId, string SessionId, string MachineId, string Sealed, string Wrapped);
+
 /// <summary>A list of items of access control.</summary>
 /// <typeparam name="T">The type of the items.</typeparam>
 /// <param name="Items">The items.</param>
@@ -295,5 +316,7 @@ public sealed record AccessListDto<T>(IReadOnlyList<T> Items);
 [JsonSerializable(typeof(DeprovisionResultDto))]
 [JsonSerializable(typeof(CreateAccessProposalRequest))]
 [JsonSerializable(typeof(DecideAccessProposalRequest))]
+[JsonSerializable(typeof(ConfirmGrantKeysRequest))]
+[JsonSerializable(typeof(AccessListDto<GrantKeyDto>))]
 [JsonSerializable(typeof(ApiProblemDto))]
 public sealed partial class FleetAccessApiJsonContext : JsonSerializerContext;

@@ -15,6 +15,7 @@ namespace CodeAlta.Desktop.Rpc;
 internal sealed partial class FleetServerService
 {
     private const int MaxSignedChanges = 500;
+    private const int MaxShareableSessions = 100;
 
     /// <summary>People and access at a server, as this computer's person may see them.</summary>
     [NeoRpcMethod("access")]
@@ -24,8 +25,9 @@ internal sealed partial class FleetServerService
         if (!FleetServerLinkStore.IsValidId(request!.LinkId)) return FleetAccessOverview.Failed("invalid_request", null);
         try
         {
-            return AccessView(await _servers!.ReadAccessAsync(request.LinkId, cancellationToken).ConfigureAwait(false),
-                _servers.Connections.FirstOrDefault(connection => connection.Link.Id == request.LinkId)?.Link.Url);
+            var read = await _servers!.ReadAccessAsync(request.LinkId, cancellationToken).ConfigureAwait(false);
+            var connection = _servers.Connections.FirstOrDefault(connection => connection.Link.Id == request.LinkId);
+            return AccessView(read, connection?.Link.Url, Shareable(connection, read));
         }
         catch (Exception exception) when (Failure(exception) is { } failure)
         {
@@ -145,10 +147,23 @@ internal sealed partial class FleetServerService
     public Task<FleetSecretActionResult> RevokeGrantAsync(FleetSecretRefRequest request, CancellationToken cancellationToken)
         => AccessRefAsync(request, (client, id, token) => client.RevokeGrantAsync(id, token), cancellationToken);
 
-    /// <summary>Confirms, as the owner of sealed content, that its keys were wrapped to the grantee's devices.</summary>
+    /// <summary>Gives a grant of sealed content its keys, as a computer of their owner: sealed here and wrapped to each device of the grantee.</summary>
     [NeoRpcMethod("confirmGrantKeys")]
     public Task<FleetSecretActionResult> ConfirmGrantKeysAsync(FleetSecretRefRequest request, CancellationToken cancellationToken)
-        => AccessRefAsync(request, (client, id, token) => client.ConfirmGrantKeysAsync(id, token), cancellationToken);
+        => SecretActionAsync(request?.ExpectedEpoch, request?.LinkId, async () =>
+        {
+            if (string.IsNullOrEmpty(request!.Id)) return new FleetSecretActionResult("invalid_request", null);
+            try
+            {
+                await _servers!.ConfirmGrantKeysAsync(request.LinkId, request.Id, cancellationToken).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return new FleetSecretActionResult("keys_unavailable", exception.Message);
+            }
+
+            return new FleetSecretActionResult("ok", null);
+        });
 
     /// <summary>Offers a machine or an automation to another owner.</summary>
     [NeoRpcMethod("offerTransfer")]
@@ -311,9 +326,33 @@ internal sealed partial class FleetServerService
         }
     }
 
-    /// <summary>The page's view of what the server holds: names resolved, what this person may act on marked.</summary>
-    internal static FleetAccessOverview AccessView(DesktopFleetAccess read, string? serverUrl)
+    /// <summary>
+    /// The sessions this person may share sealed: on their own machines or started by them, whose title opens on this computer
+    /// (a grant of their content gives the grantee that title, sealed again for them here).
+    /// </summary>
+    internal static FleetAccessSessionView[] Shareable(FleetServerConnection? connection, DesktopFleetAccess read)
     {
+        if (connection?.Connector is not { MetadataKeys: { } keys } connector) return [];
+        var me = read.Self.Person.Id;
+        var mine = read.Owners.Where(owner => owner.ResourceKind == FleetResourceKinds.Machine && owner.OwnerKind == FleetPrincipalKinds.Person && owner.OwnerId == me)
+            .Select(static owner => owner.ResourceId).ToHashSet(StringComparer.Ordinal);
+        var directory = connector.Directory;
+        return [.. directory.Sessions.Values.Where(session => mine.Contains(session.MachineId) || session.Fact.PersonId == me)
+            .OrderByDescending(static session => session.Fact.UpdatedAt)
+            .Select(session => keys.TryOpen(session.Fact.SessionId, session.Fact.SealedMetadata, out var metadata) && metadata?.Title is { Length: > 0 } title
+                ? new FleetAccessSessionView(session.Fact.SessionId, title,
+                    directory.Machines.TryGetValue(session.MachineId, out var machine) ? machine.Inventory?.Name ?? session.MachineId : session.MachineId)
+                : null)
+            .OfType<FleetAccessSessionView>().Take(MaxShareableSessions)];
+    }
+
+    /// <summary>The page's view of what the server holds: names resolved, what this person may act on marked.</summary>
+    internal static FleetAccessOverview AccessView(DesktopFleetAccess read, string? serverUrl) => AccessView(read, serverUrl, []);
+
+    /// <summary>The page's view of what the server holds, with the sessions this person may share sealed.</summary>
+    internal static FleetAccessOverview AccessView(DesktopFleetAccess read, string? serverUrl, FleetAccessSessionView[] sessions)
+    {
+        var titles = sessions.ToDictionary(static session => session.Id, static session => session.Title, StringComparer.Ordinal);
         var me = read.Self.Person;
         var administers = FleetOrganizationRoles.Administers(me.Role);
         var maintains = new HashSet<string>(me.Teams.Where(static team => team.Role == FleetTeamRoles.Maintainer).Select(static team => team.TeamId), StringComparer.Ordinal);
@@ -340,6 +379,7 @@ internal sealed partial class FleetServerService
             FleetScopeKinds.Organization => "Organization",
             FleetScopeKinds.Team when id is not null => teams.GetValueOrDefault(id, id),
             FleetScopeKinds.Resource when id is not null && id.StartsWith("machine:", StringComparison.Ordinal) => Device(id["machine:".Length..]),
+            FleetScopeKinds.Resource when id is not null && id.StartsWith("session:", StringComparison.Ordinal) => titles.GetValueOrDefault(id["session:".Length..], id),
             _ => id ?? string.Empty,
         };
         FleetAccessPersonView Person(PersonAccessDto person) => new(person.Id, person.DisplayName, person.Role, person.Status, person.Devices,
@@ -365,7 +405,7 @@ internal sealed partial class FleetServerService
                 transfer.State == FleetTransferStates.Offered && (transfer.OfferedBy == me.Id || administers)))],
             [.. read.Proposals.Select(proposal => new FleetAccessProposalView(proposal.Id, people.GetValueOrDefault(proposal.PersonId, proposal.PersonId), proposal.SessionId,
                 proposal.Kind, proposal.Summary, proposal.Payload, proposal.State, proposal.CreatedAt))],
-            serverUrl);
+            serverUrl, sessions);
     }
 
     // The change a proposal names, made with this person's own request; null once made, else why not.
@@ -434,16 +474,23 @@ internal sealed partial class FleetServerService
 /// <param name="Transfers">The transfers.</param>
 /// <param name="Proposals">The changes agents proposed.</param>
 /// <param name="ServerUrl">The address of the server, which an invited person joins.</param>
+/// <param name="Sessions">The sessions this person may share sealed, their titles opened on this computer.</param>
 internal sealed record FleetAccessOverview(string Status, string? Message, FleetAccessPersonView? Me, string[] Capabilities, bool Signer, bool Advanced,
     FleetAccessDocumentView? Document, FleetAccessPersonView[] People, FleetAccessTeamView[] Teams, FleetAccessIdentityView[] Identities, FleetAccessGrantView[] Grants,
-    FleetAccessOwnerView[] Owners, FleetAccessTransferView[] Transfers, FleetAccessProposalView[] Proposals, string? ServerUrl)
+    FleetAccessOwnerView[] Owners, FleetAccessTransferView[] Transfers, FleetAccessProposalView[] Proposals, string? ServerUrl, FleetAccessSessionView[] Sessions)
 {
     /// <summary>Gets an overview of a failure.</summary>
     /// <param name="status">The status.</param>
     /// <param name="message">What was said.</param>
     /// <returns>The overview.</returns>
-    public static FleetAccessOverview Failed(string status, string? message) => new(status, message, null, [], false, false, null, [], [], [], [], [], [], [], null);
+    public static FleetAccessOverview Failed(string status, string? message) => new(status, message, null, [], false, false, null, [], [], [], [], [], [], [], null, []);
 }
+
+/// <summary>A session this person may share with its content sealed.</summary>
+/// <param name="Id">Its id.</param>
+/// <param name="Title">Its title, opened on this computer.</param>
+/// <param name="MachineName">The machine it runs on.</param>
+internal sealed record FleetAccessSessionView(string Id, string Title, string MachineName);
 
 /// <summary>A person.</summary>
 /// <param name="Id">Their id.</param>
