@@ -663,6 +663,41 @@ public sealed class SignInTests
     }
 
     [TestMethod]
+    public async Task ADomainThatCouldNotBeCheckedForWantOfAConfirmedEmailSaysSo_AndEveryOtherRefusalKeepsItsWords()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        await server.SetUpAsync(owner);
+        await ConfigureCompanyAsync(server, owner, provider, requireSso: false, domains: ["contoso.example"], tenants: ["tenant-a"]);
+
+        async Task<(string? Code, string? Detail)> RefusedAsync(FakeAccount account)
+        {
+            provider.Account = account;
+            var (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+            var refused = await CompleteAsync(server, laptop, start, back);
+            Assert.AreEqual(HttpStatusCode.Forbidden, refused.Status, refused.Body.ToString());
+            return (refused.Code, refused.Body.GetProperty("detail").GetString());
+        }
+
+        // The tenant is the right one, but the provider (Entra ID) did not confirm the email, so its domain cannot be checked: the refusal says so.
+        var unconfirmed = await RefusedAsync(new FakeAccount("sam-1", "sam@contoso.example", "Sam", [], EmailVerified: false, TenantId: "tenant-a"));
+        Assert.AreEqual(SignInErrorCodes.IdentityNotAllowed, unconfirmed.Code);
+        StringAssert.Contains(unconfirmed.Detail, "did not confirm this account's email");
+        StringAssert.Contains(unconfirmed.Detail, "let in its tenant instead");
+
+        // A tenant that is not named, a confirmed email of another domain: the words stay the generic ones.
+        foreach (var account in new[] { new FakeAccount("sam-2", "sam@contoso.example", "Sam", [], EmailVerified: false, TenantId: "tenant-b"),
+                     new FakeAccount("sam-3", "sam@fabrikam.example", "Sam", [], TenantId: "tenant-a") })
+        {
+            var generic = await RefusedAsync(account);
+            Assert.AreEqual(SignInErrorCodes.IdentityNotAllowed, generic.Code);
+            Assert.AreEqual("This account is not of the domains or tenants your organization lets in.", generic.Detail, account.Subject);
+        }
+    }
+
+    [TestMethod]
     public async Task ChangingTheCompanySignInNeedsTheOwnerToSignInAgain_AConfirmationWorksOnceForItsDeviceAndTenMinutes()
     {
         await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");

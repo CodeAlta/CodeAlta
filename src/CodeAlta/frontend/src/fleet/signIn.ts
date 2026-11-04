@@ -47,6 +47,18 @@ export function removableLogin(login: Pick<FleetSignInLoginView, "method" | "id"
   return login.method !== "company" && typeof login.id === "string" && login.id.length > 0;
 }
 
+/**
+ * The ways a person may confirm a change with, each once, as a refusal of a confirmation names them: the accounts they linked
+ * of the method they just used (by their names, as the server lists them) first, then every other linked method by its name.
+ */
+export function confirmWays(method: string, logins: readonly Pick<FleetSignInLoginView, "method" | "name">[], methodName: (method: string) => string): string[] {
+  const ways: string[] = [];
+  const add = (way: string) => { if (!ways.includes(way)) ways.push(way); };
+  for (const login of logins) if (login.method === method && login.method !== "passkey") add(login.name);
+  for (const login of logins) if (login.method !== method || login.method === "passkey") add(methodName(login.method));
+  return ways;
+}
+
 /** The code of a GitHub sign-in, as the page shows it, with the handle the host continues it with. */
 export type SignInCode = Readonly<{ handle: string; userCode: string; url: string }>;
 
@@ -97,6 +109,14 @@ export function signInDraft(view: FleetSignInSettingsView): SignInDraft {
 /** Whether the draft names a company provider. */
 export function hasCompany(draft: SignInDraft): boolean {
   return draft.issuer.trim().length > 0 || draft.clientId.trim().length > 0;
+}
+
+/** Whether an issuer is Microsoft Entra ID's (its host): a provider that never confirms an email, so its accounts are let in by tenant id. */
+export function isEntraIssuer(issuer: string): boolean {
+  try {
+    const host = new URL(issuer.trim()).hostname.toLowerCase();
+    return host === "login.microsoftonline.com" || host === "login.microsoft.com" || host === "sts.windows.net";
+  } catch { return false; }
 }
 
 /** Why a draft cannot be saved; null when it can. */
