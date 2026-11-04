@@ -306,11 +306,11 @@ public sealed class FleetSecretsTests
         Assert.AreEqual("https://grafana.example", Resolve(new("default", null, null), "${var:GRAFANA_URL}"));
         Assert.IsFalse(store.ListFleetCopies().Any(static copy => copy.ScopeId is null && copy.ScopeKind == "project"), "a project this machine does not have is not kept");
 
-        // A rotation reaches the machine at its next refresh; the old version is no longer masked nor given.
+        // A rotation reaches the machine at its next refresh; the old version is no longer given, and stays masked.
         await fleet.Manager.RotateAsync(person.Id, "person-rotated", CancellationToken.None);
         await sync.SyncAsync(CancellationToken.None);
         Assert.AreEqual("person-rotated", Resolve(new("home", null, null)));
-        Assert.IsFalse(store.GetSecretValues().Contains("person-value"));
+        Assert.IsTrue(store.GetSecretValues().Contains("person-value"), "the old version stays masked: a run may still hold it");
         Assert.IsTrue(store.GetSecretValues().Contains("person-rotated"));
 
         // A copy no controller device of the person gave is refused, and not kept.
@@ -374,7 +374,7 @@ public sealed class FleetSecretsTests
             var result = await refreshed.SyncAsync(CancellationToken.None);
             Assert.IsFalse(refreshed.Environments.TryGetValue("production", out var production) && production.Approvers.Count == 0, "the rule of approval is not dropped");
             Assert.IsFalse(refreshed.Environments.ContainsKey("staging"), "an environment taken away does not come back");
-            Assert.IsFalse(store.GetSecretValues().Contains("v1-value"), "a superseded value does not come back");
+            Assert.IsFalse(store.ListFleetCopies().Any(static copy => copy.Name == "TOKEN" && copy.Version < 2), "a superseded value does not come back");
             Assert.IsTrue(result.Refused.Count >= 3, string.Join("; ", result.Refused));
         }
     }

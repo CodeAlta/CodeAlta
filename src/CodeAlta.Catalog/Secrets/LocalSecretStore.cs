@@ -181,7 +181,13 @@ public sealed partial class LocalSecretStore : ISecretLookup
     public bool DeleteSecret(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
-        return Change(document => document.Secrets.Remove(name));
+        return Change(document =>
+        {
+            if (!document.Secrets.Remove(name, out var removed)) return false;
+            // A run may still hold the value: it stays masked.
+            Retire(document, [removed.Value]);
+            return true;
+        });
     }
 
     /// <summary>Sets a variable: adds it, or gives it a new value and a new version.</summary>
@@ -259,7 +265,7 @@ public sealed partial class LocalSecretStore : ISecretLookup
     public IReadOnlyCollection<string> GetSecretValues()
     {
         var snapshot = Read();
-        if (snapshot.Document.Secrets.Count == 0 && snapshot.Document.Fleet.Count == 0) return [];
+        if (snapshot.Document.Secrets.Count == 0 && snapshot.Document.Fleet.Count == 0 && snapshot.Document.Retired.Count == 0) return [];
         List<string> values = [];
         try
         {
@@ -270,8 +276,9 @@ public sealed partial class LocalSecretStore : ISecretLookup
             // What is not read cannot leak.
         }
 
-        // The secrets the fleet gave this machine are masked as its own are.
+        // The secrets the fleet gave this machine are masked as its own are, and so are the values taken away a run may still hold.
         values.AddRange(FleetSecretValues(snapshot));
+        values.AddRange(RetiredValues(snapshot));
         return values;
     }
 
@@ -342,6 +349,8 @@ public sealed partial class LocalSecretStore : ISecretLookup
             {
                 version = existing.Version + 1;
                 document.Secrets.Remove(name);
+                // A run may still hold the value it replaces: it stays masked.
+                Retire(document, [existing.Value]);
             }
             else if (mustExist)
             {
@@ -451,6 +460,7 @@ public sealed partial class LocalSecretStore : ISecretLookup
             document.Secrets = new(document.Secrets.Where(static entry => IsName(entry.Key)), StringComparer.OrdinalIgnoreCase);
             document.Variables = new(document.Variables.Where(static entry => IsName(entry.Key) && entry.Value.Value is not null), StringComparer.OrdinalIgnoreCase);
             document.Fleet = [.. (document.Fleet ?? []).Where(static copy => copy is not null && IsName(copy.Name) && copy.Source is { Length: > 0 } && copy.Value is not null)];
+            document.Retired = [.. (document.Retired ?? []).Where(static retired => retired?.Value is not null)];
             return document;
         }
         catch (JsonException exception)
@@ -489,6 +499,9 @@ public sealed partial class LocalSecretStore : ISecretLookup
 
         // The values of the copies the fleet gave, by their place in the document.
         public string?[]? FleetValues { get; set; }
+
+        // The values taken away, kept for masking.
+        public IReadOnlyList<string>? RetiredValues { get; set; }
     }
 }
 
@@ -509,6 +522,10 @@ internal sealed class StoreDocument
     // The copies the fleet gave this machine, their values protected as the values of the machine are.
     [JsonPropertyName("fleet")]
     public List<FleetCopyDocument> Fleet { get; set; } = [];
+
+    // The values taken away that a run may still hold: masked, never given again.
+    [JsonPropertyName("retired")]
+    public List<RetiredDocument> Retired { get; set; } = [];
 }
 
 internal sealed class SecretDocument
