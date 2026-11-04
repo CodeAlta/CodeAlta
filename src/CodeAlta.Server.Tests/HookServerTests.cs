@@ -145,6 +145,39 @@ public sealed class HookServerTests
         Assert.AreEqual(HookEventStates.Expired, states[late.DeliveryId]);
     }
 
+    // More events wait than a connection hands at once: each answer of the machine frees room for the next ones, without waiting
+    // for another connection.
+    [TestMethod]
+    public async Task MoreThanABatchOfEvents_AreAllHanded_AsTheMachineAnswers()
+    {
+        await using var fixture = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("laptop");
+        using var node = new TestDevice("node");
+        await fixture.SetUpWithNodeAsync(owner, node);
+        var hook = await CreateAsync(fixture, owner, node.DeviceId, HookSources.Webhook);
+        for (var index = 0; index < 150; index++)
+        {
+            if (index > 0 && index % 60 == 0) fixture.Clock.Advance(TimeSpan.FromMinutes(1));
+            Assert.AreEqual(HttpStatusCode.Accepted, (await PushAsync(fixture, hook.Path, $$"""{"n":{{index}}}""", "e" + index)).Status);
+        }
+
+        var events = Channel.CreateUnbounded<FleetHookEvent>();
+        var (connection, _) = await ConnectAsync(fixture, node, events);
+        await using var _ = connection;
+        var handed = new HashSet<string>(StringComparer.Ordinal);
+        while (handed.Count < 150)
+        {
+            var batch = new List<string> { (await NextAsync(events)).DeliveryId };
+            await Task.Delay(100);
+            while (events.Reader.TryRead(out var next)) batch.Add(next.DeliveryId);
+            handed.UnionWith(batch);
+            await connection.SendRequestAsync(FleetHookMethods.Ack, JsonSerializer.SerializeToElement(new FleetHookAcks([.. batch.Select(static id => new FleetHookAck(id, true, "x: started"))]),
+                FleetHookServerJsonContext.Default.FleetHookAcks));
+        }
+
+        Assert.AreEqual(0, (await ListAsync(fixture, owner)).Single().Pending, "every event was handed and answered on one connection");
+    }
+
     [TestMethod]
     public async Task TheIngress_RefusesWhatIsNotAHook_TooLarge_OrTooFast_AndAHookIsAPersonsOwn()
     {
