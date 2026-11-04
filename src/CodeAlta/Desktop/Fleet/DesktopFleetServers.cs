@@ -677,6 +677,8 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             Statistics = _statistics,
             WatchDirectory = true,
             Configure = _configure,
+            // A budget reached, a run that waits, a notification: the pages and the Fleet button read them again.
+            BudgetsChanged = _ => OnChanged(),
         });
         connections.Changed += OnChanged;
         Volatile.Write(ref _connections, connections);

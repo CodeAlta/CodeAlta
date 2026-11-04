@@ -216,8 +216,19 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         lock (_gate) return _assignments.GetValueOrDefault(id)?.Number ?? 0;
     }
 
+    /// <summary>Gets when the local policy of the node last refused a run; null when it refused none since the node started.</summary>
+    internal DateTimeOffset? LastPolicyRefusal { get; private set; }
+
     /// <inheritdoc />
     public string? Check(AutomationEntry entry, ModelProviderDescriptor provider)
+    {
+        var refused = CheckPolicy(entry, provider);
+        // A policy that refuses runs is a problem of the machine its owner hears of (its health).
+        if (refused is not null) LastPolicyRefusal = DateTimeOffset.UtcNow;
+        return refused;
+    }
+
+    private string? CheckPolicy(AutomationEntry entry, ModelProviderDescriptor provider)
     {
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentNullException.ThrowIfNull(provider);
@@ -237,6 +248,17 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
 
     /// <summary>Gets or sets what admits a run to an environment of the fleet; null until the node joined a server, and then no run uses one.</summary>
     internal NodeEnvironmentGate? Environments { get; set; }
+
+    /// <summary>Gets or sets what admits a run to the budgets of the machine; null until the node joined a server, and then no budget limits it.</summary>
+    internal NodeBudgets? Budgets { get; set; }
+
+    /// <inheritdoc />
+    public async Task<string?> AdmitBudgetAsync(AutomationEntry entry, string runId, ProjectDescriptor? project, string spaceId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (Budgets is not { } budgets) return null;
+        return (await budgets.AdmitAsync(new Fleet.NodeApi.FleetNodeBudgetRun(runId, entry.Definition.Name, spaceId, project), null, cancellationToken).ConfigureAwait(false)).Problem;
+    }
 
     /// <inheritdoc />
     public Task<CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult> AdmitEnvironmentAsync(AutomationEntry entry, string runId, string environment, CancellationToken cancellationToken)

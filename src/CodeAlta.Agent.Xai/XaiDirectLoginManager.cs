@@ -212,7 +212,7 @@ public sealed class XaiDirectLoginManager
             ? DateTimeOffset.FromUnixTimeSeconds(cache.ExpiresAtUnixSeconds.Value)
             : (DateTimeOffset?)null;
         var baseUri = options.BaseUri ?? XaiDefaults.DefaultApiBaseUri;
-        return new XaiDirectLoginResult(baseUri, expiresAt, cache.Scope);
+        return new XaiDirectLoginResult(baseUri, expiresAt, cache.Scope) { Renews = !string.IsNullOrWhiteSpace(cache.RefreshToken) };
     }
 
     private async ValueTask<XaiTokenResponse> CompleteBrowserCallbackAsync(
@@ -260,7 +260,7 @@ public sealed class XaiDirectLoginManager
         };
         await store.WriteAsync(cache, cancellationToken).ConfigureAwait(false);
         var baseUri = options.BaseUri ?? XaiDefaults.DefaultApiBaseUri;
-        return new XaiDirectLoginResult(baseUri, token.ExpiresAt, token.Scope);
+        return new XaiDirectLoginResult(baseUri, token.ExpiresAt, token.Scope) { Renews = !string.IsNullOrWhiteSpace(token.RefreshToken) };
     }
 
     private static async ValueTask WriteBrowserCallbackResponseAsync(
@@ -356,4 +356,8 @@ public sealed record XaiDirectDeviceCode(Uri VerificationUri, string UserCode, D
 /// <param name="BaseUri">The resolved xAI API base URI.</param>
 /// <param name="ExpiresAt">The xAI access-token expiry time when provided.</param>
 /// <param name="Scope">The granted OAuth scope.</param>
-public sealed record XaiDirectLoginResult(Uri BaseUri, DateTimeOffset? ExpiresAt, string? Scope);
+public sealed record XaiDirectLoginResult(Uri BaseUri, DateTimeOffset? ExpiresAt, string? Scope)
+{
+    /// <summary>Gets whether the stored credential holds a refresh token, which renews the access token past <see cref="ExpiresAt"/>.</summary>
+    public bool Renews { get; init; }
+}

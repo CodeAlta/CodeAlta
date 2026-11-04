@@ -4828,6 +4828,16 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             return;
         }
 
+        // The gate admits the prompt now that its turn would start (it may wait: the item stays submitting, so no other
+        // drain takes it); one it refuses fails without reaching the model, and the next one is tried.
+        if (QueuedRunGate is { } gate && await AdmitQueuedAsync(gate, sessionId, work).ConfigureAwait(false) is { } refused)
+        {
+            try { await MarkQueuedPromptFailedAsync(work.Entry, work.Prompt.QueueItemId, refused, DateTimeOffset.UtcNow).ConfigureAwait(false); }
+            finally { work.Use.Dispose(); }
+            await TryDrainNextQueuedPromptAsync(sessionId, existingActor).ConfigureAwait(false);
+            return;
+        }
+
         // The run of a queued prompt (the result of a child session or of a background job) can ask, like a send.
         var askExecution = CreateRunAskExecution(sessionId, work.Entry.Attachment.Cancellation.Token);
         try

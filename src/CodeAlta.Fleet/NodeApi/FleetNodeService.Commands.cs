@@ -63,7 +63,9 @@ public sealed partial class FleetNodeService
         if (parameters.Prompt is { } prompt)
         {
             var selection = Selection(parameters.Selection, provider.ProviderId.Value, session.AgentPromptId);
-            send = Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, prompt) { Selection = selection }));
+            // The budgets of the machine admit the first run: it may wait for its owner, the creation does not.
+            send = await WithinBudgetAsync(session.SessionId, session, parameters.Title,
+                () => Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, prompt) { Selection = selection }))).ConfigureAwait(false);
         }
 
         return new FleetCreateSessionResult(session.SessionId, provider.ProviderId.Value, send);
@@ -155,7 +157,9 @@ public sealed partial class FleetNodeService
         }
 
         var selection = Selection(parameters.Selection, session.ResolvedProviderKey, session.AgentPromptId);
-        return Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, text) { Selection = selection }, cancellationToken));
+        // A send the runtime knows already (a retry) is answered as it was; a new one starts a run the budgets admit first.
+        return await WithinBudgetAsync(retryKey, session, null,
+            () => Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, text) { Selection = selection }, CancellationToken.None))).ConfigureAwait(false);
     }
 
     private async Task<FleetQueueResult> QueueAsync(FleetNodeCall call, FleetQueueParams parameters, CancellationToken cancellationToken)

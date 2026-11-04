@@ -119,7 +119,11 @@ public sealed record FleetPublicationCursors(long Facts, long Inventory, long St
 /// <param name="State">The state of the device, such as <c>active</c>, <c>idle</c> or <c>busy</c>.</param>
 /// <param name="ActiveSessions">How many sessions run on the device now, when it runs some.</param>
 /// <param name="Update">Where the device stands in the update campaign it was last asked, or null.</param>
-public sealed record FleetPresenceUpdate(string State, int? ActiveSessions = null, FleetUpdateReport? Update = null);
+/// <param name="Health">
+/// The problems of the machine now (<see cref="Api.FleetHealthKinds"/>): an empty list says it has none; null says nothing, for a
+/// device that does not report its health.
+/// </param>
+public sealed record FleetPresenceUpdate(string State, int? ActiveSessions = null, FleetUpdateReport? Update = null, IReadOnlyList<Api.FleetHealthProblem>? Health = null);
 
 /// <summary>A device online, with its state.</summary>
 /// <param name="DeviceId">The device.</param>

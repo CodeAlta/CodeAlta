@@ -175,6 +175,8 @@ internal sealed partial class RemoteSessionHost
     internal static OwnedSessionCommandResult ToResult(FleetCommandResult result)
     {
         AgentRunId? run = result.RunId is { Length: > 0 } id ? new AgentRunId(id) : null;
+        // A prompt held by a budget of the machine is sent once its owner continues it anyway: not a failure of the send.
+        if (result.Status == FleetBudgetCommandStatuses.Held) return new OwnedSessionCommandResult(OwnedSessionCommandOutcome.Completed, run, FleetBudgetCommandStatuses.Held);
         if (result.Status is not ("accepted" or "replay")) return new OwnedSessionCommandResult(OwnedSessionCommandOutcome.Failed, run, result.Code ?? result.Status);
         return result.Outcome switch
         {

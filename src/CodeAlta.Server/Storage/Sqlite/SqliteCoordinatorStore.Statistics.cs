@@ -84,12 +84,12 @@ public sealed partial class SqliteCoordinatorStore
                 }
 
                 Execute(connection, transaction,
-                    "INSERT INTO statistics_sets (device_id, session_id, organization_id, epoch, version, project_key, received_at) " +
-                    "VALUES ($device, $session, $org, $epoch, $version, $project, $at) " +
+                    "INSERT INTO statistics_sets (device_id, session_id, organization_id, epoch, version, project_key, space_key, received_at) " +
+                    "VALUES ($device, $session, $org, $epoch, $version, $project, $space, $at) " +
                     "ON CONFLICT (device_id, session_id) DO UPDATE SET epoch = excluded.epoch, version = excluded.version, project_key = excluded.project_key, " +
-                    "received_at = excluded.received_at",
+                    "space_key = excluded.space_key, received_at = excluded.received_at",
                     ("$device", deviceId), ("$session", set.SessionId), ("$org", organizationId), ("$epoch", set.Epoch), ("$version", set.Version),
-                    ("$project", set.ProjectKey), ("$at", ToTime(now)));
+                    ("$project", set.ProjectKey), ("$space", set.SpaceKey), ("$at", ToTime(now)));
                 outcomes.Add((set.SessionId, StatisticsSetOutcome.Applied));
             }
 

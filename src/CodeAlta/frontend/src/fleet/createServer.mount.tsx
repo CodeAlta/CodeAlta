@@ -93,6 +93,10 @@ const approvalsApi: FleetApprovalsApi = {
   approve: async request => { calls.push(JSON.stringify({ approve: request.deviceId, words: request.words, kind: request.kind })); devices = devices.map(item => ({ ...item, status: "approved" })); return { status: "ok", device: null, message: null }; },
   revoke: async request => { calls.push(JSON.stringify({ refuse: request.deviceId })); return { status: "ok", device: null, message: null }; },
   watch: async () => (async function* () { })(),
+  budgets: async () => ({ status: "ok", message: null, budgets: [], holds: [], notifications: [], machines: [], spaces: [], projects: [], timeZone: "UTC" }),
+  continueRun: async () => ({ status: "ok", message: null }),
+  stopRun: async () => ({ status: "ok", message: null }),
+  readNotification: async () => ({ status: "ok", message: null }),
 };
 
 function Fixture() {

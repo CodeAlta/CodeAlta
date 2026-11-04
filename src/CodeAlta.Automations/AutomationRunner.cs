@@ -82,6 +82,20 @@ internal interface IAutomationRunGate
     /// <returns>What admitted the run, or why it may not start.</returns>
     Task<EnvironmentAdmissionResult> AdmitEnvironmentAsync(AutomationEntry entry, string runId, string environment, CancellationToken cancellationToken)
         => Task.FromResult(EnvironmentAdmissionResult.Refused($"This machine runs no automation in the environment '{environment}': environments are given by a server."));
+
+    /// <summary>
+    /// Admits a run to the budgets of the machine (<c>doc/fleet/observability.md</c>, budgets and alerts): an enforced budget
+    /// while the machine holds enough of it, an advisory one until it is reached. A reached budget stops the run or holds it
+    /// until its owner continues it anyway, which may wait.
+    /// </summary>
+    /// <param name="entry">The automation.</param>
+    /// <param name="runId">The run, which a Continue anyway is bound to.</param>
+    /// <param name="project">The project of the run; null for a chat.</param>
+    /// <param name="spaceId">The space of the run.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <returns>Why the run may not start; null when it may.</returns>
+    Task<string?> AdmitBudgetAsync(AutomationEntry entry, string runId, ProjectDescriptor? project, string spaceId, CancellationToken cancellationToken)
+        => Task.FromResult<string?>(null);
 }
 
 /// <summary>Starts the session of a run and sends it the prompt.</summary>
@@ -183,6 +197,10 @@ internal sealed class AutomationRunner : IAutomationRunner
                 if (gated.Problem is not null || gated.Admission is null) return Refuse(gated.Problem ?? "The environment did not admit the run.");
                 admitted = gated.Admission;
             }
+
+            // The budgets of the machine admit the run before anything is created; a reached one may hold it for its owner.
+            if (_gate is not null && await _gate.AdmitBudgetAsync(entry, runId, project, spaceId, cancellationToken).ConfigureAwait(false) is { } overBudget)
+                return Refuse(overBudget);
 
             var models = await _host.ModelProviderInitializationService.GetModelsAsync(provider.ProviderId, cancellationToken).ConfigureAwait(false);
             var modelId = definition.Model.Model ?? AgentModelDefaults.ResolveModelId(models, provider.DefaultModelId);
