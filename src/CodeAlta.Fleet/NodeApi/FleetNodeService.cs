@@ -152,8 +152,21 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             options.Host.RuntimeService.QueuedRunGate = _queuedRunGate;
         }
 
+        // A session another person started here (a member of a team) resolves none of the owner's secrets.
+        options.Host.Identities.IsOwnerWork = sessionId => Principals.PersonOf(sessionId) is null;
+        if (options.AdmitBudget is not null)
+        {
+            // A session whose send a budget holds waits for a person (it does not move); the sends held when the node stopped are taken again.
+            _heldSessions = () => HeldSends.SessionIds;
+            options.Host.HeldSends = _heldSessions;
+            _ = Task.Run(ResumeHeldSendsAsync);
+        }
+
         RestoreAgentRestrictions();
     }
+
+    // What tells the host the sessions whose send a budget holds, taken back when the service stops.
+    private readonly Func<IReadOnlyCollection<string>>? _heldSessions;
 
     /// <summary>Gets the pairing of the node.</summary>
     public FleetPairingCoordinator Pairing { get; }
@@ -288,6 +301,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         if (ReferenceEquals(_host.RuntimeService.RemoteParents, _agents)) _host.RuntimeService.RemoteParents = null;
         if (_queuedRunGate is not null && ReferenceEquals(_host.RuntimeService.QueuedRunGate, _queuedRunGate)) _host.RuntimeService.QueuedRunGate = null;
+        if (_heldSessions is not null && ReferenceEquals(_host.HeldSends, _heldSessions)) _host.HeldSends = null;
         foreach (var caller in _callers.Values)
         {
             try { await caller.Connection.CloseAsync("node_stopping").ConfigureAwait(false); }
@@ -533,7 +547,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             if (device is { PersonId: { } person, OwnSessionsOnly: true, Permissions: DevicePermissions.None } && _trusted.FindTrusted(caller.Fingerprint) is null
                 && (access.Required & (DevicePermissions.View | DevicePermissions.Start)) != 0)
             {
-                People.Ask(person, device.DeviceId);
+                People.Ask(person, device.DeviceId, device.OrganizationId);
                 throw new FleetException(FleetErrorCodes.Forbidden, null, "The owner of this machine was asked to let you use it: try again once they did.");
             }
 

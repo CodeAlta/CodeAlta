@@ -2138,6 +2138,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             }
         }
         var agentPromptUsage = ResolveAgentPromptUsage(instructions.PromptBundle, project?.ProjectPath);
+        // The provider the session would run with, as the host allows it to this session (a node: account credentials only for
+        // the sessions of an unattended run), at every attachment: a change of provider, a tier or a fallback, a child.
+        if (ProviderGate is { } providerGate
+            && await providerGate(session, options.ProviderKey ?? options.ProviderId.Value, cancellationToken).ConfigureAwait(false) is { } providerRefused)
+            throw new InvalidOperationException(providerRefused);
         // Read with the instructions, which expand the same patterns into the built-in tools the session does without.
         var toolPatterns = GetDisabledToolPatterns(session.SessionId);
         var providerProviderId = new ModelProviderId(options.ProviderId.Value);

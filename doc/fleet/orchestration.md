@@ -127,9 +127,12 @@ their own use, under their vendor's terms. So:
 - **Organization providers**: an admin or a team maintainer defines a provider once (type, endpoint, models). Its key
   is sealed by their computer to the keys of the machines of that scope, as the signed device list and the signed access
   document say; the server stores and relays only these sealed copies. A machine opens its copy only when it was given
-  by someone who answers for the scope in the access document it verified, keeps the key in its protected store, and
-  adds the provider to its configuration with that key; a provider taken away is removed with its key. A provider of the
-  machine's own with the same id is never replaced. Rotation is a new version of the provider, sealed again. With a
+  by someone who answers for the scope in the access document it verified, and signed over the whole definition it
+  installs (owner, type, endpoint, models), so that a server cannot point a genuine key at another endpoint; it keeps the
+  key in its protected store and adds the provider to its configuration with that key; a provider taken away is removed
+  with its key. Versions only move forward on a machine: an older copy, or one at or below a version taken away, is
+  refused. A provider keeps the scope it was made for. A provider of the machine's own with the same id is never
+  replaced. Rotation is a new version of the provider, sealed again. With a
   gateway, each scope or automation gets its own virtual key, so costs and limits follow ownership.
 - **Other credentials of a run** (Jira, Grafana, Kubernetes, Slack, Git) are the machine's own, scoped to what its runs
   may do: a machine inside the infrastructure holds read-only monitoring access and the narrow write role of its
@@ -155,8 +158,10 @@ editor says why another one is refused:
   (read-only by default), and everything else held as an approval.
 - **Allowed actions are tools, not command patterns.** "Restart a pod in namespace `shop`" is an MCP or plugin tool with
   typed parameters and a fixed scope; a shell pattern such as `kubectl rollout *` is too easy to bend. Typed parameters
-  are not enough on their own, so an allowed tool also has: a **pinned implementation** (its version and hash are part
-  of the signed automation), **preconditions** it checks on the target before acting, **bounds** on what it may change
+  are not enough on their own, so an allowed tool also has: a **pinned definition** (the hash of its name, description
+  and parameters, and the version its server reports, are part of the signed automation: a tool whose definition
+  changed waits for a person; the pin does not identify its code, which is a host-side tool of the machine, installed and
+  updated by its owner), **preconditions** it checks on the target before acting, **bounds** on what it may change
   (one deployment, a replica count within limits), **idempotency** (a repeat does nothing more) and a **circuit
   breaker** (after N uses in a period it stops and asks). Commands and edits outside the allowed tools follow the
   run's permission mode, which an unattended run keeps strict.

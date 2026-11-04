@@ -3657,6 +3657,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return AltaExitCodes.ServiceUnavailable;
         }
 
+        if (await RefuseOutsideGuardAsync(context, targetSessionId).ConfigureAwait(false) is { } unguarded)
+        {
+            return unguarded;
+        }
+
         // A session another machine runs takes the prompt there, under the rules of that machine.
         if (runtime.RemoteChildren is { } remote
             && await runtime.TryGetRecoverableSessionAsync(targetSessionId, context.CancellationToken).ConfigureAwait(false) is null
@@ -4342,6 +4347,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (string.IsNullOrWhiteSpace(targetSessionId))
         {
             return UsageError(context, "usage.missingSession", "A target session id is required outside a session caller. Use --session <session-id>.", "alta reminder create");
+        }
+
+        if (await RefuseOutsideGuardAsync(context, targetSessionId).ConfigureAwait(false) is { } unguarded)
+        {
+            return unguarded;
         }
 
         var infoResult = await ResolveSessionInfoAsync(context, targetSessionId).ConfigureAwait(false);
@@ -5310,6 +5320,28 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return project is not null && string.Equals(project.Id, NormalizeOptionalText(context.Caller.SourceProjectId), StringComparison.OrdinalIgnoreCase)
             ? null
             : PermissionDenied(context, "sandbox.projectDenied", AltaSandboxGate.Refusal(sandbox, what));
+    }
+
+    // A session whose tool calls a guard checks (the run of an automation with autonomy) hands work (a prompt, a reminder, the
+    // end of a job) only to the sessions of its own run: any other session would do it with its own tools, which no guard of
+    // the run checks, and a session of another machine is out of its reach. Null when allowed.
+    private static async Task<int?> RefuseOutsideGuardAsync(AltaCommandContext context, string targetSessionId)
+    {
+        if (!string.Equals(context.Caller.Kind, "agent", StringComparison.OrdinalIgnoreCase) || NormalizeOptionalText(context.Caller.SourceSessionId) is not { } callerId
+            || IsCaller(context, targetSessionId) || context.Services.Get<SessionRuntimeService>() is not { } runtime || runtime.ToolGuards is not { } guards
+            || await guards.FindAsync(callerId, context.CancellationToken).ConfigureAwait(false) is null)
+            return null;
+        static bool IsRun(AltaActorProvenance createdBy) => createdBy.Kind == AltaActorProvenance.AutomationKind && !string.IsNullOrEmpty(createdBy.AutomationId);
+        var caller = await runtime.TryGetRecoverableSessionAsync(callerId, context.CancellationToken).ConfigureAwait(false);
+        var target = await runtime.TryGetRecoverableSessionAsync(targetSessionId.Trim(), context.CancellationToken).ConfigureAwait(false);
+        var callerRun = caller is null ? null : await runtime.FindLineageCreatorAsync(caller, IsRun, context.CancellationToken).ConfigureAwait(false);
+        var targetRun = target is null ? null : await runtime.FindLineageCreatorAsync(target, IsRun, context.CancellationToken).ConfigureAwait(false);
+        if (callerRun is not null && targetRun is not null && string.Equals(callerRun.AutomationId, targetRun.AutomationId, StringComparison.Ordinal)
+            && string.Equals(callerRun.CorrelationId, targetRun.CorrelationId, StringComparison.Ordinal))
+            return null;
+        return PermissionDenied(context, "guard.otherSession",
+            $"This session runs for an automation that decides what it does without a person, and session '{targetSessionId.Trim()}' is not one of the sessions of its run: "
+            + "what it is handed would be done there without that check. Start a session of your own (`alta session create`), which keeps it, or ask the user.");
     }
 
     // Whether a session was created by another, or descends from it through its parents.

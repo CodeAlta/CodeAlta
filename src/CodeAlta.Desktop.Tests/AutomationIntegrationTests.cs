@@ -157,6 +157,38 @@ public sealed class AutomationIntegrationTests
         Assert.IsTrue(fixture.Tools.To("/api/apps.connections.open").All(static request => request.Authorization == "Bearer xapp-app"));
     }
 
+    // Slack spreads the events of an app among its connections, it does not copy them: the triggers of one app share one
+    // connection of this machine, which hands each event to every trigger it matches.
+    [TestMethod]
+    public async Task TheTriggersOfOneSlackApp_ShareOneConnection_AndEachEventReachesItsTrigger()
+    {
+        await using var fixture = await Fixture.CreateAsync("""
+            { type = "slack", event = "mention", channel = "C0123ABCDEF", app_token = "${secret:SLACK_APP}", bot_token = "${secret:SLACK_BOT}" },
+            { type = "slack", event = "mention", channel = "C0FFFFFFFFF", app_token = "${secret:SLACK_APP}", bot_token = "${secret:SLACK_BOT}" }
+            """);
+        fixture.Tools.On(HttpMethod.Post, "/api/apps.connections.open", """{"ok":true,"url":"wss://wss.slack.test/link"}""");
+
+        fixture.Service.Tick(fixture.Clock.Now);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var socket = await fixture.Sockets.Accepted.Reader.ReadAsync(timeout.Token);
+        await FakeSlackSockets.SendAsync(socket, Envelope("e1", "Ev1", "app_mention", "C0FFFFFFFFF", "<@A1> the second channel"));
+        var second = await fixture.Runner.NextAsync();
+        StringAssert.Contains(second.Prompt, "C0FFFFFFFFF");
+        second.Complete(new(AutomationRun.Completed));
+        await fixture.UntilAsync(() => !fixture.Service.IsRunning(First));
+
+        await FakeSlackSockets.SendAsync(socket, Envelope("e2", "Ev2", "app_mention", "C0123ABCDEF", "<@A1> the first channel"));
+        var first = await fixture.Runner.NextAsync();
+        StringAssert.Contains(first.Prompt, "C0123ABCDEF");
+        first.Complete(new(AutomationRun.Completed));
+        await fixture.UntilAsync(() => !fixture.Service.IsRunning(First));
+
+        fixture.Service.Tick(fixture.Clock.Now);
+        await Task.Delay(200);
+        Assert.IsFalse(fixture.Sockets.Accepted.Reader.TryRead(out _), "one connection for the app");
+        Assert.HasCount(1, fixture.Tools.To("/api/apps.connections.open"));
+    }
+
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
@@ -199,9 +231,15 @@ public sealed class AutomationIntegrationTests
         Assert.IsFalse(forged.Accepted);
         StringAssert.Contains(forged.Message, "does not verify");
         Assert.AreEqual(0, fixture.Tools.Requests.Count);
+        // What the server is told names the automation by its id and says what happened in a word: no name, no secret of the machine.
+        var name = fixture.Service.Snapshot.Find(First)!.Definition.Name;
+        Assert.AreEqual($"{First}: signature refused", forged.Report);
+        Assert.IsFalse(forged.Report.Contains(name, StringComparison.Ordinal));
+        StringAssert.Contains(forged.Message, name, "the machine's own log says more");
 
         var taken = await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "msg_1"), default);
         Assert.IsTrue(taken.Accepted, taken.Message);
+        Assert.AreEqual($"{First}: started", taken.Report);
         var start = await fixture.Runner.NextAsync();
         StringAssert.Contains(start.Prompt, "incident INC-42 was declared");
         StringAssert.Contains(start.Prompt, "Name: Checkout errors");
@@ -216,6 +254,73 @@ public sealed class AutomationIntegrationTests
         StringAssert.Contains((await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "msg_1"), default)).Message, "taken already");
         Assert.AreEqual(1, fixture.Runner.Starts.Count);
         Assert.IsFalse((await fixture.Service.ReceiveHookAsync("hzzzzzzzzzzzzzzzzzz", Signed(body, "msg_2"), default)).Accepted);
+    }
+
+    // A source that does not answer for a while does not consume the event: the machine asks the server to give it again, and
+    // the event is taken once its source answers; a refusal that does not pass is final.
+    [TestMethod]
+    public async Task AnIncidentThatCannotBeReadAgainForAWhile_IsGivenAgain_NotTakenForGood()
+    {
+        await using var fixture = await Fixture.CreateAsync($$"""{ type = "incident_io", hook = "{{Hook}}", secret = "${secret:INCIDENT_SIGNING}", api_key = "${secret:INCIDENT_KEY}" }""");
+        fixture.Tools.On(HttpMethod.Get, "/v2/incidents/01INC", """{"errors":[{"message":"unavailable"}]}""", HttpStatusCode.ServiceUnavailable);
+        var body = """{"event_type":"public_incident.incident_created_v2","public_incident.incident_created_v2":{"id":"01INC"}}""";
+
+        var unavailable = await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "msg_1"), default);
+        Assert.IsFalse(unavailable.Accepted, unavailable.Message);
+        Assert.IsTrue(unavailable.Retry, "a source that does not answer is tried again");
+        Assert.AreEqual($"{First}: retry", unavailable.Report);
+        Assert.AreEqual(0, fixture.Runner.Starts.Count);
+
+        // incident.io answers again: the same delivery starts the run, once.
+        fixture.Tools.On(HttpMethod.Get, "/v2/incidents/01INC", """{"incident":{"id":"01INC","reference":"INC-42","name":"Checkout errors"}}""");
+        var taken = await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "msg_1"), default);
+        Assert.IsTrue(taken.Accepted, taken.Message);
+        Assert.IsFalse(taken.Retry);
+        Assert.AreEqual($"{First}: started", taken.Report);
+        (await fixture.Runner.NextAsync()).Complete(new(AutomationRun.Completed));
+
+        // An incident that is not found is refused for good.
+        fixture.Tools.On(HttpMethod.Get, "/v2/incidents/02INC", """{"errors":[{"message":"not found"}]}""", HttpStatusCode.NotFound);
+        var missing = await fixture.Service.ReceiveHookAsync(Hook, Signed(body.Replace("01INC", "02INC", StringComparison.Ordinal), "msg_2"), default);
+        Assert.IsFalse(missing.Accepted);
+        Assert.IsFalse(missing.Retry, missing.Message);
+    }
+
+    // An event waits at the server while its machine is offline, for a day: the machine takes it then, signed hours ago, once;
+    // older than that, or signed in the future, it is refused. What the machine remembers it took refuses a replay.
+    [TestMethod]
+    public async Task AnEventThatWaitedForItsMachine_IsTakenWithinTheDayTheServerKeepsIt_Once()
+    {
+        await using var fixture = await Fixture.CreateAsync($$"""{ type = "webhook", hook = "{{Hook}}", secret = "${secret:INCIDENT_SIGNING}", fields = ["/action"] }""");
+        var body = """{"action":"triggered"}""";
+
+        fixture.Clock.Now = Noon.AddHours(3);
+        var late = await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "w1"), default);
+        Assert.IsTrue(late.Accepted, late.Message);
+        (await fixture.Runner.NextAsync()).Complete(new(AutomationRun.Completed));
+        StringAssert.Contains((await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "w1"), default)).Message, "taken already");
+
+        fixture.Clock.Now = Noon.AddHours(25);
+        StringAssert.Contains((await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "w2"), default)).Message, "too long ago");
+        fixture.Clock.Now = Noon.AddMinutes(-10);
+        StringAssert.Contains((await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "w3"), default)).Message, "too long ago");
+        Assert.AreEqual(1, fixture.Runner.Starts.Count);
+    }
+
+    // The memory of the events a trigger took is bounded: an event signed before the newest one it had to forget is refused, so
+    // that a forgotten event is never taken again.
+    [TestMethod]
+    public void TheReplayMemory_RefusesWhatItCouldHaveForgotten()
+    {
+        AutomationWatermark? mark = null;
+        for (var index = 0; index < 3; index++) mark = AutomationReplayMemory.Remember(mark, "e" + index, 100 + index, Noon, capacity: 3);
+        Assert.IsFalse(AutomationReplayMemory.Forgotten(mark, 50), "nothing was forgotten yet");
+        mark = AutomationReplayMemory.Remember(mark, "e3", 99, Noon, capacity: 3);
+        CollectionAssert.AreEqual(new[] { "e1", "e2", "e3" }, mark.Seen.ToArray());
+        Assert.IsTrue(AutomationReplayMemory.Forgotten(mark, 100), "e0, signed at 100, was forgotten: what is signed until the newest seen before is refused");
+        Assert.IsTrue(AutomationReplayMemory.Forgotten(mark, 102));
+        Assert.IsFalse(AutomationReplayMemory.Forgotten(mark, 103), "newer than all that was forgotten");
+        Assert.IsFalse(AutomationReplayMemory.Forgotten(mark, null), "an event without a signed time relies on its id");
     }
 
     [TestMethod]

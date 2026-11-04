@@ -63,6 +63,30 @@ public sealed class AutomationRunGuardTests
         Assert.IsNull((await guard.BeforeToolCallAsync(Call("k8s_delete_namespace"), default)).BlockMessage, "allowed once by a person");
     }
 
+    // A person approves the complete action: an approval names the digest of the tool and its complete arguments, and a call too
+    // long to be shown whole says that it is shortened, with that digest and where the complete arguments are read.
+    [TestMethod]
+    public async Task AnApproval_IsBoundToTheDigestOfTheCompleteCall_AndALongOneSaysItIsShortened()
+    {
+        var asker = new Asker();
+        var guard = new AutomationRunGuard(Entry(new AutomationAutonomy()), new AutomationCallBreaker(), asker.AskAsync, new AutomationClock { Now = Noon }, dryRun: false);
+        static string Digest(string tool, string arguments)
+            => "sha256:" + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(tool + "\n" + arguments)));
+
+        var arguments = $$"""{"padding":"{{new string('a', 3000)}}","target":"prod-db"}""";
+        await guard.BeforeToolCallAsync(Call("db_drop", arguments), default);
+        var asked = asker.Asked.Single();
+        Assert.AreEqual(Digest("db_drop", arguments), asked.ApprovalId, "the approval is bound to the complete call");
+        StringAssert.Contains(asked.Command, "shortened");
+        StringAssert.Contains(asked.Command, Digest("db_drop", arguments));
+        StringAssert.Contains(asked.Reason, "complete arguments");
+
+        // A short call is shown whole, and bound to its digest as well.
+        await guard.BeforeToolCallAsync(Call("db_drop", """{ "target" : "dev-db" }"""), default);
+        Assert.AreEqual(Digest("db_drop", """{"target":"dev-db"}"""), asker.Asked[1].ApprovalId, "the digest is of the arguments without their spacing");
+        Assert.AreEqual("""db_drop { "target" : "dev-db" }""", asker.Asked[1].Command);
+    }
+
     [TestMethod]
     public async Task TheCircuitBreaker_AsksAPersonBeyondItsCallsOfTheHour_AllRunsTogether()
     {
@@ -80,6 +104,38 @@ public sealed class AutomationRunGuardTests
 
         clock.Now = Noon.AddMinutes(61);
         Assert.IsNull((await first.BeforeToolCallAsync(Call("k8s_restart_pod"), default)).BlockMessage, "an hour later");
+    }
+
+    // The calls of the hour are kept with the state of the automations: a restart does not give an automation its calls again.
+    [TestMethod]
+    public async Task TheCircuitBreaker_KeepsTheCallsOfTheHour_AcrossARestart()
+    {
+        var folder = Directory.CreateTempSubdirectory("codealta-breaker-").FullName;
+        try
+        {
+            var path = Path.Combine(folder, "state.json");
+            var asker = new Asker { Answer = AgentPermissionDecisionKind.Deny };
+            var clock = new AutomationClock { Now = Noon };
+            var autonomy = new AutomationAutonomy { AllowedTools = ["k8s_restart_pod"], MaxCallsPerHour = 2 };
+            var before = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(new AutomationStateStore(path, false)), asker.AskAsync, clock, dryRun: false);
+            Assert.IsNull((await before.BeforeToolCallAsync(Call("k8s_restart_pod"), default)).BlockMessage);
+            Assert.IsNull((await before.BeforeToolCallAsync(Call("k8s_restart_pod"), default)).BlockMessage);
+
+            // Restarted within the hour: the circuit breaker asks a person.
+            clock.Now = Noon.AddMinutes(30);
+            var after = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(new AutomationStateStore(path, false)), asker.AskAsync, clock, dryRun: false);
+            Assert.IsNotNull((await after.BeforeToolCallAsync(Call("k8s_restart_pod"), default)).BlockMessage);
+            StringAssert.Contains(asker.Asked.Single().Reason, "circuit breaker");
+
+            // An hour after the first calls, the tool runs again by itself.
+            clock.Now = Noon.AddMinutes(61);
+            var later = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(new AutomationStateStore(path, false)), asker.AskAsync, clock, dryRun: false);
+            Assert.IsNull((await later.BeforeToolCallAsync(Call("k8s_restart_pod"), default)).BlockMessage);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
     }
 
     [TestMethod]
@@ -213,6 +269,45 @@ public sealed class AutomationRunGuardTests
         }
     }
 
+    // Each approval a run waits for is one of its own: its server tells a person of each one (a notification per approval, not
+    // per run), and who is on call is read again when it starts to wait.
+    [TestMethod]
+    public async Task EachApprovalARunWaitsFor_HasAnIdOfItsOwn()
+    {
+        using var root = new AutomationTempRoot();
+        File.WriteAllText(Path.Combine(root.Path, "config.toml"), """
+            [automations.0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77]
+            name = "Diagnosis"
+            prompt = "Diagnose."
+            autonomy = { allowed_tools = ["k8s_restart_pod"] }
+            """);
+        var asker = new Asker { Held = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var runner = new GuardedRunner(asker);
+        await using var service = new AutomationService(Path.Combine(root.Path, "config.toml"), _ => Task.FromResult<IReadOnlyList<CodeAlta.Catalog.ProjectDescriptor>>([]),
+            new AutomationStateStore(Path.Combine(root.Path, "state.json"), false), runner, new AutomationClock { Now = Noon }, TimeZoneInfo.Utc);
+        await service.RefreshAsync();
+        const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77";
+
+        await service.RunAsync(Id, default);
+        Assert.IsNull(service.Runs(Id, 1)[0].Approval, "a run that waits for nobody has no approval");
+        var first = runner.Guard!.BeforeToolCallAsync(Call("k8s_delete_namespace"), default).AsTask();
+        var approval = service.Runs(Id, 1)[0].Approval;
+        Assert.IsNotNull(approval);
+        asker.Held.SetResult(new(AgentPermissionDecisionKind.AllowOnce));
+        await first;
+        Assert.IsNull(service.Runs(Id, 1)[0].Approval, "answered, it waits for nothing");
+
+        asker.Held = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var second = runner.Guard.BeforeToolCallAsync(Call("k8s_delete_namespace"), default).AsTask();
+        var next = service.Runs(Id, 1)[0].Approval;
+        Assert.IsNotNull(next);
+        Assert.AreNotEqual(approval, next, "the next approval is another one");
+        asker.Held.SetResult(new(AgentPermissionDecisionKind.Deny));
+        await second;
+        runner.Completion.SetResult(new(AutomationRun.Completed));
+        for (var i = 0; i < 200 && service.IsRunning(Id); i++) await Task.Delay(10);
+    }
+
     [TestMethod]
     public async Task ARunWaitsWhileACallWaitsForAPerson_ATryKeepsItsCalls_AndATakeOverIsSaid()
     {
@@ -236,6 +331,9 @@ public sealed class AutomationRunGuardTests
         Assert.AreEqual(AutomationRun.Waiting, service.Runs(Id, 1)[0].Status, "the run waits for a person");
         // A person takes it over by the id of the run alone, as the phone does.
         Assert.AreEqual(("not_found", (string?)null), await TakeOver("run-unknown") is var unknown ? (unknown.Status, unknown.SessionId) : default);
+        // Named for another automation, the run is not taken over: what authorized the request was about that other automation.
+        Assert.IsNull(service.TakeOver(run.Id, "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d78"));
+        Assert.IsFalse(service.IsTakenOver(run.Id));
         Assert.AreEqual(("ok", "session-1"), await TakeOver(run.Id) is var taken ? (taken.Status, taken.SessionId) : default);
         Assert.IsTrue(service.IsTakenOver(run.Id));
         // What waits for the person: this run, and the run of a team on a machine of a server, which a server told them of.

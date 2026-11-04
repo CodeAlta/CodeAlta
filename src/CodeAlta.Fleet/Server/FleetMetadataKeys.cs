@@ -411,6 +411,40 @@ public static class FleetKeyWrap
         }
     }
 
+    /// <summary>
+    /// Tells, without opening it, whether a copy of a key was given to a device by a controller device of that device's
+    /// person, by the device list this device verified, for this key, epoch and space: what a controller device checks of
+    /// the copies other devices hold, so that it trusts only the holders a controller gave the key to.
+    /// </summary>
+    /// <param name="wrapped">The wrapped key.</param>
+    /// <param name="keyId">The id the key must have.</param>
+    /// <param name="epoch">The epoch the grant must name.</param>
+    /// <param name="space">The space the grant must name; null for a key of the person.</param>
+    /// <param name="deviceId">The device the copy must be for.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <returns>Whether the grant holds.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="space"/> is null.</exception>
+    public static bool IsGranted(string wrapped, string keyId, int epoch, string? space, string deviceId, FleetDeviceListState list)
+    {
+        ArgumentNullException.ThrowIfNull(wrapped);
+        ArgumentNullException.ThrowIfNull(keyId);
+        ArgumentNullException.ThrowIfNull(deviceId);
+        ArgumentNullException.ThrowIfNull(list);
+        try
+        {
+            using var document = JsonDocument.Parse(wrapped);
+            var root = document.RootElement;
+            if (FleetSealedJson.Text(root, "alg") != Algorithm || FleetSealedJson.Text(root, "kid") != keyId || FleetSealedJson.Text(root, "to") != deviceId) return false;
+            if (ReadGrant(root) is not { } grant || grant.Epoch != epoch || !string.Equals(grant.SpaceId, space, StringComparison.Ordinal)) return false;
+            CheckGrant(root, keyId, grant, deviceId, list);
+            return true;
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidDataException or CryptographicException or FormatException)
+        {
+            return false;
+        }
+    }
+
     // The fields of a grant are signed one per line: a name never holds a control character.
     private static bool IsName(string? text) => !string.IsNullOrEmpty(text) && text.Length <= 256 && !text.Any(char.IsControl);
 

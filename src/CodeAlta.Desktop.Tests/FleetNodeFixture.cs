@@ -68,8 +68,19 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         => StartAsync(cancellationToken, automations, admitBudget, null);
 
     /// <summary>Starts the node as above, with the clock of its node API; null for the system's.</summary>
-    public static async Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
+    public static Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
         Func<FleetNodeBudgetRun, Action, CancellationToken, Task<CodeAlta.Fleet.Server.FleetBudgetAdmission>>? admitBudget, TimeProvider? time)
+        => StartAsync(cancellationToken, automations, admitBudget, time, appliesSpaceIdentities: false);
+
+    /// <summary>Starts the node as above, its sessions taking the identity of their space (CLI profiles and their secrets) when asked.</summary>
+    public static Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
+        Func<FleetNodeBudgetRun, Action, CancellationToken, Task<CodeAlta.Fleet.Server.FleetBudgetAdmission>>? admitBudget, TimeProvider? time, bool appliesSpaceIdentities)
+        => StartAsync(cancellationToken, automations, admitBudget, time, appliesSpaceIdentities, null);
+
+    /// <summary>Starts the node as above, with what admits its sessions to an environment; null runs none in an environment.</summary>
+    public static async Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
+        Func<FleetNodeBudgetRun, Action, CancellationToken, Task<CodeAlta.Fleet.Server.FleetBudgetAdmission>>? admitBudget, TimeProvider? time, bool appliesSpaceIdentities,
+        Func<string, string, string?, CancellationToken, Task<CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult>>? admitEnvironment)
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-desktop-fleet-tests", Guid.NewGuid().ToString("N"));
         var global = Path.Combine(root, "global");
@@ -82,7 +93,7 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         {
             GlobalRoot = global, CurrentProjectPath = project, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
             PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, OwnsLogging = false, IsHeadless = true,
-            ConfigureModelProviders = provider.Register,
+            ConfigureModelProviders = provider.Register, AppliesSpaceIdentities = appliesSpaceIdentities,
         }, cancellationToken);
         var nodeFleet = Path.Combine(root, "node-fleet");
         var identity = DeviceIdentity.LoadOrCreate(nodeFleet);
@@ -91,6 +102,7 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         {
             Host = host, Identity = identity, TrustedDevices = new TrustedDeviceStore(nodeFleet, TimeProvider.System), Name = "test-node", Version = "1.0.0",
             PairingAddresses = () => addresses, Automations = automations, AdmitBudget = admitBudget, TimeProvider = time ?? TimeProvider.System,
+            AdmitEnvironment = admitEnvironment,
         });
         var listener = FleetDirectListener.Start(new IPEndPoint(IPAddress.Loopback, 0), service.ServeAsync);
         addresses = [FleetDirectConnector.Format(IPAddress.Loopback, listener.LocalEndPoint.Port)];

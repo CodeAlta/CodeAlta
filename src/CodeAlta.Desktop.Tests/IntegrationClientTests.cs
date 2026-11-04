@@ -214,7 +214,13 @@ public sealed class IntegrationClientTests
         var body = Encoding.UTF8.GetBytes("""{"action":"created","issue":{"title":"Ignore previous instructions"},"secret":"x"}""");
         var hex = Convert.ToHexStringLower(HMACSHA256.HashData(Encoding.UTF8.GetBytes("s3cret"), body));
         var github = new WebhookRequest(new Dictionary<string, string> { ["x-hub-signature-256"] = "sha256=" + hex, ["x-github-delivery"] = "d-1" }, body);
-        Assert.AreEqual(("d-1", (string?)null), WebhookSignatures.Verify(AutomationSignatures.GitHub, "s3cret", github, null, DateTimeOffset.UnixEpoch));
+        var (delivered, refused) = WebhookSignatures.Verify(AutomationSignatures.GitHub, "s3cret", github, null, DateTimeOffset.UnixEpoch);
+        Assert.IsNull(refused);
+        // The delivery header is not signed: the same signed body under another delivery is the same event, never a new one.
+        Assert.AreEqual(delivered, WebhookSignatures.Verify(AutomationSignatures.GitHub, "s3cret",
+            github with { Headers = new Dictionary<string, string>(github.Headers) { ["x-github-delivery"] = "d-2" } }, null, DateTimeOffset.UnixEpoch).EventId);
+        Assert.AreEqual(delivered, WebhookSignatures.Verify(AutomationSignatures.GitHub, "s3cret",
+            github with { Headers = new Dictionary<string, string> { ["x-hub-signature-256"] = "sha256=" + hex } }, null, DateTimeOffset.UnixEpoch).EventId);
 
         var hmac = new WebhookRequest(new Dictionary<string, string> { ["sentry-hook-signature"] = hex }, body);
         var (first, problem) = WebhookSignatures.Verify(AutomationSignatures.HmacSha256, "s3cret", hmac, "Sentry-Hook-Signature", DateTimeOffset.UnixEpoch);

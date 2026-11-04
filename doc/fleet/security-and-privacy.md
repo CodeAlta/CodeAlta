@@ -267,7 +267,11 @@ Starting or driving a session on another machine is remote code execution, by de
   server, keeps the version it verified in the folder of the link, and applies it from there while the server is away
   and after a restart. Every rule and every stop is signed: a version that does not verify is refused and changes
   nothing, so a server can withhold a version (deny service) but never forge, loosen or roll one back. Ordering is the
-  chain's, so versions carry no validity window.
+  chain's, so versions carry no validity window. A version a device takes after its checkpoint must also be signed by
+  someone who signs now, as the device list and the access document it holds now say, so that a signer removed since
+  cannot sign a new one against their past authority; a later version by a current signer vouches for those before it.
+  A kept policy that no longer reads stops the work of the fleet on that machine until it is repaired or deleted: an
+  established restriction never silently becomes no policy.
 - **Rules**, each optional, narrowing the work of the fleet (sessions started from another device, agents of other
   machines, automations) in the spaces linked to the server, never what a person does at a machine: allowed kinds of
   providers and models, a sandbox floor, network egress, tools turned off, whether people and agents start work on

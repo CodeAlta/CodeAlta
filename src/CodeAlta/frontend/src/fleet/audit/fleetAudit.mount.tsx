@@ -40,6 +40,9 @@ const owner: FleetAccessOverview = {
 };
 let access = owner;
 let brokenAt: number | null = null;
+// A page of older records held until the test lets it answer, as a slow server would.
+let olderHeld: Promise<void> | null = null;
+let releaseOlder: () => void = () => {};
 
 const api: FleetAuditApi = {
   status: async () => ({ status: "ok", servers: [{ id: "home", url: "https://fleet.example", organization: "Example", link: "approved", connection: "online", problem: null,
@@ -47,6 +50,7 @@ const api: FleetAuditApi = {
   access: async () => access,
   audit: async request => {
     calls.push(JSON.stringify({ audit: { filters: request.filters, before: request.before } }));
+    if (request.before !== null && olderHeld) await olderHeld;
     const filters = request.filters;
     const matching = log.filter(item => (!filters?.actions || filters.actions.some(prefix => item.action === prefix || prefix.endsWith(".") && item.action.startsWith(prefix)))
       && (!filters?.personId || item.personId === filters.personId) && (!filters?.result || (filters.result === "failure" ? item.result !== "success" : item.result === filters.result))
@@ -67,6 +71,8 @@ function Fixture() {
   const [width, setWidth] = useState(1250);
   const [key, setKey] = useState(0);
   Object.assign(window, { fleetAuditFixture: { setWidth, calls,
+    holdOlder: () => { olderHeld = new Promise<void>(resolve => { releaseOlder = () => { olderHeld = null; resolve(); }; }); },
+    releaseOlder: () => releaseOlder(),
     member: () => { access = { ...owner, capabilities: ["access.view"] }; setKey(value => value + 1); },
     broken: () => { brokenAt = 236; setKey(value => value + 1); } } });
   return <div className="ide-shell settings-dialog-content" style={{ padding: 12, width, boxSizing: "border-box" }}>

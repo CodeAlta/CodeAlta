@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using CodeAlta.Catalog;
+using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Fleet.NodeApi;
 
@@ -8,7 +9,11 @@ namespace CodeAlta.Fleet.NodeApi;
 /// <param name="Title">What the run is, for the owner.</param>
 /// <param name="SpaceId">The space of the session.</param>
 /// <param name="Project">Its project; null for a chat.</param>
-public sealed record FleetNodeBudgetRun(string RunId, string? Title, string? SpaceId, ProjectDescriptor? Project);
+public sealed record FleetNodeBudgetRun(string RunId, string? Title, string? SpaceId, ProjectDescriptor? Project)
+{
+    /// <summary>Gets the nonce of the hold the run asks when a budget holds it; null for a new one. A send taken again after a restart asks the same hold.</summary>
+    public string? Nonce { get; init; }
+}
 
 /// <summary>The statuses of a send that the budgets of the machine decided.</summary>
 public static class FleetBudgetCommandStatuses
@@ -30,29 +35,89 @@ public sealed partial class FleetNodeService
     // The sends the budgets admitted, by their retry key: a retry after a lost answer is the runtime's replay, not a new run.
     private readonly ConcurrentDictionary<string, byte> _budgetAdmitted = new(StringComparer.Ordinal);
 
-    // Sends a prompt once the budgets of the machine admit it: at once when they do, never when one stops it, and later when one
-    // holds it (the answer says it waits; the send is made once its owner continues it anyway).
-    private async Task<FleetCommandResult> WithinBudgetAsync(string runId, SessionViewDescriptor session, string? title, Func<FleetCommandResult> send)
+    // The sends a budget holds, kept across restarts; created with the service.
+    private FleetHeldSends HeldSends => LazyInitializer.EnsureInitialized(ref _heldSends, () => new FleetHeldSends(Path.Combine(_host.CatalogOptions.FleetRoot, "held-sends.json")));
+
+    private FleetHeldSends? _heldSends;
+
+    // A send of the node API as it is kept while a budget holds it.
+    private static FleetHeldSend HeldSendOf(string runId, string sessionId, string text, string? title, OwnedSessionSelection? selection)
+        => new(runId, sessionId, text, title, System.Buffers.Text.Base64Url.EncodeToString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)),
+            selection?.ProviderKey, selection?.AgentPromptId, selection?.ModelId, selection?.ReasoningEffort?.ToString(), DateTimeOffset.UtcNow);
+
+    // The send a held one makes once admitted: the owned command of its session, with its retry key.
+    private FleetCommandResult SendHeld(FleetHeldSend held)
     {
+        OwnedSessionSelection? selection = held.ProviderKey is { } provider && held.AgentPromptId is { } prompt
+            ? new OwnedSessionSelection(provider, prompt, held.ModelId,
+                Enum.TryParse<CodeAlta.Agent.AgentReasoningEffort>(held.ReasoningEffort, ignoreCase: true, out var effort) ? effort : null)
+            : null;
+        return Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(held.RunId, held.SessionId, held.Text) { Selection = selection }, CancellationToken.None));
+    }
+
+    // Takes again the sends a budget held when the node stopped: each asks the same hold, and is sent once admitted.
+    private async Task ResumeHeldSendsAsync()
+    {
+        foreach (var held in HeldSends.List())
+        {
+            try
+            {
+                if (await _host.RuntimeService.TryGetRecoverableSessionAsync(held.SessionId).ConfigureAwait(false) is not { } session)
+                {
+                    HeldSends.Remove(held.RunId);
+                    continue;
+                }
+
+                var result = await WithinBudgetAsync(held.RunId, session, held.Title, held).ConfigureAwait(false);
+                LogInfo($"The held prompt {held.RunId} of the session {held.SessionId} was taken again after a restart ({result.Status}).");
+            }
+            catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException or UnauthorizedAccessException)
+            {
+                LogInfo($"The held prompt {held.RunId} of the session {held.SessionId} was not taken again: {exception.Message}");
+            }
+        }
+    }
+
+    // Sends a prompt once the budgets of the machine admit it: at once when they do, never when one stops it, and later when one
+    // holds it (the answer says it waits; the send is made once its owner continues it anyway). A send held is kept before the
+    // answer says so: a restart takes it again, and its session waits for a person meanwhile.
+    private async Task<FleetCommandResult> WithinBudgetAsync(string runId, SessionViewDescriptor session, string? title, FleetHeldSend held)
+    {
+        Func<FleetCommandResult> send = () => SendHeld(held);
         if (_options.AdmitBudget is not { } admit || _budgetAdmitted.ContainsKey(runId)) return send();
         if (_budgetHolds.ContainsKey(runId)) return new FleetCommandResult(FleetBudgetCommandStatuses.Held, Code: FleetBudgetCommandStatuses.Held);
         var project = session.ProjectRef is { Length: > 0 } projectId ? await _host.ProjectCatalog.GetByIdAsync(projectId).ConfigureAwait(false) : null;
-        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var run = new FleetNodeBudgetRun(runId, title ?? session.Title, session.SpaceId, project);
-        var admission = admit(run, () => held.TrySetResult(), CancellationToken.None);
-        if (await Task.WhenAny(admission, held.Task).ConfigureAwait(false) == admission)
+        var waits = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var run = new FleetNodeBudgetRun(runId, title ?? session.Title, session.SpaceId, project) { Nonce = held.Nonce };
+        var admission = admit(run, () => waits.TrySetResult(), CancellationToken.None);
+        if (await Task.WhenAny(admission, waits.Task).ConfigureAwait(false) == admission)
         {
             var decided = await admission.ConfigureAwait(false);
+            HeldSends.Remove(runId);
             if (decided.Problem is { } problem)
             {
                 LogInfo($"The prompt of the session {session.SessionId} was not sent: {problem}");
                 return new FleetCommandResult(FleetBudgetCommandStatuses.Reached, Code: FleetBudgetCommandStatuses.Reached);
             }
 
+            // A stop that came while the budgets decided reaches it: checked again right before it is sent.
+            RequireNotHalted();
             return Admitted(runId, send);
         }
 
         if (!_budgetHolds.TryAdd(runId, 0)) return new FleetCommandResult(FleetBudgetCommandStatuses.Held, Code: FleetBudgetCommandStatuses.Held);
+        try
+        {
+            // Kept before the answer says it waits: a send accepted is never lost with the process.
+            HeldSends.Add(held);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _budgetHolds.TryRemove(runId, out _);
+            LogInfo($"The prompt of the session {session.SessionId} that waits for its budget could not be kept: {exception.Message}");
+            return new FleetCommandResult(FleetBudgetCommandStatuses.Reached, Code: FleetBudgetCommandStatuses.Reached);
+        }
+
         LogInfo($"The prompt of the session {session.SessionId} waits for its budget.");
         _ = SendOnceAdmittedAsync(runId, session.SessionId, admission, send);
         return new FleetCommandResult(FleetBudgetCommandStatuses.Held, Code: FleetBudgetCommandStatuses.Held);
@@ -63,9 +128,20 @@ public sealed partial class FleetNodeService
         try
         {
             var decided = await admission.ConfigureAwait(false);
+            // A node that stopped meanwhile leaves the send kept: its next start takes it again.
+            if (Volatile.Read(ref _disposed) != 0) return;
+            // Forgotten before it is sent: a send is made at most once, also when the node stops right after.
+            HeldSends.Remove(runId);
             if (decided.Problem is { } problem)
             {
                 LogInfo($"The prompt of the session {sessionId} was not sent: {problem}");
+                return;
+            }
+
+            // A stop of the kill switch that came while it waited reaches it: it is never sent.
+            if (Policy?.Halt is { } halt)
+            {
+                LogInfo($"The prompt of the session {sessionId} that waited for its budget was not sent: {halt.Describe(_options.Name)}");
                 return;
             }
 
@@ -93,8 +169,11 @@ public sealed partial class FleetNodeService
         var session = await _host.RuntimeService.TryGetRecoverableSessionAsync(queued.SessionId, cancellationToken).ConfigureAwait(false);
         var project = session?.ProjectRef is { Length: > 0 } projectId ? await _host.ProjectCatalog.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false) : null;
         var decided = await admit(new FleetNodeBudgetRun(queued.QueueItemId, session?.Title, session?.SpaceId, project), static () => { }, cancellationToken).ConfigureAwait(false);
-        if (decided.Problem is { } problem) LogInfo($"The queued prompt {queued.QueueItemId} of the session {queued.SessionId} was not sent: {problem}");
-        return decided.Problem;
+        // The work of the fleet waits on a stop, checked once its admission is decided: a person's own work at the machine goes on.
+        var problem = decided.Problem
+            ?? (Policy?.Halt is { } halt && Work.List().Any(item => item.SessionId == queued.SessionId) ? halt.Describe(_options.Name) : null);
+        if (problem is not null) LogInfo($"The queued prompt {queued.QueueItemId} of the session {queued.SessionId} was not sent: {problem}");
+        return problem;
     }
 
     private FleetCommandResult Admitted(string runId, Func<FleetCommandResult> send)

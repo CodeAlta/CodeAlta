@@ -163,13 +163,15 @@ internal sealed partial class FleetServerService
 
     /// <summary>Gives a grant of sealed content its keys, as a computer of their owner: sealed here and wrapped to each device of the grantee.</summary>
     [NeoRpcMethod("confirmGrantKeys")]
-    public Task<FleetSecretActionResult> ConfirmGrantKeysAsync(FleetSecretRefRequest request, CancellationToken cancellationToken)
+    public Task<FleetSecretActionResult> ConfirmGrantKeysAsync(FleetGrantConfirmRequest request, CancellationToken cancellationToken)
         => SecretActionAsync(request?.ExpectedEpoch, request?.LinkId, async () =>
         {
-            if (string.IsNullOrEmpty(request!.Id)) return new FleetSecretActionResult("invalid_request", null);
+            if (string.IsNullOrEmpty(request!.Id) || string.IsNullOrEmpty(request.SubjectKind) || string.IsNullOrEmpty(request.SubjectId) || string.IsNullOrEmpty(request.Capability))
+                return new FleetSecretActionResult("invalid_request", null);
             try
             {
-                await _servers!.ConfirmGrantKeysAsync(request.LinkId, request.Id, cancellationToken).ConfigureAwait(false);
+                await _servers!.ConfirmGrantKeysAsync(request.LinkId, request.Id, new FleetGrantDecision(request.SubjectKind, request.SubjectId, request.Capability, request.ScopeId),
+                    cancellationToken).ConfigureAwait(false);
             }
             catch (InvalidOperationException exception)
             {
@@ -771,6 +773,16 @@ internal sealed record FleetAccessTeamMemberRequest(string ExpectedEpoch, string
 /// <param name="ScopeKind">Where.</param>
 /// <param name="ScopeId">The id of the scope.</param>
 /// <param name="Sealed">Whether it opens content sealed from the server.</param>
+/// <summary>The grant a person confirms the keys of, as the console showed it: its id, whom it gives what, on what.</summary>
+/// <param name="ExpectedEpoch">The epoch of the console.</param>
+/// <param name="LinkId">The link.</param>
+/// <param name="Id">The grant.</param>
+/// <param name="SubjectKind">A person or a team.</param>
+/// <param name="SubjectId">The person or the team.</param>
+/// <param name="Capability">What it gives.</param>
+/// <param name="ScopeId">On what; null for a scope without an id.</param>
+internal sealed record FleetGrantConfirmRequest(string ExpectedEpoch, string LinkId, string Id, string SubjectKind, string SubjectId, string Capability, string? ScopeId);
+
 internal sealed record FleetAccessGrantRequest(string ExpectedEpoch, string LinkId, string SubjectKind, string SubjectId, string Capability, string ScopeKind, string? ScopeId,
     bool Sealed);
 

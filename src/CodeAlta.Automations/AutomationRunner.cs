@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime.Tools;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime.Scripts;
 using CodeAlta.Orchestration.Hosting;
@@ -120,6 +121,33 @@ internal interface IAutomationRunGate
     /// <returns>Why the run may not start; null when it may.</returns>
     Task<string?> AdmitBudgetAsync(AutomationEntry entry, string runId, ProjectDescriptor? project, string spaceId, CancellationToken cancellationToken)
         => Task.FromResult<string?>(null);
+
+    /// <summary>
+    /// Gets what the work in the space of a run must keep to besides its provider and model (the signed policy of the
+    /// organization it is linked to, on a machine of a fleet): the permission mode, the sandbox and the tools off its session
+    /// runs with, whatever its definition asks, or why it may not run at all.
+    /// </summary>
+    /// <param name="entry">The automation.</param>
+    /// <param name="provider">The provider the run would start with.</param>
+    /// <param name="spaceId">The space of the run.</param>
+    /// <returns>The limits; <see cref="AutomationRunLimits.None"/> when nothing limits the run.</returns>
+    AutomationRunLimits LimitsFor(AutomationEntry entry, ModelProviderDescriptor provider, string spaceId) => AutomationRunLimits.None;
+}
+
+/// <summary>What a run keeps to besides its provider and model: given to its session before its first prompt.</summary>
+/// <param name="Problem">Why the run may not start; null when it may.</param>
+/// <param name="PermissionMode">The permission mode its session runs in; null for the one its definition names.</param>
+/// <param name="Sandbox">The sandbox its session runs in; null for the one its definition names.</param>
+/// <param name="ToolsOff">The tools turned off in its session; null for none.</param>
+internal sealed record AutomationRunLimits(string? Problem, string? PermissionMode, string? Sandbox, IReadOnlyList<string>? ToolsOff)
+{
+    /// <summary>Gets the limits of a run nothing limits.</summary>
+    public static AutomationRunLimits None { get; } = new(null, null, null, null);
+
+    /// <summary>Gets the limits of a run that may not start.</summary>
+    /// <param name="problem">Why.</param>
+    /// <returns>The limits.</returns>
+    public static AutomationRunLimits Refused(string problem) => new(problem, null, null, null);
 }
 
 /// <summary>Starts the session of a run and sends it the prompt.</summary>
@@ -160,7 +188,8 @@ internal sealed class AutomationRunner : IAutomationRunner
 
     private readonly CodeAltaHost _host;
     private readonly IAutomationRunGate? _gate;
-    private readonly AutomationCallBreaker _breaker = new();
+    /// <summary>Gets or sets the circuit breaker of the allowed tools of the runs; the service gives one that keeps its calls with its state.</summary>
+    internal AutomationCallBreaker Breaker { get; set; } = new();
 
     /// <summary>How often the approvals of the commands and edits of a run with autonomy are looked at for their timeout.</summary>
     internal static readonly TimeSpan ApprovalWatch = TimeSpan.FromSeconds(15);
@@ -172,6 +201,32 @@ internal sealed class AutomationRunner : IAutomationRunner
     {
         ArgumentNullException.ThrowIfNull(host);
         (_host, _gate) = (host, gate);
+        host.ToolGuards.AddOrigin(GuardOf);
+    }
+
+    /// <summary>
+    /// Gets or sets what tells, for the session of a run once its first turn ended (or after a restart), the automation as it
+    /// is now and whether the run was a try (null when the run is no longer known); null when nothing tells: such a session is
+    /// then guarded as one of an automation that allows nothing by itself.
+    /// </summary>
+    internal Func<string, string, (AutomationEntry? Entry, bool? DryRun)>? Origin { get; set; }
+
+    // The guards of the runs that work now, by run: their sessions and the sessions these start are checked by the same one.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, AutomationRunGuard> _live = new(StringComparer.Ordinal);
+
+    // The guard a session takes from the automation that created it (its lineage gives it to the sessions it starts): the one
+    // of its run while the run works, else one of the automation as it is now; a try stays a try. An automation no longer
+    // known, or a run no longer known, gives a guard that allows nothing by itself: what its sessions call waits for a person.
+    private AgentToolInterceptor? GuardOf(string sessionId, AltaActorProvenance createdBy)
+    {
+        if (createdBy is not { Kind: AltaActorProvenance.AutomationKind, AutomationId: { Length: > 0 } automationId }) return null;
+        if (createdBy.CorrelationId is { Length: > 0 } runId && _live.TryGetValue(runId, out var live)) return live;
+        var (entry, dryRun) = Origin?.Invoke(automationId, createdBy.CorrelationId ?? string.Empty) ?? (null, null);
+        if (entry is not null && entry.Definition.Autonomy is null) return null;
+        entry ??= new AutomationEntry(new AutomationDefinition(automationId, "an automation that is no longer here"), new AutomationSource(string.Empty, null, null), null, null, null);
+        var autonomy = dryRun is null || entry.Definition.Autonomy is null ? new AutomationAutonomy() : entry.Definition.Autonomy;
+        return new AutomationRunGuard(entry with { Definition = entry.Definition with { Autonomy = autonomy } }, Breaker,
+            (session, request, token) => _host.RuntimeService.Permissions.RequestForSessionAsync(session, request, token), TimeProvider.System, dryRun == true);
     }
 
     /// <inheritdoc />
@@ -256,6 +311,11 @@ internal sealed class AutomationRunner : IAutomationRunner
             }
 
             if (_gate?.CheckModel(entry, provider, model.Id, spaceId) is { } ruled) return Refuse(ruled);
+            // The permission mode, the sandbox and the tools the policy of the space allows, whatever the definition asks.
+            var limits = _gate?.LimitsFor(entry, provider, spaceId) ?? AutomationRunLimits.None;
+            if (limits.Problem is { } limited) return Refuse(limited);
+            var permissionMode = limits.PermissionMode ?? definition.PermissionMode;
+            var sandboxName = limits.Sandbox ?? definition.Sandbox;
             if (definition.Model.Effort is { } effort && model.SupportedReasoningEfforts is { } supported && !supported.Contains(effort))
                 return Refuse($"The model '{model.Id}' has no reasoning effort '{effort.ToString().ToLowerInvariant()}'.");
 
@@ -266,20 +326,41 @@ internal sealed class AutomationRunner : IAutomationRunner
             var agent = definition.Agent ?? drafts.DefaultPromptId;
             if (!drafts.Prompts.Any(candidate => candidate.Id == agent)) return Refuse($"There is no agent prompt '{agent}' in the space '{spaceId}'.");
             // The permission mode is one the provider offers a new session, checked before the session exists.
-            if (definition.PermissionMode is { } mode && !_host.Commands.GetNewSessionPermissionModes(provider.ProviderId.Value).Modes.Contains(mode, StringComparer.Ordinal))
+            if (permissionMode is { } mode && !_host.Commands.GetNewSessionPermissionModes(provider.ProviderId.Value).Modes.Contains(mode, StringComparer.Ordinal))
                 return Refuse($"The provider '{provider.ProviderId.Value}' does not offer the permission mode '{mode}'.");
 
             cancellationToken.ThrowIfCancellationRequested();
+            // What the host requires is checked again after the admissions that may wait (an approval, a budget): a stop of the
+            // kill switch that came meanwhile reaches the run before anything is created.
+            if (_gate?.Check(entry, provider) is { } stopped) return Refuse(stopped);
             // The host keeps a bounded number of pending commands: a prompt that would be refused starts no session.
             if (!_host.Commands.HasCapacity) return Refuse(NoCapacity);
-            var session = await _host.Commands.CreateDraftSessionAsync(project, provider, SessionTitle(definition.Name, detail), new AltaActorProvenance
+            // The tools the policy turns off are off from the creation of the session, as for a session started from another device.
+            string? limitedId = null;
+            if (limits.ToolsOff is { Count: > 0 } off)
             {
-                Kind = AltaActorProvenance.AutomationKind,
-                AutomationId = definition.Id,
-                SourceProjectId = project?.Id,
-                CorrelationId = runId,
-                CreatedAt = DateTimeOffset.UtcNow,
-            }, null, spaceId, definition.PermissionMode, null, null, definition.SessionOptions).ConfigureAwait(false);
+                limitedId = Guid.NewGuid().ToString();
+                _host.RuntimeService.SetDisabledToolPatterns(limitedId, off);
+            }
+
+            SessionViewDescriptor session;
+            try
+            {
+                session = await _host.Commands.CreateDraftSessionAsync(project, provider, SessionTitle(definition.Name, detail), new AltaActorProvenance
+                {
+                    Kind = AltaActorProvenance.AutomationKind,
+                    AutomationId = definition.Id,
+                    SourceProjectId = project?.Id,
+                    CorrelationId = runId,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                }, null, spaceId, permissionMode, limitedId, null, definition.SessionOptions).ConfigureAwait(false);
+            }
+            catch
+            {
+                if (limitedId is not null) _host.RuntimeService.SetDisabledToolPatterns(limitedId, null);
+                throw;
+            }
+
             sessionId = session.SessionId;
             // The processes of the session get the values of the environment it was admitted to, from its first attachment.
             if (admitted is not null) _host.Identities.Environments.Admit(sessionId, admitted);
@@ -287,7 +368,7 @@ internal sealed class AutomationRunner : IAutomationRunner
             if (definition.ReviewBeforeCommit is { } review
                 && (await _host.Commands.SetReviewBeforeCommitAsync(sessionId, review, cancellationToken).ConfigureAwait(false)).Status is var reviewed and not "ok")
                 return new(sessionId, $"The review before commit could not be chosen ({reviewed}).", null);
-            if (definition.Sandbox is { } sandbox
+            if (sandboxName is { } sandbox
                 && (await _host.Commands.SetSandboxAsync(sessionId, sandbox, cancellationToken).ConfigureAwait(false)).Status is var sandboxed and not "ok")
                 return new(sessionId, $"The sandbox '{sandbox}' could not be chosen ({sandboxed}).", null);
 
@@ -299,8 +380,10 @@ internal sealed class AutomationRunner : IAutomationRunner
             {
                 if (_host.RuntimeService.GetPermissionPolicy(sessionId) == SessionPermissionPolicy.Approve)
                     return new(sessionId, "This automation decides what its runs do without a person: it runs in a permission mode that asks for commands and edits, not one that allows everything.", null);
-                var guarded = sessionId;
-                guard = new AutomationRunGuard(entry, _breaker, (request, token) => _host.RuntimeService.Permissions.RequestForSessionAsync(guarded, request, token), TimeProvider.System, dryRun);
+                // A call waits for a person on the card of the session that makes it: the run's own, or a session it started.
+                guard = new AutomationRunGuard(entry, Breaker, (session, request, token) => _host.RuntimeService.Permissions.RequestForSessionAsync(session, request, token),
+                    TimeProvider.System, dryRun);
+                _live[runId] = guard;
                 _host.ToolGuards.Set(sessionId, guard);
             }
 
@@ -310,7 +393,12 @@ internal sealed class AutomationRunner : IAutomationRunner
                 { Selection = selection, Provenance = AgentPromptProvenance.Automation }, CancellationToken.None);
             if (admission.Kind is not (OwnedSessionCommandAdmissionKind.Accepted or OwnedSessionCommandAdmissionKind.Replay) || admission.Receipt is null)
             {
-                if (guard is not null) _host.ToolGuards.Remove(sessionId, guard);
+                if (guard is not null)
+                {
+                    _host.ToolGuards.Remove(sessionId, guard);
+                    _live.TryRemove(new KeyValuePair<string, AutomationRunGuard>(runId, guard));
+                }
+
                 return new(sessionId, admission.Kind == OwnedSessionCommandAdmissionKind.Capacity ? NoCapacity
                     : $"The prompt was not accepted ({admission.Kind.ToString().ToLowerInvariant()}).", null);
             }
@@ -382,7 +470,9 @@ internal sealed class AutomationRunner : IAutomationRunner
             try { await watch.ConfigureAwait(false); }
             catch (Exception exception) when (exception is not OutOfMemoryException) { }
             guard.NoteWaiting(false);
+            // The session keeps a guard of its automation from its origin (GuardOf): its later turns are checked too.
             _host.ToolGuards.Remove(sessionId, guard);
+            _live.TryRemove(new KeyValuePair<string, AutomationRunGuard>(runId, guard));
         }
     }
 

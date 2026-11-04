@@ -9,6 +9,7 @@ import { keyWords } from "./fleetServer";
 import { managesMachine } from "../machines/machineManagement";
 import { sshTargetOf } from "../machines/addMachine";
 import { SetupFailureDetail } from "../machines/AddMachineDialog";
+import { hostKeyOf } from "../machines/addMachine";
 import { localServerSteps, organizationUrlOf, serverSetupProblem, serverStepTitle, sshServerSteps } from "./createServer";
 import { ServerSpaces, type ServerSpacesApi, type ServerSpacesListApi } from "./ServerSpaces";
 
@@ -68,8 +69,11 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
   const computer = sshTargetOf(target);
   const url = organizationUrlOf(address);
   const ready = !!owner.trim() && (where === "local" || !!computer && (reach !== "address" || !!url));
+  // The SSH key shown of a computer ssh does not know yet, which "Trust it" trusts.
+  const shownKey = failed ? hostKeyOf(failed.code, failed.detail) : null;
 
-  async function create(acceptNewHostKey: boolean) {
+  // "Trust it" trusts the SSH key shown, by its fingerprint: every connection of the setup requires that key.
+  async function create(trustedHostKey: string | null) {
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
@@ -79,8 +83,8 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
     const common = { expectedEpoch: epoch, ownerName: owner.trim(), organizationName: organization.trim() || null, port, dataRoot: dataRoot.trim() || null,
       toolPath: toolPath.trim() || null, packageFolder: packages.trim() || null };
     try {
-      const events = await api.createServer(where === "local" ? { ...common, target: null, address: null, acceptNewHostKey: false, ownCertificate: false }
-        : { ...common, target: computer, address: reach === "address" ? url : null, acceptNewHostKey, ownCertificate: reach === "encrypted" }, { signal: controller.signal });
+      const events = await api.createServer(where === "local" ? { ...common, target: null, address: null, trustedHostKey: null, ownCertificate: false }
+        : { ...common, target: computer, address: reach === "address" ? url : null, trustedHostKey, ownCertificate: reach === "encrypted" }, { signal: controller.signal });
       for await (const event of events) {
         if (controller.signal.aborted) return;
         apply(event);
@@ -153,7 +157,7 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
       </DialogBody>
       <DialogFooter actions={<>
         <Button text={t("Back")} onClick={() => setWhere(null)} />
-        <Button intent="primary" disabled={!ready} text={t("Create my server")} onClick={() => void create(false)} />
+        <Button intent="primary" disabled={!ready} text={t("Create my server")} onClick={() => void create(null)} />
       </>} />
     </>}
     {steps && <>
@@ -179,10 +183,10 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
       </DialogBody>
       <DialogFooter actions={<>
         {!running && failed && <Button text={t("Back")} onClick={() => { setSteps(null); setFailed(null); }} />}
-        {!running && failed?.code === "host_key_unknown" && <Button intent="primary" text={t("Trust it and start over")} title={t("Every step runs again from the first one.")}
-          onClick={() => void create(true)} />}
-        {!running && failed && failed.code !== "host_key_unknown" && <Button intent="primary" icon={<AppIcon name="refresh" size={14} />} text={t("Start over")}
-          title={t("Every step runs again from the first one.")} onClick={() => void create(false)} />}
+        {!running && shownKey && <Button intent="primary" text={t("Trust it and start over")} title={t("Every step runs again from the first one.")}
+          onClick={() => void create(shownKey)} />}
+        {!running && failed && !shownKey && <Button intent="primary" icon={<AppIcon name="refresh" size={14} />} text={t("Start over")}
+          title={t("Every step runs again from the first one.")} onClick={() => void create(null)} />}
         {linkId && <Button intent="primary" text={t("Done")} onClick={() => onClose(true, recoveryWords)} />}
       </>} />
     </>}

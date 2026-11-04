@@ -10,10 +10,10 @@ const overview: FleetSecretsOverview = {
   environments: [{ id: "e1", name: "production", version: 1, approvers: [], approverNames: [], labels: [], automations: [], verified: true },
     { id: "e2", name: "forged", version: 1, approvers: [], approverNames: [], labels: [], automations: [], verified: false }],
   approvals: [
-    { id: "late", environment: "production", machine: "Mac", runId: "r2", title: null, status: "pending", requestedAt: "2026-11-03T12:00:00Z", mayApprove: true },
-    { id: "early", environment: "production", machine: "Mac", runId: "r1", title: null, status: "pending", requestedAt: "2026-11-03T11:00:00Z", mayApprove: true },
-    { id: "done", environment: "production", machine: "Mac", runId: "r0", title: null, status: "approved", requestedAt: "2026-11-03T10:00:00Z", mayApprove: false },
-    { id: "other", environment: "production", machine: "Mac", runId: "r3", title: null, status: "pending", requestedAt: "2026-11-03T10:00:00Z", mayApprove: false },
+    { id: "late", environment: "production", machine: "Mac", runId: "r2", title: null, status: "pending", requestedAt: "2026-11-03T12:00:00Z", mayApprove: true, review: "review" },
+    { id: "early", environment: "production", machine: "Mac", runId: "r1", title: null, status: "pending", requestedAt: "2026-11-03T11:00:00Z", mayApprove: true, review: "review" },
+    { id: "done", environment: "production", machine: "Mac", runId: "r0", title: null, status: "approved", requestedAt: "2026-11-03T10:00:00Z", mayApprove: false, review: "review" },
+    { id: "other", environment: "production", machine: "Mac", runId: "r3", title: null, status: "pending", requestedAt: "2026-11-03T10:00:00Z", mayApprove: false, review: "review" },
   ],
 };
 

@@ -118,7 +118,7 @@ public sealed class SshServerInstallerTests
         ssh.Answers.Enqueue(new SshResult(SshResult.ConnectionFailed, "",
             "Warning: Permanently added 'box' (ED25519) to the list of known hosts.\r\nme@box: Permission denied (publickey).\r\n"));
         var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
-            new SshServerSetupRequest { Target = new SshTarget("me", "box", null), AcceptNewHostKey = true }, (_, _, _) => Task.FromResult<ReachProblem?>(null),
+            new SshServerSetupRequest { Target = new SshTarget("me", "box", null), TrustedHostKey = "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)" }, (_, _, _) => Task.FromResult<ReachProblem?>(null),
             (_, _, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
         Assert.AreEqual(("connect", "auth_failed"), (failure.Step, failure.Code));
         Assert.AreEqual("me@box: Permission denied (publickey).", failure.Message);

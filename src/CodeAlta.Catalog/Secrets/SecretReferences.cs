@@ -55,7 +55,12 @@ public sealed record SecretScope(string? SpaceId, string? ProjectId, string? Env
     /// <summary>Gets the run (a session, a run of an automation) its uses are recorded for; null records none.</summary>
     public string? RunId { get; init; }
 
-    /// <summary>Gets whether the run is the work of the owner of the machine, whose own values then come first.</summary>
+    /// <summary>
+    /// Gets whether the run is the work of the owner of the machine, whose own values then come first. The work of another
+    /// person (a session a member of a team started on a team machine) gets none of the owner's values: neither the store
+    /// of the machine nor the values the fleet gave the owner's person, spaces and projects; only those of the environment
+    /// it was admitted to.
+    /// </summary>
     public bool OwnerWork { get; init; } = true;
 }
 
@@ -198,6 +203,8 @@ public sealed class SecretReferenceResolver
         var sources = new List<ISecretLookup>(5);
         if (scope.OwnerWork) sources.Add(store);
         if (!string.IsNullOrWhiteSpace(scope.Environment)) sources.Add(store.FleetScope(FleetSecretScopes.Environment, scope.Environment, shell, used));
+        // The values of the owner's person, spaces and projects are the owner's: the work of another person never gets them.
+        if (!scope.OwnerWork) return new(Environment.GetEnvironmentVariable, sources);
         if (!string.IsNullOrWhiteSpace(scope.ProjectId)) sources.Add(store.FleetScope(FleetSecretScopes.Project, scope.ProjectId, shell, used));
         if (!string.IsNullOrWhiteSpace(scope.SpaceId)) sources.Add(store.FleetScope(FleetSecretScopes.Space, scope.SpaceId, shell, used));
         sources.Add(store.FleetScope(FleetSecretScopes.Person, null, shell, used));

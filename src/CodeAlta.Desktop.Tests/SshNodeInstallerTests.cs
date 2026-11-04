@@ -179,12 +179,15 @@ public sealed class SshNodeInstallerTests
     }
 
     [TestMethod]
-    public void HostKeyFingerprint_IsReadFromTheLinesOfSshKeygen()
+    public void HostKeyFingerprint_IsTheHashOfTheKey_AsSshKeygenPrintsIt()
     {
-        Assert.AreEqual("SHA256:abc+/def= (ED25519)", OpenSshRunner.ReadFingerprint("256 SHA256:abc+/def= box (ED25519)\n"));
-        Assert.AreEqual("SHA256:xyz (RSA)", OpenSshRunner.ReadFingerprint("3072 SHA256:xyz |1|hashed= (RSA)\n256 SHA256:other x (ED25519)\n"), "the first key ssh recorded");
-        Assert.IsNull(OpenSshRunner.ReadFingerprint(""));
-        Assert.IsNull(OpenSshRunner.ReadFingerprint("not a key\n"));
+        var key = Convert.ToBase64String([.. Enumerable.Range(0, 51).Select(static i => (byte)i)]);
+        var hash = "SHA256:" + Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(Convert.FromBase64String(key))).TrimEnd('=');
+        Assert.AreEqual((hash, hash + " (ED25519)"), OpenSshRunner.FingerprintOf($"|1|c2FsdA==|aGFzaA== ssh-ed25519 {key}\n"));
+        Assert.AreEqual(hash + " (RSA)", OpenSshRunner.FingerprintOf($"# a comment\nbox ssh-rsa {key}\nbox ssh-ed25519 {key}\n")?.Text, "the first key ssh recorded");
+        Assert.AreEqual(hash + " (ECDSA)", OpenSshRunner.FingerprintOf($"box ecdsa-sha2-nistp256 {key}")?.Text);
+        Assert.IsNull(OpenSshRunner.FingerprintOf(""));
+        Assert.IsNull(OpenSshRunner.FingerprintOf("not a key\n"));
     }
 
     private async Task<string> FailureAsync(params SshResult[] answers)
@@ -203,7 +206,7 @@ public sealed class SshNodeInstallerTests
 
         public List<string> Scripts { get; } = [];
 
-        public Task<SshResult> RunAsync(SshTarget target, string script, bool acceptNewHostKey, Action<string>? onOutput, CancellationToken cancellationToken)
+        public Task<SshResult> RunAsync(SshTarget target, string script, string? trustedHostKey, Action<string>? onOutput, CancellationToken cancellationToken)
         {
             Scripts.Add(script);
             var answer = Answers.Count > 0 ? Answers.Dequeue() : new SshResult(0, "", "");
@@ -211,7 +214,7 @@ public sealed class SshNodeInstallerTests
             return Task.FromResult(answer);
         }
 
-        public Task<SshResult> CopyAsync(SshTarget target, IReadOnlyList<string> files, string folder, bool acceptNewHostKey, CancellationToken cancellationToken)
+        public Task<SshResult> CopyAsync(SshTarget target, IReadOnlyList<string> files, string folder, string? trustedHostKey, CancellationToken cancellationToken)
             => Task.FromResult(new SshResult(0, "", ""));
 
         public string? HostKey { get; init; }
@@ -226,7 +229,7 @@ public sealed class SshNodeInstallerTests
 
         public int Forwards { get; private set; }
 
-        public Task<SshForward> ForwardAsync(SshTarget target, int remotePort, bool acceptNewHostKey, CancellationToken cancellationToken)
+        public Task<SshForward> ForwardAsync(SshTarget target, int remotePort, string? trustedHostKey, CancellationToken cancellationToken)
         {
             Forwards++;
             return Task.FromResult(new SshForward(40000 + remotePort, static () => { }));

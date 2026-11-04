@@ -591,6 +591,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(FleetAccessTeamMemberRequest))]
 [JsonSerializable(typeof(FleetAccessOnCallRequest))]
 [JsonSerializable(typeof(FleetAccessGrantRequest))]
+[JsonSerializable(typeof(FleetGrantConfirmRequest))]
 [JsonSerializable(typeof(FleetAccessTransferRequest))]
 [JsonSerializable(typeof(FleetAccessDecideRequest))]
 [JsonSerializable(typeof(FleetAccessResourceRequest))]

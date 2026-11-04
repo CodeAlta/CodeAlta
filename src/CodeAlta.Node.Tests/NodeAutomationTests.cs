@@ -162,6 +162,87 @@ public sealed class NodeAutomationTests
         StringAssert.Contains(forbidden.Message, "automate");
     }
 
+    // A machine of a team or of the organization runs automations with account credentials only, whatever gave them: one a
+    // device paired directly gave it too, not only one a server assigned.
+    [TestMethod]
+    public async Task OnAMachineOfATeam_AnAutomationNoServerGaveRunsWithAccountCredentialsOnly()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var fixture = await AutomationFixture.StartAsync(root, new ScriptedNodeProvider(), new NodeClock { Now = Noon }, token, _ => AutomationCredentialKind.Personal);
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Local", "Hello."), 1), cancellationToken: token);
+        var automations = fixture.Node.Automations!;
+        automations.DeviceId ??= fixture.Fleet.DeviceId;
+        Assert.AreNotEqual(AutomationRun.Failed, (await client.RunAutomationAsync(Id, cancellationToken: token)).Status, "a personal machine may use a personal plan");
+
+        var team = new FleetAccessTeam("infra", ["p2"], [], false);
+        var access = FleetAccessState.Empty with
+        {
+            OrganizationId = "org", Teams = FleetAccessState.Empty.Teams.Add("infra", team), Machines = FleetAccessState.Empty.Machines.Add(automations.DeviceId!, "infra"),
+        };
+        automations.ServerAccesses = () => [access];
+        var refused = await client.RunAutomationAsync(Id, cancellationToken: token);
+        Assert.AreEqual(AutomationRun.Failed, refused.Status);
+        StringAssert.Contains(refused.Message, "account credentials only");
+    }
+
+    // A try is a method of its own (doc/fleet/protocol.md, "Versions"): a node that does not know it answers method_not_found,
+    // and the device says so rather than run the automation for real.
+    [TestMethod]
+    public async Task ATry_IsAMethodOfItsOwn_ThatTheNodeRunsAsATry()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var fixture = await AutomationFixture.StartAsync(root, new ScriptedNodeProvider(), new NodeClock { Now = Noon }, token);
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Tried", "Hello."), 1), cancellationToken: token);
+
+        var tried = await client.TryAutomationAsync(Id, token);
+        Assert.AreEqual("try", tried.Trigger, tried.Message);
+        Assert.AreEqual("try", (await client.ListAutomationRunsAsync(Id, cancellationToken: token)).Runs.Single(run => run.Id == tried.Id).Trigger);
+    }
+
+    // Account credentials hold for the whole run (doc/fleet/orchestration.md, "Credentials of unattended runs"): its session that
+    // changes provider, a model tier or a fallback, and the sessions it starts resolve only to account providers.
+    [TestMethod]
+    public async Task AccountCredentials_HoldForTheSessionsOfARun_ItsChildren_AndAChangeOfProvider()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var provider = new ScriptedNodeProvider();
+        await using var fixture = await AutomationFixture.StartAsync(root, provider, new NodeClock { Now = Noon }, token,
+            descriptor => descriptor.ProviderId.Value == "personal" ? AutomationCredentialKind.Personal : AutomationCredentialKind.Account);
+        NodeAutomationPolicy.Save(fixture.Node.Host.CatalogOptions.FleetRoot, new NodeAutomationPolicy { Credentials = NodeAutomationPolicy.AccountCredentials });
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Unattended", "Hello."), 1), cancellationToken: token);
+        var run = await client.RunAutomationAsync(Id, cancellationToken: token);
+        Assert.AreNotEqual(AutomationRun.Failed, run.Status, run.Message);
+        var host = fixture.Node.Host;
+        var sessionId = run.SessionId ?? (await WaitForAsync(async () => (await client.ListAutomationRunsAsync(Id, cancellationToken: token)).Runs
+            .FirstOrDefault(candidate => candidate.Id == run.Id && candidate.SessionId is not null), token)).SessionId!;
+        var session = (await host.RuntimeService.TryGetRecoverableSessionAsync(sessionId, token))!;
+        var child = await host.Commands.CreateDraftSessionAsync(null, provider.Descriptor, "Child", new CodeAlta.Catalog.AltaActorProvenance
+        {
+            Kind = CodeAlta.Catalog.AltaActorProvenance.WorkflowKind, SourceSessionId = sessionId, CreatedAt = DateTimeOffset.UtcNow,
+        }, null, null, null, null, null, null);
+        var plain = await host.Commands.CreateDraftSessionAsync(null, provider.Descriptor, "Plain", null, null, null, null, null, null, null);
+        var gate = host.RuntimeService.ProviderGate;
+        Assert.IsNotNull(gate, "the node checks the provider of every attachment of a session");
+        // A provider of the machine that runs with a personal plan (only its descriptor is read here).
+        host.ModelProviderRegistry.RegisterOrReplace(new CodeAlta.Agent.ModelProviderDescriptor(new("personal"), "Personal"), static () => throw new NotSupportedException());
+
+        // The run's session that changes provider, and its child, are refused a personal plan; an account provider is theirs.
+        StringAssert.Contains(await gate(session, "personal", token), "account credentials");
+        StringAssert.Contains(await gate(child, "personal", token), "account credentials");
+        Assert.IsNull(await gate(child, provider.Descriptor.ProviderId.Value, token));
+        // A session that no automation started keeps the providers of the machine.
+        Assert.IsNull(await gate(plain, "personal", token));
+    }
+
     // The signed policy of the organization of the space a run goes to (doc/fleet/security-and-privacy.md, policies and the kill
     // switch) applies to the node's own automations too, not only to those a server delivered: its providers, its models, its
     // account credentials.
@@ -195,6 +276,40 @@ public sealed class NodeAutomationTests
         linked = false;
         var allowed = await client.RunAutomationAsync(Id, cancellationToken: token);
         Assert.AreNotEqual(AutomationRun.Failed, allowed.Status, allowed.Message);
+    }
+
+    // The limits of the signed policy on what a session of the fleet may do reach the runs of automations too, whatever their
+    // definition asks: a permission mode above its ceiling, a sandbox below its floor, the tools it turns off.
+    [TestMethod]
+    public async Task TheRulesOfTheSpace_LimitThePermissionModeTheSandboxAndTheToolsOfARun()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var fixture = await AutomationFixture.StartAsync(root, new ScriptedNodeProvider(), new NodeClock { Now = Noon }, token);
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        var policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Rules = new FleetPolicyRules(PermissionMode: "default") };
+        var automations = fixture.Node.Automations!;
+        automations.Policy = new FleetPolicyGuard(fixture.Fleet.DeviceId, () => [new FleetPolicySource("https://fleet.example", policy, null, static _ => true)]);
+
+        await client.PutAutomationAsync(fixture.Signed(Definition("Wide", "Hello.") + "\npermission_mode = \"acceptEdits\"\n", 1), cancellationToken: token);
+        var wide = await client.RunAutomationAsync(Id, cancellationToken: token);
+        Assert.AreEqual(AutomationRun.Failed, wide.Status, "a mode above the ceiling of the policy");
+        StringAssert.Contains(wide.Message, "policy of the organization");
+        Assert.IsNull(wide.SessionId);
+
+        policy = policy with { Number = 2, Rules = new FleetPolicyRules(Network: "off") };
+        await client.PutAutomationAsync(fixture.Signed(Definition("Open", "Hello.") + "\nsandbox = \"off\"\n", 2), cancellationToken: token);
+        var open = await client.RunAutomationAsync(Id, cancellationToken: token);
+        Assert.AreEqual(AutomationRun.Failed, open.Status, "no sandbox where the policy limits the network of the sandbox");
+        StringAssert.Contains(open.Message, "sandbox");
+
+        policy = policy with { Number = 3, Rules = new FleetPolicyRules(ToolsOff: ["shell_command"]) };
+        await client.PutAutomationAsync(fixture.Signed(Definition("Tools", "Hello."), 3), cancellationToken: token);
+        var run = await client.RunAutomationAsync(Id, cancellationToken: token);
+        var sessionId = (await WaitForAsync(() => Task.FromResult(automations.Engine.Runs(Id, 10).FirstOrDefault(candidate => candidate.Id == run.Id && candidate.SessionId is not null)),
+            token)).SessionId!;
+        CollectionAssert.Contains(fixture.Node.Host.RuntimeService.GetDisabledToolPatterns(sessionId).ToList(), "shell_command", "the tools the policy turns off are off");
     }
 
     // The longest time of a session in the policy reaches the runs of automations.

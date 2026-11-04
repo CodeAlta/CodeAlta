@@ -73,7 +73,7 @@ public sealed class NodeBudgetTests
 
             // The node holds the run: the budget has nothing left for it.
             var hold = await WaitForAsync(async () => (await manager.ListHoldsAsync(token)).Holds.FirstOrDefault(), token);
-            Assert.AreEqual((FleetBudgetHoldStates.Waiting, nodeId, "Report"), (hold.Status, hold.MachineId, hold.Title));
+            Assert.AreEqual((FleetBudgetHoldStates.Waiting, nodeId, (string?)null), (hold.Status, hold.MachineId, hold.Title), "the server never reads what the run is about");
             Assert.IsNull((await desktop.ListAutomationRunsAsync(Id, null, token)).Runs.FirstOrDefault(run => run.RunId == runId && run.SessionId is not null),
                 "no session starts while the run waits");
             Assert.AreEqual(string.Empty, provider.LastUserText, "no model is called");
@@ -97,6 +97,73 @@ public sealed class NodeBudgetTests
             Assert.AreEqual(1, (await manager.ListHoldsAsync(token)).Holds.Count, "a budget that stops holds nothing");
             Assert.IsTrue(File.Exists(Path.Combine(servers.Connections.Store.LinkFolder(servers.Connections.Connections.Single().Link.Id), NodeBudgets.FileName)),
                 "the node keeps its budgets, for its runs offline");
+        }
+        finally
+        {
+            await servers.DisposeAsync();
+            await node.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task ARunThatWaitedForItsBudget_DoesNotStart_WhenTheOwnerStoppedTheFleetMeanwhile()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+        {
+            DataRoot = Path.Combine(root.Root, "server"), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+        }, token);
+        var address = server.Addresses.First(static uri => uri.Scheme == "http");
+        using var desktopKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "desktop-fleet"));
+        using var otherKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "other-fleet"));
+        using var desktop = new FleetServerClient(address, desktopKey);
+        var setup = await desktop.SetUpAsync(server.SetupCode!.Code, "Alex", "Desktop", "Home", token);
+        var enrollment = await desktop.CreateEnrollmentTokenAsync(null, "test-node", token);
+        Assert.AreEqual(NodeExitCodes.Success, await new NodeApplication(TextWriter.Null, TextWriter.Null) { InitializeLogging = false, ServiceEnvironment = static () => null }
+            .RunAsync(["join", address.ToString(), "--token", enrollment.Token, "--data-root", root.DataRoot, "--name", "test-node", "--no-wait"]));
+        var nodeId = (await desktop.ListDevicesAsync(token)).Single(static device => device.Status == "pending").Id;
+        await desktop.ApproveAsync(nodeId, FleetDeviceKinds.Node, token);
+        using (var other = new FleetServerClient(address, otherKey))
+        {
+            await other.EnrollAsync((await desktop.CreateEnrollmentTokenAsync(null, "other", token)).Token, "Build box", FleetDeviceKinds.Node, token);
+            await desktop.ApproveAsync(otherKey.DeviceId, FleetDeviceKinds.Node, token);
+        }
+
+        var provider = new ScriptedNodeProvider();
+        var node = await NodeHost.StartAsync(root.Options() with
+        {
+            ConfigureModelProviders = provider.Register,
+            Automations = new NodeAutomationOptions { TimeZone = TimeZoneInfo.Utc, WatchRepositories = false, CredentialKind = static _ => AutomationCredentialKind.Account },
+        }, token);
+        var automations = node.Automations!;
+        var servers = NodeServers.Start(node, null, "test-node", "1.0.0", Fast);
+        try
+        {
+            await WaitForAsync(async () => (await desktop.ListMachinesAsync(token)).Any(static machine => machine.Online) ? "online" : null, token);
+            var desktopDevices = new FleetOrganizationDevices(address, desktopKey, Path.Combine(root.Root, "desktop-link", FleetOrganizationDevices.PinFileName));
+            var manager = new FleetBudgetsManager(desktopDevices);
+            var budget = await manager.PutAsync(null, new FleetBudgetSettings("Home tokens", FleetBudgetScopeKinds.Person, null, FleetBudgetMeasures.Tokens, 100,
+                FleetBudgetPeriods.Month, "UTC", FleetBudgetModes.Enforced, FleetBudgetReachedActions.Hold), token);
+            using (var other = new FleetServerClient(address, otherKey)) await other.AskAllowanceAsync(budget.Id, new FleetAllowanceRequest(1, 0, 100), token);
+            var list = await desktop.ReadVerifiedDeviceListAsync(null, token);
+            await desktop.PutAutomationAsync(Sign(desktopKey, list, setup.Organization.Id, nodeId, Id), token);
+            await WaitForAsync(() => Task.FromResult(automations.AssignmentOf(Id) is { Number: 1 } ? "held" : null), token);
+            var runId = Guid.CreateVersion7().ToString("N");
+            await desktop.RunAutomationAsync(FleetAutomationSigning.SignRun(desktopKey, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion,
+                setup.Organization.Id, Id, nodeId, runId, string.Empty, string.Empty, DateTimeOffset.UtcNow)), token);
+            var hold = await WaitForAsync(async () => (await manager.ListHoldsAsync(token)).Holds.FirstOrDefault(), token);
+
+            // The owner stops the fleet while the run waits, then continues it anyway: the stop wins.
+            var policy = new FleetOrganizationPolicy(new FleetOrganizationAccess(desktopDevices));
+            await policy.SignAsync(await policy.PrepareAsync(FleetPolicyRules.None, new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [], "Incident"), null, token), token);
+            await WaitForAsync(() => Task.FromResult(automations.Policy?.Halt is not null ? "stopped" : null), token);
+            await manager.ContinueAsync(hold.Id, token);
+            var refused = await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs
+                .FirstOrDefault(run => run.RunId == runId && run.Message is not null), token);
+            StringAssert.Contains(refused.Message, "Incident");
+            Assert.IsNull(refused.SessionId, "no session starts");
+            Assert.AreEqual(string.Empty, provider.LastUserText, "no model is called");
         }
         finally
         {

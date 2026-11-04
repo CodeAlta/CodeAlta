@@ -186,6 +186,12 @@ public static class FleetNodeMethods
     /// <summary>Runs an assigned automation now.</summary>
     public const string AutomationsRun = "automations.run";
 
+    /// <summary>
+    /// Tries an assigned automation now: a dry run, whose tools it calls by itself record their calls instead of making them. A
+    /// method of its own, so that a node that does not know tries answers <c>method_not_found</c> rather than run it for real.
+    /// </summary>
+    public const string AutomationsTry = "automations.try";
+
     /// <summary>The runs of the assigned automations, newest first.</summary>
     public const string AutomationsRuns = "automations.runs";
 
@@ -836,13 +842,15 @@ public sealed record FleetAgentPolicyInfo(IReadOnlyList<string> Spaces, string? 
 /// <param name="PersonId">The person, as the signed device list names them.</param>
 /// <param name="Permissions">What their controller devices may do: <c>view</c>, <c>drive</c>, <c>start</c>; on their own sessions only.</param>
 /// <param name="AddedAt">When the owner named them.</param>
-public sealed record FleetNodePerson(string PersonId, IReadOnlyList<string> Permissions, DateTimeOffset AddedAt);
+/// <param name="OrganizationId">The organization of the person, whose ids are unique within it only; null in a list written before it was kept.</param>
+public sealed record FleetNodePerson(string PersonId, IReadOnlyList<string> Permissions, DateTimeOffset AddedAt, string? OrganizationId = null);
 
 /// <summary>A person of the organization who tried to start a session on the machine, and waits for its owner.</summary>
 /// <param name="PersonId">The person.</param>
 /// <param name="DeviceId">The device they asked from.</param>
 /// <param name="AskedAt">When they first asked.</param>
-public sealed record FleetNodeAsk(string PersonId, string DeviceId, DateTimeOffset AskedAt);
+/// <param name="OrganizationId">The organization of the person; null for a request written before it was kept.</param>
+public sealed record FleetNodeAsk(string PersonId, string DeviceId, DateTimeOffset AskedAt, string? OrganizationId = null);
 
 /// <summary>The people a personal machine lets in, and who asks to be.</summary>
 /// <param name="People">The people it names.</param>
@@ -854,7 +862,10 @@ public sealed record FleetNodePeopleInfo(IReadOnlyList<FleetNodePerson> People, 
 /// <param name="PersonId">The person.</param>
 /// <param name="Permissions">What they may do; null or empty takes them out.</param>
 /// <param name="Refuse">Whether to refuse their request: it is dropped and not recorded again until they are let in.</param>
-public sealed record FleetNodePeopleChange(string PersonId, IReadOnlyList<string>? Permissions = null, bool Refuse = false);
+/// <param name="OrganizationId">
+/// The organization of the person; null for the one of their request, else the only organization the machine is linked to.
+/// </param>
+public sealed record FleetNodePeopleChange(string PersonId, IReadOnlyList<string>? Permissions = null, bool Refuse = false, string? OrganizationId = null);
 
 /// <summary>The labels the owner gives a machine (<c>control.labels.get</c>, <c>control.labels.set</c>), which it publishes in its inventory.</summary>
 /// <param name="Labels">The labels, such as <c>gpu</c> or <c>prod</c>.</param>

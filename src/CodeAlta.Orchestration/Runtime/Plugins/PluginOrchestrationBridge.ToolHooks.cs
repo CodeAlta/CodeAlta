@@ -10,7 +10,14 @@ namespace CodeAlta.Orchestration.Runtime.Plugins;
 /// <param name="ProjectId">The project of the session, or <see langword="null"/> for a global session.</param>
 /// <param name="WorkingDirectory">The folder the session works in.</param>
 /// <param name="SpaceId">The space of the session; <see langword="null"/> applies no space.</param>
-public sealed record SessionToolHookScope(string SessionId, string? ProjectId, string? WorkingDirectory, string? SpaceId);
+public sealed record SessionToolHookScope(string SessionId, string? ProjectId, string? WorkingDirectory, string? SpaceId)
+{
+    /// <summary>Gets the session this one comes from (its parent, or the session that created it); null for none.</summary>
+    public string? ParentSessionId { get; init; }
+
+    /// <summary>Gets who created the session, as the session records it (an automation, a workflow, a person); null when it records none.</summary>
+    public CodeAlta.Catalog.AltaActorProvenance? CreatedBy { get; init; }
+}
 
 public sealed partial class PluginOrchestrationBridge
 {

@@ -52,6 +52,13 @@ public sealed record AutomationListDto(IReadOnlyList<AutomationDto> Automations)
 public sealed record AutomationRunDto(string RunId, string AutomationId, string MachineId, long Number, string Trigger, string Status, DateTimeOffset StartedAt,
     DateTimeOffset? EndedAt, string? Occurrence, DateTimeOffset? LeaseUntil, string? SessionId, string? Message)
 {
+    /// <summary>
+    /// The status of the answer to a take-over its machine did not confirm (it said nothing in time, or does not answer
+    /// take-overs): the take-over was asked, and the run may still stop at the timeout of an approval. A take-over its machine
+    /// confirmed has the status <see cref="FleetAutomationRunRequest.TakeOverAction"/>; one it refused is a refusal.
+    /// </summary>
+    public const string TakeOverRequested = "requested";
+
     /// <summary>Gets the input tokens of its session, the prompt cache included; null when unknown.</summary>
     public long? InputTokens { get; init; }
 

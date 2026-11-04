@@ -48,8 +48,20 @@ public sealed record FleetAutomationVersion(
     [property: JsonPropertyName("key")] string SignerKey,
     [property: JsonPropertyName("time")] DateTimeOffset Time)
 {
-    /// <summary>The version of the format this library writes.</summary>
+    /// <summary>The version of the format of a version whose definition a machine of any 4.x runs as it reads it.</summary>
     public const int CurrentVersion = 1;
+
+    /// <summary>
+    /// The version of the format of a version whose definition decides what its runs do without a person (its autonomy): a
+    /// machine that does not know autonomy reads version 1 only, so it refuses the version rather than run the automation
+    /// without its guard (<c>doc/fleet/protocol.md</c>, "Versions").
+    /// </summary>
+    public const int AutonomyVersion = 2;
+
+    /// <summary>Gets the version of the format of a version.</summary>
+    /// <param name="autonomy">Whether its definition decides what its runs do without a person.</param>
+    /// <returns><see cref="AutonomyVersion"/> with autonomy, <see cref="CurrentVersion"/> otherwise.</returns>
+    public static int VersionFor(bool autonomy) => autonomy ? AutonomyVersion : CurrentVersion;
 
     /// <summary>The prefix of the scope of an automation of a team.</summary>
     public const string TeamScopePrefix = "team:";
@@ -168,7 +180,7 @@ public static class FleetAutomationVersionDocuments
     public static string? Check(FleetAutomationVersion version)
     {
         ArgumentNullException.ThrowIfNull(version);
-        if (version.Version != FleetAutomationVersion.CurrentVersion) return $"version {version.Version.ToString(CultureInfo.InvariantCulture)} of the format is not known";
+        if (version.Version is not (FleetAutomationVersion.CurrentVersion or FleetAutomationVersion.AutonomyVersion)) return $"version {version.Version.ToString(CultureInfo.InvariantCulture)} of the format is not known";
         if (!IsName(version.AutomationId, MaxIdLength)) return "the id of the automation is 1 to 128 characters, without control characters";
         if (version.Number <= 0) return "the number of a version starts at 1";
         if (!IsName(version.MachineId, MaxIdLength)) return "a version names the machine that runs it";
@@ -365,8 +377,9 @@ public static class FleetAutomationVersionDocuments
             return "a team machine runs the automations of its team's maintainers, and of its members when the team allows it";
         }
 
-        // Personal automations: only the person who owns the machine gives it automations.
-        if (!devices.Members.TryGetValue(machineId, out var self) || self.OwnerId is null || !string.Equals(self.OwnerId, signerPersonId, StringComparison.Ordinal))
+        // Personal automations: only the person who owns the machine gives it automations; the one the access document names once
+        // the machine was given to another person.
+        if (FleetAccessState.OwnerOfMachine(access, machineId, devices) is not { } owner || !string.Equals(owner, signerPersonId, StringComparison.Ordinal))
             return "the version is signed by a device of another person than the owner of this machine";
         return null;
     }

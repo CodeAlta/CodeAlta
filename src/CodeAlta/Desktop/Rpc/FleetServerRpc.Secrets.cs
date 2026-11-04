@@ -43,7 +43,10 @@ internal sealed partial class FleetServerService
                 .ToDictionary(static pair => pair.Environment.Id, static pair => pair.Definition!.Approvers, StringComparer.Ordinal);
             var approvals = read.Approvals.Select(approval => new FleetApprovalView(approval.Id, approval.EnvironmentName, DeviceName(approval.MachineId), approval.RunId, approval.Title,
                 approval.Status, approval.RequestedAt, approval.Status == FleetApprovalStates.Pending && approvers.TryGetValue(approval.EnvironmentId, out var people)
-                    && people.Contains(read.PersonId, StringComparer.Ordinal))).ToArray();
+                    && people.Contains(read.PersonId, StringComparer.Ordinal)
+                    // Only a run its machine asked itself is approved: never one the server made up or changed.
+                    && read.Manager.Devices.Current is { } list && CodeAlta.Fleet.Server.FleetApprovalRequests.IsAskedBy(approval, list, out _),
+                CodeAlta.Fleet.Server.FleetSecretsManager.ReviewOf(approval))).ToArray();
             var spaces = Spaces is null ? [] : await Spaces.LoadAsync(cancellationToken).ConfigureAwait(false);
             var linked = read.ScopeNames;
             return new FleetSecretsOverview("ok", null, secrets, environmentViews, approvals,
@@ -129,8 +132,18 @@ internal sealed partial class FleetServerService
     public Task<FleetSecretActionResult> ApproveRunAsync(FleetApprovalActionRequest request, CancellationToken cancellationToken)
         => SecretActionAsync(request?.ExpectedEpoch, request?.LinkId, async () =>
         {
-            if (request!.ApprovalId is not { Length: > 0 and <= 64 } id) return new FleetSecretActionResult("invalid_request", null);
-            await _servers!.SecretsOf(request.LinkId).ApproveAsync(id, cancellationToken).ConfigureAwait(false);
+            if (request!.ApprovalId is not { Length: > 0 and <= 64 } id || request.Review is not { Length: > 0 and <= 128 } review)
+                return new FleetSecretActionResult("invalid_request", null);
+            // The run signed is the one shown: an approval the server changed since is refused.
+            try
+            {
+                await _servers!.SecretsOf(request.LinkId).ApproveAsync(id, review, cancellationToken).ConfigureAwait(false);
+            }
+            catch (InvalidDataException changed)
+            {
+                return new FleetSecretActionResult("approval_changed", changed.Message);
+            }
+
             return new FleetSecretActionResult("ok", null);
         });
 
@@ -201,7 +214,9 @@ internal sealed record FleetEnvironmentView(string Id, string Name, int Version,
 /// <param name="Status"><c>pending</c> or <c>approved</c>.</param>
 /// <param name="RequestedAt">When it was asked.</param>
 /// <param name="MayApprove">Whether this computer's person approves it.</param>
-internal sealed record FleetApprovalView(string Id, string Environment, string Machine, string RunId, string? Title, string Status, DateTimeOffset RequestedAt, bool MayApprove);
+/// <param name="Review">What the person reviews of it: the approval given must still be this one.</param>
+internal sealed record FleetApprovalView(string Id, string Environment, string Machine, string RunId, string? Title, string Status, DateTimeOffset RequestedAt, bool MayApprove,
+    string Review);
 
 /// <summary>A machine, a person, a space or a project a value can name.</summary>
 /// <param name="Id">Its id.</param>
@@ -275,7 +290,8 @@ internal sealed record FleetEnvironmentSetRequest(string ExpectedEpoch, string L
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
 /// <param name="LinkId">The link.</param>
 /// <param name="ApprovalId">The approval.</param>
-internal sealed record FleetApprovalActionRequest(string ExpectedEpoch, string LinkId, string ApprovalId);
+/// <param name="Review">What the person reviewed of it (<see cref="FleetApprovalView.Review"/>).</param>
+internal sealed record FleetApprovalActionRequest(string ExpectedEpoch, string LinkId, string ApprovalId, string Review);
 
 /// <summary>The outcome of an action on the values of a server.</summary>
 /// <param name="Status"><c>ok</c>, the code of the server's refusal, <c>unreachable</c>, <c>not_found</c>, <c>invalid_request</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>

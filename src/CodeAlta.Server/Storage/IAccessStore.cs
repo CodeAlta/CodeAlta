@@ -273,12 +273,15 @@ public interface IAccessStore
     /// <returns>The providers.</returns>
     ValueTask<IReadOnlyList<(ScopeProviderRecord Provider, IReadOnlyList<string> Machines)>> ListScopeProvidersAsync(string organizationId, CancellationToken cancellationToken = default);
 
-    /// <summary>Writes a provider of a scope with its sealed key, replacing the copies held, when its version is above the one held.</summary>
+    /// <summary>
+    /// Writes a provider of a scope with its sealed key, replacing the copies held, when its version is above the one held and
+    /// it keeps the owner it was made for.
+    /// </summary>
     /// <param name="provider">The provider.</param>
     /// <param name="wraps">The copy of its sealing key for each machine.</param>
     /// <param name="audit">The audit record.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
-    /// <returns>Whether it was written: false when the version held is not below.</returns>
+    /// <returns>Whether it was written: false when the version held is not below, or the one held has another owner.</returns>
     ValueTask<bool> PutScopeProviderAsync(ScopeProviderRecord provider, IReadOnlyList<(string DeviceId, string Wrapped)> wraps, AuditEntry audit,
         CancellationToken cancellationToken = default);
 

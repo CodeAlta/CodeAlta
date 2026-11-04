@@ -64,6 +64,9 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
     /// </summary>
     public Func<string, string?>? PersonOf { get; set; }
 
+    /// <summary>Gets or sets what names the organization of the person of a session (<see cref="PersonOf"/>); null names none.</summary>
+    public Func<string, string?>? PersonOrganizationOf { get; set; }
+
     /// <summary>Gets or sets what tells whether a provider runs with the credentials of an account; null says nothing of it.</summary>
     public Func<ModelProviderDescriptor, bool>? IsAccountProvider { get; set; }
 
@@ -132,7 +135,8 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
             var projectIdentity = isPrivate || project is null ? null : await FleetProjectKeys.IdentityAsync(project, _repositories, cancellationToken).ConfigureAwait(false);
             result.Add(new FleetLocalSession(session.SessionId, space, isPrivate,
                 epochs.TryGetValue(session.SessionId, out var epoch) ? epoch : 0, state, session.CreatedAt, session.UpdatedAt, Bounded(providerType),
-                Bounded(session.ViewState?.ModelId ?? session.ModelId), counts, isPrivate ? null : title, projectIdentity, PersonOf?.Invoke(session.SessionId)));
+                Bounded(session.ViewState?.ModelId ?? session.ModelId), counts, isPrivate ? null : title, projectIdentity, PersonOf?.Invoke(session.SessionId),
+                PersonOrganizationOf?.Invoke(session.SessionId)));
         }
 
         // The sessions gone from the instance are forgotten with their counts.

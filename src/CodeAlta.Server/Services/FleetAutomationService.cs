@@ -42,10 +42,14 @@ internal sealed class FleetAutomationService
     internal const string WaitingStatus = "waiting";
 
     private const int MaxRunsPerReport = 100;
+    // The latest runs of an automation a take-over is looked for in: a run that waits for a person is among its latest.
+    private const int MaxRunsChecked = 1000;
     private const int MaxMessageLength = 500;
     private const int MaxRunIdLength = 128;
     private const int MaxOccurrenceLength = 256;
     private static readonly TimeSpan PushTimeout = TimeSpan.FromSeconds(5);
+    // The take-overs waiting for the answer of their machine, by machine, automation and run.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<FleetAutomationTakeOverAck>> _takeOvers = new(StringComparer.Ordinal);
     private static readonly TimeSpan MaxLease = TimeSpan.FromHours(1);
 
     private readonly ICoordinatorStore _store;
@@ -200,6 +204,7 @@ internal sealed class FleetAutomationService
         if (run.SignerDeviceId != actor.Id || run.SignerKey != actor.PublicKey) throw Invalid("The run request must name the device that signs it, with its key.");
         if (run.OrganizationId != actor.OrganizationId) throw Invalid("The run request must name the organization of the server.");
         var held = await _automations.GetAutomationAsync(actor.OrganizationId, id, run.MachineId, cancellationToken).ConfigureAwait(false);
+        // Run by hand by who the machine lets run it (it checks the signed request): the person who gave it, who answers for its scope.
         if (held is null || held.Removed || held.OwnerPersonId != person && !await MaintainsAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false))
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation of yours has this id on this machine.");
         await RequireOwnedAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false);
@@ -253,23 +258,68 @@ internal sealed class FleetAutomationService
         if (held is null || held.Removed
             || held.OwnerPersonId != person && (MayTakeOver is not { } may || !await may(held, person, cancellationToken).ConfigureAwait(false)))
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation whose approvals you answer has this id on this machine.");
+        // The run must be one the machine reported for this automation: a take-over authorized for one automation is never
+        // forwarded for the run of another (the machine checks it too).
+        if (!(await _automations.ListAutomationRunsAsync(actor.OrganizationId, id, MaxRunsChecked, cancellationToken).ConfigureAwait(false))
+                .Any(reported => reported.RunId == runId && reported.MachineId == run.MachineId))
+            throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No run of this automation has this id on this machine.");
         if (_presence.Get(run.MachineId) is not { } session)
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.AutomationConflict, "The machine is offline: its run goes on as its automation says until it is online.");
+        // What the machine answers is awaited: the person is told the run is theirs only once its machine took it over.
+        var waitingFor = TakeOverKey(run.MachineId, id, runId);
+        var answer = new TaskCompletionSource<FleetAutomationTakeOverAck>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _takeOvers[waitingFor] = answer;
+        FleetAutomationTakeOverAck? answered;
         try
         {
-            using var timeout = new CancellationTokenSource(PushTimeout);
-            await session.Connection.SendEventAsync(new FleetEvent(FleetAutomationMethods.TakeOver,
-                JsonSerializer.SerializeToElement(signed, FleetAutomationRunRequestJsonContext.Default.FleetSignedAutomationRunRequest)), timeout.Token).ConfigureAwait(false);
+            try
+            {
+                using var timeout = new CancellationTokenSource(PushTimeout);
+                await session.Connection.SendEventAsync(new FleetEvent(FleetAutomationMethods.TakeOver,
+                    JsonSerializer.SerializeToElement(signed, FleetAutomationRunRequestJsonContext.Default.FleetSignedAutomationRunRequest)), timeout.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is FleetException or FleetConnectionClosedException or OperationCanceledException or InvalidOperationException)
+            {
+                throw CoordinatorException.Conflict(CoordinatorErrorCodes.AutomationConflict, "The machine did not take the request: try again once it is online.");
+            }
+
+            // A machine that does not answer take-overs, or not in time: asked, not confirmed.
+            try { answered = await answer.Task.WaitAsync(TakeOverAnswerWait, _time, cancellationToken).ConfigureAwait(false); }
+            catch (TimeoutException) { answered = null; }
         }
-        catch (Exception exception) when (exception is FleetException or FleetConnectionClosedException or OperationCanceledException or InvalidOperationException)
+        finally
         {
-            throw CoordinatorException.Conflict(CoordinatorErrorCodes.AutomationConflict, "The machine did not take the request: try again once it is online.");
+            _takeOvers.TryRemove(new KeyValuePair<string, TaskCompletionSource<FleetAutomationTakeOverAck>>(waitingFor, answer));
         }
 
-        _logger.LogInformation("Run {Run} of automation {Automation} on {Machine} was taken over by {Device}", runId, id, run.MachineId, actor.Id);
+        if (answered is { Accepted: false } refused)
+        {
+            _logger.LogInformation("Run {Run} of automation {Automation} on {Machine} was not taken over by {Device}: the machine refused it", runId, id, run.MachineId, actor.Id);
+            throw CoordinatorException.Conflict(CoordinatorErrorCodes.AutomationConflict, $"The machine refused the take-over: {Line(refused.Message) ?? "it gave no reason"}.");
+        }
+
+        _logger.LogInformation("Run {Run} of automation {Automation} on {Machine} was {Outcome} by {Device}", runId, id, run.MachineId,
+            answered is null ? "asked to be taken over" : "taken over", actor.Id);
         await _store.AppendAuditAsync(origin.Audit("automation.takeover", actor, id), CancellationToken.None).ConfigureAwait(false);
-        return new AutomationRunDto(runId, id, run.MachineId, held.Number, "manual", FleetAutomationRunRequest.TakeOverAction, run.Time, null, null, null, null, null);
+        return new AutomationRunDto(runId, id, run.MachineId, held.Number, "manual", answered is null ? AutomationRunDto.TakeOverRequested : FleetAutomationRunRequest.TakeOverAction,
+            run.Time, null, null, null, null, null);
     }
+
+    /// <summary>Gets or sets how long a take-over waits for its machine to say what it did with it.</summary>
+    internal TimeSpan TakeOverAnswerWait { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>Takes the answer of a machine to a take-over it was given: the person who asked is told it.</summary>
+    /// <param name="device">The machine.</param>
+    /// <param name="ack">Its answer.</param>
+    internal void AcknowledgeTakeOver(DeviceRecord device, FleetAutomationTakeOverAck? ack)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        if (ack is not { AutomationId.Length: > 0 and <= MaxRunIdLength, RunId.Length: > 0 and <= MaxRunIdLength }) return;
+        // Only the machine the take-over went to answers it.
+        if (_takeOvers.TryGetValue(TakeOverKey(device.Id, ack.AutomationId, ack.RunId), out var waiting)) waiting.TrySetResult(ack);
+    }
+
+    private static string TakeOverKey(string machineId, string automationId, string runId) => machineId + "\n" + automationId + "\n" + runId;
 
     // The scheduler's check of the credential kind (doc/fleet/orchestration.md, credentials of unattended runs), beside the
     // machine's own before each run: an automation of a team or of the organization runs with a provider its machine says runs
@@ -292,6 +342,19 @@ internal sealed class FleetAutomationService
         return snapshot.Owner(FleetResourceKinds.Automation, run.AutomationId) is { } owner
             && snapshot.ServiceIdentities.Any(other => other.Id == identity && other.Enabled && other.OwnerKind == owner.OwnerKind && other.OwnerId == owner.OwnerId)
             ? identity : null;
+    }
+
+    // Whether a person holds a capability on an automation (doc/fleet/access-control.md, team roles and grants): the person who
+    // gave the version held, else by access control on its owner (its team's roles, a grant, the roles of the organization).
+    private async Task<bool> MayAsync(string organizationId, string automationId, string? giver, string person, string capability, CancellationToken cancellationToken)
+    {
+        if (giver == person) return true;
+        if (Access is not { } access) return false;
+        var snapshot = await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false);
+        var owner = snapshot.Owner(FleetResourceKinds.Automation, automationId);
+        var (ownerKind, ownerId) = owner is not null ? (owner.OwnerKind, owner.OwnerId) : giver is not null ? (FleetPrincipalKinds.Person, giver) : (null, null);
+        return ownerKind is not null && ownerId is not null
+            && AccessPolicy.Allows(snapshot, person, capability, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), _time.GetUtcNow());
     }
 
     // Whether the person answers for an automation of a scope: a maintainer of its team, an owner or admin for the organization.
@@ -365,7 +428,9 @@ internal sealed class FleetAutomationService
 
         if (held is null)
         {
-            if (!string.Equals(machine.OwnerPersonId, person, StringComparison.Ordinal))
+            // A personal machine given to another person is theirs, whom the device list does not name.
+            var machineOwner = snapshot?.Owner(FleetResourceKinds.Machine, machine.Id) is { OwnerKind: FleetPrincipalKinds.Person } given ? given.OwnerId : machine.OwnerPersonId;
+            if (!string.Equals(machineOwner, person, StringComparison.Ordinal))
                 throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A person gives automations to the machines they own only.");
             return null;
         }
@@ -386,8 +451,8 @@ internal sealed class FleetAutomationService
     {
         var person = RequirePersonController(actor);
         var records = await _automations.ListAutomationsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false);
-        // Its runs are read by the person who gave it, and by those who answer for its team or for the organization.
-        if (!records.Any(record => record.AutomationId == id) && !await MaintainsAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false))
+        // Its runs are read by the person who gave it, and by who holds automation.view on it: its team, a grant, the organization's roles.
+        if (!records.Any(record => record.AutomationId == id) && !await MayAsync(actor.OrganizationId, id, null, person, "automation.view", cancellationToken).ConfigureAwait(false))
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation of yours has this id.");
         var runs = await _automations.ListAutomationRunsAsync(actor.OrganizationId, id, Math.Clamp(limit ?? 50, 1, RunsKept), cancellationToken).ConfigureAwait(false);
         return new AutomationRunListDto([.. runs.Select(static run => new AutomationRunDto(run.RunId, run.AutomationId, run.MachineId, run.Number, run.Trigger, run.Status,
@@ -531,9 +596,12 @@ internal sealed class FleetAutomationService
                     OnCall = fact.OnCall is { } named ? [.. named.Where(static identity => identity is { Length: > 0 and <= 256 }).Take(20)] : null,
                 };
                 var recipients = ApprovalRecipients is { } resolve ? await resolve(automation, fact, cancellationToken).ConfigureAwait(false) : [automation.OwnerPersonId];
+                // Once per approval the run waits for, when the machine names it (each one is told, also after the first was read),
+                // to who answers it when it waits: the person on call then.
+                var key = "approval:" + run.RunId + (fact?.Approval is { Length: > 0 and <= 64 } approval ? ":" + approval : string.Empty);
                 foreach (var person in recipients.Distinct(StringComparer.Ordinal))
                 {
-                    await notifications.NotifyAsync(device.OrganizationId, person, "approval:" + run.RunId, FleetNotificationKinds.Approval, "warning", null, device.Id, null,
+                    await notifications.NotifyAsync(device.OrganizationId, person, key, FleetNotificationKinds.Approval, "warning", null, device.Id, null,
                         run.AutomationId, run.RunId, cancellationToken).ConfigureAwait(false);
                 }
             }

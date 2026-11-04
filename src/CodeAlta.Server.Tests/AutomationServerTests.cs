@@ -238,15 +238,40 @@ public sealed class AutomationServerTests
 
         FleetSignedAutomationRunRequest TakeOver(string? action, string run = "run-9")
         {
-            var text = FleetAutomationRunRequestDocuments.Serialize(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, organization, Id, node.DeviceId, run,
+            var text = FleetAutomationRunRequestDocuments.Serialize(new FleetAutomationRunRequest(FleetAutomationRunRequest.VersionFor(action), organization, Id, node.DeviceId, run,
                 owner.DeviceId, owner.PublicKey, fixture.Clock.Now) { Action = action });
             return new FleetSignedAutomationRunRequest(text, owner.Sign(FleetAutomationRunRequestDocuments.GetSignedBytes(text)));
         }
 
+        // The person is told the run is theirs only once its machine says it took it over; refused, they are told why; without an
+        // answer, that it was asked.
+        fixture.GetService<CodeAlta.Server.Services.FleetAutomationService>().TakeOverAnswerWait = TimeSpan.FromMilliseconds(500);
+        async Task<FleetAutomationTakeOverAck> AnswerAsync(bool accepted, string? message)
+        {
+            var answer = new FleetAutomationTakeOverAck(Id, "run-9", accepted, message);
+            await connection.SendRequestAsync(FleetAutomationMethods.TakeOverAck, JsonSerializer.SerializeToElement(answer, FleetAutomationServerJsonContext.Default.FleetAutomationTakeOverAck));
+            return answer;
+        }
+
         var request = TakeOver(FleetAutomationRunRequest.TakeOverAction);
-        var taken = await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-9/takeover", new RunAutomationRequest(request));
-        Assert.AreEqual(HttpStatusCode.Accepted, taken.Status, taken.Body.ToString());
+        var asking = fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-9/takeover", new RunAutomationRequest(request));
         Assert.AreEqual(request, await NextAsync(asked), "the machine gets the take-over as signed");
+        await AnswerAsync(true, null);
+        var taken = await asking;
+        Assert.AreEqual(HttpStatusCode.Accepted, taken.Status, taken.Body.ToString());
+        Assert.AreEqual(FleetAutomationRunRequest.TakeOverAction, taken.Read<AutomationRunDto>().Status, "taken over, as its machine says");
+
+        var refusing = fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-9/takeover", new RunAutomationRequest(TakeOver(FleetAutomationRunRequest.TakeOverAction)));
+        await NextAsync(asked);
+        await AnswerAsync(false, "no run of this automation with autonomy is in progress with this id");
+        var refusedTakeOver = await refusing;
+        Assert.AreEqual(HttpStatusCode.Conflict, refusedTakeOver.Status, refusedTakeOver.Body.ToString());
+        StringAssert.Contains(refusedTakeOver.Body.ToString(), "no run of this automation with autonomy is in progress");
+
+        var unanswered = await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-9/takeover", new RunAutomationRequest(TakeOver(FleetAutomationRunRequest.TakeOverAction)));
+        await NextAsync(asked);
+        Assert.AreEqual(HttpStatusCode.Accepted, unanswered.Status, unanswered.Body.ToString());
+        Assert.AreEqual(AutomationRunDto.TakeOverRequested, unanswered.Read<AutomationRunDto>().Status, "asked, not confirmed: the machine did not say");
         // A request to run is not a take-over, nor the other way round, nor one for another run than the path.
         StringAssert.Contains((await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-9/takeover", new RunAutomationRequest(TakeOver(null)))).Body.ToString(),
             "does not take a run over");
@@ -261,6 +286,10 @@ public sealed class AutomationServerTests
             "another automation or run");
         // A request to run reads as before: no action is written.
         Assert.IsFalse(TakeOver(null).Payload.Contains("action", StringComparison.Ordinal));
+        // A run the machine did not report for this automation is not forwarded: the take-over is bound to the run of the automation it names.
+        var other = await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-of-another/takeover",
+            new RunAutomationRequest(TakeOver(FleetAutomationRunRequest.TakeOverAction, "run-of-another")));
+        Assert.AreEqual(HttpStatusCode.NotFound, other.Status, other.Body.ToString());
     }
 
     [TestMethod]

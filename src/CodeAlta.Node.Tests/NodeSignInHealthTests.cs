@@ -47,6 +47,28 @@ public sealed class NodeSignInHealthTests
         Assert.AreEqual(0, health.Read().Count);
     }
 
+    // The heartbeat alone starts the reading of the sign-ins: the first read of a new node, and the next one once the interval passed.
+    [TestMethod]
+    public async Task TheFirstHeartbeat_ReadsTheSignInsOfANewNode()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options(), token);
+        var read = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var health = new NodeHealth(node)
+        {
+            DiskSpace = () => (500 * 1024L * 1024 * 1024, 1000 * 1024L * 1024 * 1024),
+            SignInDefinitions = () =>
+            {
+                read.TrySetResult();
+                return [];
+            },
+        };
+
+        health.Read();
+        await read.Task.WaitAsync(TimeSpan.FromSeconds(10), token);
+    }
+
     [TestMethod]
     public async Task ALargeDiskWithTensOfGigabytesLeft_IsNotLow_ButOneUnderTheMinimumIs()
     {

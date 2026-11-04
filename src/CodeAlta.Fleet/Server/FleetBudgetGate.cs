@@ -19,10 +19,14 @@ public sealed record FleetBudgetLink(string LinkId, FleetOrganizationDevices Dev
 
 /// <summary>A run that a budget may limit: a session of the machine, in a space, of a project.</summary>
 /// <param name="RunId">The run, which a Continue anyway is bound to.</param>
-/// <param name="Title">What the run is, for the owner.</param>
+/// <param name="Title">What the run is, for the owner on this machine: a hold the server records names the run only, never its title.</param>
 /// <param name="SpaceId">The space of the session on this machine; null for the default one.</param>
 /// <param name="ProjectIdentity">What recognizes its project on the person's machines (<see cref="FleetProjectKeys.IdentityAsync"/>); null for none.</param>
-public sealed record FleetBudgetRun(string RunId, string? Title, string? SpaceId, string? ProjectIdentity);
+public sealed record FleetBudgetRun(string RunId, string? Title, string? SpaceId, string? ProjectIdentity)
+{
+    /// <summary>Gets the nonce of the hold the run asks when a budget holds it; null for a new one. A run taken again after a restart asks the same hold.</summary>
+    public string? Nonce { get; init; }
+}
 
 /// <summary>What this machine spent of a budget: the statistics facts it counted itself, which it holds offline too.</summary>
 public interface IFleetBudgetSpend
@@ -128,7 +132,7 @@ public sealed class FleetBudgetGate
                     return new FleetBudgetAdmission($"The budget '{budget.Name}' is reached: the run does not start.", continued);
                 }
 
-                var problem = await HoldAsync(link, state, budget, period, run, held, cancellationToken).ConfigureAwait(false);
+                var problem = await HoldAsync(link, state, budget, period, run, scope, held, cancellationToken).ConfigureAwait(false);
                 if (problem is not null) return new FleetBudgetAdmission(problem, continued);
                 continued.Add(budget.BudgetId);
             }
@@ -149,8 +153,11 @@ public sealed class FleetBudgetGate
             return serverReached || spent >= budget.Limit ? period : null;
         }
 
+        // What the server gives is not signed: this machine never holds more than the signed limit, and its own spending that
+        // reached the limit holds the run whatever the server says.
+        if (spent >= budget.Limit) return period;
         var reserve = FleetBudgetDocuments.RunReserve(budget);
-        var held = kept.PeriodStart == period.StartQuarter ? kept.Allowance : 0;
+        var held = Math.Min(kept.PeriodStart == period.StartQuarter ? kept.Allowance : 0, budget.Limit);
         if (held - spent >= reserve) return null;
         try
         {
@@ -158,9 +165,10 @@ public sealed class FleetBudgetGate
             timeout.CancelAfter(ReadTimeout);
             using var client = Client(link);
             var given = await client.AskAllowanceAsync(budget.BudgetId, new FleetAllowanceRequest(budget.Number, spent, reserve), timeout.Token).ConfigureAwait(false);
-            state.SetAllowance(budget.BudgetId, given.PeriodStart, given.Granted);
-            Log($"The server gave this machine {given.Granted} of the budget '{budget.Name}' for its period{(given.Exhausted ? "; the budget is reached" : string.Empty)}.");
-            return given.Granted - spent >= reserve ? null : period;
+            var granted = Math.Clamp(given.Granted, 0, budget.Limit);
+            state.SetAllowance(budget.BudgetId, given.PeriodStart, granted);
+            Log($"The server gave this machine {granted} of the budget '{budget.Name}' for its period{(given.Exhausted ? "; the budget is reached" : string.Empty)}.");
+            return granted - spent >= reserve ? null : period;
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested && exception is FleetServerException or HttpRequestException or OperationCanceledException)
         {
@@ -171,10 +179,10 @@ public sealed class FleetBudgetGate
     }
 
     // A run that waits for a person: the server records the hold, the owner continues it anyway (signed) or stops it.
-    private async Task<string?> HoldAsync(FleetBudgetLink link, LinkState state, FleetBudgetDefinition budget, FleetBudgetPeriod period, FleetBudgetRun run, Action? held,
-        CancellationToken cancellationToken)
+    private async Task<string?> HoldAsync(FleetBudgetLink link, LinkState state, FleetBudgetDefinition budget, FleetBudgetPeriod period, FleetBudgetRun run,
+        FleetBudgetRunScope scope, Action? held, CancellationToken cancellationToken)
     {
-        var nonce = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(16));
+        var nonce = run.Nonce is { Length: > 0 and <= 128 } given && !given.Any(char.IsControl) ? given : Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(16));
         var deadline = _time.GetUtcNow() + HoldWait;
         FleetBudgetHoldDto? hold = null;
         var announced = false;
@@ -187,13 +195,19 @@ public sealed class FleetBudgetGate
             {
                 using var client = Client(link);
                 hold = hold is null
-                    ? await client.RequestBudgetHoldAsync(budget.BudgetId, new RequestFleetBudgetHoldRequest(run.RunId, nonce, budget.Number, period.StartQuarter, Title(run.Title)),
+                    ? await client.RequestBudgetHoldAsync(budget.BudgetId, new RequestFleetBudgetHoldRequest(run.RunId, nonce, budget.Number, period.StartQuarter, Title: null),
                         cancellationToken).ConfigureAwait(false)
                     : await client.GetBudgetHoldAsync(hold.Id, cancellationToken).ConfigureAwait(false);
             }
-            catch (FleetServerException exception) when (exception.Code is "budget_hold.conflict" or "budget.not_found")
+            catch (FleetServerException exception) when (exception.Code == "budget_hold.conflict")
             {
-                return exception.Code == "budget.not_found" ? null : $"The run waits for the budget '{budget.Name}' with another hold already.";
+                return $"The run waits for the budget '{budget.Name}' with another hold already.";
+            }
+            catch (FleetServerException exception) when (exception.Code == "budget.not_found")
+            {
+                // A server that no longer knows the budget releases nothing: only a signed removal, or a version that is not reached,
+                // lets the run start (read below), else the run waits as for a server that does not answer.
+                hold = null;
             }
             catch (Exception exception) when (!cancellationToken.IsCancellationRequested && exception is FleetServerException or HttpRequestException or OperationCanceledException)
             {
@@ -221,11 +235,20 @@ public sealed class FleetBudgetGate
 
             // Reached no more (a new period, a higher limit, an allowance given): the run starts.
             await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
+            // The machine keeps every budget it verified: one it no longer has is one it cannot tell, and the run waits.
             var kept = state.Budgets().FirstOrDefault(candidate => candidate.Id == budget.BudgetId);
-            if (kept is null) return null;
-            if (link.Devices.Current is { } list && FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Devices.Identity.DeviceId, out var current, out _)
-                && (current.Number != budget.Number || await CheckAsync(link, state, kept, current, cancellationToken).ConfigureAwait(false) is null))
-                return null;
+            if (kept is not null && link.Devices.Current is { } list && FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Devices.Identity.DeviceId, out var current, out _))
+            {
+                // A new version decides again, as for a new run, never by itself: one that no longer covers the run, or that it is
+                // not reached under, starts it; one that stops refuses it; otherwise the run waits for its owner.
+                if (current.Number != budget.Number && !FleetBudgetDocuments.Covers(current, scope)) return null;
+                if (await CheckAsync(link, state, kept, current, cancellationToken).ConfigureAwait(false) is null) return null;
+                if (current.Number != budget.Number && current.Reached == FleetBudgetReachedActions.Stop)
+                {
+                    Log($"The run {run.RunId} does not start: the budget '{current.Name}' is reached and stops its runs now.");
+                    return $"The budget '{current.Name}' is reached: the run does not start.";
+                }
+            }
 
             var left = deadline - _time.GetUtcNow();
             if (left <= TimeSpan.Zero) return $"The budget '{budget.Name}' is reached and nobody continued the run in time.";
@@ -262,7 +285,11 @@ public sealed class FleetBudgetGate
             timeout.CancelAfter(ReadTimeout);
             if (link.Devices.Current is null) await link.Devices.RefreshAsync(timeout.Token).ConfigureAwait(false);
             using var client = Client(link);
-            state.Replace((await client.ListMachineBudgetsAsync(timeout.Token).ConfigureAwait(false)).Budgets);
+            var listed = (await client.ListMachineBudgetsAsync(timeout.Token).ConfigureAwait(false)).Budgets;
+            // What the server says is taken only as a newer version this machine verifies: what it leaves out, what does not
+            // verify and an older version change nothing that the machine verified (a removal is a signed version too).
+            if (link.Devices.Current is { } list)
+                state.Merge(listed, signed => FleetBudgetDocuments.TryVerify(signed, list, link.Devices.Identity.DeviceId, out var budget, out _) ? budget : null);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested
             && exception is FleetServerException or HttpRequestException or OperationCanceledException or FleetDeviceListException)
@@ -281,14 +308,7 @@ public sealed class FleetBudgetGate
     }
 
     private static FleetServerClient Client(FleetBudgetLink link)
-        => new(link.Devices.ServerAddress, link.Devices.Identity, link.Devices.Handler) { DeviceList = link.Devices };
-
-    private static string? Title(string? title)
-    {
-        if (string.IsNullOrWhiteSpace(title)) return null;
-        var kept = new string([.. title.Where(static c => !char.IsControl(c))]).Trim();
-        return kept.Length > 200 ? kept[..200] : kept;
-    }
+        => link.Devices.CreateClient();
 
     private static void Log(string message)
     {
@@ -332,20 +352,27 @@ public sealed class FleetBudgetGate
             lock (_gate) return [.. _budgets.Values];
         }
 
-        public void Replace(IReadOnlyList<FleetMachineBudgetDto> budgets)
+        /// <summary>
+        /// Takes what the server says of the budgets: a version it verifies, for the budget it names, newer than the one kept
+        /// (or the same, whose allowance and state the server updates). A budget the server leaves out, a version that does
+        /// not verify, and an older one keep what is kept: only a newer signed version, a removal included, changes a budget.
+        /// </summary>
+        public void Merge(IReadOnlyList<FleetMachineBudgetDto> budgets, Func<FleetSignedBudget?, FleetBudgetDefinition?> verify)
         {
             lock (_gate)
             {
-                var next = new Dictionary<string, KeptBudget>(StringComparer.Ordinal);
                 foreach (var budget in budgets)
                 {
+                    if (verify(budget.Signed) is not { } incoming || incoming.BudgetId != budget.Id) continue;
+                    var known = _budgets.GetValueOrDefault(budget.Id);
+                    var knownNumber = known is not null && verify(known.Signed) is { } held ? held.Number : (long?)null;
+                    if (knownNumber > incoming.Number) continue;
                     // The allowance the server says, or more when this machine was given more since (a read raced a grant).
                     var period = FleetStatisticsFamilies.QuarterOf(budget.Usage.PeriodStart);
-                    var allowance = _budgets.TryGetValue(budget.Id, out var known) && known.PeriodStart == period ? Math.Max(known.Allowance, budget.Allowance) : budget.Allowance;
-                    next[budget.Id] = new KeptBudget { Id = budget.Id, Signed = budget.Signed, PeriodStart = period, Allowance = allowance, State = budget.Usage.State };
+                    var allowance = known is not null && known.PeriodStart == period ? Math.Max(known.Allowance, budget.Allowance) : budget.Allowance;
+                    _budgets[budget.Id] = new KeptBudget { Id = budget.Id, Signed = budget.Signed, PeriodStart = period, Allowance = allowance, State = budget.Usage.State };
                 }
 
-                _budgets = next;
                 Save();
             }
         }

@@ -113,10 +113,14 @@ internal sealed partial class DesktopFleetServers
         if (ownerKind == FleetPrincipalKinds.Organization) ownerId = list.OrganizationId ?? string.Empty;
         using var client = Client(linkId);
         var held = (await client.ListScopeProvidersAsync(cancellationToken).ConfigureAwait(false)).Items.FirstOrDefault(provider => provider.Id == providerId);
-        var version = (held?.Version ?? 0) + 1;
-        var (sealedText, wraps) = FleetProviderKeys.Seal(list.OrganizationId ?? string.Empty, providerId, version, apiKey, recipients, list.Sequence, Identity());
-        return await client.PutScopeProviderAsync(providerId, new PutScopeProviderRequest(ownerKind, ownerId, name, type, endpoint, models, version, sealedText,
-            [.. wraps.Select(static wrap => new GrantKeyWrapDto(wrap.DeviceId, wrap.Wrapped))]), cancellationToken).ConfigureAwait(false);
+        // Machines refuse a version at or below one they removed, and the server forgets a provider it deletes: a version
+        // also above the time keeps one made again after a deletion above the one removed.
+        var version = Math.Max((held?.Version ?? 0) + 1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        // The definition as the server keeps it (trimmed), which is what the copies are signed over and the machines install.
+        var definition = new FleetProviderDefinition(ownerKind, ownerId, name.Trim(), type, endpoint, [.. models.Select(static model => model.Trim())]);
+        var (sealedText, wraps) = FleetProviderKeys.Seal(list.OrganizationId ?? string.Empty, providerId, version, definition, apiKey, recipients, list.Sequence, Identity());
+        return await client.PutScopeProviderAsync(providerId, new PutScopeProviderRequest(ownerKind, ownerId, definition.Name, type, endpoint, definition.Models, version,
+            sealedText, [.. wraps.Select(static wrap => new GrantKeyWrapDto(wrap.DeviceId, wrap.Wrapped))]), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -125,18 +129,60 @@ internal sealed partial class DesktopFleetServers
     /// </summary>
     /// <param name="linkId">The link.</param>
     /// <param name="grantId">The grant.</param>
+    /// <param name="decision">What the person decided, as the console showed the grant.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The grant, active.</returns>
     /// <exception cref="KeyNotFoundException">No such link, grant or session.</exception>
-    /// <exception cref="InvalidOperationException">This computer does not hold the key of the session, or the grantee has no device.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The server describes another grant, this computer does not hold the key of the session, the team is not signed yet, or the grantee has no device.
+    /// </exception>
     /// <exception cref="FleetServerException">The server refused it.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<GrantDto> ConfirmGrantKeysAsync(string linkId, string grantId, CancellationToken cancellationToken)
+    public async Task<GrantDto> ConfirmGrantKeysAsync(string linkId, string grantId, FleetGrantDecision decision, CancellationToken cancellationToken)
     {
-        var keys = Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.MetadataKeys
+        var connector = Volatile.Read(ref _connections)?.Find(linkId)?.Connector;
+        var keys = connector?.MetadataKeys
             ?? throw new InvalidOperationException("This computer is not connected to the server: it cannot open the content of the grant.");
+        // The people of a team come from the signed access document, read again so that the latest signed team decides.
+        var access = await connector!.Access.RefreshAsync(cancellationToken).ConfigureAwait(false);
         using var client = Client(linkId);
-        return await FleetGrantKeys.ConfirmAsync(client, keys, grantId, cancellationToken).ConfigureAwait(false);
+        var confirmed = await FleetGrantKeys.ConfirmAsync(client, keys, grantId, decision, access, cancellationToken).ConfigureAwait(false);
+        // Kept, so that the copies a new device of the grantee misses are given later for this decision only.
+        RecordGrantDecision(linkId, grantId, decision);
+        return confirmed;
+    }
+
+    private const string GrantDecisionsFileName = "grant-decisions.json";
+
+    // The grants a person of this computer confirmed, as they decided them, by grant.
+    private Dictionary<string, FleetGrantDecision> ReadGrantDecisions(string linkId)
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(Path.Combine(_store.LinkFolder(linkId), GrantDecisionsFileName)),
+                DesktopGrantDecisionsJson.Default.DictionaryStringFleetGrantDecision) ?? [];
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or System.Text.Json.JsonException or IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    private void RecordGrantDecision(string linkId, string grantId, FleetGrantDecision decision)
+    {
+        try
+        {
+            var decisions = ReadGrantDecisions(linkId);
+            decisions[grantId] = decision;
+            var folder = _store.LinkFolder(linkId);
+            Directory.CreateDirectory(folder);
+            File.WriteAllBytes(Path.Combine(folder, GrantDecisionsFileName), System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(decisions,
+                DesktopGrantDecisionsJson.Default.DictionaryStringFleetGrantDecision));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Not kept: the grant is keyed again once a person confirms it again.
+        }
     }
 
     /// <summary>
@@ -199,3 +245,6 @@ internal sealed partial class DesktopFleetServers
         return state;
     }
 }
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(Dictionary<string, FleetGrantDecision>))]
+internal sealed partial class DesktopGrantDecisionsJson : System.Text.Json.Serialization.JsonSerializerContext;

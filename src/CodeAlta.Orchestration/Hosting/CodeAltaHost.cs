@@ -99,6 +99,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
         // guard the host gave that session (the autonomy of an automation's run), looked up at each call.
         var toolHooks = Commands.Plugins;
         runtimeService.ToolInterceptorOf = scope => ToolGuards.Compose(scope, toolHooks?.CreateToolInterceptor(scope));
+        runtimeService.ToolGuards = ToolGuards;
+        // A session without a guard of its own takes the one of where it comes from: its lineage is read from the store.
+        ToolGuards.ReadSession = runtimeService.TryGetRecoverableSessionAsync;
         // A plugin can continue a session whose run ended, with a prompt of its own.
         if (runtimeService.PluginEventObserver is { } pluginEvents)
             pluginEvents.RunEndHooks = new PluginRunEndHooks(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins,
@@ -263,15 +266,22 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     /// <summary>
     /// Lists the sessions that wait for a person: a question a session asked, a command or a file change to allow, a form to
-    /// fill, a conversation held by another process. A session that waits for several is listed once.
+    /// fill, a conversation held by another process, a send a budget holds. A session that waits for several is listed once.
     /// </summary>
     /// <returns>The ids of the sessions.</returns>
     public async ValueTask<IReadOnlyList<string>> ListSessionsWaitingForPersonAsync()
     {
         var reviews = await RuntimeService.Permissions.ListWaitingSessionsAsync().ConfigureAwait(false);
         var held = await RuntimeService.ConversationHolds.ListWaitingSessionsAsync().ConfigureAwait(false);
-        return [.. Commands.Asks.ListWaitingSessions().Concat(reviews).Concat(held).Distinct(StringComparer.OrdinalIgnoreCase)];
+        var sends = HeldSends?.Invoke() ?? [];
+        return [.. Commands.Asks.ListWaitingSessions().Concat(reviews).Concat(held).Concat(sends).Distinct(StringComparer.OrdinalIgnoreCase)];
     }
+
+    /// <summary>
+    /// Gets or sets what gives the sessions whose send waits for a person elsewhere than in this host: a send of the fleet a
+    /// budget holds until its owner continues it (<see cref="ListSessionsWaitingForPersonAsync"/>); null for none.
+    /// </summary>
+    public Func<IReadOnlyCollection<string>>? HeldSends { get; set; }
 
     /// <summary>Gets host-owned admission and drainage for up to eight actual cached workspace reads.</summary>
     public OwnedSessionWorkspace WorkspaceReads { get; }

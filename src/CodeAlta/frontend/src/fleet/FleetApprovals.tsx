@@ -126,6 +126,10 @@ export function FleetApprovals({ epoch, api = fleetServer, active = false, onOpe
     if (reply?.status === "ok") {
       await dismiss(item);
       showToast({ intent: "success", icon: <AppIcon name="check" size={16} />, message: t("You took the run over: answer it in its session on {machine}.", { machine: item.notification.machine ?? "" }) });
+    } else if (reply?.status === "requested") {
+      // Its machine did not confirm it: the run is not said to be the person's, and the notice stays.
+      showToast({ intent: "warning", icon: <AppIcon name="warning" size={16} />,
+        message: t("You asked to take the run over on {machine}: it has not confirmed it yet, and an approval that waits too long may still stop the run.", { machine: item.notification.machine ?? "" }) });
     } else {
       showToast({ intent: "danger", icon: <AppIcon name="error" size={16} />, message: reply?.message ?? t("The run could not be taken over.") });
     }

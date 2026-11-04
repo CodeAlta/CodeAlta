@@ -26,6 +26,7 @@ public sealed class FleetOrganizationPolicy
     private readonly string? _path;
     private readonly SemaphoreSlim _refresh = new(1, 1);
     private FleetPolicyState? _current;
+    private bool _unreadable;
     // Whether the state was verified in this process: a state read from the file is extended only after a whole chain verified.
     private bool _verifiedHere;
 
@@ -38,7 +39,7 @@ public sealed class FleetOrganizationPolicy
         ArgumentNullException.ThrowIfNull(access);
         Access = access;
         _path = path;
-        _current = Read();
+        _current = Read(out _unreadable);
     }
 
     /// <summary>Gets the anchored access document of the link.</summary>
@@ -72,9 +73,14 @@ public sealed class FleetOrganizationPolicy
         await _refresh.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // Repaired or deleted meanwhile: read again; still unreadable: refused.
+            if (_unreadable && Read(out _unreadable) is var again && !_unreadable) Volatile.Write(ref _current, again);
+            if (_unreadable)
+                throw new FleetPolicyDocumentException(0, $"the policy this device kept for this server does not read ({_path}), and with it the checkpoint of its chain: "
+                    + "repair or delete that file to read the policy of the server again");
             var access = await Access.RefreshAsync(cancellationToken).ConfigureAwait(false);
             var devices = Devices.Current ?? await Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
-            using var client = new FleetServerClient(Devices.ServerAddress, Devices.Identity, Devices.Handler);
+            using var client = Devices.CreateClient();
             var held = Volatile.Read(ref _current);
             var organization = devices.OrganizationId ?? access.OrganizationId ?? string.Empty;
             // Verified before in this process: only the versions after it are read, each checked to follow the one before it.
@@ -85,22 +91,32 @@ public sealed class FleetOrganizationPolicy
                 if (FleetPolicyDocuments.TryParse(after.Items[^1].Document.Payload, out var newest) && newest.DeviceListSequence > devices.Sequence)
                     devices = await Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
                 var extended = held;
+                var taken = new List<(FleetSignedPolicyDocument, FleetPolicyState)>(after.Items.Count);
                 foreach (var item in after.Items)
                 {
                     if (!FleetPolicyDocuments.TryAppend(extended, item.Document, devices, Access.At, organization, out var next, out var reason))
                         throw new FleetPolicyDocumentException(extended.Number + 1, reason);
                     extended = next;
+                    taken.Add((item.Document, next));
                 }
 
-                return Accept(held, extended);
+                return AcceptEndorsed(held, taken, devices);
             }
 
             var listed = await client.ListPolicyDocumentsAsync(0, cancellationToken).ConfigureAwait(false);
             var needed = listed.Items.Count == 0 ? 0 : FleetPolicyDocuments.TryParse(listed.Items[^1].Document.Payload, out var last) ? last.DeviceListSequence : long.MaxValue;
             if (devices.Sequence < needed) devices = await Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
-            var verification = FleetPolicyDocuments.Verify(listed.Items.Select(static item => item.Document), devices, Access.At, organization);
-            if (!verification.IsValid) throw new FleetPolicyDocumentException(verification.BrokenAt!.Value, verification.Reason!);
-            var state = verification.State;
+            // Replayed one version at a time, so that the versions after the checkpoint can be held to the authority of now.
+            var state = FleetPolicyState.Empty;
+            var replayed = new List<(FleetSignedPolicyDocument, FleetPolicyState)>(listed.Items.Count);
+            foreach (var item in listed.Items)
+            {
+                if (!FleetPolicyDocuments.TryAppend(state, item.Document, devices, Access.At, organization, out var next, out var reason))
+                    throw new FleetPolicyDocumentException(state.Number + 1, reason);
+                state = next;
+                replayed.Add((item.Document, next));
+            }
+
             if (held is { Number: > 0 })
             {
                 // The chain held before is the anchor: the same first version, and the version held at the same place.
@@ -113,7 +129,9 @@ public sealed class FleetOrganizationPolicy
             }
 
             _verifiedHere = true;
-            return Accept(held, state);
+            // Without a checkpoint, the first read trusts the chain as it is (as the first read of the device list does); with
+            // one, the versions after it are taken for the first time.
+            return held is { Number: > 0 } ? AcceptEndorsed(held, replayed.Skip((int)held.Number).ToList(), devices) : Accept(held, state);
         }
         finally
         {
@@ -160,9 +178,34 @@ public sealed class FleetOrganizationPolicy
         ArgumentNullException.ThrowIfNull(draft);
         var text = FleetPolicyDocuments.Serialize(draft.Document with { SignerDeviceId = Devices.Identity.DeviceId });
         var signed = new FleetSignedPolicyDocument(text, Base64Url.EncodeToString(Devices.Identity.SignData(FleetPolicyDocuments.GetSignedBytes(text))));
-        using (var client = new FleetServerClient(Devices.ServerAddress, Devices.Identity, Devices.Handler))
+        using (var client = Devices.CreateClient())
             await client.AppendPolicyDocumentAsync(signed, cancellationToken).ConfigureAwait(false);
         return await RefreshAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // Versions taken for the first time stand only up to the last one whose signer holds authority now (the device list and the
+    // access document as this device holds them now): a later signer who holds it vouches for the versions before it; after
+    // it, a version a revoked signer made against their past authority is refused, and the policy stays as that last one left it.
+    private FleetPolicyState AcceptEndorsed(FleetPolicyState held, IReadOnlyList<(FleetSignedPolicyDocument Document, FleetPolicyState State)> taken, FleetDeviceListState devices)
+    {
+        var endorsed = held;
+        string? refusal = null;
+        var access = Access.Current;
+        foreach (var (document, state) in taken)
+        {
+            if (FleetPolicyDocuments.CheckCurrentSigner(document, devices, access) is { } why)
+            {
+                refusal ??= why;
+            }
+            else
+            {
+                endorsed = state;
+                refusal = null;
+            }
+        }
+
+        var accepted = Accept(held, endorsed);
+        return refusal is null ? accepted : throw new FleetPolicyDocumentException(endorsed.Number + 1, refusal);
     }
 
     private FleetPolicyState Accept(FleetPolicyState? held, FleetPolicyState state)
@@ -174,24 +217,51 @@ public sealed class FleetOrganizationPolicy
         return state;
     }
 
-    // The policy this device verified, read back as it wrote it: the device trusts its own folder as it trusts its pins.
-    private FleetPolicyState? Read()
+    /// <summary>
+    /// Gets whether the policy this device kept for the link does not read: its rules, its stop and the checkpoint of its chain
+    /// are lost, so the work of the fleet stops (<see cref="Current"/> holds a stop that says so) and the chain of the server is
+    /// not trusted again until the file is repaired or deleted.
+    /// </summary>
+    public bool KeptPolicyUnreadable => Volatile.Read(ref _unreadable);
+
+    // The policy this device verified, read back as it wrote it: the device trusts its own folder as it trusts its pins. A
+    // file that exists but does not read fails closed: established restrictions never silently become "no policy".
+    private FleetPolicyState? Read(out bool unreadable)
     {
+        unreadable = false;
         if (_path is null) return null;
-        try
+        for (var attempt = 0; ; attempt++)
         {
-            if (JsonSerializer.Deserialize(File.ReadAllBytes(_path), FleetPolicyKeptJson.Default.PolicyKept) is not { Root.Length: > 0 } kept || kept.Rules is null) return null;
-            return new FleetPolicyState(kept.Organization, kept.Number, kept.Tip, kept.List, kept.Access, kept.Rules, kept.Stop, kept.Signer, kept.Time) { FirstHash = kept.Root };
+            try
+            {
+                if (JsonSerializer.Deserialize(File.ReadAllBytes(_path), FleetPolicyKeptJson.Default.PolicyKept) is not { Root.Length: > 0 } kept || kept.Rules is null)
+                    return Unreadable(out unreadable);
+                return new FleetPolicyState(kept.Organization, kept.Number, kept.Tip, kept.List, kept.Access, kept.Rules, kept.Stop, kept.Signer, kept.Time) { FirstHash = kept.Root };
+            }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return null;
+            }
+            catch (JsonException)
+            {
+                return Unreadable(out unreadable);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Another instance of the link may be replacing it: read again, then fail closed.
+                if (attempt >= 2) return Unreadable(out unreadable);
+                Thread.Sleep(50);
+            }
         }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+    }
+
+    private FleetPolicyState Unreadable(out bool unreadable)
+    {
+        unreadable = true;
+        return FleetPolicyState.Empty with
         {
-            return null;
-        }
-        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
-        {
-            // A file that does not read is no policy, and no anchor: the next read verifies the chain from its first version.
-            return null;
-        }
+            Stop = new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [], $"the policy this machine kept for this server does not read ({_path}): repair or delete that file"),
+        };
     }
 
     // The checkpoint only moves forward, also when another instance of the same link wrote it meanwhile.
@@ -200,7 +270,7 @@ public sealed class FleetOrganizationPolicy
         if (_path is null || state.Number == 0) return;
         try
         {
-            if (Read() is { } stored && stored.Number > state.Number) return;
+            if (Read(out _) is { } stored && stored.Number > state.Number) return;
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             FleetFiles.WriteAtomically(_path, JsonSerializer.SerializeToUtf8Bytes(new PolicyKept(state.FirstHash!, state.Number, state.LastHash!, state.OrganizationId, state.DeviceListSequence,
                 state.AccessNumber, state.Rules, state.Stop, state.SignerDeviceId, state.Time), FleetPolicyKeptJson.Default.PolicyKept));

@@ -90,8 +90,9 @@ public sealed class FleetSecretsManager
     }
 
     /// <summary>
-    /// Rotates a value: its next version, sealed for the machines that hold it now and are still in the list (a revoked
-    /// machine is not given the new one) and for the person's controller devices; the machines take it at their next run.
+    /// Rotates a value: its next version, sealed for the machines that hold it now by a grant a controller device of the
+    /// person signed and are still in the list (a revoked machine is not given the new one, nor a holder the server lists
+    /// by itself) and for the person's controller devices; the machines take it at their next run.
     /// </summary>
     /// <param name="id">The id of the value.</param>
     /// <param name="value">The new value.</param>
@@ -111,7 +112,8 @@ public sealed class FleetSecretsManager
         using var client = Client();
         var held = await FindAsync(client, id, cancellationToken).ConfigureAwait(false);
         var binding = FleetSecretBinding.Of(held) with { Version = held.Version + 1 };
-        var copies = FleetSecretSealing.Seal(value, binding, FleetSecretSealing.Recipients(list, person, held.Holders), list, _devices.Identity);
+        var granted = FleetSecretSealing.GrantedHolders(held, list).Intersect(held.Holders, StringComparer.Ordinal);
+        var copies = FleetSecretSealing.Seal(value, binding, FleetSecretSealing.Recipients(list, person, granted), list, _devices.Identity);
         return await client.PutSecretAsync(id, new SetFleetSecretRequest(held.Kind, held.Name, held.Scope, binding.Version, held.HostOnly, copies), cancellationToken)
             .ConfigureAwait(false);
     }
@@ -242,23 +244,48 @@ public sealed class FleetSecretsManager
     }
 
     /// <summary>
-    /// Approves a run that waits for an environment: this device signs an approval bound to that environment and its
-    /// version, the machine, the run and the nonce the machine chose, valid for <see cref="ApprovalLifetime"/>.
+    /// Gives what a person reviews of an approval, as a short text that the approval they click must still match: its id,
+    /// the environment, its name and version, the machine, the run, the nonce, the automation and the title.
+    /// </summary>
+    /// <param name="approval">The approval as it was shown.</param>
+    /// <returns>The text, the same for the same approval.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="approval"/> is null.</exception>
+    public static string ReviewOf(FleetApprovalDto approval)
+    {
+        ArgumentNullException.ThrowIfNull(approval);
+        var text = string.Join('\n', "codealta-approval-review/1", approval.Id, approval.EnvironmentId, approval.EnvironmentName,
+            approval.EnvironmentVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), approval.MachineId, approval.RunId, approval.Nonce,
+            approval.AutomationId ?? string.Empty, approval.Title ?? string.Empty);
+        return System.Buffers.Text.Base64Url.EncodeToString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)));
+    }
+
+    /// <summary>
+    /// Approves the run a person reviewed, which waits for an environment: this device signs an approval bound to that
+    /// environment and its version, the machine, the run and the nonce the machine chose, valid for <see cref="ApprovalLifetime"/>.
+    /// The approval is read again first and must be the one reviewed (<see cref="ReviewOf"/>): a server that answers another
+    /// run, machine or nonce for the same approval gets nothing signed.
     /// </summary>
     /// <param name="approvalId">The approval.</param>
+    /// <param name="reviewed">What the person reviewed of it (<see cref="ReviewOf"/> of the approval shown).</param>
     /// <param name="cancellationToken">Cancels the calls.</param>
     /// <returns>The approval as the server holds it now.</returns>
-    /// <exception cref="ArgumentException">The id is empty, or this device is not a controller device of the list.</exception>
+    /// <exception cref="ArgumentException">An argument is empty, or this device is not a controller device of the list.</exception>
+    /// <exception cref="InvalidDataException">The approval the server answers is not the one reviewed, or not one its machine asked (<see cref="FleetApprovalRequests"/>): nothing is signed.</exception>
     /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
     /// <exception cref="FleetServerException">The server refused it: this device's person is not an approver, or it was given already.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<FleetApprovalDto> ApproveAsync(string approvalId, CancellationToken cancellationToken)
+    public async Task<FleetApprovalDto> ApproveAsync(string approvalId, string reviewed, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(approvalId);
+        ArgumentException.ThrowIfNullOrEmpty(reviewed);
         var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
         var person = PersonOf(list);
         using var client = Client();
         var asked = await client.GetApprovalAsync(approvalId, cancellationToken).ConfigureAwait(false);
+        if (asked.Id != approvalId || !string.Equals(ReviewOf(asked), reviewed, StringComparison.Ordinal))
+            throw new InvalidDataException("The approval changed since it was shown: read the approvals again before approving.");
+        // What the machine asked itself, never a request the server made up or changed.
+        if (!FleetApprovalRequests.IsAskedBy(asked, list, out var notAsked)) throw new InvalidDataException($"The run is not one its machine asked: {notAsked}.");
         var now = Now();
         var approval = new FleetEnvironmentApproval(FleetEnvironmentApproval.CurrentVersion, list.OrganizationId!, asked.Id, asked.EnvironmentId, asked.EnvironmentVersion,
             asked.MachineId, asked.RunId, asked.Nonce, person, _devices.Identity.DeviceId, now, now + ApprovalLifetime);
@@ -279,7 +306,7 @@ public sealed class FleetSecretsManager
         return await client.ListSecretUsesAsync(id, cancellationToken).ConfigureAwait(false);
     }
 
-    private FleetServerClient Client() => new(_devices.ServerAddress, _devices.Identity, _devices.Handler) { DeviceList = _devices };
+    private FleetServerClient Client() => _devices.CreateClient();
 
     // To the second, as the signed documents of the fleet are.
     private DateTimeOffset Now() => DateTimeOffset.FromUnixTimeSeconds(_time.GetUtcNow().ToUnixTimeSeconds());

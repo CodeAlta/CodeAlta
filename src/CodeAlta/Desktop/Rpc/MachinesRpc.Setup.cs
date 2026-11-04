@@ -53,7 +53,7 @@ internal sealed partial class MachinesService
         var setup = new SshNodeSetupRequest
         {
             Target = target, Name = string.IsNullOrWhiteSpace(request.Name) ? null : request.Name.Trim(), Port = request.Port ?? CodeAlta.Fleet.Channels.FleetChannelProtocol.DefaultPort,
-            DataRoot = Blank(request.DataRoot), ToolPath = Blank(request.ToolPath), PackageFolder = Blank(request.PackageFolder), AcceptNewHostKey = request.AcceptNewHostKey,
+            DataRoot = Blank(request.DataRoot), ToolPath = Blank(request.ToolPath), PackageFolder = Blank(request.PackageFolder), TrustedHostKey = FleetServerService.TrustedHostKey(request.TrustedHostKey),
             Manage = request.Manage,
         };
         string? words = null;
@@ -108,10 +108,10 @@ internal sealed partial class MachinesService
 /// <param name="DataRoot">The profile of the node there; null for <c>~/.alta</c> (<c>~/.alta-node</c> where CodeAlta Desktop runs).</param>
 /// <param name="ToolPath">The folder of the tool there; null for <c>~/.dotnet/tools</c>.</param>
 /// <param name="PackageFolder">A folder of this computer with the packages to install; null for nuget.org.</param>
-/// <param name="AcceptNewHostKey">Whether a host key ssh does not know yet is accepted.</param>
+/// <param name="TrustedHostKey">The fingerprint of the host key the person trusted, as it was shown to them; null for the keys ssh knows.</param>
 /// <param name="Manage">Whether this computer manages the machine (its devices, projects, secrets and updates), as the person ticked; off by default.</param>
 internal sealed record MachineSshRequest(string ExpectedEpoch, string Target, string? Name, int? Port, string? DataRoot, string? ToolPath, string? PackageFolder,
-    bool AcceptNewHostKey, bool Manage = false);
+    string? TrustedHostKey, bool Manage = false);
 
 /// <summary>Where a setup over SSH stands.</summary>
 /// <param name="Step"><c>connect</c>, <c>check</c>, <c>install</c>, <c>service</c>, <c>pair</c>, or <c>finished</c>.</param>
