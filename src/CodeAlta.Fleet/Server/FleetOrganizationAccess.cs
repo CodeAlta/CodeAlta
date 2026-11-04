@@ -68,10 +68,12 @@ public sealed class FleetOrganizationAccess
         try
         {
             using var client = new FleetServerClient(Devices.ServerAddress, Devices.Identity, Devices.Handler);
-            // Verified before in this process: only the versions after it are read, each checked to follow the one before it.
-            if (Volatile.Read(ref _current) is { Number: > 0, OrganizationId: { } known } held)
+            // Verified before in this process: only the versions after it are read, each checked to follow the one before it. An
+            // answer that does not start right after it (a gap, a fork, a server that lists from the start) is verified whole below.
+            if (Volatile.Read(ref _current) is { Number: > 0, OrganizationId: { } known } held
+                && await client.ListAccessDocumentsAsync(held.Number, cancellationToken).ConfigureAwait(false) is var after
+                && (after.Items.Count == 0 || FleetAccessDocuments.TryParse(after.Items[0].Document.Payload, out var first) && first.Number == held.Number + 1))
             {
-                var after = await client.ListAccessDocumentsAsync(held.Number, cancellationToken).ConfigureAwait(false);
                 if (after.Items.Count == 0) return held;
                 var needs = FleetAccessDocuments.TryParse(after.Items[^1].Document.Payload, out var newest) ? newest.DeviceListSequence : long.MaxValue;
                 var list = Devices.Current is { } current && current.Sequence >= needs ? current : await Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
