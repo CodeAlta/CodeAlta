@@ -367,7 +367,17 @@ internal sealed partial class AccessService
             || AccessPolicy.Allows(snapshot, person.Id, "access.review", AccessTarget.Organization, now);
         var visible = snapshot.Grants.Where(grant => all || grant.SubjectKind == FleetPrincipalKinds.Person && grant.SubjectId == person.Id
             || grant.SubjectKind == FleetPrincipalKinds.Team && snapshot.TeamRole(grant.SubjectId, person.Id) is not null
-            || grant.ScopeKind == FleetScopeKinds.Team && snapshot.TeamRole(grant.ScopeId!, person.Id) == FleetTeamRoles.Maintainer).ToList();
+            || grant.ScopeKind == FleetScopeKinds.Team && snapshot.TeamRole(grant.ScopeId!, person.Id) == FleetTeamRoles.Maintainer
+            || grant.CreatedByPersonId == person.Id).ToList();
+        // The grants on a resource the caller answers for (its owner, a maintainer of the team that owns it): they confirm the
+        // keys of its content and take the grants back, without managing the access of the organization.
+        foreach (var grant in snapshot.Grants.Where(grant => grant.ScopeKind == FleetScopeKinds.Resource && !visible.Contains(grant)))
+        {
+            var target = await GrantTargetAsync(actor.OrganizationId, snapshot, grant.ScopeKind, grant.ScopeId, cancellationToken).ConfigureAwait(false);
+            if (target.OwnerKind == FleetPrincipalKinds.Person ? target.OwnerId == person.Id
+                : target.OwnerKind == FleetPrincipalKinds.Team && target.OwnerId is { } owningTeam && snapshot.TeamRole(owningTeam, person.Id) == FleetTeamRoles.Maintainer)
+                visible.Add(grant);
+        }
         // An active grant of a session whose grantee has a device its copies of the key miss: a computer of the owner keys it again.
         var keyed = visible.Where(static grant => grant.Status == FleetGrantStatuses.Active && grant.Capability == "session.view-content").ToList();
         HashSet<string> missing = new(StringComparer.Ordinal);

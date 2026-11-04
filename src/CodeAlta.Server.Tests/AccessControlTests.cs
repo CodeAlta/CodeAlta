@@ -366,6 +366,37 @@ public sealed class AccessControlTests
     }
 
     [TestMethod]
+    public async Task WhoAnswersForTheContentOfAGrant_ListsIt_AndConfirmsItsKeys_WithoutManagingAccess()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Build box");
+        var (setup, machine) = await server.SetUpWithNodeAsync(owner, node);
+        var (mia, miaId) = await AddPersonAsync(server, owner, setup, "Mia");
+        var (max, maxId) = await AddPersonAsync(server, owner, setup, "Max");
+        var (cy, _) = await AddPersonAsync(server, owner, setup, "Cy");
+        var team = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/teams", new CreateTeamRequest("Infra"))).Read<TeamDto>();
+        await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{team.Id}/members/{miaId}", new SetTeamMemberRequest(FleetTeamRoles.Maintainer));
+        await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/teams/{team.Id}/members/{setup.Owner.Id}");
+        var offer = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Machine, machine.Id, FleetPrincipalKinds.Team,
+            team.Id))).Read<TransferDto>();
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/transfers/{offer.Id}/accept")).Status);
+        await PublishSessionAsync(server, node, "s1");
+
+        // Mia, a maintainer of the team whose machine runs the session, shares it with Max: she sees the grant that waits for her keys.
+        var made = await server.SendAsync(mia, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "session.view-content", FleetScopeKinds.Resource, "session:s1", Sealed: true));
+        Assert.AreEqual(HttpStatusCode.Created, made.Status, made.Body.ToString());
+        var grant = made.Read<GrantDto>();
+        Assert.IsTrue((await server.SendAsync(mia, HttpMethod.Get, "/api/v1/grants")).Read<AccessListDto<GrantDto>>().Items.Any(item => item.Id == grant.Id),
+            "who answers for the content lists the grants on it, to confirm their keys");
+        Assert.IsFalse((await server.SendAsync(cy, HttpMethod.Get, "/api/v1/grants")).Read<AccessListDto<GrantDto>>().Items.Any(item => item.Id == grant.Id),
+            "nobody else does");
+        var keyed = await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/grants/{grant.Id}/keys", new ConfirmGrantKeysRequest("sealed", [new GrantKeyWrapDto(max.DeviceId, "wrapped")]));
+        Assert.AreEqual(HttpStatusCode.OK, keyed.Status, keyed.Body.ToString());
+    }
+
+    [TestMethod]
     public async Task AMaintainerOfAnotherTeam_NeitherReplacesNorTakesOverAProviderTheyDoNotAnswerFor()
     {
         await using var server = await ServerFixture.StartAsync();
