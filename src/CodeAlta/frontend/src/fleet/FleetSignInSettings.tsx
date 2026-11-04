@@ -281,7 +281,7 @@ function SignInDialog({ server, epoch, api, view, logins, onClose }: {
             <InputGroup value={draft.allowedTenants} disabled={working} placeholder={t("Required for Entra ID")} spellCheck={false}
               onChange={event => update({ allowedTenants: event.target.value })} /></label>
         </div>
-        <small className="muted-text">{t("Redirect to register at the provider: http://127.0.0.1 (any port).")}</small>
+        <small className="muted-text">{t("Redirect to register at the provider: http://localhost/callback (any port; on Entra ID, a Web platform redirect).")}</small>
         {hasCompany(draft) && <GroupRoles draft={draft} working={working} update={update} />}
         <Switch checked={draft.requireSso} disabled={working} label={t("Require company sign-in")} onChange={event => update({ requireSso: event.currentTarget.checked })} />
         {draft.requireSso && <small className="muted-text">{t("Only company sign-in lets a new computer in; your passkey stays as the owner's way in.")}</small>}

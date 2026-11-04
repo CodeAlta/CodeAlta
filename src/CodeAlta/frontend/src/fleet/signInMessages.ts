@@ -107,10 +107,12 @@ export const signInMessages = {
     "每次公司登录时，此人获得其所属组中最广的角色，不属于任何组则为成员。所有者保留其角色。"],
   "Each group needs its id.": ["Cada grupo necesita su id.", "Chaque groupe a besoin de son id.", "Jede Gruppe braucht ihre ID.", "各グループには ID が必要です。", "每个组都需要其 ID。"],
   "A group gives one role.": ["Un grupo da un solo rol.", "Un groupe donne un seul rôle.", "Eine Gruppe gibt eine Rolle.", "1 つのグループが与えるロールは 1 つです。", "一个组只给一个角色。"],
-  "Redirect to register at the provider: http://127.0.0.1 (any port).": [
-    "Redirección que registrar en el proveedor: http://127.0.0.1 (cualquier puerto).", "Redirection à enregistrer chez le fournisseur : http://127.0.0.1 (tout port).",
-    "Beim Anbieter zu registrierende Weiterleitung: http://127.0.0.1 (beliebiger Port).", "プロバイダーに登録するリダイレクト: http://127.0.0.1 (任意のポート)。",
-    "在提供方注册的重定向：http://127.0.0.1（任意端口）。"],
+  "Redirect to register at the provider: http://localhost/callback (any port; on Entra ID, a Web platform redirect).": [
+    "Redirección que registrar en el proveedor: http://localhost/callback (cualquier puerto; en Entra ID, una redirección de la plataforma Web).",
+    "Redirection à enregistrer chez le fournisseur : http://localhost/callback (tout port ; sur Entra ID, une redirection de la plateforme Web).",
+    "Beim Anbieter zu registrierende Weiterleitung: http://localhost/callback (beliebiger Port; bei Entra ID eine Weiterleitung der Plattform „Web“).",
+    "プロバイダーに登録するリダイレクト: http://localhost/callback (任意のポート。Entra ID では「Web」プラットフォームのリダイレクト)。",
+    "在提供方注册的重定向：http://localhost/callback（任意端口；在 Entra ID 中为 Web 平台重定向）。"],
   "Require company sign-in": ["Exigir el inicio de sesión de empresa", "Exiger la connexion d’entreprise", "Unternehmensanmeldung verlangen", "会社のサインインを必須にする", "要求公司登录"],
   "Only company sign-in lets a new computer in; your passkey stays as the owner's way in.": [
     "Solo el inicio de sesión de empresa deja entrar un equipo nuevo; tu llave de acceso sigue siendo la entrada del propietario.",

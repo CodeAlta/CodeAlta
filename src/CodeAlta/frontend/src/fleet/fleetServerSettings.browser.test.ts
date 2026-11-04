@@ -305,6 +305,9 @@ test("the owner links a passkey, turns company sign-in on and requires it, and t
     await page.until(`document.querySelector('.fleet-sign-in-dialog .fleet-sign-in-methods')`, "the form");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-methods label')].map(label => [label.textContent, label.querySelector('input').checked])`),
       [["Passkey", true], ["Microsoft", true], ["Google · Not registered yet", true], ["GitHub", true]]);
+    // The redirect to register is the one company sign-in comes back to: localhost, since Entra ID's Web platform takes no 127.0.0.1.
+    assert.equal(await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-dialog small')].map(small => small.textContent).find(text => text.startsWith('Redirect'))`),
+      "Redirect to register at the provider: http://localhost/callback (any port; on Entra ID, a Web platform redirect).");
     await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-dialog .bp6-switch')].find(label => label.textContent === 'Company sign-in').querySelector('input').click()`);
     await page.until(`document.querySelector('.fleet-sign-in-dialog [role=alert]')?.textContent === 'Company sign-in needs its issuer and client id.'`, "the provider is needed");
     await page.evaluate(`(() => { const inputs = [...document.querySelectorAll('.fleet-sign-in-dialog .fleet-server-form .bp6-input')];
