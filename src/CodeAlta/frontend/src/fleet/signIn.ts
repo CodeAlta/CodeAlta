@@ -99,6 +99,14 @@ export function hasCompany(draft: SignInDraft): boolean {
   return draft.issuer.trim().length > 0 || draft.clientId.trim().length > 0;
 }
 
+/** Whether an issuer is Microsoft Entra ID's (its host): a provider that never confirms an email, so its accounts are let in by tenant id. */
+export function isEntraIssuer(issuer: string): boolean {
+  try {
+    const host = new URL(issuer.trim()).hostname.toLowerCase();
+    return host === "login.microsoftonline.com" || host === "login.microsoft.com" || host === "sts.windows.net";
+  } catch { return false; }
+}
+
 /** Why a draft cannot be saved; null when it can. */
 export function signInDraftProblem(draft: SignInDraft): MessageKey | null {
   if (hasCompany(draft)) {

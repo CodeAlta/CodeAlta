@@ -6,7 +6,7 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { serverProblem } from "./fleetServer";
-import { allowedValues, groupRoleChoices, hasCompany, linkableMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
+import { allowedValues, groupRoleChoices, hasCompany, isEntraIssuer, linkableMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
 import { ConfirmPopover } from "../ConfirmPopover";
 import { SignInCode } from "./SignInCode";
 import { SignInMethodIcon } from "./SignInMethodIcon";
@@ -281,6 +281,8 @@ function SignInDialog({ server, epoch, api, view, logins, onClose }: {
             <InputGroup value={draft.allowedTenants} disabled={working} placeholder={t("Required for Entra ID")} spellCheck={false}
               onChange={event => update({ allowedTenants: event.target.value })} /></label>
         </div>
+        {isEntraIssuer(draft.issuer) && <Callout compact intent="warning" className="fleet-sign-in-entra">
+          {t("Entra ID does not confirm emails, so an email domain would refuse all its accounts: they are let in by tenant id.")}</Callout>}
         <small className="muted-text">{t("Redirect to register at the provider: http://localhost/callback (any port; on Entra ID, a Web platform redirect).")}</small>
         {hasCompany(draft) && <GroupRoles draft={draft} working={working} update={update} />}
         <Switch checked={draft.requireSso} disabled={working} label={t("Require company sign-in")} onChange={event => update({ requireSso: event.currentTarget.checked })} />

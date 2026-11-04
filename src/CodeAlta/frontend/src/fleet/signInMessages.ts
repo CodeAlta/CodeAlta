@@ -156,6 +156,12 @@ export const signInMessages = {
     "La modification affichée n’est pas celle que le serveur appliquerait : rien n’a été approuvé.", "Die angezeigte Änderung ist nicht die, die der Server anwenden würde: nichts wurde genehmigt.",
     "表示された変更はサーバーが適用する変更ではありません。何も承認されていません。", "显示的更改并非服务器将应用的更改：未批准任何内容。"],
   "Email domains let in": ["Dominios de correo admitidos", "Domaines d’e-mail admis", "Zugelassene E-Mail-Domänen", "受け入れるメールのドメイン", "允许的邮箱域名"],
+  "Entra ID does not confirm emails, so an email domain would refuse all its accounts: they are let in by tenant id.": [
+    "Entra ID no confirma los correos, así que un dominio de correo rechazaría todas sus cuentas: se admiten por id. de inquilino.",
+    "Entra ID ne confirme pas les e-mails : un domaine d’e-mail refuserait tous ses comptes, qui sont admis par id. de locataire.",
+    "Entra ID bestätigt keine E-Mail-Adressen, deshalb würde eine E-Mail-Domäne alle seine Konten abweisen: Sie werden über die Mandanten-ID hereingelassen.",
+    "Entra ID はメールを確認しないため、メールのドメインを指定するとそのアカウントはすべて拒否されます。アカウントはテナント ID で受け入れます。",
+    "Entra ID 不会确认邮箱，因此邮箱域名会拒绝其所有账户：请改用租户 ID 允许它们。"],
   "Tenant ids let in": ["Id. de inquilino admitidos", "Id. de locataire admis", "Zugelassene Mandanten-IDs", "受け入れるテナント ID", "允许的租户 ID"],
   "Required for Entra ID": ["Obligatorio para Entra ID", "Obligatoire pour Entra ID", "Für Entra ID erforderlich", "Entra ID では必須", "Entra ID 必填"],
   "Requiring company sign-in needs company sign-in on.": ["Exigir el inicio de sesión de empresa requiere activarlo.", "Exiger la connexion d’entreprise demande de l’activer.",

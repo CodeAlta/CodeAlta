@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { FleetSignInSettingsView } from "#neoastra";
-import { allowedValues, orderedSignInMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
+import { allowedValues, isEntraIssuer, orderedSignInMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
 
 const settings = (look: Partial<FleetSignInSettingsView> = {}): FleetSignInSettingsView => ({ methods: [
   { id: "company", name: "Contoso", enabled: true, available: true }, { id: "passkey", name: "Passkey", enabled: true, available: true },
@@ -45,6 +45,12 @@ test("company sign-in names the domains or the tenants it lets in", () => {
   assert.equal(signInDraftProblem({ ...draft, allowedDomains: " , " }), "Company sign-in needs the email domains or the tenant ids it lets in.");
   assert.equal(signInDraftProblem({ ...draft, allowedDomains: "", allowedTenants: "tenant-a" }), null);
   assert.deepEqual(allowedValues(" Contoso.com, fabrikam.com;contoso.com\nexample.org "), ["contoso.com", "fabrikam.com", "example.org"]);
+});
+
+test("Entra ID is told by its issuer's host, whatever the tenant or the path", () => {
+  for (const issuer of ["https://login.microsoftonline.com/organizations/v2.0", " https://LOGIN.microsoftonline.com/0a1b/v2.0 ", "https://sts.windows.net/0a1b/",
+    "https://login.microsoft.com/0a1b/v2.0"]) assert.equal(isEntraIssuer(issuer), true, issuer);
+  for (const issuer of ["", "not a url", "https://login.contoso.example/v2.0", "https://accounts.google.com", "https://evil.example/login.microsoftonline.com"]) assert.equal(isEntraIssuer(issuer), false, issuer);
 });
 
 test("the row says the methods people may use now, or that company sign-in is required", () => {

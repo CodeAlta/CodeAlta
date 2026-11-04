@@ -310,9 +310,16 @@ test("the owner links a passkey, turns company sign-in on and requires it, and t
       "Redirect to register at the provider: http://localhost/callback (any port; on Entra ID, a Web platform redirect).");
     await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-dialog .bp6-switch')].find(label => label.textContent === 'Company sign-in').querySelector('input').click()`);
     await page.until(`document.querySelector('.fleet-sign-in-dialog [role=alert]')?.textContent === 'Company sign-in needs its issuer and client id.'`, "the provider is needed");
+    // Entra ID never confirms an email: with its issuer the dialog says its accounts are let in by tenant id; another issuer needs no such word.
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-sign-in-entra')`), null);
+    await page.evaluate(type(".fleet-sign-in-dialog .fleet-server-form .bp6-input", "https://login.microsoftonline.com/organizations/v2.0"));
+    await page.until(`document.querySelector('.fleet-sign-in-entra')`, "the warning about Entra ID");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-sign-in-entra').textContent`),
+      "Entra ID does not confirm emails, so an email domain would refuse all its accounts: they are let in by tenant id.");
     await page.evaluate(`(() => { const inputs = [...document.querySelectorAll('.fleet-sign-in-dialog .fleet-server-form .bp6-input')];
       const set = (input, value) => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); };
       set(inputs[0], 'https://login.contoso.example/v2.0'); set(inputs[1], 'contoso-client'); set(inputs[2], 'the-secret'); set(inputs[3], 'Contoso'); return true; })()`);
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-sign-in-entra')`), null, "no word about Entra ID for another issuer");
     await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-dialog .bp6-switch')].find(label => label.textContent === 'Require company sign-in').querySelector('input').click()`);
     // Whose accounts it lets in is named: nothing named is refused.
     await page.until(`document.querySelector('.fleet-sign-in-dialog [role=alert]')?.textContent === 'Company sign-in needs the email domains or the tenant ids it lets in.'`, "the domains are needed");
