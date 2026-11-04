@@ -229,6 +229,25 @@ public sealed class ServerApplication
         AddDataRoot(updateCommand, update);
         updateCommand.Add((_, _) => UpdateAsync(update));
 
+        var backups = new BackupsOptions();
+        var backupsCommand = new Command("backups", "List the backups of the database, and delete those that keep secrets in clear")
+        {
+            new CommandUsage("Usage: {NAME} [--delete-unsealed] [options]"),
+            _,
+            "Lists the copies of the database in backups/ of the data root (taken before",
+            "each update) and whether each keeps the client secret of the company's",
+            "sign-in or the headers of the telemetry collector in clear: a version",
+            "before the server sealed them took those. --delete-unsealed deletes them,",
+            "but the one a version on trial rolls back to, which goes once the trial",
+            "ends. A copy taken since holds them sealed: it opens with the key ring of",
+            "keys/ only, which a backup of the data root keeps beside it.",
+            _,
+            "Options:",
+            { "delete-unsealed", "Delete the backups that keep secrets in clear", v => backups.DeleteUnsealed = v is not null },
+        };
+        AddDataRoot(backupsCommand, backups);
+        backupsCommand.Add((_, _) => BackupsAsync(backups));
+
         return new CommandApp("altaserver", config: new CommandConfig { OutputFactory = static _ => DefaultCommandOutput.Instance })
         {
             new CommandUsage("Usage: {NAME} <command> [options]"),
@@ -245,6 +264,7 @@ public sealed class ServerApplication
             uninstallCommand,
             setupCommand,
             updateCommand,
+            backupsCommand,
             _,
             "Options:",
             new HelpOption(),
@@ -369,6 +389,14 @@ public sealed class ServerApplication
         await using (server.ConfigureAwait(false))
         {
             await _output.WriteLineAsync($"CodeAlta Server {ServerVersion.Current} listens on {string.Join(", ", server.Addresses.Select(static address => address.ToString().TrimEnd('/')))} (data root {paths.DataRoot}).").ConfigureAwait(false);
+            // Copies an older version took before the server sealed its secrets keep them in clear: said once, with what to do.
+            if (ServerBackups.FindUnsealed(paths) is { Count: > 0 } unsealed)
+            {
+                await _error.WriteLineAsync($"altaserver: {unsealed.Count} backup{(unsealed.Count == 1 ? "" : "s")} in {paths.BackupsRoot} keep the client secret of the company's sign-in or the " +
+                    "headers of the telemetry collector in clear (a version before the server sealed them took them): altaserver backups --delete-unsealed deletes them.")
+                    .ConfigureAwait(false);
+            }
+
             if (server.SetupCode is { } code)
             {
                 await _output.WriteLineAsync($"No owner yet. Setup code: {code.Code} (until {code.ExpiresAt.ToLocalTime():t}, from this machine only; altaserver setup-code prints it again).")
@@ -905,6 +933,38 @@ public sealed class ServerApplication
         public string? Account { get; set; }
 
         public bool DryRun { get; set; }
+    }
+
+    private sealed class BackupsOptions : DataRootOptions
+    {
+        public bool DeleteUnsealed { get; set; }
+    }
+
+    private async ValueTask<int> BackupsAsync(BackupsOptions options)
+    {
+        if (!options.TryResolve(_error, out var paths)) return ServerExitCodes.InvalidUsage;
+        var list = ServerBackups.List(paths!);
+        if (list.Count == 0) await _output.WriteLineAsync($"No backup in {paths!.BackupsRoot}.").ConfigureAwait(false);
+        foreach (var backup in list)
+        {
+            var state = !backup.Unsealed ? "no secret in clear" : backup.KeptForTrial is { } version ? $"secrets in clear, kept while {version} is on trial" : "secrets in clear";
+            await _output.WriteLineAsync($"{Path.GetFileName(backup.Path)}: {state}").ConfigureAwait(false);
+        }
+
+        if (!options.DeleteUnsealed) return ServerExitCodes.Success;
+        try
+        {
+            var (deleted, kept) = ServerBackups.DeleteUnsealed(paths!);
+            foreach (var file in deleted) await _output.WriteLineAsync($"Deleted {Path.GetFileName(file)}.").ConfigureAwait(false);
+            foreach (var backup in kept)
+                await _output.WriteLineAsync($"Kept {Path.GetFileName(backup.Path)}: {backup.KeptForTrial} rolls back to it while on trial; run this again once it confirmed.").ConfigureAwait(false);
+            return ServerExitCodes.Success;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            await _error.WriteLineAsync($"altaserver backups: {exception.Message}").ConfigureAwait(false);
+            return ServerExitCodes.Failure;
+        }
     }
 
     private sealed class SetupCodeOptions : DataRootOptions

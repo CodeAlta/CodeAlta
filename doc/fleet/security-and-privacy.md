@@ -88,6 +88,9 @@ snapshot never grants a whole space.
   elsewhere), each for one use and one organization; no API gives them back, not even to the owner (the names of the
   headers only), and no log or audit record holds them. A value an older version kept in clear is sealed at the next
   start and overwritten in the file. A database without its key ring reads them as unset: the owner sets them again.
+  A backup taken since holds them sealed; one an older version took (`backups/`, before an update) may hold them in
+  clear: the server says so once at its start, and `altaserver backups --delete-unsealed` deletes those, but the one a
+  version on trial rolls back to.
 - **Account recovery is not encryption recovery.** Regaining the Owner role on a server (`altaserver recover-owner`, on
   the server's own terminal) never needs the recovery key of encrypted data, which never goes to the server; that key
   restores keys on a device, locally.
