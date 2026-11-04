@@ -753,14 +753,18 @@ test("the canvas is used with the keyboard: tabs, menus, the table of a chart, t
     await page.key("Enter", 13, "\r");
     await page.until(`document.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim() === 'Overview' && ${settled}`, "the previous page");
     assert.equal(await page.evaluate(`document.querySelector('[role="tablist"]').getAttribute('role')`), "tablist");
-    // A menu opens with Enter, moves with the arrows, and closes with Escape.
+    // A menu opens with Enter, moves with the arrows, and closes with Escape. Its frames come late here, as on a loaded
+    // machine: the popover takes the focus a frame after it opens, and an Escape before that goes to the button.
+    await page.evaluate(`(() => { const frame = window.requestAnimationFrame.bind(window); window.promptFrame = frame;
+      window.requestAnimationFrame = callback => frame(() => setTimeout(() => frame(callback), 600)); })()`);
     await page.evaluate(`document.querySelector('button[aria-label^="Compare:"]').focus()`);
     await page.key("Enter", 13, "\r");
     await page.until(`document.querySelector('.bp6-menu')`, "the menu");
-    // The popover ignores an Escape while it is still opening.
-    await idle(400);
+    // The popover closes on an Escape it receives: once its focus is in it, whatever the time that takes.
+    await page.until(`document.activeElement?.closest('.bp6-portal') != null`, "the focus in the menu");
     await page.key("Escape", 27);
     await page.until(`!document.querySelector('.bp6-menu')`, "the menu closed");
+    await page.evaluate(`window.requestAnimationFrame = window.promptFrame`);
     assert.equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')?.startsWith('Compare:')`), true, "the focus comes back to the button");
     // The legend is a row of buttons with a pressed state, and the year is one tab stop.
     assert.ok(await page.evaluate<number>(`document.querySelectorAll('.chart-legend-item[aria-pressed]').length`) >= 2);

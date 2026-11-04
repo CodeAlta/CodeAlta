@@ -190,6 +190,8 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             // Jira, Slack and the hooks of its servers, with the secrets of this machine: the node watches them while nobody is at the keyboard.
             Integrations = _options.Integrations ?? AutomationIntegrationOptions.ForHost(catalog.GlobalRoot),
         };
+        // The credential rules of a run hold at every attachment of its sessions and of those they start.
+        host.RuntimeService.ProviderGate = CheckSessionProviderAsync;
     }
 
     /// <summary>Gets the engine.</summary>
@@ -278,15 +280,48 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         if (organizationScope && organizationServices.Count == 0)
             return "The automations of the organization run as one of its service identities: an admin turns one on in People and access, and a signer signs it for machines.";
 
-        var kind = _options.CredentialKind?.Invoke(provider) ?? Classify(provider);
+        return CredentialRefusal(entry, provider, null, policy);
+    }
+
+    // Why a run of an automation may not use a provider by the credential it runs with: one that cannot be told, or a personal plan
+    // where account credentials are required (a machine of a team or of the organization, this machine's policy, and, with a space,
+    // the signed policy that applies there). An automation no longer known here keeps to account credentials.
+    private string? CredentialRefusal(AutomationEntry? entry, ModelProviderDescriptor provider, string? spaceId, NodeAutomationPolicy? policy = null)
+    {
+        var kind = CredentialKindOf(provider);
         if (kind == AutomationCredentialKind.Unknown)
             return $"The credential the provider '{provider.ProviderId.Value}' runs with cannot be told: an unattended run uses a provider whose credential is known.";
-        if (kind == AutomationCredentialKind.Personal && (team is not null || organizationMachine || IsSharedMachine()))
+        if (kind != AutomationCredentialKind.Personal) return null;
+        if (entry is null)
+            return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and the automation this session runs for is no longer on this machine: it keeps to account credentials.";
+        if (TeamsOf(entry).Machine is not null || OrganizationOf(entry).Machine || IsSharedMachine())
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and a machine of a team or of the organization runs automations with account credentials only.";
-        if (kind == AutomationCredentialKind.Personal && policy.Credentials != NodeAutomationPolicy.AnyCredentials)
+        policy ??= NodeAutomationPolicy.Load(_fleetRoot);
+        if (policy.Problem is not null || policy.Credentials != NodeAutomationPolicy.AnyCredentials)
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and this machine runs automations with account credentials only.";
-
+        if (spaceId is not null && RulesOf(entry, spaceId)?.AccountCredentials == true)
+            return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and the policy of the organization runs every automation with account credentials.";
         return null;
+    }
+
+    /// <summary>
+    /// Checks the provider a session of this node attaches with (<see cref="CodeAlta.Orchestration.Runtime.SessionRuntimeService.ProviderGate"/>):
+    /// a session of a run of an automation, and every session it started, keeps the credential rules of that automation for the
+    /// whole run, whatever changes its provider (a person, a model tier, a fallback) and whatever starts a child.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="providerKey">The provider it would run with.</param>
+    /// <param name="cancellationToken">Cancels the reads of its lineage.</param>
+    /// <returns>Why it may not; null when it may, or when no automation started it.</returns>
+    internal async ValueTask<string?> CheckSessionProviderAsync(SessionViewDescriptor session, string providerKey, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        var origin = await _host.RuntimeService.FindLineageCreatorAsync(session,
+            static createdBy => createdBy.Kind == AltaActorProvenance.AutomationKind && !string.IsNullOrEmpty(createdBy.AutomationId), cancellationToken).ConfigureAwait(false);
+        if (origin is null) return null;
+        if (!_host.ModelProviderRegistry.TryGetProvider(new ModelProviderId(providerKey), out var provider))
+            return $"The provider '{providerKey}' is not one of this machine: a session of an automation runs with a provider whose credential is known.";
+        return CredentialRefusal(Engine.Snapshot.Find(origin.AutomationId!), provider, session.SpaceId ?? SpaceDescriptor.DefaultId);
     }
 
     /// <inheritdoc />

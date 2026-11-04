@@ -32,7 +32,7 @@ public sealed record FleetPolicySource(string Server, FleetPolicyState? Policy, 
 /// </summary>
 public sealed class FleetPolicyGuard
 {
-    private readonly string _deviceId;
+    private readonly Func<string> _deviceId;
     private readonly Func<IEnumerable<FleetPolicySource>> _sources;
 
     /// <summary>Initializes a new instance of the <see cref="FleetPolicyGuard"/> class over the connectors of the servers of a machine.</summary>
@@ -44,6 +44,21 @@ public sealed class FleetPolicyGuard
     {
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FleetPolicyGuard"/> class over the connectors of the servers of a
+    /// machine whose device is read only once a policy has a stop to check against it: a machine with no server makes no
+    /// device key for its guard (<c>doc/fleet/security-and-privacy.md</c>, S1).
+    /// </summary>
+    /// <param name="deviceId">Gives the device of this machine, when a stop is checked.</param>
+    /// <param name="connectors">Gives the connectors of the servers this machine joined.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public FleetPolicyGuard(Func<string> deviceId, Func<IEnumerable<FleetConnector>> connectors)
+    {
+        ArgumentNullException.ThrowIfNull(deviceId);
+        _deviceId = deviceId;
+        _sources = Sources(connectors);
+    }
+
     /// <summary>Initializes a new instance of the <see cref="FleetPolicyGuard"/> class over policies as they were verified.</summary>
     /// <param name="deviceId">The device of this machine.</param>
     /// <param name="sources">Gives the policy of each server, with its access document and its spaces.</param>
@@ -52,7 +67,7 @@ public sealed class FleetPolicyGuard
     {
         ArgumentException.ThrowIfNullOrEmpty(deviceId);
         ArgumentNullException.ThrowIfNull(sources);
-        _deviceId = deviceId;
+        _deviceId = () => deviceId;
         _sources = sources;
     }
 
@@ -63,7 +78,7 @@ public sealed class FleetPolicyGuard
         {
             foreach (var source in _sources())
             {
-                if (source.Policy is { Stop: { } stop } policy && policy.Stops(_deviceId, source.Access))
+                if (source.Policy is { Stop: { } stop } policy && policy.Stops(_deviceId(), source.Access))
                     return new FleetPolicyHalt(source.Server, stop, policy.Number, policy.Time);
             }
 

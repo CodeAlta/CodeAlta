@@ -126,7 +126,7 @@ public sealed class NodeServerAutomationTests
 
             // A try asked through the server is a dry run of the automation on this machine.
             var tryId = Guid.CreateVersion7().ToString("N");
-            var tryRequest = FleetAutomationSigning.SignRun(desktopKey, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, setup.Organization.Id, Id, nodeId,
+            var tryRequest = FleetAutomationSigning.SignRun(desktopKey, new FleetAutomationRunRequest(FleetAutomationRunRequest.TryVersion, setup.Organization.Id, Id, nodeId,
                 tryId, string.Empty, string.Empty, clock.Now) { Action = FleetAutomationRunRequest.TryAction });
             var tried = await automations.RunFromServerAsync(link, list, setup.Organization.Id, tryRequest, token);
             Assert.AreEqual((tryId, AutomationService.TryTrigger, (string?)null), (tried.Run?.Id, tried.Run?.Trigger, tried.Refused));

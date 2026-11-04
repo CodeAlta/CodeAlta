@@ -84,8 +84,10 @@ to it.
   App, no ID token: the server reads the numeric user id and the name through the API with the user token, once, and
   keeps neither the token nor the login, which its person can change and give away), Apple later.
 - **Removing** a linked account or a passkey (`DELETE /api/v1/sign-in/logins/{id}`, the person's own, or anyone's for
-  `access.manage`) makes it sign nobody in; the ids are opaque hashes, never the issuer, subject or credential id. Two
-  are kept: the last way in of an owner without a recovery key (`sign_in.last_way_in`, checked in the same write), and a
+  `access.manage`) makes it sign nobody in; the ids are opaque hashes, never the issuer, subject or credential id. Some
+  are kept: the last way in that still signs an owner without a recovery key in under the settings (an account of
+  Microsoft signs nobody in while company sign-in is required), and the last passkey of the break-glass owner then
+  (`sign_in.last_way_in`, checked in the same write against the settings it was judged by); and a
   company account (`sign_in.managed_by_organization`), which would only come back as a new person at its next sign-in:
   a person leaves through deprovisioning. There is no sign-out: the server keeps no session, a device key acts.
 - A self-hosted server has its own host name, so it cannot use a redirect address registered once for everyone. The
@@ -111,7 +113,12 @@ to it.
   `PublicSignInClients.GitHubClientId`. The client secret, webhook secret and private key of the conversion are not
   needed, and not kept unless `-SaveCredentialsTo` names a file.
 - A linked method signs in only once a person linked it from one of their devices; an account nobody linked signs
-  nobody in.
+  nobody in. Linking is not done by the device key alone, which a thief may hold: a person who has a way in signs in
+  with it again first (a single-use confirmation from the same device, as for dangerous actions below), and their first
+  way in is linked within an hour of the device joining (the setup of the server, or a device another one just
+  approved), when its key was just proved. A passkey the server's page registers is only verified there: the signed
+  completion of the device adds it, in the same write that checks the device is still an approved controller of its
+  acting person, and a revocation ends what the device had in progress.
 - Sign-in on the server's own web pages (a browser, the phone) needs an application the admin registers with the
   provider, or a passkey.
 
@@ -120,7 +127,9 @@ to it.
 - An organization configures its OpenID Connect provider (Entra ID, Okta, Google Workspace, Keycloak...); SAML is not
   planned.
 - The owner sets its issuer, client id and secret; the server reads its discovery document before keeping them, and
-  never gives the secret back. The redirect registered at the provider is the loopback of the desktop under the name
+  never gives the secret back. Entra ID's multi-tenant `organizations` and `common` endpoints name their issuer
+  with a placeholder for each tenant: accepted for Microsoft's own sign-in only, as when a token is checked, and with
+  the tenants named below. The redirect registered at the provider is the loopback of the desktop under the name
   `localhost` (`http://localhost/callback`, any port; the desktop listens on IPv4 and IPv6), since Entra ID's Web platform
   registers only `https://` or `http://localhost` addresses; CodeAlta's own clients come back to `127.0.0.1`.
 - **Only the company's own accounts.** A provider serves more than one company (Google, the multi-tenant endpoints of
@@ -130,7 +139,7 @@ to it.
   Entra ID needs its tenant ids, since its emails are not verified. An identity outside is refused and audited, and no
   person is made for it.
 - **Enforcement**: the organization requires its company sign-in, and no other way signs a new device in, except
-  the passkey of one **break-glass Owner**.
+  the passkey of one **break-glass Owner**, who must have one before the organization requires company sign-in.
 - People are created at their first sign-in, as members; the groups of each sign-in are kept with its login, and map
   to roles by **group id** (Entra app roles rather than group claims, which overflow past 200 groups): at each company
   sign-in the widest mapped role applies, member for none. No group makes or unmakes an owner, so the break-glass owner
@@ -189,10 +198,13 @@ or required, the break-glass owner) needs it today, one way or the other, each w
 
 - **Sign in again**: the owner's controller device signs in with a method linked to its person (purpose `confirm`, a
   passkey, a linked account or the company's own sign-in), which gives a single-use confirmation bound to that device
-  for 10 minutes.
+  for 10 minutes. An account is asked to authenticate again at its provider, not to reuse the session the browser keeps
+  there (`prompt=login` for Microsoft, `max_age=0` for Google, both for the others), and its `auth_time` must be of the
+  sign-in; GitHub's device flow has no such request, so its code is entered at GitHub as for any sign-in.
 - **Approve on another device**: the device asks for an approval of exactly this change; another approved controller
-  device of the same person is shown the change (the client secret by its SHA-256 only), recomputes its digest itself,
-  refuses one that does not match, and signs that digest. The approval binds to the change and to the device that asks,
+  device of the same person is shown every field of the change (the client secret by its SHA-256 only), recomputes its
+  digest itself, refuses one that does not match, and signs that digest only if the server still holds the change it
+  showed. The approval binds to the change and to the device that asks,
   lasts 10 minutes and is audited with its signature; the server cannot have it sign another change than the one shown.
 
 A signed request alone is not enough, and a refused change does not use the confirmation up.

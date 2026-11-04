@@ -114,6 +114,8 @@ internal sealed partial class AutomationService
 
     private static readonly TimeSpan ListenAgainAfter = TimeSpan.FromMinutes(1);
     private readonly Dictionary<string, SlackListening> _listeners = new(StringComparer.Ordinal);
+    // The triggers each Slack connection hands its messages to, by app, as the automations are now.
+    private readonly Dictionary<string, IReadOnlyList<SlackRoute>> _slackRoutes = new(StringComparer.Ordinal);
     private readonly HashSet<string> _capped = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string Problem, DateTimeOffset At)> _listenerProblems = new(StringComparer.Ordinal);
 
@@ -136,23 +138,38 @@ internal sealed partial class AutomationService
     /// <summary>The most ids of pushed events a trigger remembers, so that an event delivered twice runs once.</summary>
     internal const int RememberedEvents = 500;
 
+    // Whether a trigger took a pushed event already, without taking it.
+    private bool Seen(AutomationEntry entry, AutomationTrigger trigger, string eventId)
+    {
+        lock (_gate) return _state.Watermark(entry.Id, trigger.Key)?.Seen.Contains(eventId) == true;
+    }
+
+    // Whether a pushed event signed at a time is older than what the memory of the trigger still tells apart.
+    private bool Forgotten(AutomationEntry entry, AutomationTrigger trigger, DateTimeOffset? signedAt)
+    {
+        lock (_gate) return AutomationReplayMemory.Forgotten(_state.Watermark(entry.Id, trigger.Key), signedAt?.ToUnixTimeSeconds());
+    }
+
     // Whether a trigger sees a pushed event for the first time: Slack delivers again what it thinks was not acknowledged,
     // a sender retries a webhook. What claims also guards across machines; this guards a host that claims nothing.
-    private bool FirstSeen(AutomationEntry entry, AutomationTrigger trigger, string eventId)
+    private bool FirstSeen(AutomationEntry entry, AutomationTrigger trigger, string eventId, DateTimeOffset? signedAt = null)
     {
         lock (_gate)
         {
             var mark = _state.Watermark(entry.Id, trigger.Key);
-            if (mark is not null && mark.Seen.Contains(eventId)) return false;
-            var seen = mark?.Seen.ToList() ?? [];
-            seen.Add(eventId);
-            if (seen.Count > RememberedEvents) seen.RemoveRange(0, seen.Count - RememberedEvents);
+            var signed = signedAt?.ToUnixTimeSeconds();
+            if (mark is not null && mark.Seen.Contains(eventId) || AutomationReplayMemory.Forgotten(mark, signed)) return false;
             // The threads it answered stay beside the events it saw.
-            var heads = new Dictionary<string, string>(mark?.Heads ?? [], StringComparer.Ordinal);
-            _state.SetWatermark(entry.Id, trigger.Key, new AutomationWatermark { Since = _time.GetUtcNow(), Seen = seen, Heads = heads }, RememberedEvents, RememberedThreads);
+            _state.SetWatermark(entry.Id, trigger.Key, AutomationReplayMemory.Remember(mark, eventId, signed, _time.GetUtcNow(), RememberedEvents), RememberedEvents, RememberedThreads);
             return true;
         }
     }
+
+    /// <summary>
+    /// How long ago an event pushed to a hook of the server may have been signed: the day the server keeps it for an offline
+    /// machine. The memory of what a trigger took refuses a replay within it.
+    /// </summary>
+    internal static readonly TimeSpan HookCatchUp = TimeSpan.FromHours(24);
 
     /// <summary>The most threads of Slack a trigger remembers it answered.</summary>
     internal const int RememberedThreads = 512;
@@ -300,11 +317,13 @@ internal sealed partial class AutomationService
             Integrations?.Log?.Invoke($"The Jira query of the automation '{entry.Definition.Name}' ({entry.Id}) matches more than {MaximumQueryIssues} issues: it reads the first {MaximumQueryIssues}, in the order of the query.");
     }
 
-    // Starts and stops the Socket Mode listeners of the Slack triggers as the automations are now; under no lock.
+    // Starts and stops the Socket Mode listeners of the Slack triggers as the automations are now; under no lock. Slack spreads
+    // the events of an app among its connections rather than copying them to each: the triggers of one app share one
+    // connection, which hands each event to every trigger of that app it matches.
     private void ListenToSlack(DateTimeOffset now)
     {
         if (Integrations is not { } integrations) return;
-        var wanted = new Dictionary<string, (AutomationEntry Entry, AutomationTrigger Trigger)>(StringComparer.Ordinal);
+        var armed = new List<(AutomationEntry Entry, AutomationTrigger Trigger)>();
         lock (_gate)
         {
             if (!_closed && !_state.Paused)
@@ -312,49 +331,72 @@ internal sealed partial class AutomationService
                 foreach (var entry in _snapshot.Entries)
                 {
                     if (!Armed(entry)) continue;
-                    foreach (var trigger in entry.Definition.Triggers.Where(static trigger => trigger.Kind == AutomationTriggerKind.Slack))
-                        wanted[entry.Id + "|" + trigger.FingerprintKey] = (entry, trigger);
+                    foreach (var trigger in entry.Definition.Triggers.Where(static trigger => trigger.Kind == AutomationTriggerKind.Slack)) armed.Add((entry, trigger));
                 }
             }
-
-            foreach (var (key, listening) in _listeners.ToArray())
-            {
-                if (wanted.ContainsKey(key)) continue;
-                listening.Stop.Cancel();
-                listening.Stop.Dispose();
-                _listeners.Remove(key);
-            }
-
-            foreach (var id in _listenerProblems.Keys.Where(id => !wanted.Values.Any(pair => pair.Entry.Id == id)).ToArray()) _listenerProblems.Remove(id);
         }
 
-        foreach (var (key, (entry, trigger)) in wanted)
+        // The triggers by the app they listen with, the app known by the hash of its token.
+        var apps = new Dictionary<string, (string Token, List<SlackRoute> Routes)>(StringComparer.Ordinal);
+        foreach (var (entry, trigger) in armed)
         {
-            lock (_gate)
-            {
-                if (_listeners.ContainsKey(key)) continue;
-                if (_listenerProblems.TryGetValue(entry.Id, out var last) && now - last.At < ListenAgainAfter) continue;
-            }
-
             var (appToken, appMissing) = Resolve(entry.ProjectId, trigger.AppToken!);
             var (channel, channelMissing) = Resolve(entry.ProjectId, trigger.Channel!);
             if (appToken is null || channel is null)
             {
-                lock (_gate) _listenerProblems[entry.Id] = (appMissing ?? channelMissing!, now);
-                Changed?.Invoke();
+                bool told;
+                lock (_gate)
+                {
+                    told = _listenerProblems.TryGetValue(entry.Id, out var last) && last.Problem == (appMissing ?? channelMissing!) && now - last.At < ListenAgainAfter;
+                    if (!told) _listenerProblems[entry.Id] = (appMissing ?? channelMissing!, now);
+                }
+
+                if (!told) Changed?.Invoke();
                 continue;
+            }
+
+            var key = "slack:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(appToken)))[..32];
+            if (!apps.TryGetValue(key, out var app)) apps[key] = app = (appToken, []);
+            app.Routes.Add(new SlackRoute(entry.Id, trigger, channel));
+        }
+
+        lock (_gate)
+        {
+            foreach (var (key, listening) in _listeners.ToArray())
+            {
+                if (apps.ContainsKey(key)) continue;
+                listening.Stop.Cancel();
+                listening.Stop.Dispose();
+                _listeners.Remove(key);
+                _slackRoutes.Remove(key);
+            }
+
+            // The routes of a connection that goes on are those of now: a trigger added or removed of its app takes effect at once.
+            foreach (var (key, app) in apps) _slackRoutes[key] = app.Routes;
+            var armedIds = armed.Select(static pair => pair.Entry.Id).ToHashSet(StringComparer.Ordinal);
+            foreach (var id in _listenerProblems.Keys.Where(id => !armedIds.Contains(id)).ToArray()) _listenerProblems.Remove(id);
+        }
+
+        foreach (var (key, (appToken, routes)) in apps)
+        {
+            lock (_gate)
+            {
+                if (_listeners.ContainsKey(key)) continue;
+                if (routes.Any(route => _listenerProblems.TryGetValue(route.AutomationId, out var last) && now - last.At < ListenAgainAfter)) continue;
             }
 
             var listener = new SlackSocketListener(new SlackClient(integrations.Http, integrations.SlackApi), integrations.SlackConnect, _time);
             var stop = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
-            var id = entry.Id;
-            var watched = trigger;
-            var task = Task.Run(() => listener.RunAsync(appToken, message => OnSlackAsync(id, watched, channel, message), () =>
+            var app = key;
+            var task = Task.Run(() => listener.RunAsync(appToken, message => FanOutSlackAsync(app, message), () =>
             {
                 lock (_gate)
                 {
-                    if (listener.Problem is { } problem) _listenerProblems[id] = (problem, _time.GetUtcNow());
-                    else _listenerProblems.Remove(id);
+                    foreach (var route in _slackRoutes.GetValueOrDefault(app) ?? [])
+                    {
+                        if (listener.Problem is { } problem) _listenerProblems[route.AutomationId] = (problem, _time.GetUtcNow());
+                        else _listenerProblems.Remove(route.AutomationId);
+                    }
                 }
 
                 Changed?.Invoke();
@@ -366,6 +408,17 @@ internal sealed partial class AutomationService
             }
         }
     }
+
+    // Hands a message of a Slack app to every trigger of that app: each one takes what it matches.
+    private async Task FanOutSlackAsync(string app, SlackMessage message)
+    {
+        IReadOnlyList<SlackRoute> routes;
+        lock (_gate) routes = [.. _slackRoutes.GetValueOrDefault(app) ?? []];
+        foreach (var route in routes) await OnSlackAsync(route.AutomationId, route.Trigger, route.Channel, message).ConfigureAwait(false);
+    }
+
+    // A trigger of a Slack app: the automation, the trigger and the channel it watches.
+    private sealed record SlackRoute(string AutomationId, AutomationTrigger Trigger, string Channel);
 
     private Task OnSlackAsync(string automationId, AutomationTrigger trigger, string channel, SlackMessage message)
     {
@@ -392,58 +445,104 @@ internal sealed partial class AutomationService
     /// <param name="hookId">The hook.</param>
     /// <param name="request">The event, as pushed.</param>
     /// <param name="cancellationToken">Cancels the reading again of an incident.</param>
-    /// <returns>Whether an automation took it, and what happened, for the server's record.</returns>
-    internal async Task<(bool Accepted, string Message)> ReceiveHookAsync(string hookId, WebhookRequest request, CancellationToken cancellationToken)
+    /// <returns>Whether an automation took it, what happened for this machine's log, and what the server records of it.</returns>
+    internal async Task<AutomationHookReceipt> ReceiveHookAsync(string hookId, WebhookRequest request, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(hookId);
         ArgumentNullException.ThrowIfNull(request);
         AutomationSnapshot snapshot;
         lock (_gate) snapshot = _snapshot;
         var named = snapshot.Entries.SelectMany(entry => entry.Definition.Triggers.Where(trigger => trigger.IsHooked && trigger.Hook == hookId).Select(trigger => (entry, trigger))).ToArray();
-        if (named.Length == 0) return (false, "No automation of this machine has a trigger on this hook.");
-        if (Integrations is null) return (false, "This host does not take the events of other tools.");
+        if (named.Length == 0) return new(false, "No automation of this machine has a trigger on this hook.", "no automation");
+        if (Integrations is null) return new(false, "This host does not take the events of other tools.", "no integrations");
+        // What the machine's log says names the automation and why; what the server records says what happened in a word, of
+        // an automation by its id: its name and the names of its secrets are not the server's to read.
         var outcomes = new List<string>();
+        var reports = new List<string>();
         var accepted = false;
+        var retry = false;
+        void Note(AutomationEntry entry, string code, string message)
+        {
+            outcomes.Add($"{entry.Definition.Name}: {message}");
+            reports.Add($"{entry.Id}: {code}");
+        }
+
         foreach (var (entry, trigger) in named)
         {
             if (_state.Paused || !Armed(entry))
             {
-                outcomes.Add($"{entry.Definition.Name}: not enabled here.");
+                Note(entry, "not enabled", "not enabled here.");
                 continue;
             }
 
             var (secret, missing) = Resolve(entry.ProjectId, trigger.Secret!);
-            if (secret is null) { outcomes.Add($"{entry.Definition.Name}: {missing}"); continue; }
-            var (eventId, refused) = WebhookSignatures.Verify(trigger.Signature ?? AutomationSignatures.Standard, secret, request, trigger.SignatureHeader, _time.GetUtcNow());
+            if (secret is null) { Note(entry, "secret missing", missing!); continue; }
+            // An event may have waited for this machine at the server: it is taken within the day the server keeps it, once.
+            var scheme = trigger.Signature ?? AutomationSignatures.Standard;
+            var (eventId, refused) = WebhookSignatures.Verify(scheme, secret, request, trigger.SignatureHeader, _time.GetUtcNow(), HookCatchUp);
             if (eventId is null)
             {
                 // An event that does not verify is not authentic: nothing of it reaches a prompt.
-                outcomes.Add($"{entry.Definition.Name}: {refused}");
+                Note(entry, "signature refused", refused!);
                 continue;
             }
 
-            if (!FirstSeen(entry, trigger, eventId))
+            var signedAt = scheme == AutomationSignatures.Standard ? WebhookSignatures.SignedAt(request) : null;
+            if (Seen(entry, trigger, eventId))
             {
                 accepted = true;
-                outcomes.Add($"{entry.Definition.Name}: this event was taken already.");
+                Note(entry, "taken already", "this event was taken already.");
                 continue;
             }
 
-            var (sample, problem) = trigger.Kind == AutomationTriggerKind.IncidentIo
+            if (Forgotten(entry, trigger, signedAt))
+            {
+                Note(entry, "too old", "it was signed before the newest event this machine had to forget: it could have been taken already.");
+                continue;
+            }
+
+            var (sample, problem, transient) = trigger.Kind == AutomationTriggerKind.IncidentIo
                 ? await IncidentSampleAsync(entry.ProjectId, entry.Definition.Prompt, trigger, request.Body, cancellationToken).ConfigureAwait(false)
-                : (WebhookSample(entry.Definition.Prompt, trigger, eventId, request.Body), null);
+                : (WebhookSample(entry.Definition.Prompt, trigger, eventId, request.Body), null, false);
             if (sample is null)
             {
-                outcomes.Add($"{entry.Definition.Name}: {problem}");
+                // A source that does not answer for now leaves the event to be given again: it is not taken yet.
+                if (transient)
+                {
+                    retry = true;
+                    Note(entry, "retry", problem! + " It is tried again when the server gives it again.");
+                }
+                else Note(entry, "event refused", problem!);
+                continue;
+            }
+
+            // The event is taken here, once its run can start: one given again meanwhile (another delivery) is taken once.
+            if (!FirstSeen(entry, trigger, eventId, signedAt))
+            {
+                accepted = true;
+                Note(entry, "taken already", "this event was taken already.");
                 continue;
             }
 
             accepted = true;
-            outcomes.Add(Trigger(entry, trigger.KindName, sample.Detail, sample.Prompt, occurrence: EventOccurrence(trigger, eventId), reply: sample.Reply)
-                ? $"{entry.Definition.Name}: started." : $"{entry.Definition.Name}: not started (see its runs).");
+            if (Trigger(entry, trigger.KindName, sample.Detail, sample.Prompt, occurrence: EventOccurrence(trigger, eventId), reply: sample.Reply)) Note(entry, "started", "started.");
+            else Note(entry, "not started", "not started (see its runs).");
         }
 
-        return (accepted, AutomationText.Line(string.Join(" ", outcomes), 500));
+        return new(accepted, AutomationText.Line(string.Join(" ", outcomes), 500), AutomationText.Line(string.Join("; ", reports), 500)) { Retry = retry };
+    }
+
+    /// <summary>What a machine did with an event a hook of the server received.</summary>
+    /// <param name="Accepted">Whether an automation took it (its signature verified).</param>
+    /// <param name="Message">What happened, for the log of this machine: the names of the automations, and why.</param>
+    /// <param name="Report">What happened, for the record of the server: each automation by its id, in a word.</param>
+    internal sealed record AutomationHookReceipt(bool Accepted, string Message, string Report)
+    {
+        /// <summary>
+        /// Gets whether an automation could not take the event for now (its source did not answer): the server gives it again
+        /// later rather than forget it. The automations that took it take it once.
+        /// </summary>
+        public bool Retry { get; init; }
     }
 
     /// <summary>Tests the connection of a trigger as the editor writes it: the credentials it names, and what it watches.</summary>
@@ -689,7 +788,10 @@ internal sealed partial class AutomationService
         }
     }
 
-    private async Task<(AutomationSample? Sample, string? Problem)> IncidentSampleAsync(string? projectId, string prompt, AutomationTrigger trigger, byte[] body, CancellationToken cancellationToken)
+    // The sample of an incident: the incident read again from incident.io. Transient when incident.io did not answer for now, so
+    // that the event is given again rather than taken for good.
+    private async Task<(AutomationSample? Sample, string? Problem, bool Transient)> IncidentSampleAsync(string? projectId, string prompt, AutomationTrigger trigger, byte[] body,
+        CancellationToken cancellationToken)
     {
         (string Id, bool Declared)? named;
         try
@@ -699,18 +801,19 @@ internal sealed partial class AutomationService
         }
         catch (JsonException)
         {
-            return (null, "The event is not JSON.");
+            return (null, "The event is not JSON.", false);
         }
 
-        if (named is not { } read) return (null, "The event is not about an incident declared or updated.");
-        if (read.Declared != (trigger.Event == "declared")) return (null, $"The event is {(read.Declared ? "a declaration" : "an update")}: the trigger starts on {(trigger.Event == "declared" ? "declarations" : "updates")}.");
+        if (named is not { } read) return (null, "The event is not about an incident declared or updated.", false);
+        if (read.Declared != (trigger.Event == "declared"))
+            return (null, $"The event is {(read.Declared ? "a declaration" : "an update")}: the trigger starts on {(trigger.Event == "declared" ? "declarations" : "updates")}.", false);
         var (key, missing) = Resolve(projectId, trigger.ApiKey!);
-        if (key is null) return (null, missing);
+        if (key is null) return (null, missing, false);
         // The incident read again from incident.io with this machine's key: the copy the prompt gets, not the one pushed.
         var fetched = await new IncidentIoClient(Integrations!.Http, Integrations.IncidentApi).IncidentAsync(key, read.Id, cancellationToken).ConfigureAwait(false);
-        if (fetched.Value is not { } incident) return (null, fetched.Problem);
+        if (fetched.Value is not { } incident) return (null, fetched.Problem, fetched.Transient);
         var reply = trigger.Reply ? new AutomationReplyTarget(trigger, $"the timeline of {incident.Reference ?? incident.Id}") { IncidentId = incident.Id } : null;
-        return (new AutomationSample(IncidentDetail(incident), IncidentPrompt(prompt, incident, read.Declared, reply), reply), null);
+        return (new AutomationSample(IncidentDetail(incident), IncidentPrompt(prompt, incident, read.Declared, reply), reply), null, false);
     }
 
     private static AutomationSample WebhookSample(string prompt, AutomationTrigger trigger, string eventId, byte[] body)
@@ -793,6 +896,7 @@ internal sealed partial class AutomationService
     {
         foreach (var listening in _listeners.Values) listening.Stop.Cancel();
         _listeners.Clear();
+        _slackRoutes.Clear();
     }
 
     private sealed record SlackListening(CancellationTokenSource Stop, Task Task);

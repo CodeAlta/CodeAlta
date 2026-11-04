@@ -79,6 +79,18 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
     /// <summary>Gets or sets whether the token endpoint takes the client secret in the Authorization header only, as Okta does by default.</summary>
     public bool BasicAuthenticationOnly { get; set; }
 
+    /// <summary>
+    /// Gets or sets when the person signed in at the provider, as the session of the browser keeps it; null for a sign-in
+    /// at each authorization. A request with <c>prompt=login</c> or <c>max_age</c> signs in again, unless <see cref="IgnoresReauthentication"/>.
+    /// </summary>
+    public DateTimeOffset? SessionStartedAt { get; set; }
+
+    /// <summary>Gets or sets whether it answers <c>prompt=login</c> and <c>max_age</c> with the session it has, as a provider that ignores them would.</summary>
+    public bool IgnoresReauthentication { get; set; }
+
+    /// <summary>Gets or sets whether its ID tokens carry <c>auth_time</c>.</summary>
+    public bool IssuesAuthTime { get; set; } = true;
+
     /// <summary>Gets the authorization requests it received.</summary>
     public ConcurrentQueue<IReadOnlyDictionary<string, string>> Authorizations { get; } = new();
 
@@ -171,7 +183,9 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
         if (query.GetValueOrDefault("client_id") != ClientId) return Results.BadRequest("unknown client");
         if (query.GetValueOrDefault("code_challenge_method") != "S256" || string.IsNullOrEmpty(query.GetValueOrDefault("code_challenge"))) return Results.BadRequest("PKCE needed");
         var code = "code-" + Guid.NewGuid().ToString("N");
-        _codes[code] = new Grant(Account, query["redirect_uri"], query["code_challenge"], query.GetValueOrDefault("nonce"));
+        var reauthenticate = !IgnoresReauthentication && (query.GetValueOrDefault("prompt") == "login" || query.ContainsKey("max_age"));
+        var authenticated = reauthenticate ? Now() : SessionStartedAt ?? Now();
+        _codes[code] = new Grant(Account, query["redirect_uri"], query["code_challenge"], query.GetValueOrDefault("nonce"), authenticated);
         var target = query["redirect_uri"] + (query["redirect_uri"].Contains('?') ? "&" : "?") + "code=" + Uri.EscapeDataString(code) + "&state="
             + Uri.EscapeDataString(query.GetValueOrDefault("state") ?? string.Empty);
         return Results.Redirect(target);
@@ -224,6 +238,7 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
         if (grant.Account.FamilyName is { } family) claims["family_name"] = family;
         if (grant.Account.TenantId is { } tenant) claims["tid"] = tenant;
         if ((Nonce ?? grant.Nonce) is { } nonce) claims["nonce"] = nonce;
+        if (IssuesAuthTime) claims["auth_time"] = grant.AuthenticatedAt.ToUnixTimeSeconds();
         var expires = now + Lifetime;
         var descriptor = new SecurityTokenDescriptor
         {
@@ -239,5 +254,5 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
         return new JsonWebTokenHandler { SetDefaultTimesOnTokenCreation = false }.CreateToken(descriptor);
     }
 
-    private sealed record Grant(FakeAccount Account, string RedirectUri, string Challenge, string? Nonce);
+    private sealed record Grant(FakeAccount Account, string RedirectUri, string Challenge, string? Nonce, DateTimeOffset AuthenticatedAt);
 }

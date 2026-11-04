@@ -770,20 +770,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The hosts of the sessions the window shows: the host of this process, and one per paired machine, which the
                 // fleet of the instance adds and removes.
                 var sessionHosts = new SessionHosts.SessionHostRegistry(new SessionHosts.LocalSessionHost(host));
-                fleet = new Fleet.DesktopFleet(host.CatalogOptions.FleetRoot, sessionHosts.TakeMembership(), Environment.MachineName);
-                fleet.Moves = new Fleet.DesktopMoves(host, fleet, Environment.MachineName, host.CatalogOptions.FleetRoot);
-                // The sessions agents of this computer start on its machines, and the answers they send back.
-                remoteChildren = new Fleet.DesktopRemoteChildren(host, fleet, Environment.MachineName);
-                host.RuntimeService.RemoteChildren = remoteChildren;
-                // The CodeAlta Servers this instance is linked to: none until a server is created or joined.
-                fleetServers = new Fleet.DesktopFleetServers(host, Environment.MachineName, DesktopCommandLine.Version);
-                // An agent of this computer starts no work elsewhere when a stop reaches it or its organization says so.
-                remoteChildren.Policy = fleetServers.Policy;
-                // A machine of an organization this computer is not paired with is reached through the relay of its server.
-                fleet.RelayRoute = fleetServers.FindRoute;
-                var followedServers = fleetServers;
-                var followedFleet = fleet;
-                fleetServers.Changed += () => _ = followedFleet.SyncOrganizationMachinesAsync(followedServers.OrganizationMachines(), CancellationToken.None);
+                // The paired machines, the sessions agents start on them and the CodeAlta Servers of this instance: wired here,
+                // started once the window shows the application, with no key and no network for a profile that stays local.
+                var fleetStartup = Fleet.DesktopFleetStartup.Create(host, sessionHosts, Environment.MachineName, DesktopCommandLine.Version);
+                fleet = fleetStartup.Fleet;
+                remoteChildren = fleetStartup.RemoteChildren;
+                fleetServers = fleetStartup.Servers;
                 // The bookmarks of the sessions of this instance, in its database. A bookmarked session is kept by the
                 // retention of sessions, which deletes nothing before the bookmarks were read.
                 var bookmarks = new CodeAlta.Catalog.Bookmarks.BookmarkService(host.ApplicationDatabase,
@@ -806,17 +798,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     Mark("application shown, the work after the start begins");
                 }, TaskScheduler.Default);
                 // The paired machines are reached once the window shows the application.
-                var startedFleet = fleet;
-                var startedServers = fleetServers;
-                var startedChildren = remoteChildren;
-                _ = shown.Shown.ContinueWith(_ => startedChildren.Start(), TaskScheduler.Default);
-                // The moves this computer took and a stop left unfinished end first, by its own decisions.
-                _ = shown.Shown.ContinueWith(async _ =>
-                {
-                    if (startedFleet.Moves is { } moves) await moves.RecoverAsync(CancellationToken.None).ConfigureAwait(false);
-                    await startedFleet.StartAsync(CancellationToken.None).ConfigureAwait(false);
-                    await startedServers.StartAsync(CancellationToken.None).ConfigureAwait(false);
-                }, TaskScheduler.Default).Unwrap();
+                _ = shown.Shown.ContinueWith(_ => fleetStartup.StartRemoteChildren(), TaskScheduler.Default);
+                _ = shown.Shown.ContinueWith(_ => fleetStartup.StartAsync(CancellationToken.None), TaskScheduler.Default).Unwrap();
                 operations = new SessionOperationsService(sessionHosts, host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
                 if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
                 // The reviews of the user: comments on plans, files and changes, kept per checkout in the state folder.

@@ -108,9 +108,26 @@ internal sealed partial class DesktopFleetServers
     /// <exception cref="FleetServerException">The server refused, or gave no usable code.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public Task<FleetSignInCode> StartLinkCodeAsync(string linkId, string method, CancellationToken cancellationToken)
+        => StartLinkCodeAsync(linkId, method, null, cancellationToken);
+
+    /// <summary>
+    /// Starts a sign-in with a code (GitHub) to link the account, with the confirmation of a sign-in of the person with a way
+    /// in they have (<see cref="ConfirmSignInAsync"/>), which a link needs unless it is their first way in.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="method">The method; one that uses a device code.</param>
+    /// <param name="confirmation">The confirmation; null for a first way in.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The code, and its handle.</returns>
+    /// <exception cref="ArgumentException">The method does not use a device code.</exception>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="DesktopSignInException">Too many sign-ins wait.</exception>
+    /// <exception cref="FleetServerException">The server refused (<c>sign_in.confirmation_required</c> without a confirmation), or gave no usable code.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<FleetSignInCode> StartLinkCodeAsync(string linkId, string method, string? confirmation, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return StartCodeAsync(Client(linkId), linkId, method, FleetSignInPurposes.Link, cancellationToken);
+        return StartCodeAsync(Client(linkId), linkId, method, FleetSignInPurposes.Link, cancellationToken, confirmation);
     }
 
     /// <summary>
@@ -259,7 +276,24 @@ internal sealed partial class DesktopFleetServers
     /// <exception cref="DesktopSignInException">The browser did not open, the person cancelled, the code is not one that waits, or the sign-in expired.</exception>
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<SignInPersonDto> LinkSignInAsync(string linkId, string method, string? handle, CancellationToken cancellationToken)
+    public Task<SignInPersonDto> LinkSignInAsync(string linkId, string method, string? handle, CancellationToken cancellationToken)
+        => LinkSignInAsync(linkId, method, handle, null, cancellationToken);
+
+    /// <summary>
+    /// Links a sign-in method as <see cref="LinkSignInAsync(string, string, string?, CancellationToken)"/> does, with the
+    /// confirmation of a sign-in of the person with a way in they have, which a link needs unless it is their first way in.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="method">The method.</param>
+    /// <param name="handle">The handle <see cref="StartLinkCodeAsync(string, string, string?, CancellationToken)"/> gave, for a method that uses a code (which took the confirmation); null otherwise.</param>
+    /// <param name="confirmation">The confirmation, for a method through the browser; null for a first way in.</param>
+    /// <param name="cancellationToken">Cancels the sign-in.</param>
+    /// <returns>The person it was linked to.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="DesktopSignInException">The browser did not open, the person cancelled, the code is not one that waits, or the sign-in expired.</exception>
+    /// <exception cref="FleetServerException">The server refused (<c>sign_in.confirmation_required</c> without a confirmation).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<SignInPersonDto> LinkSignInAsync(string linkId, string method, string? handle, string? confirmation, CancellationToken cancellationToken)
     {
         if (FleetSignInMethods.UsesDeviceCode(method))
         {
@@ -275,7 +309,7 @@ internal sealed partial class DesktopFleetServers
         }
 
         using var client = Client(linkId);
-        return (await SignInThroughBrowserAsync(client, method, FleetSignInPurposes.Link, cancellationToken).ConfigureAwait(false)).Person;
+        return (await SignInThroughBrowserAsync(client, method, FleetSignInPurposes.Link, cancellationToken, confirmation).ConfigureAwait(false)).Person;
     }
 
     /// <summary>Reads the sign-in settings of the organization of a server; an owner's computer only.</summary>
@@ -355,20 +389,29 @@ internal sealed partial class DesktopFleetServers
         return [.. (await client.ListSignInApprovalsAsync(cancellationToken).ConfigureAwait(false)).Where(approval => approval.RequesterDeviceId != client.DeviceId && approval.Status == "pending")];
     }
 
-    /// <summary>Approves from this computer a change of the company sign-in another computer of its person asks for.</summary>
+    /// <summary>
+    /// Approves from this computer a change of the company sign-in another computer of its person asks for: exactly the
+    /// change its page showed, named by the digest this computer computed of it. The server is read again to sign, and a
+    /// server that answers another change then (whatever digest it gives) gets nothing signed.
+    /// </summary>
     /// <param name="linkId">The link.</param>
     /// <param name="approvalId">The approval.</param>
+    /// <param name="shownDigest">The digest of the change the page showed (<see cref="FleetSignInApprovals.Digest"/>).</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>A task that completes once approved.</returns>
+    /// <exception cref="ArgumentException"><paramref name="shownDigest"/> is null or empty.</exception>
     /// <exception cref="KeyNotFoundException">No such link, or no such approval.</exception>
-    /// <exception cref="InvalidOperationException">The change shown is not the one the server would apply: nothing was signed.</exception>
+    /// <exception cref="InvalidOperationException">The change the server holds now is not the one shown: nothing was signed.</exception>
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task ApproveSignInChangeAsync(string linkId, string approvalId, CancellationToken cancellationToken)
+    public async Task ApproveSignInChangeAsync(string linkId, string approvalId, string shownDigest, CancellationToken cancellationToken)
     {
+        ArgumentException.ThrowIfNullOrEmpty(shownDigest);
         using var client = Client(linkId);
         var approval = (await client.ListSignInApprovalsAsync(cancellationToken).ConfigureAwait(false)).FirstOrDefault(approval => approval.Id == approvalId)
             ?? throw new KeyNotFoundException("No change waits for this approval.");
+        if (!string.Equals(FleetSignInApprovals.Digest(approval.Change), shownDigest, StringComparison.Ordinal))
+            throw new InvalidOperationException("The change the server holds now is not the one shown: nothing was signed.");
         await client.ApproveSignInChangeAsync(approval, cancellationToken).ConfigureAwait(false);
     }
 
@@ -399,12 +442,13 @@ internal sealed partial class DesktopFleetServers
         await client.RemoveSignInLoginAsync(loginId, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<CompleteSignInResponse> SignInThroughBrowserAsync(FleetServerClient client, string method, string purpose, CancellationToken cancellationToken)
+    private async Task<CompleteSignInResponse> SignInThroughBrowserAsync(FleetServerClient client, string method, string purpose, CancellationToken cancellationToken,
+        string? confirmation = null)
     {
         // A company registers its own client, and Entra ID's Web platform takes only https:// or http://localhost there; the clients
         // CodeAlta registers come back to 127.0.0.1.
         using var redirect = FleetLoopbackRedirect.Start(method == FleetSignInMethods.Company ? FleetLoopbackHost.Localhost : FleetLoopbackHost.IPAddress);
-        var start = await client.StartSignInAsync(method, redirect.RedirectUri, purpose, cancellationToken).ConfigureAwait(false);
+        var start = await client.StartSignInAsync(method, redirect.RedirectUri, purpose, confirmation, cancellationToken).ConfigureAwait(false);
         if (start.State is not { Length: > 0 } state)
             throw new FleetServerException(HttpStatusCode.OK, FleetServerException.HttpErrorCode, null, "The server gave no state for the sign-in.");
         if (!Uri.TryCreate(start.AuthorizationUrl, UriKind.Absolute, out var authorization) || authorization.Scheme is not ("https" or "http") || !OpenBrowser(authorization))
@@ -429,14 +473,15 @@ internal sealed partial class DesktopFleetServers
 
     // The first call of a device flow: the server asks the provider for a code, which waits here, with the client of its
     // device key, for the second call. The client is the code's from now on: it is disposed with it.
-    private async Task<FleetSignInCode> StartCodeAsync(FleetServerClient client, string target, string method, string purpose, CancellationToken cancellationToken)
+    private async Task<FleetSignInCode> StartCodeAsync(FleetServerClient client, string target, string method, string purpose, CancellationToken cancellationToken,
+        string? confirmation = null)
     {
         try
         {
             if (!FleetSignInMethods.UsesDeviceCode(method)) throw new ArgumentException($"'{method}' does not sign in with a code.", nameof(method));
             Sweep();
             if (_codes.Count >= MaximumCodes) throw new DesktopSignInException("sign_in.busy", "Too many sign-ins wait: finish or cancel one first.");
-            var start = await client.StartSignInAsync(method, null, purpose, cancellationToken).ConfigureAwait(false);
+            var start = await client.StartSignInAsync(method, null, purpose, confirmation, cancellationToken).ConfigureAwait(false);
             if (start.UserCode is not { Length: > 0 and <= 64 } userCode || userCode.Any(static c => c is < '!' or > '~')
                 || !Uri.TryCreate(start.AuthorizationUrl, UriKind.Absolute, out var page) || !(page.Scheme == Uri.UriSchemeHttps || page.Scheme == Uri.UriSchemeHttp && page.IsLoopback))
                 throw new FleetServerException(HttpStatusCode.OK, FleetServerException.HttpErrorCode, null, "The server gave no code to enter.");

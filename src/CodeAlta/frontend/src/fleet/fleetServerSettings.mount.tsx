@@ -2,7 +2,7 @@
 // its telemetry through it. Driven by fleetServerSettings.browser.test.ts through `fleetFixture`: what the page asks is recorded.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { FleetDeviceView, FleetServerDeviceRequest, FleetServerRecoverRequest, FleetServerView, FleetSignInApprovalView, FleetSignInLinkRequest, FleetSignInLoginView, FleetSignInSettingsRequest,
+import type { FleetDeviceView, FleetServerDeviceRequest, FleetServerRecoverRequest, FleetServerView, FleetSignInApprovalView, FleetSignInCodeRequest, FleetSignInLinkRequest, FleetSignInLoginView, FleetSignInSettingsRequest,
   FleetSignInSettingsView, FleetTelemetryRequest, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyRequest, FleetUpdateStartRequest, FleetUpdatesView } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { FleetServerSettings, type FleetServerApi } from "./FleetServerSettings";
@@ -94,8 +94,8 @@ const api: FleetServerApi = {
     return { status: "ok", message: null };
   },
   signInSettings: async () => ({ status: "ok", settings: signIn, logins, message: null, approvals }),
-  approveSignInChange: async (request: { approvalId: string }) => {
-    calls.push(JSON.stringify({ approved: request.approvalId }));
+  approveSignInChange: async (request: { approvalId: string; digest: string }) => {
+    calls.push(JSON.stringify({ approved: request.approvalId, digest: request.digest }));
     approvals = approvals.filter(approval => approval.id !== request.approvalId);
     return { status: "ok", message: null };
   },
@@ -112,8 +112,11 @@ const api: FleetServerApi = {
     return { status: "ok", settings: signIn, logins: [], message: null, approvals: null };
   },
   // GitHub gives a code and waits for the person, until Cancel; the others link at once.
-  startSignInCode: async () => ({ status: "ok", message: null, code: { handle: "0123456789abcdef0123456789abcdef", userCode: "WDJB-MJHT",
-    url: "https://github.com/login/device", expiresAt: "2026-11-04T12:15:00Z" } }),
+  startSignInCode: async (request: FleetSignInCodeRequest) => {
+    if (request.confirmWith) calls.push(JSON.stringify({ startCode: request.method, confirmWith: request.confirmWith }));
+    return { status: "ok", message: null, code: { handle: "0123456789abcdef0123456789abcdef", userCode: "WDJB-MJHT",
+      url: "https://github.com/login/device", expiresAt: "2026-11-04T12:15:00Z" } };
+  },
   linkSignIn: async (request: FleetSignInLinkRequest, options?: { signal?: AbortSignal }) => {
     calls.push(JSON.stringify({ linkSignIn: request.method }));
     if (request.method === "github") {
@@ -143,7 +146,9 @@ Object.assign(window, { fleetFixture: { calls, skip: (count: number) => { skippe
     { method: "company", name: "alex@contoso.example", createdAt: "2026-11-01T08:00:00Z", lastUsedAt: null, id: "a_company" },
     { method: "microsoft", name: "alex@outlook.com", createdAt: "2026-11-02T08:00:00Z", lastUsedAt: null, id: "a_microsoft" }]; },
   ask: () => { approvals = [{ id: "approval-1", requestedBy: "Office desktop", issuer: "https://login.contoso.example", clientId: "contoso-client", secretChanges: true,
-    allowedDomains: ["contoso.example"], allowedTenants: [], requireSso: true, enabled: ["company", "passkey"], expiresAt: "2026-11-04T12:10:00Z" }]; } } });
+    allowedDomains: ["contoso.example"], allowedTenants: [], requireSso: true, enabled: ["company", "passkey"], expiresAt: "2026-11-04T12:10:00Z",
+    digest: "digest-of-the-change-shown", displayName: "Contoso", groupsClaim: "roles", groupRoles: [{ group: "g-admins", role: "admin" }], secretRemoved: false,
+    breakGlassPersonId: null, companyOff: false }]; } } });
 
 createRoot(document.getElementById("root")!).render(<StrictMode>
   <ShellLanguageContext.Provider value={{ locale: "en", choice: "en", setLanguage: () => {} }}>

@@ -73,6 +73,40 @@ public sealed class FleetAutomationSigningTests
         StringAssert.Contains(Refused(null), "does not read");
     }
 
+    // What a machine must obey for safety is never a field an older machine ignores (doc/fleet/protocol.md, "Versions"): a try,
+    // and a version whose definition decides what its runs do without a person, are of a format an older machine refuses
+    // (it reads version 1 only), so that it neither runs a try for real nor runs an automation without its autonomy.
+    [TestMethod]
+    public void ATry_AndAVersionWithAutonomy_AreOfAFormatAnOlderMachineRefuses()
+    {
+        using var devices = new Devices();
+        var list = devices.List();
+        var now = new DateTimeOffset(2026, 11, 3, 9, 0, 0, TimeSpan.Zero);
+        FleetSignedAutomationRunRequest Sign(int version, string? action)
+            => FleetAutomationSigning.SignRun(devices.Laptop, new FleetAutomationRunRequest(version, "org", "daily-1", devices.Node.DeviceId, "run-1", string.Empty,
+                string.Empty, now) { Action = action });
+
+        // An older machine reads version 1 only.
+        Assert.AreEqual(1, FleetAutomationRunRequest.VersionFor(null));
+        Assert.AreEqual(1, FleetAutomationRunRequest.VersionFor(FleetAutomationRunRequest.TakeOverAction));
+        Assert.AreEqual(2, FleetAutomationRunRequest.VersionFor(FleetAutomationRunRequest.TryAction));
+        var tried = Sign(FleetAutomationRunRequest.VersionFor(FleetAutomationRunRequest.TryAction), FleetAutomationRunRequest.TryAction);
+        Assert.IsTrue(FleetAutomationRunRequestDocuments.TryVerify(tried, list, "org", devices.Node.DeviceId, now, out var request, out var reason), reason);
+        Assert.AreEqual(FleetAutomationRunRequest.TryAction, request.Action);
+        // A try in the format of a run, or a run in the format of a try, does not read: one is never taken for the other.
+        Assert.ThrowsExactly<ArgumentException>(() => Sign(1, FleetAutomationRunRequest.TryAction));
+        Assert.ThrowsExactly<ArgumentException>(() => Sign(2, null));
+        Assert.IsFalse(FleetAutomationRunRequestDocuments.TryRead(tried.Payload.Replace("\"v\":2", "\"v\":1", StringComparison.Ordinal), out _, out reason));
+        StringAssert.Contains(reason, "try");
+
+        Assert.AreEqual(1, FleetAutomationVersion.VersionFor(autonomy: false));
+        Assert.AreEqual(2, FleetAutomationVersion.VersionFor(autonomy: true));
+        var guarded = FleetAutomationSigning.Sign(devices.Laptop, Version(devices.Node.DeviceId, 5) with { Version = FleetAutomationVersion.VersionFor(autonomy: true) });
+        Assert.IsTrue(FleetAutomationVersionDocuments.TryVerify(guarded, list, "org", devices.Node.DeviceId, out var version, out reason), reason);
+        Assert.AreEqual(2, version.Version);
+        Assert.ThrowsExactly<ArgumentException>(() => FleetAutomationSigning.Sign(devices.Laptop, Version(devices.Node.DeviceId, 6) with { Version = 3 }));
+    }
+
     [TestMethod]
     public void OnADirectChannelTheVersionVerifiesWithTheKeyItNames()
     {
@@ -100,7 +134,7 @@ public sealed class FleetAutomationSigningTests
         StringAssert.Contains(FleetAutomationVersionDocuments.Check(Version("node", 1) with { Removed = true }), "holds nothing else");
         Assert.IsNull(FleetAutomationVersionDocuments.Check(Version("node", 1) with { Removed = true, Definition = null }));
         StringAssert.Contains(FleetAutomationVersionDocuments.Check(Version("node", 1) with { Triggers = ["Hourly Now"] }), "short word");
-        StringAssert.Contains(FleetAutomationVersionDocuments.Check(Version("node", 1) with { Version = 2 }), "not known");
+        StringAssert.Contains(FleetAutomationVersionDocuments.Check(Version("node", 1) with { Version = 3 }), "not known");
         StringAssert.Contains(FleetAutomationVersionDocuments.Check(Version("node", 1) with { Definition = null, Sealed = "x", Repository = "github.com/a/b" }), "in clear beside");
     }
 

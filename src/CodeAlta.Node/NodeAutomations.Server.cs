@@ -287,8 +287,11 @@ internal sealed partial class NodeAutomations
                         Approvers = run.Status == AutomationRun.Waiting && Engine.Snapshot.Find(id)?.Definition.Autonomy is { Approvers: not AutomationAutonomy.OwnerApprovers } autonomy
                             ? autonomy.Approvers : null,
                         OnCall = run.Status == AutomationRun.Waiting ? run.OnCall : null,
+                        Approval = run.Status == AutomationRun.Waiting ? run.Approval : null,
                     };
-                    var key = $"{fact.Status}|{fact.EndedAt?.ToUnixTimeMilliseconds()}|{fact.SessionId}|{fact.Number}|{fact.InputTokens}|{fact.OutputTokens}|{fact.Cost}|{fact.ActingAs}";
+                    // A new approval, or another person on call, is told again.
+                    var key = $"{fact.Status}|{fact.EndedAt?.ToUnixTimeMilliseconds()}|{fact.SessionId}|{fact.Number}|{fact.InputTokens}|{fact.OutputTokens}|{fact.Cost}|{fact.ActingAs}"
+                        + $"|{fact.Approval}|{string.Join(',', fact.OnCall ?? [])}";
                     if (!reported.TryGetValue(run.Id, out var known) || known != key) changed.Add((fact, key));
                 }
             }

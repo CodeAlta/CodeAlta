@@ -14,6 +14,8 @@ public sealed partial class FleetNodeService
             FleetNodeJsonContext.Default.FleetAutomationInfo, PutAutomationAsync);
         On(caller, FleetNodeMethods.AutomationsRun, Access.Automate, FleetNodeJsonContext.Default.FleetAutomationRef,
             FleetNodeJsonContext.Default.FleetAutomationRunInfo, RunAutomationAsync);
+        On(caller, FleetNodeMethods.AutomationsTry, Access.Automate, FleetNodeJsonContext.Default.FleetAutomationRef,
+            FleetNodeJsonContext.Default.FleetAutomationRunInfo, TryAutomationAsync);
         On(caller, FleetNodeMethods.AutomationsRemove, Access.Automations, FleetNodeJsonContext.Default.FleetAutomationRef,
             FleetNodeJsonContext.Default.FleetAutomationRemoved, RemoveAutomationAsync);
         On(caller, FleetNodeMethods.AutomationsList, Access.Automations, FleetNodeJsonContext.Default.FleetEmpty,
@@ -33,6 +35,13 @@ public sealed partial class FleetNodeService
         var automations = RequireAutomations();
         RequireWork();
         return Once(call, FleetNodeJsonContext.Default.FleetAutomationRunInfo, () => automations.RunAsync(AutomationCaller(call), parameters.Id, parameters.DryRun == true, cancellationToken));
+    }
+
+    private Task<FleetAutomationRunInfo> TryAutomationAsync(FleetNodeCall call, FleetAutomationRef parameters, CancellationToken cancellationToken)
+    {
+        var automations = RequireAutomations();
+        RequireWork();
+        return Once(call, FleetNodeJsonContext.Default.FleetAutomationRunInfo, () => automations.RunAsync(AutomationCaller(call), parameters.Id, true, cancellationToken));
     }
 
     private Task<FleetAutomationRemoved> RemoveAutomationAsync(FleetNodeCall call, FleetAutomationRef parameters, CancellationToken cancellationToken)

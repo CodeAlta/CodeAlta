@@ -180,6 +180,16 @@ public sealed class FleetSignInEndToEndTests
                 "a code continues once");
             Assert.AreEqual("sign_in.invalid_attempt", (await owner.LinkSignInAsync(new FleetSignInLinkRequest(ownerEpoch, linkId, "github"), token)).Status, "GitHub needs its code");
 
+            // A second way in needs the person to sign in again with the one they have: the code of the link starts once they did.
+            Assert.AreEqual("sign_in.confirmation_required", (await owner.StartSignInCodeAsync(new FleetSignInCodeRequest(ownerEpoch, "github", null, linkId), token)).Status);
+            var confirmCode = (await owner.StartSignInCodeAsync(new FleetSignInCodeRequest(ownerEpoch, "github", null, linkId, "confirm"), token)).Code!;
+            github.Approve(confirmCode.UserCode, account);
+            var again = await owner.StartSignInCodeAsync(new FleetSignInCodeRequest(ownerEpoch, "github", null, linkId, null, "github", confirmCode.Handle), token);
+            Assert.AreEqual("ok", again.Status, again.Message);
+            github.Approve(again.Code!.UserCode, account);
+            var relinked = await owner.LinkSignInAsync(new FleetSignInLinkRequest(ownerEpoch, linkId, "github", again.Code.Handle), token);
+            Assert.AreEqual("ok", relinked.Status, relinked.Message);
+
             // A new computer joins with that account: a device of the person exists, so it approves the new one.
             await using var laptopHost = await HostAsync(At("laptop"), root, token);
             await using var laptopServers = new DesktopFleetServers(laptopHost, "Alex laptop", "4.0.0") { OpenBrowser = static _ => true };

@@ -42,6 +42,12 @@ public static class FleetAutomationMethods
     /// </summary>
     public const string TakeOver = "automations.takeOver";
 
+    /// <summary>
+    /// What a machine did with a take-over (<see cref="FleetAutomationTakeOverAck"/>): the server tells the person who asked that
+    /// the run is theirs only once its machine accepted it, and why it refused it otherwise.
+    /// </summary>
+    public const string TakeOverAck = "automations.takeOverAck";
+
     /// <summary>The feature a server announces in its welcome when it holds automations.</summary>
     public const string Feature = "automations";
 }
@@ -60,6 +66,13 @@ public sealed record FleetAutomationAcks(IReadOnlyList<FleetAutomationAck> Acks)
 /// <param name="Applied">Whether the machine holds that version now (or a newer one).</param>
 /// <param name="Message">Why it refused it; null when applied.</param>
 public sealed record FleetAutomationAck(string AutomationId, long Number, bool Applied, string? Message);
+
+/// <summary>What a machine did with a take-over of a run.</summary>
+/// <param name="AutomationId">The automation the take-over named.</param>
+/// <param name="RunId">The run it named.</param>
+/// <param name="Accepted">Whether the run now waits for the person who asked, and no approval stops it.</param>
+/// <param name="Message">Why it refused it, in a line; null when accepted.</param>
+public sealed record FleetAutomationTakeOverAck(string AutomationId, string RunId, bool Accepted, string? Message);
 
 /// <summary>A machine claims a due time of an automation.</summary>
 /// <param name="AutomationId">The automation.</param>
@@ -130,6 +143,12 @@ public sealed record FleetAutomationRunFact(string RunId, string AutomationId, l
     /// rotation of its team. Null for none.
     /// </summary>
     public IReadOnlyList<string>? OnCall { get; init; }
+
+    /// <summary>
+    /// Gets the id of the approval a run that waits waits for, a new one each time it starts to wait: the server tells a person of
+    /// each approval once, not of the run once. Null for a run that waits for none, or a machine that does not say it.
+    /// </summary>
+    public string? Approval { get; init; }
 }
 
 /// <summary>The source-generated contracts of the automation methods of the control connection.</summary>
@@ -139,4 +158,5 @@ public sealed record FleetAutomationRunFact(string RunId, string AutomationId, l
 [JsonSerializable(typeof(FleetAutomationClaimRequest))]
 [JsonSerializable(typeof(FleetAutomationClaimResult))]
 [JsonSerializable(typeof(FleetAutomationRunFacts))]
+[JsonSerializable(typeof(FleetAutomationTakeOverAck))]
 public sealed partial class FleetAutomationServerJsonContext : JsonSerializerContext;

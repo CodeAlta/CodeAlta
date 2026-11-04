@@ -401,7 +401,8 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             // The machine runs what this computer signed for it, numbered after every version it signed of this automation.
             var definition = AutomationConfig.Write(string.Empty, copy);
             var number = NextNumber(entry.Id);
-            var signed = _sign(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, null, entry.Id, number, machineId, false, copy.Enabled, TriggerKinds(copy),
+            // An automation with autonomy is of a format a machine that does not know autonomy refuses, rather than run it unguarded.
+            var signed = _sign(new FleetAutomationVersion(FleetAutomationVersion.VersionFor(copy.Autonomy is not null), null, entry.Id, number, machineId, false, copy.Enabled, TriggerKinds(copy),
                 definition, repository, null, _deviceId(), string.Empty, DateTimeOffset.UtcNow));
             // A copy is the same whatever the number of times it is made: each attempt has a key of its own, so that one
             // made again after a removal is made, not answered from the receipt of the first.
@@ -502,11 +503,11 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     /// <param name="entry">The automation.</param>
     /// <param name="runId">The run.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
-    /// <returns>Why it was not passed on; null once the machine was asked.</returns>
-    internal Task<string?> TakeOverAsync(AutomationEntry entry, string runId, CancellationToken cancellationToken)
+    /// <returns>Why it was not passed on or was refused, or whether its machine confirmed it.</returns>
+    internal Task<AutomationTakeOverOutcome> TakeOverAsync(AutomationEntry entry, string runId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        return entry.Definition.RunsOn is not { } machineId ? Task.FromResult<string?>("It runs on this computer.") : TakeOverAsync(entry.Id, machineId, runId, cancellationToken);
+        return entry.Definition.RunsOn is not { } machineId ? Task.FromResult(new AutomationTakeOverOutcome("It runs on this computer.", false)) : TakeOverAsync(entry.Id, machineId, runId, cancellationToken);
     }
 
     /// <summary>
@@ -518,28 +519,29 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     /// <param name="machineId">The machine that runs it.</param>
     /// <param name="runId">The run.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
-    /// <returns>Why it was not passed on; null once the machine was asked.</returns>
-    internal async Task<string?> TakeOverAsync(string automationId, string machineId, string runId, CancellationToken cancellationToken)
+    /// <returns>Why it was not passed on or was refused, or whether its machine confirmed it: only then is the run the person's.</returns>
+    internal async Task<AutomationTakeOverOutcome> TakeOverAsync(string automationId, string machineId, string runId, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(automationId);
         ArgumentException.ThrowIfNullOrWhiteSpace(machineId);
         if (SignRun is not { } sign || ServerRoute?.Invoke(machineId) is not { } route)
-            return "Its machine is reached through no server online: open its session on the machine to answer it.";
+            return new("Its machine is reached through no server online: open its session on the machine to answer it.", false);
         using (route)
         {
             try
             {
-                await route.TakeOverAsync(sign(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, route.OrganizationId, automationId, machineId, runId,
+                var answer = await route.TakeOverAsync(sign(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, route.OrganizationId, automationId, machineId, runId,
                     string.Empty, string.Empty, DateTimeOffset.UtcNow) { Action = FleetAutomationRunRequest.TakeOverAction }), cancellationToken).ConfigureAwait(false);
-                return null;
+                // Its machine said it took the run over, or did not say (asked, not confirmed).
+                return new(null, answer.Status == FleetAutomationRunRequest.TakeOverAction);
             }
             catch (FleetServerException exception)
             {
-                return $"{route.MachineName}: {exception.Message}";
+                return new($"{route.MachineName}: {exception.Message}", false);
             }
             catch (Exception exception) when (exception is HttpRequestException or IOException or ArgumentException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
             {
-                return $"The server of {route.MachineName} did not take the request: {exception.Message}";
+                return new($"The server of {route.MachineName} did not take the request: {exception.Message}", false);
             }
         }
     }
@@ -565,8 +567,10 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         var now = DateTimeOffset.UtcNow;
         try
         {
-            var signed = sign(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, route.OrganizationId, entry.Id, machineId, runId, string.Empty,
-                string.Empty, now) { Action = dryRun ? FleetAutomationRunRequest.TryAction : null });
+            // A try is of a format a machine that does not know tries refuses, rather than run the automation for real.
+            var action = dryRun ? FleetAutomationRunRequest.TryAction : null;
+            var signed = sign(new FleetAutomationRunRequest(FleetAutomationRunRequest.VersionFor(action), route.OrganizationId, entry.Id, machineId, runId, string.Empty,
+                string.Empty, now) { Action = action });
             await route.RunAsync(signed, cancellationToken).ConfigureAwait(false);
         }
         catch (FleetServerException exception)
@@ -654,7 +658,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             var sealedText = await route.SealAsync(new FleetAutomationContent(AutomationConfig.Write(string.Empty, copy), repository), entry.Id, number, machineId, scope,
                 cancellationToken).ConfigureAwait(false);
             // Given to a machine of a team its person maintains, it is an automation of that team (doc/fleet/orchestration.md, scopes).
-            var signed = _sign(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, route.OrganizationId, entry.Id, number, machineId, false, copy.Enabled,
+            var signed = _sign(new FleetAutomationVersion(FleetAutomationVersion.VersionFor(copy.Autonomy is not null), route.OrganizationId, entry.Id, number, machineId, false, copy.Enabled,
                 TriggerKinds(copy), null, null, sealedText, _deviceId(), string.Empty, DateTimeOffset.UtcNow) { Scope = scope, Provider = scope is null ? null : copy.Model.Provider });
             await route.PutAsync(signed, cancellationToken).ConfigureAwait(false);
             lock (_gate) _numbers[entry.Id] = number;

@@ -837,7 +837,8 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// policies and the kill switch): whether a stop reaches it, and the rules of the organization of a space.
     /// </summary>
     public FleetPolicyGuard Policy => LazyInitializer.EnsureInitialized(ref _policy,
-        () => new FleetPolicyGuard(Identity().DeviceId, () => Connections.Select(static connection => connection.Connector).OfType<FleetConnector>()));
+        // The device is read when a stop is checked, which only a server link brings: a computer that stays local makes no key (S1).
+        () => new FleetPolicyGuard(() => Identity().DeviceId, () => Connections.Select(static connection => connection.Connector).OfType<FleetConnector>()));
 
     private FleetPolicyGuard? _policy;
 

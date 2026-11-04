@@ -117,10 +117,12 @@ public sealed class BudgetTests
         Assert.AreEqual(2000, verified.Limit);
         Assert.IsFalse(FleetBudgetDocuments.TryVerify(forged, list, fleet.NodeKey.DeviceId, out _, out _), "a budget the server made up does not verify");
 
-        // Removed, it limits nothing and is no longer listed.
+        // Removed, it limits nothing and is no longer listed for its owner; a machine reads its signed removal, which ends what it kept.
         await fleet.Manager.RemoveAsync(budget.Id, CancellationToken.None);
         Assert.AreEqual(0, (await fleet.Manager.ListAsync(CancellationToken.None)).Budgets.Count);
-        Assert.AreEqual(0, (await node.ListMachineBudgetsAsync()).Budgets.Count);
+        var removal = (await node.ListMachineBudgetsAsync()).Budgets.Single();
+        Assert.IsTrue(FleetBudgetDocuments.TryVerify(removal.Signed, list, fleet.NodeKey.DeviceId, out var removed, out reason), reason);
+        Assert.IsTrue(removed.Removed);
         CollectionAssert.IsSubsetOf(new[] { "budget.set", "budget.remove" }, (await fleet.AuditAsync("budget.")).Select(static record => record.Action).ToArray());
     }
 
@@ -284,6 +286,172 @@ public sealed class BudgetTests
         }
     }
 
+    // A server that leaves a budget out, replaces it with one whose signature does not hold, or gives an older version back,
+    // takes no restriction away: the machine keeps the newest version it verified, and only a signed removal ends a budget.
+    [TestMethod]
+    public async Task AServer_CannotEraseNorRollBackABudgetTheMachineKnows()
+    {
+        var root = new TempDirectory();
+        var fleet = await BudgetFixture.StartAsync(root);
+        try
+        {
+            var spend = new FakeSpend { Spent = 100 };
+            var tamper = new Tamper();
+            var statePath = Path.Combine(root.Path, "node-budgets.json");
+            var gate = fleet.Gate(spend, statePath, tamper);
+            FleetBudgetSettings Machine(long limit) => Settings(limit) with { Name = "Machine", ScopeKind = FleetBudgetScopeKinds.Machine, ScopeId = fleet.NodeKey.DeviceId,
+                Mode = FleetBudgetModes.Advisory, Reached = FleetBudgetReachedActions.Stop };
+            async Task<string?> AdmitAsync(FleetBudgetGate with, string run) => (await with.AdmitAsync(new FleetBudgetRun(run, null, null, null), TestContext.CancellationToken)).Problem;
+
+            var loose = await fleet.Manager.PutAsync(null, Machine(1000), CancellationToken.None);
+            Assert.IsNull(await AdmitAsync(gate, "run-1"), "under its limit");
+            var strict = await fleet.Manager.PutAsync(loose.Id, Machine(100), CancellationToken.None);
+            StringAssert.Contains(await AdmitAsync(gate, "run-2"), "is reached");
+
+            // Left out, replaced by a version whose signature does not hold, or by the older version with the higher limit: still reached.
+            tamper.Budgets = static _ => [];
+            StringAssert.Contains(await AdmitAsync(gate, "run-3"), "is reached", "a budget left out is kept");
+            tamper.Budgets = budgets => [.. budgets.Select(budget => budget with { Signed = budget.Signed with { Payload = budget.Signed.Payload.Replace("\"limit\":100", "\"limit\":100000", StringComparison.Ordinal) } })];
+            StringAssert.Contains(await AdmitAsync(gate, "run-4"), "is reached", "a version whose signature does not hold is not taken");
+            tamper.Budgets = budgets => [.. budgets.Select(budget => budget with { Signed = loose.Signed })];
+            StringAssert.Contains(await AdmitAsync(gate, "run-5"), "is reached", "an older version is not taken back");
+            tamper.Budgets = budgets => [.. budgets.Select(budget => budget with { Id = "another-budget" })];
+            StringAssert.Contains(await AdmitAsync(gate, "run-6"), "is reached", "a version under the id of another budget is not taken");
+
+            // Restarted, with a server that leaves it out: what it verified is kept in its file.
+            tamper.Budgets = static _ => [];
+            StringAssert.Contains(await AdmitAsync(fleet.Gate(spend, statePath, tamper), "run-7"), "is reached");
+
+            // A signed removal ends it, and an older version given back after it does not bring it back.
+            tamper.Budgets = null;
+            await fleet.Manager.RemoveAsync(strict.Id, CancellationToken.None);
+            Assert.IsNull(await AdmitAsync(gate, "run-8"), "a signed removal ends the budget");
+            tamper.Budgets = budgets => [.. budgets.Select(budget => budget with { Signed = strict.Signed })];
+            Assert.IsNull(await AdmitAsync(gate, "run-9"), "the removal is kept");
+        }
+        finally
+        {
+            await fleet.DisposeAsync();
+            root.Dispose();
+        }
+    }
+
+    // A held run is released only by a signed decision or by its budget not being reached: a server that says the budget is
+    // not found releases nothing.
+    [TestMethod]
+    public async Task AHeldRun_IsNotReleasedByAServerThatSaysItsBudgetIsNotFound()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        var budget = await fleet.Manager.PutAsync(null, Settings(100), CancellationToken.None);
+        using (var other = new FleetServerClient(fleet.Server.BaseAddress, fleet.OtherKey))
+            Assert.AreEqual(100, (await other.AskAllowanceAsync(budget.Id, new FleetAllowanceRequest(1, 0, 100))).Granted);
+        var tamper = new Tamper { HoldNotFound = true };
+        var gate = fleet.Gate(new FakeSpend(), null, tamper);
+        gate.HoldWait = TimeSpan.FromSeconds(1);
+        var admission = await gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), TestContext.CancellationToken).WaitAsync(Patience, TestContext.CancellationToken);
+        StringAssert.Contains(admission.Problem, "nobody continued the run in time");
+    }
+
+    // A new version of the budget of a held run decides again, as for a new run: a rename or a lower limit keeps it waiting,
+    // a limit it is no longer reached under starts it, and a version that stops refuses it. A version change alone authorizes nothing.
+    [TestMethod]
+    public async Task ANewVersionOfTheBudgetOfAHeldRun_DecidesAgain_ItReleasesNothingByItself()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        var budget = await fleet.Manager.PutAsync(null, Settings(100), CancellationToken.None);
+        using (var other = new FleetServerClient(fleet.Server.BaseAddress, fleet.OtherKey))
+            Assert.AreEqual(100, (await other.AskAllowanceAsync(budget.Id, new FleetAllowanceRequest(1, 0, 100))).Granted);
+        var gate = fleet.Gate(new FakeSpend());
+        var held = new TaskCompletionSource();
+        var admission = gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), () => held.TrySetResult(), TestContext.CancellationToken);
+        await held.Task.WaitAsync(Patience, TestContext.CancellationToken);
+
+        // Renamed, then given a lower limit: still reached, the run waits.
+        await fleet.Manager.PutAsync(budget.Id, Settings(100) with { Name = "Renamed" }, CancellationToken.None);
+        gate.Changed();
+        await fleet.Manager.PutAsync(budget.Id, Settings(50) with { Name = "Renamed" }, CancellationToken.None);
+        gate.Changed();
+        await Task.Delay(TimeSpan.FromMilliseconds(600), TestContext.CancellationToken);
+        Assert.IsFalse(admission.IsCompleted, "a new version that is still reached releases nothing");
+
+        // A limit it is no longer reached under: the run starts.
+        await fleet.Manager.PutAsync(budget.Id, Settings(10_000) with { Name = "Renamed" }, CancellationToken.None);
+        gate.Changed();
+        Assert.IsNull((await admission.WaitAsync(Patience, TestContext.CancellationToken)).Problem);
+
+        // A version that stops runs refuses a held one.
+        var second = await fleet.Manager.PutAsync(null, Settings(100) with { Name = "Second" }, CancellationToken.None);
+        using (var other = new FleetServerClient(fleet.Server.BaseAddress, fleet.OtherKey))
+            await other.AskAllowanceAsync(second.Id, new FleetAllowanceRequest(1, 0, 100));
+        var waiting = new TaskCompletionSource();
+        var stopped = gate.AdmitAsync(new FleetBudgetRun("run-2", null, null, null), () => waiting.TrySetResult(), TestContext.CancellationToken);
+        await waiting.Task.WaitAsync(Patience, TestContext.CancellationToken);
+        await fleet.Manager.PutAsync(second.Id, Settings(100) with { Name = "Second", Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
+        gate.Changed();
+        StringAssert.Contains((await stopped.WaitAsync(Patience, TestContext.CancellationToken)).Problem, "is reached");
+    }
+
+    // What the server gives of an enforced budget is not signed: the machine never holds more than its signed limit, and what it
+    // spent itself reaching the limit holds the run, whatever allowance the server gives.
+    [TestMethod]
+    public async Task AnAllowance_IsBoundedByTheSignedLimit_WhateverTheServerGives()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        await fleet.Manager.PutAsync(null, Settings(100), CancellationToken.None);
+        var spend = new FakeSpend { Spent = 100 };
+        var tamper = new Tamper { Allowance = 1_000_000 };
+        var gate = fleet.Gate(spend, null, tamper);
+        gate.HoldWait = TimeSpan.FromSeconds(1);
+        var reached = await gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), TestContext.CancellationToken).WaitAsync(Patience, TestContext.CancellationToken);
+        StringAssert.Contains(reached.Problem, "nobody continued the run in time", "its own spending reached the signed limit");
+        // Below the limit, the run starts on what is left of it, not on the allowance the server made up.
+        spend.Spent = 60;
+        Assert.IsNull((await gate.AdmitAsync(new FleetBudgetRun("run-2", null, null, null), TestContext.CancellationToken)).Problem);
+    }
+
+    /// <summary>A server in the path of a machine that changes what it answers, as a compromised one would.</summary>
+    private sealed class Tamper() : DelegatingHandler(new SocketsHttpHandler())
+    {
+        /// <summary>Gets or sets what the server answers for the budgets of the machine; null leaves its answer.</summary>
+        public Func<IReadOnlyList<FleetMachineBudgetDto>, IReadOnlyList<FleetMachineBudgetDto>>? Budgets { get; set; }
+
+        /// <summary>Gets or sets an allowance the server gives, whatever was asked; null leaves its answer.</summary>
+        public long? Allowance { get; set; }
+
+        /// <summary>Gets or sets whether a hold is answered with budget.not_found.</summary>
+        public bool HoldNotFound { get; set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (HoldNotFound && request.Method == HttpMethod.Post && path.EndsWith("/holds", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound)
+                {
+                    Content = new StringContent("""{"status":404,"title":"budget.not_found","detail":"No such budget.","code":"budget.not_found"}""", System.Text.Encoding.UTF8,
+                        "application/problem+json"),
+                };
+            }
+
+            var response = await base.SendAsync(request, cancellationToken);
+            if (Budgets is { } budgets && path.EndsWith("/machine-budgets", StringComparison.Ordinal) && response.IsSuccessStatusCode)
+            {
+                var listed = System.Text.Json.JsonSerializer.Deserialize(await response.Content.ReadAsStringAsync(cancellationToken), FleetBudgetsApiJsonContext.Default.FleetMachineBudgetListDto)!;
+                response.Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(new FleetMachineBudgetListDto(budgets(listed.Budgets)),
+                    FleetBudgetsApiJsonContext.Default.FleetMachineBudgetListDto), System.Text.Encoding.UTF8, "application/json");
+            }
+
+            if (Allowance is { } given && path.EndsWith("/allowance", StringComparison.Ordinal) && response.IsSuccessStatusCode)
+            {
+                var allowance = System.Text.Json.JsonSerializer.Deserialize(await response.Content.ReadAsStringAsync(cancellationToken), FleetBudgetsApiJsonContext.Default.FleetAllowanceDto)!;
+                response.Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(allowance with { Granted = given, Exhausted = false },
+                    FleetBudgetsApiJsonContext.Default.FleetAllowanceDto), System.Text.Encoding.UTF8, "application/json");
+            }
+
+            return response;
+        }
+    }
+
     private static FleetBudgetSettings Settings(long limit) => new("Tokens of the person", FleetBudgetScopeKinds.Person, null, FleetBudgetMeasures.Tokens, limit,
         FleetBudgetPeriods.Month, "UTC", FleetBudgetModes.Enforced, FleetBudgetReachedActions.Hold);
 
@@ -356,9 +524,9 @@ public sealed class BudgetTests
         }
 
         /// <summary>The gate of the node machine, with what it spent as the test says it.</summary>
-        public FleetBudgetGate Gate(IFleetBudgetSpend spend, string? statePath = null)
+        public FleetBudgetGate Gate(IFleetBudgetSpend spend, string? statePath = null, HttpMessageHandler? handler = null)
         {
-            var devices = new FleetOrganizationDevices(Server.BaseAddress, NodeKey);
+            var devices = new FleetOrganizationDevices(Server.BaseAddress, NodeKey, null, handler);
             var link = new FleetBudgetLink("link", devices, null, statePath);
             return new FleetBudgetGate(() => [link], spend) { HoldPoll = TimeSpan.FromMilliseconds(100) };
         }

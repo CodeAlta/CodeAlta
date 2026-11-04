@@ -164,6 +164,50 @@ public sealed class AltaSessionSelectionTests
         Assert.AreEqual(("large", AgentReasoningEffort.XHigh), (kept.ModelId, kept.ReasoningEffort));
     }
 
+    // A session whose tool calls a guard checks (the run of an automation with autonomy) hands work only to the sessions of its
+    // own run: a prompt, a reminder or the end of a job handed to another session would be done there with its tools, unchecked.
+    [TestMethod]
+    public async Task AGuardedSession_HandsWorkOnlyToTheSessionsOfItsRun()
+    {
+        using var temp = new TempFolder();
+        var provider = new GatedProvider();
+        await using var host = await CreateHostAsync(temp, provider, inherit: () => true);
+        _ = new CodeAlta.Automations.AutomationRunner(host);
+        var commands = DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()));
+        const string AutomationId = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d79";
+        var run = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Run", new AltaActorProvenance
+        {
+            Kind = AltaActorProvenance.AutomationKind, AutomationId = AutomationId, CorrelationId = "run-1", CreatedAt = DateTimeOffset.UtcNow,
+        }, null, null, null, null, null, null);
+        var child = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Child", new AltaActorProvenance
+        {
+            Kind = AltaActorProvenance.WorkflowKind, SourceSessionId = run.SessionId, CreatedAt = DateTimeOffset.UtcNow,
+        }, null, null, null, null, null, null);
+        var other = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "The user's own");
+        Assert.IsNotNull(await host.ToolGuards.FindAsync(run.SessionId, default), "the session of the run is guarded");
+        var agent = new AltaCallerIdentity { Kind = "agent", SourceSessionId = run.SessionId, SourceProjectId = host.CurrentProject.Id };
+
+        foreach (var args in new[]
+                 {
+                     new[] { "session", "send", other.SessionId, "--message", "deploy" }, ["session", "queue", other.SessionId, "--message", "deploy"],
+                     ["session", "message", other.SessionId, "--message", "deploy"], ["reminder", "create", "--session", other.SessionId, "--duration", "60", "--content", "deploy"],
+                     ["job", "start", "--session", other.SessionId, "--command", "echo deploy"],
+                 })
+        {
+            var refused = await commands.InvokeAsync(args, caller: agent);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, refused.ExitCode, string.Join(' ', args) + ": " + refused.Transcript);
+            StringAssert.Contains(refused.Transcript, "guard.otherSession", string.Join(' ', args));
+        }
+
+        Assert.AreEqual(0, provider.Turns.Count, "the user's session was handed nothing");
+        // A session of its own run takes it; a session no guard checks hands work as before.
+        var toChild = await commands.InvokeAsync(["session", "queue", child.SessionId, "--message", "look"], caller: agent);
+        Assert.AreEqual(AltaExitCodes.Success, toChild.ExitCode, toChild.Transcript);
+        var plain = new AltaCallerIdentity { Kind = "agent", SourceSessionId = other.SessionId, SourceProjectId = host.CurrentProject.Id };
+        var fromPlain = await commands.InvokeAsync(["reminder", "create", "--session", child.SessionId, "--duration", "60", "--content", "later"], caller: plain);
+        Assert.AreEqual(AltaExitCodes.Success, fromPlain.ExitCode, fromPlain.Transcript);
+    }
+
     [TestMethod]
     public async Task Choices_RefuseWithoutTheOwnerOfTheSessions()
     {

@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime.Tools;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime.Scripts;
 using CodeAlta.Orchestration.Hosting;
@@ -187,7 +188,8 @@ internal sealed class AutomationRunner : IAutomationRunner
 
     private readonly CodeAltaHost _host;
     private readonly IAutomationRunGate? _gate;
-    private readonly AutomationCallBreaker _breaker = new();
+    /// <summary>Gets or sets the circuit breaker of the allowed tools of the runs; the service gives one that keeps its calls with its state.</summary>
+    internal AutomationCallBreaker Breaker { get; set; } = new();
 
     /// <summary>How often the approvals of the commands and edits of a run with autonomy are looked at for their timeout.</summary>
     internal static readonly TimeSpan ApprovalWatch = TimeSpan.FromSeconds(15);
@@ -199,6 +201,32 @@ internal sealed class AutomationRunner : IAutomationRunner
     {
         ArgumentNullException.ThrowIfNull(host);
         (_host, _gate) = (host, gate);
+        host.ToolGuards.AddOrigin(GuardOf);
+    }
+
+    /// <summary>
+    /// Gets or sets what tells, for the session of a run once its first turn ended (or after a restart), the automation as it
+    /// is now and whether the run was a try (null when the run is no longer known); null when nothing tells: such a session is
+    /// then guarded as one of an automation that allows nothing by itself.
+    /// </summary>
+    internal Func<string, string, (AutomationEntry? Entry, bool? DryRun)>? Origin { get; set; }
+
+    // The guards of the runs that work now, by run: their sessions and the sessions these start are checked by the same one.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, AutomationRunGuard> _live = new(StringComparer.Ordinal);
+
+    // The guard a session takes from the automation that created it (its lineage gives it to the sessions it starts): the one
+    // of its run while the run works, else one of the automation as it is now; a try stays a try. An automation no longer
+    // known, or a run no longer known, gives a guard that allows nothing by itself: what its sessions call waits for a person.
+    private AgentToolInterceptor? GuardOf(string sessionId, AltaActorProvenance createdBy)
+    {
+        if (createdBy is not { Kind: AltaActorProvenance.AutomationKind, AutomationId: { Length: > 0 } automationId }) return null;
+        if (createdBy.CorrelationId is { Length: > 0 } runId && _live.TryGetValue(runId, out var live)) return live;
+        var (entry, dryRun) = Origin?.Invoke(automationId, createdBy.CorrelationId ?? string.Empty) ?? (null, null);
+        if (entry is not null && entry.Definition.Autonomy is null) return null;
+        entry ??= new AutomationEntry(new AutomationDefinition(automationId, "an automation that is no longer here"), new AutomationSource(string.Empty, null, null), null, null, null);
+        var autonomy = dryRun is null || entry.Definition.Autonomy is null ? new AutomationAutonomy() : entry.Definition.Autonomy;
+        return new AutomationRunGuard(entry with { Definition = entry.Definition with { Autonomy = autonomy } }, Breaker,
+            (session, request, token) => _host.RuntimeService.Permissions.RequestForSessionAsync(session, request, token), TimeProvider.System, dryRun == true);
     }
 
     /// <inheritdoc />
@@ -352,8 +380,10 @@ internal sealed class AutomationRunner : IAutomationRunner
             {
                 if (_host.RuntimeService.GetPermissionPolicy(sessionId) == SessionPermissionPolicy.Approve)
                     return new(sessionId, "This automation decides what its runs do without a person: it runs in a permission mode that asks for commands and edits, not one that allows everything.", null);
-                var guarded = sessionId;
-                guard = new AutomationRunGuard(entry, _breaker, (request, token) => _host.RuntimeService.Permissions.RequestForSessionAsync(guarded, request, token), TimeProvider.System, dryRun);
+                // A call waits for a person on the card of the session that makes it: the run's own, or a session it started.
+                guard = new AutomationRunGuard(entry, Breaker, (session, request, token) => _host.RuntimeService.Permissions.RequestForSessionAsync(session, request, token),
+                    TimeProvider.System, dryRun);
+                _live[runId] = guard;
                 _host.ToolGuards.Set(sessionId, guard);
             }
 
@@ -363,7 +393,12 @@ internal sealed class AutomationRunner : IAutomationRunner
                 { Selection = selection, Provenance = AgentPromptProvenance.Automation }, CancellationToken.None);
             if (admission.Kind is not (OwnedSessionCommandAdmissionKind.Accepted or OwnedSessionCommandAdmissionKind.Replay) || admission.Receipt is null)
             {
-                if (guard is not null) _host.ToolGuards.Remove(sessionId, guard);
+                if (guard is not null)
+                {
+                    _host.ToolGuards.Remove(sessionId, guard);
+                    _live.TryRemove(new KeyValuePair<string, AutomationRunGuard>(runId, guard));
+                }
+
                 return new(sessionId, admission.Kind == OwnedSessionCommandAdmissionKind.Capacity ? NoCapacity
                     : $"The prompt was not accepted ({admission.Kind.ToString().ToLowerInvariant()}).", null);
             }
@@ -435,7 +470,9 @@ internal sealed class AutomationRunner : IAutomationRunner
             try { await watch.ConfigureAwait(false); }
             catch (Exception exception) when (exception is not OutOfMemoryException) { }
             guard.NoteWaiting(false);
+            // The session keeps a guard of its automation from its origin (GuardOf): its later turns are checked too.
             _host.ToolGuards.Remove(sessionId, guard);
+            _live.TryRemove(new KeyValuePair<string, AutomationRunGuard>(runId, guard));
         }
     }
 

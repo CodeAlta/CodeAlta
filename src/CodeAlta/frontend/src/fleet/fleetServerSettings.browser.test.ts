@@ -59,11 +59,13 @@ test("another computer of the owner asks to change the company sign-in: this one
     await page.clickText(".bp6-menu-item", "Add a passkey");
     await page.until(`document.querySelector('.fleet-sign-in-approval')`, "the change to approve");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-approval li')].map(item => item.textContent)`),
-      ["https://login.contoso.example · contoso-client", "Email domains let in: contoso.example", "Require company sign-in", "A new client secret"]);
+      ["Issuer: https://login.contoso.example · contoso-client", "Name shown: Contoso", "Groups claim: roles", "Email domains let in: contoso.example",
+        "Roles from groups: g-admins → admin", "Sign in with: company, passkey", "Require company sign-in", "Break-glass owner: you", "A new client secret"]);
     assert.match(await page.evaluate(`document.querySelector('.fleet-sign-in-approval').textContent`) as string, /^Office desktop asks to change the company sign-in\./u);
     await page.clickText(".fleet-sign-in-approval .bp6-button", "Approve");
     await page.until(`!document.querySelector('.fleet-sign-in-approval')`, "approved");
-    assert.ok((await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).some(call => call.includes('"approved":"approval-1"')));
+    // The approval names the digest of the change shown: the host signs that change or nothing.
+    assert.ok((await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).some(call => call.includes('"approved":"approval-1","digest":"digest-of-the-change-shown"')));
     assert.deepEqual(page.problems, []);
   }, options);
 });
@@ -289,11 +291,16 @@ test("the owner links a passkey, turns company sign-in on and requires it, and t
     await page.clickText(".bp6-menu-item", "Add a passkey");
     await page.until(`document.querySelector('.fleet-sign-in-logins .bp6-tag')?.textContent === 'Passkey · Passkey on Windows'`, "the passkey listed");
 
-    // Link GitHub shows the code to enter at GitHub, opens GitHub's page, and Cancel stops the wait.
+    // Link GitHub: a second way in asks the person to sign in again with the passkey first; then the code to enter at
+    // GitHub shows, Copy opens GitHub's page, and Cancel stops the wait.
     await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
     await page.until(`[...document.querySelectorAll('.bp6-menu-item')].some(item => item.textContent === 'Link GitHub')`, "GitHub may be linked");
     await page.clickText(".bp6-menu-item", "Link GitHub");
+    await page.until(`document.querySelector('.fleet-sign-in-confirm')?.textContent.startsWith('Adding a way to sign in needs you to sign in again with one you have.')`,
+      "the sign-in again asked");
+    await page.clickText(".fleet-sign-in-confirm-methods .bp6-button", "Continue with Passkey");
     await page.until(`document.querySelector('.fleet-sign-in-code code')?.textContent === 'WDJB-MJHT'`, "the code to enter");
+    assert.ok((await calls(page)).some(call => call.startCode === "github" && call.confirmWith === "passkey"), "the link starts once the person signed in again");
     await page.clickText(".fleet-sign-in-code .bp6-button", "Copy the code and open GitHub");
     await page.until(`window.fleetFixture.calls.some(call => call.includes('openPage'))`, "GitHub's page opened");
     await page.clickText(".fleet-sign-in-code .bp6-button", "Cancel");
@@ -352,6 +359,12 @@ test("confirming a change with an account that is not theirs names the ways in t
       await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
       await page.until(`[...document.querySelectorAll('.bp6-menu-item')].some(entry => entry.textContent === ${JSON.stringify(item)})`, item);
       await page.clickText(".bp6-menu-item", item);
+      // A second way in asks first to sign in again with the one the person has.
+      if (item !== "Add a passkey") {
+        await page.until(`[...document.querySelectorAll('.fleet-sign-in-confirm-methods .bp6-button')].some(button => button.textContent === 'Continue with Passkey')`,
+          "the sign-in again asked");
+        await page.clickText(".fleet-sign-in-confirm-methods .bp6-button", "Continue with Passkey");
+      }
       await page.until(`!document.querySelector('.bp6-popover-open') && !document.querySelector('.fleet-server-sign-in .bp6-button:disabled')`, `${item} done`);
     }
     await page.until(`document.querySelectorAll('.fleet-sign-in-logins .bp6-tag').length === 2`, "the two ways in listed");

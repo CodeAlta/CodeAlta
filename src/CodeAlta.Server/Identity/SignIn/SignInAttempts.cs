@@ -50,6 +50,9 @@ public static class SignInErrorCodes
     /// <summary>The ID token expired.</summary>
     public const string TokenExpired = "sign_in.token_expired";
 
+    /// <summary>A confirmation was answered with an earlier sign-in at the provider, not a fresh one.</summary>
+    public const string NotFresh = "sign_in.not_fresh";
+
     /// <summary>No person of the server linked this account.</summary>
     public const string NotLinked = "sign_in.not_linked";
 
@@ -82,6 +85,12 @@ public static class SignInErrorCodes
 
     /// <summary>A company account belongs to the organization: an admin removes the person in People and access, not the account.</summary>
     public const string ManagedByOrganization = "sign_in.managed_by_organization";
+
+    /// <summary>
+    /// The person has no way to sign in yet, and the device that links the first one joined too long ago: a stolen device key
+    /// would otherwise make its own. The first way in is linked soon after the device joined.
+    /// </summary>
+    public const string FirstWayInExpired = "sign_in.first_way_in_expired";
 }
 
 /// <summary>A sign-in that waits for the browser.</summary>
@@ -108,6 +117,9 @@ public sealed class SignInAttempt
     /// <summary>Gets the person who links, for a link; null for an enrollment.</summary>
     public string? LinkingPersonId { get; init; }
 
+    /// <summary>Gets whether a link is of the first way in of its person, which no sign-in confirmed; it completes only while the person has none.</summary>
+    public bool FirstWayIn { get; init; }
+
     /// <summary>Gets the loopback address the browser comes back to; empty for a device code.</summary>
     public required string RedirectUri { get; init; }
 
@@ -122,6 +134,9 @@ public sealed class SignInAttempt
 
     /// <summary>Gets when it stops working.</summary>
     public required DateTimeOffset ExpiresAt { get; init; }
+
+    /// <summary>Gets when it started: a confirmation is answered by an authentication at the provider since then.</summary>
+    public DateTimeOffset StartedAt { get; init; }
 
     /// <summary>Gets the provider's device code, which never leaves the server; null for a redirect.</summary>
     public string? DeviceCode { get; init; }
@@ -161,6 +176,9 @@ public sealed class SignInAttempt
 
     /// <summary>Gets or sets the person the passkey proved (or the passkey registered for), or null.</summary>
     public string? PasskeyPersonId { get; set; }
+
+    /// <summary>Gets or sets the passkey the page registered and verified, which only the signed completion of the device adds; null otherwise.</summary>
+    public Storage.PasskeyRecord? PendingPasskey { get; set; }
 }
 
 /// <summary>A change of the company sign-in that waits for another controller device of its owner to approve it, in memory.</summary>
@@ -362,6 +380,30 @@ public sealed class SignInAttempts
     {
         if (FindApproval(id) is not { ApprovedBy: not null } approval || approval.RequesterDeviceId != deviceId) return null;
         return _approvals.TryRemove(approval.Id, out var taken) ? taken : null;
+    }
+
+    /// <summary>
+    /// Forgets what a device has in progress, once it is revoked: its sign-ins (a passkey its page registers, an account it
+    /// links), its confirmations and the changes it asked to have approved.
+    /// </summary>
+    /// <param name="deviceId">The device.</param>
+    public void ForgetDevice(string deviceId)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        foreach (var pair in _attempts)
+        {
+            if (pair.Value.DeviceId == deviceId) _attempts.TryRemove(pair.Key, out _);
+        }
+
+        foreach (var pair in _confirmations)
+        {
+            if (pair.Value.DeviceId == deviceId) _confirmations.TryRemove(pair.Key, out _);
+        }
+
+        foreach (var pair in _approvals)
+        {
+            if (pair.Value.RequesterDeviceId == deviceId) _approvals.TryRemove(pair.Key, out _);
+        }
     }
 
     private void Sweep()

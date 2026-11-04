@@ -86,10 +86,16 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
     public IReadOnlyList<string>? Calls { get; init; }
 
     /// <summary>
-    /// Gets who its on-call tool said was on call when it started, by email and name: what the server asks when the run waits,
-    /// if they answer the approvals of its automation; null when the automation reads none.
+    /// Gets who its on-call tool said was on call when it started, and again each time it starts to wait, by email and name: what
+    /// the server asks when the run waits, if they answer the approvals of its automation; null when the automation reads none.
     /// </summary>
     public IReadOnlyList<string>? OnCall { get; init; }
+
+    /// <summary>
+    /// Gets the id of the approval the run waits for now, a new one each time it starts to wait: its server tells a person of each
+    /// approval once; null while it waits for none.
+    /// </summary>
+    public string? Approval { get; init; }
 }
 
 /// <summary>What an event trigger has already seen of a repository.</summary>
@@ -107,8 +113,53 @@ internal sealed record AutomationWatermark
     /// <summary>The items that already started it, newest last: an item is handled once.</summary>
     public List<string> Seen { get; init; } = [];
 
+    /// <summary>
+    /// For the pushed events signed at a time (Standard Webhooks), the newest such time seen, in Unix seconds: when
+    /// <see cref="Seen"/> forgets an event, <see cref="Floor"/> becomes it (<see cref="AutomationReplayMemory"/>).
+    /// </summary>
+    public long Newest { get; init; }
+
     /// <summary>The last commit seen of each open pull request, by its number.</summary>
     public Dictionary<string, string> Heads { get; init; } = [];
+}
+
+/// <summary>
+/// The memory of the pushed events a trigger took, which refuses a replay: the ids it took, bounded, and for the events signed at
+/// a time, a floor under which an event is refused because its id could have been forgotten. An event that waited for its machine
+/// (a day at the server) is taken once, whenever it comes, and a captured one sent again is not taken again.
+/// </summary>
+internal static class AutomationReplayMemory
+{
+    /// <summary>Whether an event signed at a time is one the memory can no longer tell apart: signed until the newest it forgot.</summary>
+    /// <param name="mark">The memory of the trigger; null for none.</param>
+    /// <param name="signedAt">When the event was signed, in Unix seconds; null for an event that says none (it relies on its id).</param>
+    internal static bool Forgotten(AutomationWatermark? mark, long? signedAt) => signedAt is { } at && mark is { Floor: > 0 } && at <= mark.Floor;
+
+    /// <summary>Remembers an event a trigger took.</summary>
+    /// <param name="mark">The memory of the trigger; null for none.</param>
+    /// <param name="eventId">The event.</param>
+    /// <param name="signedAt">When it was signed, in Unix seconds; null when it says none.</param>
+    /// <param name="now">The clock.</param>
+    /// <param name="capacity">The most ids remembered.</param>
+    /// <returns>The memory with the event.</returns>
+    internal static AutomationWatermark Remember(AutomationWatermark? mark, string eventId, long? signedAt, DateTimeOffset now, int capacity)
+    {
+        var seen = mark?.Seen.ToList() ?? [];
+        seen.Add(eventId);
+        var floor = mark?.Floor ?? 0;
+        // What it forgets was signed no later than the newest it had seen before: that becomes the floor.
+        if (seen.Count > capacity)
+        {
+            seen.RemoveRange(0, seen.Count - capacity);
+            floor = Math.Max(floor, mark?.Newest ?? 0);
+        }
+
+        return new AutomationWatermark
+        {
+            Since = now, Seen = seen, Heads = new Dictionary<string, string>(mark?.Heads ?? [], StringComparer.Ordinal), Floor = floor,
+            Newest = Math.Max(mark?.Newest ?? 0, signedAt ?? 0),
+        };
+    }
 }
 
 /// <summary>
@@ -129,6 +180,8 @@ internal sealed class AutomationStateStore
     private const int MaximumSeen = 256;
     private const int MaximumHeads = 512;
     private const int MaximumAllowed = 1024;
+    // The most calls of an automation its circuit breaker keeps: more than any number of calls an hour it allows.
+    private const int MaximumCalls = 10_000;
     private static readonly TimeSpan AliveSavedEvery = TimeSpan.FromMinutes(1);
 
     private readonly Lock _gate = new();
@@ -219,6 +272,12 @@ internal sealed class AutomationStateStore
 
             return runs;
         }
+    }
+
+    /// <summary>A run by its identifier, or null when it is not kept.</summary>
+    internal AutomationRun? Run(string runId)
+    {
+        lock (_gate) return _state.Runs.LastOrDefault(run => run.Id == runId);
     }
 
     /// <summary>The run that started a session, or null.</summary>
@@ -327,6 +386,24 @@ internal sealed class AutomationStateStore
         }
     }
 
+    /// <summary>The calls of the allowed tools of an automation its circuit breaker counts, oldest first; empty for none.</summary>
+    internal IReadOnlyList<DateTimeOffset> Calls(string automationId)
+    {
+        lock (_gate) return _state.Calls.TryGetValue(automationId, out var calls) ? [.. calls] : [];
+    }
+
+    /// <summary>Keeps the calls of the allowed tools of an automation its circuit breaker counts: those of the last hour.</summary>
+    internal void SetCalls(string automationId, IReadOnlyList<DateTimeOffset> calls)
+    {
+        ArgumentNullException.ThrowIfNull(calls);
+        lock (_gate)
+        {
+            if (calls.Count == 0) _state.Calls.Remove(automationId);
+            else _state.Calls[automationId] = [.. calls.TakeLast(MaximumCalls)];
+            Save();
+        }
+    }
+
     /// <summary>Forgets what the event triggers of automations that no longer exist have seen.</summary>
     internal void KeepWatermarks(IReadOnlySet<string> keys)
     {
@@ -354,6 +431,7 @@ internal sealed class AutomationStateStore
             state.Runs = [.. (state.Runs ?? []).Where(static run => run is { Id.Length: > 0, AutomationId.Length: > 0, Trigger: not null, Status: not null })];
             state.Watermarks = (state.Watermarks ?? []).Where(static pair => pair.Value is { Seen: not null, Heads: not null }).ToDictionary(static pair => pair.Key, static pair => pair.Value);
             state.Allowed = (state.Allowed ?? []).Where(static pair => !string.IsNullOrEmpty(pair.Value)).ToDictionary(static pair => pair.Key, static pair => pair.Value);
+            state.Calls = (state.Calls ?? []).Where(static pair => pair.Value is not null).ToDictionary(static pair => pair.Key, static pair => pair.Value);
             unreadable = false;
             return state;
         }
@@ -393,6 +471,9 @@ internal sealed class AutomationStateStore
 
         /// <summary>The automations of project files the user allowed, each with the fingerprint of what was allowed.</summary>
         public Dictionary<string, string> Allowed { get; set; } = [];
+
+        /// <summary>The calls of the allowed tools of each automation in the last hour, which its circuit breaker counts.</summary>
+        public Dictionary<string, List<DateTimeOffset>> Calls { get; set; } = [];
     }
 }
 
