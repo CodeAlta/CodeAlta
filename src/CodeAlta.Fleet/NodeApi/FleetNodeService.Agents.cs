@@ -288,11 +288,12 @@ public sealed partial class FleetNodeService
         var session = await RequireViewedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
         if (!SameId(session.SpaceId ?? "default", request.SpaceId))
             throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null, "An agent reaches only the sessions of its own space.");
-        await RequireAgentFloorAsync(session.SessionId, request.Floor!, cancellationToken).ConfigureAwait(false);
+        // The mode the session runs in, not the one it records: without one of its own, it runs in its provider's.
+        var mode = await RequireAgentFloorAsync(session.SessionId, request.Floor!, cancellationToken).ConfigureAwait(false);
         var child = _agents.Find(session.SessionId);
         var ownChild = child is not null && string.Equals(child.ParentSessionId, request.ParentSessionId, StringComparison.OrdinalIgnoreCase)
             && child.ParentDeviceId == call.Caller.DeviceId;
-        if (!ownChild && SessionPermissionModes.Rank(session.PermissionMode) >= SessionPermissionModes.Rank(SessionPermissionModes.Bypass))
+        if (!ownChild && SessionPermissionModes.Rank(mode) >= SessionPermissionModes.Rank(SessionPermissionModes.Bypass))
             throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null,
                 "The session bypasses permissions: a prompt of an agent of another machine is held for a person, who sends it from the session.");
         if (!_agents.TryUseNonce(request.Nonce))
@@ -313,13 +314,14 @@ public sealed partial class FleetNodeService
 
     // The fleet is never a way out of a sandbox (doc/fleet/security-and-privacy.md, "Remote execution", rule 8): an agent
     // drives only a session that asks the user at least as much as itself, and runs at least as confined as its sandbox.
-    private async Task RequireAgentFloorAsync(string sessionId, FleetAgentFloor floor, CancellationToken cancellationToken)
+    // Returns the mode the session runs in.
+    private async Task<string> RequireAgentFloorAsync(string sessionId, FleetAgentFloor floor, CancellationToken cancellationToken)
     {
         var mode = await _host.RuntimeService.GetPermissionModeAsync(sessionId, cancellationToken).ConfigureAwait(false);
         if (SessionPermissionModes.Rank(mode) > SessionPermissionModes.Rank(floor.PermissionMode))
             throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null,
                 $"The session runs in '{mode}', which asks less than the agent that sends the prompt ('{floor.PermissionMode}'): a person sends it from the session.");
-        if (floor.Confinement is not { } wire) return;
+        if (floor.Confinement is not { } wire) return mode;
         var sandbox = await _host.RuntimeService.GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
         var why = !sandbox.IsSandboxed ? "it runs without a sandbox"
             : sandbox.Profile is not { } profile ? $"its sandbox '{sandbox.Choice.Profile}' cannot be used"
@@ -328,6 +330,7 @@ public sealed partial class FleetNodeService
         if (why is not null)
             throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null,
                 $"The agent that sends the prompt is sandboxed (profile '{floor.Sandbox}'), and the session is less confined than it ({why}): a person sends it from the session.");
+        return mode;
     }
 
     // The restrictions of the sessions agents started here are held by the runtime only: they are given again at each start.

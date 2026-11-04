@@ -49,4 +49,19 @@ public sealed class SandboxConfinementTests
         Assert.IsNull((workspace with { Network = SandboxNetwork.Hosts, Hosts = ["github.com"] }).WeakerThan(workspace with { Network = SandboxNetwork.On }),
             "some hosts are less than the internet");
     }
+
+    // A floor crosses machines whose file systems may tell case apart (Linux) or not: folders that differ only by case are
+    // taken as different ones, which refuses rather than gives what the floor does not.
+    [TestMethod]
+    public void FoldersThatDifferOnlyByCase_AreDifferentFolders_InTheStricterDirection()
+    {
+        var workspace = SandboxConfinement.Of(SandboxProfiles.Resolve(SandboxProfiles.Workspace, []));
+        var floor = workspace with { Read = ["/srv/data"], Write = ["/srv/out"], Deny = ["/srv/data/secret"] };
+
+        StringAssert.Contains((floor with { Deny = ["/srv/data/Secret"] }).WeakerThan(floor), "/srv/data/secret", "the folder the floor denies is not denied");
+        StringAssert.Contains((floor with { Read = ["/srv/Data"] }).WeakerThan(floor), "/srv/Data", "a folder the floor does not read");
+        StringAssert.Contains((floor with { Write = ["/srv/Out"] }).WeakerThan(floor), "/srv/Out", "a folder the floor does not write");
+        Assert.IsNull((floor with { Deny = ["/srv/data/secret", "/srv/data/Secret"] }).WeakerThan(floor), "denying both is as strict");
+        Assert.IsNull(floor.WeakerThan(floor), "the same folders, as written, are as strict");
+    }
 }
