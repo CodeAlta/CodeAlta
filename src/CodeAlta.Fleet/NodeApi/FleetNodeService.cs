@@ -85,6 +85,13 @@ public sealed class FleetNodeServiceOptions
     /// <c>control.update</c>); null for a host without them, whose methods then answer <see cref="FleetNodeErrorCodes.Unavailable"/>.
     /// </summary>
     public IFleetNodeManagement? Management { get; init; }
+
+    /// <summary>
+    /// Gets the providers the node gives its owner and the devices that manage it (<c>control.providers.*</c>): their readiness,
+    /// a provider added with its key, and the device-code sign-in; null for a host without them, whose methods then answer
+    /// <see cref="FleetNodeErrorCodes.ProvidersUnavailable"/>.
+    /// </summary>
+    public IFleetNodeProviders? Providers { get; init; }
 }
 
 /// <summary>
@@ -319,6 +326,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             RegisterManagementExtras(caller, Access.Owner);
             // The secrets of the machine: its owner, on the machine, manages them.
             RegisterSecrets(caller, Access.Owner);
+            RegisterProviders(caller, Access.Owner, Access.Owner);
             RegisterAgentPolicy(caller, Access.Owner);
             RegisterLabels(caller, Access.Owner);
             // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
@@ -392,6 +400,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         RegisterManagementExtras(caller, Access.Manage);
         // And its secrets, for a device paired with the node only: never one trusted through the list of an organization.
         RegisterSecrets(caller, Access.ManagePaired);
+        // Its providers are read by any device that manages it; a key or a sign-in, a credential of the machine, by a paired one only.
+        RegisterProviders(caller, Access.Manage, Access.ManagePaired);
         RegisterAgentPolicy(caller, Access.Manage);
         RegisterLabels(caller, Access.Manage);
     }

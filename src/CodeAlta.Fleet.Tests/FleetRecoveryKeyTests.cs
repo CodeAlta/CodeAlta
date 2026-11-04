@@ -26,6 +26,12 @@ public sealed class FleetRecoveryKeyTests
         Assert.IsFalse(FleetRecoveryKey.TryParse(string.Join(' ', words.Take(31)), out _), "a word missing");
         Assert.IsFalse(FleetRecoveryKey.TryParse(string.Join(' ', words.Take(31).Append("notaword")), out _), "a word not of the list");
         Assert.IsFalse(FleetRecoveryKey.TryParse(null, out _));
+        // A word not of the list is found by its position, never by repeating the words.
+        var typo = words.ToArray();
+        typo[6] = typo[6] + "x";
+        Assert.AreEqual(7, FleetRecoveryKey.UnknownWordPosition(string.Join(' ', typo)));
+        Assert.AreEqual(0, FleetRecoveryKey.UnknownWordPosition(string.Join(", ", words)));
+        Assert.AreEqual(0, FleetRecoveryKey.UnknownWordPosition(null));
         using var other = FleetRecoveryKey.Generate();
         using (var mine = key.CreateIdentity())
         using (var theirs = other.CreateIdentity())

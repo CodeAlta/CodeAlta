@@ -613,6 +613,45 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.ControlSecretsDelete, parameters, FleetNodeJsonContext.Default.FleetSecretRef, FleetNodeJsonContext.Default.FleetSecretChange, null,
             cancellationToken);
 
+    /// <summary>The owner's local control, or a device that manages the machine: lists its providers and how each stands.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The providers, and the types a provider can be given.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetProviderList> ListProvidersAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlProvidersList, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetProviderList, null,
+            cancellationToken);
+
+    /// <summary>
+    /// The owner's local control, or a paired device that manages the machine: adds or changes a provider; its key, when given,
+    /// goes over this end-to-end channel into the secrets store of the machine.
+    /// </summary>
+    /// <param name="parameters">The provider.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The provider as it stands now.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetProviderStatus> SetProviderAsync(FleetProviderSetParams parameters, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlProvidersSet, parameters, FleetNodeJsonContext.Default.FleetProviderSetParams, FleetNodeJsonContext.Default.FleetProviderStatus, null,
+            cancellationToken);
+
+    /// <summary>The owner's local control, or a paired device that manages the machine: starts the device-code sign-in of a provider on the node.</summary>
+    /// <param name="key">The provider.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The page and the code the person enters there.</returns>
+    /// <exception cref="FleetException">The node refused the call (<see cref="FleetNodeErrorCodes.ProviderSignInUnsupported"/>, <see cref="FleetNodeErrorCodes.ProviderNotFound"/>).</exception>
+    public Task<FleetProviderSignInPrompt> StartProviderSignInAsync(string key, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlProvidersSignIn, new FleetProviderRef(key), FleetNodeJsonContext.Default.FleetProviderRef,
+            FleetNodeJsonContext.Default.FleetProviderSignInPrompt, null, cancellationToken);
+
+    /// <summary>The owner's local control, or a paired device that manages the machine: waits a while for the sign-in of a provider to end.</summary>
+    /// <param name="key">The provider.</param>
+    /// <param name="waitSeconds">How long the node waits before it answers <c>waiting</c>: 0 to 25.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Where the sign-in stands.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetProviderSignInState> WaitProviderSignInAsync(string key, int waitSeconds, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlProvidersSignInWait, new FleetProviderSignInWaitParams(key, waitSeconds), FleetNodeJsonContext.Default.FleetProviderSignInWaitParams,
+            FleetNodeJsonContext.Default.FleetProviderSignInState, null, cancellationToken);
+
     /// <summary>The owner's local control: revokes a device and closes its channels.</summary>
     /// <param name="device">The device: its id, its name, or the start of its id.</param>
     /// <param name="cancellationToken">Cancels the call.</param>

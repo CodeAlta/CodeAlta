@@ -66,6 +66,18 @@
 .machine-project-add { display: flex; gap: 8px; }
 .machine-providers li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .machine-ready { color: var(--green); }
+/* The providers of a machine it is managed from: state, why not ready, and what makes it ready. */
+.machine-providers-section .machine-providers li { flex-wrap: nowrap; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid var(--border-subtle, rgba(128, 128, 128, 0.16)); }
+.machine-providers-section .machine-providers li:last-child { border-bottom: 0; }
+.machine-provider-icon { display: inline-flex; padding-top: 3px; flex: none; }
+.machine-providers li[data-state="not_ready"] .machine-provider-icon, .machine-providers li[data-state="failed"] .machine-provider-icon { color: var(--orange, #d9822b); }
+.machine-provider-main { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.machine-provider-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.machine-provider-main small { overflow-wrap: anywhere; }
+.machine-provider-problem { color: var(--orange, #d9822b); }
+.machine-provider-actions { display: flex; gap: 6px; flex: none; }
+.machine-provider-code p { margin: 0 0 6px; }
+.machine-provider-code-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; overflow-wrap: anywhere; }
 .machine-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .machine-log { margin: 0; max-height: 360px; overflow: auto; padding: 8px 10px; border-radius: 6px; font-size: 11.5px; line-height: 1.45;
   background: color-mix(in srgb, var(--muted) 10%, transparent); white-space: pre-wrap; overflow-wrap: anywhere; }

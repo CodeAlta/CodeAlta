@@ -16,8 +16,10 @@ export type FleetCanvasApi = Readonly<{
 /** What the canvas does through the window. */
 export type FleetCanvasActions = Readonly<{
   openSession(sessionId: string): void;
-  /** Opens the page of a machine paired with this computer (Settings > Fleet > Machines). */
+  /** Opens the page of a machine this computer reaches, paired or through its server (Settings > Fleet > Machines). */
   openMachine(machineId: string): void;
+  /** Opens a page of Settings: `fleetServer` or `machines`. */
+  openSettings(page: "fleetServer" | "machines"): void;
   /** Runs a command of the window by its name; false when it cannot run now. */
   runCommand(name: string): boolean;
 }>;
@@ -67,7 +69,7 @@ export function FleetDirectoryView({ directory, actions }: { directory: FleetDir
   if (directory.status !== "ok" && !paired) {
     return <div className="fleet-canvas"><NonIdealState icon={<AppIcon name="server" size={36} />} title={t("Not linked to a server.")}
       description={t("Create your server or join one in Settings > Fleet > Server.")}
-      action={<Button icon={<AppIcon name="settings" size={15} />} onClick={() => actions.runCommand("settings")}>{t("Settings")}</Button>} /></div>;
+      action={<Button icon={<AppIcon name="settings" size={15} />} onClick={() => actions.openSettings("fleetServer")}>{t("Settings")}</Button>} /></div>;
   }
 
   const connection = serverConnection({ connection: directory.connection ?? "offline" });
@@ -87,6 +89,8 @@ export function FleetDirectoryView({ directory, actions }: { directory: FleetDir
         <span className={summary.waiting > 0 ? "fleet-canvas-waiting" : undefined}><strong>{summary.waiting}</strong> {t("wait for you")}</span>
       </div>
       <Switch className="fleet-canvas-archived" checked={archived} label={t("Archived")} onChange={event => setArchived(event.currentTarget.checked)} />
+      <Button className="fleet-canvas-settings" variant="minimal" size="small" icon={<AppIcon name="settings" size={15} />} text={t("Settings")}
+        title={t(paired ? "Settings > Fleet > Machines" : "Settings > Fleet > Server")} onClick={() => actions.openSettings(paired ? "machines" : "fleetServer")} />
     </header>
     {groups.length === 0 ? <NonIdealState icon={<AppIcon name="remote" size={36} />} title={t("No machine has published yet.")} />
       : <div className="fleet-canvas-machines">
@@ -108,7 +112,7 @@ function MachineCard({ machine, sessions, time, onOpen, onOpenMachine }: {
     <div className="fleet-machine-head">
       <span className="fleet-machine-icon"><AppIcon name={machine.isThisComputer ? "computer" : "remote"} size={18} /></span>
       <div className="fleet-machine-main">
-        <div className="fleet-machine-title">{machine.isPaired
+        <div className="fleet-machine-title">{machine.isPaired || machine.isReachable && !machine.isThisComputer
           ? <button type="button" className="fleet-machine-open" title={open} aria-label={open} onClick={() => onOpenMachine(machine.id)}><strong>{machine.name}</strong></button>
           : <strong>{machine.name}</strong>}
           <Tag minimal round intent={machine.online ? "success" : "none"}>{t(machine.online ? "Online" : "Offline")}</Tag>

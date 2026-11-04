@@ -146,6 +146,86 @@ public sealed class FleetNodeManagementTests
     }
 
     [TestMethod]
+    public async Task Manager_GivesAProviderItsKey_WhichTheMachineKeepsInItsSecrets_AndSeesWhyAProviderIsNotReady()
+    {
+        await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(fixture.Node.Host.CatalogOptions.GlobalRoot);
+        try
+        {
+            var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: false, token);
+            var otherMachine = await fixture.PairAsync(fixture.Other, "phone", manages: false, token);
+            await using var manager = await FleetNodeClient.ConnectAsync(ownerMachine, fixture.Owner, token);
+            await using var other = await FleetNodeClient.ConnectAsync(otherMachine, fixture.Other, token);
+
+            var listed = await manager.ListProvidersAsync(token);
+            CollectionAssert.IsSubsetOf(new[] { "openai-responses", "anthropic", "copilot" }, listed.Types.Select(static type => type.Type).ToArray());
+            Assert.IsTrue(listed.Types.Single(static type => type.Type == "copilot").SignIn, "Copilot signs in with a device code the desktop shows");
+
+            // A provider without its key: the machine says why it is not ready (the secret its key will be), instead of only in its log.
+            var bare = await manager.SetProviderAsync(new FleetProviderSetParams("anthropic", "anthropic", null, null, null, null), token);
+            Assert.AreEqual((FleetProviderStates.NotReady, FleetProviderReasons.SecretMissing, "PROVIDER_ANTHROPIC_API_KEY", "key"), (bare.State, bare.Reason, bare.Detail, bare.Credential));
+
+            // Its key, typed on the desktop, goes to the secrets of the machine; the configuration names the secret, never the key.
+            // (Its endpoint is a closed port of this computer: its preparation fails at once, without the network.)
+            var keyed = await manager.SetProviderAsync(new FleetProviderSetParams("anthropic", null, "Claude API", null, "http://127.0.0.1:9/v1", "sk-ant-from-laptop-123",
+                MakeDefault: true), token);
+            Assert.AreEqual(("PROVIDER_ANTHROPIC_API_KEY", "Claude API", true), (keyed.KeySecret, keyed.Name, keyed.IsDefault));
+            Assert.AreNotEqual(FleetProviderReasons.KeyMissing, keyed.Reason, "it has its key now");
+            Assert.IsTrue(store.TryGetSecret("PROVIDER_ANTHROPIC_API_KEY", out var value));
+            Assert.AreEqual("sk-ant-from-laptop-123", value);
+            Assert.AreEqual("laptop (manage)", store.ListSecrets().Single(static secret => secret.Name == "PROVIDER_ANTHROPIC_API_KEY").SetBy);
+            var config = await File.ReadAllTextAsync(Path.Combine(fixture.Node.Host.CatalogOptions.GlobalRoot, "config.toml"), token);
+            StringAssert.Contains(config, "PROVIDER_ANTHROPIC_API_KEY");
+            Assert.IsFalse(config.Contains("sk-ant-from-laptop-123", StringComparison.Ordinal), "never the key in clear in the configuration");
+            Assert.IsTrue(fixture.Node.Host.ModelProviderRegistry.ListProviders(includeDisabled: true).Any(static provider => provider.ProviderId.Value == "anthropic"),
+                "the providers start again: no restart of the node");
+
+            // The secret is gone: the machine names the one it waits for.
+            store.DeleteSecret("PROVIDER_ANTHROPIC_API_KEY");
+            await manager.SetProviderAsync(new FleetProviderSetParams("anthropic", null, null, null, null, null), token);
+            var missing = (await manager.ListProvidersAsync(token)).Providers.Single(static provider => provider.Key == "anthropic");
+            Assert.AreEqual((FleetProviderReasons.SecretMissing, "PROVIDER_ANTHROPIC_API_KEY"), (missing.Reason, missing.Detail));
+
+            // A provider that takes a key has no sign-in; an unknown type and a bad key are refused.
+            Assert.AreEqual(FleetNodeErrorCodes.ProviderSignInUnsupported,
+                (await Assert.ThrowsExactlyAsync<FleetException>(() => manager.StartProviderSignInAsync("anthropic", token))).Error.Code);
+            Assert.AreEqual(FleetNodeErrorCodes.ProviderNotFound, (await Assert.ThrowsExactlyAsync<FleetException>(() => manager.StartProviderSignInAsync("nothing", token))).Error.Code);
+            Assert.AreEqual(FleetErrorCodes.InvalidParams,
+                (await Assert.ThrowsExactlyAsync<FleetException>(() => manager.SetProviderAsync(new FleetProviderSetParams("odd", "made-up", null, null, null, null), token))).Error.Code);
+            Assert.AreEqual(FleetErrorCodes.InvalidParams,
+                (await Assert.ThrowsExactlyAsync<FleetException>(() => manager.SetProviderAsync(new FleetProviderSetParams("no spaces", "anthropic", null, null, null, null), token))).Error.Code);
+            Assert.AreEqual("none", (await manager.WaitProviderSignInAsync("anthropic", 0, token)).Status);
+
+            // A device that does not manage the machine reads and changes none of its providers.
+            foreach (var call in new Func<Task>[]
+            {
+                () => other.ListProvidersAsync(token),
+                () => other.SetProviderAsync(new FleetProviderSetParams("anthropic", null, null, null, null, "stolen"), token),
+                () => other.StartProviderSignInAsync("anthropic", token),
+            })
+            {
+                Assert.AreEqual(FleetErrorCodes.Forbidden, (await Assert.ThrowsExactlyAsync<FleetException>(call)).Error.Code);
+            }
+        }
+        finally
+        {
+            store.Delete();
+        }
+    }
+
+    [TestMethod]
+    public void NodeProviders_NameTheSecretOfAKey_AndTellHowEachTypeGetsItsCredential()
+    {
+        Assert.AreEqual("PROVIDER_OPENAI_API_KEY", NodeProviders.SecretNameOf("openai"));
+        Assert.AreEqual("PROVIDER_MY_GATEWAY_2_API_KEY", NodeProviders.SecretNameOf("my-gateway-2"));
+        Assert.AreEqual(("key", "sign_in", "sign_in", "cli"), (NodeProviders.Credential("anthropic"), NodeProviders.Credential("copilot"), NodeProviders.Credential("codex"),
+            NodeProviders.Credential("claude-code")));
+        Assert.IsTrue(NodeProviders.SignsInWithCode("copilot"));
+        Assert.IsFalse(NodeProviders.SignsInWithCode("codex"), "Codex signs in with a browser on the machine");
+    }
+
+    [TestMethod]
     public async Task ManagerWhoLosesManage_IsForbiddenAtTheNextCall()
     {
         await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);

@@ -2,7 +2,7 @@
 // machinePage.browser.test.ts through `machineFixture`: what the page asks is recorded.
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { MachineDeviceView, MachineManagement, MachineView, SecretView, VariableView } from "#neoastra";
+import type { MachineDeviceView, MachineManagement, MachineProviderStatusView, MachineView, SecretView, VariableView } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { MachinePage, type MachinePageApi } from "./MachinePage";
 
@@ -80,10 +80,41 @@ const api: MachinePageApi = {
   },
   setAgentSandbox: async request => { calls.push(JSON.stringify({ agentSandbox: request.sandbox })); agentPolicy.sandbox = request.sandbox ?? null; return { status: "ok", message: null }; },
   setAgentBypass: async request => { calls.push(JSON.stringify({ agentBypass: request.allowed })); agentPolicy.allowBypass = request.allowed; return { status: "ok", message: null }; },
+  // The providers of the machine: Codex ready, OpenAI skipped for its key, Copilot not signed in. A key typed on the page makes OpenAI ready;
+  // the sign-in of Copilot gives a code, and ends at the second wait.
+  providers: async () => ({ status: "ok", message: null, providers: [...providerList], secretProtection: "libsecret",
+    types: [{ type: "openai-responses", name: "OpenAI", credential: "key", signIn: false }, { type: "anthropic", name: "Anthropic", credential: "key", signIn: false },
+      { type: "copilot", name: "GitHub Copilot", credential: "sign_in", signIn: true }] }),
+  setProvider: async request => {
+    calls.push(JSON.stringify({ setProvider: request.key, type: request.type, keyGiven: !!request.apiKey, makeDefault: request.makeDefault }));
+    const known = providerList.find(provider => provider.key === request.key);
+    const next: MachineProviderStatusView = { ...(known ?? { key: request.key, name: request.displayName || "Anthropic", type: request.type ?? "anthropic", credential: "key", signIn: false,
+      isDefault: false, model: null, apiUrl: null }), enabled: true, state: "ready", reason: null, detail: null, keySecret: `PROVIDER_${request.key.toUpperCase()}_API_KEY` };
+    providerList = known ? providerList.map(provider => provider.key === request.key ? next : provider) : [...providerList, next];
+    return { status: "ok", provider: next, message: null };
+  },
+  providerSignIn: async request => {
+    calls.push(JSON.stringify({ signIn: request.key }));
+    return { status: "ok", message: null, url: "https://github.com/login/device", userCode: "WDJB-MJHT", expiresAt: null };
+  },
+  providerSignInWait: async request => {
+    if (++signInWaits < 2) { await new Promise(resolve => setTimeout(resolve, 800)); return { status: "waiting", account: null, code: null }; }
+    providerList = providerList.map(provider => provider.key === request.key ? { ...provider, state: "ready", reason: null } : provider);
+    return { status: "completed", account: "octocat", code: null };
+  },
   labels: async () => ({ status: "ok", message: null, labels: [...labels] }),
   setLabels: async request => { calls.push(JSON.stringify({ labels: request.labels })); labels = [...request.labels]; return { status: "ok", message: null }; },
 };
 let labels: string[] = ["gpu"];
+let signInWaits = 0;
+let providerList: MachineProviderStatusView[] = [
+  { key: "codex", name: "Codex", type: "codex", enabled: true, state: "ready", reason: null, detail: null, credential: "sign_in", keySecret: null, signIn: false, isDefault: true,
+    model: "gpt-6.1", apiUrl: null },
+  { key: "openai", name: "OpenAI", type: "openai-responses", enabled: true, state: "not_ready", reason: "key_missing", detail: "OPENAI_API_KEY", credential: "key", keySecret: null,
+    signIn: false, isDefault: false, model: null, apiUrl: null },
+  { key: "copilot", name: "GitHub Copilot", type: "copilot", enabled: true, state: "not_ready", reason: "sign_in_needed", detail: null, credential: "sign_in", keySecret: null,
+    signIn: true, isDefault: false, model: null, apiUrl: null },
+];
 const secrets = new Map<string, SecretView & { value: string }>();
 const variables = new Map<string, VariableView>([["GRAFANA_URL", { name: "GRAFANA_URL", value: "https://grafana.example", version: 1, setBy: "build-box owner", setAt: "2026-11-02T09:00:00Z" }]]);
 function setSecret(name: string, value: string) {

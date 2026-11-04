@@ -51,6 +51,9 @@ public sealed class NodeHost : IAsyncDisposable
     /// <summary>Gets the runtime of the node.</summary>
     public CodeAltaHost Host { get; }
 
+    /// <summary>Gets the catalog of models the providers of the node are started with.</summary>
+    internal ModelsDevCatalogService ModelCatalog => _modelsDev;
+
     /// <summary>
     /// Gets the automations the node runs (those of its profile and those its paired devices assigned to it); null when
     /// it runs none (<see cref="NodeHostOptions.RunAutomations"/>).

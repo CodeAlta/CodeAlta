@@ -21,10 +21,12 @@ test("over SSH, the assistant shows each step, says what to do when ssh does not
     await page.evaluate(type(".add-machine-field input", "me@pc-ai"));
     await page.clickText(".add-machine-dialog .bp6-button", "Add the machine");
 
-    // ssh does not know the computer: the step fails with what to do, and the retry trusts it.
+    // ssh does not know the computer: the step fails with what to do and the key to compare, and the setup starts over trusting it.
     await page.until(`document.querySelector('.add-machine-failure')`, "the failure");
     assert.match(await page.evaluate(`document.querySelector('.add-machine-failure').textContent`) as string, /does not know the SSH key of me@pc-ai yet/u);
-    await page.clickText(".add-machine-dialog .bp6-button", "Trust it and try again");
+    assert.equal(await page.evaluate(`document.querySelector('.add-machine-host-key code')?.textContent`), "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)");
+    await page.shot("add-machine-host-key");
+    await page.clickText(".add-machine-dialog .bp6-button", "Trust it and start over");
     await page.until(`document.querySelectorAll('.add-machine-steps li[data-state=done]').length === 5`, "every step done");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.add-machine-steps li small')].map(item => item.textContent)`),
       ["me@pc-ai", "Linux x86_64 · .NET SDK 10.0.114", "CodeAlta Node 4.0.0 · ~/.dotnet/tools", "systemd --user unit, port 2585", "apple river stone cloud amber tiger"]);

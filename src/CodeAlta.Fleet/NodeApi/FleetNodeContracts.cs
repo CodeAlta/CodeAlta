@@ -108,6 +108,18 @@ public static class FleetNodeMethods
     /// <summary>The owner's local control, or a device that manages the node: enrolls the node in a server with a token, as <c>altanode join</c>.</summary>
     public const string ControlServersJoin = "control.servers.join";
 
+    /// <summary>The owner's local control, or a device that manages the node: its providers and how each stands.</summary>
+    public const string ControlProvidersList = "control.providers.list";
+
+    /// <summary>The owner's local control, or a paired device that manages the node: adds or changes a provider, its key kept in the secrets of the machine.</summary>
+    public const string ControlProvidersSet = "control.providers.set";
+
+    /// <summary>The owner's local control, or a paired device that manages the node: starts the device-code sign-in of a provider on the node.</summary>
+    public const string ControlProvidersSignIn = "control.providers.signin";
+
+    /// <summary>The owner's local control, or a paired device that manages the node: waits a while for the sign-in of a provider to end.</summary>
+    public const string ControlProvidersSignInWait = "control.providers.signin.wait";
+
     /// <summary>A target: takes the offer of a session (or, as a probe, only says whether it would).</summary>
     public const string MovesOffer = "moves.offer";
 
@@ -222,6 +234,18 @@ public static class FleetNodeErrorCodes
 
     /// <summary>No secret or variable of the machine has that name.</summary>
     public const string SecretNotFound = "secret.not_found";
+
+    /// <summary>No provider of the node has that key.</summary>
+    public const string ProviderNotFound = "provider.not_found";
+
+    /// <summary>The provider does not sign in with a device code (it signs in with a browser on the machine, or takes a key).</summary>
+    public const string ProviderSignInUnsupported = "provider.sign_in_unsupported";
+
+    /// <summary>The sign-in of the provider could not start on the node (what failed is in the message).</summary>
+    public const string ProviderSignInFailed = "provider.sign_in_failed";
+
+    /// <summary>The node cannot change its providers (its host has none to change).</summary>
+    public const string ProvidersUnavailable = "provider.unavailable";
 
     /// <summary>The secrets of the machine cannot be read or written (what failed is in the message).</summary>
     public const string SecretsUnavailable = "secret.unavailable";
@@ -861,6 +885,13 @@ public sealed record FleetAgentDeliveryAckParams(IReadOnlyList<string> Ids);
 [JsonSerializable(typeof(FleetSecretSetParams))]
 [JsonSerializable(typeof(FleetSecretRef))]
 [JsonSerializable(typeof(FleetSecretChange))]
+[JsonSerializable(typeof(FleetProviderList))]
+[JsonSerializable(typeof(FleetProviderStatus))]
+[JsonSerializable(typeof(FleetProviderSetParams))]
+[JsonSerializable(typeof(FleetProviderRef))]
+[JsonSerializable(typeof(FleetProviderSignInPrompt))]
+[JsonSerializable(typeof(FleetProviderSignInState))]
+[JsonSerializable(typeof(FleetProviderSignInWaitParams))]
 [JsonSerializable(typeof(FleetDeviceRef))]
 [JsonSerializable(typeof(FleetDevicePermissionsParams))]
 [JsonSerializable(typeof(FleetDeviceChange))]

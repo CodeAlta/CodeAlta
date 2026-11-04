@@ -8,7 +8,7 @@ import { ShellLanguageContext } from "../../shellLanguage";
 import { FleetDirectoryView, type FleetCanvasActions } from "./FleetCanvas";
 
 const never = () => assert.fail("rendering must not act");
-const actions: FleetCanvasActions = { openSession: never, openMachine: never, runCommand: never };
+const actions: FleetCanvasActions = { openSession: never, openMachine: never, openSettings: never, runCommand: never };
 const machine = (id: string, look: Partial<FleetMachineView> = {}): FleetMachineView => ({ id, name: id, kind: "node", os: "macos", version: "4.0.1", online: true,
   presence: "online", activeSessions: 0, isThisComputer: false, isPaired: true, providers: [], sessions: 0, isReachable: true, labels: [], ...look });
 const session = (id: string, machineId: string, state: string, look: Partial<FleetSessionView> = {}): FleetSessionView => ({ id, machineId, state,
@@ -39,16 +39,17 @@ test("without a server, the canvas shows the paired machines: their state, versi
   assert.match(html, /<strong>1<\/strong> \/ 2 machines online/u);
 });
 
-test("linked to a server, the canvas shows the server's machines; only a paired one opens a page", () => {
+test("linked to a server, the canvas shows the server's machines; one this computer reaches opens its page, paired or through the server", () => {
   const html = render(directory({
     status: "ok", organization: "Home", url: "https://fleet.example", connection: "online",
     machines: [machine("here", { name: "Desktop", isThisComputer: true, isPaired: false }), machine("mini-id", { name: "Mac mini" }),
-      machine("relay-id", { name: "cloud box", isPaired: false })],
+      machine("relay-id", { name: "cloud box", isPaired: false }), machine("far-id", { name: "far box", isPaired: false, isReachable: false })],
   }));
   assert.ok(html.includes("<h1>Home</h1>") && html.includes("https://fleet.example"), html);
   assert.ok(!html.includes(english("Paired machines")));
   assert.ok(html.includes(`aria-label="${english("Open the page of {name}", { name: "Mac mini" })}"`));
-  assert.ok(!html.includes(english("Open the page of {name}", { name: "cloud box" })), "a machine reached through the relay only has no page here");
+  assert.ok(html.includes(`aria-label="${english("Open the page of {name}", { name: "cloud box" })}"`), "a machine reached through the server is one of the person's machines: its page opens");
+  assert.ok(!html.includes(english("Open the page of {name}", { name: "far box" })), "a machine this computer does not reach has no page here");
   assert.ok(!html.includes(english("Open the page of {name}", { name: "Desktop" })));
 });
 

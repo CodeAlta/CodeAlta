@@ -27,6 +27,7 @@ export default function Canvas() {
   const actions = useMemo<FleetCanvasActions>(() => ({
     openSession: id => latest.current.shell?.openSession(id),
     openMachine: id => settingsNavigation.open(machinePageLink(id)),
+    openSettings: page => settingsNavigation.open(page),
     runCommand: name => latest.current.shell?.run(name) ?? false,
   }), []);
   return <FleetCanvas api={api} visible={visible} actions={actions} />;

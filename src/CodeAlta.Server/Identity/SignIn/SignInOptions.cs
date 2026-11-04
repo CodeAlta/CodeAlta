@@ -16,7 +16,8 @@ public static class PublicSignInClients
 
     /// <summary>
     /// The application (client) id of the CodeAlta application in Microsoft Entra: multitenant and personal accounts,
-    /// platform "Mobile and desktop applications" with the redirect <c>http://localhost</c>, public client flows on.
+    /// platform "Mobile and desktop applications" with the redirect <c>http://127.0.0.1/callback</c> (Entra ignores the port of
+    /// a loopback redirect, and the desktop listens on a port of its choice: <c>FleetLoopbackRedirect</c>), public client flows on.
     /// </summary>
     public const string MicrosoftClientId = PlaceholderPrefix + "microsoft-client-id";
 

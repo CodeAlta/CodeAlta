@@ -14,6 +14,24 @@ const type = (selector: string, value: string) => `(() => { const input = docume
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});
   input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`;
 
+test("Invite a computer… shows the address and the code alone, each with Copy; Add a machine… shows the command of a node", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-server-card')`, "the server");
+    await page.clickText(".fleet-server-card .bp6-button", "Invite a computer…");
+    await page.until(`document.querySelector('.fleet-token-dialog.fleet-token-computer .fleet-token-code input')?.value === 'JOIN-5678'`, "the code");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-token-dialog input')].map(input => input.value)`), ["https://fleet.example", "JOIN-5678"],
+      "the code alone, not inside a command");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-token-dialog .bp6-dialog-header').textContent`), "Invite a computer");
+    await page.shot("fleet-invite-computer");
+    await page.clickText(".fleet-token-dialog .bp6-button", "Done");
+    await page.until(`!document.querySelector('.fleet-token-dialog')`, "closed");
+
+    await page.clickText(".fleet-server-card .bp6-button", "Add a machine…");
+    await page.until(`document.querySelector('.fleet-token-dialog.fleet-token-machine input')?.value === 'altanode join https://fleet.example --token JOIN-5678'`, "the command");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the owner's computer updates the fleet at a time it chooses, follows the campaign, cancels it and sets the policy", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     // The card of the server says its version and its policy.
@@ -157,6 +175,12 @@ test("a computer without a server recovers with the 32 words of the recovery key
     assert.equal(await page.evaluate(`${recover}.disabled`), true);
     await page.shot("fleet-recover-dialog");
 
+    // A mistyped word is said by its position, without the words.
+    await page.evaluate(typeArea(".fleet-server-dialog textarea", words.replace("alarm", "zzzz")));
+    await page.until(`${recover}.disabled === false`, "32 words");
+    await page.evaluate(`${recover}.click()`);
+    await page.until(`document.querySelector('.fleet-server-dialog [role=alert]')?.textContent === 'Word 5 is not a word of a recovery key: check how it is written.'`, "the position");
+
     // Words that are not a recovery key of the server are refused, and the dialog stays.
     await page.evaluate(typeArea(".fleet-server-dialog textarea", words.replace("bear", "bird")));
     await page.until(`${recover}.disabled === false`, "32 words");
@@ -169,7 +193,7 @@ test("a computer without a server recovers with the 32 words of the recovery key
     await page.until(`!document.querySelector('.fleet-server-dialog')`, "the dialog closes");
     await page.until(`document.querySelector('.fleet-server-card')`, "the server again");
     const calls = (await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call)).filter(call => call.recover);
-    assert.deepEqual(calls.map(call => [call.recover, call.words === words]), [["https://fleet.example", false], ["https://fleet.example", true]]);
+    assert.deepEqual(calls.map(call => [call.recover, call.words === words]), [["https://fleet.example", false], ["https://fleet.example", false], ["https://fleet.example", true]]);
     assert.deepEqual(page.problems, []);
   }, options);
 });

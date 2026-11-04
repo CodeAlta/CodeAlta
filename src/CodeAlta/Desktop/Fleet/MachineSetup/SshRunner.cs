@@ -103,6 +103,15 @@ internal interface ISshRunner
     /// <returns>The forward, with the port of this computer it listens on.</returns>
     /// <exception cref="IOException">The forward did not open.</exception>
     Task<SshForward> ForwardAsync(SshTarget target, int remotePort, bool acceptNewHostKey, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reads the fingerprint of the host key of the computer, without trusting it: what the person compares before
+    /// "Trust it" records it.
+    /// </summary>
+    /// <param name="target">The computer.</param>
+    /// <param name="cancellationToken">Stops the read.</param>
+    /// <returns>The fingerprint and the type of the key (<c>SHA256:… (ED25519)</c>); null when it could not be read.</returns>
+    Task<string?> ReadHostKeyAsync(SshTarget target, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
 }
 
 /// <summary>A port of this computer forwarded to the loopback of a computer over SSH; disposing it closes it.</summary>
@@ -227,6 +236,58 @@ internal sealed class OpenSshRunner : ISshRunner
         {
             if (!forwarded) Close();
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> ReadHostKeyAsync(SshTarget target, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        // ssh records the key it is offered in a known_hosts file of its own, which ssh-keygen then reads: the person's
+        // own file is left as it is, and the SSH configuration (a host's HostName, its port) applies as for the setup.
+        var folder = Directory.CreateTempSubdirectory("codealta-hostkey-");
+        try
+        {
+            var knownHosts = Path.Combine(folder.FullName, "known_hosts");
+            List<string> arguments =
+            [
+                "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", $"UserKnownHostsFile=\"{knownHosts}\"",
+                "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no",
+            ];
+            if (target.Port is { } port) arguments.AddRange(["-p", port.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+            arguments.AddRange(["-T", "--", target.Destination, "exit 0"]);
+            using (var reading = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                reading.CancelAfter(TimeSpan.FromSeconds(30));
+                try { await RunProcessAsync(arguments, new MemoryStream(), null, reading.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return null; }
+            }
+
+            if (!File.Exists(knownHosts)) return null;
+            var keygen = new OpenSshRunner(Locate("ssh-keygen"));
+            var listed = await keygen.RunProcessAsync(["-l", "-f", knownHosts], new MemoryStream(), null, cancellationToken).ConfigureAwait(false);
+            return listed.Succeeded ? ReadFingerprint(listed.Output) : null;
+        }
+        finally
+        {
+            try { folder.Delete(recursive: true); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    /// <summary>The fingerprint and the type of the first key that <c>ssh-keygen -l</c> lists (<c>256 SHA256:… host (ED25519)</c>); null for none.</summary>
+    /// <param name="listing">What <c>ssh-keygen -l</c> printed.</param>
+    /// <returns>The fingerprint and the type, as <c>SHA256:… (ED25519)</c>; null when it lists no key.</returns>
+    internal static string? ReadFingerprint(string listing)
+    {
+        foreach (var line in listing.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2 || !parts[1].StartsWith("SHA256:", StringComparison.Ordinal)) continue;
+            var type = parts[^1] is { Length: > 2 } last && last[0] == '(' && last[^1] == ')' ? " " + last : "";
+            return parts[1] + type;
+        }
+
+        return null;
     }
 
     private static int FreePort()

@@ -20,7 +20,7 @@ const api: AddMachineApi = {
     return (async function* () {
       yield event("connect", "running", request.target);
       await wait(50);
-      if (!request.acceptNewHostKey) { yield event("connect", "failed", "Host key verification failed.", "host_key_unknown"); return; }
+      if (!request.acceptNewHostKey) { yield event("connect", "failed", "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)", "host_key_unknown"); return; }
       yield event("connect", "done", "me@pc-ai");
       for (const [step, detail] of [["check", "Linux x86_64 · .NET SDK 10.0.114"], ["install", "CodeAlta Node 4.0.0 · ~/.dotnet/tools"],
         ["service", "systemd --user unit, port 2585"], ["pair", "apple river stone cloud amber tiger"]]) {
@@ -35,7 +35,7 @@ const api: AddMachineApi = {
 let devices: FleetDeviceView[] = [{ id: "me", name: "desktop", kind: "controller", status: "approved", online: true, words: "a b c d e f", createdAt: "2026-11-01T00:00:00Z" }];
 let polls = 0;
 const serverApi: AddMachineServerApi = {
-  status: async () => ({ status: "ok", deviceId: "me", words: null, servers: [{ id: "home", url: "https://fleet.example", organization: "Home", link: "approved",
+  status: async () => ({ status: "ok", deviceId: "me", words: null, personName: null, servers: [{ id: "home", url: "https://fleet.example", organization: "Home", link: "approved",
     connection: "online", problem: null, controller: true, spaces: [], recoveryKey: true }] }),
   createToken: async () => { calls.push(JSON.stringify({ token: "home" })); return { status: "ok", token: "JOIN-1234", expiresAt: null, message: null }; },
   devices: async () => {
