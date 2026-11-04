@@ -125,6 +125,12 @@ public sealed class CoordinatorServerOptions
 
     /// <summary>Gets the limits of the requests of devices the server does not know yet: setup, sign-in, enrollment, recovery, the hooks' ingress.</summary>
     public AuthenticationRateLimits RateLimits { get; init; } = new();
+
+    /// <summary>
+    /// Gets the reverse proxies in front of the server whose <c>X-Forwarded-For</c> it believes (<c>--trusted-proxy</c>):
+    /// addresses or networks; empty (the default) to count every request by its peer.
+    /// </summary>
+    public IReadOnlyList<string> TrustedProxies { get; init; } = [];
 }
 
 /// <summary>What a running server writes in its data root, for <c>altaserver status</c>.</summary>
@@ -422,6 +428,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton(metrics);
         services.AddSingleton(new NonceCache(time, options.MaxClockSkew * 2 + TimeSpan.FromMinutes(1)));
         services.AddSingleton(new AuthenticationRateLimiter(options.RateLimits, time));
+        services.AddSingleton(new TrustedProxies(options.TrustedProxies));
         services.AddSingleton(provider => new RequestAuthenticator(store, provider.GetRequiredService<NonceCache>(), time, options.MaxClockSkew) { Metrics = metrics });
         services.AddSingleton<PresenceRegistry>();
         services.AddSingleton(new DirectoryVisibility(store, store, time));

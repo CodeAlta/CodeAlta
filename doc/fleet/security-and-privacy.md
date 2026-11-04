@@ -171,7 +171,10 @@ hooks' ingress take requests from devices the server does not know yet. Each is 
   attempt a minute), so a flood in the owner's name slows them down and never shuts them out. Devices the server knows
   are not counted: they sign their requests.
 - Behind a proxy on the server's loopback (Tailscale Serve, Caddy), every request comes from that one address and the
-  limits are shared; they still end with their window.
+  limits are shared, unless the owner names the proxy (`--trusted-proxy 127.0.0.1;::1`, addresses or networks). Only a
+  request whose peer is a trusted proxy has its `X-Forwarded-For` read, from its right end past the trusted proxies of
+  the chain, so what a caller writes before the proxy is never believed; that address is what the limits count and the
+  audit records, and a caller of another machine behind the proxy is not "this machine" for setup.
 
 ## Credentials
 

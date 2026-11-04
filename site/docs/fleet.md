@@ -296,7 +296,7 @@ A server you installed yourself (`dotnet tool install -g CodeAlta.Server`) start
 altaserver install
 ```
 
-It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--certificate`) and sets up one service per data root. The server listens on `http://127.0.0.1:2586`: put Tailscale Serve, Caddy or the TLS of your platform in front of it, or give it a certificate and an `https://` address. A plain `http://` address beyond the loopback is refused, unless `--allow-insecure-http` forces it on a network you trust.
+It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--certificate`) and sets up one service per data root. The server listens on `http://127.0.0.1:2586`: put Tailscale Serve, Caddy or the TLS of your platform in front of it, or give it a certificate and an `https://` address. A plain `http://` address beyond the loopback is refused, unless `--allow-insecure-http` forces it on a network you trust. Behind Tailscale Serve or Caddy on the same machine, add `--trusted-proxy "127.0.0.1;::1"`: the server then limits the attempts of each caller by the address the proxy forwards, and its audit names them, instead of counting everyone as the proxy.
 
 | System | What `altaserver install` sets up |
 | --- | --- |

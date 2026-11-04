@@ -185,7 +185,7 @@ public sealed class AuthenticationRateLimiter
     {
         ArgumentNullException.ThrowIfNull(origin);
         ArgumentNullException.ThrowIfNull(store);
-        var decision = TryAcquireAddress(action, origin.RemoteAddress);
+        var decision = TryAcquireAddress(action, origin.ClientAddress);
         return decision.Allowed ? Task.CompletedTask : RefuseAsync(action, decision, origin, store, null);
     }
 

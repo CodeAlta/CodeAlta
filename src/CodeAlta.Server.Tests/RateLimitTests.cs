@@ -83,6 +83,41 @@ public sealed class RateLimitTests
     }
 
     [TestMethod]
+    public async Task BehindATrustedProxyEachCallerIsLimitedByTheAddressItForwards_AndAForwardedAddressIsIgnoredOtherwise()
+    {
+        var limits = new AuthenticationRateLimits { SignInStart = new RateLimit(1, TimeSpan.FromMinutes(1)) };
+        async Task<HttpStatusCode> StartAsync(ServerFixture server, TestDevice device, string? forwardedFor)
+            => (await server.SendAsync(device, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, device.PublicKey, Redirect),
+                tamper: request => { if (forwardedFor is not null) request.Headers.Add("X-Forwarded-For", forwardedFor); })).Status;
+
+        // Without a trusted proxy, the header is anyone's to write: the peer counts.
+        await using (var direct = await ServerFixture.StartAsync(configure: options => Configure(options, limits)))
+        {
+            using var owner = new TestDevice("Desktop");
+            using var laptop = new TestDevice("Laptop");
+            await direct.SetUpAsync(owner);
+            Assert.AreEqual(HttpStatusCode.OK, await StartAsync(direct, laptop, "198.51.100.1"));
+            Assert.AreEqual(HttpStatusCode.TooManyRequests, await StartAsync(direct, laptop, "198.51.100.2"), "a forwarded address of an untrusted peer is ignored");
+        }
+
+        // Behind Tailscale Serve or Caddy on the loopback, named as a trusted proxy: each caller is counted by the address it forwards.
+        await using var proxied = await ServerFixture.StartAsync(configure: options => Configure(options, limits, trustedProxies: ["127.0.0.1", "::1"]));
+        using var proxiedOwner = new TestDevice("Desktop");
+        using var device = new TestDevice("Laptop");
+        await proxied.SetUpAsync(proxiedOwner);
+        Assert.AreEqual(HttpStatusCode.OK, await StartAsync(proxied, device, "198.51.100.1"));
+        Assert.AreEqual(HttpStatusCode.OK, await StartAsync(proxied, device, "198.51.100.2"), "another caller behind the proxy");
+        Assert.AreEqual(HttpStatusCode.TooManyRequests, await StartAsync(proxied, device, "198.51.100.1"));
+        // What the caller wrote before the proxy added its address is not believed: the address the proxy saw counts.
+        Assert.AreEqual(HttpStatusCode.TooManyRequests, await StartAsync(proxied, device, "203.0.113.9, 198.51.100.2"));
+        Assert.AreEqual(HttpStatusCode.OK, await StartAsync(proxied, device, "198.51.100.1, 198.51.100.3, 127.0.0.1"), "a trusted proxy in the chain is skipped");
+
+        var audit = (await proxied.SendAsync(proxiedOwner, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        CollectionAssert.IsSubsetOf(new[] { "198.51.100.1", "198.51.100.2", "198.51.100.3" },
+            audit.Where(static record => record.Action == "sign_in.start").Select(static record => record.SourceAddress).ToArray(), "the audit names the callers, not the proxy");
+    }
+
+    [TestMethod]
     public void APersonPastTheirLimitKeepsASlowPath_AndAnAddressWindowEnds()
     {
         var clock = new TestClock(DateTimeOffset.UtcNow);
@@ -124,11 +159,11 @@ public sealed class RateLimitTests
         Assert.AreEqual("::1", AuthenticationRateLimiter.AddressKey(IPAddress.IPv6Loopback));
     }
 
-    private static Hosting.CoordinatorServerOptions Configure(Hosting.CoordinatorServerOptions options, AuthenticationRateLimits limits)
+    private static Hosting.CoordinatorServerOptions Configure(Hosting.CoordinatorServerOptions options, AuthenticationRateLimits limits, string[]? trustedProxies = null)
         => new()
         {
             DataRoot = options.DataRoot, Urls = options.Urls, TimeProvider = options.TimeProvider, Relay = options.Relay, ConfigureLogging = options.ConfigureLogging,
             UpdateStatus = options.UpdateStatus, EnvironmentVariable = options.EnvironmentVariable, TelemetryExportInterval = options.TelemetryExportInterval,
-            SignIn = options.SignIn, RateLimits = limits,
+            SignIn = options.SignIn, RateLimits = limits, TrustedProxies = trustedProxies ?? [],
         };
 }

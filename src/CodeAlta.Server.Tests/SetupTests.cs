@@ -62,6 +62,22 @@ public sealed class SetupTests
     }
 
     [TestMethod]
+    public async Task BehindATrustedProxyACallerOfAnotherMachineDoesNotSetTheServerUp()
+    {
+        await using var server = await ServerFixture.StartAsync(configure: options => new CoordinatorServerOptions
+        {
+            DataRoot = options.DataRoot, Urls = options.Urls, TimeProvider = options.TimeProvider, ConfigureLogging = options.ConfigureLogging,
+            EnvironmentVariable = options.EnvironmentVariable, TrustedProxies = ["127.0.0.1", "::1"],
+        });
+        using var owner = new TestDevice("Desktop");
+        var request = new SetupRequest(server.SetupCode, "Alex", owner.Name, owner.PublicKey, owner.FirstEntry(server.Clock.Now));
+        var remote = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/setup", request, tamper: message => message.Headers.Add("X-Forwarded-For", "198.51.100.7"));
+        Assert.AreEqual((HttpStatusCode.Forbidden, CoordinatorErrorCodes.SetupNotLocal), (remote.Status, remote.Code), "the proxy forwards a caller of another machine");
+        var local = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/setup", request);
+        Assert.AreEqual(HttpStatusCode.Created, local.Status, local.Body.ToString());
+    }
+
+    [TestMethod]
     public async Task AWrongCodeIsRefusedAndFiveDropTheCode()
     {
         await using var server = await ServerFixture.StartAsync();

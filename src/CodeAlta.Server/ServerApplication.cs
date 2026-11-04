@@ -121,6 +121,7 @@ public sealed class ServerApplication
             { "certificate=", "A PKCS #12 {FILE} for the https:// addresses", v => run.Certificate = v },
             { "certificate-password-env=", "The environment {VARIABLE} that holds the certificate's password", v => run.CertificatePasswordVariable = v },
             { "allow-insecure-http", "Allow http:// addresses beyond the loopback, on a network you trust", v => run.AllowInsecureHttp = v is not null },
+            { "trusted-proxy=", "The {ADDRESSES} of the reverse proxies in front of the server, separated by ';' (127.0.0.1;::1 for Tailscale Serve or Caddy here): their X-Forwarded-For names the caller the limits count", v => run.TrustedProxies = v },
         };
         AddDataRoot(runCommand, run);
         runCommand.Add((_, _) => RunServerAsync(run));
@@ -160,6 +161,7 @@ public sealed class ServerApplication
             { "certificate=", "A PKCS #12 {FILE} for the https:// addresses", v => install.Certificate = v },
             { "certificate-password-env=", "The environment {VARIABLE} that holds the certificate's password", v => install.CertificatePasswordVariable = v },
             { "allow-insecure-http", "Allow http:// addresses beyond the loopback, on a network you trust", v => install.AllowInsecureHttp = v is not null },
+            { "trusted-proxy=", "The {ADDRESSES} of the reverse proxies in front of the server, separated by ';'", v => install.TrustedProxies = v },
             { "user", "A service of the current user (the default)", v => install.User = v is not null },
             { "system", "A service of the system, started at boot, that runs as --account", v => install.System = v is not null },
             { "account=", "The {ACCOUNT} a --system service runs as", v => install.Account = v },
@@ -340,6 +342,7 @@ public sealed class ServerApplication
                 CertificatePath = options.Certificate,
                 CertificatePassword = password,
                 AllowInsecureHttp = options.AllowInsecureHttp,
+                TrustedProxies = Proxies(options.TrustedProxies),
                 UpdateStatus = () => updates?.Status(),
                 // The last step of a campaign of the fleet: the same self-update as altaserver update, with the signed hash.
                 ApplyUpdate = (request, requestedBy, token) => updates is { } self
@@ -731,6 +734,7 @@ public sealed class ServerApplication
         else if (!options.System && options.Account is not null) usage = "--account goes with --system only.";
         else if (options.Port is not null && (!int.TryParse(options.Port, NumberStyles.None, CultureInfo.InvariantCulture, out var port) || port is < 1 or > 65535))
             usage = $"--port needs a port from 1 to 65535: '{options.Port}'.";
+        else if (options.TrustedProxies is { } proxies && !TryReadProxies(proxies, out var proxyProblem)) usage = proxyProblem;
         else if (options.Urls is { } urls)
         {
             // A service that would refuse to start is refused before it is installed.
@@ -777,6 +781,7 @@ public sealed class ServerApplication
         if (options.Certificate is { } certificate) arguments.AddRange(["--certificate", Path.GetFullPath(certificate)]);
         if (options.CertificatePasswordVariable is { } variable) arguments.AddRange(["--certificate-password-env", variable]);
         if (options.AllowInsecureHttp) arguments.Add(ServerBindings.AllowInsecureHttpOption);
+        if (options.TrustedProxies is { } proxies) arguments.AddRange(["--trusted-proxy", proxies]);
         var system = scope == ServiceScope.System;
         return new ServiceRequest
         {
@@ -868,6 +873,26 @@ public sealed class ServerApplication
         public string? CertificatePasswordVariable { get; set; }
 
         public bool AllowInsecureHttp { get; set; }
+
+        public string? TrustedProxies { get; set; }
+    }
+
+    private static string[] Proxies(string? text) => text is null ? [] : text.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static bool TryReadProxies(string text, out string? problem)
+    {
+        try
+        {
+            // The addresses must read as the server reads them at its start.
+            var proxies = new TrustedProxies(Proxies(text));
+            problem = proxies.Any ? null : "--trusted-proxy names no address.";
+            return problem is null;
+        }
+        catch (ArgumentException exception)
+        {
+            problem = exception.Message;
+            return false;
+        }
     }
 
     /// <summary>The options of <c>install</c> and <c>uninstall</c>: those of the <c>run</c> the service starts, and whom it runs as.</summary>
