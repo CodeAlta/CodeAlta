@@ -40,7 +40,10 @@ public sealed record ExternalProvider(string Method, ExternalProviderKind Kind, 
 /// <param name="Email">Its email, or null.</param>
 /// <param name="Name">Its name for people, or null.</param>
 /// <param name="Groups">Its groups (ids), empty when the provider gives none.</param>
-public sealed record ExternalIdentity(string Issuer, string Subject, string? Email, string? Name, IReadOnlyList<string> Groups);
+/// <param name="TenantId">The tenant of the account (the <c>tid</c> claim), or null.</param>
+/// <param name="EmailVerified">Whether the provider says <paramref name="Email"/> is verified: its <c>email</c> claim with <c>email_verified</c> true.</param>
+public sealed record ExternalIdentity(string Issuer, string Subject, string? Email, string? Name, IReadOnlyList<string> Groups, string? TenantId = null,
+    bool EmailVerified = false);
 
 /// <summary>The device code a provider gave for a sign-in (RFC 8628).</summary>
 /// <param name="DeviceCode">The device code, which only the server holds and polls with.</param>
@@ -311,8 +314,12 @@ public sealed class ExternalSignInClient : IDisposable
         var subject = Text(claims, "sub") ?? throw new ExternalSignInException(SignInErrorCodes.TokenInvalid, "The ID token has no subject.");
         // A Microsoft account is keyed on its tenant and object id, which stay when its sub (per application) would not.
         if (provider.Method == "microsoft" && Text(claims, "tid") is { } tenant && Text(claims, "oid") is { } objectId) subject = tenant + "/" + objectId;
-        var email = Text(claims, "email") ?? Text(claims, "preferred_username");
-        return new ExternalIdentity(issuer, subject, email, Text(claims, "name") ?? email, Groups(claims, provider.GroupsClaim));
+        var emailClaim = Text(claims, "email");
+        var email = emailClaim ?? Text(claims, "preferred_username");
+        // Only the email claim, with email_verified true, proves a domain; a preferred_username never does.
+        var verified = emailClaim is not null && claims.TryGetValue("email_verified", out var flag)
+            && (flag is true || flag is string text && string.Equals(text, "true", StringComparison.OrdinalIgnoreCase));
+        return new ExternalIdentity(issuer, subject, email, Text(claims, "name") ?? email, Groups(claims, provider.GroupsClaim), Text(claims, "tid"), verified);
     }
 
     private Task<TokenValidationResult> ValidateAsync(string token, ExternalProvider provider, OpenIdConnectConfiguration configuration)

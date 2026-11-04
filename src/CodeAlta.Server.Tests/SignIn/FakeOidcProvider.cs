@@ -21,7 +21,9 @@ namespace CodeAlta.Server.Tests.SignIn;
 /// <param name="Name">Its name.</param>
 /// <param name="Groups">Its groups.</param>
 /// <param name="GitHubId">Its numeric id at <see cref="FakeGitHubDeviceFlow"/>.</param>
-internal sealed record FakeAccount(string Subject, string Email, string Name, IReadOnlyList<string> Groups, long GitHubId = 0);
+/// <param name="EmailVerified">Whether its ID token says the email is verified.</param>
+/// <param name="TenantId">Its tenant (the <c>tid</c> claim), or null for none.</param>
+internal sealed record FakeAccount(string Subject, string Email, string Name, IReadOnlyList<string> Groups, long GitHubId = 0, bool EmailVerified = true, string? TenantId = null);
 
 /// <summary>
 /// An OpenID Connect provider in the process of a test, on the loopback: discovery, an authorization endpoint that
@@ -211,7 +213,9 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
         var claims = new Dictionary<string, object>
         {
             ["sub"] = grant.Account.Subject, ["email"] = grant.Account.Email, ["name"] = grant.Account.Name, ["groups"] = grant.Account.Groups.ToArray(),
+            ["email_verified"] = grant.Account.EmailVerified,
         };
+        if (grant.Account.TenantId is { } tenant) claims["tid"] = tenant;
         if ((Nonce ?? grant.Nonce) is { } nonce) claims["nonce"] = nonce;
         var expires = now + Lifetime;
         var descriptor = new SecurityTokenDescriptor

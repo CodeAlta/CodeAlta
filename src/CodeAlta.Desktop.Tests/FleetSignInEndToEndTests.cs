@@ -53,7 +53,7 @@ public sealed class FleetSignInEndToEndTests
             Assert.AreEqual("ok", held.Status, held.Message);
             Assert.IsFalse(held.Settings!.Methods.Single(static method => method.Id == "microsoft").Available, "the public client of the project is a placeholder");
             var set = await owner.SetSignInSettingsAsync(new FleetSignInSettingsRequest(ownerEpoch, linkId, held.Settings.Version, ["company", "passkey"],
-                provider.Issuer.AbsoluteUri, provider.ClientId, provider.ClientSecret, "Contoso", null, false), token);
+                provider.Issuer.AbsoluteUri, provider.ClientId, provider.ClientSecret, "Contoso", null, false, ["contoso.example"]), token);
             Assert.AreEqual("ok", set.Status, set.Message);
             Assert.IsTrue(set.Settings!.HasClientSecret);
 

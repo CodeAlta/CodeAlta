@@ -37,7 +37,7 @@ let signIn: FleetSignInSettingsView = { methods: [
   { id: "company", name: "Company sign-in", enabled: false, available: false }, { id: "passkey", name: "Passkey", enabled: true, available: true },
   { id: "microsoft", name: "Microsoft", enabled: true, available: true }, { id: "google", name: "Google", enabled: true, available: false },
   { id: "github", name: "GitHub", enabled: true, available: true }], issuer: null, clientId: null, hasClientSecret: false, displayName: null, groupsClaim: "groups",
-  requireSso: false, version: 0, updatedAt: null };
+  requireSso: false, version: 0, updatedAt: null, allowedDomains: [], allowedTenants: [] };
 let logins: FleetSignInLoginView[] = [];
 const unavailable = async () => { throw new Error("not in this fixture"); };
 // Left, the page is empty; the recovery key of the person links it again.

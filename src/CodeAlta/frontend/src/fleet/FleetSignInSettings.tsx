@@ -6,7 +6,7 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { serverProblem } from "./fleetServer";
-import { hasCompany, linkableMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
+import { allowedValues, hasCompany, linkableMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
 import { SignInCode } from "./SignInCode";
 
 /** The calls of the sign-in of a server. */
@@ -124,7 +124,8 @@ function SignInDialog({ server, epoch, api, view, onClose }: {
       const company = hasCompany(draft);
       const result = await api.setSignInSettings({ expectedEpoch: epoch, linkId: server.id, version: view.version, enabled: draft.enabled,
         issuer: company ? draft.issuer.trim() : null, clientId: company ? draft.clientId.trim() : null, clientSecret: company && draft.clientSecret ? draft.clientSecret : null,
-        displayName: company ? draft.displayName.trim() || null : null, groupsClaim: company ? draft.groupsClaim.trim() || null : null, requireSso: draft.requireSso },
+        displayName: company ? draft.displayName.trim() || null : null, groupsClaim: company ? draft.groupsClaim.trim() || null : null, requireSso: draft.requireSso,
+        allowedDomains: company ? allowedValues(draft.allowedDomains) : null, allowedTenants: company ? allowedValues(draft.allowedTenants) : null },
         { timeoutMilliseconds: 60_000 });
       if (result.status === "ok") { onClose(true); return; }
       setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
@@ -157,6 +158,14 @@ function SignInDialog({ server, epoch, api, view, onClose }: {
             <InputGroup value={draft.displayName} disabled={working} placeholder={company?.name ?? "Contoso"} onChange={event => update({ displayName: event.target.value })} /></label>
           <label><span>{t("Groups claim")}</span>
             <InputGroup value={draft.groupsClaim} disabled={working} spellCheck={false} onChange={event => update({ groupsClaim: event.target.value })} /></label>
+        </div>
+        <div className="fleet-telemetry-choices">
+          <label><span>{t("Email domains let in")}</span>
+            <InputGroup value={draft.allowedDomains} disabled={working} placeholder="contoso.com" spellCheck={false}
+              onChange={event => update({ allowedDomains: event.target.value })} /></label>
+          <label><span>{t("Tenant ids let in")}</span>
+            <InputGroup value={draft.allowedTenants} disabled={working} placeholder={t("Required for Entra ID")} spellCheck={false}
+              onChange={event => update({ allowedTenants: event.target.value })} /></label>
         </div>
         <small className="muted-text">{t("Redirect to register at the provider: http://127.0.0.1 (any port).")}</small>
         <Switch checked={draft.requireSso} disabled={working} label={t("Require company sign-in")} onChange={event => update({ requireSso: event.currentTarget.checked })} />

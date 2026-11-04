@@ -139,7 +139,13 @@ public sealed class SignInService : IDisposable
             if (claim.Length > 64 || claim.Any(static c => !char.IsAsciiLetterOrDigit(c) && c is not ('_' or '-' or '.' or ':' or '/')))
                 throw Invalid("The groups claim is not the name of a claim.");
             var name = string.IsNullOrWhiteSpace(given.DisplayName) ? null : SetupService.RequireName(given.DisplayName, "displayName");
-            company = new CompanyDocument(issuer.AbsoluteUri.TrimEnd('/'), given.ClientId.Trim(), name, claim);
+            var domains = ReadAllowed(given.AllowedDomains, IsDomain, "An allowed domain is not a domain name (contoso.com).");
+            var tenants = ReadAllowed(given.AllowedTenants, IsTenant, "An allowed tenant is not a tenant id.");
+            // An identity provider serves more than one company: the server lets in only the domains and tenants named.
+            if (domains.Length == 0 && tenants.Length == 0) throw Invalid("Company sign-in needs the email domains or the tenant ids it lets in.");
+            // Entra ID gives emails it did not verify: only its tenant id proves the company.
+            if (IsEntraId(issuer) && tenants.Length == 0) throw Invalid("Company sign-in with Entra ID needs the tenant ids it lets in.");
+            company = new CompanyDocument(issuer.AbsoluteUri.TrimEnd('/'), given.ClientId.Trim(), name, claim, domains, tenants);
             if (given.ClientSecret is not null) secret = given.ClientSecret.Length == 0 ? null : given.ClientSecret;
             if (secret is { Length: > 2048 }) throw Invalid("The client secret is too long.");
             // A provider that does not answer is refused now rather than at the first sign-in of a person.
@@ -172,7 +178,8 @@ public sealed class SignInService : IDisposable
         var document = new SignInSettingsDocument(enabled, company, request.RequireSso, request.RequireSso ? breakGlass : null);
         var record = new SignInSettingsRecord(actor.OrganizationId, JsonSerializer.Serialize(document, SignInSettingsJsonContext.Default.SignInSettingsDocument), secret,
             held.Version + 1, _time.GetUtcNow());
-        var details = JsonSerializer.Serialize(new SignInSettingsAudit(enabled, company?.Issuer, request.RequireSso), SignInSettingsJsonContext.Default.SignInSettingsAudit);
+        var details = JsonSerializer.Serialize(new SignInSettingsAudit(enabled, company?.Issuer, request.RequireSso, company?.AllowedDomains, company?.AllowedTenants),
+            SignInSettingsJsonContext.Default.SignInSettingsAudit);
         if (!await _signIn.SetSignInSettingsAsync(record, origin.Audit("sign_in.settings.set", actor, actor.OrganizationId, details: details), cancellationToken)
                 .ConfigureAwait(false))
             throw CoordinatorException.Conflict(SignInErrorCodes.SettingsInvalid, "The sign-in settings changed meanwhile: read them again.");
@@ -331,7 +338,7 @@ public sealed class SignInService : IDisposable
                 throw await RefuseAsync(origin, signed.DeviceId, attempt.Method, exception.Code, exception.Message, cancellationToken).ConfigureAwait(false);
             }
 
-            (person, login) = await ResolvePersonAsync(attempt, identity, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
+            (person, login) = await ResolvePersonAsync(attempt, settings, identity, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
         }
 
         return await FinishAsync(attempt, settings, person, login, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
@@ -388,7 +395,7 @@ public sealed class SignInService : IDisposable
         if (attempt is null)
             throw await RefuseAsync(origin, signed.DeviceId, pending.Method, SignInErrorCodes.AttemptInvalid, "The sign-in expired: start again.", cancellationToken)
                 .ConfigureAwait(false);
-        var (person, login) = await ResolvePersonAsync(attempt, result.Identity!, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
+        var (person, login) = await ResolvePersonAsync(attempt, settings, result.Identity!, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
         return new PollSignInResponse(false, result.Interval, await FinishAsync(attempt, settings, person, login, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false));
     }
 
@@ -523,9 +530,13 @@ public sealed class SignInService : IDisposable
         _passkeys.Dispose();
     }
 
-    private async Task<(PersonRecord Person, LoginRecord Login)> ResolvePersonAsync(SignInAttempt attempt, ExternalIdentity identity, RequestOrigin origin, string? deviceId,
-        CancellationToken cancellationToken)
+    private async Task<(PersonRecord Person, LoginRecord Login)> ResolvePersonAsync(SignInAttempt attempt, HeldSettings settings, ExternalIdentity identity, RequestOrigin origin,
+        string? deviceId, CancellationToken cancellationToken)
     {
+        // Every company sign-in, of a new person or of one already linked, is of a domain or a tenant the owner named.
+        if (attempt.Method == FleetSignInMethods.Company && !IsAllowed(settings.Document.Company, identity))
+            throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.IdentityNotAllowed,
+                "This account is not of the domains or tenants your organization lets in.", cancellationToken).ConfigureAwait(false);
         var now = _time.GetUtcNow();
         var groups = identity.Groups.Count == 0 ? null : JsonSerializer.Serialize(identity.Groups.ToArray(), SignInSettingsJsonContext.Default.StringArray);
         var name = Truncate(identity.Email ?? identity.Name ?? identity.Subject);
@@ -627,7 +638,8 @@ public sealed class SignInService : IDisposable
 
     private SignInSettingsDto ToDto(HeldSettings settings)
         => new(Describe(settings.Document), settings.Document.Company is { } company
-                ? new CompanySignInDto(company.Issuer, company.ClientId, settings.Secret is not null, company.DisplayName, company.GroupsClaim)
+                ? new CompanySignInDto(company.Issuer, company.ClientId, settings.Secret is not null, company.DisplayName, company.GroupsClaim, company.AllowedDomains ?? [],
+                    company.AllowedTenants ?? [])
                 : null,
             settings.Document.RequireSso, settings.Document.BreakGlassPersonId, settings.Version, settings.UpdatedAt);
 
@@ -659,7 +671,8 @@ public sealed class SignInService : IDisposable
             .ConfigureAwait(false);
         var status = code switch
         {
-            SignInErrorCodes.MethodDisabled or SignInErrorCodes.SsoRequired or SignInErrorCodes.NotLinked or SignInErrorCodes.LinkedElsewhere => StatusCodes.Status403Forbidden,
+            SignInErrorCodes.MethodDisabled or SignInErrorCodes.SsoRequired or SignInErrorCodes.NotLinked or SignInErrorCodes.LinkedElsewhere
+                or SignInErrorCodes.IdentityNotAllowed => StatusCodes.Status403Forbidden,
             SignInErrorCodes.ProviderUnavailable => StatusCodes.Status502BadGateway,
             _ => StatusCodes.Status401Unauthorized,
         };
@@ -667,6 +680,38 @@ public sealed class SignInService : IDisposable
     }
 
     private static CoordinatorException Invalid(string message) => CoordinatorException.BadRequest(SignInErrorCodes.SettingsInvalid, message);
+
+    // A tenant named must be the account's; a domain named must be the one of its verified email. Both, when both are named.
+    // Settings kept before the owner had to name them let nobody in.
+    internal static bool IsAllowed(CompanyDocument? company, ExternalIdentity identity)
+    {
+        if (company is null) return false;
+        var domains = company.AllowedDomains ?? [];
+        var tenants = company.AllowedTenants ?? [];
+        if (domains.Length == 0 && tenants.Length == 0) return false;
+        if (tenants.Length > 0 && (identity.TenantId is not { Length: > 0 } tenant || !tenants.Contains(tenant, StringComparer.OrdinalIgnoreCase))) return false;
+        if (domains.Length == 0) return true;
+        if (!identity.EmailVerified || identity.Email is not { } email) return false;
+        var at = email.LastIndexOf('@');
+        return at > 0 && at < email.Length - 1 && domains.Contains(email[(at + 1)..], StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string[] ReadAllowed(IReadOnlyList<string>? values, Func<string, bool> valid, string message)
+    {
+        if (values is null) return [];
+        var read = values.Select(static value => value?.Trim().ToLowerInvariant() ?? string.Empty).Where(static value => value.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
+        if (read.Length > 50 || read.Any(value => !valid(value))) throw Invalid(message);
+        return read;
+    }
+
+    private static bool IsDomain(string value)
+        => value.Length <= 253 && value.Contains('.', StringComparison.Ordinal) && !value.StartsWith('.') && !value.EndsWith('.')
+            && value.Split('.').All(static label => label.Length is > 0 and <= 63 && !label.StartsWith('-') && !label.EndsWith('-') && label.All(static c => char.IsAsciiLetterOrDigit(c) || c == '-'));
+
+    private static bool IsTenant(string value) => value.Length <= 64 && value.All(static c => char.IsAsciiLetterOrDigit(c) || c is '-' or '.' or '_');
+
+    private static bool IsEntraId(Uri issuer) => issuer.Host.Equals("login.microsoftonline.com", StringComparison.OrdinalIgnoreCase)
+        || issuer.Host.Equals("login.microsoft.com", StringComparison.OrdinalIgnoreCase) || issuer.Host.Equals("sts.windows.net", StringComparison.OrdinalIgnoreCase);
 
     private static bool CryptographicEquals(string left, string right)
         => System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(left), System.Text.Encoding.UTF8.GetBytes(right));
@@ -691,10 +736,12 @@ internal sealed record SignInSettingsDocument(string[] Enabled, CompanyDocument?
 /// <param name="ClientId">The client id.</param>
 /// <param name="DisplayName">Its name for people.</param>
 /// <param name="GroupsClaim">The claim of the groups.</param>
-internal sealed record CompanyDocument(string Issuer, string ClientId, string? DisplayName, string GroupsClaim);
+/// <param name="AllowedDomains">The email domains it lets in; null in settings kept before they were named.</param>
+/// <param name="AllowedTenants">The tenant ids it lets in; null in settings kept before they were named.</param>
+internal sealed record CompanyDocument(string Issuer, string ClientId, string? DisplayName, string GroupsClaim, string[]? AllowedDomains = null, string[]? AllowedTenants = null);
 
 /// <summary>What the audit log records of a change of the settings, never a secret.</summary>
-internal sealed record SignInSettingsAudit(string[] Enabled, string? Issuer, bool RequireSso);
+internal sealed record SignInSettingsAudit(string[] Enabled, string? Issuer, bool RequireSso, string[]? AllowedDomains = null, string[]? AllowedTenants = null);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(SignInSettingsDocument))]

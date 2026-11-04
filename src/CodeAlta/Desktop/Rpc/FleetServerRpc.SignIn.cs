@@ -148,12 +148,15 @@ internal sealed partial class FleetServerService
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, [], null);
         if (!FleetServerLinkStore.IsValidId(request!.LinkId) || request.Enabled is not { Length: <= 8 } enabled || enabled.Any(static method => !FleetSignInMethods.IsKnown(method))
             || request.Issuer is { Length: > MaximumText } || request.ClientId is { Length: > 512 } || request.ClientSecret is { Length: > MaximumText }
-            || request.DisplayName is { Length: > 128 } || request.GroupsClaim is { Length: > 64 })
+            || request.DisplayName is { Length: > 128 } || request.GroupsClaim is { Length: > 64 } || request.AllowedDomains is { Length: > 50 }
+            || request.AllowedTenants is { Length: > 50 } || request.AllowedDomains?.Any(static value => value is null or { Length: > 253 }) == true
+            || request.AllowedTenants?.Any(static value => value is null or { Length: > 64 }) == true)
             return new("invalid_request", null, [], null);
         var company = string.IsNullOrWhiteSpace(request.Issuer) && string.IsNullOrWhiteSpace(request.ClientId)
             ? null
             : new CompanySignInSettings(request.Issuer?.Trim() ?? string.Empty, request.ClientId?.Trim() ?? string.Empty, request.ClientSecret,
-                string.IsNullOrWhiteSpace(request.DisplayName) ? null : request.DisplayName.Trim(), string.IsNullOrWhiteSpace(request.GroupsClaim) ? null : request.GroupsClaim.Trim());
+                string.IsNullOrWhiteSpace(request.DisplayName) ? null : request.DisplayName.Trim(), string.IsNullOrWhiteSpace(request.GroupsClaim) ? null : request.GroupsClaim.Trim(),
+                request.AllowedDomains ?? [], request.AllowedTenants ?? []);
         try
         {
             var settings = await _servers!.SetSignInSettingsAsync(request.LinkId, new SetSignInSettingsRequest(request.Version, enabled, company, request.RequireSso),
@@ -172,7 +175,8 @@ internal sealed partial class FleetServerService
     internal static FleetSignInSettingsView SettingsView(SignInSettingsDto settings)
         => new([.. settings.Methods.Select(static method => new FleetSignInMethodSettingView(method.Id, method.DisplayName, method.Enabled, method.Available))],
             settings.Company?.Issuer, settings.Company?.ClientId, settings.Company?.HasClientSecret ?? false, settings.Company?.DisplayName, settings.Company?.GroupsClaim ?? "groups",
-            settings.RequireSso, (int)Math.Min(settings.Version, int.MaxValue), settings.UpdatedAt is { } updated ? Time(updated) : null);
+            settings.RequireSso, (int)Math.Min(settings.Version, int.MaxValue), settings.UpdatedAt is { } updated ? Time(updated) : null,
+            [.. settings.Company?.AllowedDomains ?? []], [.. settings.Company?.AllowedTenants ?? []]);
 }
 
 /// <summary>A request for the sign-in methods of a server.</summary>
@@ -261,8 +265,10 @@ internal sealed record FleetSignInMethodSettingView(string Id, string Name, bool
 /// <param name="RequireSso">Whether company sign-in is required.</param>
 /// <param name="Version">The version, which a change names.</param>
 /// <param name="UpdatedAt">When they were last set, or null.</param>
+/// <param name="AllowedDomains">The email domains company sign-in lets in.</param>
+/// <param name="AllowedTenants">The tenant ids company sign-in lets in.</param>
 internal sealed record FleetSignInSettingsView(FleetSignInMethodSettingView[] Methods, string? Issuer, string? ClientId, bool HasClientSecret, string? DisplayName, string GroupsClaim,
-    bool RequireSso, int Version, string? UpdatedAt);
+    bool RequireSso, int Version, string? UpdatedAt, string[] AllowedDomains, string[] AllowedTenants);
 
 /// <summary>A method linked to this computer's person.</summary>
 /// <param name="Method">The method.</param>
@@ -289,5 +295,7 @@ internal sealed record FleetSignInSettingsResult(string Status, FleetSignInSetti
 /// <param name="DisplayName">Its name for people.</param>
 /// <param name="GroupsClaim">The claim of the groups; null for <c>groups</c>.</param>
 /// <param name="RequireSso">Whether company sign-in is required.</param>
+/// <param name="AllowedDomains">The email domains company sign-in lets in.</param>
+/// <param name="AllowedTenants">The tenant ids company sign-in lets in.</param>
 internal sealed record FleetSignInSettingsRequest(string ExpectedEpoch, string LinkId, int Version, string[] Enabled, string? Issuer, string? ClientId, string? ClientSecret,
-    string? DisplayName, string? GroupsClaim, bool RequireSso);
+    string? DisplayName, string? GroupsClaim, bool RequireSso, string[]? AllowedDomains = null, string[]? AllowedTenants = null);

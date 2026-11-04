@@ -113,6 +113,12 @@ to it.
 - The owner sets its issuer, client id and secret; the server reads its discovery document before keeping them, and
   never gives the secret back. The redirect registered at the provider is the loopback of the desktop
   (`http://127.0.0.1`, any port).
+- **Only the company's own accounts.** A provider serves more than one company (Google, the multi-tenant endpoints of
+  Entra ID, a shared Okta), so the owner names the **email domains** and the **tenant ids** it lets in, at least one.
+  The server checks every company sign-in, a person's first and the next ones: a tenant named must be the token's
+  `tid`; a domain named must be the one of its `email` claim with `email_verified` true (never `preferred_username`).
+  Entra ID needs its tenant ids, since its emails are not verified. An identity outside is refused and audited, and no
+  person is made for it.
 - **Enforcement**: the organization requires its company sign-in, and no other way signs a new device in, except
   the passkey of one **break-glass Owner**.
 - People are created at their first sign-in, as members; the groups of each sign-in are kept with its login, and map

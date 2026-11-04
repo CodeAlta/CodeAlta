@@ -67,6 +67,9 @@ public static class SignInErrorCodes
 
     /// <summary>Too many sign-ins wait at once.</summary>
     public const string Busy = "sign_in.busy";
+
+    /// <summary>The company's provider proved an identity outside the domains and tenants the owner named.</summary>
+    public const string IdentityNotAllowed = "sign_in.identity_not_allowed";
 }
 
 /// <summary>A sign-in that waits for the browser.</summary>

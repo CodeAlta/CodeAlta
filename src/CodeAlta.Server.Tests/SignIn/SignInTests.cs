@@ -504,6 +504,54 @@ public sealed class SignInTests
     }
 
     [TestMethod]
+    public async Task CompanySignInLetsInOnlyTheVerifiedDomainsAndTheTenantsTheOwnerNamed()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        var setup = await server.SetUpAsync(owner);
+
+        // The owner names who the company's provider lets in: nothing named is refused, as Entra ID without a tenant.
+        var held = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Read<SignInSettingsDto>();
+        var open = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version, [FleetSignInMethods.Company],
+            new CompanySignInSettings(provider.Issuer.AbsoluteUri, provider.ClientId, provider.ClientSecret), false));
+        Assert.AreEqual((HttpStatusCode.BadRequest, SignInErrorCodes.SettingsInvalid), (open.Status, open.Code), "a company sign-in that lets every account in");
+        var entra = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version, [FleetSignInMethods.Company],
+            new CompanySignInSettings("https://login.microsoftonline.com/organizations/v2.0", "client", "secret", AllowedDomains: ["contoso.example"]), false));
+        Assert.AreEqual(SignInErrorCodes.SettingsInvalid, entra.Code, "Entra ID's emails are not verified: its tenant is named");
+        var settings = await ConfigureCompanyAsync(server, owner, provider, requireSso: false, domains: [" Contoso.Example "]);
+        CollectionAssert.AreEqual(new[] { "contoso.example" }, settings.Company!.AllowedDomains!.ToArray());
+
+        // Another company's account, and one of the domain whose email the provider did not verify, are refused: no person is made.
+        foreach (var outsider in new[] { new FakeAccount("eve-1", "eve@fabrikam.example", "Eve", []), new FakeAccount("eve-2", "eve@contoso.example", "Eve", [], EmailVerified: false),
+                     new FakeAccount("eve-3", "eve@contoso.example.evil", "Eve", []) })
+        {
+            provider.Account = outsider;
+            var (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+            var refused = await CompleteAsync(server, laptop, start, back);
+            Assert.AreEqual((HttpStatusCode.Forbidden, SignInErrorCodes.IdentityNotAllowed), (refused.Status, refused.Code), outsider.Email);
+        }
+
+        Assert.AreEqual(1, (await server.Server.Store.ListPeopleAsync(setup.Organization.Id)).Count, "no person for an identity outside");
+        provider.Account = new FakeAccount("sam-1", "sam@CONTOSO.example", "Sam", []);
+        var (allowed, allowedBack) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, laptop, allowed, allowedBack)).Status);
+
+        // With tenants named, the account's tenant decides, whatever its email.
+        await ConfigureCompanyAsync(server, owner, provider, requireSso: false, tenants: ["tenant-a"]);
+        provider.Account = new FakeAccount("sam-1", "sam@contoso.example", "Sam", [], TenantId: "tenant-b");
+        var (other, otherBack) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        Assert.AreEqual(SignInErrorCodes.IdentityNotAllowed, (await CompleteAsync(server, laptop, other, otherBack)).Code, "an account linked before is still checked");
+        provider.Account = new FakeAccount("sam-2", "sam@anything.example", "Sam", [], EmailVerified: false, TenantId: "TENANT-A");
+        var (tenant, tenantBack) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, laptop, tenant, tenantBack)).Status);
+
+        var audit = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        Assert.AreEqual(4, audit.Count(static record => record.Result == SignInErrorCodes.IdentityNotAllowed), "every refusal is audited");
+    }
+
+    [TestMethod]
     public async Task TheCompanyProviderIsCheckedWhenTheOwnerSetsIt_AndItsSecretNeverComesBack()
     {
         await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
@@ -512,7 +560,7 @@ public sealed class SignInTests
         await server.SetUpAsync(owner);
         var held = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Read<SignInSettingsDto>();
         var unreachable = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version, [FleetSignInMethods.Company],
-            new CompanySignInSettings("http://127.0.0.1:1/nothing", "client", "secret"), false));
+            new CompanySignInSettings("http://127.0.0.1:1/nothing", "client", "secret", AllowedDomains: ["contoso.example"]), false));
         Assert.AreEqual(SignInErrorCodes.ProviderUnavailable, unreachable.Code);
         var plainHttp = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version, [FleetSignInMethods.Company],
             new CompanySignInSettings("http://idp.example", "client", "secret"), false));
@@ -557,12 +605,14 @@ public sealed class SignInTests
 
     private static (HttpStatusCode, string?) Answer(ApiAnswer answer) => (answer.Status, answer.Code);
 
-    private static async Task<SignInSettingsDto> ConfigureCompanyAsync(ServerFixture server, TestDevice owner, FakeOidcProvider provider, bool requireSso)
+    private static async Task<SignInSettingsDto> ConfigureCompanyAsync(ServerFixture server, TestDevice owner, FakeOidcProvider provider, bool requireSso,
+        string[]? domains = null, string[]? tenants = null)
     {
         var held = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Read<SignInSettingsDto>();
         var set = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version,
             [FleetSignInMethods.Company, FleetSignInMethods.Passkey, FleetSignInMethods.Microsoft, FleetSignInMethods.GitHub],
-            new CompanySignInSettings(provider.Issuer.AbsoluteUri, provider.ClientId, held.Company is null ? provider.ClientSecret ?? string.Empty : null, "Contoso"), requireSso));
+            new CompanySignInSettings(provider.Issuer.AbsoluteUri, provider.ClientId, held.Company is null ? provider.ClientSecret ?? string.Empty : null, "Contoso", null,
+                domains ?? (tenants is null ? ["contoso.example"] : null), tenants), requireSso));
         Assert.AreEqual(HttpStatusCode.OK, set.Status, set.Body.ToString());
         return set.Read<SignInSettingsDto>();
     }

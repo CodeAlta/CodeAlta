@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { FleetSignInSettingsView } from "#neoastra";
-import { orderedSignInMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
+import { allowedValues, orderedSignInMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
 
 const settings = (look: Partial<FleetSignInSettingsView> = {}): FleetSignInSettingsView => ({ methods: [
   { id: "company", name: "Contoso", enabled: true, available: true }, { id: "passkey", name: "Passkey", enabled: true, available: true },
   { id: "microsoft", name: "Microsoft", enabled: true, available: false }, { id: "google", name: "Google", enabled: false, available: true },
   { id: "github", name: "GitHub", enabled: true, available: true }], issuer: "https://login.contoso.example", clientId: "client", hasClientSecret: true, displayName: "Contoso",
-  groupsClaim: "groups", requireSso: false, version: 3, updatedAt: null, ...look });
+  groupsClaim: "groups", requireSso: false, version: 3, updatedAt: null, allowedDomains: ["contoso.example"], allowedTenants: [], ...look });
 
 test("the company's sign-in comes first, then a passkey, then the linked accounts", () => {
   assert.deepEqual(orderedSignInMethods([{ id: "github", name: "GitHub", breakGlass: false }, { id: "passkey", name: "Passkey", breakGlass: true },
@@ -29,6 +29,14 @@ test("company sign-in needs an https issuer and a client id, and requiring it ne
   assert.equal(signInDraftProblem({ ...draft, issuer: "", clientId: "" }), "Company sign-in needs its issuer and client id.");
   assert.equal(signInDraftProblem({ ...draft, issuer: "", clientId: "", enabled: ["passkey"], requireSso: true }), "Requiring company sign-in needs company sign-in on.");
   assert.equal(signInDraftProblem({ ...draft, enabled: ["passkey"], requireSso: true }), "Requiring company sign-in needs company sign-in on.");
+});
+
+test("company sign-in names the domains or the tenants it lets in", () => {
+  const draft = signInDraft(settings());
+  assert.equal(draft.allowedDomains, "contoso.example");
+  assert.equal(signInDraftProblem({ ...draft, allowedDomains: " , " }), "Company sign-in needs the email domains or the tenant ids it lets in.");
+  assert.equal(signInDraftProblem({ ...draft, allowedDomains: "", allowedTenants: "tenant-a" }), null);
+  assert.deepEqual(allowedValues(" Contoso.com, fabrikam.com;contoso.com\nexample.org "), ["contoso.com", "fabrikam.com", "example.org"]);
 });
 
 test("the row says the methods people may use now, or that company sign-in is required", () => {
