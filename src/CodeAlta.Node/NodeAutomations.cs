@@ -546,9 +546,23 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         if (Engine.Snapshot.Find(id) is not { Source.IsAssigned: true })
             throw new FleetException(FleetNodeErrorCodes.AutomationNotFound, null, "No automation of yours on this machine has that id.");
-        // A run a budget holds waits for its owner, as long as it takes: the caller hears at once that it waits (held), and
-        // the run goes on in the work of the engine, which it outlives the call in.
-        var runId = Guid.CreateVersion7().ToString("N");
+        var run = await RunByHandAsync(id, Guid.CreateVersion7().ToString("N"), cancellationToken).ConfigureAwait(false)
+            ?? throw new FleetException(FleetNodeErrorCodes.AutomationNotFound, null, "No automation of yours on this machine has that id.");
+        Log($"{caller.Name} ({caller.DeviceId}) ran the automation {id}: {run.Status}.");
+        return Describe(run);
+    }
+
+    /// <summary>
+    /// Runs an automation by hand with the id of its run, and answers once its session started or it failed to start, or as
+    /// soon as a budget of the machine holds it (<see cref="AutomationRun.Held"/>): a run held waits for its owner as long as
+    /// it takes, in the work of the engine, which it outlives the call in.
+    /// </summary>
+    /// <param name="id">The automation.</param>
+    /// <param name="runId">The id of the run.</param>
+    /// <param name="cancellationToken">Cancels the wait for the answer, not the run.</param>
+    /// <returns>The run; null for an automation that does not exist.</returns>
+    private async Task<AutomationRun?> RunByHandAsync(string id, string runId, CancellationToken cancellationToken)
+    {
         var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _holdWaiters[runId] = held;
         try
@@ -557,15 +571,11 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             if (await Task.WhenAny(running, held.Task).WaitAsync(cancellationToken).ConfigureAwait(false) != running
                 && Engine.Runs(id, MaximumRuns).FirstOrDefault(candidate => candidate.Id == runId) is { Status: AutomationRun.Held } waiting)
             {
-                Log($"{caller.Name} ({caller.DeviceId}) ran the automation {id}: it waits for Continue anyway.");
                 _ = running.ContinueWith(static task => _ = task.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
-                return Describe(waiting);
+                return waiting;
             }
 
-            var run = await running.WaitAsync(cancellationToken).ConfigureAwait(false)
-                ?? throw new FleetException(FleetNodeErrorCodes.AutomationNotFound, null, "No automation of yours on this machine has that id.");
-            Log($"{caller.Name} ({caller.DeviceId}) ran the automation {id}: {run.Status}.");
-            return Describe(run);
+            return await running.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {

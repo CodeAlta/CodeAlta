@@ -107,6 +107,7 @@ public sealed class RemoteSessionHostTests
         var row = merged.Sessions.Single(session => session.Id == created.SessionId);
         Assert.AreEqual(machine.DeviceId, row.MachineId);
         Assert.AreEqual("test-node", row.MachineName);
+        Assert.AreEqual("Scripted", row.MachineProviderName, "Its row names the provider as the machine does.");
         Assert.AreEqual(WorkspaceService.MachineScopePrefix + machine.DeviceId, row.ProjectId);
         Assert.AreEqual(machine.DeviceId, merged.Projects.Single(project => project.Id == row.ProjectId).MachineId);
 

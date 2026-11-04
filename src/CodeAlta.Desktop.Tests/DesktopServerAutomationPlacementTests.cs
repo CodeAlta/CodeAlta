@@ -107,6 +107,7 @@ public sealed class DesktopServerAutomationPlacementTests
                         new FleetServerClient(address, desktopKey))
                     : null,
                 RunsReadInterval = TimeSpan.Zero,
+                RunReportWait = TimeSpan.FromSeconds(10),
             };
             automations.Placement = placement;
             await using (placement)
@@ -150,6 +151,18 @@ public sealed class DesktopServerAutomationPlacementTests
                 await WaitForAsync(() => !asked.IsEmpty, "the machine to be asked the run", token);
                 Assert.IsTrue(asked.TryDequeue(out var runRequest));
                 Assert.AreEqual((Id, ran.Id, fleet.DeviceId), (runRequest.AutomationId, runRequest.RunId, runRequest.SignerDeviceId));
+
+                // Run now while a budget of the machine holds new runs: the machine reports the run held, and Run now says that it
+                // waits for Continue anyway, as for a machine reached directly.
+                var holding = automations.RunAsync(Id, token);
+                await WaitForAsync(() => !asked.IsEmpty, "the machine to be asked the run a budget holds", token);
+                Assert.IsTrue(asked.TryDequeue(out var heldRequest));
+                Assert.IsTrue(await connector.ReportAutomationRunsAsync(new FleetAutomationRunFacts([
+                    new FleetAutomationRunFact(heldRequest.RunId, Id, first.Version.Number, "manual", "held", DateTimeOffset.UtcNow, null)
+                    { Message = "A budget of the machine is reached: the run waits for Continue anyway." }]), token));
+                var held = (await holding)!;
+                Assert.AreEqual((heldRequest.RunId, "held"), (held.Id, held.Status), held.Message);
+                StringAssert.Contains(held.Message, "Continue anyway");
 
                 // Changed, it is given again, with a newer number; unchanged, it is not.
                 await placement.SyncAsync(token);
