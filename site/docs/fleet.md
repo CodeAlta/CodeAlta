@@ -303,7 +303,7 @@ It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--
 ### Add machines and computers
 
 - **A machine**: in **Settings** > **Fleet** > **Machines**, **Add a machine…** > **Through my server** shows the command to run on it, `altanode join <address> --token <code>`, which prints the six words of the machine's key. The machines that join list under the command with their words: click **It shows the same words** beside the one whose words the machine printed. Another one is never approved by itself. The **Add a machine…** of the server's card shows the same command for a machine that waits for you to approve it: it appears under the server as a **New device**; click **Approve…**, check that the machine shows the same six words, and click **It shows the same words**.
-- **What waits for you**: when a machine or a computer asks to join, a message comes wherever you are in CodeAlta, with its six words, **Approve** and **Refuse**, and the **Fleet** button of the title bar counts what waits. Approve when the words are the same as on the device.
+- **What waits for you**: when a machine or a computer asks to join, a message comes wherever you are in CodeAlta, with its six words, **Approve** and **Refuse**, and the **Fleet** button of the title bar counts what waits, with the runs held by a [budget](#set-budgets-for-your-machines) and the [problems of your machines](#hear-of-problems-of-your-machines). Approve when the words are the same as on the device.
 - **Another of your computers**: **Join an organization…** with the address of the server, then sign in with a method you linked (a passkey, Microsoft, Google, GitHub) or an enrollment code; it shows six words while it waits, and you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
 
 ### Join an organization
@@ -407,6 +407,33 @@ Each machine linked to your server counts the statistics of its sessions, a node
 - **My fleet** shows the machines of your own fleet. **This machine** is the full Statistics page, with its filters and comparisons, for this computer.
 
 A node starts counting with the day it first runs.
+
+### Set budgets for your machines
+
+A budget limits the tokens or the estimated cost (in US dollars) your machines spend per day, week or month.
+
+1. In CodeAlta Desktop, on the owner's computer, open **Settings** > **Fleet** > **Budgets** and click **Add a budget…**.
+2. Name it and choose **Where it applies**: **All my work**, one machine, a space or a project.
+3. Choose **Tokens** or **Estimated cost (USD)**, the **Limit** and the **Period**. Periods start at midnight of your computer's time zone, a week on Monday.
+4. Choose how it holds, and what happens at its limit, then click **Add**.
+
+| How it holds | Effect |
+| --- | --- |
+| **Enforced: each machine gets a share** | Each machine holds a share of the budget and spends it without asking, also offline. A run starts only when its machine holds enough; a machine that runs out asks for more, and the server never gives more than the limit |
+| **Advisory: it warns** | The budget counts what the machines report; machines working at once or offline can pass it before you hear of it |
+
+| At its limit | Effect |
+| --- | --- |
+| **Hold new runs for me** | A new run in its scope waits; **Continue anyway** starts it, **Stop** drops it |
+| **Stop new runs** | A new run in its scope does not start |
+
+Each budget shows a bar of what its scope used in its period, red once it is reached. **Edit** and the trash button change or remove it, beside its row. You hear of a budget once at 80% and once at 100% of each period.
+
+A run that waits comes as a message wherever you are in CodeAlta, with **Continue anyway** and **Stop**, and in **Runs that wait for a budget** at the top of the page. Your computer signs each **Continue anyway** for that one run: the machine checks it, so the server alone cannot start a run past your budget. Estimated costs come from the prices of the model catalog, as in the Statistics tab.
+
+### Hear of problems of your machines
+
+Your nodes tell the server how they are: little disk space left, a provider whose sign-in failed, an automation whose last runs failed, their policy refusing runs. The server also sees a node offline for more than six hours and one that runs an older version than the server. A problem that lasts more than ten minutes comes to you once, as a message with **Dismiss**, and stays listed under **Notifications** in **Settings** > **Fleet** > **Budgets** until you dismiss it or it ends. One that comes back later comes again.
 
 ### Give secrets to your machines
 

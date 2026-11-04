@@ -46,6 +46,19 @@ Surprise bills are the first complaint of agent users. So budgets ship with the 
   ([security](security-and-privacy.md#policies-and-the-kill-switch)).
 - At 80% and 100%: a notification; at 100%, new runs in that scope wait for a person's **Continue anyway** (or stop,
   per the budget).
+- **Who signs what.** A budget is signed by a controller device of its owner, as policies are: a machine applies only a
+  budget that verifies against the device list it anchored, so a server can drop one (deny service) but neither loosen
+  nor invent one. Allowances are the server's bookkeeping. **Continue anyway** loosens, so it is signed too, for one run:
+  bound to the budget and its version, the period, the machine, the run and a nonce the machine chose, valid an hour;
+  **Stop** is stricter and is not signed.
+- **Allowances**: each machine commits the larger of what it was given and what its facts count (a desktop that spends
+  without allowances still takes its part); the server gives only what no machine committed, at least a quarter of the
+  limit at once so that a machine asks seldom and spends offline, in one transaction with the facts. A machine admits a
+  run while it holds a hundredth of the limit beyond what it spent, counted from its own statistics; the last run of a
+  period can pass the limit by what it spends.
+- A budget limits the facts of its owner's machines: the person, one machine, a space (by the opaque id the server knows
+  it by, which statistics sets carry), a project (by its blind index). Teams, the organization and automations come with
+  their roles (M4).
 - Estimates come from the model catalog's prices (models.dev), as the Statistics plugin does; a subscription shows its
   plan usage instead, asked of the vendor's CLI as today.
 
@@ -128,3 +141,12 @@ which the hosts name at three levels; the first that names one wins:
   backlog of its outbox), sessions working and devices connected.
 - Machines report health in their heartbeat; the server turns lasting problems into notifications for the machine's
   owner (or the admins of team machines), at most once per problem.
+  - A node reports what it sees (disk space low where it keeps its state, a provider whose sign-in failed, an
+    automation whose last runs failed, its policy refusing runs); the server sees for itself a node offline longer than
+    a threshold and one behind its own version. Names and numbers, never content.
+  - A problem is a kind and a subject (a provider, an automation) since it was first seen: told once it lasts (ten
+    minutes by default), resolved when it ends; one that comes back is another one. The store is written when the
+    problems of a machine change, not at every heartbeat.
+  - Notifications are kept per person with a key that makes each one once (a budget, its period and threshold; a
+    machine, its problem and since when), so a replay of facts or a restart tells nothing twice; the person's online
+    controller devices are told at once, the others read them when they connect.
