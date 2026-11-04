@@ -18,7 +18,7 @@ namespace CodeAlta.Desktop.Fleet;
 /// Nothing happens for a profile without a server: the device key is the one pairing makes, created by the first
 /// pairing or the first server, and no connection is made before a link exists. Keys and requests stay in the host.
 /// </remarks>
-internal sealed class DesktopFleetServers : IAsyncDisposable
+internal sealed partial class DesktopFleetServers : IAsyncDisposable
 {
     private readonly CodeAltaHost _host;
     private readonly string _deviceName;

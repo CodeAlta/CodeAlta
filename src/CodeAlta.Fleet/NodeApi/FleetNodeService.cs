@@ -68,6 +68,13 @@ public sealed class FleetNodeServiceOptions
     public IFleetNodeAutomations? Automations { get; init; }
 
     /// <summary>
+    /// Gets what admits a run to an environment of the fleet (<c>doc/fleet/secrets.md</c>, environments), by the name of the
+    /// environment, the run, and what the run is for its approver: null when it may start, else why not. It may wait for
+    /// an approval. Null runs no session in an environment.
+    /// </summary>
+    public Func<string, string, string?, CancellationToken, Task<EnvironmentAdmissionResult>>? AdmitEnvironment { get; init; }
+
+    /// <summary>
     /// Gets the log and the self-update the node gives its owner and the devices that manage it (<c>control.log</c>,
     /// <c>control.update</c>); null for a host without them, whose methods then answer <see cref="FleetNodeErrorCodes.Unavailable"/>.
     /// </summary>
@@ -299,6 +306,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             // The secrets of the machine: its owner, on the machine, manages them.
             RegisterSecrets(caller, Access.Owner);
             RegisterAgentPolicy(caller, Access.Owner);
+            RegisterLabels(caller, Access.Owner);
             // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
             RegisterMoves(caller, Access.Owner);
             On(caller, FleetNodeMethods.MovesList, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList,
@@ -371,6 +379,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         // And its secrets, for a device paired with the node only: never one trusted through the list of an organization.
         RegisterSecrets(caller, Access.ManagePaired);
         RegisterAgentPolicy(caller, Access.Manage);
+        RegisterLabels(caller, Access.Manage);
     }
 
     private void RegisterManagementExtras(FleetNodeCaller caller, Access access)

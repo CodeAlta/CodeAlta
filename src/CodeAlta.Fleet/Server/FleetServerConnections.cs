@@ -71,6 +71,9 @@ public sealed class FleetServerConnectionsOptions
 
     /// <summary>Gets what takes the automations the servers give this node, and reports their runs; null ignores them (a desktop does).</summary>
     public IFleetServerAutomations? Automations { get; init; }
+
+    /// <summary>Gets what is told, by the id of its link, that a server says the values of this machine changed; null ignores it (a desktop does).</summary>
+    public Action<string>? SecretsChanged { get; init; }
 }
 
 /// <summary>What a node does with the automations its servers give it.</summary>
@@ -317,6 +320,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
             AutomationsAssigned = _options.Automations is { } automations ? (delivery, token) => automations.AcceptAsync(created!, link, delivery, token) : null,
             AutomationsOnline = _options.Automations is { } online ? token => online.OnlineAsync(created!, link, token) : null,
             AutomationsRun = _options.Automations is { } runs ? (request, token) => runs.RunAsync(created!, link, request, token) : null,
+            SecretsChanged = _options.SecretsChanged is { } changed ? () => changed(link.Id) : null,
         };
         if (_options.Configure is { } configure) options = configure(options);
         var connector = new FleetConnector(options);

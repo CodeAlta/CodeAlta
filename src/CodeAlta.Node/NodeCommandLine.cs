@@ -99,6 +99,9 @@ internal sealed record NodeCommandHandlers(
     /// <summary>Gets what lists, sets, rotates and deletes the secrets and variables of the machine; null for none.</summary>
     public Func<NodeSecretCommandOptions, ValueTask<int>>? Secrets { get; init; }
 
+    /// <summary>Gets what lists and changes the labels of the machine; null for none.</summary>
+    public Func<NodeLabelCommandOptions, ValueTask<int>>? Labels { get; init; }
+
     /// <summary>Gets what shows or changes whether agents of other machines may start sessions on the node; does nothing by default.</summary>
     public Func<NodeAgentCommandOptions, ValueTask<int>> Agents { get; init; } = static _ => ValueTask.FromResult(0);
 
@@ -456,6 +459,31 @@ internal static class NodeCommandLine
             return handlers.Secrets?.Invoke(secrets) ?? handlers.NotImplemented("secrets");
         });
 
+        var labels = new NodeLabelCommandOptions();
+        var labelsCommand = new Command("labels", "List and change the labels of this machine")
+        {
+            new CommandUsage("Usage: {NAME} [list] [options]"),
+            new CommandUsage("       {NAME} add|remove <label>... [options]"),
+            new CommandUsage("       {NAME} set [<label>...] [options]"),
+            _,
+            "The labels of this machine, such as gpu or prod: it publishes them to its",
+            "servers, and an environment of the fleet runs only on the machines with",
+            "one of its labels. CodeAlta Desktop changes them on the page of the machine.",
+            "  list    the labels",
+            "  add     adds labels",
+            "  remove  removes labels",
+            "  set     replaces the labels; set alone removes them all",
+            _,
+            "Options:",
+        };
+        AddProfile(labelsCommand, labels.Profile);
+        labelsCommand.Add("<>", "The command and its labels");
+        labelsCommand.Add((_, words) =>
+        {
+            labels.Words.AddRange(words);
+            return handlers.Labels?.Invoke(labels) ?? handlers.NotImplemented("labels");
+        });
+
         var agents = new NodeAgentCommandOptions();
         var agentsCommand = new Command("agents", "Show or change whether agents of other machines may start sessions here")
         {
@@ -583,6 +611,7 @@ internal static class NodeCommandLine
             projectsCommand,
             automationsCommand,
             secretsCommand,
+            labelsCommand,
             agentsCommand,
             joinCommand,
             machinesCommand,

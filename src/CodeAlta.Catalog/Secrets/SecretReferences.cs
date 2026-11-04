@@ -43,6 +43,22 @@ public sealed class SecretReferenceException : Exception
     public SecretReference Reference { get; }
 }
 
+/// <summary>The work of a run, which tells the scopes its references resolve in (<c>doc/fleet/secrets.md</c>, scopes).</summary>
+/// <param name="SpaceId">The space of the run on this machine; null for none.</param>
+/// <param name="ProjectId">The project of the run on this machine; null for a chat.</param>
+/// <param name="Environment">The environment the run names, once it was admitted; null for none.</param>
+public sealed record SecretScope(string? SpaceId, string? ProjectId, string? Environment)
+{
+    /// <summary>Gets the work of no space, project or environment.</summary>
+    public static SecretScope None { get; } = new(null, null, null);
+
+    /// <summary>Gets the run (a session, a run of an automation) its uses are recorded for; null records none.</summary>
+    public string? RunId { get; init; }
+
+    /// <summary>Gets whether the run is the work of the owner of the machine, whose own values then come first.</summary>
+    public bool OwnerWork { get; init; } = true;
+}
+
 /// <summary>Reads the references of the configuration: <c>${env:NAME}</c>, <c>${secret:NAME}</c> and <c>${var:NAME}</c>.</summary>
 public static class SecretReferences
 {
@@ -123,9 +139,10 @@ public static class SecretReferences
 
 /// <summary>
 /// Gives the values of the references of the configuration: a variable of the environment for <c>${env:NAME}</c>, and for
-/// <c>${secret:NAME}</c> and <c>${var:NAME}</c> the value of the first source that has it, the narrowest scope first
-/// (later the environment of a run, the project, the space, the team, the organization; the machine now). A value that is
-/// not set is an error that names it, never an empty value.
+/// <c>${secret:NAME}</c> and <c>${var:NAME}</c> the value of the first source that has it: the machine's own store for
+/// the work of its owner, then the values the fleet gave it, the narrowest scope first (the environment of the run, the
+/// project, the space, the person; teams and the organization later). A value that is not set is an error that names it,
+/// never an empty value.
 /// </summary>
 public sealed class SecretReferenceResolver
 {
@@ -144,11 +161,48 @@ public sealed class SecretReferenceResolver
         _sources = sources;
     }
 
-    /// <summary>Gets a resolver of the environment of this process and the store of a profile.</summary>
+    /// <summary>
+    /// Gets a resolver of the environment of this process and the store of a profile, for what runs on the host side
+    /// (providers, MCP servers, plugin tools): the machine's own values first, then those the fleet gave the person's work.
+    /// </summary>
     /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
     /// <returns>The resolver.</returns>
     public static SecretReferenceResolver ForMachine(string root)
-        => new(Environment.GetEnvironmentVariable, [new LocalSecretStore(root)]);
+    {
+        var store = new LocalSecretStore(root);
+        return new(Environment.GetEnvironmentVariable, [store, store.FleetScope(FleetSecretScopes.Person, null, shell: false)]);
+    }
+
+    /// <summary>Gets a resolver for the work of a run: its environment, its project and its space (<see cref="ForScope(string, SecretScope, bool, Action{FleetSecretCopyInfo}?)"/>).</summary>
+    /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
+    /// <param name="scope">The work of the run.</param>
+    /// <param name="shell">Whether the values go to the agent's shell, which never gets a host-only secret.</param>
+    /// <returns>The resolver.</returns>
+    public static SecretReferenceResolver ForScope(string root, SecretScope scope, bool shell) => ForScope(root, scope, shell, null);
+
+    /// <summary>
+    /// Gets a resolver for the work of a run (<c>doc/fleet/secrets.md</c>, scopes): the machine's own values first for the
+    /// work of its owner, then the values the fleet gave this machine, the narrowest scope first: the run's environment,
+    /// its project, its space, the person.
+    /// </summary>
+    /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
+    /// <param name="scope">The work of the run.</param>
+    /// <param name="shell">Whether the values go to the agent's shell, which never gets a host-only secret.</param>
+    /// <param name="used">Told each value of the fleet given, for the record of its uses; null for none.</param>
+    /// <returns>The resolver.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="scope"/> is null.</exception>
+    public static SecretReferenceResolver ForScope(string root, SecretScope scope, bool shell, Action<FleetSecretCopyInfo>? used)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        var store = new LocalSecretStore(root);
+        var sources = new List<ISecretLookup>(5);
+        if (scope.OwnerWork) sources.Add(store);
+        if (!string.IsNullOrWhiteSpace(scope.Environment)) sources.Add(store.FleetScope(FleetSecretScopes.Environment, scope.Environment, shell, used));
+        if (!string.IsNullOrWhiteSpace(scope.ProjectId)) sources.Add(store.FleetScope(FleetSecretScopes.Project, scope.ProjectId, shell, used));
+        if (!string.IsNullOrWhiteSpace(scope.SpaceId)) sources.Add(store.FleetScope(FleetSecretScopes.Space, scope.SpaceId, shell, used));
+        sources.Add(store.FleetScope(FleetSecretScopes.Person, null, shell, used));
+        return new(Environment.GetEnvironmentVariable, sources);
+    }
 
     /// <summary>Gets the sources of secrets and variables, the narrowest scope first.</summary>
     public IReadOnlyList<ISecretLookup> Sources => _sources;

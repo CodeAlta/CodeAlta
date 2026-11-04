@@ -147,6 +147,12 @@ public static class FleetNodeMethods
     /// <summary>The owner's local control, or a device that manages the node: changes that policy.</summary>
     public const string ControlAgentsSet = "control.agents.set";
 
+    /// <summary>The owner's local control, or a device that manages the node: the labels of the machine.</summary>
+    public const string ControlLabelsGet = "control.labels.get";
+
+    /// <summary>The owner's local control, or a device that manages the node: sets the labels of the machine.</summary>
+    public const string ControlLabelsSet = "control.labels.set";
+
     /// <summary>Copies an automation to the node, which runs it from now on (<see cref="IFleetNodeAutomations"/>).</summary>
     public const string AutomationsPut = "automations.put";
 
@@ -501,6 +507,13 @@ public sealed record FleetCreateSessionParams(string? ProjectId = null, string? 
     FleetModelSelection? Selection = null)
 {
     /// <summary>
+    /// Gets the environment of the fleet the session uses; null for none. The node admits the session first (its rules,
+    /// and its approval when it requires one): its first prompt is sent once it was admitted, and its processes get the
+    /// values of the environment.
+    /// </summary>
+    public string? Environment { get; init; }
+
+    /// <summary>
     /// Gets the signed request of the agent that starts the session as the child of its own, on behalf of the person of
     /// the calling device (<see cref="Protocol.FleetAgentRequestKinds.Start"/>); null for a session a person starts.
     /// </summary>
@@ -780,6 +793,10 @@ public sealed record FleetEmpty;
 /// <param name="AllowBypass">Whether their sessions may bypass permissions (when their parent does); off by default.</param>
 public sealed record FleetAgentPolicyInfo(IReadOnlyList<string> Spaces, string? Sandbox = null, bool AllowBypass = false);
 
+/// <summary>The labels the owner gives a machine (<c>control.labels.get</c>, <c>control.labels.set</c>), which it publishes in its inventory.</summary>
+/// <param name="Labels">The labels, such as <c>gpu</c> or <c>prod</c>.</param>
+public sealed record FleetMachineLabelsInfo(IReadOnlyList<string> Labels);
+
 /// <summary>The parameters of <c>agents.deliveries.take</c>.</summary>
 /// <param name="Limit">The most deliveries to take; null for 50.</param>
 public sealed record FleetAgentDeliveryTakeParams(int? Limit = null);
@@ -879,6 +896,7 @@ public sealed record FleetAgentDeliveryAckParams(IReadOnlyList<string> Ids);
 [JsonSerializable(typeof(FleetAutomationRunInfo))]
 [JsonSerializable(typeof(FleetAutomationRunList))]
 [JsonSerializable(typeof(FleetAgentPolicyInfo))]
+[JsonSerializable(typeof(FleetMachineLabelsInfo))]
 [JsonSerializable(typeof(FleetAgentDeliveryTakeParams))]
 [JsonSerializable(typeof(FleetAgentDeliveryList))]
 [JsonSerializable(typeof(FleetAgentDeliveryAckParams))]

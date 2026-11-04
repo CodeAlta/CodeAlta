@@ -268,6 +268,12 @@ internal sealed record AutomationDefinition(string Id, string Name)
     /// <summary>The sandbox its sessions run in: a profile, or <c>off</c>; null for what the settings give.</summary>
     public string? Sandbox { get; init; }
 
+    /// <summary>
+    /// The environment of the fleet its runs use (<c>doc/fleet/secrets.md</c>, environments): a run starts only once the
+    /// machine admitted it (its rules held, its approval given), and its sessions get the values of that environment; null for none.
+    /// </summary>
+    public string? Environment { get; init; }
+
     /// <summary>The options of its sessions, such as whether they can start sessions of their own; null for the defaults.</summary>
     public AgentSessionOptions? SessionOptions { get; init; }
 
@@ -297,6 +303,8 @@ internal sealed record AutomationDefinition(string Id, string Name)
         if (Script is not null) text += "\nscript\n" + Script + "\n" + (ScriptArguments ?? string.Empty);
         // Nor without a machine of their own.
         if (RunsOn is not null) text += "\nruns_on\n" + RunsOn;
+        // Nor without an environment.
+        if (Environment is not null) text += "\nenvironment\n" + Environment;
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 

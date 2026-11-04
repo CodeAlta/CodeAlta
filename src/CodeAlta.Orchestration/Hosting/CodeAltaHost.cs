@@ -409,6 +409,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             // The secrets of this machine are shared by the hosts of the profile: their values are masked in what the
             // sessions keep, journal, show and trace.
             var secretMasker = new AgentSecretMasker(new LocalSecretStore(globalRoot).GetSecretValues);
+            var secretUses = new SecretUseLog(globalRoot);
             var startupScratchpadCleanup = options.StartupScratchpadCleanup;
             if (startupScratchpadCleanup is not null
                 && (!string.Equals(startupScratchpadCleanup.StateRoot, catalogOptions.StateRoot, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
@@ -586,11 +587,16 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 InheritPermissionMode = options.InheritPermissionModePolicy,
                 ShowsPromptSuggestions = options.ShowsPromptSuggestions,
                 Identities = options.AppliesSpaceIdentities
-                    // The CLI profiles read their ${secret:NAME} and ${var:NAME} from the store of this machine.
+                    // The CLI profiles read their ${secret:NAME} and ${var:NAME} from the store of this machine: its own values,
+                    // then those the fleet gave it for the environment, the project and the space of the session, never a
+                    // host-only one; each use of a value of the fleet is recorded for the session.
                     ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog),
-                        identity => SpaceIdentityEnvironment.Create(identity, SecretReferenceResolver.ForMachine(catalogOptions.GlobalRoot).Read,
+                        (identity, scope) => SpaceIdentityEnvironment.Create(identity, SecretReferenceResolver.ForScope(catalogOptions.GlobalRoot, scope, shell: true,
+                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null).Read,
                             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
-                        new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles)
+                        new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles,
+                        // An admission to an environment is kept across a restart of the host, bound to the rules and the approval that admitted it.
+                        new SessionSecretEnvironments(readOnlyGlobalState ? null : Path.Combine(catalogOptions.FleetRoot, "environment-admissions.json")))
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
                 SandboxBackend = options.SandboxBackend,

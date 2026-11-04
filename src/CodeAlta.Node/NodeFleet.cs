@@ -133,6 +133,10 @@ internal sealed class NodeFleet : IAsyncDisposable
                 AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses, RequestStop = requestStop, CloneRoot = node.Options.CloneRoot,
                 Updating = () => node.AdmissionPaused, UpdateStatus = updateStatus, Metrics = metrics, Automations = node.Automations,
                 Management = management,
+                // A session that names an environment is admitted as a run of an automation is, once the node joined a server.
+                AdmitEnvironment = (environment, runId, title, token) => node.Automations?.Environments is { } gate
+                    ? gate.AdmitAsync(environment, runId, null, title, token)
+                    : Task.FromResult(CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult.Refused($"This machine runs no session in the environment '{environment}': it joined no server.")),
             });
             // An assigned automation runs while the device that assigned it is still paired, with the automate permission.
             if (node.Automations is { } automations)
@@ -302,16 +306,20 @@ internal sealed class NodeServers : IAsyncDisposable
     private readonly Fleet.Server.FleetHostStatisticsSource _statistics;
 
     private NodeServers(DeviceIdentity identity, Fleet.Server.FleetHostPublicationSource source, Fleet.Server.FleetServerConnections connections,
-        Fleet.Server.FleetHostStatisticsSource statistics)
+        Fleet.Server.FleetHostStatisticsSource statistics, NodeFleetSecrets secrets)
     {
         _identity = identity;
         _source = source;
         _connections = connections;
         _statistics = statistics;
+        Secrets = secrets;
     }
 
     /// <summary>Gets the connections to the servers.</summary>
     public Fleet.Server.FleetServerConnections Connections => _connections;
+
+    /// <summary>Gets the values the servers give this node, kept in the protected store of the machine.</summary>
+    public NodeFleetSecrets Secrets { get; }
 
     /// <summary>Starts the connections of the servers of the profile.</summary>
     /// <param name="node">The running node.</param>
@@ -365,6 +373,7 @@ internal sealed class NodeServers : IAsyncDisposable
         var source = new Fleet.Server.FleetHostPublicationSource(node.Host, name, version, ["sessions", "moves"]);
         // The statistics the node counts (its Statistics plugin), published with the facts of its sessions.
         var statistics = Fleet.Server.FleetHostStatisticsSource.ForHost(node.Host);
+        NodeFleetSecrets? secrets = null;
         var connections = new Fleet.Server.FleetServerConnections(new Fleet.Server.FleetServerConnectionsOptions
         {
             FleetRoot = catalog.FleetRoot,
@@ -380,7 +389,14 @@ internal sealed class NodeServers : IAsyncDisposable
             Updates = updates,
             // The automations a server gives this node, verified against its device list and opened with the key of this node.
             Automations = node.Automations is { } given ? new NodeServerAutomations(given, identity) : null,
+            // The values the servers seal for this node: read again as soon as a server says they changed.
+            SecretsChanged = linkId => secrets?.Changed(linkId),
         });
+        secrets = new NodeFleetSecrets(node.Host, connections);
+        // A run that names an environment is admitted by its rules and its approval, as the servers verified them.
+        if (node.Automations is { } admitted) admitted.Environments = new NodeEnvironmentGate(secrets, catalog);
+        // An admission kept across a restart holds while the rules this node verified are the version that admitted it.
+        node.Host.Identities.Environments.Validate = secrets.Holds;
         if (node.Automations is { } automations)
         {
             automations.DeviceId ??= identity.DeviceId;
@@ -393,7 +409,8 @@ internal sealed class NodeServers : IAsyncDisposable
         }
 
         connections.Start();
-        return new NodeServers(identity, source, connections, statistics);
+        secrets.Start();
+        return new NodeServers(identity, source, connections, statistics, secrets);
     }
 
     // The device list is read again for each relay, so that a device removed from it is refused at once; when the server
@@ -422,6 +439,7 @@ internal sealed class NodeServers : IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        await Secrets.DisposeAsync().ConfigureAwait(false);
         await _connections.DisposeAsync().ConfigureAwait(false);
         await _source.DisposeAsync().ConfigureAwait(false);
         _statistics.Dispose();

@@ -502,6 +502,9 @@ public sealed partial class FleetConnector : IAsyncDisposable
                 case FleetAutomationMethods.Run:
                     OnAutomationRun(fleetEvent, stop);
                     break;
+                case Protocol.Api.FleetSecretMethods.Changed:
+                    _options.SecretsChanged?.Invoke();
+                    break;
             }
 
             return ValueTask.CompletedTask;

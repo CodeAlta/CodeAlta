@@ -60,7 +60,7 @@ public sealed record VariableInfo(string Name, string Value, int Version, string
 /// The desktop, the terminal application, the command line and the node of one profile share the store: each change
 /// reads the file again and writes it back while it holds the lock of the file, and each read follows the file.
 /// </remarks>
-public sealed class LocalSecretStore : ISecretLookup
+public sealed partial class LocalSecretStore : ISecretLookup
 {
     /// <summary>The scope of the values of a machine.</summary>
     public const string MachineScope = "machine";
@@ -259,15 +259,20 @@ public sealed class LocalSecretStore : ISecretLookup
     public IReadOnlyCollection<string> GetSecretValues()
     {
         var snapshot = Read();
-        if (snapshot.Document.Secrets.Count == 0) return [];
+        if (snapshot.Document.Secrets.Count == 0 && snapshot.Document.Fleet.Count == 0) return [];
+        List<string> values = [];
         try
         {
-            return [.. Values(snapshot).Values];
+            values.AddRange(Values(snapshot).Values);
         }
         catch (SecretStoreUnavailableException)
         {
-            return [];
+            // What is not read cannot leak.
         }
+
+        // The secrets the fleet gave this machine are masked as its own are.
+        values.AddRange(FleetSecretValues(snapshot));
+        return values;
     }
 
     /// <summary>Removes the store: its file, and the key of its protection.</summary>
@@ -445,6 +450,7 @@ public sealed class LocalSecretStore : ISecretLookup
             // Names are those of environment variables: one name whatever its case, as on Windows.
             document.Secrets = new(document.Secrets.Where(static entry => IsName(entry.Key)), StringComparer.OrdinalIgnoreCase);
             document.Variables = new(document.Variables.Where(static entry => IsName(entry.Key) && entry.Value.Value is not null), StringComparer.OrdinalIgnoreCase);
+            document.Fleet = [.. (document.Fleet ?? []).Where(static copy => copy is not null && IsName(copy.Name) && copy.Source is { Length: > 0 } && copy.Value is not null)];
             return document;
         }
         catch (JsonException exception)
@@ -480,6 +486,9 @@ public sealed class LocalSecretStore : ISecretLookup
         public StoreDocument Document { get; } = document;
 
         public Dictionary<string, string>? Values { get; set; }
+
+        // The values of the copies the fleet gave, by their place in the document.
+        public string?[]? FleetValues { get; set; }
     }
 }
 
@@ -496,6 +505,10 @@ internal sealed class StoreDocument
 
     [JsonPropertyName("variables")]
     public Dictionary<string, VariableDocument> Variables { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    // The copies the fleet gave this machine, their values protected as the values of the machine are.
+    [JsonPropertyName("fleet")]
+    public List<FleetCopyDocument> Fleet { get; set; } = [];
 }
 
 internal sealed class SecretDocument

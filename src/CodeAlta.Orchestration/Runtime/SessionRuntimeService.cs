@@ -819,7 +819,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         if (!Identities.IsEnabled) return SessionIdentity.Usual;
         if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated) return entry.Identity;
         return await GetSessionSpaceAsync(sessionId, cancellationToken).ConfigureAwait(false) is { } record
-            ? await Identities.ResolveAsync(record.SpaceId, record.ProjectId, cancellationToken).ConfigureAwait(false)
+            ? await Identities.ResolveAsync(record.SpaceId, record.ProjectId, sessionId, cancellationToken).ConfigureAwait(false)
             : SessionIdentity.Usual;
     }
 
@@ -2152,7 +2152,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var tools = options.Tools;
         // The identity of the space of the session as it is now: the session keeps it until it attaches again,
         // whatever the window shows and whatever is changed in the space meanwhile.
-        var identity = await Identities.ResolveAsync(session.SpaceId, session.ProjectRef, cancellationToken).ConfigureAwait(false);
+        var identity = await Identities.ResolveAsync(session.SpaceId, session.ProjectRef, session.SessionId, cancellationToken).ConfigureAwait(false);
         // What the programs of the session start with: the identity of its space, and the variables that name the session.
         var processEnvironment = SessionProcessEnvironment.WithMarkers(identity.Environment, session.SessionId,
             options.ProviderKey ?? session.ResolvedProviderKey, options.Model, options.ReasoningEffort);

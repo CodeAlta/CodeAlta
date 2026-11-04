@@ -406,6 +406,27 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.ControlAgentsSet, policy, FleetNodeJsonContext.Default.FleetAgentPolicyInfo, FleetNodeJsonContext.Default.FleetAgentPolicyInfo,
             null, cancellationToken);
 
+    /// <summary>The owner's local control, or a device that manages the node: the labels of the machine.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The labels.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetMachineLabelsInfo> GetLabelsAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlLabelsGet, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMachineLabelsInfo,
+            null, cancellationToken);
+
+    /// <summary>The owner's local control, or a device that manages the node: sets the labels of the machine, which it publishes.</summary>
+    /// <param name="labels">The labels.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The labels as the node keeps them.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="labels"/> is null.</exception>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetMachineLabelsInfo> SetLabelsAsync(IReadOnlyList<string> labels, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(labels);
+        return CallAsync(FleetNodeMethods.ControlLabelsSet, new FleetMachineLabelsInfo(labels), FleetNodeJsonContext.Default.FleetMachineLabelsInfo,
+            FleetNodeJsonContext.Default.FleetMachineLabelsInfo, null, cancellationToken);
+    }
+
     /// <summary>Queues a prompt for after the running turn of a session.</summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="text">The prompt.</param>

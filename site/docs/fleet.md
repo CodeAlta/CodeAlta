@@ -131,6 +131,12 @@ On the machine of the node:
 
 `--space <space>` with `add` or `clone` puts the project in a space too. While the node runs, it makes the change, and keeps a project that still has sessions; otherwise the commands change the catalog of the profile directly.
 
+## Label your machines
+
+Labels such as `gpu`, `prod` or `always-on` say what a machine is for. Its page in CodeAlta Desktop shows them under **Labels**: type one or more, separated by commas or spaces, and **Add**; the cross of a label removes it. On the machine itself, `altanode labels` lists them, `altanode labels add gpu prod` and `altanode labels remove gpu` change them, and `altanode labels set` replaces them all.
+
+A machine linked to a CodeAlta Server publishes its labels there: the **Fleet** canvas shows them on its card, agents find the machines with `alta fleet machine list --label gpu`, and an [environment](secrets.md#environments) that names labels runs only on the machines with one of them. A label is letters, digits, `-`, `_`, `.` and `:`.
+
 ## Pair it with CodeAlta Desktop
 
 1. On the machine of the node, while it runs, type `altanode pair`. It prints a pairing link, `codealta-pair://…`, and six words, then waits.
@@ -232,6 +238,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | --- | --- |
 | **Devices** | Each computer paired with the machine, with a switch per permission: **View**, **Drive**, **Start**, **Move**, **Automate** and **Manage**. **Revoke** (the cross at the end of the row, then **Revoke**) refuses that computer there at once. |
 | **Agents of other machines** | The spaces where agents of other computers may start sessions there and send prompts to its sessions, the sandbox their sessions run in at least, and whether they may bypass permissions ([Let agents start sessions on it](#let-agents-start-sessions-on-it)) |
+| **Labels** | Its [labels](#label-your-machines), which it publishes to its servers: add them, or remove one with its cross |
 | **Projects** | Clone a repository there, add a folder, remove a project |
 | **Providers** | The providers ready on the machine, and its default model. A machine without one cannot start sessions: sign in to a provider on it |
 | **Secrets** | Its [secrets and variables](secrets.md), as **Settings** > **Secrets** shows those of this computer: **Add a secret…**, **Rotate** and **Delete** a secret, edit or delete a variable. A value goes to the machine and is never shown back |
@@ -392,6 +399,10 @@ Each machine linked to your server counts the statistics of its sessions, a node
 
 A node starts counting with the day it first runs.
 
+### Give secrets to your machines
+
+**Settings > Fleet > Secrets and environments** sets the secrets and variables of your machines from the computer that made the server: for all your work, a space, a project or an environment, for the machines you choose, rotated from there. Environments such as `production` run only on the machines they name and can wait for your approval before a run starts. See [Secrets of your machines with a server](secrets.md#secrets-of-your-machines-with-a-server).
+
 ## Let agents use the fleet
 
 Ask an agent of CodeAlta Desktop to work with your machines: "run the iOS tests on a Mac that is free", "move this session to the build box", "run the nightly review on the server machine", "how many tokens did my machines use this month". It follows the built-in `codealta-fleet` skill and the `alta fleet` commands:
@@ -418,6 +429,6 @@ An agent works with your access and never more:
 - **Remote sessions run code on the machine.** A paired computer can start agents there that use its tools, as you would sitting at it. Pair only your own computers, and revoke the ones you no longer use.
 - **Keys are pinned.** Each computer has its own key. Pairing records the key of the other side, and every connection checks it: a machine that presents another key is refused. The six words let you check, at pairing, that the link comes from the machine you think. Through a server, the key comes from the list of devices your own computers signed, never from the server alone, and a device revoked there is refused.
 - **Permission requests wait for a person.** The node never grants a permission request by itself: you answer it from a paired computer or on the machine.
-- **Credentials stay where they are.** Each machine signs in to its providers itself; nothing is copied from your desktop. The keys and tokens a machine needs are its own [secrets](secrets.md#on-a-machine-with-altanode), set on it with `altanode secrets`.
+- **Credentials stay where they are.** Each machine signs in to its providers itself; nothing is copied from your desktop. The keys and tokens a machine needs are its own [secrets](secrets.md#on-a-machine-with-altanode), set on it with `altanode secrets`, or values your computer seals for it through a server, which the server cannot read ([secrets of your machines](secrets.md#secrets-of-your-machines-with-a-server)).
 - **Choose where the node listens.** By default it listens on the machine itself only. `--listen-all` opens it to every network the machine is on: prefer a private network you control.
 - **Tailscale is the simplest safe network.** With [Tailscale](https://tailscale.com) on your computers, bind the node to the machine's Tailscale address (`altanode run --bind 100.x.y.z`) or use `--listen-all`: your computers reach it from anywhere, through an encrypted network only they are on, and nothing is exposed to the internet. Do not forward the node's port on your router.

@@ -116,6 +116,8 @@ function MachineCard({ machine, sessions, time, onOpen, onOpenMachine }: {
           {machine.isPaired ? <Tag minimal round>{t("Paired")}</Tag>
             : machine.isReachable && <Tag minimal round title={t("Through the server, encrypted from end to end")}>{t("Relayed")}</Tag>}</div>
         <div className="muted-text fleet-machine-details">{details}</div>
+        {machine.labels.length > 0 && <div className="fleet-machine-labels" aria-label={t("Labels")}>
+          {machine.labels.map(label => <Tag key={label} minimal>{label}</Tag>)}</div>}
       </div>
       <span className="muted-text fleet-machine-count">{working > 0 ? `${count} · ${working} ${t("at work")}` : count}</span>
     </div>

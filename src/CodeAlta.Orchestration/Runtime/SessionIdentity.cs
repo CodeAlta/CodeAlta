@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Secrets;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -33,7 +34,7 @@ public sealed record SessionIdentity(string? SpaceId, SpaceIdentity? Identity, A
 public sealed class SessionIdentityResolver
 {
     private readonly SpaceCatalog? _spaces;
-    private readonly Func<SpaceIdentity?, AgentProcessEnvironment> _environment;
+    private readonly Func<SpaceIdentity?, SecretScope, AgentProcessEnvironment> _environment;
     private readonly Func<string, IReadOnlyList<SpaceCliProfile>> _projectProfiles;
 
     /// <summary>Initializes a resolver.</summary>
@@ -45,14 +46,32 @@ public sealed class SessionIdentityResolver
     /// </param>
     public SessionIdentityResolver(SpaceCatalog? spaces, Func<SpaceIdentity?, AgentProcessEnvironment>? environment = null,
         Func<string, IReadOnlyList<SpaceCliProfile>>? projectProfiles = null)
+        : this(spaces, environment is null ? null : (identity, _) => environment(identity), projectProfiles, null)
     {
-        _spaces = spaces;
-        _environment = environment ?? SpaceIdentityEnvironment.Create;
-        _projectProfiles = projectProfiles ?? (static _ => []);
     }
 
-    /// <summary>Gets a resolver that gives every session the usual settings.</summary>
-    public static SessionIdentityResolver None { get; } = new(null);
+    /// <summary>
+    /// Initializes a resolver whose environments are built for the work of each session (<c>doc/fleet/secrets.md</c>,
+    /// scopes): its space, its project, the environment it was admitted to, and the session as the run its uses are recorded for.
+    /// </summary>
+    /// <param name="spaces">The spaces, or <see langword="null"/> for a host whose sessions keep the usual settings.</param>
+    /// <param name="environment">Builds the environment of an identity for the work of a session; null for <see cref="SpaceIdentityEnvironment.Create(SpaceIdentity?)"/>.</param>
+    /// <param name="projectProfiles">Reads the CLI profiles a project gives its sessions; null for none. It never throws.</param>
+    /// <param name="environments">The environments sessions were admitted to; null for none.</param>
+    public SessionIdentityResolver(SpaceCatalog? spaces, Func<SpaceIdentity?, SecretScope, AgentProcessEnvironment>? environment,
+        Func<string, IReadOnlyList<SpaceCliProfile>>? projectProfiles, SessionSecretEnvironments? environments)
+    {
+        _spaces = spaces;
+        _environment = environment ?? (static (identity, _) => SpaceIdentityEnvironment.Create(identity));
+        _projectProfiles = projectProfiles ?? (static _ => []);
+        Environments = environments ?? new SessionSecretEnvironments();
+    }
+
+    /// <summary>Gets the environments sessions were admitted to, whose values their processes get.</summary>
+    public SessionSecretEnvironments Environments { get; }
+
+    /// <summary>Gets a new resolver that gives every session the usual settings (its <see cref="Environments"/> its own).</summary>
+    public static SessionIdentityResolver None => new(null);
 
     /// <summary>Gets whether the sessions of this host take the identity of their space.</summary>
     public bool IsEnabled => _spaces is not null;
@@ -67,7 +86,20 @@ public sealed class SessionIdentityResolver
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The identity; the usual one when the space and the project set none or cannot be read.</returns>
     /// <exception cref="OperationCanceledException">The read was canceled.</exception>
-    public async Task<SessionIdentity> ResolveAsync(string? recordedSpaceId, string? projectId, CancellationToken cancellationToken = default)
+    public Task<SessionIdentity> ResolveAsync(string? recordedSpaceId, string? projectId, CancellationToken cancellationToken = default)
+        => ResolveAsync(recordedSpaceId, projectId, null, cancellationToken);
+
+    /// <summary>
+    /// Gives the identity of a session (<see cref="ResolveAsync(string?, string?, CancellationToken)"/>), whose environment is
+    /// built for its work: its space, its project and the environment it was admitted to.
+    /// </summary>
+    /// <param name="recordedSpaceId">The space the journal of the session records, or <see langword="null"/>.</param>
+    /// <param name="projectId">The project of the session, or <see langword="null"/> for a chat.</param>
+    /// <param name="sessionId">The session, the run its uses of values are recorded for; null for none.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The identity; the usual one when the space and the project set none or cannot be read.</returns>
+    /// <exception cref="OperationCanceledException">The read was canceled.</exception>
+    public async Task<SessionIdentity> ResolveAsync(string? recordedSpaceId, string? projectId, string? sessionId, CancellationToken cancellationToken)
     {
         if (_spaces is null) return SessionIdentity.Usual;
         SpaceDescriptor space;
@@ -87,7 +119,10 @@ public sealed class SessionIdentityResolver
             return SessionIdentity.Usual;
         }
 
-        return Of(space, profiles);
+        return Of(space, profiles, new SecretScope(space.Id, string.IsNullOrWhiteSpace(projectId) ? null : projectId, sessionId is null ? null : Environments.Get(sessionId))
+        {
+            RunId = sessionId,
+        });
     }
 
     /// <summary>Gives the identity of one space.</summary>
@@ -116,12 +151,22 @@ public sealed class SessionIdentityResolver
     /// <returns>The identity.</returns>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
     public SessionIdentity Of(SpaceDescriptor space, IReadOnlyList<SpaceCliProfile> projectProfiles)
+        => Of(space, projectProfiles, new SecretScope(space?.Id, null, null));
+
+    /// <summary>Gives the identity of the sessions of a project in a space for the work of a run, without reading the catalog.</summary>
+    /// <param name="space">The space.</param>
+    /// <param name="projectProfiles">The CLI profiles of the project; empty for none.</param>
+    /// <param name="scope">The work of the run, whose values its environment gets.</param>
+    /// <returns>The identity.</returns>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
+    public SessionIdentity Of(SpaceDescriptor space, IReadOnlyList<SpaceCliProfile> projectProfiles, SecretScope scope)
     {
         ArgumentNullException.ThrowIfNull(space);
         ArgumentNullException.ThrowIfNull(projectProfiles);
+        ArgumentNullException.ThrowIfNull(scope);
         var identity = (space.Settings.Identity ?? new SpaceIdentity()).WithProjectCli(projectProfiles);
         if (identity.IsEmpty) return new SessionIdentity(space.Id, null, AgentProcessEnvironment.Empty);
-        return new SessionIdentity(space.Id, identity, _environment(identity))
+        return new SessionIdentity(space.Id, identity, _environment(identity, scope))
         {
             ProjectProfiles = [.. projectProfiles.Select(static profile => profile.Name)],
         };

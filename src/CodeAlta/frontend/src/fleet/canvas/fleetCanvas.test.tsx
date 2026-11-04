@@ -10,7 +10,7 @@ import { FleetDirectoryView, type FleetCanvasActions } from "./FleetCanvas";
 const never = () => assert.fail("rendering must not act");
 const actions: FleetCanvasActions = { openSession: never, openMachine: never, runCommand: never };
 const machine = (id: string, look: Partial<FleetMachineView> = {}): FleetMachineView => ({ id, name: id, kind: "node", os: "macos", version: "4.0.1", online: true,
-  presence: "online", activeSessions: 0, isThisComputer: false, isPaired: true, providers: [], sessions: 0, isReachable: true, ...look });
+  presence: "online", activeSessions: 0, isThisComputer: false, isPaired: true, providers: [], sessions: 0, isReachable: true, labels: [], ...look });
 const session = (id: string, machineId: string, state: string, look: Partial<FleetSessionView> = {}): FleetSessionView => ({ id, machineId, state,
   providerType: "codex", model: "gpt-6", createdAt: "2026-11-03T08:00:00Z", updatedAt: "2026-11-03T09:00:00Z", turns: 0, tokens: 0, canOpen: true, title: null, ...look });
 const directory = (look: Partial<FleetDirectoryResult>): FleetDirectoryResult => ({ status: "ok", linkId: null, url: null, organization: null, connection: null,
@@ -50,6 +50,12 @@ test("linked to a server, the canvas shows the server's machines; only a paired 
   assert.ok(html.includes(`aria-label="${english("Open the page of {name}", { name: "Mac mini" })}"`));
   assert.ok(!html.includes(english("Open the page of {name}", { name: "cloud box" })), "a machine reached through the relay only has no page here");
   assert.ok(!html.includes(english("Open the page of {name}", { name: "Desktop" })));
+});
+
+test("a machine shows the labels it publishes", () => {
+  const html = render(directory({ status: "ok", machines: [machine("gpu-id", { name: "gpu box", labels: ["gpu", "prod"] }), machine("plain-id", { name: "plain" })] }));
+  assert.match(html, /<div class="fleet-machine-labels" aria-label="Labels"><span class="bp6-tag[^"]*"><span class="bp6-text-overflow-ellipsis bp6-fill">gpu<\/span><\/span>/u);
+  assert.equal(html.match(/fleet-machine-labels/gu)?.length, 1, "a machine without a label shows none");
 });
 
 test("with neither a server nor a paired machine, the canvas says how to have a server", () => {
