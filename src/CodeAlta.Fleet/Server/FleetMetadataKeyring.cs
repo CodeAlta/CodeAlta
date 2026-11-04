@@ -48,12 +48,21 @@ public sealed class FleetMetadataKeyring
     public FleetOrganizationDevices Devices => _devices;
 
     /// <summary>
+    /// Gets or sets the signed access document of the server as this device verified it, read at each call
+    /// (<c>doc/fleet/access-control.md</c>, ownership over time): a machine given to another person takes the keys of its new owner
+    /// and seals with them only, never with those of the person the device list names; a controller device wraps its person's keys
+    /// to the machines the document gives them, never to those it gives another person, and makes a new epoch of a key such a
+    /// machine holds. Null reads the device list alone; the connector of the link sets it to its access document.
+    /// </summary>
+    public Func<FleetAccessState?>? Access { get; set; }
+
+    /// <summary>
     /// Gets the keys that seal, by the id of their space on this device; a space waits without one before its key reaches
     /// this device or while a removal waits for its new epoch. A key given before the last removal the anchored list
     /// accepted is never among them, from the moment the list accepted it: also when the keys were not read again since,
-    /// or the next epoch could not be made.
+    /// or the next epoch could not be made. Nor is a key of another person than the one of this device, a machine given away.
     /// </summary>
-    public IReadOnlyDictionary<string, FleetMetadataKey> Current => Sealing(Volatile.Read(ref _snapshot).Current, _devices.Current);
+    public IReadOnlyDictionary<string, FleetMetadataKey> Current => Sealing(Volatile.Read(ref _snapshot).Current, _devices.Current, Access?.Invoke());
 
     /// <summary>Gets every key this device opened: those that seal, older epochs and the keys of the person, which still open what they sealed.</summary>
     public IReadOnlyCollection<FleetMetadataKey> Held => Volatile.Read(ref _snapshot).Held.Values.ToArray();
@@ -105,18 +114,20 @@ public sealed class FleetMetadataKeyring
         var wanted = spaces.Select(Normalize).ToHashSet(StringComparer.Ordinal);
         // The list first: nothing is read or wrapped through a server whose list does not extend the anchored one.
         var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        var access = Access?.Invoke();
         // A removal it accepted stops the older keys sealing now, before the calls that follow can fail (or a server delay them).
         var accepted = Volatile.Read(ref _snapshot);
-        if (Sealing(accepted.Current, list) is var sealing && !ReferenceEquals(sealing, accepted.Current)) Volatile.Write(ref _snapshot, accepted with { Current = sealing });
+        if (Sealing(accepted.Current, list, access) is var sealing && !ReferenceEquals(sealing, accepted.Current)) Volatile.Write(ref _snapshot, accepted with { Current = sealing });
         using var client = _devices.CreateClient();
         var rows = await client.ListMetadataKeysAsync(cancellationToken).ConfigureAwait(false);
-        var opened = Open(rows, list);
+        var opened = Open(rows, list, access);
         var known = ReadSpaces(rows, opened);
         var me = _identity.DeviceId;
         if (list.IsController(me))
         {
+            // The devices of the person: its own, and the machines the signed access document gives them, never one it gives another person.
             var context = new Making(client, list, list.Members[me], [.. list.Members.Values.Where(member => member.DeviceId == me
-                || list.Members[me].OwnerId is { } owner && member.OwnerId == owner)]);
+                || list.Members[me].OwnerId is { } owner && FleetAccessState.PersonOf(access, member) == owner)], access);
             foreach (var space in known.Where(static space => space.Local is not null).ToArray())
             {
                 if (await KeepAsync(context, space, opened, cancellationToken).ConfigureAwait(false) is { } made)
@@ -140,15 +151,17 @@ public sealed class FleetMetadataKeyring
         }
 
         var previous = Volatile.Read(ref _snapshot);
+        var person = PersonOfSelf(list, access);
         var current = ImmutableDictionary.CreateBuilder<string, FleetMetadataKey>(StringComparer.Ordinal);
         foreach (var local in wanted)
         {
             // The first space made for this local space wins: the devices of the person converge on it.
             var space = known.Where(candidate => candidate.Local == local).OrderBy(static candidate => candidate.CreatedAt).ThenBy(static candidate => candidate.Id, StringComparer.Ordinal)
                 .FirstOrDefault();
-            if (space is null || Newest(space, opened) is not { } key || IsStale(key, list)) continue;
+            if (space is null || Newest(space, opened) is not { } key || IsStale(key, list) || !IsOfPerson(key, person)) continue;
             // Never back to an older epoch of the same space.
-            if (previous.Current.TryGetValue(local, out var held) && held.Grant!.SpaceId == key.Grant!.SpaceId && held.Grant.Epoch > key.Grant.Epoch && !IsStale(held, list))
+            if (previous.Current.TryGetValue(local, out var held) && held.Grant!.SpaceId == key.Grant!.SpaceId && held.Grant.Epoch > key.Grant.Epoch && !IsStale(held, list)
+                && IsOfPerson(held, person))
                 key = held;
             current[local] = key;
         }
@@ -163,8 +176,9 @@ public sealed class FleetMetadataKeyring
     /// <summary>Forgets every key this device opened: the link is gone, or the device left the server.</summary>
     public void Forget() => Volatile.Write(ref _snapshot, Snapshot.Empty);
 
-    // Every copy of this device whose grant holds; a copy the server made or relabelled is passed over.
-    private Dictionary<string, FleetMetadataKey> Open(IReadOnlyList<MetadataKeyDto> rows, FleetDeviceListState list)
+    // Every copy of this device whose grant holds; a copy the server made or relabelled is passed over, and so is a copy of the
+    // person the device list names once the signed access document gives this machine to another person.
+    private Dictionary<string, FleetMetadataKey> Open(IReadOnlyList<MetadataKeyDto> rows, FleetDeviceListState list, FleetAccessState? access)
     {
         var opened = new Dictionary<string, FleetMetadataKey>(StringComparer.Ordinal);
         foreach (var row in rows)
@@ -172,7 +186,7 @@ public sealed class FleetMetadataKeyring
             if (row.Wrapped is not { } wrapped) continue;
             try
             {
-                opened[row.Id] = FleetKeyWrap.Unwrap(wrapped, row.Id, row.Epoch, row.Space, _identity, list);
+                opened[row.Id] = FleetKeyWrap.Unwrap(wrapped, row.Id, row.Epoch, row.Space, _identity, list, access);
             }
             catch (InvalidDataException)
             {
@@ -206,15 +220,17 @@ public sealed class FleetMetadataKeyring
         return spaces;
     }
 
-    // A new epoch when a device left after the key was given (its maker included), or when the copy of the newest epoch for
-    // this device does not open; else the newest key goes to the person's devices that lack it.
+    // A new epoch when a device left after the key was given (its maker included), when a machine that holds it was given to
+    // another person (the signed access document says so: it is no longer a device of this person), or when the copy of the
+    // newest epoch for this device does not open; else the newest key goes to the person's devices that lack it.
     private async Task<FleetMetadataKey?> KeepAsync(Making context, KnownSpace space, Dictionary<string, FleetMetadataKey> opened, CancellationToken cancellationToken)
     {
         var newest = space.Rows[^1];
         var held = Newest(space, opened);
         if (held is null) return null;
         var unopenable = newest.Epoch > held.Grant!.Epoch && newest.Wrapped is not null;
-        if (IsStale(held, context.List) || unopenable) return await MakeAsync(context, space.Id, space.Local!, newest.Epoch + 1, cancellationToken).ConfigureAwait(false);
+        if (IsStale(held, context.List) || unopenable || newest.Id == held.Id && GivenAway(context, newest))
+            return await MakeAsync(context, space.Id, space.Local!, newest.Epoch + 1, cancellationToken).ConfigureAwait(false);
         if (newest.Id != held.Id) return null;
         var missing = context.Devices.Where(device => !newest.WrappedTo.Contains(device.DeviceId)).ToArray();
         if (missing.Length > 0)
@@ -279,13 +295,31 @@ public sealed class FleetMetadataKeyring
     private static FleetMetadataKey? Newest(KnownSpace space, Dictionary<string, FleetMetadataKey> opened)
         => space.Made ?? space.Rows.Reverse().Select(row => opened.GetValueOrDefault(row.Id)).FirstOrDefault(static key => key is not null);
 
+    // A machine of the list that holds the key, not removed, which the signed access document gives another person than the one
+    // of the key: its new owner reads what the key seals, so the person seals with a new epoch from now on.
+    private static bool GivenAway(Making context, MetadataKeyDto row)
+        => context.Self.OwnerId is { } owner && row.WrappedTo.Any(device => context.List.Members.TryGetValue(device, out var member) && member.Kind == FleetDeviceKinds.Node
+            && !context.List.Removed.Contains(device) && FleetAccessState.PersonOf(context.Access, member) != owner);
+
     private static string Normalize(string? space) => string.IsNullOrWhiteSpace(space) ? SpaceDescriptor.DefaultId : space.Trim();
 
     private static bool IsStale(FleetMetadataKey key, FleetDeviceListState list) => key.Grant is not { } grant || grant.DeviceListSequence < list.LastRemovalSequence;
 
-    // The keys that seal by a list: the same dictionary when none is stale by it.
-    private static ImmutableDictionary<string, FleetMetadataKey> Sealing(ImmutableDictionary<string, FleetMetadataKey> current, FleetDeviceListState? list)
-        => list is null || !current.Values.Any(key => IsStale(key, list)) ? current : current.RemoveRange([.. current.Where(pair => IsStale(pair.Value, list)).Select(static pair => pair.Key)]);
+    // The person this device seals for: the one the signed access document names once this machine was given to another person.
+    private string? PersonOfSelf(FleetDeviceListState? list, FleetAccessState? access)
+        => list is not null && list.Members.TryGetValue(_identity.DeviceId, out var self) ? FleetAccessState.PersonOf(access, self) : null;
+
+    // A key seals for this device only when it is of the person of this device; before the list names one, any key.
+    private static bool IsOfPerson(FleetMetadataKey key, string? person) => person is null || key.Grant?.PersonId == person;
+
+    // The keys that seal by a list and the access document: the same dictionary when none is stale by them.
+    private ImmutableDictionary<string, FleetMetadataKey> Sealing(ImmutableDictionary<string, FleetMetadataKey> current, FleetDeviceListState? list, FleetAccessState? access)
+    {
+        if (list is null) return current;
+        var person = PersonOfSelf(list, access);
+        bool Drops(FleetMetadataKey key) => IsStale(key, list) || !IsOfPerson(key, person);
+        return !current.Values.Any(Drops) ? current : current.RemoveRange([.. current.Where(pair => Drops(pair.Value)).Select(static pair => pair.Key)]);
+    }
 
     private sealed record Snapshot(ImmutableDictionary<string, FleetMetadataKey> Current, ImmutableDictionary<string, FleetMetadataKey> Held)
     {
@@ -299,5 +333,6 @@ public sealed class FleetMetadataKeyring
         public FleetMetadataKey? Made { get; init; }
     }
 
-    private sealed record Making(FleetServerClient Client, FleetDeviceListState List, FleetDeviceListMember Self, IReadOnlyList<FleetDeviceListMember> Devices);
+    private sealed record Making(FleetServerClient Client, FleetDeviceListState List, FleetDeviceListMember Self, IReadOnlyList<FleetDeviceListMember> Devices,
+        FleetAccessState? Access);
 }

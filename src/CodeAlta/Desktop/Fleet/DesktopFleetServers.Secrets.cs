@@ -30,13 +30,16 @@ internal sealed partial class DesktopFleetServers
     public FleetSecretsManager SecretsOf(string linkId)
     {
         var link = _store.List().FirstOrDefault(candidate => candidate.Id == linkId) ?? throw new KeyNotFoundException($"No server link has the id '{linkId}'.");
-        var devices = Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.Devices is { } running && running.ServerAddress == link.Address && Handler is null
+        var connector = Volatile.Read(ref _connections)?.Find(linkId)?.Connector;
+        var devices = connector?.Devices is { } running && running.ServerAddress == link.Address && Handler is null
             ? running
             : new FleetOrganizationDevices(link.Address, Identity(), Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName), Handler)
             {
                 CertificatePin = link.CertificatePin,
             };
-        return new FleetSecretsManager(devices);
+        // The machines the signed access document gives this person are theirs to seal values for, those it gives another person no more.
+        var access = connector?.Access ?? new FleetOrganizationAccess(devices, Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationAccess.PinFileName));
+        return new FleetSecretsManager(devices) { Access = () => access.Current };
     }
 
     /// <summary>Reads the values, environments and approvals of this computer's person at a server.</summary>
@@ -58,7 +61,8 @@ internal sealed partial class DesktopFleetServers
         var devices = (await client.ListDevicesAsync(cancellationToken).ConfigureAwait(false)).ToDictionary(static device => device.Id, StringComparer.Ordinal);
         var organization = await client.GetOrganizationAsync(cancellationToken).ConfigureAwait(false);
         var person = list.Members.TryGetValue(client.DeviceId, out var self) && self.OwnerId is { } owner ? owner : string.Empty;
-        var machines = list.Members.Values.Where(member => member.OwnerId == person && member.Kind == FleetDeviceKinds.Node && !list.Removed.Contains(member.DeviceId))
+        var access = manager.Access?.Invoke();
+        var machines = list.Members.Values.Where(member => FleetAccessState.PersonOf(access, member) == person && member.Kind == FleetDeviceKinds.Node && !list.Removed.Contains(member.DeviceId))
             .OrderBy(member => devices.GetValueOrDefault(member.DeviceId)?.Name ?? member.DeviceId, StringComparer.OrdinalIgnoreCase).ToArray();
         return new DesktopFleetSecrets(secrets.Secrets, environments, approvals.Approvals, devices, organization.People, person, machines,
             await ScopeNamesAsync(linkId, cancellationToken).ConfigureAwait(false), manager);

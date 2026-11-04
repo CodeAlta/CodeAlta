@@ -15,7 +15,14 @@ namespace CodeAlta.Fleet.Server;
 /// <param name="Devices">The device list the machine anchored, whose key and HTTP handler the calls use too.</param>
 /// <param name="Keys">The metadata keys of the person's spaces, which name the space and the project of a run as the server knows them; null names none.</param>
 /// <param name="StatePath">The file the budgets of the link are kept in, so that a machine offline or restarted still holds its allowances; null keeps them in memory.</param>
-public sealed record FleetBudgetLink(string LinkId, FleetOrganizationDevices Devices, FleetMetadataKeyring? Keys, string? StatePath);
+public sealed record FleetBudgetLink(string LinkId, FleetOrganizationDevices Devices, FleetMetadataKeyring? Keys, string? StatePath)
+{
+    /// <summary>
+    /// Gets the signed access document of the server, as the machine verified it: once it gives the machine to another person,
+    /// the budgets of that person hold there, and those of the person the device list names no more. Null reads the device list alone.
+    /// </summary>
+    public FleetOrganizationAccess? Access { get; init; }
+}
 
 /// <summary>A run that a budget may limit: a session of the machine, in a space, of a project.</summary>
 /// <param name="RunId">The run, which a Continue anyway is bound to.</param>
@@ -121,10 +128,12 @@ public sealed class FleetBudgetGate
             var state = _states.GetOrAdd(link.LinkId, _ => LinkState.Load(link.StatePath));
             await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
             if (link.Devices.Current is not { } list) continue;
-            var scope = ScopeOf(link, list, run);
+            var access = link.Access?.Current;
+            var scope = ScopeOf(link, list, access, run);
             foreach (var kept in state.Budgets())
             {
-                if (!FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Devices.Identity.DeviceId, out var budget, out _) || !FleetBudgetDocuments.Covers(budget, scope)) continue;
+                if (!FleetBudgetDocuments.TryVerify(kept.Signed, list, access, link.Devices.Identity.DeviceId, out var budget, out _) || !FleetBudgetDocuments.Covers(budget, scope))
+                    continue;
                 if (await CheckAsync(link, state, kept, budget, cancellationToken).ConfigureAwait(false) is not { } period) continue;
                 if (budget.Reached == FleetBudgetReachedActions.Stop)
                 {
@@ -227,7 +236,7 @@ public sealed class FleetBudgetGate
             await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
             var kept = state.Budgets().FirstOrDefault(candidate => candidate.Id == budget.BudgetId);
             if (kept is null) return null;
-            if (link.Devices.Current is { } list && FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Devices.Identity.DeviceId, out var current, out _)
+            if (link.Devices.Current is { } list && FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var current, out _)
                 && (current.Number != budget.Number || await CheckAsync(link, state, kept, current, cancellationToken).ConfigureAwait(false) is null))
                 return null;
 
@@ -275,10 +284,11 @@ public sealed class FleetBudgetGate
         }
     }
 
-    private static FleetBudgetRunScope ScopeOf(FleetBudgetLink link, FleetDeviceListState list, FleetBudgetRun run)
+    private static FleetBudgetRunScope ScopeOf(FleetBudgetLink link, FleetDeviceListState list, FleetAccessState? access, FleetBudgetRun run)
     {
         var machine = link.Devices.Identity.DeviceId;
-        var owner = list.Members.TryGetValue(machine, out var self) ? self.OwnerId : null;
+        // The owner the signed access document names once the machine was given to another person, else the device list's.
+        var owner = FleetAccessState.OwnerOfMachine(access, machine, list);
         var key = link.Keys?.CurrentFor(run.SpaceId);
         var project = key is not null && run.ProjectIdentity is { Length: > 0 } identity ? FleetProjectKeys.Of(key, identity) : null;
         return new FleetBudgetRunScope(machine, owner, key?.Grant?.SpaceId, project);

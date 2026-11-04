@@ -164,7 +164,10 @@ event that the signed definition accepts. The first start by a new person asks t
   who enrolled it: the machine takes its owner from the signed document (whose devices manage it, whose automations it runs),
   never from the server's word. Once a signed version gives a machine another owner, the machine revokes the devices paired
   with it under the former owner, except the new owner's own, and forgets the people it named: its new owner pairs and names
-  again.
+  again. Everything the machine takes from a person follows that owner too: budgets, environments and values, hooks, the
+  metadata keys it seals with, and the grants of its sessions, signed by the new owner's devices only. The former owner's
+  devices stop giving it keys and values, and seal from then on with a new epoch the machine does not hold. A machine given
+  to the organization has no person for owner: its owners and the admins who sign manage it, each on their own sessions.
 - **A person leaves** (or is deprovisioned by SCIM): their devices and delegations are revoked; what they owned in team
   or organization scopes (automations, workflow scripts, organization providers) goes to the scope's team or to a named
   successor, paused until that owner resumes it; their personal machines leave the fleet; what they shared stays

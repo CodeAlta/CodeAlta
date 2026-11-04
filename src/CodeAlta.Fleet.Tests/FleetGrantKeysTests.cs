@@ -2,6 +2,7 @@ using System.Buffers.Text;
 using System.Text.Json;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Fleet.Server;
 
 namespace CodeAlta.Fleet.Tests;
@@ -62,6 +63,68 @@ public sealed class FleetGrantKeysTests
         var (genuine, genuineWraps) = FleetGrantKeys.Seal("org", "g1", "s1", metadata, [bea], list.Sequence, devices.Desk);
         Assert.ThrowsExactly<InvalidDataException>(() => FleetGrantKeys.Open(genuine, Tamper(genuineWraps.Single().Wrapped, "sig"), "org", "g1", "s1", devices.Node.DeviceId, devices.Bea, list));
         Assert.ThrowsExactly<ArgumentException>(() => FleetGrantKeys.Seal("org", "g1", "s1", metadata, [], list.Sequence, devices.Desk));
+    }
+
+    [TestMethod]
+    public void AMachineGivenToAnotherPerson_TakesTheKeysValuesBudgetsAndGrantsOfItsNewOwner_AndNoneOfItsFormerOwner()
+    {
+        using var devices = new Devices();
+        var list = devices.List();
+        // The node of p1 (Desk) was given to p2 (Bea): the device list still names p1, the signed access document names p2.
+        var access = FleetAccessState.Empty with { PersonalMachines = System.Collections.Immutable.ImmutableDictionary.CreateRange([KeyValuePair.Create(devices.Node.DeviceId, "p2")]) };
+        Assert.AreEqual("p2", FleetAccessState.PersonOf(access, list.Members[devices.Node.DeviceId]));
+        Assert.AreEqual("p1", FleetAccessState.PersonOf(access, list.Members[devices.Desk.DeviceId]), "a document gives machines only");
+
+        // The keys of a space: the new owner's open on the machine, the former owner's no more.
+        var node = PublicKey(devices.Node);
+        FleetMetadataKey KeyOf(string person) => FleetMetadataKey.Generate(new FleetKeyGrant("org", person, 1, list.Sequence) { SpaceId = "space-" + person });
+        var beaKey = KeyOf("p2");
+        var byBea = FleetKeyWrap.Wrap(beaKey, node, beaKey.Grant!, devices.Bea);
+        Assert.AreEqual(beaKey.Id, FleetKeyWrap.Unwrap(byBea, beaKey.Id, 1, "space-p2", devices.Node, list, access).Id);
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetKeyWrap.Unwrap(byBea, beaKey.Id, 1, "space-p2", devices.Node, list), "without the document, Bea is another person");
+        Assert.IsTrue(FleetKeyWrap.IsGranted(byBea, beaKey.Id, 1, "space-p2", devices.Node.DeviceId, list, access));
+        var deskKey = KeyOf("p1");
+        var byDesk = FleetKeyWrap.Wrap(deskKey, node, deskKey.Grant!, devices.Desk);
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetKeyWrap.Unwrap(byDesk, deskKey.Id, 1, "space-p1", devices.Node, list, access), "the former owner gives the machine no key");
+        Assert.IsFalse(FleetKeyWrap.IsGranted(byDesk, deskKey.Id, 1, "space-p1", devices.Node.DeviceId, list, access));
+
+        // Values: the new owner seals them for the machine, which opens them; the former owner seals none for it.
+        Assert.AreEqual(devices.Node.DeviceId, FleetSecretSealing.Recipients(list, access, "p2", [devices.Node.DeviceId]).Single(member => member.Kind == FleetDeviceKinds.Node).DeviceId);
+        Assert.IsFalse(FleetSecretSealing.Recipients(list, access, "p1", [devices.Node.DeviceId]).Any(member => member.Kind == FleetDeviceKinds.Node));
+        var binding = new FleetSecretBinding("v1", FleetSecretKinds.Secret, "TOKEN", FleetSecretScopeKinds.Person, null, 1, false);
+        var copies = FleetSecretSealing.Seal("s3cret", binding, FleetSecretSealing.Recipients(list, access, "p2", [devices.Node.DeviceId]), list, access, devices.Bea);
+        var copy = copies.Single(item => item.DeviceId == devices.Node.DeviceId).Sealed;
+        Assert.IsTrue(FleetSecretSealing.TryOpen(copy, binding, devices.Node, list, access, out var value, out var reason), reason);
+        Assert.AreEqual("s3cret", value);
+        Assert.IsFalse(FleetSecretSealing.TryOpen(copy, binding, devices.Node, list, out _, out _), "without the document, Bea is another person");
+        Assert.ThrowsExactly<ArgumentException>(() => FleetSecretSealing.Seal("s3cret", binding, [list.Members[devices.Node.DeviceId]], list, access, devices.Desk));
+
+        // Budgets and environments: those of the new owner hold on the machine, those of the former owner no more.
+        var time = new DateTimeOffset(2026, 11, 4, 9, 0, 0, TimeSpan.Zero);
+        FleetSignedBudget Budget(DeviceIdentity signer, string person) => FleetBudgetsManager.SignBudget(signer, new FleetBudgetDefinition(FleetBudgetDefinition.CurrentVersion, "org",
+            person, "b-" + person, "Budget", FleetBudgetScopeKinds.Person, null, FleetBudgetMeasures.Tokens, 1000, FleetBudgetPeriods.Day, "UTC", FleetBudgetModes.Advisory,
+            FleetBudgetReachedActions.Stop, 1, false, signer.DeviceId, time));
+        Assert.IsTrue(FleetBudgetDocuments.TryVerify(Budget(devices.Bea, "p2"), list, access, devices.Node.DeviceId, out _, out reason), reason);
+        Assert.IsFalse(FleetBudgetDocuments.TryVerify(Budget(devices.Desk, "p1"), list, access, devices.Node.DeviceId, out _, out _));
+        Assert.IsTrue(FleetBudgetDocuments.TryVerify(Budget(devices.Desk, "p1"), list, devices.Node.DeviceId, out _, out _), "without the document, the device list decides");
+        FleetSignedEnvironment Environment(DeviceIdentity signer, string person) => FleetServerClient.SignEnvironment(signer, new FleetEnvironmentDefinition(
+            FleetEnvironmentDefinition.CurrentVersion, "org", person, "e-" + person, "prod", 1, [], [], [], false, signer.DeviceId, time));
+        Assert.IsTrue(FleetEnvironmentDocuments.TryVerify(Environment(devices.Bea, "p2"), list, access, devices.Node.DeviceId, out _, out reason), reason);
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerify(Environment(devices.Desk, "p1"), list, access, devices.Node.DeviceId, out _, out _));
+
+        // A personal automation its new owner gives it opens there; one of its former owner no more.
+        var content = new FleetAutomationContent("{\"steps\":[]}", null);
+        var beaVersion = FleetAutomationSigning.Seal(content, "a1", 1, devices.Node.DeviceId, list, devices.Bea);
+        Assert.IsTrue(FleetAutomationSigning.TryOpen(beaVersion, "a1", 1, devices.Node.DeviceId, devices.Node, list, access, out _, out reason), reason);
+        Assert.IsFalse(FleetAutomationSigning.TryOpen(FleetAutomationSigning.Seal(content, "a1", 1, devices.Node.DeviceId, list, devices.Desk), "a1", 1, devices.Node.DeviceId,
+            devices.Node, list, access, out _, out _));
+
+        // Grants of the sessions of the machine: signed by a device of its new owner, never of its former owner.
+        var metadata = new FleetSessionMetadata("Fix the parser");
+        var (sealedByBea, beaWraps) = FleetGrantKeys.Seal("org", "g1", "s1", metadata, [PublicKey(devices.Cy)], list.Sequence, devices.Bea);
+        Assert.AreEqual("Fix the parser", FleetGrantKeys.Open(sealedByBea, beaWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Cy, list, access).Title);
+        var (sealedByDesk, deskWraps) = FleetGrantKeys.Seal("org", "g1", "s1", metadata, [PublicKey(devices.Cy)], list.Sequence, devices.Desk);
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetGrantKeys.Open(sealedByDesk, deskWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Cy, list, access));
     }
 
     [TestMethod]

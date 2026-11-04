@@ -46,8 +46,10 @@ public sealed partial class FleetConnector
 
     private void InitializeAccess()
     {
-        Access = _options.Access ?? new FleetOrganizationAccess(Devices, _options.AccessPinPath);
-        GrantKeys = new FleetGrantKeyring(Devices);
+        var access = Access = _options.Access ?? new FleetOrganizationAccess(Devices, _options.AccessPinPath);
+        // The keys follow the owner the signed access document names once a machine was given to another person.
+        GrantKeys = new FleetGrantKeyring(Devices) { Access = () => access.Current };
+        if (_options.MetadataKeys is { Access: null } keys) keys.Access = () => access.Current;
         if (_options.AccessChanged is { } changed) Access.Changed += changed;
     }
 

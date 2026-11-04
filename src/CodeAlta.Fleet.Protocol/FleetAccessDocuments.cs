@@ -372,6 +372,21 @@ public sealed record FleetAccessState(
         return devices.Members.TryGetValue(machineId, out var member) ? member.OwnerId : null;
     }
 
+    /// <summary>
+    /// Gets the person whose keys, values, budgets and environments a member of the device list holds: for a machine given to
+    /// another person, the one the document names (<see cref="OwnerOfMachine"/>); otherwise the person the device list names
+    /// for it. A controller device or a recovery key is always of the person the list names: a document gives machines only.
+    /// </summary>
+    /// <param name="access">The access document, as the device verified it; null for none: the device list decides alone.</param>
+    /// <param name="member">The member of the device list.</param>
+    /// <returns>The person, or null when neither names one.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="member"/> is null.</exception>
+    public static string? PersonOf(FleetAccessState? access, FleetDeviceListMember member)
+    {
+        ArgumentNullException.ThrowIfNull(member);
+        return member.Kind == FleetDeviceKinds.Node && access is not null && access.PersonalMachines.TryGetValue(member.DeviceId, out var person) ? person : member.OwnerId;
+    }
+
     /// <summary>Gets whether a machine is the organization's.</summary>
     /// <param name="deviceId">The device of the machine.</param>
     /// <returns>Whether the document names it a machine of the organization.</returns>

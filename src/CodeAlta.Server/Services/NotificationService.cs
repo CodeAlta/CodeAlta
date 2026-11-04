@@ -39,6 +39,9 @@ internal sealed class NotificationService
     /// <summary>Gets the devices online, which are told of new notifications; null tells none.</summary>
     public PresenceRegistry? Presence { get; init; }
 
+    /// <summary>Gets the access model, whose owner records say who owns a machine given to another person: it is told what its owner's machines are; null reads the device records alone.</summary>
+    public IAccessStore? Access { get; init; }
+
     /// <summary>Adds a notification for a person, once per key.</summary>
     /// <param name="organizationId">The organization.</param>
     /// <param name="personId">The person.</param>
@@ -102,9 +105,11 @@ internal sealed class NotificationService
     public async Task TellAsync(string organizationId, string personId, string method, bool controllers, CancellationToken cancellationToken, string? except = null)
     {
         if (Presence is not { } presence) return;
+        // The machines of the person: those given to them included, by their owner record.
+        var snapshot = controllers ? null : await MachineOwners.ReadAsync(Access, organizationId, cancellationToken).ConfigureAwait(false);
         foreach (var device in await _store.ListDevicesAsync(organizationId, cancellationToken).ConfigureAwait(false))
         {
-            if (device.OwnerPersonId != personId || device.Status != DeviceStatuses.Approved || device.Id == except) continue;
+            if (MachineOwners.PersonOf(snapshot, device) != personId || device.Status != DeviceStatuses.Approved || device.Id == except) continue;
             if ((device.Kind == FleetDeviceKinds.Controller) != controllers) continue;
             if (presence.Get(device.Id) is { } session) _ = SendAsync(session, method);
         }

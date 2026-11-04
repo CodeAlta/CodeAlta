@@ -135,6 +135,32 @@ public sealed class FleetOrganizationAccessTests
     }
 
     [TestMethod]
+    public async Task AMachineGivenToTheOrganization_GivesItsDeviceListPersonNoOwnerTrust_AndItsSignersManageIt()
+    {
+        using var world = new World();
+        var server = world.Server();
+        var devices = new FleetOrganizationDevices(new Uri("http://server.test/"), world.Node, null, server);
+        var access = new FleetOrganizationAccess(devices);
+        var trust = new FleetOrganizationTrust(() => devices.Current, world.Node.DeviceId, () => access.Current);
+
+        // Alex (p1, the owner) gave his node to the organization; Mia (p2) signs for it, Max (p3) is a member.
+        server.Documents.Add(world.Sign(world.Desktop, 1, null, owners: ["p1"], signers: ["p2"],
+            extra: $$"""
+                "orgMachines":["{{world.Node.DeviceId}}"]
+                """));
+        await devices.RefreshAsync(CancellationToken.None);
+        Assert.IsTrue((await access.RefreshAsync(CancellationToken.None)).IsOrganizationMachine(world.Node.DeviceId));
+
+        var alex = trust.FindTrusted(world.Desktop.Fingerprint);
+        Assert.AreEqual((FleetOrganizationTrust.TeamMaintainerPermissions, "p1", true), (alex?.Permissions, alex?.PersonId, alex?.OwnSessionsOnly),
+            "the person the device list names manages it as a signer, on their own sessions, never as its owner");
+        var mia = trust.FindTrusted(world.Mia.Fingerprint);
+        Assert.AreEqual((FleetOrganizationTrust.TeamMaintainerPermissions, "p2", true), (mia?.Permissions, mia?.PersonId, mia?.OwnSessionsOnly), "a signer manages it");
+        var max = trust.FindTrusted(world.Max.Fingerprint);
+        Assert.AreEqual((DevicePermissions.None, "p3", true), (max?.Permissions, max?.PersonId, max?.OwnSessionsOnly), "a member who does not sign gets nothing from the organization");
+    }
+
+    [TestMethod]
     public void ATeamMachineRunsTheAutomationsOfItsMaintainers_ThoseOfItsMembersWhenAllowed_AndNoneOfASuspendedPerson()
     {
         using var world = new World();

@@ -55,6 +55,15 @@ internal sealed class BudgetService
         _logger = logger;
     }
 
+    /// <summary>
+    /// Gets the access model, whose owner records say who owns a machine given to another person: its budgets are that person's,
+    /// and its facts count for them. Null reads the device records alone.
+    /// </summary>
+    public IAccessStore? Access { get; init; }
+
+    // The person of a device: the owner of a machine given to them, else the person its record names.
+    private ValueTask<string?> PersonAsync(DeviceRecord device, CancellationToken cancellationToken) => MachineOwners.PersonOfAsync(Access, device, cancellationToken);
+
     /// <summary>Lists the budgets of the calling controller device's person, with their consumption in the current period.</summary>
     /// <param name="actor">The calling device.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
@@ -97,7 +106,8 @@ internal sealed class BudgetService
         if (definition.ScopeKind == FleetBudgetScopeKinds.Machine)
         {
             var machine = await _store.GetDeviceAsync(definition.ScopeId!, cancellationToken).ConfigureAwait(false);
-            if (machine is null || machine.OrganizationId != actor.OrganizationId || machine.OwnerPersonId != actor.OwnerPersonId)
+            if (machine is null || machine.OrganizationId != actor.OrganizationId
+                || await PersonAsync(machine, cancellationToken).ConfigureAwait(false) != actor.OwnerPersonId)
                 throw Invalid("A budget of a machine names a machine of its person.");
         }
 
@@ -127,8 +137,8 @@ internal sealed class BudgetService
     public async Task<FleetMachineBudgetListDto> ListForMachineAsync(DeviceRecord actor, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(actor);
-        if (actor.OwnerPersonId is null || actor.Status != DeviceStatuses.Approved) return new FleetMachineBudgetListDto([]);
-        var budgets = await _budgets.ListBudgetsAsync(actor.OrganizationId, actor.OwnerPersonId, cancellationToken).ConfigureAwait(false);
+        if (actor.Status != DeviceStatuses.Approved || await PersonAsync(actor, cancellationToken).ConfigureAwait(false) is not { } person) return new FleetMachineBudgetListDto([]);
+        var budgets = await _budgets.ListBudgetsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false);
         var now = _time.GetUtcNow();
         var listed = new List<FleetMachineBudgetDto>();
         foreach (var budget in budgets.Where(static budget => !budget.Removed))
@@ -296,11 +306,11 @@ internal sealed class BudgetService
     public async Task EvaluateAsync(DeviceRecord device, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(device);
-        if (device.OwnerPersonId is null) return;
         try
         {
+            if (await PersonAsync(device, cancellationToken).ConfigureAwait(false) is not { } person) return;
             var now = _time.GetUtcNow();
-            foreach (var budget in await _budgets.ListBudgetsAsync(device.OrganizationId, device.OwnerPersonId, cancellationToken).ConfigureAwait(false))
+            foreach (var budget in await _budgets.ListBudgetsAsync(device.OrganizationId, person, cancellationToken).ConfigureAwait(false))
             {
                 if (budget.Removed || !FleetBudgetDocuments.TryRead(budget.Payload, out var definition, out _)) continue;
                 var usage = await UsageAsync(budget, definition, now, cancellationToken).ConfigureAwait(false);
@@ -357,9 +367,9 @@ internal sealed class BudgetService
 
     private async Task<(BudgetRecord Budget, FleetBudgetDefinition Definition)> GetOwnAsync(DeviceRecord actor, string id, CancellationToken cancellationToken)
     {
-        if (!IsText(id, 128) || actor.OwnerPersonId is null) throw NotFound();
+        if (!IsText(id, 128) || await PersonAsync(actor, cancellationToken).ConfigureAwait(false) is not { } person) throw NotFound();
         var budget = await _budgets.GetBudgetAsync(actor.OrganizationId, id, cancellationToken).ConfigureAwait(false);
-        if (budget is null || budget.Removed || budget.OwnerPersonId != actor.OwnerPersonId || !FleetBudgetDocuments.TryRead(budget.Payload, out var definition, out _))
+        if (budget is null || budget.Removed || budget.OwnerPersonId != person || !FleetBudgetDocuments.TryRead(budget.Payload, out var definition, out _))
             throw NotFound();
         return (budget, definition);
     }

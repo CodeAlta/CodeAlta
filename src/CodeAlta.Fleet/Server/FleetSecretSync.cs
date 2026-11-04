@@ -22,7 +22,8 @@ public sealed record FleetSecretSyncResult(int Taken, IReadOnlyList<string> Refu
 /// <summary>
 /// Takes the values one server holds for this machine (<c>doc/fleet/secrets.md</c>, how a run gets them): it reads the
 /// copies sealed for it, opens each one whose key a controller device of its person gave by the device list the anchor
-/// of the link verified (<see cref="FleetSecretSealing.TryOpen"/>), maps its scope to this machine (a space by the key of
+/// of the link verified, its person being the one the signed access document names once the machine was given to another
+/// person (<see cref="FleetSecretSealing.TryOpen(string?, FleetSecretBinding, Identity.DeviceIdentity, FleetDeviceListState, FleetAccessState?, out string?, out string?)"/>), maps its scope to this machine (a space by the key of
 /// that space, a project by the blind index of its repository, an environment by its signed definition) and keeps the
 /// values in the protected store of the machine (<see cref="LocalSecretStore.ReplaceFleetCopies"/>). A rotation is taken
 /// at the next refresh, which runs before each run; a value the server no longer gives is dropped. A machine the list
@@ -58,6 +59,13 @@ public sealed class FleetSecretSync
         _store = store;
         _projects = projects;
     }
+
+    /// <summary>
+    /// Gets the signed access document of the server as this machine verified it, read at each refresh: once it gives the machine
+    /// to another person, the values and environments of that person are taken, and those of the person the device list names no
+    /// more. Null reads the device list alone.
+    /// </summary>
+    public Func<FleetAccessState?>? Access { get; init; }
 
     /// <summary>Gets the id of the server link.</summary>
     public string Source => _source;
@@ -143,9 +151,11 @@ public sealed class FleetSecretSync
         // The environments whose definition a controller device of the person signed, the newest of each name.
         var verified = ImmutableDictionary.CreateBuilder<string, FleetEnvironmentDefinition>(StringComparer.Ordinal);
         var byId = new Dictionary<string, FleetEnvironmentDefinition>(StringComparer.Ordinal);
+        // The person of this machine: the one the signed access document names once it was given to another person.
+        var access = Access?.Invoke();
         foreach (var environment in environments.Environments)
         {
-            if (!FleetEnvironmentDocuments.TryVerify(environment.Signed, list, _devices.Identity.DeviceId, out var definition, out _) || definition.EnvironmentId != environment.Id)
+            if (!FleetEnvironmentDocuments.TryVerify(environment.Signed, list, access, _devices.Identity.DeviceId, out var definition, out _) || definition.EnvironmentId != environment.Id)
                 continue;
             var digest = Digest(environment.Signed.Payload);
             if (checkpoint.Environments.TryGetValue(definition.EnvironmentId, out var newest)
@@ -174,7 +184,7 @@ public sealed class FleetSecretSync
                 continue;
             }
 
-            if (!FleetSecretSealing.TryOpen(secret.Copy, FleetSecretBinding.Of(secret), _devices.Identity, list, out var value, out var reason))
+            if (!FleetSecretSealing.TryOpen(secret.Copy, FleetSecretBinding.Of(secret), _devices.Identity, list, access, out var value, out var reason))
             {
                 refused.Add($"{secret.Name}: {reason}");
                 continue;

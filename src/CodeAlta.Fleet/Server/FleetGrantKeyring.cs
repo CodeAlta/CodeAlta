@@ -22,6 +22,13 @@ public sealed class FleetGrantKeyring
         _devices = devices;
     }
 
+    /// <summary>
+    /// Gets the signed access document of the server as this device verified it, read at each refresh: the copies of a session of a
+    /// machine given to another person are signed by a device of its new owner, never of the person the device list names. Null
+    /// reads the device list alone.
+    /// </summary>
+    public Func<FleetAccessState?>? Access { get; init; }
+
     /// <summary>Gets the metadata a grant gives this device for a session, or null.</summary>
     /// <param name="sessionId">The session.</param>
     /// <returns>Its metadata, or null.</returns>
@@ -46,11 +53,13 @@ public sealed class FleetGrantKeyring
         var list = _devices.Current ?? await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
         if (keys.Items.Any(key => !list.Members.ContainsKey(key.MachineId))) list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
         var opened = ImmutableDictionary.CreateBuilder<string, FleetSessionMetadata>(StringComparer.Ordinal);
+        var access = Access?.Invoke();
         foreach (var key in keys.Items)
         {
             try
             {
-                opened[key.SessionId] = FleetGrantKeys.Open(key.Sealed, key.Wrapped, list.OrganizationId ?? string.Empty, key.GrantId, key.SessionId, key.MachineId, _devices.Identity, list);
+                opened[key.SessionId] = FleetGrantKeys.Open(key.Sealed, key.Wrapped, list.OrganizationId ?? string.Empty, key.GrantId, key.SessionId, key.MachineId, _devices.Identity, list,
+                    access);
             }
             catch (InvalidDataException)
             {

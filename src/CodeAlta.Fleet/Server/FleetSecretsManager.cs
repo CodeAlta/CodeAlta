@@ -40,6 +40,12 @@ public sealed class FleetSecretsManager
     /// <summary>Gets the anchored device list the values are sealed by.</summary>
     public FleetOrganizationDevices Devices => _devices;
 
+    /// <summary>
+    /// Gets the signed access document of the server as this device verified it, read at each call: the machines it gives this
+    /// device's person are theirs to seal values for, and those it gives another person no more. Null reads the device list alone.
+    /// </summary>
+    public Func<FleetAccessState?>? Access { get; init; }
+
     /// <summary>Lists the values of this device's person.</summary>
     /// <param name="cancellationToken">Cancels the calls.</param>
     /// <returns>The values.</returns>
@@ -84,7 +90,8 @@ public sealed class FleetSecretsManager
         var binding = held is null
             ? new FleetSecretBinding(FleetSecretSealing.NewId(), kind, name, scope.Kind, scope.Id, 1, hostOnly)
             : FleetSecretBinding.Of(held) with { Version = held.Version + 1, HostOnly = hostOnly, Name = name };
-        var copies = FleetSecretSealing.Seal(value, binding, FleetSecretSealing.Recipients(list, person, machines), list, _devices.Identity);
+        var access = Access?.Invoke();
+        var copies = FleetSecretSealing.Seal(value, binding, FleetSecretSealing.Recipients(list, access, person, machines), list, access, _devices.Identity);
         return await client.PutSecretAsync(binding.SecretId, new SetFleetSecretRequest(kind, binding.Name, scope, binding.Version, hostOnly, copies), cancellationToken)
             .ConfigureAwait(false);
     }
@@ -112,8 +119,9 @@ public sealed class FleetSecretsManager
         using var client = Client();
         var held = await FindAsync(client, id, cancellationToken).ConfigureAwait(false);
         var binding = FleetSecretBinding.Of(held) with { Version = held.Version + 1 };
-        var granted = FleetSecretSealing.GrantedHolders(held, list).Intersect(held.Holders, StringComparer.Ordinal);
-        var copies = FleetSecretSealing.Seal(value, binding, FleetSecretSealing.Recipients(list, person, granted), list, _devices.Identity);
+        var access = Access?.Invoke();
+        var granted = FleetSecretSealing.GrantedHolders(held, list, access).Intersect(held.Holders, StringComparer.Ordinal);
+        var copies = FleetSecretSealing.Seal(value, binding, FleetSecretSealing.Recipients(list, access, person, granted), list, access, _devices.Identity);
         return await client.PutSecretAsync(id, new SetFleetSecretRequest(held.Kind, held.Name, held.Scope, binding.Version, held.HostOnly, copies), cancellationToken)
             .ConfigureAwait(false);
     }
@@ -152,12 +160,13 @@ public sealed class FleetSecretsManager
         ArgumentException.ThrowIfNullOrEmpty(machineId);
         var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
         var person = PersonOf(list);
-        if (FleetSecretSealing.Recipients(list, person, [machineId]).FirstOrDefault(member => member.DeviceId == machineId) is not { } machine)
+        var access = Access?.Invoke();
+        if (FleetSecretSealing.Recipients(list, access, person, [machineId]).FirstOrDefault(member => member.DeviceId == machineId) is not { } machine)
             throw new ArgumentException("The machine is not a device of this person in the device list.", nameof(machineId));
         using var client = Client();
         var held = await FindAsync(client, id, cancellationToken).ConfigureAwait(false);
         var own = held.Copy ?? throw new InvalidDataException("This device holds no copy of the value to give.");
-        var copy = FleetSecretSealing.Regrant(own, FleetSecretBinding.Of(held), machine, _devices.Identity, list);
+        var copy = FleetSecretSealing.Regrant(own, FleetSecretBinding.Of(held), machine, _devices.Identity, list, access);
         return await client.AddSecretCopiesAsync(id, new AddFleetSecretCopiesRequest(held.Version, [copy]), cancellationToken).ConfigureAwait(false);
     }
 

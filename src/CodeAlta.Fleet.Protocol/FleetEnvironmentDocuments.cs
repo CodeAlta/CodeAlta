@@ -217,13 +217,33 @@ public static class FleetEnvironmentDocuments
     /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
     public static bool TryVerify(FleetSignedEnvironment? signed, FleetDeviceListState devices, string? machineId,
         [NotNullWhen(true)] out FleetEnvironmentDefinition? definition, [NotNullWhen(false)] out string? reason)
+        => TryVerify(signed, devices, null, machineId, out definition, out reason);
+
+    /// <summary>
+    /// Verifies a definition for a machine, as
+    /// <see cref="TryVerify(FleetSignedEnvironment?, FleetDeviceListState, string?, out FleetEnvironmentDefinition?, out string?)"/> does,
+    /// with the owner of the machine the signed access document names once it was given to another person
+    /// (<see cref="FleetAccessState.OwnerOfMachine"/>): the environments of its new owner hold there, those of the person the
+    /// device list names no more.
+    /// </summary>
+    /// <param name="signed">The signed definition.</param>
+    /// <param name="devices">The device list as the machine verified it.</param>
+    /// <param name="access">The access document as the machine verified it; null for none.</param>
+    /// <param name="machineId">The device of the machine that verifies.</param>
+    /// <param name="definition">The definition, when it verifies.</param>
+    /// <param name="reason">Why it does not verify, or null.</param>
+    /// <returns>Whether it verifies.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
+    public static bool TryVerify(FleetSignedEnvironment? signed, FleetDeviceListState devices, FleetAccessState? access, string? machineId,
+        [NotNullWhen(true)] out FleetEnvironmentDefinition? definition, [NotNullWhen(false)] out string? reason)
     {
         ArgumentNullException.ThrowIfNull(devices);
         definition = null;
         if (signed is null || string.IsNullOrEmpty(signed.Signature)) return Refuse("the environment does not read", out reason);
         if (!TryRead(signed.Payload, out var read, out reason)) return false;
         if (devices.OrganizationId is { } organization && organization != read.OrganizationId) return Refuse("the environment is of another organization", out reason);
-        if (string.IsNullOrEmpty(machineId) || !devices.Members.TryGetValue(machineId, out var self) || self.OwnerId is null || self.OwnerId != read.PersonId)
+        if (string.IsNullOrEmpty(machineId) || !devices.Members.ContainsKey(machineId) || FleetAccessState.OwnerOfMachine(access, machineId, devices) is not { } owner
+            || owner != read.PersonId)
             return Refuse("the environment is of another person than the owner of this machine", out reason);
         if (!IsSigner(devices, read.SignerDeviceId, read.PersonId, out var signer))
             return Refuse("the environment is not signed by a controller device of its person", out reason);
@@ -239,7 +259,7 @@ public static class FleetEnvironmentDocuments
     /// is signed by a controller device of one of the approvers of the environment, with the key the device list holds for it.
     /// </summary>
     /// <param name="signed">The signed approval.</param>
-    /// <param name="environment">The definition the machine verified (<see cref="TryVerify"/>).</param>
+    /// <param name="environment">The definition the machine verified (<see cref="TryVerify(FleetSignedEnvironment?, FleetDeviceListState, FleetAccessState?, string?, out FleetEnvironmentDefinition?, out string?)"/>).</param>
     /// <param name="devices">The device list as the machine verified it.</param>
     /// <param name="machineId">The device of the machine.</param>
     /// <param name="runId">The run the machine asked the approval of.</param>

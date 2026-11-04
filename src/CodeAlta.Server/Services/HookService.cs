@@ -72,6 +72,9 @@ internal sealed class HookService
         (_store, _hooks, _presence, _time, _logger) = (store, hooks, presence, time, logger);
     }
 
+    /// <summary>Gets the access model, whose owner records say who owns a machine given to another person; null reads the device records alone.</summary>
+    public IAccessStore? Access { get; init; }
+
     /// <summary>Makes a hook for a machine of the calling controller device's person.</summary>
     /// <param name="actor">The calling device.</param>
     /// <param name="request">The hook asked for.</param>
@@ -91,8 +94,8 @@ internal sealed class HookService
         if (machine is null || machine.OrganizationId != actor.OrganizationId || machine.Kind != FleetDeviceKinds.Node)
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.DeviceNotFound, "No machine of the organization has this id.");
         if (machine.Status != DeviceStatuses.Approved) throw CoordinatorException.Conflict(CoordinatorErrorCodes.DeviceState, "The machine is not a member of the device list.");
-        // Personal scope: a person's hooks go to the machines they own; a team's come with access control.
-        if (!string.Equals(machine.OwnerPersonId, person, StringComparison.Ordinal))
+        // Personal scope: a person's hooks go to the machines they own (a machine given to them included); a team's come with access control.
+        if (!string.Equals(await MachineOwners.PersonOfAsync(Access, machine, cancellationToken).ConfigureAwait(false), person, StringComparison.Ordinal))
             throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A person makes hooks for the machines they own only.");
         if ((await _hooks.ListHooksAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false)).Count >= MaxHooksPerPerson)
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.HookConflict, $"A person has at most {MaxHooksPerPerson} hooks: delete one first.");

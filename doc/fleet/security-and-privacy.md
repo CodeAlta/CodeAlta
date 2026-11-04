@@ -67,7 +67,7 @@ snapshot never grants a whole space.
 | Key | Purpose |
 | --- | --- |
 | **Device key** (ECDSA/ECDH P-256, non-exportable where possible) | Signs proofs and requests; receives wrapped keys (ECDH-ES, HKDF, AES-256-GCM). Only controller devices sign device-list entries and delegations ([the device list](#the-device-list)) |
-| **Space metadata key**, with epochs | Seals the space's descriptive metadata (titles, project names) and keys the blind index. A new epoch when a member leaves; new data uses it |
+| **Space metadata key**, with epochs | Seals the space's descriptive metadata (titles, project names) and keys the blind index. A new epoch when a member leaves, or when a machine that held it is given to another person; new data uses it |
 | **Channel key**, with epochs | Seals the messages of one project's channel, for its members |
 | **Session replica key** (random 256 bits) | Encrypts one session's replica, in segments with derived sub-keys to stay far from AES-GCM nonce limits; wrapped only to the devices allowed to read that session |
 | **Snapshot key** (random, one per snapshot) | Encrypts one shared snapshot; it opens that snapshot and nothing later |
