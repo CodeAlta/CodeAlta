@@ -23,7 +23,7 @@ Check the page in Firefox and take a screenshot.
 The agent turns the tools on for its session with `alta browser activate`, then uses them. The browser opens at its first call, in a window you see, and the screenshots appear in the timeline. The session sees only the tabs it opened, never the tabs of another session.
 
 <figure class="alta-figure my-4" style="max-width: 48rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-browser-session.webp" alt="A CodeAlta session whose agent ran alta browser activate, navigate_page to codealta.github.io and take_screenshot: the screenshot in the timeline, and the Browser Edge chip in the composer" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-browser-session.webp" alt="A CodeAlta session whose agent ran alta browser activate, navigate_page to codealta.io and take_screenshot: the screenshot in the timeline, and the Browser Edge chip in the composer" loading="lazy">
   <figcaption class="small text-secondary mt-2">An agent opened the website of CodeAlta in Edge and took a screenshot, shown in the timeline; the chip of the prompt names its browser.</figcaption>
 </figure>
 

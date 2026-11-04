@@ -91,7 +91,7 @@ draw.rounded_rectangle((x, 376 * S, box_right, 432 * S), 12 * S, fill=(16, 30, 4
 draw.text((x + 20 * S, 391 * S), "$", font=mono, fill=(45, 212, 191))
 draw.text((x + 44 * S, 391 * S), command, font=mono, fill=(236, 243, 252))
 draw.text((x, 452 * S), "Also in your terminal: CodeAlta TUI and altacli", font=font("segoeui.ttf", 17), fill=(132, 152, 176))
-draw.text((x, 556 * S), "codealta.github.io", font=font("segoeuisl.ttf", 23), fill=(158, 182, 208))
+draw.text((x, 556 * S), "codealta.io", font=font("segoeuisl.ttf", 23), fill=(158, 182, 208))
 
 output = sys.argv[1] if len(sys.argv) > 1 else "site/img/alta-banner.png"
 banner.convert("RGB").resize((1280, 640), Image.LANCZOS).save(output, optimize=True)

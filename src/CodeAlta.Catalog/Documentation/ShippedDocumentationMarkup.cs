@@ -12,7 +12,7 @@ namespace CodeAlta.Catalog.Documentation;
 internal static partial class ShippedDocumentationMarkup
 {
     /// <summary>The site of the guide: an address of the site that names no shipped page goes there.</summary>
-    internal const string WebSite = "https://codealta.github.io";
+    internal const string WebSite = "https://codealta.io";
 
     private const int MaximumFigureLines = 400;
     private const int MaximumSvgLength = 256 * 1024;

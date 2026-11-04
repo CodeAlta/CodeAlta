@@ -288,7 +288,7 @@ public sealed class ConfiguredProviderRegistrationTests
     {
         var headers = RawApiProviderDefaultsCatalog.CreateHeaderDefaults(transportKind, providerKey, new Uri(uri));
 
-        Assert.AreEqual(attributed ? "https://codealta.github.io" : null, headers?.GetValueOrDefault("HTTP-Referer"));
+        Assert.AreEqual(attributed ? "https://codealta.io" : null, headers?.GetValueOrDefault("HTTP-Referer"));
         Assert.AreEqual(attributed ? "CodeAlta" : null, headers?.GetValueOrDefault("X-OpenRouter-Title"));
         Assert.IsNull(headers?.GetValueOrDefault("X-OpenRouter-Categories"), "Without an application, no category is named.");
     }

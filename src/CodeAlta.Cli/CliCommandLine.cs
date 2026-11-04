@@ -353,7 +353,7 @@ internal static class CliCommandLine
             "  5 session in use   6 provider not ready   7 invalid structured output",
             _,
             "`altacli <command> --help` for the details: input, output, storage, config.",
-            "Documentation: https://codealta.github.io/docs/command-line/",
+            "Documentation: https://codealta.io/docs/command-line/",
             _,
             new HelpOption(),
             new VersionOption(),

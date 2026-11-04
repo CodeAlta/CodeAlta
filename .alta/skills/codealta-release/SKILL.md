@@ -168,7 +168,7 @@ since <last tag>."
 ![<alt text of the picture>](https://raw.githubusercontent.com/CodeAlta/CodeAlta/X.Y.Z/site/img/<picture>.webp)
 
 Two short paragraphs at most: what it does for the user, how to reach it (menus, shortcuts, commands), what
-agents can do with it. [More →](https://codealta.github.io/docs/<page>/) (#<issue>, #<pr>)
+agents can do with it. [More →](https://codealta.io/docs/<page>/) (#<issue>, #<pr>)
 
 ## 🎁 And also
 
