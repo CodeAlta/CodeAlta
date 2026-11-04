@@ -278,6 +278,45 @@ public sealed class AccessControlTests
         var resumed = await server.SendAsync(mia, HttpMethod.Post, "/api/v1/owners/automation/nightly/resume");
         Assert.AreEqual(HttpStatusCode.OK, resumed.Status, resumed.Body.ToString());
         Assert.IsFalse(resumed.Read<ResourceOwnerDto>().Paused);
+
+        // The team answers its approvals: the access document names who else than Max takes its runs over, for its machine.
+        var draft = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/draft")).Read<AccessDocumentDraftDto>();
+        Assert.AreEqual(("nightly", miaId), (draft.Document.Approvers!.Single().AutomationId, draft.Document.Approvers!.Single().People.Single()),
+            "the maintainer of the team; Max placed it, the admins are not asked");
+        Assert.IsTrue((await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/self")).Read<AccessSelfDto>().Document.Pending
+            .Any(line => line.Contains("answers the approvals of", StringComparison.Ordinal)));
+        Task<ApiAnswer> TakeOverAsync(TestDevice device)
+        {
+            var text = FleetAutomationRunRequestDocuments.Serialize(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, setup.Organization.Id, "nightly", machine.Id,
+                "run-1", device.DeviceId, device.PublicKey, server.Clock.Now) { Action = FleetAutomationRunRequest.TakeOverAction });
+            return server.SendAsync(device, HttpMethod.Post, "/api/v1/automations/nightly/runs/run-1/takeover",
+                new RunAutomationRequest(new FleetSignedAutomationRunRequest(text, device.Sign(FleetAutomationRunRequestDocuments.GetSignedBytes(text)))));
+        }
+
+        // Its runs that ask the person on call go to whoever of the team is on call now, by the rotation its maintainer sets.
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, $"/api/v1/teams/{team.Id}/oncall", new PutOnCallRotationRequest([maxId, miaId], 12))).Status,
+            "a member does not set it");
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await server.SendAsync(mia, HttpMethod.Put, $"/api/v1/teams/{team.Id}/oncall",
+            new PutOnCallRotationRequest([maxId, setup.Owner.Id], 12))).Status, "only people of the team");
+        var set = await server.SendAsync(mia, HttpMethod.Put, $"/api/v1/teams/{team.Id}/oncall", new PutOnCallRotationRequest([maxId, miaId], 12));
+        Assert.AreEqual(HttpStatusCode.OK, set.Status, set.Body.ToString());
+        var listedTeam = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/teams")).Read<AccessListDto<TeamDto>>().Items.Single();
+        Assert.AreEqual((maxId, 12), (listedTeam.OnCall!.OnCallNow, listedTeam.OnCall.ShiftHours));
+        var access = server.GetService<CodeAlta.Server.Services.AccessService>();
+        CollectionAssert.AreEqual(new[] { maxId }, (await access.ApproversOfAsync(setup.Organization.Id, "nightly", maxId, "oncall", default)).ToArray());
+        // Its on-call tool names who is on call: they are asked when they answer its approvals; anyone else falls back to the rotation.
+        CollectionAssert.AreEqual(new[] { miaId }, (await access.ApproversOfAsync(setup.Organization.Id, "nightly", maxId, "oncall", ["mia@acme.test", "Mia"], default)).ToArray());
+        var ownerSelf = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/self")).Read<AccessSelfDto>();
+        CollectionAssert.AreEqual(new[] { maxId }, (await access.ApproversOfAsync(setup.Organization.Id, "nightly", maxId, "oncall", [ownerSelf.Person.DisplayName, "zed@acme.test"], default)).ToArray(),
+            "an owner of the organization answers none of its approvals: the tool does not make them");
+        CollectionAssert.AreEqual(new[] { miaId, maxId }, (await access.ApproversOfAsync(setup.Organization.Id, "nightly", maxId, null, default)).ToArray(), "its owner team otherwise");
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(mia, HttpMethod.Delete, $"/api/v1/teams/{team.Id}/oncall")).Status);
+        CollectionAssert.AreEqual(new[] { miaId, maxId }, (await access.ApproversOfAsync(setup.Organization.Id, "nightly", maxId, "oncall", default)).ToArray(), "without a rotation, its team");
+
+        var byMia = await TakeOverAsync(mia);
+        Assert.AreEqual(HttpStatusCode.Conflict, byMia.Status, byMia.Body.ToString());
+        StringAssert.Contains(byMia.Body.ToString(), "offline", "Mia may: the machine is offline, so it is not passed on");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await TakeOverAsync(owner)).Status, "an owner of the organization manages it, but answers none of its approvals");
     }
 
     [TestMethod]

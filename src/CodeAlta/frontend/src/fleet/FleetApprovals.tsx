@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Tag } from "@blueprintjs/core";
-import { fleetServer, type FleetBudgetHoldView, type FleetDeviceView, type FleetNotificationView, type FleetServerView } from "#neoastra";
+import { automations, fleetServer, type FleetBudgetHoldView, type FleetDeviceView, type FleetNotificationView, type FleetServerView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { dismissToast, showToast } from "../appToaster";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 import { keyWords, waitingRuns } from "./fleetServer";
 import { continueHeldRun, heldRunToastKey, waitingApprovals, type HeldRunOutcome, type WaitingApproval } from "./approvals";
-import { newNotifications, notificationIntent, notificationPhrase, waitingHolds } from "./budgets";
+import { approvalRun, newNotifications, notificationIntent, notificationPhrase, waitingHolds } from "./budgets";
 
 /** The calls of the Fleet button. */
 export type FleetApprovalsApi = Pick<typeof fleetServer, "status" | "devices" | "approve" | "revoke" | "watch" | "budgets" | "continueRun" | "stopRun" | "readNotification" | "directory">;
@@ -116,6 +116,21 @@ export function FleetApprovals({ epoch, api = fleetServer, active = false, onOpe
     await markRead(item);
   }, [close, markRead]);
 
+  // A run that waits for the person is taken over from its message, signed by this computer: the server and its machine check
+  // that the person answers the approvals of its automation (its owner, the team that owns it, a grant).
+  const takeOver = useCallback(async (item: NewNotification) => {
+    const run = approvalRun(item.notification);
+    if (!epoch || !run) return;
+    const reply = await automations.takeOverOnMachine({ expectedEpoch: epoch, id: run.automationId, machineId: run.machineId, runId: run.runId }, { timeoutMilliseconds: 30_000 })
+      .catch(() => null);
+    if (reply?.status === "ok") {
+      await dismiss(item);
+      showToast({ intent: "success", icon: <AppIcon name="check" size={16} />, message: t("You took the run over: answer it in its session on {machine}.", { machine: item.notification.machine ?? "" }) });
+    } else {
+      showToast({ intent: "danger", icon: <AppIcon name="error" size={16} />, message: reply?.message ?? t("The run could not be taken over.") });
+    }
+  }, [dismiss, epoch, t]);
+
   useEffect(() => {
     // What was decided or dismissed elsewhere (the server's page, another computer, the Budgets page) no longer waits here.
     const keys = new Set([...waiting.map(toastKey), ...holds.map(holdKey), ...notes.map(noteKey)]);
@@ -161,16 +176,21 @@ export function FleetApprovals({ epoch, api = fleetServer, active = false, onOpe
       if (announced.current.has(key)) continue;
       announced.current.add(key);
       const phrase = notificationPhrase(item.notification);
+      const run = approvalRun(item.notification);
       showToast({
-        intent: notificationIntent(item.notification.severity), icon: <AppIcon name={item.notification.kind === "health" ? "remote" : "usage"} size={16} />, timeout: 0,
+        intent: notificationIntent(item.notification.severity),
+        icon: <AppIcon name={item.notification.kind === "health" ? "remote" : item.notification.kind === "approval" ? "shield" : "usage"} size={16} />, timeout: 0,
         onDismiss: () => { if (!closing.current.delete(key)) void markRead(item); },
         message: <div className="fleet-approval-toast fleet-notification-toast" data-notification={item.notification.kind}>
           <strong>{t(phrase.key, phrase.values)}</strong>
-          <span className="fleet-approval-actions"><Button size="small" variant="minimal" text={t("Dismiss")} onClick={() => void dismiss(item)} /></span>
+          <span className="fleet-approval-actions">
+            {run && <Button size="small" intent="warning" text={t("Take over")} onClick={() => void takeOver(item)} />}
+            <Button size="small" variant="minimal" text={t("Dismiss")} onClick={() => void dismiss(item)} />
+          </span>
         </div>,
       }, key);
     }
-  }, [act, close, decide, dismiss, holds, markRead, notes, t, waiting]);
+  }, [act, close, decide, dismiss, holds, markRead, notes, t, takeOver, waiting]);
 
   if (!epoch || (servers.length === 0 && runs === 0)) return null;
   const count = waiting.length + holds.length + notes.length + runs;

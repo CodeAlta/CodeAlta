@@ -545,6 +545,8 @@ public sealed partial class McpPlugin : PluginBase
                 ScriptName = tool.Name,
                 RunsInParallel = true,
                 OutputSchema = useArgumentsJsonWrapper ? null : tool.OutputSchema,
+                // What an automation pins an allowed tool to, besides the hash of its definition.
+                Version = tool.ServerVersion,
             },
             async (invocation, cancellationToken) => await InvokeDirectToolAsync(
                 tool.Server,

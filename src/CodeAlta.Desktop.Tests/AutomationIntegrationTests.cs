@@ -95,6 +95,26 @@ public sealed class AutomationIntegrationTests
     }
 
     [TestMethod]
+    public async Task ARunThatAsksThePersonOnCall_ReadsWhoIsOnCallBeforeItStarts_AndGoesOnWhenItsToolDoesNotAnswer()
+    {
+        await using var fixture = await Fixture.CreateAsync($$"""{ type = "daily", at = ["09:00"] }""", enabled: false,
+            extra: """autonomy = { approvers = "oncall", oncall = { source = "pagerduty", schedule = "PSCHED", token = "${secret:PD}" } }""");
+        fixture.Tools.On(HttpMethod.Get, "/oncalls", """{"oncalls":[{"user":{"email":"max@acme.test","name":"Max"}}]}""");
+
+        var run = await fixture.Service.RunAsync(First, default);
+        Assert.AreEqual(AutomationRun.Running, run!.Status);
+        CollectionAssert.AreEqual(new[] { "max@acme.test", "Max" }, fixture.Service.Runs(First, 1)[0].OnCall!.ToArray(), "what its server asks when the run waits");
+        Assert.AreEqual("Token token=pd-key", fixture.Tools.To("/oncalls").Single().Authorization, "with the secret of this machine");
+
+        // A tool that does not answer leaves the run to the rotation of its team, and says so.
+        fixture.Tools.On(HttpMethod.Get, "/oncalls", _ => (System.Net.HttpStatusCode.ServiceUnavailable, """{"error":{"message":"down"}}"""));
+        var second = await fixture.Service.RunAsync(First, default);
+        Assert.AreEqual(AutomationRun.Running, second!.Status);
+        Assert.IsNull(fixture.Service.Runs(First, 1)[0].OnCall);
+        Assert.IsTrue(fixture.Logged.Any(line => line.Contains("could not be read from pagerduty", StringComparison.Ordinal) && line.Contains("rotation of its team", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
     public async Task AJiraTrigger_SaysWhichSecretIsMissing_AndReadsNothing()
     {
         await using var fixture = await Fixture.CreateAsync($$"""{ type = "jira_query", site = "https://acme.atlassian.net", email = "bot@acme.test", token = "${secret:UNSET}", jql = "x" }""");
@@ -269,6 +289,7 @@ public sealed class AutomationIntegrationTests
             ["${secret:SLACK_APP}"] = "xapp-app",
             ["${secret:SLACK_BOT}"] = "xoxb-bot",
             ["${secret:INCIDENT_KEY}"] = "inc-key",
+            ["${secret:PD}"] = "pd-key",
             ["${secret:INCIDENT_SIGNING}"] = "whsec_" + Convert.ToBase64String(SigningKey),
         }.ToFrozenDictionary(StringComparer.Ordinal);
 
@@ -291,6 +312,7 @@ public sealed class AutomationIntegrationTests
                         : (text, null),
                     SlackApi = new Uri("https://slack.test/api/"),
                     IncidentApi = new Uri("https://incident.test/"),
+                    PagerDutyApi = new Uri("https://pagerduty.test/"),
                     SlackConnect = Sockets.ConnectAsync,
                     Log = Logged.Enqueue,
                 },
@@ -309,7 +331,7 @@ public sealed class AutomationIntegrationTests
 
         internal AutomationService Service { get; }
 
-        internal static async Task<Fixture> CreateAsync(string trigger, bool enabled = true)
+        internal static async Task<Fixture> CreateAsync(string trigger, bool enabled = true, string extra = "")
         {
             var root = new AutomationTempRoot();
             File.WriteAllText(Path.Combine(root.Path, "config.toml"), $$"""
@@ -318,6 +340,7 @@ public sealed class AutomationIntegrationTests
                 enabled = {{(enabled ? "true" : "false")}}
                 prompt = "Triage it."
                 triggers = [{{trigger}}]
+                {{extra}}
                 """);
             var fixture = new Fixture(root);
             await fixture.Service.RefreshAsync();

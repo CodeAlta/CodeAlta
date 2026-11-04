@@ -35,6 +35,16 @@ public interface IFleetNodeAutomations
     /// <exception cref="Protocol.FleetException">No such automation (<see cref="FleetNodeErrorCodes.AutomationNotFound"/>).</exception>
     Task<FleetAutomationRunInfo> RunAsync(FleetAutomationCaller caller, string id, CancellationToken cancellationToken);
 
+    /// <summary>Runs an assigned automation now, or tries it: a dry run, whose tools it calls by itself record their calls instead of making them.</summary>
+    /// <param name="caller">The device that asks.</param>
+    /// <param name="id">The automation.</param>
+    /// <param name="dryRun">Whether it is a dry run.</param>
+    /// <param name="cancellationToken">Cancels the start.</param>
+    /// <returns>The run, once its session exists or it failed to start.</returns>
+    /// <exception cref="Protocol.FleetException">No such automation, or this node tries none (<see cref="FleetNodeErrorCodes.AutomationNotFound"/>).</exception>
+    Task<FleetAutomationRunInfo> RunAsync(FleetAutomationCaller caller, string id, bool dryRun, CancellationToken cancellationToken)
+        => dryRun ? throw new Protocol.FleetException(FleetNodeErrorCodes.AutomationNotFound, null, "This machine tries no automation.") : RunAsync(caller, id, cancellationToken);
+
     /// <summary>The runs of the assigned automations, newest first.</summary>
     /// <param name="caller">The device that asks.</param>
     /// <param name="id">The automation; null for all the assigned ones.</param>
@@ -73,7 +83,14 @@ public sealed record FleetAutomationPutParams(string Definition, string? Reposit
 
 /// <summary>The parameters of <c>automations.remove</c> and <c>automations.run</c>.</summary>
 /// <param name="Id">The automation.</param>
-public sealed record FleetAutomationRef(string Id);
+public sealed record FleetAutomationRef(string Id)
+{
+    /// <summary>
+    /// Gets whether <c>automations.run</c> tries the automation: a dry run, whose tools it calls by itself are replaced by
+    /// fakes that record their calls on the run. Null or false: a run.
+    /// </summary>
+    public bool? DryRun { get; init; }
+}
 
 /// <summary>The answer of <c>automations.remove</c>.</summary>
 /// <param name="Id">The automation.</param>

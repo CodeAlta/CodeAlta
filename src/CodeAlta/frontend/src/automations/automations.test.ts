@@ -3,7 +3,7 @@ import test from "node:test";
 import type { AutomationItem, AutomationRunItem, AutomationTriggerItem } from "#neoastra";
 import { locales, translate, type Locale, type MessageKey } from "../localization";
 import { defaultSessionSettings } from "../sessionSettings/sessionSettings";
-import { automationTemplates, canReply, dayName, denseTimeline, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, formProblem, formSettings, inputOf, integrationTypes, isHooked, isIntegration, isSchedule, maximumNameLength, newAutonomy, describeAutonomy, toolNames,
+import { automationTemplates, canReply, dayName, denseTimeline, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, formProblem, formSettings, inputOf, integrationTypes, isHooked, isIntegration, isSchedule, maximumNameLength, newAutonomy, describeAllowedTool, describeAutonomy, toolNames,
   maximumPromptLength, needsProject, newTrigger, openableRun, placementLabel, placementProblem, placementWait, scriptArgumentsTemplate, runStatusLabel, runTone, runTriggerLabel, runsWithFacts, secretName, secretReference, sessionOrigin, sessionSettingsOf, timelinePosition, timelineRows, triggerIcon, triggerLabel,
   triggerTone, triggerTypes, type AutomationForm } from "./automations";
 
@@ -181,12 +181,19 @@ test("the form of an automation holds what it is, and where it is written", () =
 });
 
 test("the autonomy of an automation goes to the form and back, its tools trimmed", () => {
-  const autonomy = { allowedTools: ["k8s_restart_pod"], maxCallsPerHour: 3, approvalTimeout: 30, onTimeout: "wait", approvers: "owner" };
+  const autonomy = { allowedTools: ["k8s_restart_pod"], maxCallsPerHour: 3, approvalTimeout: 30, onTimeout: "wait", approvers: "owner", tools: null, onCall: null };
   const form = formOf(item("a", { autonomy }));
   assert.deepEqual(form.autonomy, autonomy);
   assert.deepEqual(inputOf({ ...form, autonomy: { ...autonomy, allowedTools: [" k8s_restart_pod ", "  "] } }).autonomy, autonomy);
   // Turned on, it is read only: no tool allowed, approvals to the owner within an hour, then the run stops.
-  assert.deepEqual(newAutonomy(), { allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner" });
+  assert.deepEqual(newAutonomy(), { allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner", tools: null, onCall: null });
+  // The pins, bounds and preconditions of a tool it still allows are kept; those of a tool taken out go with it.
+  const pinned = { name: "k8s_restart_pod", version: "1.4.2", hash: "sha256:00", bounds: [{ argument: "namespace", values: ["shop"], min: null, max: null }],
+    preconditions: [{ tool: "k8s_get_deployment", arguments: ["namespace"], expect: "available" }] };
+  assert.deepEqual(inputOf({ ...form, autonomy: { ...autonomy, tools: [pinned] } }).autonomy?.tools, [pinned]);
+  assert.equal(inputOf({ ...form, autonomy: { ...autonomy, allowedTools: ["k8s_scale"], tools: [pinned] } }).autonomy?.tools, null);
+  assert.equal(describeAllowedTool(pinned, (key, values) => translate("en", key, values)), "pinned to 1.4.2 · bounds on namespace · checks k8s_get_deployment first");
+  assert.equal(describeAllowedTool({ ...pinned, version: null, hash: null, bounds: [], preconditions: [] }, (key, values) => translate("en", key, values)), null);
   const en = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate("en", key, parameters);
   assert.equal(describeAutonomy(newAutonomy(), en), "Read only: it asks you before anything else than reading.");
   assert.equal(describeAutonomy({ ...newAutonomy(), allowedTools: ["jira_comment", "slack_post"] }, en), "It calls jira_comment, slack_post by itself; it asks you for anything else.");

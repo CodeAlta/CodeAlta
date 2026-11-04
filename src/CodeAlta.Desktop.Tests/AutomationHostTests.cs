@@ -61,6 +61,29 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
+    public async Task TakeOver_IsAPersonsCommand_ThatAPluginRunsForTheUser()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var agent = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1", SourceProjectId = fixture.Project.Id };
+        foreach (var caller in new[] { agent, AltaCallerIdentity.Cli, agent with { OnBehalfOfUser = true } })
+        {
+            var refused = await fixture.Run(["automation", "takeover", "run-1"], caller: caller);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, refused.Code, refused.Text);
+            StringAssert.Contains(refused.Text, "automation.needsPerson");
+        }
+
+        var user = AltaCallerIdentity.Cli with { OnBehalfOfUser = true };
+        var unknown = await fixture.Run(["automation", "takeover", "run-1"], caller: user);
+        Assert.AreEqual(AltaExitCodes.NotFound, unknown.Code, unknown.Text);
+        Assert.AreEqual(AltaExitCodes.Usage, (await fixture.Run(["automation", "takeover"], caller: user)).Code);
+        Assert.AreEqual(AltaExitCodes.Usage, (await fixture.Run(["automation", "takeover", "run-1", "--machine", "node-1"], caller: user)).Code, "a machine goes with its automation");
+        var remote = await fixture.Run(["automation", "takeover", "run-1", "--machine", "node-1", "--automation", "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77"], caller: user);
+        StringAssert.Contains(remote.Text, "reached from no fleet", "without a fleet, a run of a machine of a server is not taken over");
+        var waiting = await fixture.Run(["automation", "waiting"], caller: user);
+        Assert.AreEqual((AltaExitCodes.Success, 0), (waiting.Code, Of(waiting.Records, "alta.automation.waiting").Length));
+    }
+
+    [TestMethod]
     public async Task Show_SaysWhatTheRunsOfAnAutomationDoWithoutAPerson()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -68,6 +91,11 @@ public sealed class AutomationHostTests
         var saved = await fixture.Rpc.SaveAsync(new(Epoch, Input("Diagnosis") with { Autonomy = autonomy }, null), default);
         Assert.AreEqual("ok", saved.Status, saved.Message);
         var plain = await fixture.Rpc.SaveAsync(new(Epoch, Input("Plain"), null), default);
+        // The schedule of an on-call tool goes to the file and back through the page, with its approvers.
+        var onCall = new AutomationOnCallItem("pagerduty", "PSCHED", "${secret:PD}", null);
+        var paged = await fixture.Rpc.SaveAsync(new(Epoch, Input("Paged") with { Autonomy = autonomy with { Approvers = "oncall", OnCall = onCall } }, null), default);
+        Assert.AreEqual("ok", paged.Status, paged.Message);
+        Assert.AreEqual(onCall, (await fixture.Rpc.ListAsync(new(Epoch), default)).Items.Single(item => item.Id == paged.Id).Autonomy!.OnCall);
 
         var shown = (await fixture.One("alta.automation", "automation", "show", saved.Id!)).GetProperty("autonomy");
         Assert.AreEqual("k8s_restart_pod", shown.GetProperty("allowedTools")[0].GetString());

@@ -128,6 +128,40 @@ public sealed class AccessPolicyTests
             "the organization's, by the roles that run it");
     }
 
+    [TestMethod]
+    public void AnApproverByGrantsWithAnEnd_IsListedWithTheLatestEnd_AndNotOnceItPassed()
+    {
+        var access = Snapshot(
+            people: [Person("bea", FleetOrganizationRoles.Member), Person("cy", FleetOrganizationRoles.Member), Person("dan", FleetOrganizationRoles.Member)],
+            grants: [Grant("g1", FleetPrincipalKinds.Person, "cy", "automation.approve", FleetScopeKinds.Resource, "automation:a1", expires: Now.AddDays(1)),
+                Grant("g2", FleetPrincipalKinds.Person, "cy", "automation.approve", FleetScopeKinds.Resource, "automation:a1", expires: Now.AddDays(3)),
+                Grant("g3", FleetPrincipalKinds.Person, "dan", "automation.approve", FleetScopeKinds.Resource, "automation:a1"),
+                Grant("g4", FleetPrincipalKinds.Person, "dan", "automation.approve", FleetScopeKinds.Resource, "automation:a1", expires: Now.AddDays(1))]);
+        var automation = AccessTarget.Resource(FleetResourceKinds.Automation, "a1", FleetPrincipalKinds.Person, "bea");
+
+        CollectionAssert.AreEqual(new (string, DateTimeOffset?)[] { ("bea", null), ("cy", Now.AddDays(3)), ("dan", null) },
+            AccessPolicy.ApproversWithEnds(access, automation, Now).ToArray(), "its owner and a grant without an end have none; the latest end of the grants");
+        CollectionAssert.AreEqual(new (string, DateTimeOffset?)[] { ("bea", null), ("dan", null) }, AccessPolicy.ApproversWithEnds(access, automation, Now.AddDays(4)).ToArray());
+    }
+
+    [TestMethod]
+    public void TheOnCallOfARotation_IsTheTurnOfTheTime_SkippingWhoLeftTheTeamOrIsSuspended()
+    {
+        var access = Snapshot(
+            people: [Person("mia", FleetOrganizationRoles.Member), Person("max", FleetOrganizationRoles.Member), Person("old", FleetOrganizationRoles.Member) with { Status = FleetPersonStatuses.Suspended },
+                Person("gone", FleetOrganizationRoles.Member)],
+            teams: [Team("infra")],
+            members: [Member("infra", "mia", FleetTeamRoles.Maintainer), Member("infra", "max", FleetTeamRoles.Member), Member("infra", "old", FleetTeamRoles.Member)]);
+        var rotation = new OnCallRotationRecord("org", "infra", ["mia", "max", "old", "gone"], Now, 12, Now, "mia");
+
+        Assert.AreEqual(("mia", Now.AddHours(12)), AccessService.OnCallNow(rotation, access, Now.AddHours(1)));
+        Assert.AreEqual(("max", Now.AddHours(24)), AccessService.OnCallNow(rotation, access, Now.AddHours(13)));
+        Assert.AreEqual("mia", AccessService.OnCallNow(rotation, access, Now.AddHours(25)).PersonId, "a suspended person's turn, and that of who left the team, go to the next in turn");
+        Assert.AreEqual("mia", AccessService.OnCallNow(rotation, access, Now.AddHours(48)).PersonId, "the turns go round");
+        Assert.AreEqual(("mia", Now.AddHours(12)), AccessService.OnCallNow(rotation, access, Now.AddHours(-3)), "before its start, its first turn");
+        Assert.AreEqual(((string?)null, (DateTimeOffset?)null), AccessService.OnCallNow(rotation with { People = ["old", "gone"] }, access, Now));
+    }
+
     private static AccessSnapshot Snapshot(IReadOnlyList<PersonRecord>? people = null, IReadOnlyList<TeamRecord>? teams = null, IReadOnlyList<TeamMemberRecord>? members = null,
         IReadOnlyList<GrantRecord>? grants = null)
         => new(people ?? [], teams ?? [], members ?? [], grants ?? [], [], []);

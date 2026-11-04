@@ -30,6 +30,12 @@ internal sealed class AutomationIntegrationOptions
     /// <summary>Gets the address of the API of incident.io; null for its own.</summary>
     public Uri? IncidentApi { get; init; }
 
+    /// <summary>Gets the address of the API of PagerDuty; null for its own, but in tests.</summary>
+    public Uri? PagerDutyApi { get; init; }
+
+    /// <summary>Gets the address of the API of Opsgenie, whatever the region; null for the one of the region, but in tests.</summary>
+    public Uri? OpsgenieApi { get; init; }
+
     /// <summary>Gets what connects a Socket Mode WebSocket; null for a <see cref="ClientWebSocket"/>.</summary>
     public Func<Uri, CancellationToken, Task<WebSocket>>? SlackConnect { get; init; }
 
@@ -601,13 +607,13 @@ internal sealed partial class AutomationService
         if (Snapshot.Find(id) is not { } entry) return (null, NoSuchAutomation);
         if (triggerIndex < -1 || triggerIndex >= entry.Definition.Triggers.Count) return (null, "The automation has no such trigger.");
         if (entry.Problem is { } problem) return (null, problem);
+        // Without an event: its own prompt, the tools its autonomy allows replaced by fakes; on its machine for one placed there.
+        if (triggerIndex == -1) return (await RunAsync(id, null, dryRun: true, cancellationToken).ConfigureAwait(false), null);
         if (entry.Definition.RunsOn is not null) return (null, "It runs on another machine: try it there, or here before you place it.");
-        // Without an event: its own prompt, the tools its autonomy allows replaced by fakes.
-        if (triggerIndex == -1) return (await BeginAsync(entry, TryTrigger, "Try", entry.Definition.Prompt, cancellationToken).ConfigureAwait(false), null);
         var trigger = entry.Definition.Triggers[triggerIndex];
         var (sample, missing) = await SampleAsync(entry.ProjectId, entry.Definition.Prompt, trigger, body, cancellationToken).ConfigureAwait(false);
         if (sample is null) return (null, missing);
-        var run = await BeginAsync(entry, TryTrigger, "Try · " + sample.Detail, sample.Prompt, cancellationToken, reply: sample.Reply is { } target ? target with { Kept = true } : null)
+        var run = await BeginAsync(entry, TryTrigger, sample.Detail, sample.Prompt, cancellationToken, reply: sample.Reply is { } target ? target with { Kept = true } : null)
             .ConfigureAwait(false);
         return (run, null);
     }

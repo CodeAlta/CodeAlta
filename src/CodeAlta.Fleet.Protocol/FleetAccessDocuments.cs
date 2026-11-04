@@ -24,6 +24,25 @@ public sealed record FleetAccessTeam(
     [property: JsonPropertyName("runsMemberAutomations")] bool RunsMemberAutomations,
     [property: JsonPropertyName("services"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Services = null);
 
+/// <summary>
+/// The people who answer the approvals of the runs of an automation, and take its runs over, besides the person who placed
+/// it on a machine: the members of the team that owns it and those granted to approve it (<c>automation.approve</c>).
+/// </summary>
+/// <param name="AutomationId">The automation.</param>
+/// <param name="People">The people.</param>
+public sealed record FleetAccessApprovers(
+    [property: JsonPropertyName("automation")] string AutomationId,
+    [property: JsonPropertyName("people")] IReadOnlyList<string> People)
+{
+    /// <summary>
+    /// Gets when the approval of some of its people ends, by person: a grant with an end date. A machine refuses them from
+    /// that time. Null, or a person missing here: no end.
+    /// </summary>
+    [JsonPropertyName("until")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, DateTimeOffset>? Until { get; init; }
+}
+
 /// <summary>A team machine: the device of the machine and the team that owns it.</summary>
 /// <param name="DeviceId">The device of the machine.</param>
 /// <param name="TeamId">The team.</param>
@@ -73,6 +92,14 @@ public sealed record FleetAccessDocument(
 {
     /// <summary>The version of the format this library writes.</summary>
     public const int CurrentVersion = 1;
+
+    /// <summary>
+    /// Gets the people who answer the approvals of automations and take their runs over, besides who placed each; null for
+    /// none, which a version without them says by leaving the field out.
+    /// </summary>
+    [JsonPropertyName("approvers")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<FleetAccessApprovers>? Approvers { get; init; }
 }
 
 /// <summary>A version of the access document as it travels and is stored: the exact JSON text signed, and the signature.</summary>
@@ -113,6 +140,35 @@ public sealed record FleetAccessState(
 
     /// <summary>Gets the hash of the first version, the root a device pins per server.</summary>
     public string? FirstHash { get; init; }
+
+    /// <summary>Gets the people who answer the approvals of each automation and take its runs over, besides who placed it, by automation.</summary>
+    public ImmutableDictionary<string, ImmutableHashSet<string>> Approvers { get; init; } = ImmutableDictionary.Create<string, ImmutableHashSet<string>>(StringComparer.Ordinal);
+
+    /// <summary>Gets when the approval of a person for an automation ends, by automation then person; a person missing has no end.</summary>
+    public ImmutableDictionary<string, ImmutableDictionary<string, DateTimeOffset>> ApproversUntil { get; init; } =
+        ImmutableDictionary.Create<string, ImmutableDictionary<string, DateTimeOffset>>(StringComparer.Ordinal);
+
+    /// <summary>Gets whether the document names a person among those who answer the approvals of an automation and take its runs over, at a time.</summary>
+    /// <param name="automationId">The automation.</param>
+    /// <param name="personId">The person.</param>
+    /// <param name="now">The time of the machine: an approval with an end date holds before it only.</param>
+    /// <returns>Whether it names them, they are not suspended, and their approval has not ended.</returns>
+    public bool Approves(string? automationId, string? personId, DateTimeOffset now)
+        => automationId is not null && personId is not null && !IsSuspended(personId) && Approvers.TryGetValue(automationId, out var people) && people.Contains(personId)
+            && !(ApproversUntil.TryGetValue(automationId, out var ends) && ends.TryGetValue(personId, out var end) && now >= end);
+
+    /// <summary>Lists when the approvals of a version end, by automation then person.</summary>
+    /// <param name="approvers">The approvers of a version; null for none.</param>
+    /// <returns>The ends.</returns>
+    public static ImmutableDictionary<string, ImmutableDictionary<string, DateTimeOffset>> UntilOf(IReadOnlyList<FleetAccessApprovers>? approvers)
+        => (approvers ?? []).Where(static item => item.Until is { Count: > 0 })
+            .ToImmutableDictionary(static item => item.AutomationId, static item => item.Until!.ToImmutableDictionary(StringComparer.Ordinal), StringComparer.Ordinal);
+
+    /// <summary>Lists the approvers of a version, by automation.</summary>
+    /// <param name="approvers">The approvers of a version; null for none.</param>
+    /// <returns>The people by automation.</returns>
+    public static ImmutableDictionary<string, ImmutableHashSet<string>> ApproversOf(IReadOnlyList<FleetAccessApprovers>? approvers)
+        => (approvers ?? []).ToImmutableDictionary(static item => item.AutomationId, static item => item.People.ToImmutableHashSet(StringComparer.Ordinal), StringComparer.Ordinal);
 
     /// <summary>Gets the team that owns a machine, or null for a personal machine.</summary>
     /// <param name="deviceId">The device of the machine.</param>
@@ -284,6 +340,8 @@ public static class FleetAccessDocuments
             [.. document.Suspended])
         {
             FirstHash = state.FirstHash ?? hash,
+            Approvers = FleetAccessState.ApproversOf(document.Approvers),
+            ApproversUntil = FleetAccessState.UntilOf(document.Approvers),
         };
         return true;
     }
@@ -372,6 +430,24 @@ public static class FleetAccessDocuments
             lines.Add($"{Name(device)} is no longer a team machine");
         foreach (var id in after.Suspended.Where(id => !before.Suspended.Contains(id))) lines.Add($"{Name(id)} is suspended: their work stops on team machines");
         foreach (var id in before.Suspended.Where(id => !after.Suspended.Contains(id, StringComparer.Ordinal))) lines.Add($"{Name(id)} is no longer suspended");
+        var approvers = FleetAccessState.ApproversOf(after.Approvers);
+        foreach (var (automation, people) in approvers.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            var ends = FleetAccessState.UntilOf(after.Approvers).GetValueOrDefault(automation);
+            DateTimeOffset? EndAfter(string id) => ends is not null && ends.TryGetValue(id, out var end) ? end : null;
+            foreach (var id in people.Where(id => !(before.Approvers.TryGetValue(automation, out var held) && held.Contains(id))
+                    || End(before, automation, id) != EndAfter(id)).Order(StringComparer.Ordinal))
+                lines.Add(ends?.TryGetValue(id, out var end) == true
+                    ? $"{Name(id)} answers the approvals of {Name(automation)} and takes its runs over until {end.ToString("u", System.Globalization.CultureInfo.InvariantCulture)}"
+                    : $"{Name(id)} answers the approvals of {Name(automation)} and takes its runs over");
+        }
+
+        foreach (var (automation, people) in before.Approvers.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            foreach (var id in people.Where(id => !(approvers.TryGetValue(automation, out var now) && now.Contains(id))).Order(StringComparer.Ordinal))
+                lines.Add($"{Name(id)} no longer answers the approvals of {Name(automation)}");
+        }
+
         return lines;
     }
 
@@ -386,7 +462,12 @@ public static class FleetAccessDocuments
         ArgumentNullException.ThrowIfNull(right);
         return SameSet(left.Owners, right.Owners) && SameSet(left.Signers, right.Signers) && SameSet(left.Suspended, right.Suspended)
             && SameSet(left.Machines.Select(static machine => machine.DeviceId + "\n" + machine.TeamId), right.Machines.Select(static machine => machine.DeviceId + "\n" + machine.TeamId))
-            && SameSet(left.Teams.Select(TeamKey), right.Teams.Select(TeamKey));
+            && SameSet(left.Teams.Select(TeamKey), right.Teams.Select(TeamKey))
+            && SameSet(Approvals(left), Approvals(right));
+
+        static IEnumerable<string> Approvals(FleetAccessDocument document)
+            => (document.Approvers ?? []).SelectMany(static item => item.People.Select(person => item.AutomationId + "\n" + person + "\n"
+                + (item.Until?.TryGetValue(person, out var end) == true ? end.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty)));
 
         static string TeamKey(FleetAccessTeam team)
             => $"{team.Id}\n{team.RunsMemberAutomations}\n{string.Join(',', team.Maintainers.Order(StringComparer.Ordinal))}\n{string.Join(',', team.Members.Order(StringComparer.Ordinal))}"
@@ -402,8 +483,18 @@ public static class FleetAccessDocuments
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(document);
         return SaySame(new FleetAccessDocument(1, document.OrganizationId, 0, null, 0, [.. state.Owners], [.. state.Signers], [.. state.Teams.Values],
-            [.. state.Machines.Select(static pair => new FleetAccessMachine(pair.Key, pair.Value))], [.. state.Suspended], document.SignerDeviceId, document.Time), document);
+            [.. state.Machines.Select(static pair => new FleetAccessMachine(pair.Key, pair.Value))], [.. state.Suspended], document.SignerDeviceId, document.Time)
+        {
+            Approvers = [.. state.Approvers.Select(pair => new FleetAccessApprovers(pair.Key, [.. pair.Value])
+            {
+                Until = state.ApproversUntil.TryGetValue(pair.Key, out var ends) && ends.Count > 0 ? ends : null,
+            })],
+        }, document);
     }
+
+    // When the approval of a person for an automation ends in a state; null for no end.
+    private static DateTimeOffset? End(FleetAccessState state, string automation, string person)
+        => state.ApproversUntil.TryGetValue(automation, out var ends) && ends.TryGetValue(person, out var end) ? end : null;
 
     private static bool SameSet(IEnumerable<string> left, IEnumerable<string> right)
         => new HashSet<string>(left, StringComparer.Ordinal).SetEquals(right);
@@ -475,6 +566,20 @@ public static class FleetAccessDocuments
         {
             if (machine is null || !IsId(machine.DeviceId) || !machines.Add(machine.DeviceId) || !teams.Contains(machine.TeamId ?? string.Empty))
                 return "a team machine does not name a team of the version, or is named twice";
+        }
+
+        if (document.Approvers is { } approvers)
+        {
+            if (approvers.Count > MaxItems) return "it holds too many approvers";
+            var automations = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var item in approvers)
+            {
+                if (item is null || !IsId(item.AutomationId) || !automations.Add(item.AutomationId) || item.People is null || item.People.Count == 0 || item.People.Count > MaxItems
+                    || item.People.Any(static id => !IsId(id)) || item.People.Distinct(StringComparer.Ordinal).Count() != item.People.Count)
+                    return "the approvers of an automation do not hold";
+                if (item.People.Any(suspended.Contains)) return "a suspended person answers approvals";
+                if (item.Until is { } until && until.Keys.Any(person => !item.People.Contains(person, StringComparer.Ordinal))) return "the approvers of an automation do not hold";
+            }
         }
 
         return null;

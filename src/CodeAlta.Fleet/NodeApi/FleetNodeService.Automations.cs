@@ -32,7 +32,7 @@ public sealed partial class FleetNodeService
     {
         var automations = RequireAutomations();
         RequireWork();
-        return Once(call, FleetNodeJsonContext.Default.FleetAutomationRunInfo, () => automations.RunAsync(AutomationCaller(call), parameters.Id, cancellationToken));
+        return Once(call, FleetNodeJsonContext.Default.FleetAutomationRunInfo, () => automations.RunAsync(AutomationCaller(call), parameters.Id, parameters.DryRun == true, cancellationToken));
     }
 
     private Task<FleetAutomationRemoved> RemoveAutomationAsync(FleetNodeCall call, FleetAutomationRef parameters, CancellationToken cancellationToken)

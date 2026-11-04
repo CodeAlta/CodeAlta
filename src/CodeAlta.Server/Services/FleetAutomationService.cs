@@ -23,7 +23,14 @@ internal sealed class FleetAutomationService
     /// the team that owns it and who is granted them; the seam where on-call resolvers come too. Null: the person whose
     /// version the server holds.
     /// </summary>
-    internal Func<AutomationRecord, CancellationToken, Task<IReadOnlyList<string>>>? ApprovalRecipients { get; init; }
+    internal Func<AutomationRecord, FleetAutomationRunFact?, CancellationToken, Task<IReadOnlyList<string>>>? ApprovalRecipients { get; init; }
+
+    /// <summary>
+    /// Gets or sets whether a person who did not place an automation answers its approvals, and so takes its runs over: a
+    /// member of the team that owns it, a person granted to approve it. Null: only the person who placed it. The machine
+    /// checks it again against the signed access document.
+    /// </summary>
+    internal Func<AutomationRecord, string, CancellationToken, Task<bool>>? MayTakeOver { get; init; }
 
     /// <summary>Gets or sets the notifications of the people, which tell them a run waits for their approval; null tells nobody.</summary>
     internal NotificationService? Notifications { get; init; }
@@ -181,7 +188,7 @@ internal sealed class FleetAutomationService
         if (!key.Verify(FleetAutomationRunRequestDocuments.GetSignedBytes(signed.Payload), signed.Signature))
             throw Invalid("The signature of the run request does not verify with the key of the calling device.");
         if (run.AutomationId != id) throw Invalid("The run request names another automation than the path.");
-        if (run.Action is not null) throw Invalid("A request to take a run over is sent to its run, not to run the automation.");
+        if (run.Action is not (null or FleetAutomationRunRequest.TryAction)) throw Invalid("A request to take a run over is sent to its run, not to run the automation.");
         if (run.SignerDeviceId != actor.Id || run.SignerKey != actor.PublicKey) throw Invalid("The run request must name the device that signs it, with its key.");
         if (run.OrganizationId != actor.OrganizationId) throw Invalid("The run request must name the organization of the server.");
         var held = await _automations.GetAutomationAsync(actor.OrganizationId, id, run.MachineId, cancellationToken).ConfigureAwait(false);
@@ -233,8 +240,9 @@ internal sealed class FleetAutomationService
         if (run.SignerDeviceId != actor.Id || run.SignerKey != actor.PublicKey) throw Invalid("The take-over must name the device that signs it, with its key.");
         if (run.OrganizationId != actor.OrganizationId) throw Invalid("The take-over must name the organization of the server.");
         var held = await _automations.GetAutomationAsync(actor.OrganizationId, id, run.MachineId, cancellationToken).ConfigureAwait(false);
-        if (held is null || held.Removed || held.OwnerPersonId != person)
-            throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation of yours has this id on this machine.");
+        if (held is null || held.Removed
+            || held.OwnerPersonId != person && (MayTakeOver is not { } may || !await may(held, person, cancellationToken).ConfigureAwait(false)))
+            throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation whose approvals you answer has this id on this machine.");
         if (_presence.Get(run.MachineId) is not { } session)
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.AutomationConflict, "The machine is offline: its run goes on as its automation says until it is online.");
         try
@@ -415,17 +423,25 @@ internal sealed class FleetAutomationService
         }
 
         if (records.Count > 0) await _automations.RecordAutomationRunsAsync(records, RunsKept, cancellationToken).ConfigureAwait(false);
-        // A run that waits for an approval is told to who answers it: the facts only, never what the run asks.
+        // A run that waits for an approval is told to who answers it: the facts only, never what the run asks. The subject is
+        // the automation and the detail the run, which a person takes over from the message.
         if (Notifications is { } notifications)
         {
             foreach (var run in records.Where(static run => run.Status == WaitingStatus))
             {
                 if (await _automations.GetAutomationAsync(device.OrganizationId, run.AutomationId, device.Id, cancellationToken).ConfigureAwait(false) is not { } automation) continue;
-                var recipients = ApprovalRecipients is { } resolve ? await resolve(automation, cancellationToken).ConfigureAwait(false) : [automation.OwnerPersonId];
+                // What the run says of who answers it, bounded: the server matches it against who answers the approvals, never trusts it alone.
+                var fact = runs.FirstOrDefault(other => other.RunId == run.RunId);
+                fact = fact is null ? null : fact with
+                {
+                    Approvers = fact.Approvers is { Length: > 0 and <= 32 } said ? said : null,
+                    OnCall = fact.OnCall is { } named ? [.. named.Where(static identity => identity is { Length: > 0 and <= 256 }).Take(20)] : null,
+                };
+                var recipients = ApprovalRecipients is { } resolve ? await resolve(automation, fact, cancellationToken).ConfigureAwait(false) : [automation.OwnerPersonId];
                 foreach (var person in recipients.Distinct(StringComparer.Ordinal))
                 {
                     await notifications.NotifyAsync(device.OrganizationId, person, "approval:" + run.RunId, FleetNotificationKinds.Approval, "warning", null, device.Id, null,
-                        run.AutomationId, "A run waits for your approval: open its session to answer it, or take it over.", cancellationToken).ConfigureAwait(false);
+                        run.AutomationId, run.RunId, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
