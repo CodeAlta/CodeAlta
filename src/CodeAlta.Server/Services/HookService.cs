@@ -175,8 +175,10 @@ internal sealed class HookService
             if (value.Length <= MaxHeaderLength) kept[lower] = value;
         }
 
-        // A sender that retries keeps its id and its body; a forged event with a known id has another body.
-        var named = kept.GetValueOrDefault("webhook-id") ?? kept.GetValueOrDefault("x-github-delivery") ?? kept.GetValueOrDefault("x-request-id") ?? string.Empty;
+        // A sender that retries keeps its id and its body; a forged event with a known id has another body. Only an id the sender
+        // signs (webhook-id of Standard Webhooks) tells two events apart: a header it does not sign, such as X-GitHub-Delivery,
+        // would make one event many.
+        var named = kept.GetValueOrDefault("webhook-id") ?? string.Empty;
         var key = Convert.ToHexStringLower(SHA256.HashData([.. Encoding.UTF8.GetBytes(named + "\n"), .. body]));
         var record = new HookEventRecord(hook.OrganizationId, Guid.CreateVersion7().ToString("N"), hook.HookId, hook.MachineId, key, now, now + Waits, HookEventStates.Pending,
             null, null, JsonSerializer.Serialize(kept, HookStorageJsonContext.Default.DictionaryStringString), body);

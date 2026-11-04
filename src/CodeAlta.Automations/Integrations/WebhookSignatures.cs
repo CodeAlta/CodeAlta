@@ -60,8 +60,10 @@ internal static class WebhookSignatures
             {
                 var given = request.Header("x-hub-signature-256");
                 if (given is null || !given.StartsWith("sha256=", StringComparison.Ordinal)) return (null, "The event has no X-Hub-Signature-256 header.");
+                // The signature covers the body only, not X-GitHub-Delivery: the event is what was signed, so that the same body under
+                // another delivery header is the same event, not one more run (a redelivery keeps its body).
                 return Matches(given[7..], HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), request.Body))
-                    ? (request.Header("x-github-delivery") is { Length: > 0 and <= 256 } delivery ? delivery : BodyId(request.Body), null)
+                    ? (BodyId(request.Body), null)
                     : (null, "The signature of the event does not verify with its signing secret.");
             }
 
