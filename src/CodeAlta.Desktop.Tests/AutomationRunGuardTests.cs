@@ -63,6 +63,30 @@ public sealed class AutomationRunGuardTests
         Assert.IsNull((await guard.BeforeToolCallAsync(Call("k8s_delete_namespace"), default)).BlockMessage, "allowed once by a person");
     }
 
+    // A person approves the complete action: an approval names the digest of the tool and its complete arguments, and a call too
+    // long to be shown whole says that it is shortened, with that digest and where the complete arguments are read.
+    [TestMethod]
+    public async Task AnApproval_IsBoundToTheDigestOfTheCompleteCall_AndALongOneSaysItIsShortened()
+    {
+        var asker = new Asker();
+        var guard = new AutomationRunGuard(Entry(new AutomationAutonomy()), new AutomationCallBreaker(), asker.AskAsync, new AutomationClock { Now = Noon }, dryRun: false);
+        static string Digest(string tool, string arguments)
+            => "sha256:" + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(tool + "\n" + arguments)));
+
+        var arguments = $$"""{"padding":"{{new string('a', 3000)}}","target":"prod-db"}""";
+        await guard.BeforeToolCallAsync(Call("db_drop", arguments), default);
+        var asked = asker.Asked.Single();
+        Assert.AreEqual(Digest("db_drop", arguments), asked.ApprovalId, "the approval is bound to the complete call");
+        StringAssert.Contains(asked.Command, "shortened");
+        StringAssert.Contains(asked.Command, Digest("db_drop", arguments));
+        StringAssert.Contains(asked.Reason, "complete arguments");
+
+        // A short call is shown whole, and bound to its digest as well.
+        await guard.BeforeToolCallAsync(Call("db_drop", """{ "target" : "dev-db" }"""), default);
+        Assert.AreEqual(Digest("db_drop", """{"target":"dev-db"}"""), asker.Asked[1].ApprovalId, "the digest is of the arguments without their spacing");
+        Assert.AreEqual("""db_drop { "target" : "dev-db" }""", asker.Asked[1].Command);
+    }
+
     [TestMethod]
     public async Task TheCircuitBreaker_AsksAPersonBeyondItsCallsOfTheHour_AllRunsTogether()
     {

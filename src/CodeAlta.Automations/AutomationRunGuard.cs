@@ -154,7 +154,7 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
         var shown = Shown(tool, call.Invocation.Arguments);
         if (!_autonomy.Allows(tool))
         {
-            return await AskAsync(call.Invocation.SessionId, tool, shown, $"The automation '{_entry.Definition.Name}' may not call {tool} by itself: allow this call once, or deny it.",
+            return await AskAsync(call.Invocation.SessionId, tool, shown, DigestOf(tool, call.Invocation.Arguments), $"The automation '{_entry.Definition.Name}' may not call {tool} by itself: allow this call once, or deny it.",
                 call.WorkingDirectory, cancellationToken).ConfigureAwait(false);
         }
 
@@ -177,7 +177,7 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
             held = $"it called its allowed tools {_autonomy.MaxCallsPerHour} times in the last hour, and its circuit breaker asks a person";
         }
 
-        var decision = await AskAsync(call.Invocation.SessionId, tool, shown, $"The automation '{_entry.Definition.Name}' may not make this call of {tool} by itself: {held}. Allow it once, or deny it.",
+        var decision = await AskAsync(call.Invocation.SessionId, tool, shown, DigestOf(tool, call.Invocation.Arguments), $"The automation '{_entry.Definition.Name}' may not make this call of {tool} by itself: {held}. Allow it once, or deny it.",
             call.WorkingDirectory, cancellationToken).ConfigureAwait(false);
         if (decision.BlockMessage is not null) return decision;
         return await PreconditionsAsync(rules, call, cancellationToken).ConfigureAwait(false) is { } stale ? NotMade(tool, stale) : decision;
@@ -214,10 +214,13 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
     private static AgentToolCallDecision NotMade(string tool, string why)
         => AgentToolCallDecision.Block($"The call of {tool} was not made: {why}. Its target is not as it must be to act; say what you found instead.");
 
-    private async Task<AgentToolCallDecision> AskAsync(string sessionId, string tool, string shown, string reason, string? folder, CancellationToken cancellationToken)
+    // Asks a person a call, bound to the digest of the complete call (its approval id): a call shortened to be shown says where
+    // the complete arguments are read.
+    private async Task<AgentToolCallDecision> AskAsync(string sessionId, string tool, string shown, string digest, string reason, string? folder, CancellationToken cancellationToken)
     {
+        if (shown.Contains(digest, StringComparison.Ordinal)) reason += " The call is shortened here: its complete arguments are in the tool call of the session.";
         var request = new AgentCommandPermissionRequest(new ModelProviderId("automation"), string.Empty, _time.GetUtcNow(), null, "automation-" + Guid.NewGuid().ToString("N"),
-            null, shown, string.IsNullOrWhiteSpace(folder) ? Environment.CurrentDirectory : folder, null, reason, null, null, null);
+            digest, shown, string.IsNullOrWhiteSpace(folder) ? Environment.CurrentDirectory : folder, null, reason, null, null, null);
         using var timeout = _autonomy.ApprovalTimeout is { } minutes && _autonomy.OnTimeout == AutomationAutonomy.StopOnTimeout && !TakenOver
             ? new CancellationTokenSource(TimeSpan.FromMinutes(minutes), _time) : new CancellationTokenSource();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
@@ -253,10 +256,33 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
         return AgentToolCallDecision.Block($"A person did not allow the call of {tool}: do not call it again, and say what you would have done.");
     }
 
-    // The tool and its arguments as the person reads them, and as a try records them.
+    // The tool and its arguments as the person reads them, and as a try records them: a call too long to be shown whole says so,
+    // with the digest of the complete call its approval is bound to.
     private static string Shown(string tool, JsonElement arguments)
     {
         var text = arguments.ValueKind is JsonValueKind.Undefined ? "{}" : arguments.GetRawText();
-        return tool + " " + (text.Length <= MaximumShownArguments ? text : text[..MaximumShownArguments] + "…");
+        return tool + " " + (text.Length <= MaximumShownArguments ? text
+            : text[..MaximumShownArguments] + $"… (shortened: the complete arguments are {text.Length} characters, {DigestOf(tool, arguments)})");
+    }
+
+    /// <summary>
+    /// The digest of a call an approval is bound to: SHA-256 of the tool, a line feed and its complete arguments as compact JSON
+    /// (without their spacing), as <c>sha256:</c> and lowercase hexadecimal.
+    /// </summary>
+    internal static string DigestOf(string tool, JsonElement arguments)
+    {
+        using var buffer = new MemoryStream();
+        buffer.Write(System.Text.Encoding.UTF8.GetBytes(tool + "\n"));
+        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = false, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
+        {
+            if (arguments.ValueKind is not JsonValueKind.Undefined) arguments.WriteTo(writer);
+            else
+            {
+                writer.WriteStartObject();
+                writer.WriteEndObject();
+            }
+        }
+
+        return AutomationAllowedTool.HashPrefix + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(buffer.ToArray()));
     }
 }
