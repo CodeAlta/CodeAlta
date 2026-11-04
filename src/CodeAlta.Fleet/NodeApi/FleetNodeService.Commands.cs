@@ -23,7 +23,7 @@ public sealed partial class FleetNodeService
             throw new FleetException(FleetErrorCodes.InvalidParams, null, $"A title has 1 to {MaxTitleLength} characters.");
         if (parameters.Agent is not null) return CreateAgentSessionAsync(call, parameters);
         var retryKey = RetryKey(call);
-        return CreateRecordedAsync(call, Once(call, FleetNodeJsonContext.Default.FleetCreateSessionResult, () => CreateSessionCoreAsync(retryKey, parameters)));
+        return CreateRecordedAsync(call, Once(call, FleetNodeJsonContext.Default.FleetCreateSessionResult, () => CreateSessionCoreAsync(call.Device, retryKey, parameters)));
     }
 
     // A session started through a team membership is its person's: recorded before its result returns, so that their next call finds it.
@@ -34,7 +34,7 @@ public sealed partial class FleetNodeService
         return result;
     }
 
-    private async Task<FleetCreateSessionResult> CreateSessionCoreAsync(string retryKey, FleetCreateSessionParams parameters)
+    private async Task<FleetCreateSessionResult> CreateSessionCoreAsync(Identity.TrustedDevice? device, string retryKey, FleetCreateSessionParams parameters)
     {
         ProjectDescriptor? project = null;
         if (parameters.ProjectId is { } projectId)
@@ -61,6 +61,8 @@ public sealed partial class FleetNodeService
             _host.RuntimeService.SetDisabledToolPatterns(sessionId, off);
         }
 
+        // Whose work it is is known before the session exists: its identity, read when it attaches, resolves only what that person may use.
+        RecordPrincipal(device, sessionId);
         SessionViewDescriptor session;
         try
         {

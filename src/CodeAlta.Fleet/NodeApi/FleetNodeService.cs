@@ -152,6 +152,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             options.Host.RuntimeService.QueuedRunGate = _queuedRunGate;
         }
 
+        // A session another person started here (a member of a team) resolves none of the owner's secrets.
+        options.Host.Identities.IsOwnerWork = sessionId => Principals.PersonOf(sessionId) is null;
         RestoreAgentRestrictions();
     }
 

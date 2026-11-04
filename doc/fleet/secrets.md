@@ -27,7 +27,8 @@ never by the server.
   `${secret:NAME}` and `${var:NAME}` beside `${env:NAME}`, and `api_key_secret = "NAME"` beside `api_key_env`. A
   configuration file never holds a value again.
 - **Scopes**, the narrowest winning: the run's environment, then the project, the space, the person, the team, the
-  organization. A machine's own store comes first for the work of its owner; an organization's policy can require the
+  organization. A machine's own store comes first for the work of its owner; the work of another person there (a
+  member of a team on a team machine) gets none of the owner's values, only those of the environment it was admitted to; an organization's policy can require the
   managed value on its machines.
 - **Write-only**: the desktop and the REST API set a secret, rotate it and delete it; they list its name, scope,
   version, who set it and when, and which machines hold it, never its value.

@@ -61,6 +61,9 @@ public sealed class FleetSecretCopiesTests
         Assert.AreEqual("machine", Resolve(new SecretScope("work", "p1", "production")));
         Assert.AreEqual("environment", SecretReferenceResolver.ForScope(root.Path, new SecretScope("work", "p1", "production") { OwnerWork = false }, shell: true)
             .Resolve("${secret:TOKEN}"));
+        // The work of another person gets none of the owner's values: not those of the owner's person, spaces or projects.
+        Assert.IsFalse(SecretReferenceResolver.ForScope(root.Path, new SecretScope("work", "p1", null) { OwnerWork = false }, shell: true)
+            .TryGet(new SecretReference(SecretReferenceKind.Secret, "TOKEN"), out _));
     }
 
     [TestMethod]

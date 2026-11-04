@@ -49,6 +49,30 @@ public sealed class TeamMachineSessionsTests
         Assert.AreEqual(0, (await mia.ListSessionsAsync(null, token)).Sessions.Count, "Mia goes on");
     }
 
+    [TestMethod]
+    public async Task AMembersSession_GetsNoneOfTheOwnersSecrets()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, null, null, appliesSpaceIdentities: true);
+        // The owner of the machine keeps a token in its store; the space hands it to the CLI of its sessions.
+        new CodeAlta.Catalog.Secrets.LocalSecretStore(fixture.Host.CatalogOptions.GlobalRoot).SetSecret("GRAFANA_TOKEN", "owner-token-value", "owner (tests)");
+        await fixture.Host.SpaceCatalog.UpdateSettingsAsync(CodeAlta.Catalog.SpaceDescriptor.DefaultId, settings => settings with
+        {
+            Identity = new CodeAlta.Catalog.SpaceIdentity(Cli: [new CodeAlta.Catalog.SpaceCliProfile("grafana", [new("GRAFANA_TOKEN", "${secret:GRAFANA_TOKEN}")])]),
+        }, token);
+        var owner = await fixture.Host.Identities.ResolveAsync(CodeAlta.Catalog.SpaceDescriptor.DefaultId, null, "owner-session", token);
+        Assert.IsTrue(owner.Environment.Variables.Any(static variable => variable.Value == "owner-token-value"), "the owner's work gets it");
+
+        using var maxKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "max"));
+        var trust = new TeamTrust();
+        trust.Members[maxKey.Fingerprint] = ("max", maxKey.DeviceId);
+        await using var max = await ConnectAsync(fixture, trust, maxKey, token);
+        var created = await max.CreateSessionAsync(new FleetCreateSessionParams(Title: "Max's work", SpaceId: CodeAlta.Catalog.SpaceDescriptor.DefaultId), "create-max", token);
+        var identity = await fixture.Host.RuntimeService.GetSessionIdentityAsync(created.SessionId, token);
+        Assert.IsFalse(identity.Environment.Variables.Any(static variable => variable.Value.Contains("owner-token-value", StringComparison.Ordinal)),
+            "a session another person started never gets the owner's secrets");
+    }
+
     private static async Task<FleetNodeClient> ConnectAsync(FleetNodeFixture fixture, IDeviceTrustPolicy trust, DeviceIdentity identity, CancellationToken token)
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
