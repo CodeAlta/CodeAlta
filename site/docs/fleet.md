@@ -427,13 +427,13 @@ A budget limits the tokens or the estimated cost (in US dollars) your machines s
 | **Hold new runs for me** | A new run in its scope waits; **Continue anyway** starts it, **Stop** drops it |
 | **Stop new runs** | A new run in its scope does not start |
 
-Each budget shows a bar of what its scope used in its period, red once it is reached. **Edit** and the trash button change or remove it, beside its row. You hear of a budget once at 80% and once at 100% of each period.
+Each budget shows a bar of what its scope used in its period, red once it is reached. **Edit** and the trash button change or remove it, beside its row. You hear of a budget once at 80% and once at 100% of each period: a message you dismiss, or close, is gone from all your computers.
 
 A run that waits comes as a message wherever you are in CodeAlta, with **Continue anyway** and **Stop**, and in **Runs that wait for a budget** at the top of the page. Your computer signs each **Continue anyway** for that one run: the machine checks it, so the server alone cannot start a run past your budget. Estimated costs come from the prices of the model catalog, as in the Statistics tab.
 
 ### Hear of problems of your machines
 
-Your nodes tell the server how they are: little disk space left, a provider whose sign-in failed or ends within three days without renewing itself, an automation whose last runs failed, their policy refusing runs. The server also sees a node offline for more than six hours and one that runs an older version than the server. A problem that lasts more than ten minutes comes to you once, as a message with **Dismiss**, and stays listed under **Notifications** in **Settings** > **Fleet** > **Budgets** until you dismiss it or it ends. One that comes back later comes again.
+Your nodes tell the server how they are: little disk space left, a provider whose sign-in failed or ends within three days without renewing itself, an automation whose last runs failed, their policy refusing runs. The server also sees a node offline for more than six hours and one that runs an older version than the server. A problem that lasts more than ten minutes comes to you once, as a message with **Dismiss**, and stays listed under **Notifications** in **Settings** > **Fleet** > **Budgets** until you dismiss it or it ends. Dismissing it, or closing its message, dismisses it on all your computers. One that comes back later comes again.
 
 ### Give secrets to your machines
 

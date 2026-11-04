@@ -54,7 +54,8 @@ const buttonApi: FleetApprovalsApi = {
 function Fixture() {
   const [width, setWidth] = useState(1250);
   const [shown, setShown] = useState(false);
-  Object.assign(window, { fleetBudgetsFixture: { setWidth, calls, showButton: () => setShown(true) } });
+  // hideButton then showButton is a start of the window again: a new Fleet button that reads the server anew.
+  Object.assign(window, { fleetBudgetsFixture: { setWidth, calls, showButton: () => setShown(true), hideButton: () => setShown(false) } });
   return <div className="ide-shell settings-dialog-content" style={{ padding: 12, width, boxSizing: "border-box" }}>
     {shown && <FleetApprovals epoch="12345678-1234-1234-1234-123456789abc" api={buttonApi} onOpen={() => calls.push(JSON.stringify({ open: "fleetBudgets" }))} />}
     <FleetBudgetsSettings epoch="12345678-1234-1234-1234-123456789abc" api={api} />

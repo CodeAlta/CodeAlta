@@ -33,6 +33,11 @@ export function FleetApprovals({ epoch, api = fleetServer, onOpen }: { epoch: st
   const [notes, setNotes] = useState<NewNotification[]>([]);
   // What a toast was shown for: each comes once.
   const announced = useRef(new Set<string>());
+  // The toasts this window takes away itself, whose closing is not the person's: the others closed with their ✕ are dismissed.
+  const closing = useRef(new Set<string>());
+  // The notifications marked read, so that a toast closed twice marks it once.
+  const marked = useRef(new Set<string>());
+  const close = useCallback((key: string) => { closing.current.add(key); dismissToast(key); }, []);
   const read = useCallback(async (signal: AbortSignal) => {
     if (!epoch) return;
     const status = await api.status({ expectedEpoch: epoch }, { signal, timeoutMilliseconds: 15_000 });
@@ -70,35 +75,43 @@ export function FleetApprovals({ epoch, api = fleetServer, onOpen }: { epoch: st
 
   const act = useCallback(async (approval: WaitingApproval, approve: boolean) => {
     if (!epoch) return;
-    dismissToast(toastKey(approval));
+    close(toastKey(approval));
     // An approval names the words the person compared in the toast and the class it said: the host signs the key of those
     // words only, as that class only.
     const request = { expectedEpoch: epoch, linkId: approval.server.id, deviceId: approval.device.id, words: approve ? approval.device.words : null,
       kind: approve ? approval.device.kind : null };
     await (approve ? api.approve(request, { timeoutMilliseconds: 30_000 }) : api.revoke(request, { timeoutMilliseconds: 30_000 })).catch(() => null);
     setWaiting(current => current.filter(item => item.device.id !== approval.device.id || item.server.id !== approval.server.id));
-  }, [api, epoch]);
+  }, [api, close, epoch]);
 
   const decide = useCallback(async (item: WaitingHold, carryOn: boolean) => {
     if (!epoch) return;
-    dismissToast(holdKey(item));
+    close(holdKey(item));
     // Continue anyway is signed by this computer for this run only; Stop needs no signature.
     const request = { expectedEpoch: epoch, linkId: item.server.id, id: item.hold.id };
     await (carryOn ? api.continueRun(request, { timeoutMilliseconds: 30_000 }) : api.stopRun(request, { timeoutMilliseconds: 30_000 })).catch(() => null);
     setHolds(current => current.filter(other => other.hold.id !== item.hold.id || other.server.id !== item.server.id));
-  }, [api, epoch]);
+  }, [api, close, epoch]);
 
-  const dismiss = useCallback(async (item: NewNotification) => {
-    if (!epoch) return;
-    dismissToast(noteKey(item));
+  // A notification dismissed here, with Dismiss or the ✕ of its toast, is read for the person on the server: no computer of theirs
+  // shows it again, and only a change of what it is about (a budget reached after 80%, a new period, a new problem) makes another.
+  const markRead = useCallback(async (item: NewNotification) => {
+    const key = noteKey(item);
+    if (!epoch || marked.current.has(key)) return;
+    marked.current.add(key);
     await api.readNotification({ expectedEpoch: epoch, linkId: item.server.id, id: item.notification.id }, { timeoutMilliseconds: 30_000 }).catch(() => null);
     setNotes(current => current.filter(other => other.notification.id !== item.notification.id || other.server.id !== item.server.id));
   }, [api, epoch]);
 
+  const dismiss = useCallback(async (item: NewNotification) => {
+    close(noteKey(item));
+    await markRead(item);
+  }, [close, markRead]);
+
   useEffect(() => {
     // What was decided or dismissed elsewhere (the server's page, another computer, the Budgets page) no longer waits here.
     const keys = new Set([...waiting.map(toastKey), ...holds.map(holdKey), ...notes.map(noteKey)]);
-    for (const key of announced.current) if (!keys.has(key)) dismissToast(key);
+    for (const key of announced.current) if (!keys.has(key)) close(key);
     for (const approval of waiting) {
       const key = toastKey(approval);
       if (announced.current.has(key)) continue;
@@ -140,13 +153,14 @@ export function FleetApprovals({ epoch, api = fleetServer, onOpen }: { epoch: st
       const phrase = notificationPhrase(item.notification);
       showToast({
         intent: notificationIntent(item.notification.severity), icon: <AppIcon name={item.notification.kind === "health" ? "remote" : "usage"} size={16} />, timeout: 0,
+        onDismiss: () => { if (!closing.current.delete(key)) void markRead(item); },
         message: <div className="fleet-approval-toast fleet-notification-toast" data-notification={item.notification.kind}>
           <strong>{t(phrase.key, phrase.values)}</strong>
           <span className="fleet-approval-actions"><Button size="small" variant="minimal" text={t("Dismiss")} onClick={() => void dismiss(item)} /></span>
         </div>,
       }, key);
     }
-  }, [act, decide, dismiss, holds, notes, t, waiting]);
+  }, [act, close, decide, dismiss, holds, markRead, notes, t, waiting]);
 
   if (!epoch || servers.length === 0) return null;
   const count = waiting.length + holds.length + notes.length;

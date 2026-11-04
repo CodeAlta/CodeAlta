@@ -63,6 +63,29 @@ test("each budget shows its scope, rules and consumption, and a budget is added 
   }, options);
 });
 
+test("a notification closed with the ✕ of its toast is dismissed for the person, and does not come back when the window starts again",
+  { skip: !edge, timeout: 90_000 }, async () => {
+    await withCanvas(async page => {
+      await page.until(`document.querySelector('.fleet-hold-row')`, "the page");
+      await page.evaluate(`window.fleetBudgetsFixture.showButton()`);
+      await page.until(`document.querySelector('.fleet-notification-toast')`, "the toast of the notification");
+      await page.evaluate(`document.querySelector('.fleet-notification-toast').closest('.bp6-toast').querySelector('button[aria-label=Close]').click()`);
+      await page.until(`document.querySelector('.fleet-approvals-button')?.getAttribute('aria-label') === 'Fleet: 1 thing needs you'`, "it no longer waits");
+      assert.deepEqual(await page.evaluate(calls), [{ read: "n1" }], "closing it is dismissing it, on the server, for every computer of the person");
+      await page.until(`!document.querySelector('.fleet-notification-toast')`, "its toast is gone");
+
+      // The window starts again: the run held still waits, the notification is not shown again.
+      await page.evaluate(`window.fleetBudgetsFixture.hideButton()`);
+      await page.until(`!document.querySelector('.fleet-approvals-button')`, "the window closed");
+      await page.evaluate(`window.fleetBudgetsFixture.showButton()`);
+      await page.until(`document.querySelector('.fleet-approvals-button')?.getAttribute('aria-label') === 'Fleet: 1 thing needs you'`, "read again");
+      await page.until(`document.querySelector('.fleet-hold-toast')`, "the toast of the run");
+      assert.equal(await page.evaluate(`document.querySelectorAll('.fleet-notification-toast').length`), 0, "no toast of the notification");
+      assert.deepEqual(await page.evaluate(calls), [{ read: "n1" }], "the hold toast taken away and shown again marks nothing");
+      assert.deepEqual(page.problems, []);
+    }, options);
+  });
+
 test("a run held by a budget is continued anyway from the Fleet button's toast, the notification is dismissed, and the page stays whole when narrow",
   { skip: !edge, timeout: 90_000 }, async () => {
     await withCanvas(async page => {
