@@ -104,6 +104,19 @@ public sealed class PluginRuntimeBuiltInTests
     }
 
     [TestMethod]
+    public void EverySecretToldBeforeTheHostAttaches_ReachesItsMasking()
+    {
+        var sink = new PluginSecretSink();
+        var told = Enumerable.Range(0, 1100).Select(static index => $"key-given-early-{index:D4}").ToArray();
+        foreach (var value in told) sink.Mask(value);
+        sink.Mask(told[0]);
+
+        var masked = new List<string>();
+        sink.Attach(masked.Add);
+        CollectionAssert.AreEquivalent(told, masked, "no value told is dropped, however many");
+    }
+
+    [TestMethod]
     public void AHostWithoutSpaces_PutsEveryPluginInEverySpace()
     {
         IPluginServices services = new NoopPluginServices(XenoAtom.Logging.LogManager.GetLogger("test"));
