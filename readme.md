@@ -1,6 +1,8 @@
 # CodeAlta [![ci](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml) [![NuGet](https://img.shields.io/nuget/v/CodeAlta.svg?label=CodeAlta)](https://www.nuget.org/packages/CodeAlta/) [![NuGet](https://img.shields.io/nuget/v/CodeAlta.Tui.svg?label=CodeAlta.Tui)](https://www.nuget.org/packages/CodeAlta.Tui/) [![NuGet](https://img.shields.io/nuget/v/CodeAlta.Cli.svg?label=CodeAlta.Cli)](https://www.nuget.org/packages/CodeAlta.Cli/)
 
-CodeAlta is an open-source workspace for AI coding agents, local code, terminals and Git. It runs on Windows, macOS and Linux, with a desktop app, a terminal UI and a command line.
+**Your agents. One workspace. One fleet.**
+
+CodeAlta is an open-source agentic development environment, local and distributed: AI coding agents, your code, terminals and Git in one workspace. Run your agents on this computer, on your other machines, or across a whole company, from one laptop at home to the machines of your organization. It runs on Windows, macOS and Linux, with a desktop app, a terminal UI, a command line, and a node and a server for your fleet.
 
 Its agent harness holds its own against the vendors' own agents: on hard tasks of [SWE-bench Pro](https://codealta.io/docs/benchmark/), it resolves as many tasks as Claude Code with Claude Opus, for 12% less, and one more than Codex with GPT.
 
@@ -40,9 +42,31 @@ dotnet tool install -g CodeAlta.Node
 altanode run
 ```
 
+CodeAlta Server brings your people and machines together, for you alone or a whole team ([CodeAlta Server](https://codealta.io/docs/fleet/server/)); CodeAlta Desktop can also create one for you over SSH:
+
+```sh
+dotnet tool install -g CodeAlta.Server
+altaserver run
+```
+
 Launch the app from a project folder. On first launch it opens the provider setup: sign in with a Claude, ChatGPT or GitHub Copilot subscription, or add an API key.
 
 See [Getting Started](https://codealta.io/docs/getting-started/) for requirements and the first steps.
+
+## 🛰️ Fleet
+
+<p align="center">
+  <img src="site/img/fleet-in-action.svg" alt="CodeAlta Fleet in action: your desktop and a teammate's laptop connect to CodeAlta Server, which runs no agent and reads no conversation; sessions travel encrypted end to end to a Mac mini, also paired directly, and to a build box; a session moves from one machine to the other; a cloud runner joins once approved with the same six words; every machine checks the rules signed by your devices" width="920">
+</p>
+
+CodeAlta is no longer one desktop: [Fleet](https://codealta.io/docs/fleet/) scales it from home to enterprise, one optional step at a time.
+
+- **Move a session, mid-task**: [send a session to another machine](https://codealta.io/docs/fleet/sessions/#move-a-session) and it goes on there, with its conversation, its commits and its changes; bring it back the same way.
+- **Run on any machine**: start sessions on the Mac that runs your iOS tests or the box with the GPU, run automations where they fit, and read, answer and steer them from CodeAlta Desktop.
+- **Your machines, no server**: [add a machine](https://codealta.io/docs/fleet/machines/) over SSH or with a pairing link; your computers talk directly, encrypted end to end.
+- **A server that cannot read**: [CodeAlta Server](https://codealta.io/docs/fleet/server/) reaches every machine from anywhere without opening a port; it relays sessions encrypted end to end, runs no agent and reads no conversation.
+- **Rules your devices sign**: who may do what is signed by your devices and checked by every machine; [a kill switch and an audit log](https://codealta.io/docs/fleet/policies-and-audit/) for the whole fleet.
+- **For teams**: [people and teams](https://codealta.io/docs/fleet/people-and-access/) who sign in with Microsoft, Google, GitHub, a passkey or your company's sign-in; team machines, budgets, secrets, updates and statistics of every machine.
 
 ## ✨ Features
 
