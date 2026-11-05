@@ -382,6 +382,47 @@ public sealed class FleetSecretsTests
     }
 
     [TestMethod]
+    public async Task AnAnswerThatNamesOneEnvironmentTwice_RecordsTheVersionTheMachineTakes()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var person = (await fleet.NodeListAsync()).Members[fleet.DesktopKey.DeviceId].OwnerId!;
+        var production = await fleet.Manager.PutEnvironmentAsync("production", [], [], [], false, CancellationToken.None);
+        using var rewrite = new RewriteHandler { InnerHandler = new HttpClientHandler() };
+        using var nodeRoot = new TempDirectory();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(nodeRoot.Path, new CodeAlta.Catalog.Secrets.MasterKeySecretProtector(
+            new CodeAlta.Catalog.Secrets.FileSecretKeyStore(Path.Combine(nodeRoot.Path, "secrets", "key"))));
+        var sync = new FleetSecretSync("link-1", new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey,
+            Path.Combine(fleet.Root.Path, "node-link", FleetOrganizationDevices.PinFileName), rewrite), null, store, null);
+        using var reader = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        var first = (await reader.ListEnvironmentsAsync()).Environments.Single();
+
+        // Version 2 requires an approval; the server answers it, then version 1 of the same environment.
+        await fleet.Manager.PutEnvironmentAsync("production", [person], [], [], false, CancellationToken.None);
+        rewrite.Environments = environments => environments with { Environments = [.. environments.Environments, first] };
+        await sync.SyncAsync(CancellationToken.None);
+        Assert.AreEqual(2L, sync.Environments["production"].Number, "the newest version of the environment is the one taken");
+        var organization = (await fleet.NodeListAsync()).OrganizationId!;
+        Assert.AreEqual(2L, store.ReadFleetCheckpoint(organization).Environments[production.Id].Number, "the version recorded is the one taken");
+
+        // Then it answers version 1 alone: the rule of approval stays.
+        rewrite.Environments = _ => new FleetEnvironmentListDto([first]);
+        var result = await sync.SyncAsync(CancellationToken.None);
+        Assert.IsFalse(sync.Environments.TryGetValue("production", out var rolledBack) && rolledBack.Approvers.Count == 0, "the rule of approval is not dropped");
+        Assert.IsTrue(result.Refused.Count >= 1, string.Join("; ", result.Refused));
+
+        // The same for a value: its newest version is the one kept and recorded, whatever comes after it in the answer.
+        rewrite.Environments = null;
+        var secret = await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), "v1-value", false,
+            [fleet.NodeKey.DeviceId], CancellationToken.None);
+        var firstCopy = (await fleet.HeldAsync(fleet.NodeKey)).Secrets.Single();
+        await fleet.Manager.RotateAsync(secret.Id, "v2-value", CancellationToken.None);
+        rewrite.Held = held => held with { Secrets = [.. held.Secrets, firstCopy] };
+        await sync.SyncAsync(CancellationToken.None);
+        Assert.AreEqual(2, store.ListFleetCopies().Single(static copy => copy.Name == "TOKEN").Version);
+        Assert.AreEqual(2, store.ReadFleetCheckpoint(organization).Secrets[secret.Id]);
+    }
+
+    [TestMethod]
     public async Task AnApproval_SignsTheRunThePersonReviewed_NeverOneTheServerSubstitutesAtTheClick()
     {
         await using var fleet = await SecretsFixture.StartAsync();
@@ -456,6 +497,34 @@ public sealed class FleetSecretsTests
             {
                 Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(swap(approval), FleetSecretsApiJsonContext.Default.FleetApprovalDto), Encoding.UTF8, "application/json"),
             };
+        }
+    }
+
+    // Answers the environments and the values of a machine changed as a server can change them.
+    private sealed class RewriteHandler : DelegatingHandler
+    {
+        public Func<FleetEnvironmentListDto, FleetEnvironmentListDto>? Environments { get; set; }
+
+        public Func<FleetSecretListDto, FleetSecretListDto>? Held { get; set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = await base.SendAsync(request, cancellationToken);
+            if (request.Method != HttpMethod.Get) return response;
+            var path = request.RequestUri!.AbsolutePath;
+            string? body = null;
+            if (Environments is { } environments && path.EndsWith("/api/v1/environments", StringComparison.Ordinal))
+            {
+                var read = System.Text.Json.JsonSerializer.Deserialize(await response.Content.ReadAsStringAsync(cancellationToken), FleetSecretsApiJsonContext.Default.FleetEnvironmentListDto)!;
+                body = System.Text.Json.JsonSerializer.Serialize(environments(read), FleetSecretsApiJsonContext.Default.FleetEnvironmentListDto);
+            }
+            else if (Held is { } held && path.EndsWith("/api/v1/secrets/held", StringComparison.Ordinal))
+            {
+                var read = System.Text.Json.JsonSerializer.Deserialize(await response.Content.ReadAsStringAsync(cancellationToken), FleetSecretsApiJsonContext.Default.FleetSecretListDto)!;
+                body = System.Text.Json.JsonSerializer.Serialize(held(read), FleetSecretsApiJsonContext.Default.FleetSecretListDto);
+            }
+
+            return body is null ? response : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
         }
     }
 

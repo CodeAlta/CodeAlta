@@ -153,11 +153,32 @@ public sealed class FleetSecretSync
         var byId = new Dictionary<string, FleetEnvironmentDefinition>(StringComparer.Ordinal);
         // The person of this machine: the one the signed access document names once it was given to another person.
         var access = Access?.Invoke();
+        // One definition of each environment, its newest version: an answer that names one twice gives no older version, and
+        // two definitions of one version are a conflict, none of which is taken.
+        var answered = new Dictionary<string, (FleetEnvironmentDefinition Definition, string Digest)>(StringComparer.Ordinal);
+        var conflicts = new HashSet<string>(StringComparer.Ordinal);
         foreach (var environment in environments.Environments)
         {
             if (!FleetEnvironmentDocuments.TryVerify(environment.Signed, list, access, _devices.Identity.DeviceId, out var definition, out _) || definition.EnvironmentId != environment.Id)
                 continue;
             var digest = Digest(environment.Signed.Payload);
+            if (answered.TryGetValue(definition.EnvironmentId, out var other))
+            {
+                if (other.Definition.Number == definition.Number && other.Digest != digest) conflicts.Add(definition.EnvironmentId);
+                if (other.Definition.Number >= definition.Number) continue;
+            }
+
+            answered[definition.EnvironmentId] = (definition, digest);
+        }
+
+        foreach (var id in conflicts)
+        {
+            if (answered.Remove(id, out var conflict))
+                refused.Add($"environment {conflict.Definition.Name}: the server answers two definitions of version {conflict.Definition.Number}");
+        }
+
+        foreach (var (definition, digest) in answered.Values)
+        {
             if (checkpoint.Environments.TryGetValue(definition.EnvironmentId, out var newest)
                 && (definition.Number < newest.Number || definition.Number == newest.Number && digest != newest.Digest))
             {
@@ -176,7 +197,22 @@ public sealed class FleetSecretSync
         var spaces = SpacesById();
         var projects = await ProjectsByKeyAsync(cancellationToken).ConfigureAwait(false);
         var values = new List<FleetSecretValue>(held.Secrets.Count);
-        foreach (var secret in held.Secrets)
+        // One copy of each value, its newest version: two copies of one version are a conflict, none of which is taken.
+        var offered = new List<FleetSecretDto>(held.Secrets.Count);
+        foreach (var group in held.Secrets.GroupBy(static secret => secret.Id, StringComparer.Ordinal))
+        {
+            var newestOffered = group.Max(static secret => secret.Version);
+            var candidates = group.Where(secret => secret.Version == newestOffered).ToArray();
+            if (candidates.Length > 1)
+            {
+                refused.Add($"{candidates[0].Name}: the server answers two copies of version {newestOffered}");
+                continue;
+            }
+
+            offered.Add(candidates[0]);
+        }
+
+        foreach (var secret in offered)
         {
             if (checkpoint.Secrets.TryGetValue(secret.Id, out var newestVersion) && secret.Version < newestVersion)
             {
