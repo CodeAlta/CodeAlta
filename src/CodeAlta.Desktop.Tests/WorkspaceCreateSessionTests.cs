@@ -650,7 +650,6 @@ public sealed class WorkspaceCreateSessionTests
             await using var reads = new OwnedSessionWorkspace(catalog, new SessionViewJournalStore(catalog.Options));
             await using var providers = new ModelProviderRegistry();
             providers.RegisterOrReplace(Provider, () => throw new AssertFailedException("Descriptor admission must not initialize providers."));
-            var caller = Environment.CurrentManagedThreadId;
             var ran = new TaskCompletionSource<(int Thread, SynchronizationContext? Context)>(TaskCreationOptions.RunContinuationsAsynchronously);
             var service = new WorkspaceService(reads, catalog, Epoch, providers, (_, _, _) =>
             {
@@ -666,11 +665,21 @@ public sealed class WorkspaceCreateSessionTests
                 answers.Writer.TryWrite(json);
                 return ValueTask.CompletedTask;
             });
-            // The view gives the frames of the page to the host on the thread of the window: the handler runs elsewhere.
-            SynchronizationContext.SetSynchronizationContext(window);
-            _ = session.ReceiveAsync($$$"""{"neoastra":1,"kind":"invoke","id":"r1","command":"workspace.createSession","args":{"expectedHostEpoch":"{{{Epoch}}}","scope":"global"}}""");
-            SynchronizationContext.SetSynchronizationContext(previous);
+            // The view gives the frames of the page to the host on the thread of the window: the handler runs elsewhere. The
+            // window is a thread of its own, held until the handler ran, so that no pool lends it to the handler: a thread of the
+            // pool the test gave back at an await could run the handler under another name.
+            var dispatched = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var windowThread = new Thread(() =>
+            {
+                SynchronizationContext.SetSynchronizationContext(window);
+                _ = session.ReceiveAsync($$$"""{"neoastra":1,"kind":"invoke","id":"r1","command":"workspace.createSession","args":{"expectedHostEpoch":"{{{Epoch}}}","scope":"global"}}""");
+                dispatched.TrySetResult(Environment.CurrentManagedThreadId);
+                ran.Task.Wait(TimeSpan.FromSeconds(30));
+            }) { IsBackground = true, Name = "window" };
+            windowThread.Start();
+            var caller = await dispatched.Task.WaitAsync(TimeSpan.FromSeconds(30));
             var (thread, context) = await ran.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            windowThread.Join(TimeSpan.FromSeconds(30));
             Assert.AreNotEqual(caller, thread, "The session is not created on the thread of the window.");
             Assert.AreNotSame(window, context);
             using var answer = JsonDocument.Parse(await answers.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30)));
