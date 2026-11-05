@@ -226,10 +226,11 @@ public sealed class FleetOrganizationAccess
     {
         try
         {
-            return ReadPin() is { Number: > 0 };
+            return ReadPin() is not null;
         }
-        catch (FleetAccessDocumentException)
+        catch (Exception exception) when (exception is FleetAccessDocumentException or IOException or UnauthorizedAccessException)
         {
+            // Only a pin that is not there was never anchored: one that is there but does not read keeps the trust restricted.
             return true;
         }
     }
@@ -242,7 +243,10 @@ public sealed class FleetOrganizationAccess
         if (_pinPath is null) return null;
         try
         {
-            return JsonSerializer.Deserialize(File.ReadAllBytes(_pinPath), FleetAccessPinJson.Default.AccessPin) is { Root.Length: > 0 } pin ? pin : null;
+            // A pin is only ever written with its root, its version and its tip: one that is there without them was damaged.
+            return JsonSerializer.Deserialize(File.ReadAllBytes(_pinPath), FleetAccessPinJson.Default.AccessPin) is { Root.Length: > 0, Number: > 0, Tip.Length: > 0 } pin
+                ? pin
+                : throw new FleetAccessDocumentException(0, "the anchor of the access document of this server does not read");
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
