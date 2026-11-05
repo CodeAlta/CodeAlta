@@ -204,6 +204,24 @@ export function shownGroups(category: SearchCategory, found: Readonly<Record<Sea
     .map(({ group, results, total }) => ({ group, results, total }));
 }
 
+/** What a search window remembers of the groups it has searched for a query. */
+export type SearchedCounts = { query: string; counts: Map<SearchGroup, number> };
+
+/**
+ * What each category says it found for a query: a number once the group was searched for it, kept when the reader
+ * goes to another category, which no longer asks for that group; null when it has not been searched yet, which is not
+ * the same as finding nothing.
+ */
+export function categoryCounts(memory: SearchedCounts, query: string, counts: Readonly<Record<SearchGroup, number>>, searched: (group: SearchGroup) => boolean): Readonly<Record<SearchGroup, number | null>> {
+  if (memory.query !== query) { memory.query = query; memory.counts.clear(); }
+  const known = {} as Record<SearchGroup, number | null>;
+  for (const group of searchGroups) {
+    if (searched(group)) memory.counts.set(group, counts[group]);
+    known[group] = memory.counts.get(group) ?? null;
+  }
+  return known;
+}
+
 /** The results of the groups, in the order they are shown: what the arrow keys move through. */
 export const flatResults = (groups: readonly ShownGroup[]): readonly SearchResult[] => groups.flatMap(group => group.results);
 

@@ -13,9 +13,9 @@ import { searchPluginCommands, type PluginCommandView } from "../pluginUi";
 import { sessionTime } from "../sessionTime";
 import { plainTitle } from "../sessionTitle";
 import { useShellLanguage } from "../shellLanguage";
-import { contentIcon, contentKinds, contentKindsFor, contentResults, markedParts, titleWords, type ContentGroup, type ContentResult } from "./contentResults";
-import { categoryLimit, flatResults, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups, suggestedCommands, searchClaudeCodeConversations,
-  type CommandResult, type FileResult, type SearchCategory, type SearchGroup, type SearchResult } from "./searchResults";
+import { contentGroups, contentIcon, contentKinds, contentKindsFor, contentResults, markedParts, titleWords, type ContentGroup, type ContentResult } from "./contentResults";
+import { categoryCounts, categoryLimit, flatResults, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups, suggestedCommands, searchClaudeCodeConversations,
+  type CommandResult, type FileResult, type SearchCategory, type SearchedCounts, type SearchGroup, type SearchResult } from "./searchResults";
 import { searchSkills, type SkillChoice } from "./skillResults";
 import type { SettingEntry } from "../settings/settingsCatalog";
 import { settingResults } from "../settings/settingsSearch";
@@ -170,6 +170,7 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   // The conversations, the guide and the tools are found by the index of the host, a moment after the last key. A
   // search kept to a project finds the conversations of that project.
   const [foundContent, setFoundContent] = useState<FoundContent>(noContent);
+  const searched = useRef<SearchedCounts>({ query: "", counts: new Map() });
   const contentQuery = query.commands ? "" : text.trim();
   const askedKinds = scoped ? scope === null ? [] : contentKinds.conversations : contentKindsFor(category);
   const contentKey = `${contentQuery}\u0000${askedKinds.join(",")}\u0000${scoped ? scope ?? "" : ""}`;
@@ -254,6 +255,11 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   const counts: Readonly<Record<SearchGroup, number>> = { sessions: found.sessions.length, projects: found.projects.length, files: found.files.length,
     commands: found.commands.length, settings: found.settings.length, skills: found.skills.length, archived: found.archived.length, conversations: found.conversations.length,
     docs: found.docs.length, tools: found.tools.length };
+  // The page ranks most groups at once. The files and what the index finds are asked of the host for the shown
+  // category only: until they answer for this text, the category does not know what it holds.
+  const known = categoryCounts(searched.current, `${text.trim()}\u0000${fileProject}`, counts, group => group === "files"
+    ? !files || wantFiles && foundFiles.query === fileQuery && foundFiles.project === fileProject && (foundFiles.state === "ready" || foundFiles.state === "indexing")
+    : !(contentGroups as readonly SearchGroup[]).includes(group) || wantContent && foundContent.key === contentKey && foundContent.state === "ready" && askedKinds.includes(contentKinds[group as ContentGroup][0]));
   const scopeName = !scoped ? null : scope === null ? t("Chats") : snapshot?.projects.find(project => project.id === scope)?.name ?? t("Unavailable project");
   const groupLabel = (group: SearchGroup) => group === "sessions" && !words.length && shownCategory === "all" ? t("Recent sessions")
     : group === "files" && files ? t("Files of {name}", { name: files.project.name }) : group === "archived" ? t("Archived sessions") : t(categoryLabels[group]);
@@ -303,10 +309,14 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
         {searching && <ActivitySpinner size={13} />}
       </div>
       {!scoped && <div className="global-search-categories" role="tablist" aria-label={t("Search in")}>
-        {categories.map(value => <button key={value} type="button" role="tab" tabIndex={-1} aria-controls="search-results" aria-selected={value === shownCategory}
-          data-empty={value !== "all" && words.length > 0 && counts[value] === 0 || undefined}
-          disabled={query.commands && !(offersSkills ? slashCategories : ["commands"]).includes(value)} onClick={() => choose(value)}>
-          {t(categoryLabels[value])}{value !== "all" && words.length > 0 && <span className="global-search-count">{counts[value]}</span>}</button>)}
+        {categories.map(value => {
+          // A category a text starting with "/" cannot show says nothing of what it holds.
+          const disabled = query.commands && !(offersSkills ? slashCategories : ["commands"]).includes(value);
+          const count = value === "all" || !words.length || disabled ? undefined : known[value];
+          return <button key={value} type="button" role="tab" tabIndex={-1} aria-controls="search-results" aria-selected={value === shownCategory}
+            data-empty={count === 0 || undefined} disabled={disabled} onClick={() => choose(value)}>
+            {t(categoryLabels[value])}{count !== undefined && <span className="global-search-count" title={count === null ? t("Not searched yet: choose this category to search it.") : undefined}>{count ?? "?"}</span>}</button>;
+        })}
       </div>}
       <div ref={list} id="search-results" className="global-search-results" role="listbox" aria-label={t("Results")}>
         {groups.map(group => <div key={group.group} role="group" aria-label={groupLabel(group.group)}>
