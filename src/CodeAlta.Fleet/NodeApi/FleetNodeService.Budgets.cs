@@ -119,6 +119,13 @@ public sealed partial class FleetNodeService
             LogInfo($"The prompt of the session {session.SessionId} that waits for its budget could not be kept: {exception.Message}");
             return new FleetCommandResult(FleetBudgetCommandStatuses.Reached, Code: FleetBudgetCommandStatuses.Reached);
         }
+        catch (FleetHeldSendsFullException exception)
+        {
+            // Refused before the answer says it waits: the sends already held stay, none is evicted for this one.
+            _budgetHolds.TryRemove(runId, out _);
+            LogInfo($"The prompt of the session {session.SessionId} was not sent: {exception.Message}");
+            return new FleetCommandResult("capacity", Code: "capacity");
+        }
 
         LogInfo($"The prompt of the session {session.SessionId} waits for its budget.");
         _ = SendOnceAdmittedAsync(runId, session.SessionId, admission, send);

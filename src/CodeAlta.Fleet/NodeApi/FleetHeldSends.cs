@@ -33,7 +33,8 @@ internal sealed record FleetHeldSend(string RunId, string SessionId, string Text
 /// </summary>
 internal sealed class FleetHeldSends
 {
-    private const int MaximumKept = 512;
+    /// <summary>The most sends held at once: one more is refused before the node answers that it waits.</summary>
+    internal const int MaximumKept = 512;
 
     private readonly string _path;
     private readonly Lock _gate = new();
@@ -58,13 +59,14 @@ internal sealed class FleetHeldSends
 
     /// <summary>Keeps a send that waits, written before the node says it waits.</summary>
     /// <exception cref="IOException">It could not be written.</exception>
+    /// <exception cref="FleetHeldSendsFullException">The node holds <see cref="MaximumKept"/> sends already: none is evicted for it.</exception>
     public void Add(FleetHeldSend send)
     {
         lock (_gate)
         {
-            var sends = Load().SetItem(send.HoldId, send);
-            while (sends.Count > MaximumKept) sends = sends.Remove(sends.Values.MinBy(static held => held.HeldAt)!.HoldId);
-            Save(sends);
+            var known = Load();
+            if (!known.ContainsKey(send.HoldId) && known.Count >= MaximumKept) throw new FleetHeldSendsFullException(known.Count);
+            Save(known.SetItem(send.HoldId, send));
         }
     }
 
@@ -107,6 +109,15 @@ internal sealed class FleetHeldSends
         File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(sends.Values.ToList(), FleetHeldSendsJsonContext.Default.ListFleetHeldSend));
         File.Move(staging, _path, overwrite: true);
         _sends = sends;
+    }
+}
+
+/// <summary>Thrown when the node holds as many sends as it keeps: the send is refused, none already held is evicted.</summary>
+internal sealed class FleetHeldSendsFullException : InvalidOperationException
+{
+    public FleetHeldSendsFullException(int count)
+        : base($"The node already holds {count} sends for their budgets: no more is held until one is continued or stopped.")
+    {
     }
 }
 
