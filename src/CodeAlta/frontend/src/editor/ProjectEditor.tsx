@@ -10,6 +10,7 @@ import { findKeyLabel, useFindInPage } from "../findInPage/useFindInPage";
 import { fileTabKey, isFolderTab, isReadOnlyTab, type FileTab } from "../fileTabs";
 import type { MessageKey } from "../localization";
 import { MarkdownContent, MarkdownLinkScopeContext } from "../MarkdownContent";
+import { MarkdownPreviewBox } from "./MarkdownPreviewBox";
 import { SessionTabMenu, type SessionMenuEntry } from "../SessionTabMenu";
 import { useShellLanguage } from "../shellLanguage";
 import { ExternalEditorIcon, useExternalOpener } from "../externalEditors/externalEditors";
@@ -358,7 +359,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     setModes(current => new Map(current).set(path, next));
     if (kind && preferences.previews.includes(kind) !== (next === "preview"))
       prefer({ previews: next === "preview" ? [...preferences.previews, kind] : preferences.previews.filter(value => value !== kind) });
-    if (next === "source") focusEditor();
+    focusEditor();
   }
   const textReady = shownDocument?.kind === "text" && shownDocument.phase === "ready";
   const showSurface = textReady && mode === "source";
@@ -436,11 +437,15 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     window.setTimeout(attempt, 25);
   }
   useEffect(() => {
-    if (!focusWanted.current || !showSurface) return;
+    // The page of the preview of the file before it may still be there for a moment: the keyboard waits for the one of this file.
+    if (!focusWanted.current || !showSurface && !markdownBox?.isConnected) return;
     focusWanted.current = false;
-    const frame = requestAnimationFrame(() => { if (!modalOpen()) surface.current?.focus(); });
+    const frame = requestAnimationFrame(() => {
+      if (modalOpen()) return;
+      if (showSurface) surface.current?.focus(); else markdownBox?.focus({ preventScroll: true });
+    });
     return () => cancelAnimationFrame(frame);
-  }, [focusAsked, showSurface, activePath]);
+  }, [focusAsked, showSurface, activePath, markdownBox]);
   const focusFiles = () => requestAnimationFrame(() => { if (!modalOpen()) explorer.current?.focus(); });
   function open(path: string, options: Readonly<{ keep?: boolean; focus?: boolean; line?: number; column?: number; length?: number }> = {}) {
     setFiles(current => openEditorFile(current, path, !options.keep, held));
@@ -466,12 +471,13 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     if (request.path !== null) open(request.path, { keep: true, focus: true, line: request.line ?? undefined, column: request.column ?? undefined });
   }, [request]);
 
-  // The active tab takes the keyboard: in the text when there is one, in the files otherwise.
+  // The active tab takes the keyboard: in the text or the preview when there is one, in the files otherwise.
   useEffect(() => {
     // On the editor itself the keyboard is nowhere yet: its text, or its files, take it.
     if (!active || modalOpen() || root.current?.contains(document.activeElement) && document.activeElement !== root.current) return;
-    if (showSurface) surface.current?.focus(); else if (side === "files") explorer.current?.focus(); else root.current?.focus();
-  }, [active, showSurface]);
+    if (showSurface) surface.current?.focus(); else if (markdownBox?.isConnected) markdownBox.focus({ preventScroll: true });
+    else if (side === "files") explorer.current?.focus(); else root.current?.focus();
+  }, [active, showSurface, markdownBox]);
 
   // A new file, in memory until it is saved: it opens at once, and takes the keyboard.
   function newFile(language: EditorLanguage | null = null) {
@@ -901,12 +907,12 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
               onSize={value => setImageSize(value && { path: activePath, ...value })} />
           : mode === "preview" && previewKind === "svg" ? <ImageView vector url={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(preview)}`} label={activePath}
               onSize={value => setImageSize(value && { path: activePath, ...value })} />
-          : mode === "preview" ? <div className="editor-markdown" data-review={reviewPath !== null || undefined} ref={setMarkdownBox} tabIndex={reviewPath !== null ? 0 : undefined}>
+          : mode === "preview" ? <MarkdownPreviewBox label={activePath} review={reviewPath !== null} boxRef={setMarkdownBox}>
               {blockLayer.gutter}
               {/* A relative link of the document starts from its folder, as it does where the file is published. */}
               <MarkdownLinkScopeContext.Provider value={{ projectId: tab.projectId, directory: activePath.includes("/") ? activePath.slice(0, activePath.lastIndexOf("/")) : undefined }}>
                 <MarkdownContent source={preview} document sourceLines={reviewPath !== null} />
-              </MarkdownLinkScopeContext.Provider></div>
+              </MarkdownLinkScopeContext.Provider></MarkdownPreviewBox>
           : null}
         {previewFind.bar}
       </div>
