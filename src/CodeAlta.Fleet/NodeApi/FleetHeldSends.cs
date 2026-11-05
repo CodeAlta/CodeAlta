@@ -78,8 +78,7 @@ internal sealed class FleetHeldSends
         {
             var known = Load();
             if (!known.ContainsKey(send.HoldId) && known.Count >= MaximumKept) throw new FleetHeldSendsFullException(known.Count);
-            var written = send with { Text = _protection.ProtectText(send.Text), Title = send.Title is { } title ? _protection.ProtectText(title) : null };
-            Save(known.SetItem(send.HoldId, send), _written.SetItem(send.HoldId, written));
+            Save(known.SetItem(send.HoldId, send), _written.SetItem(send.HoldId, Protect(send)));
         }
     }
 
@@ -103,37 +102,100 @@ internal sealed class FleetHeldSends
         if (_sends is { } known) return known;
         var sends = ImmutableDictionary.CreateBuilder<string, FleetHeldSend>(StringComparer.Ordinal);
         var written = ImmutableDictionary.CreateBuilder<string, FleetHeldSend>(StringComparer.Ordinal);
+        byte[] bytes;
         try
         {
-            var read = JsonSerializer.Deserialize(File.ReadAllBytes(_path), FleetHeldSendsJsonContext.Default.FleetHeldSendsDocument)?.Sends ?? [];
-            foreach (var send in read.Where(static send => send is { RunId.Length: > 0, SessionId.Length: > 0, Text.Length: > 0, Nonce.Length: > 0 }))
+            bytes = File.ReadAllBytes(_path);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            _written = written.ToImmutable();
+            return _sends = sends.ToImmutable();
+        }
+
+        try
+        {
+            if (IsList(bytes))
             {
-                FleetHeldSend opened;
+                // The file of an earlier version: its sends in clear. They are still held, protected now, and the file in clear is
+                // replaced; a machine that cannot protect them yet keeps them held, and the file as it is, until it can.
+                var legacy = JsonSerializer.Deserialize(bytes, FleetHeldSendsJsonContext.Default.ListFleetHeldSend) ?? [];
+                foreach (var send in legacy.Where(static send => send is { RunId.Length: > 0, SessionId.Length: > 0, Text.Length: > 0, Nonce.Length: > 0 }))
+                    sends[send.HoldId] = send;
                 try
                 {
-                    opened = send with { Text = _protection.UnprotectText(send.Text), Title = send.Title is { } title ? _protection.UnprotectText(title) : null };
+                    foreach (var send in sends.Values) written[send.HoldId] = Protect(send);
+                    Save(sends.ToImmutable(), written.ToImmutable());
+                    return _sends!;
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException
+                    or CodeAlta.Catalog.Secrets.SecretStoreUnavailableException)
+                {
+                    _written = ImmutableDictionary.Create<string, FleetHeldSend>(StringComparer.Ordinal);
+                    return _sends = sends.ToImmutable();
+                }
+            }
+
+            var read = JsonSerializer.Deserialize(bytes, FleetHeldSendsJsonContext.Default.FleetHeldSendsDocument)?.Sends ?? [];
+            foreach (var send in read.Where(static send => send is { RunId.Length: > 0, SessionId.Length: > 0, Text.Length: > 0, Nonce.Length: > 0 }))
+            {
+                // Kept in the file whether this machine opens it or not: a send it cannot open now (its protected store is away) is
+                // not sent, and not lost either.
+                written[send.HoldId] = send;
+                try
+                {
+                    sends[send.HoldId] = send with { Text = _protection.UnprotectText(send.Text), Title = send.Title is { } title ? _protection.UnprotectText(title) : null };
                 }
                 catch (Exception exception) when (exception is FormatException or InvalidDataException or CodeAlta.Catalog.Secrets.SecretStoreUnavailableException)
                 {
-                    // A send this machine cannot open (another key, a damaged entry) is not sent: what cannot be read cannot leak.
-                    continue;
+                    // What cannot be read is not sent, and cannot leak.
                 }
-
-                sends[send.HoldId] = opened;
-                written[send.HoldId] = send;
             }
         }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException)
+        catch (JsonException)
         {
-            // None held; a file of an older format, which kept prompts in clear, is replaced at the next send held.
+            // A file that does not read is kept aside for the owner of the machine, never overwritten by the next send held.
+            try { File.Move(_path, _path + ".unreadable-" + DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture), overwrite: false); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Left where it is: nothing is written over it until it can be moved.
+                throw new IOException($"The sends held in '{_path}' do not read and could not be kept aside.", exception);
+            }
+
+            sends.Clear();
+            written.Clear();
         }
 
         _written = written.ToImmutable();
         return _sends = sends.ToImmutable();
     }
 
+    // The protected form of a send, as the file keeps it.
+    private FleetHeldSend Protect(FleetHeldSend send)
+        => send with { Text = _protection.ProtectText(send.Text), Title = send.Title is { } title ? _protection.ProtectText(title) : null };
+
+    // Whether a file is the list an earlier version wrote, not the document of this one.
+    private static bool IsList(ReadOnlySpan<byte> bytes)
+    {
+        var text = bytes.StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF]) ? bytes[3..] : bytes;
+        foreach (var b in text)
+        {
+            if (b is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n') continue;
+            return b == (byte)'[';
+        }
+
+        return false;
+    }
+
     private void Save(ImmutableDictionary<string, FleetHeldSend> sends, ImmutableDictionary<string, FleetHeldSend> written)
     {
+        // A send held but not protected yet (taken from the file of an earlier version while the protected store was away) is
+        // protected now: none is dropped from the file.
+        foreach (var (holdId, send) in sends)
+        {
+            if (!written.ContainsKey(holdId)) written = written.SetItem(holdId, Protect(send));
+        }
+
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var staging = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(new FleetHeldSendsDocument { Sends = [.. written.Values] },
@@ -164,4 +226,5 @@ internal sealed class FleetHeldSendsDocument
 }
 
 [JsonSerializable(typeof(FleetHeldSendsDocument))]
+[JsonSerializable(typeof(List<FleetHeldSend>))]
 internal sealed partial class FleetHeldSendsJsonContext : JsonSerializerContext;
