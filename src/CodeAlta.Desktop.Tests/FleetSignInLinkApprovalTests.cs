@@ -91,8 +91,28 @@ public sealed class FleetSignInLinkApprovalTests
             Assert.AreEqual("ok", linked.Status, linked.Message);
             Assert.AreEqual(FleetSignInMethods.GitHub, (await desktop.SignInSettingsAsync(new FleetServerLinkRequest(epoch, linkId), token)).Logins.Single().Method);
 
+            // A person with a way to sign in signs in again with it to approve a computer that joined with an enrollment code,
+            // or to make a recovery key: the desktop's key alone does neither.
+            using var phoneKey = DeviceIdentity.LoadOrCreate(At("phone"));
+            using var phone = new FleetServerClient(address, phoneKey);
+            await phone.EnrollAsync((await servers.CreateEnrollmentTokenAsync(linkId, TimeSpan.FromMinutes(10), "phone", token)).Token, "Phone", FleetDeviceKinds.Controller, token);
+            var waiting = (await desktop.DevicesAsync(new FleetServerLinkRequest(epoch, linkId), token)).Devices.Single(static device => device.Status == "pending");
+            Assert.AreEqual("sign_in.confirmation_required", (await desktop.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, waiting.Id, waiting.Words, "controller"), token)).Status);
+            Assert.AreEqual("sign_in.confirmation_required", (await desktop.CreateRecoveryKeyAsync(new FleetRecoveryKeyRequest(epoch, linkId), token)).Status);
+            async Task<T> SignedInAgainAsync<T>(Func<string, Task<T>> act)
+            {
+                var again = await desktop.StartSignInCodeAsync(new FleetSignInCodeRequest(epoch, "github", null, linkId, "confirm"), token);
+                Assert.AreEqual("ok", again.Status, again.Message);
+                var acting = act(again.Code!.Handle);
+                github.Approve(again.Code.UserCode, new FakeAccount("octo-alex", "alex@example.com", "Alex Martin", [], 4242));
+                return await acting;
+            }
+
+            var withSignIn = await SignedInAgainAsync(handle => desktop.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, waiting.Id, waiting.Words, "controller", "github", handle), token));
+            Assert.AreEqual("ok", withSignIn.Status, withSignIn.Message);
+
             // The recovery key of the person approves a link on this computer: its words make its key here.
-            var recovery = await desktop.CreateRecoveryKeyAsync(new FleetServerLinkRequest(epoch, linkId), token);
+            var recovery = await SignedInAgainAsync(handle => desktop.CreateRecoveryKeyAsync(new FleetRecoveryKeyRequest(epoch, linkId, "github", handle), token));
             Assert.AreEqual("ok", recovery.Status, recovery.Message);
             var words = recovery.Words!;
             Assert.AreEqual("recovery.refused", (await desktop.StartSignInCodeAsync(new FleetSignInCodeRequest(epoch, "github", null, linkId, null, "recovery", null,

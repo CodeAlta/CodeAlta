@@ -105,7 +105,12 @@ public enum LoginRemovalOutcome
 /// <param name="UsableMethods">The methods that sign the person in under them (company sign-in required leaves fewer).</param>
 /// <param name="KeepOwnersLastWayIn">Whether the person is an owner, who keeps a usable way in unless they have a recovery key.</param>
 /// <param name="KeepBreakGlassPasskey">Whether the person is the break-glass owner while company sign-in is required, who keeps a passkey.</param>
-public sealed record WayInRemoval(long SettingsVersion, IReadOnlyCollection<string> UsableMethods, bool KeepOwnersLastWayIn, bool KeepBreakGlassPasskey);
+/// <param name="CompanyValidSince">
+/// When the company's settings last changed what signs in: a company account counts only once it signed in since; null
+/// counts every one.
+/// </param>
+public sealed record WayInRemoval(long SettingsVersion, IReadOnlyCollection<string> UsableMethods, bool KeepOwnersLastWayIn, bool KeepBreakGlassPasskey,
+    DateTimeOffset? CompanyValidSince = null);
 
 /// <summary>What happened to a change of the sign-in settings.</summary>
 public enum SignInSettingsWriteOutcome

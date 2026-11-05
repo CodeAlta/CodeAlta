@@ -29,6 +29,31 @@ public sealed partial class SessionRuntimeService
     public Func<SessionViewDescriptor, string, CancellationToken, ValueTask<string?>>? ProviderGate { get; set; }
 
     /// <summary>
+    /// Gets or sets what gives the patterns over tool names the host requires a session to do without, read at every preparation
+    /// of an attachment of the session: they are added to those set on it (<see cref="SetDisabledToolPatterns"/>), which this
+    /// runtime holds in memory only, so that a session resumed after a restart of the process, and every session it starts, does
+    /// without them again. A node gives the tools the signed policy of an organization turns off for the work of the fleet. A
+    /// pattern that is not valid fails the attachment. <see langword="null"/>, the default, requires nothing.
+    /// </summary>
+    public Func<SessionViewDescriptor, CancellationToken, ValueTask<IReadOnlyList<string>?>>? ToolPatternGate { get; set; }
+
+    // Adds the patterns the host requires of a session to those it holds, before its attachment is prepared.
+    private async ValueTask RequireHostToolPatternsAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
+    {
+        if (ToolPatternGate is not { } gate || await gate(session, cancellationToken).ConfigureAwait(false) is not { Count: > 0 } required) return;
+        var held = GetDisabledToolPatterns(session.SessionId);
+        if (required.All(pattern => held.Contains(pattern.Trim(), StringComparer.OrdinalIgnoreCase))) return;
+        try
+        {
+            SetDisabledToolPatterns(session.SessionId, [.. held.Union(required, StringComparer.OrdinalIgnoreCase)]);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new InvalidOperationException($"The tools this session must do without do not read: {exception.Message}", exception);
+        }
+    }
+
+    /// <summary>
     /// Finds who created a session or the nearest session it comes from that records a creator matching a condition: the
     /// session itself first, then its parent (or the session that created it), up its lineage, read from the store.
     /// </summary>

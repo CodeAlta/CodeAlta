@@ -256,7 +256,7 @@ function ServerJoin({ epoch, server, api, onBusy, onBack, onClose }: {
     setProblem(null);
     try {
       // The words the person confirmed, as a node: the host signs the key of those words only, never a controller.
-      const approved = await api.approve({ expectedEpoch: epoch, linkId: server.id, deviceId: device.id, words: device.words, kind: "node" }, { timeoutMilliseconds: 30_000 });
+      const approved = await api.approve({ expectedEpoch: epoch, linkId: server.id, deviceId: device.id, words: device.words, kind: "node", confirmWith: null, handle: null }, { timeoutMilliseconds: 30_000 });
       if (approved.status === "ok") setJoined(approved.device ?? device);
       else setProblem({ key: "The server refused the approval.", detail: approved.message });
     } catch { setProblem({ key: "The server does not answer." }); }

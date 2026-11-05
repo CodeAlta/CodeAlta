@@ -33,6 +33,16 @@ public sealed record FleetBudgetRun(string RunId, string? Title, string? SpaceId
 {
     /// <summary>Gets the nonce of the hold the run asks when a budget holds it; null for a new one. A run taken again after a restart asks the same hold.</summary>
     public string? Nonce { get; init; }
+
+    /// <summary>
+    /// Gets the person who started the session of the run on this machine through the organization (a team membership, a person
+    /// the machine names), as the machine authenticated them; null for none. On a machine of a team or of the organization, the
+    /// space and the project of the run are those of that person's keys.
+    /// </summary>
+    public string? PersonId { get; init; }
+
+    /// <summary>Gets the organization of <see cref="PersonId"/>: a person of another organization is not one of the server's.</summary>
+    public string? PersonOrganizationId { get; init; }
 }
 
 /// <summary>What this machine spent of a budget: the statistics facts it counted itself, which it holds offline too.</summary>
@@ -335,11 +345,13 @@ public sealed class FleetBudgetGate
     {
         var machine = link.Devices.Identity.DeviceId;
         // The owner the signed access document names once the machine was given to another person, else the device list's; a
-        // machine of a team or of the organization has none, and a run names no person whose space it is: only the budgets of the
-        // machine cover it.
+        // machine of a team or of the organization has none. Its space and its project are those of the keys that seal the
+        // session: on a machine of a team or of the organization, those of the person who started it there, of this server's
+        // organization; a run without one is covered by the budgets of the machine only.
         var shared = access?.IsSharedMachine(machine) == true;
         var owner = shared ? null : FleetAccessState.OwnerOfMachine(access, machine, list);
-        var key = link.Keys?.CurrentFor(run.SpaceId, null);
+        var person = run.PersonOrganizationId is { } of && of == list.OrganizationId ? run.PersonId : null;
+        var key = link.Keys?.CurrentFor(run.SpaceId, person);
         var project = key is not null && run.ProjectIdentity is { Length: > 0 } identity ? FleetProjectKeys.Of(key, identity) : null;
         return new FleetBudgetRunScope(machine, owner, key?.Grant?.SpaceId, project);
     }

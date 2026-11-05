@@ -323,6 +323,39 @@ public sealed class NodeAutomationTests
         CollectionAssert.Contains(fixture.Node.Host.RuntimeService.GetDisabledToolPatterns(sessionId).ToList(), "shell_command", "the tools the policy turns off are off");
     }
 
+    // The tools the policy turns off are held by the runtime in memory only: a session of a run continued after the node started
+    // again, and a session it starts, do without them again.
+    [TestMethod]
+    public async Task TheToolsThePolicyTurnsOff_StayOff_WhenARunSessionIsContinuedAfterARestart()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var fixture = await AutomationFixture.StartAsync(root, new ScriptedNodeProvider(), new NodeClock { Now = Noon }, token);
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        var policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Rules = new FleetPolicyRules(ToolsOff: ["shell_command"]) };
+        var automations = fixture.Node.Automations!;
+        automations.Policy = new FleetPolicyGuard(fixture.Fleet.DeviceId, () => [new FleetPolicySource("https://fleet.example", policy, null, static _ => true)]);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Tools", "Hello."), 1), cancellationToken: token);
+        var run = await client.RunAutomationAsync(Id, cancellationToken: token);
+        var ended = await WaitForAsync(() => Task.FromResult(automations.Engine.Runs(Id, 10).FirstOrDefault(candidate => candidate.Id == run.Id && candidate.SessionId is not null
+            && candidate.Status is not (AutomationRun.Running or AutomationRun.Waiting or AutomationRun.Held))), token);
+        var runtime = fixture.Node.Host.RuntimeService;
+        var session = (await runtime.TryGetRecoverableSessionAsync(ended.SessionId!, token))!;
+
+        // What a restart loses: the patterns set on the session.
+        runtime.SetDisabledToolPatterns(session.SessionId, null);
+        Assert.AreEqual(0, runtime.GetDisabledToolPatterns(session.SessionId).Count);
+        CollectionAssert.AreEqual(new[] { "shell_command" }, (await runtime.ToolPatternGate!(session, token))?.ToArray(),
+            "the node gives them again at the next attachment of the session");
+        // A session the run started: the same.
+        var child = new CodeAlta.Catalog.SessionViewDescriptor { SessionId = Guid.NewGuid().ToString(), ParentSessionId = session.SessionId, SpaceId = session.SpaceId };
+        CollectionAssert.AreEqual(new[] { "shell_command" }, (await runtime.ToolPatternGate!(child, token))?.ToArray());
+        // A session of the person's own, not the fleet's: nothing.
+        var own = new CodeAlta.Catalog.SessionViewDescriptor { SessionId = Guid.NewGuid().ToString(), SpaceId = session.SpaceId };
+        Assert.IsNull(await runtime.ToolPatternGate!(own, token));
+    }
+
     // The longest time of a session in the policy reaches the runs of automations.
     [TestMethod]
     public async Task TheLongestTime_EndsTheRunsUnderWay()

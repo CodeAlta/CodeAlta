@@ -41,7 +41,7 @@ public sealed class FleetPolicyRpcTests
             Assert.AreEqual("ok", created.Status, created.Message);
             var linkId = created.Server!.Id;
             // The owner's first approval fixes his person in the device list, as a recovery key does.
-            Assert.AreEqual("ok", (await service.CreateRecoveryKeyAsync(new FleetServerLinkRequest(epoch, linkId), token)).Status);
+            Assert.AreEqual("ok", (await service.CreateRecoveryKeyAsync(new FleetRecoveryKeyRequest(epoch, linkId), token)).Status);
 
             var home = await service.PolicyAsync(new FleetServerLinkRequest(epoch, linkId), token);
             Assert.AreEqual(("ok", true, 0, null), (home.Status, home.CanSign, home.Number, home.Stop), home.Message);

@@ -192,6 +192,39 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         };
         // The credential rules of a run hold at every attachment of its sessions and of those they start.
         host.RuntimeService.ProviderGate = CheckSessionProviderAsync;
+        // So do the tools the policy turns off, which the runtime holds in memory only: also once the node started again.
+        host.RuntimeService.ToolPatternGate = PolicyToolsOffAsync;
+    }
+
+    /// <summary>
+    /// Gets or sets what gives the tools the signed policy turns off for a session of the work of the fleet that no automation
+    /// started (one started through the node API, and those it starts); null for none.
+    /// </summary>
+    internal Func<SessionViewDescriptor, CancellationToken, ValueTask<IReadOnlyList<string>?>>? WorkToolsOff { get; set; }
+
+    /// <summary>
+    /// Gives the tools the signed policy turns off for a session of this node, at every attachment of it
+    /// (<see cref="CodeAlta.Orchestration.Runtime.SessionRuntimeService.ToolPatternGate"/>): for a session of a run of an
+    /// automation, and every session it started, those of the policy that applies to that automation, as when its run started;
+    /// for the other work of the fleet, those of the policy of its space.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="cancellationToken">Cancels the reads of its lineage.</param>
+    /// <returns>The patterns; null for none.</returns>
+    internal async ValueTask<IReadOnlyList<string>?> PolicyToolsOffAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        var origin = await _host.RuntimeService.FindLineageCreatorAsync(session,
+            static createdBy => createdBy.Kind == AltaActorProvenance.AutomationKind && !string.IsNullOrEmpty(createdBy.AutomationId), cancellationToken).ConfigureAwait(false);
+        if (origin is not null)
+        {
+            var spaceId = session.SpaceId ?? SpaceDescriptor.DefaultId;
+            // An automation removed since: the policy of the space of its session.
+            var rules = Engine.Snapshot.Find(origin.AutomationId!) is { } entry ? RulesOf(entry, spaceId) : Policy?.RulesFor(spaceId);
+            return rules?.ToolsOff is { Count: > 0 } off ? off : null;
+        }
+
+        return WorkToolsOff is { } work ? await work(session, cancellationToken).ConfigureAwait(false) : null;
     }
 
     /// <summary>Gets the engine.</summary>

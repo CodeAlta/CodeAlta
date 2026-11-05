@@ -232,6 +232,64 @@ public sealed class OrganizationMachineTests
         Assert.AreEqual(first.Id, nodeKeys.CurrentFor("work", alexId)?.Id, "the owner's sessions still seal with his key");
     }
 
+    [TestMethod]
+    public async Task ABudgetOfASpace_CoversTheSessionsOfItsPersonOnAMachineOfTheOrganization_AndNoSessionWithoutOne()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var root = new TempDirectory();
+        using var alexKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "alex"));
+        using var nodeKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "node"));
+        using var miaKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "mia"));
+        using var alex = new FleetServerClient(server.BaseAddress, alexKey);
+        var setup = await alex.SetUpAsync(server.SetupCode, "Alex", "Desktop", "Acme", CancellationToken.None);
+        var alexId = setup.Owner.Id;
+        var enrollment = await alex.CreateEnrollmentTokenAsync(null, "build-box", CancellationToken.None);
+        using (var node = new FleetServerClient(server.BaseAddress, nodeKey)) await node.EnrollAsync(enrollment.Token, "Build box", CancellationToken.None);
+        await alex.ApproveAsync(nodeKey.DeviceId, FleetDeviceKinds.Node, CancellationToken.None);
+        var invitation = await alex.InvitePersonAsync(new InvitePersonRequest("Mia", FleetOrganizationRoles.Admin));
+        using var mia = new FleetServerClient(server.BaseAddress, miaKey);
+        await mia.EnrollAsync(invitation.Token, "Mia laptop", FleetDeviceKinds.Controller, CancellationToken.None);
+        await alex.ApproveAsync(miaKey.DeviceId, FleetDeviceKinds.Controller, CancellationToken.None);
+
+        var alexDevices = new FleetOrganizationDevices(server.BaseAddress, alexKey);
+        var alexAccess = new FleetOrganizationAccess(alexDevices);
+        var alexKeys = new FleetMetadataKeyring(alexDevices) { Access = () => alexAccess.Current };
+        var nodeDevices = new FleetOrganizationDevices(server.BaseAddress, nodeKey);
+        var nodeAccess = new FleetOrganizationAccess(nodeDevices);
+        var nodeKeys = new FleetMetadataKeyring(nodeDevices) { Access = () => nodeAccess.Current };
+        var work = (await alexKeys.RefreshAsync("work", CancellationToken.None))!;
+
+        // The machine becomes the organization's, as its owner signs it; it holds his key of the space "work".
+        var transfer = await alex.OfferTransferAsync(new OfferTransferRequest(FleetResourceKinds.Machine, nodeKey.DeviceId, FleetPrincipalKinds.Organization, setup.Organization.Id));
+        await mia.DecideTransferAsync(transfer.Id, "accept");
+        await alexAccess.SignAsync((await alexAccess.PrepareAsync(CancellationToken.None))!, CancellationToken.None);
+        await nodeAccess.RefreshAsync(CancellationToken.None);
+        Assert.IsTrue(nodeAccess.Current?.IsOrganizationMachine(nodeKey.DeviceId) == true);
+        await nodeKeys.RefreshAsync("work", CancellationToken.None);
+        Assert.AreEqual(work.Id, nodeKeys.CurrentFor("work", alexId)?.Id);
+
+        // Alex signs a budget of that space, reached on the machine.
+        var manager = new FleetBudgetsManager(alexDevices);
+        await manager.PutAsync(null, new FleetBudgetSettings("Work", FleetBudgetScopeKinds.Space, work.Grant!.SpaceId, FleetBudgetMeasures.Tokens, 100, FleetBudgetPeriods.Month, "UTC",
+            FleetBudgetModes.Advisory, FleetBudgetReachedActions.Stop), CancellationToken.None);
+        var gate = new FleetBudgetGate(() => [new FleetBudgetLink("link", nodeDevices, nodeKeys, null) { Access = nodeAccess }], new Spent(100));
+
+        // A session Alex started there, in his space: the budget of the space covers it, as on his own machine.
+        var his = await gate.AdmitAsync(new FleetBudgetRun("run-1", null, "work", null) { PersonId = alexId, PersonOrganizationId = setup.Organization.Id }, CancellationToken.None);
+        StringAssert.Contains(his.Problem, "'Work' is reached", "the budget of a space holds on a shared machine too");
+        // A session of nobody (an automation of the organization, local work), or of another person: not his space.
+        Assert.IsNull((await gate.AdmitAsync(new FleetBudgetRun("run-2", null, "work", null), CancellationToken.None)).Problem);
+        Assert.IsNull((await gate.AdmitAsync(new FleetBudgetRun("run-3", null, "work", null) { PersonId = invitation.Person.Id, PersonOrganizationId = setup.Organization.Id },
+            CancellationToken.None)).Problem);
+        Assert.IsNull((await gate.AdmitAsync(new FleetBudgetRun("run-4", null, "work", null) { PersonId = alexId, PersonOrganizationId = "another-organization" },
+            CancellationToken.None)).Problem, "the same id in another organization is another person");
+    }
+
+    private sealed class Spent(long spent) : IFleetBudgetSpend
+    {
+        public ValueTask<long> SpentAsync(FleetBudgetLink link, FleetBudgetDefinition budget, FleetBudgetPeriod period, CancellationToken cancellationToken) => ValueTask.FromResult(spent);
+    }
+
     private static FleetSignedEnvironment SignEnvironment(TestDevice signer, FleetEnvironmentDefinition definition)
     {
         var text = FleetEnvironmentDocuments.Serialize(definition);

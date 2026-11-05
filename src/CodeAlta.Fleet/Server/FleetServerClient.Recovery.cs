@@ -19,7 +19,22 @@ public sealed partial class FleetServerClient
     /// <exception cref="FleetDeviceListException">The device list does not verify, or this device is not a controller device in it: nothing was signed.</exception>
     /// <exception cref="FleetServerException">The server refused the key.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<DeviceDto> AddRecoveryKeyAsync(FleetRecoveryKey key, CancellationToken cancellationToken = default)
+    public Task<DeviceDto> AddRecoveryKeyAsync(FleetRecoveryKey key, CancellationToken cancellationToken = default) => AddRecoveryKeyAsync(key, null, cancellationToken);
+
+    /// <summary>
+    /// Makes a recovery key the recovery key of this controller device's person as
+    /// <see cref="AddRecoveryKeyAsync(FleetRecoveryKey, CancellationToken)"/> does, with the confirmation that the person
+    /// signed in again from this device, which a person with a way to sign in needs (for the removal of the one they had too).
+    /// </summary>
+    /// <param name="key">The recovery key.</param>
+    /// <param name="confirmation">The confirmation of a sign-in again (<c>purpose</c> <c>confirm</c>); null for none.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>The recovery key as a device of the list.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> is null.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not verify, or this device is not a controller device in it: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused the key (<c>sign_in.confirmation_required</c> without a confirmation it needs).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<DeviceDto> AddRecoveryKeyAsync(FleetRecoveryKey key, string? confirmation, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(key);
         using var recovery = key.CreateIdentity();
@@ -38,7 +53,8 @@ public sealed partial class FleetServerClient
             {
                 if (old.DeviceId == recovery.DeviceId) return await GetDeviceAsync(old.DeviceId, cancellationToken).ConfigureAwait(false);
                 await ChangeListAsync(old.DeviceId, "revoke",
-                    static (_, _, _) => Task.FromResult<(string, string?, string?, string?)>((FleetDeviceListOperations.Remove, null, null, null)), cancellationToken).ConfigureAwait(false);
+                    static (_, _, _) => Task.FromResult<(string, string?, string?, string?)>((FleetDeviceListOperations.Remove, null, null, null)), cancellationToken, confirmation)
+                    .ConfigureAwait(false);
                 continue;
             }
 
@@ -49,7 +65,7 @@ public sealed partial class FleetServerClient
             try
             {
                 return await SendAsync(HttpMethod.Post, "api/v1/recovery-keys",
-                    Body(new CreateRecoveryKeyRequest(publicKey, entry, key.SealAnchor(organization.Id, state.FirstHash!)), ServerApiJsonContext.Default.CreateRecoveryKeyRequest),
+                    Body(new CreateRecoveryKeyRequest(publicKey, entry, key.SealAnchor(organization.Id, state.FirstHash!), confirmation), ServerApiJsonContext.Default.CreateRecoveryKeyRequest),
                     ServerApiJsonContext.Default.DeviceDto, cancellationToken).ConfigureAwait(false);
             }
             catch (FleetServerException exception) when (exception.Code == "device_list.conflict" && attempt == 0)

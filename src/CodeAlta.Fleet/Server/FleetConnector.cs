@@ -771,7 +771,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
         var first = true;
         while (!stop.IsCancellationRequested)
         {
-            var pending = _outbox.Pending(sessions, MaxFactsPerBatch, KeyOf);
+            var pending = _outbox.Pending(sessions, MaxFactsPerBatch, KeyOf, SignPersonOf);
             if (first) _options.Metrics?.Backlog(_options.ServerAddress, pending.Count);
             first = false;
             if (pending.Count == 0) break;
@@ -892,6 +892,13 @@ public sealed partial class FleetConnector : IAsyncDisposable
     // organization only).
     private FleetMetadataKey? KeyOf(FleetLocalSession session)
         => _options.MetadataKeys?.CurrentFor(session.SpaceId, session.PersonOrganizationId is { } of && of == Devices.Current?.OrganizationId ? session.PersonId : null);
+
+    // This machine's signature that the person of a session, of this server's organization, started it here: what a device that
+    // opens a grant of its content verifies, so that the server cannot make the session another person's.
+    private string? SignPersonOf(FleetLocalSession session)
+        => session.PersonId is { } person && Devices.Current?.OrganizationId is { } organization
+            ? System.Buffers.Text.Base64Url.EncodeToString(_options.Identity.SignData(FleetSessionPersons.GetSignedBytes(organization, _options.Identity.DeviceId, session.SessionId, person)))
+            : null;
 
     // The keys of the spaces published, read again when due, sooner while a space has none. A failure leaves the keys known
     // before (titles wait without one): facts go on.

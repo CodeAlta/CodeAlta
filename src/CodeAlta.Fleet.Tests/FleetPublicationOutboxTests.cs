@@ -28,6 +28,25 @@ public sealed class FleetPublicationOutboxTests
     }
 
     [TestMethod]
+    public void TheFactsOfASessionOfAPerson_CarryTheMachinesSignature_SentAgainOnceForFactsSentWithout()
+    {
+        using var folder = new TestFolder();
+        var outbox = FleetPublicationOutbox.Load(Path.Combine(folder.Path, "outbox.json"));
+        outbox.Resume(new FleetPublicationCursors(0, 0));
+        var mine = Session("s1") with { PersonId = "p2", PersonOrganizationId = "org" };
+
+        // Sent by a version that did not sign the person of a session.
+        var unsigned = outbox.Pending([mine, Session("s2")], 500);
+        outbox.Acknowledged(new FleetFactsPublishResult(outbox.Batch(unsigned).Sequence, 2, 0, []));
+
+        // Signed now: the session of a person is sent again, once, with the signature; the other one is not.
+        var signed = outbox.Pending([mine, Session("s2")], 500, null, session => "signature-of-" + session.SessionId);
+        Assert.AreEqual(("s1", "p2", "signature-of-s1"), (signed.Single().SessionId, signed.Single().PersonId, signed.Single().PersonSignature));
+        outbox.Acknowledged(new FleetFactsPublishResult(outbox.Batch(signed).Sequence, 1, 0, []));
+        Assert.AreEqual(0, outbox.Pending([mine, Session("s2")], 500, null, session => "another-random-signature").Count, "a new signature is no new version");
+    }
+
+    [TestMethod]
     public void ABatchWhoseAnswerWasLostIsAcknowledgedByTheCursorsOfTheWelcome()
     {
         using var folder = new TestFolder();

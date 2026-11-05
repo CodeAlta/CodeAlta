@@ -379,6 +379,20 @@ public sealed class SignInAttempts
         return confirmation.ExpiresAt > _time.GetUtcNow() ? confirmation : null;
     }
 
+    /// <summary>
+    /// Reads a confirmation for the device it was given to without using it: for the first step of an action that takes it
+    /// in its last one (the removal of the recovery key that a new one replaces).
+    /// </summary>
+    /// <param name="value">The value of the confirmation.</param>
+    /// <param name="deviceId">The device that presents it.</param>
+    /// <returns>The confirmation, or null when it is unknown, used, expired, or of another device.</returns>
+    public SignInGrant? FindConfirmation(string? value, string deviceId)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length > 128) return null;
+        return _confirmations.TryGetValue(Hash(value), out var confirmation) && string.Equals(confirmation.DeviceId, deviceId, StringComparison.Ordinal)
+            && confirmation.ExpiresAt > _time.GetUtcNow() ? confirmation : null;
+    }
+
     /// <summary>Keeps a change that waits for an approval.</summary>
     /// <param name="approval">The change.</param>
     /// <returns>Whether it is kept; false when too many wait.</returns>

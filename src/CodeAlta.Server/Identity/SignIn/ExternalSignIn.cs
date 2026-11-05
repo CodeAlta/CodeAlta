@@ -415,13 +415,19 @@ public sealed class ExternalSignInClient : IDisposable
             Text(claims, "tid"), verified);
     }
 
-    // A token issued now proves a session, not a person who just authenticated: the provider says when they did.
-    private static void RequireFreshAuthentication(ExternalProvider provider, IDictionary<string, object> claims, DateTimeOffset since)
+    // A token issued now proves a session, not a person who just authenticated: the provider says when they did, signed in
+    // the token, or the sign-in confirms nothing. Microsoft's authorities send auth_time only when the registration of the
+    // application asks for it (an optional claim of the ID token): prompt=login alone is in the address, which the device
+    // that opens it may drop.
+    internal static void RequireFreshAuthentication(ExternalProvider provider, IDictionary<string, object> claims, DateTimeOffset since)
     {
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentNullException.ThrowIfNull(claims);
         if (!claims.TryGetValue("auth_time", out var value) || !TryReadSeconds(value, out var seconds))
         {
-            if ((FreshAuthenticationOf(provider) & FreshAuthentication.MaxAge) == 0) return;
-            throw new ExternalSignInException(SignInErrorCodes.NotFresh, "The provider did not say when you signed in: sign in again.");
+            throw new ExternalSignInException(SignInErrorCodes.NotFresh, IsMicrosoftHost(provider.Authority)
+                ? "Microsoft did not say when you signed in (the auth_time claim): confirm with another way to sign in, or ask the owner of the application to add the optional claim auth_time to its ID tokens."
+                : "The provider did not say when you signed in (the auth_time claim): confirm with another way to sign in.");
         }
 
         if (DateTimeOffset.FromUnixTimeSeconds(seconds) < since - FreshnessSkew)

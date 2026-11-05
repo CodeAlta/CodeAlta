@@ -9,6 +9,8 @@ import type { MessageKey } from "../localization";
 import { CreateServerDialog } from "./CreateServerDialog";
 import { JoinOrganizationDialog } from "./JoinOrganizationDialog";
 import { ServerSignIn } from "./FleetSignInSettings";
+import { SignInAgain } from "./SignInAgain";
+import { signInProblem } from "./signIn";
 import { ServerSpaces } from "./ServerSpaces";
 import { campaignProgress, campaignStateIntent, campaignStateLabel, canCancelCampaign, emptyUpdateDraft, joinCommand, keyWords, localTimeZone, machineStateIntent,
   machineStateLabel, orderedDevices, policyDraft, policyDraftProblem, policySummary, recoveryCheckPasses, recoveryCheckPositions, recoveryWordCount, serverAddressOf, serverConnection,
@@ -138,6 +140,8 @@ function ServerDevices({ server, epoch, api, revision }: { server: FleetServerVi
   const [skipped, setSkipped] = useState(0);
   const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
   const [acting, setActing] = useState<string | null>(null);
+  // A computer that joined with an enrollment code, which the person approves once they signed in again: the server asked.
+  const [confirming, setConfirming] = useState<FleetDeviceView | null>(null);
   const [generation, setGeneration] = useState(0);
   useEffect(() => {
     const abort = new AbortController();
@@ -152,14 +156,18 @@ function ServerDevices({ server, epoch, api, revision }: { server: FleetServerVi
     const timer = setInterval(() => setGeneration(value => value + 1), devicesPollMilliseconds);
     return () => clearInterval(timer);
   }, []);
-  async function act(device: FleetDeviceView, call: "approve" | "revoke") {
+  async function act(device: FleetDeviceView, call: "approve" | "revoke", confirmWith: string | null = null, handle: string | null = null) {
     setActing(device.id);
     try {
       // An approval names the words the person compared: the host signs the key of those words only.
       const approving = call === "approve";
-      const result = await api[call]({ expectedEpoch: epoch, linkId: server.id, deviceId: device.id, words: approving ? device.words : null, kind: approving ? device.kind : null },
-        { timeoutMilliseconds: 30_000 });
-      setProblem(result.status === "ok" ? null : { key: serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
+      const result = await api[call]({ expectedEpoch: epoch, linkId: server.id, deviceId: device.id, words: approving ? device.words : null, kind: approving ? device.kind : null,
+        confirmWith, handle }, { timeoutMilliseconds: confirmWith ? 11 * 60_000 : 30_000 });
+      if (approving && result.status === "sign_in.confirmation_required") { setConfirming(device); setProblem(null); return; }
+      if (result.status === "ok" || !approving) setConfirming(null);
+      setProblem(result.status === "ok" ? null : result.status === "sign_in.first_way_in_expired"
+        ? { key: "Link a way to sign in first: adding a computer or a recovery key needs one to sign in again with." }
+        : { key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
     } catch { setProblem({ key: "The server does not answer." }); }
     finally { setActing(null); setGeneration(value => value + 1); }
   }
@@ -167,6 +175,8 @@ function ServerDevices({ server, epoch, api, revision }: { server: FleetServerVi
   const ordered = orderedDevices(devices ?? []);
   return <div className="fleet-server-devices">
     {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    {confirming && <SignInAgain key={confirming.id} server={server} epoch={epoch} api={api} message="Approving {name} needs you to sign in again with a way you have."
+      values={{ name: confirming.name }} run={(method, handle) => act(confirming, "approve", method, handle)} />}
     {skipped > 0 && <Callout compact intent="warning" className="fleet-device-list-skipped">
       {skipped === 1 ? t("An entry of the device list comes from a newer version of CodeAlta and was skipped: update CodeAlta.")
         : t("{count} entries of the device list come from a newer version of CodeAlta and were skipped: update CodeAlta.", { count: skipped })}</Callout>}
@@ -207,14 +217,19 @@ function ServerDevices({ server, epoch, api, revision }: { server: FleetServerVi
 function ServerRecovery({ server, epoch, api, onMade }: { server: FleetServerView; epoch: string; api: FleetServerApi; onMade: (words: string) => void }) {
   const { t } = useShellLanguage();
   const [working, setWorking] = useState(false);
+  // A person with a way to sign in signs in again with it to make a recovery key: the server asked.
+  const [confirming, setConfirming] = useState(false);
   const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
-  async function make() {
+  async function make(confirmWith: string | null = null, handle: string | null = null) {
     setWorking(true);
     setProblem(null);
     try {
-      const result = await api.createRecoveryKey({ expectedEpoch: epoch, linkId: server.id }, { timeoutMilliseconds: 30_000 });
-      if (result.status === "ok" && result.words) onMade(result.words);
-      else setProblem({ key: serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
+      const result = await api.createRecoveryKey({ expectedEpoch: epoch, linkId: server.id, confirmWith, handle },
+        { timeoutMilliseconds: confirmWith ? 11 * 60_000 : 30_000 });
+      if (result.status === "ok" && result.words) { setConfirming(false); onMade(result.words); }
+      else if (result.status === "sign_in.confirmation_required") setConfirming(true);
+      else if (result.status === "sign_in.first_way_in_expired") setProblem({ key: "Link a way to sign in first: adding a computer or a recovery key needs one to sign in again with." });
+      else setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
     } catch { setProblem({ key: "The server does not answer." }); }
     finally { setWorking(false); }
   }
@@ -234,6 +249,8 @@ function ServerRecovery({ server, epoch, api, onMade }: { server: FleetServerVie
         : <Button size="small" intent="primary" disabled={working} icon={working ? <ActivitySpinner size={12} /> : undefined} onClick={() => void make()}>
           {t("Make a recovery key…")}</Button>}
     </div>
+    {confirming && <SignInAgain server={server} epoch={epoch} api={api} message="Making a recovery key needs you to sign in again with a way you have."
+      run={(method, handle) => make(method, handle)} />}
     {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
   </div>;
 }

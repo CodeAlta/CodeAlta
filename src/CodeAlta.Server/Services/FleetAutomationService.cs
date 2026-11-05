@@ -355,6 +355,12 @@ internal sealed class FleetAutomationService
         if (Access is not { } access) return false;
         var snapshot = await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false);
         var owner = snapshot.Owner(FleetResourceKinds.Automation, automationId);
+        // Without a record of its own, an automation is the person's who gave it, as the access service names its owner too.
+        giver ??= owner is null
+            ? (await _automations.ListAutomationHoldersAsync(organizationId, cancellationToken).ConfigureAwait(false))
+                .Where(holder => holder.AutomationId == automationId && snapshot.Person(holder.PersonId) is not null).Select(static holder => holder.PersonId).FirstOrDefault()
+            : null;
+        if (giver == person) return true;
         var (ownerKind, ownerId) = owner is not null ? (owner.OwnerKind, owner.OwnerId) : giver is not null ? (FleetPrincipalKinds.Person, giver) : (null, null);
         return ownerKind is not null && ownerId is not null
             && AccessPolicy.Allows(snapshot, person, capability, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), _time.GetUtcNow());

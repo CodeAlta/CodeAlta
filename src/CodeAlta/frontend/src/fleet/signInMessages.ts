@@ -221,4 +221,22 @@ export const signInMessages = {
     "此服务器还没有所有者：它的代码是设置代码。请使用“创建我的服务器…”→“已在运行”。"],
   "Set it up…": ["Configurarlo…", "L’installer…", "Einrichten …", "セットアップ…", "设置它…"],
   "Link {method}": ["Vincular {method}", "Lier {method}", "{method} verknüpfen", "{method} をリンク", "关联 {method}"],
+  "Approving {name} needs you to sign in again with a way you have.": [
+    "Aprobar {name} requiere que vuelvas a iniciar sesión con una forma que tengas.",
+    "Approuver {name} demande de vous reconnecter avec un moyen que vous avez.",
+    "Um {name} zu genehmigen, melde dich erneut mit einem deiner Anmeldewege an.",
+    "{name} を承認するには、お持ちの方法でもう一度サインインしてください。",
+    "批准 {name} 需要你用已有的方式重新登录。"],
+  "Making a recovery key needs you to sign in again with a way you have.": [
+    "Crear una clave de recuperación requiere que vuelvas a iniciar sesión con una forma que tengas.",
+    "Créer une clé de récupération demande de vous reconnecter avec un moyen que vous avez.",
+    "Um einen Wiederherstellungsschlüssel zu erstellen, melde dich erneut mit einem deiner Anmeldewege an.",
+    "回復キーを作成するには、お持ちの方法でもう一度サインインしてください。",
+    "创建恢复密钥需要你用已有的方式重新登录。"],
+  "Link a way to sign in first: adding a computer or a recovery key needs one to sign in again with.": [
+    "Vincula primero una forma de iniciar sesión: añadir un equipo o una clave de recuperación requiere una para volver a iniciar sesión.",
+    "Liez d’abord un moyen de connexion : ajouter un ordinateur ou une clé de récupération en demande un pour se reconnecter.",
+    "Verknüpfe zuerst einen Anmeldeweg: Einen Computer oder Wiederherstellungsschlüssel hinzuzufügen erfordert eine erneute Anmeldung damit.",
+    "先にサインイン方法をリンクしてください。コンピューターや回復キーの追加には、もう一度サインインする方法が必要です。",
+    "请先关联一种登录方式：添加计算机或恢复密钥需要用它重新登录。"],
 } satisfies Record<string, Row>;

@@ -135,6 +135,47 @@ public sealed class FleetOrganizationAccessTests
     }
 
     [TestMethod]
+    public async Task AVersionThisMachineVerifiedButCannotReadBack_GivesTheDeviceListPersonNoOwnerTrust_UntilItIsReadAgain()
+    {
+        using var world = new World();
+        using var folder = new TestFolder();
+        var pin = Path.Combine(folder.Path, "link", FleetOrganizationAccess.PinFileName);
+        var server = world.Server();
+        // Alex (p1) gave his node to Mia (p2): the device list still names Alex, the signed document names Mia.
+        server.Documents.Add(world.Sign(world.Desktop, 1, null, owners: ["p1"],
+            extra: $$"""
+                "personalMachines":[{"device":"{{world.Node.DeviceId}}","person":"p2"}]
+                """));
+        var devices = new FleetOrganizationDevices(new Uri("http://server.test/"), world.Node, null, server);
+        await devices.RefreshAsync(CancellationToken.None);
+        await new FleetOrganizationAccess(devices, pin).RefreshAsync(CancellationToken.None);
+
+        // The pin was kept by an older version, without the version it verified; or it was damaged.
+        var legacy = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(pin))!.AsObject();
+        Assert.IsTrue(legacy.Remove("last"));
+        foreach (var kept in new[] { legacy.ToJsonString(), "{ \"root\": " })
+        {
+            File.WriteAllText(pin, kept);
+            var restarted = new FleetOrganizationAccess(devices, pin);
+            Assert.AreEqual((null, true), (restarted.Current, restarted.IsUnavailable));
+            var trust = new FleetOrganizationTrust(() => devices.Current, world.Node.DeviceId, restarted);
+            Assert.IsNull(trust.FindTrusted(world.Desktop.Fingerprint), "the former owner is not the owner again while the document is unknown");
+            Assert.IsNull(trust.FindTrusted(world.Mia.Fingerprint));
+        }
+
+        // Read again from the server: the document decides, and the new owner is trusted.
+        File.WriteAllText(pin, legacy.ToJsonString());
+        var recovered = new FleetOrganizationAccess(devices, pin);
+        await recovered.RefreshAsync(CancellationToken.None);
+        Assert.IsFalse(recovered.IsUnavailable);
+        var now = new FleetOrganizationTrust(() => devices.Current, world.Node.DeviceId, recovered);
+        Assert.AreEqual(FleetPairingCoordinator.DefaultPermissions, now.FindTrusted(world.Mia.Fingerprint)?.Permissions);
+        Assert.AreEqual(DevicePermissions.None, now.FindTrusted(world.Desktop.Fingerprint)?.Permissions);
+        // A machine that never verified a document: the device list decides, as before.
+        Assert.IsFalse(new FleetOrganizationAccess(devices, Path.Combine(folder.Path, "other", FleetOrganizationAccess.PinFileName)).IsUnavailable);
+    }
+
+    [TestMethod]
     public async Task AMachineGivenToTheOrganization_GivesItsDeviceListPersonNoOwnerTrust_AndItsSignersManageIt()
     {
         using var world = new World();
