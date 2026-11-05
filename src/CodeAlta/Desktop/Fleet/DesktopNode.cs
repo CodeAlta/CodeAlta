@@ -68,6 +68,7 @@ internal sealed class DesktopNode : IAsyncDisposable
     private IReadOnlyList<string> _addresses = [];
     private string? _problem;
     private string? _tailnet;
+    private string? _network;
     private bool _disposed;
 
     /// <summary>Creates the node of this computer; it listens once <see cref="StartAsync"/> finds it turned on.</summary>
@@ -106,8 +107,11 @@ internal sealed class DesktopNode : IAsyncDisposable
     /// </summary>
     public Func<CancellationToken, Task<DesktopTailnetNode?>>? FindTailnet { get; init; }
 
-    /// <summary>Gets the name of this computer on its Tailscale network while it listens there; null otherwise.</summary>
+    /// <summary>Gets the name of this computer on its private network (its tailnet) while it listens there; null otherwise.</summary>
     public string? TailnetName => Volatile.Read(ref _tailnet);
+
+    /// <summary>Gets the name of the private network <see cref="TailnetName"/> is on, such as <c>Tailscale</c>; null otherwise.</summary>
+    public string? NetworkName => Volatile.Read(ref _network);
 
     /// <summary>
     /// Gets the policies of the servers of this computer, as it verified them: the work their relays or the paired computers start
@@ -434,6 +438,7 @@ internal sealed class DesktopNode : IAsyncDisposable
         Volatile.Write(ref _addresses, []);
         Volatile.Write(ref _problem, null);
         Volatile.Write(ref _tailnet, null);
+        Volatile.Write(ref _network, null);
         if (listener is null) return;
         await listener.DisposeAsync().ConfigureAwait(false);
         Log(false, "This computer no longer listens for its paired computers.");
@@ -467,8 +472,9 @@ internal sealed class DesktopNode : IAsyncDisposable
             .Select(address => FleetDirectConnector.Format(address, port)));
         Volatile.Write(ref _addresses, [.. first.Concat(Volatile.Read(ref _addresses)).Distinct(StringComparer.OrdinalIgnoreCase)
             .Where(PairingPayload.IsValidAddress).Take(PairingPayload.MaxAddresses)]);
+        Volatile.Write(ref _network, tailnet.Network);
         Volatile.Write(ref _tailnet, tailnet.Name);
-        Log(false, $"This computer is reached on its tailnet as {tailnet.Name}.");
+        Log(false, $"This computer is reached on {tailnet.Network} as {tailnet.Name}.");
         Changed?.Invoke();
     }
 

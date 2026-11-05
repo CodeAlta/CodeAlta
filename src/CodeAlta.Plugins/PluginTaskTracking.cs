@@ -334,6 +334,8 @@ internal sealed class PluginRuntimeServices : IPluginServices
 
     public IPluginAppFileService AppFiles => _inner.AppFiles;
 
+    public IPluginPrivateNetworkService PrivateNetworks => _inner.PrivateNetworks;
+
     public IPluginAskService Asks { get; }
 
     public IPluginPermissionService Permissions { get; }

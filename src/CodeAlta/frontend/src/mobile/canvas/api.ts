@@ -19,15 +19,17 @@ export const listenRetryMilliseconds = 500;
 /** The calls of the Mobile tab. A call that fails rejects with the `AltaError` of the call. */
 export function createMobileApi(rpc: AltaRpc, options: Readonly<{ retryMilliseconds?: number }> = {}) {
   const retryMilliseconds = options.retryMilliseconds ?? listenRetryMilliseconds;
-  const status = async (name: string) => {
-    const value = readStatus(await rpc.invoke(name, {}));
+  const status = async (name: string, request: object = {}) => {
+    const value = readStatus(await rpc.invoke(name, request));
     if (!value) throw new Error("The Mobile plugin sent a status the tab cannot read.");
     return value;
   };
   return {
     status: () => status("mobile.status"),
-    /** Asks Tailscale again. */
+    /** Asks the provider again. */
     retry: () => status("mobile.retry"),
+    /** Runs an action of the provider (a sign-in): the status of now; what it does comes with the changes. */
+    act: (action: string) => status("mobile.act", { action }),
     /**
      * Listens to the changes of the plugin, then reads its status (an event is not kept: one sent before the listening began is read
      * this way). Listens again when the connection to the plugin is made again, and after a wait when the plugin could not be reached.

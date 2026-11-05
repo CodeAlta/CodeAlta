@@ -173,6 +173,7 @@ internal sealed partial class MachinesService
         {
             Reachable = node.ReachableThroughServers,
             Servers = servers,
+            Network = node.TailnetName is null ? null : node.NetworkName,
         };
     }
 }
@@ -196,6 +197,9 @@ internal sealed record ThisComputerView(string Status, bool Visible, bool Listen
 
     /// <summary>Gets the names of the servers this computer is linked to, whose relay reaches it then.</summary>
     public string[] Servers { get; init; } = [];
+
+    /// <summary>Gets the name of the private network of <see cref="Tailnet"/>, such as Tailscale, while it listens there.</summary>
+    public string? Network { get; init; }
 
     internal static ThisComputerView Refused(string status) => new(status, false, false, null, null, 0, [], null, null, []);
 }

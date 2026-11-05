@@ -165,6 +165,7 @@ public sealed class DesktopNodeTests
 
             var port = node.Port;
             Assert.AreEqual("desk.tail1234.ts.net", node.TailnetName);
+            Assert.AreEqual("Tailscale", node.NetworkName, "the network it is found on is named, for the section This computer");
             CollectionAssert.AreEqual(new[] { $"desk.tail1234.ts.net:{port}", $"100.64.0.7:{port}" }, node.Addresses.Take(2).ToArray(),
                 "the tailnet answers at home and away; its IPv6 address is left out of an IPv4 listener");
             Assert.IsTrue(PairingPayload.TryParse(node.CreatePairing().Link, DateTimeOffset.UtcNow, out var offer, out _));

@@ -128,12 +128,12 @@ internal static class DesktopPlugins
 
     /// <summary>
     /// The plugin that serves the sessions to a phone and the QR code a phone connects with. It is off until the user turns it
-    /// on: it publishes this computer on the tailnet.
+    /// on: it publishes this computer on the tailnet, or through a Dev Tunnel.
     /// </summary>
     internal static BuiltInPluginDefinition MobileDefinition { get; } = new()
     {
         Id = "mobile", DisplayName = "Mobile",
-        Description = "The sessions of this computer on a phone, through Tailscale.",
+        Description = "The sessions of this computer on a phone, through Tailscale or Dev Tunnels.",
         EnabledByDefault = false, Frontends = PluginFrontends.Desktop,
         PluginType = typeof(MobilePlugin), Factory = static () => new MobilePlugin(),
     };
@@ -242,7 +242,7 @@ internal static class DesktopPlugins
 /// </remarks>
 internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPluginUi ui, DesktopCanvases? canvases = null, DesktopPluginIdentities? identities = null,
     IPluginAppFileService? appFiles = null, DesktopPluginAsks? asks = null, DesktopPluginPermissions? permissions = null,
-    PluginSettingsStore? settings = null) : IPluginServices
+    PluginSettingsStore? settings = null, IPluginPrivateNetworkService? privateNetworks = null) : IPluginServices
 {
     private readonly NoopPluginServices _inner = NoopPluginServices.Create();
     private readonly DesktopPluginUi _ui = ui ?? throw new ArgumentNullException(nameof(ui));
@@ -275,6 +275,9 @@ internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPlug
 
     // The files of the window's page, which a plugin serves to a browser of its own (the page of the phones).
     public IPluginAppFileService AppFiles { get; } = appFiles ?? NoopPluginAppFileService.Instance;
+
+    // The private networks of this computer and of the plugins, through which a plugin publishes a page (the page of the phones).
+    public IPluginPrivateNetworkService PrivateNetworks { get; } = privateNetworks ?? NoopPluginPrivateNetworkService.Instance;
 
     // The questions and the review requests of the sessions, once the host runs, which the page of the phones answers.
     public IPluginAskService Asks { get; } = (IPluginAskService?)asks ?? NoopPluginAskService.Instance;

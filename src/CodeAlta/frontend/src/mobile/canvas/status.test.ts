@@ -4,9 +4,9 @@ import type { AltaRpc } from "../../pluginScript/alta";
 import { changedEvent, createMobileApi, type MobileWatchEvent } from "./api";
 import { mobileView, qrPath, quietZone, readStatus, type MobileStatus } from "./status";
 
-const serving = (overrides: Partial<MobileStatus> = {}, tailscale: Partial<MobileStatus["tailscale"]> = {}): MobileStatus => ({
+const serving = (overrides: Partial<MobileStatus> = {}, provider: Partial<MobileStatus["provider"]> = {}): MobileStatus => ({
   server: "listening", port: 51234, serverDetail: null,
-  tailscale: { state: "serving", url: "https://pc.tail1.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, ...tailscale },
+  provider: { id: "tailscale", state: "serving", url: "https://pc.tail1.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, working: false, name: "Tailscale", actions: [], ...provider },
   connectUrl: "https://pc.tail1.ts.net:8443/#k=secret", address: "https://pc.tail1.ts.net:8443", qr: ["101", "010", "111"], ...overrides,
 });
 
@@ -19,10 +19,43 @@ test("the QR rows become one path of dark runs inside the quiet zone", () => {
 
 test("a status is read as the plugin sends it, and what is not one is refused", () => {
   assert.deepEqual(readStatus(JSON.parse(JSON.stringify(serving()))), serving());
-  assert.equal(readStatus({ server: "dancing", tailscale: { state: "serving" } }), null);
+  assert.equal(readStatus({ server: "dancing", provider: { id: "tailscale", state: "serving" } }), null);
+  assert.equal(readStatus({ ...serving(), provider: { state: "serving" } }), null, "a provider without its id");
   assert.equal(readStatus(null), null);
   assert.equal(readStatus({ ...serving(), qr: ["10", "1"] })?.qr, null, "a code that is not square is left out");
   assert.equal(readStatus({ ...serving(), qr: ["1x", "01"] })?.qr, null);
+});
+
+test("through Dev Tunnels: the code of the tunnel, no word of Tailscale, the sign-in offered, and each state said", () => {
+  const tunnel = (overrides: Partial<MobileStatus> = {}, provider: Partial<MobileStatus["provider"]> = {}) => serving({
+    connectUrl: "https://abc-2584.euw.devtunnels.ms/#k=secret", address: "https://abc-2584.euw.devtunnels.ms", ...overrides },
+    { id: "devtunnel", state: "serving", url: "https://abc-2584.euw.devtunnels.ms", detail: "Dev Tunnels serves it.", ...provider });
+  const read = readStatus(JSON.parse(JSON.stringify(tunnel())));
+  assert.deepEqual([read?.provider.id, read?.provider.state, read?.provider.url], ["devtunnel", "serving", "https://abc-2584.euw.devtunnels.ms"]);
+  const served = mobileView(tunnel());
+  assert.deepEqual([served.code?.address, served.problems], ["https://abc-2584.euw.devtunnels.ms", []]);
+  assert.equal(served.instruction, "Scan it with the camera of the phone. The first time, the phone signs in with the same GitHub account.");
+
+  const out = { connectUrl: null, address: null, qr: null };
+  const signIn = mobileView(tunnel(out, { state: "not-signed-in", url: null, detail: "Sign in." })).problems;
+  assert.deepEqual(signIn.map(problem => [problem.key, problem.title, problem.detail, problem.actions.map(action => action.action), problem.retry]),
+    [["provider", "Sign in to Dev Tunnels.", null, ["signin-github"], false]], "the title says it, the buttons of the provider follow");
+  const missing = mobileView(tunnel(out, { state: "not-installed", url: null, detail: "Install it.", fixUrl: "https://learn.microsoft.com/dev-tunnels" })).problems[0];
+  assert.deepEqual([missing.intent, missing.fix, missing.retry], ["danger", { label: "Install Dev Tunnels", url: "https://learn.microsoft.com/dev-tunnels" }, true]);
+  assert.deepEqual(mobileView(tunnel(out, { state: "failed", url: null, detail: "devtunnel host did not start: boom" })).problems.map(problem => [problem.title, problem.detail]),
+    [["The Dev Tunnel did not open.", "devtunnel host did not start: boom"]]);
+  assert.equal(mobileView(tunnel(out, { state: "signing-in", working: true, url: null })).waiting, "Waiting for the sign-in in the browser…");
+  assert.equal(mobileView(tunnel(out, { state: "pending", working: true, url: null })).waiting, "Dev Tunnels is opening the tunnel.");
+  assert.equal(mobileView(serving()).instruction, "Scan it with the camera of the phone. The phone must be signed in to the same tailnet.");
+});
+
+test("a provider or a state the tab has no words for: the plugin's line under a general title, and its code when it serves", () => {
+  const other = mobileView(serving({ connectUrl: null, address: null, qr: null }, { id: "pigeons", state: "lost", url: null, detail: "The pigeon got lost." }));
+  assert.deepEqual(other.problems.map(problem => [problem.key, problem.title, problem.detail, problem.retry]),
+    [["provider", "The phone page could not be published.", "The pigeon got lost.", true]]);
+  assert.deepEqual(mobileView(serving({}, { id: "pigeons" })).problems, []);
+  assert.equal(mobileView(serving({}, { id: "pigeons" })).instruction, "Scan it with the camera of the phone.");
+  assert.equal(mobileView(serving({ connectUrl: null, address: null, qr: null }, { id: "pigeons", state: "pending", working: true })).waiting, "The phone page is starting.");
 });
 
 test("served: the code, the address and nothing wrong", () => {
@@ -34,8 +67,8 @@ test("served: the code, the address and nothing wrong", () => {
 });
 
 test("starting: a line that says so, and no problem", () => {
-  assert.equal(mobileView(serving({ server: "starting", connectUrl: null, address: null, qr: null }, { state: "pending" })).waiting, "The phone page is starting.");
-  const pending = mobileView(serving({ connectUrl: null, address: null, qr: null }, { state: "pending" }));
+  assert.equal(mobileView(serving({ server: "starting", connectUrl: null, address: null, qr: null }, { state: "pending", working: true })).waiting, "The phone page is starting.");
+  const pending = mobileView(serving({ connectUrl: null, address: null, qr: null }, { state: "pending", working: true }));
   assert.equal(pending.waiting, "Tailscale is starting to publish the page.");
   assert.deepEqual(pending.problems, []);
 });
@@ -50,7 +83,7 @@ test("a port in use says which, and why when the plugin knows it", () => {
 });
 
 test("each Tailscale state that keeps a phone out says what fixes it, and Try again only where the state can change", () => {
-  const problem = (state: MobileStatus["tailscale"]["state"], fixUrl: string | null = null) =>
+  const problem = (state: string, fixUrl: string | null = null) =>
     mobileView(serving({ connectUrl: null, address: null, qr: null }, { state, fixUrl, detail: "line of the plugin" })).problems[0];
   const notInstalled = problem("not-installed", "https://tailscale.com/download");
   assert.deepEqual([notInstalled.intent, notInstalled.fix, notInstalled.retry], ["danger", { label: "Download Tailscale", url: "https://tailscale.com/download" }, false]);
@@ -117,12 +150,28 @@ test("a plugin that does not answer is told, and asked again when it may answer 
   stop();
 });
 
-test("Try again asks Tailscale again and gives the new status", async () => {
+test("Try again asks the provider again and gives the new status, and an action of the provider goes with its name", async () => {
   const fake = plugin();
   fake.answer(serving({}, { state: "serving" }));
   const status = await createMobileApi(fake.rpc).retry();
   assert.deepEqual(fake.calls, ["mobile.retry"]);
-  assert.equal(status.tailscale.state, "serving");
+  assert.equal(status.provider.state, "serving");
+  fake.answer(serving({}, { id: "devtunnel", state: "signing-in", working: true }));
+  const acted = await createMobileApi(fake.rpc).act("signin-github");
+  assert.deepEqual(fake.calls, ["mobile.retry", "mobile.act"], "an action of the provider goes through mobile.act");
+  assert.equal(acted.provider.state, "signing-in");
   fake.answer({ wrong: true });
   await assert.rejects(createMobileApi(fake.rpc).status(), /cannot read/);
+});
+test("a network a plugin brings, which the tab has no words for, shows its own line and the buttons of its state in its own words", () => {
+  const view = mobileView(serving({ connectUrl: null, address: null, qr: null }, {
+    id: "acme-vpn", name: "Acme VPN", state: "not-signed-in", url: null, detail: "Sign in to Acme first.",
+    actions: [{ action: "acme-login", label: "Sign in to Acme" }],
+  }));
+  assert.equal(view.problems.length, 1);
+  const problem = view.problems[0]!;
+  assert.equal(problem.detail, "Sign in to Acme first.");
+  assert.deepEqual(problem.actions, [{ action: "acme-login", text: "Sign in to Acme", primary: true }]);
+  assert.equal(readStatus({ ...serving(), provider: { ...serving().provider, actions: [{ action: "x", label: "y".repeat(81) }, { action: "ok", label: "Fine" }] } })?.provider.actions.length, 1,
+    "a label too long is left out");
 });

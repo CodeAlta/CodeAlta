@@ -1,28 +1,39 @@
-// What the Mobile tab shows, from the status the Mobile plugin gives (`mobile.status`, `mobile.retry`, the event `mobile.changed`):
-// the QR code of the link, and what keeps a phone from connecting, with what fixes it. Plain functions, without the DOM.
+// What the Mobile tab shows, from the status the Mobile plugin gives (`mobile.status`, `mobile.retry`, `mobile.act`, the event
+// `mobile.changed`): the QR code of the link, and what keeps a phone from connecting, with what fixes it. The plugin publishes the view
+// through a provider (Tailscale, Dev Tunnels…): each provider has its table of the words and the buttons of its states. Plain functions,
+// without the DOM.
 
-/** The state of the plugin's server on 127.0.0.1. */
+/** The state of the plugin's server on this computer. */
 export type MobileServerState = "starting" | "listening" | "port-in-use" | "failed" | "stopped";
 
-/** The state of the page's publication on the tailnet, with `tailscale serve`. */
-export type MobileTailscaleState = "pending" | "not-installed" | "not-running" | "serve-disabled" | "port-taken" | "serving" | "failed" | "stopped";
+/** What the provider of the connection does, as the plugin says it: its state is one of the provider's own. */
+export type MobileProviderStatus = Readonly<{
+  /** The id of the provider: `tailscale`, `devtunnel`… */
+  id: string;
+  /** `pending`, `serving`, `stopped`, or a state of the provider that says what keeps phones out. */
+  state: string;
+  /** The address phones open, while it is served. */
+  url: string | null;
+  /** The plugin's line, for people. */
+  detail: string;
+  /** The page that fixes it, when there is one. */
+  fixUrl: string | null;
+  /** Whether it is at a step that runs (publishing, a sign-in): a wait, no problem. */
+  working: boolean;
+  /** The name of the network, for people. */
+  name: string;
+  /** The actions its state offers, with the words of the network: used for a network the tab has no words for. */
+  actions: readonly Readonly<{ action: string; label: string }>[];
+}>;
 
 /** The status of the Mobile plugin. */
 export type MobileStatus = Readonly<{
   server: MobileServerState;
-  /** The local port, on 127.0.0.1. */
+  /** The port of the server on this computer. */
   port: number;
   /** Why the server failed, for people. */
   serverDetail: string | null;
-  tailscale: Readonly<{
-    state: MobileTailscaleState;
-    /** `https://<node>.ts.net:<port>` while serving. */
-    url: string | null;
-    /** A line for people. */
-    detail: string;
-    /** The page that fixes it (the download of Tailscale, the page of the admin console that enables Serve and HTTPS). */
-    fixUrl: string | null;
-  }>;
+  provider: MobileProviderStatus;
   /** What the QR code holds: `<url>/#k=<token>`; null while nothing can be reached. */
   connectUrl: string | null;
   /** The same without the token, shown under the QR code. */
@@ -32,22 +43,27 @@ export type MobileStatus = Readonly<{
 }>;
 
 const serverStates: readonly MobileServerState[] = ["starting", "listening", "port-in-use", "failed", "stopped"];
-const tailscaleStates: readonly MobileTailscaleState[] = ["pending", "not-installed", "not-running", "serve-disabled", "port-taken", "serving", "failed", "stopped"];
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const text = (value: unknown): string | null => typeof value === "string" && value.length > 0 ? value : null;
 
 /** Reads a status as the plugin sent it; null when it is not one. A QR code that is not a square of 0 and 1 is left out. */
 export function readStatus(value: unknown): MobileStatus | null {
-  if (!isRecord(value) || !isRecord(value.tailscale)) return null;
+  if (!isRecord(value) || !isRecord(value.provider)) return null;
   const server = serverStates.find(state => state === value.server);
-  const state = tailscaleStates.find(state => state === (value.tailscale as Record<string, unknown>).state);
-  if (!server || !state) return null;
+  const provider = value.provider;
+  const id = text(provider.id), state = text(provider.state);
+  if (!server || !id || !state) return null;
+  const actions = Array.isArray(provider.actions) ? provider.actions.flatMap(item => {
+    if (!isRecord(item)) return [];
+    const action = text(item.action), label = text(item.label);
+    return action && label && action.length <= 64 && label.length <= 80 ? [{ action, label }] : [];
+  }) : [];
   const rows = Array.isArray(value.qr) && value.qr.length > 0 && value.qr.every(row => typeof row === "string" && row.length === (value.qr as unknown[]).length && /^[01]+$/.test(row))
     ? value.qr as string[] : null;
-  const tailscale = value.tailscale;
   return {
     server, port: typeof value.port === "number" ? value.port : 0, serverDetail: text(value.serverDetail),
-    tailscale: { state, url: text(tailscale.url), detail: text(tailscale.detail) ?? "", fixUrl: text(tailscale.fixUrl) },
+    provider: { id, state, url: text(provider.url), detail: text(provider.detail) ?? "", fixUrl: text(provider.fixUrl), working: provider.working === true,
+      name: text(provider.name) ?? id, actions },
     connectUrl: text(value.connectUrl), address: text(value.address), qr: rows,
   };
 }
@@ -81,11 +97,20 @@ export type MobileText = "The phone page is starting." | "Tailscale is starting 
   | "Tailscale is not installed on this computer." | "Tailscale is not running on this computer."
   | "Tailscale Serve is not enabled for this tailnet." | "The port of Tailscale Serve is used by another service."
   | "Tailscale could not publish the page." | "The page is not published on the tailnet."
-  | "Download Tailscale" | "Enable it in the admin console" | "Open Tailscale" | "Open the page that fixes it";
+  | "Download Tailscale" | "Enable it in the admin console" | "Open Tailscale" | "Open the page that fixes it"
+  | "Scan it with the camera of the phone. The phone must be signed in to the same tailnet."
+  | "Scan it with the camera of the phone. The first time, the phone signs in with the same GitHub account."
+  | "Scan it with the camera of the phone."
+  | "Dev Tunnels is opening the tunnel." | "Waiting for the sign-in in the browser…"
+  | "The Dev Tunnels command line is not installed." | "Sign in to Dev Tunnels." | "The Dev Tunnel did not open." | "The Dev Tunnel is closed."
+  | "Install Dev Tunnels" | "Sign in with GitHub" | "The phone page could not be published.";
+
+/** A button of a problem that runs an action of the provider (`mobile.act`): words of the tab, or the words of a network it does not know. */
+export type MobileProviderAction = Readonly<{ action: string; label: MobileText; primary?: boolean } | { action: string; text: string; primary?: boolean }>;
 
 /** Something that keeps a phone from connecting: what it is, why (the plugin's own words), and what fixes it. */
 export type MobileProblem = Readonly<{
-  key: "server" | "tailscale";
+  key: "server" | "provider";
   /** Danger when nothing can work until it is fixed; warning otherwise. */
   intent: "danger" | "warning";
   title: MobileText;
@@ -96,8 +121,10 @@ export type MobileProblem = Readonly<{
   hint?: MobileText;
   /** A button that opens the page that fixes it. */
   fix: Readonly<{ label: MobileText; url: string }> | null;
-  /** Whether "Try again" asks Tailscale again: the states that can change by themselves once fixed. */
+  /** Whether "Try again" asks the provider again: the states that can change once fixed. */
   retry: boolean;
+  /** The buttons that run actions of the provider (a sign-in). */
+  actions: readonly MobileProviderAction[];
 }>;
 
 /** What the tab shows: the code when there is one, what keeps a phone from connecting, and what is still starting. */
@@ -106,22 +133,60 @@ export type MobileView = Readonly<{
   problems: readonly MobileProblem[];
   /** A step that is not done yet and is nobody's fault, while there is no code. */
   waiting: MobileText | null;
+  /** The line under the code. */
+  instruction: MobileText;
 }>;
 
-const retryStates: readonly MobileTailscaleState[] = ["not-running", "serve-disabled", "port-taken", "failed"];
+/** How the tab speaks of a state of a provider that keeps phones out. */
+type ProviderProblem = Readonly<{
+  title: MobileText;
+  danger?: boolean;
+  /** The label of the button of `fixUrl`. */
+  fix?: MobileText;
+  retry?: boolean;
+  actions?: readonly MobileProviderAction[];
+  /** Whether the title says it all: the plugin's line is not shown. */
+  quiet?: boolean;
+}>;
 
-const fixLabels: Readonly<Partial<Record<MobileTailscaleState, MobileText>>> = {
-  "not-installed": "Download Tailscale", "serve-disabled": "Enable it in the admin console", "not-running": "Open Tailscale",
+/** How the tab speaks of a provider: its problems by state, its steps that run, and the line under the code. */
+type ProviderText = Readonly<{
+  problems: Readonly<Record<string, ProviderProblem>>;
+  waiting: Readonly<Record<string, MobileText>>;
+  instruction: MobileText;
+}>;
+
+/** The words and the buttons of each provider. A provider the tab does not know shows the plugin's line. */
+const providers: Readonly<Record<string, ProviderText>> = {
+  tailscale: {
+    problems: {
+      "not-installed": { title: "Tailscale is not installed on this computer.", danger: true, fix: "Download Tailscale" },
+      "not-running": { title: "Tailscale is not running on this computer.", fix: "Open Tailscale", retry: true },
+      "serve-disabled": { title: "Tailscale Serve is not enabled for this tailnet.", danger: true, fix: "Enable it in the admin console", retry: true },
+      "port-taken": { title: "The port of Tailscale Serve is used by another service.", retry: true },
+      "failed": { title: "Tailscale could not publish the page.", retry: true },
+      "stopped": { title: "The page is not published on the tailnet." },
+    },
+    waiting: { pending: "Tailscale is starting to publish the page." },
+    instruction: "Scan it with the camera of the phone. The phone must be signed in to the same tailnet.",
+  },
+  devtunnel: {
+    problems: {
+      "not-installed": { title: "The Dev Tunnels command line is not installed.", danger: true, fix: "Install Dev Tunnels", retry: true },
+      "not-signed-in": {
+        title: "Sign in to Dev Tunnels.", quiet: true,
+        actions: [{ action: "signin-github", label: "Sign in with GitHub", primary: true }],
+      },
+      "failed": { title: "The Dev Tunnel did not open.", retry: true },
+      "stopped": { title: "The Dev Tunnel is closed." },
+    },
+    waiting: { pending: "Dev Tunnels is opening the tunnel.", "signing-in": "Waiting for the sign-in in the browser…" },
+    instruction: "Scan it with the camera of the phone. The first time, the phone signs in with the same GitHub account.",
+  },
 };
 
-const tailscaleTitles: Readonly<Partial<Record<MobileTailscaleState, MobileText>>> = {
-  "not-installed": "Tailscale is not installed on this computer.",
-  "not-running": "Tailscale is not running on this computer.",
-  "serve-disabled": "Tailscale Serve is not enabled for this tailnet.",
-  "port-taken": "The port of Tailscale Serve is used by another service.",
-  "failed": "Tailscale could not publish the page.",
-  "stopped": "The page is not published on the tailnet.",
-};
+// A state of a provider the tab has no words for: the plugin's line under a general title. The steps that run are no problem.
+const unknownProblem: ProviderProblem = { title: "The phone page could not be published.", retry: true };
 
 /** What the tab shows for a status. */
 export function mobileView(status: MobileStatus): MobileView {
@@ -129,24 +194,27 @@ export function mobileView(status: MobileStatus): MobileView {
   const server = status.server;
   if (server === "port-in-use") {
     problems.push({ key: "server", intent: "danger", title: "The port {port} is in use by another program.", parameters: { port: status.port },
-      detail: status.serverDetail, hint: "Another CodeAlta with the Mobile plugin on may be using it.", fix: null, retry: false });
+      detail: status.serverDetail, hint: "Another CodeAlta with the Mobile plugin on may be using it.", fix: null, retry: false, actions: [] });
   } else if (server === "failed" || server === "stopped") {
     problems.push({ key: "server", intent: "danger", title: server === "failed" ? "The server of the phone page did not start." : "The server of the phone page is stopped.",
-      detail: status.serverDetail, fix: null, retry: false });
+      detail: status.serverDetail, fix: null, retry: false, actions: [] });
   }
-  const tailscale = status.tailscale;
-  const title = tailscaleTitles[tailscale.state];
-  if (title) {
+  const provider = status.provider;
+  const words: ProviderText | undefined = providers[provider.id];
+  const problem = provider.working || provider.state === "serving" ? undefined : words?.problems[provider.state] ?? (provider.state === "stopped" ? undefined : unknownProblem);
+  if (problem) {
     problems.push({
-      key: "tailscale", intent: tailscale.state === "not-installed" || tailscale.state === "serve-disabled" ? "danger" : "warning", title,
-      detail: tailscale.detail.trim() || null,
-      fix: tailscale.fixUrl ? { label: fixLabels[tailscale.state] ?? "Open the page that fixes it", url: tailscale.fixUrl } : null,
-      retry: retryStates.includes(tailscale.state),
+      key: "provider", intent: problem.danger ? "danger" : "warning", title: problem.title,
+      detail: problem.quiet ? null : provider.detail.trim() || null,
+      fix: provider.fixUrl ? { label: problem.fix ?? "Open the page that fixes it", url: provider.fixUrl } : null,
+      retry: problem.retry ?? false,
+      // A network the tab has no words for gives the buttons of its state with its own.
+      actions: problem.actions ?? (words ? [] : provider.actions.map((action, index) => ({ action: action.action, text: action.label, primary: index === 0 }))),
     });
   }
   const code = status.connectUrl && status.qr ? { ...qrPath(status.qr), address: status.address ?? status.connectUrl.replace(/#.*$/u, "") } : null;
-  const waiting: MobileText | null = code || problems.some(problem => problem.key === "server") ? null
+  const waiting: MobileText | null = code || problems.length > 0 ? null
     : server === "starting" ? "The phone page is starting."
-    : tailscale.state === "pending" ? "Tailscale is starting to publish the page." : null;
-  return { code, problems, waiting };
+    : words?.waiting[provider.state] ?? (provider.state === "pending" ? "The phone page is starting." : null);
+  return { code, problems, waiting, instruction: words?.instruction ?? "Scan it with the camera of the phone." };
 }

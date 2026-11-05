@@ -480,6 +480,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // Plugins read the user's profile (the MCP servers and their sign-ins, the provider CLIs): they
             // run in the normal launch and stay off when the roots are explicit.
             var pluginAlta = roots.Home is null ? new PluginAltaServiceBridge() : null;
+            // The private networks of this computer (Tailscale, Dev Tunnels) and those of the active plugins: the page of the phones is
+            // published through one, and the fleet names this computer by one in its pairing links.
+            var privateNetworks = new CodeAlta.Plugins.PrivateNetworks.PrivateNetworkRegistry(
+                () => _hostCreation is { IsCompletedSuccessfully: true } created ? created.Result.PluginRuntime.ActivePlugins.Select(static plugin => (object?)plugin.Instance) : []);
             var startupStatus = new DesktopStartupStatus();
             using var scratchpadStartupStatus = startupScratchpadCleanup.Subscribe(startupStatus.SetScratchpadCleanup);
             var retentionProtection = DesktopSessionRetention.CreateProtection();
@@ -558,7 +562,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
                     DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay, browserHost), PluginSafeMode = DesktopPlugins.SafeMode,
-                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest), pluginAsks, pluginPermissions, pluginSettingsStore),
+                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest), pluginAsks, pluginPermissions, pluginSettingsStore,
+                    privateNetworks),
                 // With the provider types of the plugins, which start later: their providers wait for them, as the log says.
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, modelsDev, pluginProviderTypes),
@@ -795,7 +800,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var sessionHosts = new SessionHosts.SessionHostRegistry(new SessionHosts.LocalSessionHost(host));
                 // The paired machines, the sessions agents start on them and the CodeAlta Servers of this instance: wired here,
                 // started once the window shows the application, with no key and no network for a profile that stays local.
-                var fleetStartup = Fleet.DesktopFleetStartup.Create(host, sessionHosts, Environment.MachineName, DesktopCommandLine.Version);
+                var fleetStartup = Fleet.DesktopFleetStartup.Create(host, sessionHosts, Environment.MachineName, DesktopCommandLine.Version, privateNetworks: privateNetworks);
                 fleet = fleetStartup.Fleet;
                 remoteChildren = fleetStartup.RemoteChildren;
                 fleetServers = fleetStartup.Servers;

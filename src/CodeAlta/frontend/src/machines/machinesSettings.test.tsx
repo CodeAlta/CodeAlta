@@ -36,7 +36,7 @@ test("a machine added through the server is one of the person's machines: listed
 });
 
 const thisComputer = (change: Partial<ThisComputerView> = {}): ThisComputerView => ({ status: "ok", visible: false, listening: false, name: "DESKTOP-ALEX", words: null,
-  port: 2587, addresses: [], tailnet: null, problem: null, devices: [], reachable: false, servers: [], ...change });
+  port: 2587, addresses: [], tailnet: null, problem: null, devices: [], reachable: false, servers: [], network: null, ...change });
 const renderThisComputer = (view: ThisComputerView) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
   createElement(ThisComputerBody, { view, busy: false, onVisible: never, onReachable: never, onPair: never, onPermission: never, onRevoke: never })));
 

@@ -4,8 +4,20 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json.Nodes;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.PrivateNetworks;
 
 namespace CodeAlta.Plugin.Mobile.Tests;
+
+/// <summary>Makes the plugin with the private networks of CodeAlta over command lines of the tests.</summary>
+internal static class MobileFakes
+{
+    /// <summary>The plugin with Tailscale over <paramref name="tailscale"/> and Dev Tunnels over <paramref name="tunnel"/> (the one of this computer when null).</summary>
+    internal static MobilePlugin Plugin(ITailscaleCli tailscale, IDevTunnelCli? tunnel = null)
+    {
+        IReadOnlyList<IPrivateNetworkProvider> networks = [new TailscaleNetwork(tailscale), new DevTunnelNetwork(tunnel ?? new DevTunnelCli())];
+        return new MobilePlugin(() => networks);
+    }
+}
 
 /// <summary>An <c>alta</c> that answers each command with the records a test gives, and remembers what it was asked.</summary>
 internal sealed class FakeAlta : IPluginAltaService
@@ -181,9 +193,9 @@ internal sealed class FakePermissions : IPluginPermissionService
 }
 
 /// <summary>A Tailscale command line whose answers a test gives.</summary>
-internal sealed class FakeTailscaleCli(bool installed = true) : IMobileTailscaleCli
+internal sealed class FakeTailscaleCli(bool installed = true) : ITailscaleCli
 {
-    private readonly Dictionary<string, MobileCliResult> _answers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, CommandLineResult> _answers = new(StringComparer.Ordinal);
 
     internal List<string> Calls { get; } = [];
 
@@ -191,15 +203,15 @@ internal sealed class FakeTailscaleCli(bool installed = true) : IMobileTailscale
 
     internal FakeTailscaleCli Answer(string args, string output, int exitCode = 0, bool timedOut = false)
     {
-        _answers[args] = new MobileCliResult(exitCode, output, timedOut);
+        _answers[args] = new CommandLineResult(exitCode, output, timedOut);
         return this;
     }
 
-    public Task<MobileCliResult> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    public Task<CommandLineResult> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         var line = string.Join(' ', args);
         Calls.Add(line);
-        return Task.FromResult(_answers.TryGetValue(line, out var answer) ? answer : new MobileCliResult(1, "unknown command: " + line));
+        return Task.FromResult(_answers.TryGetValue(line, out var answer) ? answer : new CommandLineResult(1, "unknown command: " + line));
     }
 
     internal const string Running = """{"BackendState":"Running","Self":{"DNSName":"desk.tail1234.ts.net."}}""";

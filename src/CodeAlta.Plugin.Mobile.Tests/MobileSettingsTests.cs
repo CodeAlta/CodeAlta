@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.PrivateNetworks;
 
 namespace CodeAlta.Plugin.Mobile.Tests;
 
@@ -13,7 +15,7 @@ public sealed class MobileSettingsTests
     [TestMethod]
     public void ThePlugin_DeclaresItsTab_AndItsSettingsPage()
     {
-        var canvases = new MobilePlugin(new FakeTailscaleCli()).GetCanvases().ToArray();
+        var canvases = MobileFakes.Plugin(new FakeTailscaleCli()).GetCanvases().ToArray();
 
         Assert.AreEqual(2, canvases.Length);
         var tab = canvases.Single(static canvas => canvas.Id == MobilePlugin.CanvasId);
@@ -32,7 +34,7 @@ public sealed class MobileSettingsTests
         var (tab, tabView) = await fixture.OpenAsync(MobilePlugin.CanvasId);
         var (page, pageView) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);
 
-        CollectionAssert.AreEquivalent(new[] { "mobile.status", "mobile.retry" }, tab.Names.ToArray());
+        CollectionAssert.AreEquivalent(new[] { "mobile.status", "mobile.retry", "mobile.act" }, tab.Names.ToArray());
         CollectionAssert.AreEquivalent(new[] { "mobile.settings.get", "mobile.settings.set", "mobile.reset" }, page.Names.ToArray());
         Assert.AreEqual(MobilePlugin.AppModule, tabView.Script?.AppModule);
         Assert.AreEqual(MobilePlugin.SettingsModule, pageView.Script?.AppModule);
@@ -48,9 +50,9 @@ public sealed class MobileSettingsTests
         var saved = fixture.State.Text;
         var (page, _) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);
 
-        foreach (var (local, https) in new (int?, int?)[] { (1023, 4443), (65536, 4443), (null, 4443), (port, 80), (port, 70000), (port, null) })
+        foreach (var (local, https) in new (int?, int?)[] { (1023, 4443), (65536, 4443), (null, 4443), (port, 80), (port, 70000) })
         {
-            var answer = await page.InvokeAsync<MobilePorts, MobileSettingsView>("mobile.settings.set", new MobilePorts(local, https));
+            var answer = await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, local, https));
             Assert.IsNotNull(answer.Error, $"{local} and {https} are refused");
             StringAssert.Contains(answer.Error, "1024 to 65535");
             Assert.AreEqual((port, 4443), (answer.Port, answer.HttpsPort), "the ports of now come back with the refusal");
@@ -80,14 +82,14 @@ public sealed class MobileSettingsTests
         cli.Answer("serve status --json", Served(4443, oldPort))
             .Answer("serve --https=4443 off", "")
             .Answer($"serve --bg --https=5443 http://127.0.0.1:{newPort}", "");
-        var answer = await page.InvokeAsync<MobilePorts, MobileSettingsView>("mobile.settings.set", new MobilePorts(newPort, 5443));
+        var answer = await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, newPort, 5443));
 
         Assert.IsNull(answer.Error);
         Assert.AreEqual((newPort, 5443), (answer.Port, answer.HttpsPort));
         Assert.AreEqual("listening", answer.Server, "the server answers on its new port at once");
         Assert.IsNull(answer.Address, "the view is not served on the tailnet until Tailscale says so");
-        Assert.AreEqual("pending", answer.Tailscale.State, "the answer is the change itself, whatever Tailscale answers meanwhile");
-        await WaitAsync(() => fixture.Plugin.Settings().Tailscale.State == "serving", "Tailscale serves the new ports");
+        Assert.AreEqual("pending", answer.Provider.State, "the answer is the change itself, whatever Tailscale answers meanwhile");
+        await WaitAsync(() => fixture.Plugin.Settings().Provider.State == "serving", "Tailscale serves the new ports");
         Assert.AreEqual("https://desk.tail1234.ts.net:5443", fixture.Plugin.Settings().Address);
 
         var calls = cli.Calls.ToList();
@@ -117,7 +119,7 @@ public sealed class MobileSettingsTests
         cli.Answer("serve status --json", Served(4443, port))
             .Answer("serve --https=4443 off", "")
             .Answer($"serve --bg --https=6443 http://127.0.0.1:{port}", "");
-        await page.InvokeAsync<MobilePorts, MobileSettingsView>("mobile.settings.set", new MobilePorts(port, 6443));
+        await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, port, 6443));
         await WaitAsync(() => fixture.Plugin.Settings().Address == "https://desk.tail1234.ts.net:6443", "Tailscale serves the new port");
 
         Assert.IsTrue(cli.Calls.Contains("serve --https=4443 off"));
@@ -134,7 +136,7 @@ public sealed class MobileSettingsTests
         var (page, _) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);
         var writes = fixture.State.Writes;
 
-        var answer = await page.InvokeAsync<MobilePorts, MobileSettingsView>("mobile.settings.set", new MobilePorts(port, 4443));
+        var answer = await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, port, 4443));
 
         Assert.IsNull(answer.Error);
         Assert.AreEqual(writes, fixture.State.Writes, "nothing is written");
@@ -252,13 +254,31 @@ public sealed class MobileSettingsTests
         public ValueTask<PluginAskOutcome> CancelAsync(PluginAskReference ask, CancellationToken cancellationToken = default) => ValueTask.FromResult(new PluginAskOutcome("unavailable"));
     }
 
+    [TestMethod]
+    public async Task APortInUse_LeavesTheProviderSayingSo_NotWaiting()
+    {
+        var (port, taken) = (FreePort.Next(), FreePort.Next());
+        using var other = new TcpListener(IPAddress.Loopback, taken);
+        other.Start();
+        await using var fixture = new Fixture(new FakeTailscaleCli(installed: false));
+        await fixture.StartAsync(port, 4443);
+        var (page, _) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);
+
+        await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, taken, 4443));
+        await WaitAsync(() => !fixture.Plugin.Settings().Provider.Working, "the publication ends");
+
+        var settings = fixture.Plugin.Settings();
+        Assert.AreNotEqual("listening", settings.Server, settings.ServerDetail);
+        Assert.AreEqual("failed", settings.Provider.State, "nothing is published without a server, and nothing waits");
+    }
+
     // What `tailscale serve status --json` says when the HTTPS port serves the server of the plugin on its local port.
     private static string Served(int httpsPort, int localPort)
         => """{"Web":{"desk.tail1234.ts.net:HTTPS":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:LOCAL"}}}}}"""
             .Replace("HTTPS", httpsPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
             .Replace("LOCAL", localPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
 
-    private static async Task WaitAsync(Func<bool> condition, string what)
+    internal static async Task WaitAsync(Func<bool> condition, string what)
     {
         var end = DateTime.UtcNow.AddSeconds(15);
         while (!condition())
@@ -283,9 +303,9 @@ public sealed class MobileSettingsTests
     }
 
     /// <summary>The plugin of a window, attached to services of the tests and started on the ports a test gives.</summary>
-    private sealed class Fixture(FakeTailscaleCli cli, MemoryState? state = null, IPluginAskService? asks = null) : IAsyncDisposable
+    internal sealed class Fixture(FakeTailscaleCli cli, MemoryState? state = null, IPluginAskService? asks = null, MobilePlugin? plugin = null) : IAsyncDisposable
     {
-        internal MobilePlugin Plugin { get; } = new(cli);
+        internal MobilePlugin Plugin { get; } = plugin ?? MobileFakes.Plugin(cli);
 
         internal MemoryState State { get; } = state ?? new();
 
@@ -318,7 +338,7 @@ public sealed class MobileSettingsTests
     }
 
     /// <summary>The services a window gives the plugin, with the state in memory.</summary>
-    private sealed class Services(MemoryState state) : IPluginServices
+    internal sealed class Services(MemoryState state) : IPluginServices
     {
         private readonly NoopPluginServices _inner = NoopPluginServices.Create();
 

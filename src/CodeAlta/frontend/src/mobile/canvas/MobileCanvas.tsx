@@ -14,6 +14,8 @@ export type MobileCanvasActions = Readonly<{
   openLink(url: string): void;
   /** Asks the plugin for its status again, after it did not answer. */
   reload(): void;
+  /** Runs an action of the provider (a sign-in); its outcome comes through `status`. */
+  act(action: string): Promise<void>;
 }>;
 
 /**
@@ -55,7 +57,8 @@ export function MobileCanvas({ status, failure, actions }: { status: MobileStatu
     const detail = item.detail ?? (item.hint ? t(item.hint) : null);
     return <Callout key={item.key} className="mobile-problem" intent={item.intent} title={t(item.title, item.parameters)} data-problem={item.key}>
       {detail && <p>{detail}</p>}
-      {(item.fix || item.retry) && <div className="mobile-problem-actions">
+      {(item.fix || item.retry || item.actions.length > 0) && <div className="mobile-problem-actions">
+        {item.actions.map(action => <Button key={action.action} size="small" intent={action.primary ? "primary" : "none"} onClick={() => void actions.act(action.action)}>{"label" in action ? t(action.label) : action.text}</Button>)}
         {item.fix && <Button size="small" intent="primary" icon={<AppIcon name="openExternal" size={14} />} onClick={() => actions.openLink(item.fix!.url)}>{t(item.fix.label)}</Button>}
         {item.retry && <Button size="small" icon={<AppIcon name="refresh" size={14} />} loading={retrying} onClick={() => void retry()}>{t("Try again")}</Button>}
       </div>}
@@ -74,7 +77,7 @@ export function MobileCanvas({ status, failure, actions }: { status: MobileStatu
           <Button variant="minimal" size="small" icon={<AppIcon name={copied ? "check" : "copy"} size={14} />} aria-label={copied ? t("Copied") : t("Copy address")}
             title={copied ? t("Copied") : t("Copy address")} onClick={() => void copy(view.code!.address)} />
         </div>
-        <p className="mobile-instruction">{t("Scan it with the camera of the phone. The phone must be signed in to the same tailnet.")}</p>
+        <p className="mobile-instruction">{t(view.instruction)}</p>
       </figcaption>
     </figure>}
     {view.waiting && <div className="mobile-waiting" role="status"><Spinner size={16} /><span>{t(view.waiting)}</span></div>}

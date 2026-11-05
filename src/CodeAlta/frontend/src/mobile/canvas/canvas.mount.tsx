@@ -27,7 +27,7 @@ const rpc: AltaRpc = {
     state.calls.push(name);
     if (state.down) throw new AltaError("connection_closed", "The connection to the plugin is closed.");
     if (name === "mobile.retry" && state.afterRetry) { state.status = state.afterRetry; state.afterRetry = null; }
-    if (name === "mobile.status" || name === "mobile.retry") return wire(state.status);
+    if (name === "mobile.status" || name === "mobile.retry" || name === "mobile.act") return wire(state.status);
     throw new AltaError("command_not_found", `No handler ${name}.`);
   },
   stream: async () => { throw new Error("not used"); },

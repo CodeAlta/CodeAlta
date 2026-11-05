@@ -9,12 +9,14 @@ using XenoAtom.Logging;
 namespace CodeAlta.Plugin.Mobile;
 
 /// <summary>
-/// Serves a mobile view of CodeAlta (the recent sessions, their timelines and a composer) from an in-process server on the
-/// loopback address, publishes it on the tailnet with Tailscale Serve on an HTTPS port of its own, and shows the address as
-/// a QR code in the Mobile tab. It runs while it is turned on in Settings &gt; Plugins, which is off until the user turns it on; its
-/// ports and the access of the phones are on its settings page, Settings &gt; Extensions &gt; Mobile.
+/// Serves a mobile view of CodeAlta (the recent sessions, their timelines and a composer) from an in-process server, and shows its
+/// address as a QR code in the Mobile tab. A private network of the settings makes the view reachable (<see cref="IPluginServices.PrivateNetworks"/>):
+/// Tailscale Serve on the tailnet, a Dev Tunnel of Microsoft, or a network a plugin brings; the plugin starts the server, asks the network to
+/// publish the view, and shows what it says. It runs
+/// while it is turned on in Settings &gt; Plugins, which is off until the user turns it on; the provider, its ports and the access of the
+/// phones are on its settings page, Settings &gt; Extensions &gt; Mobile.
 /// </summary>
-[Plugin("mobile", DisplayName = "Mobile", Description = "The sessions of this computer on a phone, through Tailscale.", Frontends = PluginFrontends.Desktop)]
+[Plugin("mobile", DisplayName = "Mobile", Description = "The sessions of this computer on a phone, through Tailscale, Dev Tunnels or a private network of a plugin.", Frontends = PluginFrontends.Desktop)]
 public sealed class MobilePlugin : PluginBase
 {
     /// <summary>The id of the Mobile tab.</summary>
@@ -29,7 +31,7 @@ public sealed class MobilePlugin : PluginBase
     /// <summary>The name of the module of the application's build that draws the settings page.</summary>
     internal const string SettingsModule = "mobile-settings";
 
-    /// <summary>The port of the server on the loopback address, unless the state of the plugin says another.</summary>
+    /// <summary>The port of the server on this computer, unless the state of the plugin says another.</summary>
     internal const int DefaultPort = 2584;
 
     /// <summary>The HTTPS port of this computer on the tailnet, unless the state of the plugin says another.</summary>
@@ -44,7 +46,10 @@ public sealed class MobilePlugin : PluginBase
     private const string SettingsName = "mobile.json";
     private static readonly TimeSpan FlushPeriod = TimeSpan.FromMilliseconds(250);
 
-    private readonly IMobileTailscaleCli _cli;
+    private const string NetworkStateName = "mobile-networks.json";
+
+    // The networks of the tests; null for those of the host.
+    private readonly Func<IReadOnlyList<IPrivateNetworkProvider>>? _networks;
     private readonly MobileLive _live;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _canvases = new();
@@ -53,27 +58,70 @@ public sealed class MobilePlugin : PluginBase
     private volatile MobileSettings _settings = new();
     private volatile MobileAccess? _access;
     private MobileServer? _server;
+    // The port the server listens on now: a change of it starts the server again.
+    private int? _listeningPort;
+    // The network of now and what publishes the view through it.
+    private IPrivateNetworkProvider? _network;
+    private IPrivateNetworkPublisher? _provider;
     private volatile MobileState _state = MobileState.Starting;
-    // The ports Tailscale serves the view with now, as this instance published them: what is taken off when the ports change or the plugin stops.
-    private (int Port, int HttpsPort)? _published;
     private bool _stopped;
     // Whether the last reading of the asks failed: it is logged once.
     private bool _askingFailed;
     // Whether the last reading of the permission requests failed: it is logged once.
     private bool _approvingFailed;
 
-    /// <summary>Creates the plugin with the Tailscale command line of this computer.</summary>
+    /// <summary>Creates the plugin with the private networks of the host.</summary>
     public MobilePlugin()
-        : this(new MobileTailscaleCli())
+        : this(networks: null)
     {
     }
 
-    /// <summary>Creates the plugin with a Tailscale command line of the tests.</summary>
-    internal MobilePlugin(IMobileTailscaleCli cli)
+    /// <summary>Creates the plugin with private networks of the tests; null for those of the host.</summary>
+    internal MobilePlugin(Func<IReadOnlyList<IPrivateNetworkProvider>>? networks)
     {
-        _cli = cli ?? throw new ArgumentNullException(nameof(cli));
+        _networks = networks;
         _live = new MobileLive { SteerProbe = CanSteerAsync };
     }
+
+    /// <summary>The network of settings that name none: Tailscale, when this computer has it.</summary>
+    internal const string DefaultProvider = "tailscale";
+
+    /// <summary>The networks that publish the view, in the order the settings page offers them.</summary>
+    internal IReadOnlyList<IPrivateNetworkProvider> Networks()
+        => [.. (_networks?.Invoke() ?? Services.PrivateNetworks.Providers).Where(static network => network.Capabilities.HasFlag(PrivateNetworkCapabilities.Publish))];
+
+    // The network of an id, or null when this computer has none with it now (a plugin that brings it may not run yet).
+    private IPrivateNetworkProvider? NetworkOf(string id) => Networks().FirstOrDefault(network => string.Equals(network.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    // Makes the publisher of a network with a host of its own: what a publisher that was replaced reports afterwards is ignored.
+    private (IPrivateNetworkProvider Network, IPrivateNetworkPublisher Publisher)? Create(IPrivateNetworkProvider? network)
+    {
+        if (network is null) return null;
+        var host = new Host(this, network.Id);
+        IPrivateNetworkPublisher? publisher;
+        try
+        {
+            publisher = network.CreatePublisher(host);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // A network a plugin brings that fails publishes nothing.
+            Logger.Warn(exception, $"Mobile: the network {network.Id} could not publish the view.");
+            publisher = null;
+        }
+
+        if (publisher is null) return null;
+        host.Provider = publisher;
+        return (network, publisher);
+    }
+
+    // The network the settings name, else the default one, else the first that publishes.
+    private (IPrivateNetworkProvider Network, IPrivateNetworkPublisher Publisher)? CreateOfSettings()
+        => Create(NetworkOf(_settings.Mode)) ?? Create(NetworkOf(DefaultProvider)) ?? Networks().Select(Create).FirstOrDefault(static created => created is not null);
+
+    // What a network is given to publish: the port of the view, and the port of the network for a network that takes one.
+    private PrivateNetworkPublication Publication(IPrivateNetworkProvider network)
+        => new(_settings.Port, network.Capabilities.HasFlag(PrivateNetworkCapabilities.PublicPort) ? _settings.HttpsPort : null);
 
     /// <summary>Gets what the plugin serves now.</summary>
     internal MobileState State => _state;
@@ -92,7 +140,7 @@ public sealed class MobilePlugin : PluginBase
     public override async ValueTask OnActivatedAsync(CancellationToken cancellationToken = default)
     {
         if (Context.Host.Frontend != PluginFrontends.Desktop) return;
-        // The server starts in the background: the window does not wait for Tailscale.
+        // The server starts in the background: the window does not wait for the provider.
         _ = Tasks.Run("mobile-start", StartAsync, new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Starts the mobile view." });
         Tasks.Run("mobile-live", FlushAsync, new PluginTaskOptions { LongRunning = true, SessionRetentionIndependent = true, Description = "Pushes the state of the sessions to the phones." });
         await base.OnActivatedAsync(cancellationToken).ConfigureAwait(false);
@@ -120,7 +168,7 @@ public sealed class MobilePlugin : PluginBase
         await base.DisposeAsync().ConfigureAwait(false);
     }
 
-    /// <summary>Reads the settings, starts the server and publishes it: what activation runs in the background.</summary>
+    /// <summary>Reads the settings, starts the server and has the provider publish it: what activation runs in the background.</summary>
     internal async ValueTask StartAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -129,8 +177,9 @@ public sealed class MobilePlugin : PluginBase
             // A plugin turned off before its start ran starts nothing.
             if (_stopped) return;
             _settings = await ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+            (_network, _provider) = CreateOfSettings() is { } created ? created : (null, null);
             await StartServerAsync(cancellationToken).ConfigureAwait(false);
-            if (_server is not null) await PublishAsync(cancellationToken).ConfigureAwait(false);
+            await PublishAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -153,11 +202,14 @@ public sealed class MobilePlugin : PluginBase
             Token = null,
             Port = IsPort(settings.Port) ? settings.Port : DefaultPort,
             HttpsPort = IsPort(settings.HttpsPort) ? settings.HttpsPort : DefaultHttpsPort,
+            // A network this computer has not now stays chosen: the plugin that brings it may start later.
+            Mode = IsNetworkId(settings.Mode) ? settings.Mode : DefaultProvider,
         };
         if (valid != settings) await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, valid, cancellationToken).ConfigureAwait(false);
         return valid;
     }
 
+    // Starts the server on the loopback address, at the port of the settings: the provider publishes it.
     private async Task StartServerAsync(CancellationToken cancellationToken)
     {
         if (!Services.AppFiles.HasFiles)
@@ -166,13 +218,14 @@ public sealed class MobilePlugin : PluginBase
             return;
         }
 
+        var port = _settings.Port;
         var sessions = new MobileSessions(Services.Alta, Services.Spaces, _live);
         var attachments = Path.Combine(Context.Host.UserDataDirectory, "plugin-data", "mobile");
         Directory.CreateDirectory(attachments);
         MobileApi.RemoveStaleAttachments(attachments);
         var server = new MobileServer(new MobileServerOptions
         {
-            Port = _settings.Port, Access = _access!, Hosts = () => _state.TailnetHost is { } host ? [host] : [],
+            Port = port, Access = _access!, Hosts = () => _state.PublicHost is { } host ? [host] : [],
             Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions, attachments),
             Asks = new MobileAsks(Services.Asks, sessions), Permissions = new MobilePermissions(Services.Permissions, sessions, null, Services.Alta), Live = _live, Logger = Logger,
         });
@@ -180,14 +233,15 @@ public sealed class MobilePlugin : PluginBase
         {
             await server.StartAsync(cancellationToken).ConfigureAwait(false);
             _server = server;
+            _listeningPort = port;
             _state = _state with { Server = "listening", ServerDetail = null };
-            Logger.Info($"Mobile: the mobile view listens on http://127.0.0.1:{_settings.Port}");
+            Logger.Info($"Mobile: the mobile view listens on http://127.0.0.1:{port}");
         }
         catch (Exception exception) when (exception is IOException { InnerException: SocketException { SocketErrorCode: SocketError.AddressAlreadyInUse } } or SocketException { SocketErrorCode: SocketError.AddressAlreadyInUse })
         {
             await server.DisposeAsync().ConfigureAwait(false);
-            _state = _state with { Server = "port-in-use", ServerDetail = $"Port {_settings.Port} of this computer is used by another program, such as another CodeAlta that serves the mobile view." };
-            Logger.Warn($"Mobile: port {_settings.Port} is used by another program.");
+            _state = _state with { Server = "port-in-use", ServerDetail = $"Port {port} of this computer is used by another program, such as another CodeAlta that serves the mobile view." };
+            Logger.Warn($"Mobile: port {port} is used by another program.");
         }
         catch (Exception exception) when (exception is IOException or SocketException or InvalidOperationException)
         {
@@ -197,41 +251,54 @@ public sealed class MobilePlugin : PluginBase
         }
     }
 
-    // Tailscale publishes the server on the tailnet; without it the view is reachable on this computer only.
-    private async Task PublishAsync(CancellationToken cancellationToken)
+    private async Task StopServerAsync()
     {
-        _state = _state with { Tailscale = MobileTailscaleStatus.Pending };
-        await ChangedAsync().ConfigureAwait(false);
-        MobileTailscaleStatus status;
-        try
-        {
-            status = await new MobileTailscale(_cli).PublishAsync(_settings.Port, _settings.HttpsPort, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
-        {
-            status = new("failed", null, "Tailscale could not be asked: " + exception.Message);
-        }
-
-        _state = _state with { Tailscale = status };
-        if (status.State == "serving") _published = (_settings.Port, _settings.HttpsPort);
-        Logger.Info($"Mobile: {status.Detail}");
+        _listeningPort = null;
+        if (Interlocked.Exchange(ref _server, null) is { } server) await server.DisposeAsync().ConfigureAwait(false);
     }
 
-    // Takes off the tailnet what this instance published, with the ports it was published with.
-    private async Task UnpublishAsync(CancellationToken cancellationToken)
+    private static readonly PrivateNetworkStatus Publishing = PrivateNetworkStatus.Pending("Publishing the mobile view…");
+    private static readonly PrivateNetworkStatus NoNetwork = new("failed", null, "This computer has no private network that publishes the view.");
+    private static readonly PrivateNetworkStatus NotListening = new("failed", null, "The mobile view does not listen on this computer, so it is not published.");
+
+    // Has the provider publish the view the server serves; with the gate held. Without a server, nothing is published: the provider
+    // says so rather than staying at a step that runs.
+    private async Task PublishAsync(CancellationToken cancellationToken)
     {
-        if (_published is not { } published) return;
-        try
+        if (_provider is not { } provider || _network is not { } network)
         {
-            var outcome = await new MobileTailscale(_cli).UnpublishAsync(published.Port, published.HttpsPort, cancellationToken).ConfigureAwait(false);
-            Logger.Info($"Mobile: {outcome}");
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
-        {
-            Logger.Warn($"Mobile: Tailscale could not be asked to stop serving: {exception.Message}");
+            _state = _state with { Provider = NoNetwork };
+            return;
         }
 
-        _published = null;
+        if (_server is null)
+        {
+            _state = _state with { Provider = NotListening };
+            return;
+        }
+
+        _state = _state with { Provider = Publishing };
+        await ChangedAsync().ConfigureAwait(false);
+        PrivateNetworkStatus status;
+        try
+        {
+            status = await provider.PublishAsync(Publication(network), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+        {
+            // The command line of the network did not start or could not be read, or a network a plugin brings failed.
+            Logger.Warn(exception, $"Mobile: {network.Id} could not be asked to publish the mobile view.");
+            status = new PrivateNetworkStatus("failed", null, $"{network.DisplayName} could not be asked: {exception.Message}");
+        }
+
+        if (ReferenceEquals(provider, _provider)) SetProvider(status);
+    }
+
+    // What the provider does now, logged once for every provider; with the gate held.
+    private void SetProvider(PrivateNetworkStatus status)
+    {
+        _state = _state with { Provider = status };
+        Logger.Info($"Mobile: {_network?.Id ?? _settings.Mode}: {status.State}: {status.Detail}");
     }
 
     private async Task StopAsync(CancellationToken cancellationToken)
@@ -240,9 +307,15 @@ public sealed class MobilePlugin : PluginBase
         try
         {
             _stopped = true;
-            if (Interlocked.Exchange(ref _server, null) is { } server) await server.DisposeAsync().ConfigureAwait(false);
-            // What this instance published on the tailnet goes with it; turning the plugin on again publishes it again.
-            await UnpublishAsync(cancellationToken).ConfigureAwait(false);
+            await StopServerAsync().ConfigureAwait(false);
+            // What the provider published goes with the plugin; turning the plugin on again publishes it again.
+            _network = null;
+            if (Interlocked.Exchange(ref _provider, null) is { } provider)
+            {
+                await provider.UnpublishAsync(cancellationToken).ConfigureAwait(false);
+                await provider.DisposeAsync().ConfigureAwait(false);
+            }
+
             _state = MobileState.Stopped;
         }
         finally
@@ -251,15 +324,50 @@ public sealed class MobilePlugin : PluginBase
         }
     }
 
-    // Asks Tailscale again: it was installed, signed in, or Serve was enabled since.
-    private async Task<MobileStatus> RetryAsync(CancellationToken cancellationToken)
+    // Has the provider publish again: it was installed, signed in, or what kept phones out was fixed since; a server that did not start
+    // is started again first, unless it just failed (the settings changed).
+    private async Task<MobileStatus> RetryAsync(CancellationToken cancellationToken, bool startServer = true)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_stopped) return Status();
-            if (_server is null) await StartServerAsync(cancellationToken).ConfigureAwait(false);
-            if (_server is not null) await PublishAsync(cancellationToken).ConfigureAwait(false);
+            // The network the settings name, now that the plugin that brings it may run; or one, when there was none.
+            if (_provider is null || !string.Equals(_network?.Id, _settings.Mode, StringComparison.OrdinalIgnoreCase) && NetworkOf(_settings.Mode) is not null)
+                await ReplaceAsync(CreateOfSettings()).ConfigureAwait(false);
+            if (_server is null && startServer) await StartServerAsync(cancellationToken).ConfigureAwait(false);
+            await PublishAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        await ChangedAsync().ConfigureAwait(false);
+        return Status();
+    }
+
+    // Runs an action of the provider the tab offers (a sign-in), with the gate held so that it does not cross a publication: what it
+    // does at once is shown, and its outcome comes with the changes it reports.
+    private async Task<MobileStatus> ActAsync(string action, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_stopped || _provider is not { } provider) return Status();
+            PrivateNetworkStatus? status;
+            try
+            {
+                status = await provider.ActAsync(action, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+            {
+                Logger.Warn(exception, $"Mobile: the action {action} of {_network?.Id ?? _settings.Mode} failed.");
+                status = new PrivateNetworkStatus("failed", null, exception.Message);
+            }
+
+            if (status is not null) SetProvider(status);
+            else Logger.Warn($"Mobile: the network {_network?.Id ?? _settings.Mode} knows no action {action}.");
         }
         finally
         {
@@ -293,38 +401,71 @@ public sealed class MobilePlugin : PluginBase
     /// <summary>Whether a port is one the settings accept: the system keeps those below 1024.</summary>
     internal static bool IsPort(int? port) => port is >= MinimumPort and <= MaximumPort;
 
+    // Whether a saved network id is one: a network unknown now is kept, since a plugin may bring it later.
+    private static bool IsNetworkId(string? id) => id is { Length: > 0 and <= 64 } && id.All(static c => char.IsAsciiLetterOrDigit(c) || c == '-');
+
+    // Puts another network in the place of the one of now, which takes off what it published first; with the gate held.
+    private async Task ReplaceAsync((IPrivateNetworkProvider Network, IPrivateNetworkPublisher Publisher)? next)
+    {
+        if (_provider is { } old)
+        {
+            await old.UnpublishAsync(CancellationToken.None).ConfigureAwait(false);
+            await old.DisposeAsync().ConfigureAwait(false);
+        }
+
+        (_network, _provider) = next is { } created ? created : (null, null);
+    }
+
     /// <summary>
-    /// Changes the ports: they are saved, the server listens on its new port, and what Tailscale served with the old ports is taken off before
-    /// the view is published with the new ones. The server answers at once; Tailscale is asked in the background, and the settings page
-    /// hears the outcome with <c>mobile.settings.changed</c>.
+    /// Changes the settings: they are saved, the provider of before takes off what it published, the server listens as the provider of now
+    /// says, and the provider publishes the view in the background; the settings page hears the outcome with <c>mobile.settings.changed</c>.
     /// </summary>
-    /// <returns>The settings now, with <see cref="MobileSettingsView.Error"/> when the ports are refused.</returns>
-    internal async Task<MobileSettingsView> SetPortsAsync(MobilePorts request, CancellationToken cancellationToken)
+    /// <returns>The settings now, with <see cref="MobileSettingsView.Error"/> when the change is refused.</returns>
+    internal async Task<MobileSettingsView> SetAsync(MobileSettingsChange request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!IsPort(request.Port)) return Settings() with { Error = $"The port on this computer must be a number from {MinimumPort} to {MaximumPort}." };
-        if (!IsPort(request.HttpsPort)) return Settings() with { Error = $"The port on the tailnet must be a number from {MinimumPort} to {MaximumPort}." };
+        var id = request.Provider ?? _settings.Mode;
+        var chosen = NetworkOf(id);
+        if (chosen is null) return Settings() with { Error = "Phones connect through " + string.Join(" or ", Networks().Select(static network => network.DisplayName)) + "." };
+        if (chosen.Capabilities.HasFlag(PrivateNetworkCapabilities.PublicPort) && request.HttpsPort is { } asked && !IsPort(asked))
+            return Settings() with { Error = $"The port of {chosen.DisplayName} must be a number from {MinimumPort} to {MaximumPort}." };
         MobileSettingsView view;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_stopped) return Settings() with { Error = "The plugin is stopped." };
             var old = _settings;
-            if (old.Port == request.Port && old.HttpsPort == request.HttpsPort) return Settings();
-            _settings = old with { Port = request.Port!.Value, HttpsPort = request.HttpsPort!.Value };
+            var next = old with
+            {
+                Mode = chosen.Id, Port = request.Port!.Value, HttpsPort = request.HttpsPort ?? old.HttpsPort,
+            };
+            if (next == old && _provider is not null) return Settings();
+            // What was published goes first, with the settings it was published with; then the settings of now.
+            if (_provider is null || !string.Equals(_network?.Id, chosen.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                if (Create(chosen) is not { } created) return Settings() with { Error = $"{chosen.DisplayName} cannot publish the view." };
+                await ReplaceAsync(created).ConfigureAwait(false);
+            }
+            else
+            {
+                await _provider.UnpublishAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            _settings = next;
             await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, _settings, CancellationToken.None).ConfigureAwait(false);
-            Logger.Info($"Mobile: the ports are now {_settings.Port} on this computer and {_settings.HttpsPort} on the tailnet.");
-            if (old.Port != _settings.Port || _server is null)
+            Logger.Info($"Mobile: phones now connect through {chosen.Id}, to port {next.Port} of this computer.");
+            if (_server is null || next.Port != _listeningPort)
             {
                 // The phones that were connected reconnect to the new address once they scan it.
-                if (Interlocked.Exchange(ref _server, null) is { } server) await server.DisposeAsync().ConfigureAwait(false);
+                await StopServerAsync().ConfigureAwait(false);
                 _state = _state with { Server = "starting", ServerDetail = null };
                 await StartServerAsync(CancellationToken.None).ConfigureAwait(false);
             }
 
-            _state = _state with { Tailscale = MobileTailscaleStatus.Pending };
-            // The answer is the state of the change itself, read before Tailscale is asked: a Tailscale that answers at once would
-            // otherwise give the outcome of the publication to some calls and not to others.
+            _state = _state with { Provider = Publishing };
+            // The answer is the state of the change itself, read before the provider publishes: one that answers at once would otherwise
+            // give the outcome of the publication to some calls and not to others.
             view = Settings();
         }
         finally
@@ -332,29 +473,9 @@ public sealed class MobilePlugin : PluginBase
             _gate.Release();
         }
 
-        _ = Tasks.Run("mobile-publish", RepublishAsync, new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Publishes the mobile view on its new port." });
+        _ = Tasks.Run("mobile-publish", async ct => await RetryAsync(ct, startServer: false).ConfigureAwait(false), new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Publishes the mobile view." });
         await ChangedAsync().ConfigureAwait(false);
         return view;
-    }
-
-    // Takes off what was published with the old ports, then publishes with the ports of now. Two changes in a row each run it: the second finds the
-    // view published with the ports of the first, or nothing published, and ends on the ports of now.
-    private async ValueTask RepublishAsync(CancellationToken cancellationToken)
-    {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_stopped) return;
-            if (_published is { } published && published != (_settings.Port, _settings.HttpsPort)) await UnpublishAsync(cancellationToken).ConfigureAwait(false);
-            if (_server is not null) await PublishAsync(cancellationToken).ConfigureAwait(false);
-            else _state = _state with { Tailscale = new MobileTailscaleStatus("failed", null, "The mobile view does not listen on this computer, so Tailscale does not publish it.") };
-        }
-        finally
-        {
-            _gate.Release();
-        }
-
-        await ChangedAsync().ConfigureAwait(false);
     }
 
     // Pushes what changed four times a second, and a comment every 15 s so that proxies keep the streams open.
@@ -436,21 +557,34 @@ public sealed class MobilePlugin : PluginBase
     internal MobileStatus Status()
     {
         var state = _state;
-        var url = state.Tailscale.Url;
-        var connect = state.Server == "listening" && url is not null && _access?.PairingToken is { } token ? $"{url}/#k={token}" : null;
-        return new MobileStatus(state.Server, _settings.Port, state.ServerDetail,
-            new MobileTailscaleView(state.Tailscale.State, url, state.Tailscale.Detail, state.Tailscale.FixUrl),
-            connect, connect is null ? null : url, connect is null ? null : MobileQr.Rows(connect));
+        var url = ServedUrl(state);
+        var connect = url is not null && _access?.PairingToken is { } token ? $"{url}/#k={token}" : null;
+        return new MobileStatus(state.Server, _listeningPort ?? _settings.Port, state.ServerDetail, View(state), connect, connect is null ? null : url,
+            connect is null ? null : MobileQr.Rows(connect));
     }
 
-    /// <summary>What the settings page shows: the ports, and the address while the view is served.</summary>
+    /// <summary>What the settings page shows: the provider and its settings, and the address while the view is served.</summary>
     internal MobileSettingsView Settings()
     {
         var state = _state;
         var settings = _settings;
-        var address = state is { Server: "listening", Tailscale.State: "serving" } ? state.Tailscale.Url : null;
-        return new MobileSettingsView(settings.Port, settings.HttpsPort, address, state.Server, state.ServerDetail, new MobileSettingsTailscale(state.Tailscale.State, state.Tailscale.Detail));
+        return new MobileSettingsView(settings.Port, settings.HttpsPort, ServedUrl(state), state.Server, state.ServerDetail, View(state))
+        {
+            Providers = [.. Networks().Select(static network => new MobileNetworkView(network.Id, network.DisplayName, network.Description,
+                network.Capabilities.HasFlag(PrivateNetworkCapabilities.PublicPort)))],
+        };
     }
+
+    private MobileProviderView View(MobileState state)
+        => new(_network?.Id ?? _settings.Mode, state.Provider.State, state.Provider.Url, state.Provider.Detail, state.Provider.FixUrl, state.Provider.Working)
+        {
+            Name = _network?.DisplayName ?? _settings.Mode,
+            Actions = [.. state.Provider.Actions.Select(static action => new MobileActionView(action.Id, action.Label))],
+        };
+
+    // The address phones open while the view is served.
+    private static string? ServedUrl(MobileState state)
+        => state is { Server: "listening", Provider.State: "serving" } ? state.Provider.Url : null;
 
     private async Task ChangedAsync()
     {
@@ -479,8 +613,8 @@ public sealed class MobilePlugin : PluginBase
             Canvas = CanvasId,
             GetState = _ => _state switch
             {
-                { Server: "listening", Tailscale.State: "serving" } => new PluginButtonState { Tone = PluginStatusTone.Success, Tooltip = "Mobile: served on the tailnet" },
-                { Server: "starting" } or { Tailscale.State: "pending" } => new PluginButtonState { Badge = PluginButtonBadge.Busy, Tooltip = "Mobile: starting" },
+                var state when ServedUrl(state) is not null => new PluginButtonState { Tone = PluginStatusTone.Success, Tooltip = $"Mobile: served at {state.Provider.Url}" },
+                { Server: "starting" } or { Provider.Working: true } => new PluginButtonState { Badge = PluginButtonBadge.Busy, Tooltip = "Mobile: starting" },
                 _ => new PluginButtonState { Badge = PluginButtonBadge.Dot, Tooltip = "Mobile: phones cannot connect" },
             },
         };
@@ -496,7 +630,7 @@ public sealed class MobilePlugin : PluginBase
         }) with
         {
             Label = "Mobile: connect a phone",
-            SearchText = "mobile phone qr tailscale connect",
+            SearchText = "mobile phone qr tailscale dev tunnels connect",
             KeyBinding = new PluginKeyBinding(new PluginKeyGesture('G', PluginKeyModifiers.Ctrl), new PluginKeyGesture('M')),
         };
     }
@@ -518,6 +652,8 @@ public sealed class MobilePlugin : PluginBase
                 // The tab shows the QR code: it makes the pairing token of this run when there is none yet.
                 canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.status", async (_, ct) => await PairedAsync(Status, ct).ConfigureAwait(false));
                 canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.retry", async (_, ct) => await PairedAsync(() => RetryAsync(ct), ct).ConfigureAwait(false));
+                // The actions a state of the provider offers (a sign-in); their outcome comes with the changes.
+                canvas.Rpc.Handle<MobileAction, MobileStatus>("mobile.act", async (request, ct) => await PairedAsync(() => ActAsync(request.Action, ct), ct).ConfigureAwait(false));
                 Track(canvas, _open);
                 return ValueTask.FromResult(new PluginCanvasView { Script = PluginScript.App(AppModule) });
             },
@@ -527,7 +663,7 @@ public sealed class MobilePlugin : PluginBase
         {
             Id = SettingsCanvasId,
             Title = "Mobile",
-            Description = "The ports the mobile view is served on, and the access of the phones.",
+            Description = "How phones connect (Tailscale or Dev Tunnels), the ports of the mobile view, and the access of the phones.",
             Icon = "smartphone",
             Scope = PluginCanvasScope.Application,
             Placement = PluginCanvasPlacement.Settings,
@@ -535,7 +671,7 @@ public sealed class MobilePlugin : PluginBase
             {
                 canvas.Rpc.JsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web) { TypeInfoResolver = MobileJsonContext.Default };
                 canvas.Rpc.Handle<MobileEmpty, MobileSettingsView>("mobile.settings.get", (_, _) => ValueTask.FromResult(Settings()));
-                canvas.Rpc.Handle<MobilePorts, MobileSettingsView>("mobile.settings.set", async (request, ct) => await SetPortsAsync(request, ct).ConfigureAwait(false));
+                canvas.Rpc.Handle<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", async (request, ct) => await SetAsync(request, ct).ConfigureAwait(false));
                 canvas.Rpc.Handle<MobileEmpty, MobileSettingsView>("mobile.reset", async (_, ct) => await ResetAsync(ct).ConfigureAwait(false));
                 Track(canvas, _settingsPages);
                 return ValueTask.FromResult(new PluginCanvasView { Script = PluginScript.App(SettingsModule) });
@@ -555,25 +691,82 @@ public sealed class MobilePlugin : PluginBase
     private string DescribeTab()
     {
         var state = _state;
-        var text = new StringBuilder("# Mobile\n\nThe sessions of this computer on a phone: a page served on 127.0.0.1 and published on the tailnet with Tailscale Serve.\n\n");
-        text.Append(CultureInfo.InvariantCulture, $"- Server: {state.Server} on 127.0.0.1:{_settings.Port}{(state.ServerDetail is { } detail ? $" ({detail})" : "")}\n");
-        text.Append(CultureInfo.InvariantCulture, $"- Tailscale: {state.Tailscale.State}: {state.Tailscale.Detail}\n");
-        if (state.Tailscale.Url is { } url) text.Append(CultureInfo.InvariantCulture, $"- Address: {url} (the QR code adds the access token)\n");
+        var text = new StringBuilder($"# Mobile\n\nThe sessions of this computer on a phone: a page served by CodeAlta and published through the private network {_network?.DisplayName ?? _settings.Mode}.\n\n");
+        text.Append(CultureInfo.InvariantCulture, $"- Server: {state.Server} on port {_listeningPort ?? _settings.Port}{(state.ServerDetail is { } detail ? $" ({detail})" : "")}\n");
+        text.Append(CultureInfo.InvariantCulture, $"- Provider: {state.Provider.State}: {state.Provider.Detail}\n");
+        if (ServedUrl(state) is { } url) text.Append(CultureInfo.InvariantCulture, $"- Address: {url} (the QR code adds the access token)\n");
         return text.ToString();
     }
 
-    /// <summary>What the plugin serves: its server, and what Tailscale does with it.</summary>
+    /// <summary>What the plugin serves: its server, and what the provider does with it.</summary>
     /// <param name="Server"><c>starting</c>, <c>listening</c>, <c>port-in-use</c>, <c>failed</c> or <c>stopped</c>.</param>
     /// <param name="ServerDetail">Why the server does not listen.</param>
-    /// <param name="Tailscale">What Tailscale does.</param>
-    internal sealed record MobileState(string Server, string? ServerDetail, MobileTailscaleStatus Tailscale)
+    /// <param name="Provider">What the provider does.</param>
+    internal sealed record MobileState(string Server, string? ServerDetail, PrivateNetworkStatus Provider)
     {
-        internal static MobileState Starting { get; } = new("starting", null, MobileTailscaleStatus.Pending);
+        internal static MobileState Starting { get; } = new("starting", null, PrivateNetworkStatus.Pending("Starting…"));
 
-        internal static MobileState Stopped { get; } = new("stopped", null, MobileTailscaleStatus.Stopped);
+        internal static MobileState Stopped { get; } = new("stopped", null, new PrivateNetworkStatus("stopped", null, "The mobile view is not served."));
 
-        /// <summary>The host the requests that come through Tailscale name: the name of this computer on the tailnet, with the HTTPS port.</summary>
-        internal string? TailnetHost => Tailscale.Url is { } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Authority : null;
+        /// <summary>
+        /// The host the requests that come from outside name: the name of the address the provider gives, with its port. A provider that
+        /// names the loopback address instead (a tunnel) is let in by the server as a request of this computer.
+        /// </summary>
+        internal string? PublicHost => Provider.Url is { } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Authority : null;
+    }
+
+    // What the plugin gives the publisher of a network: the values it keeps (in a file of the plugin, by network), its log, its
+    // background, and a way to say what changed. A publisher that was replaced (the settings changed, the plugin stopped) says nothing any more.
+    private sealed class Host(MobilePlugin plugin, string network) : IPrivateNetworkHost
+    {
+        internal IPrivateNetworkPublisher? Provider { get; set; }
+
+        public async Task<string?> ReadStateAsync(string key, CancellationToken cancellationToken)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(key);
+            var values = await plugin.Services.State.ReadJsonAsync<Dictionary<string, string>>(PluginStateScope.User, NetworkStateName, cancellationToken).ConfigureAwait(false);
+            return values is not null && values.TryGetValue(Key(key), out var value) ? value : null;
+        }
+
+        public async Task WriteStateAsync(string key, string? value, CancellationToken cancellationToken)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(key);
+            var values = await plugin.Services.State.ReadJsonAsync<Dictionary<string, string>>(PluginStateScope.User, NetworkStateName, cancellationToken).ConfigureAwait(false) ?? [];
+            if (value is null) values.Remove(Key(key));
+            else values[Key(key)] = value;
+            await plugin.Services.State.WriteJsonAsync(PluginStateScope.User, NetworkStateName, values, cancellationToken).ConfigureAwait(false);
+        }
+
+        // The values of each network apart: one never reads what another one kept.
+        private string Key(string key) => network + "/" + key;
+
+        public async Task ReportAsync(PrivateNetworkStatus status)
+        {
+            await plugin._gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (!IsCurrent) return;
+                plugin.SetProvider(status);
+            }
+            finally
+            {
+                plugin._gate.Release();
+            }
+
+            await plugin.ChangedAsync().ConfigureAwait(false);
+        }
+
+        public async Task RepublishAsync()
+        {
+            if (IsCurrent) await plugin.RetryAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
+        private bool IsCurrent => Provider is not null && ReferenceEquals(Provider, plugin._provider) && !plugin._stopped;
+
+        public void Run(string name, string description, Func<CancellationToken, ValueTask> work)
+            => _ = plugin.Tasks.Run("mobile-" + name, work, new PluginTaskOptions { SessionRetentionIndependent = true, Description = description });
+
+        public void Log(string line) => plugin.Logger.Info("Mobile: " + line);
     }
 }
 
@@ -587,56 +780,89 @@ internal sealed record MobileSettings
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? Token { get; init; }
 
-    /// <summary>Gets the port of the server on the loopback address.</summary>
+    /// <summary>Gets the port of the server on this computer.</summary>
     public int Port { get; init; } = MobilePlugin.DefaultPort;
 
-    /// <summary>Gets the HTTPS port of this computer on the tailnet.</summary>
+    /// <summary>Gets the port of the network the view is published at, for a network that takes one (the HTTPS port of the tailnet).</summary>
     public int HttpsPort { get; init; } = MobilePlugin.DefaultHttpsPort;
+
+    /// <summary>Gets the id of the private network phones connect through: <c>tailscale</c>, <c>devtunnel</c>, or one a plugin brings.</summary>
+    public string Mode { get; init; } = MobilePlugin.DefaultProvider;
 }
+
+/// <summary>An action of the provider the tab asks for.</summary>
+/// <param name="Action">Its name, such as <c>signin-github</c>.</param>
+internal sealed record MobileAction(string Action);
 
 /// <summary>The input of a call that takes none.</summary>
 internal sealed record MobileEmpty;
 
-/// <summary>What Tailscale does, as the Mobile tab shows it.</summary>
-internal sealed record MobileTailscaleView(string State, string? Url, string Detail, string? FixUrl);
+/// <summary>What the provider does, as the pages show it.</summary>
+/// <param name="Id">The id of the provider.</param>
+/// <param name="State">Its state, as <see cref="PrivateNetworkStatus.State"/> says it.</param>
+/// <param name="Url">The address phones open, while the view is served.</param>
+/// <param name="Detail">A line for people.</param>
+/// <param name="FixUrl">The page that fixes the state, when there is one.</param>
+/// <param name="Working">Whether the provider is at a step that runs: the pages wait, with no problem shown.</param>
+internal sealed record MobileProviderView(string Id, string State, string? Url, string Detail, string? FixUrl, bool Working)
+{
+    /// <summary>Gets the name of the network, for people.</summary>
+    public string Name { get; init; } = Id;
+
+    /// <summary>Gets the actions its state offers, such as a sign-in.</summary>
+    public IReadOnlyList<MobileActionView> Actions { get; init; } = [];
+}
+
+/// <summary>An action a state of a network offers, as a page shows it.</summary>
+/// <param name="Action">What <c>mobile.act</c> is given.</param>
+/// <param name="Label">The label of its button.</param>
+internal sealed record MobileActionView(string Action, string Label);
+
+/// <summary>A private network phones can connect through, as the settings page offers it.</summary>
+/// <param name="Id">Its id.</param>
+/// <param name="Name">Its name, for people.</param>
+/// <param name="Description">What it needs, for people.</param>
+/// <param name="PublicPort">Whether the view is published at a port of the network the page asks for.</param>
+internal sealed record MobileNetworkView(string Id, string Name, string Description, bool PublicPort);
 
 /// <summary>What the Mobile tab shows.</summary>
 /// <param name="Server">What the server does.</param>
-/// <param name="Port">Its port on the loopback address.</param>
+/// <param name="Port">Its port on this computer.</param>
 /// <param name="ServerDetail">Why it does not listen.</param>
-/// <param name="Tailscale">What Tailscale does.</param>
+/// <param name="Provider">What the provider does.</param>
 /// <param name="ConnectUrl">The address a phone opens, with the access token; null while no phone can connect.</param>
 /// <param name="Address">The same without the token.</param>
 /// <param name="Qr">The QR code of <paramref name="ConnectUrl"/>, one string of <c>0</c> and <c>1</c> per row.</param>
-internal sealed record MobileStatus(string Server, int Port, string? ServerDetail, MobileTailscaleView Tailscale, string? ConnectUrl, string? Address, IReadOnlyList<string>? Qr);
+internal sealed record MobileStatus(string Server, int Port, string? ServerDetail, MobileProviderView Provider, string? ConnectUrl, string? Address, IReadOnlyList<string>? Qr);
 
-/// <summary>The ports the settings page asks for.</summary>
-/// <param name="Port">The port of the server on the loopback address.</param>
-/// <param name="HttpsPort">The HTTPS port of this computer on the tailnet.</param>
-internal sealed record MobilePorts(int? Port, int? HttpsPort);
-
-/// <summary>What Tailscale does, as the settings page shows it.</summary>
-/// <param name="State">The state, as <see cref="MobileTailscaleStatus.State"/> says it.</param>
-/// <param name="Detail">A line for people.</param>
-internal sealed record MobileSettingsTailscale(string State, string Detail);
+/// <summary>The settings the settings page asks for.</summary>
+/// <param name="Provider">The id of the provider; null keeps the one of now.</param>
+/// <param name="Port">The port of the server on this computer.</param>
+/// <param name="HttpsPort">The HTTPS port on the tailnet, for Tailscale; null keeps the one of now.</param>
+internal sealed record MobileSettingsChange(string? Provider, int? Port, int? HttpsPort);
 
 /// <summary>What the settings page shows.</summary>
-/// <param name="Port">The port of the server on the loopback address.</param>
-/// <param name="HttpsPort">The HTTPS port of this computer on the tailnet.</param>
-/// <param name="Address">The address of the view on the tailnet while it is served, without the access token; null otherwise.</param>
+/// <param name="Port">The port of the server on this computer.</param>
+/// <param name="HttpsPort">The HTTPS port on the tailnet, for Tailscale.</param>
+/// <param name="Address">The address of the view while it is served, without the access token; null otherwise.</param>
 /// <param name="Server">What the server does: <c>starting</c>, <c>listening</c>, <c>port-in-use</c>, <c>failed</c> or <c>stopped</c>.</param>
 /// <param name="ServerDetail">Why it does not listen.</param>
-/// <param name="Tailscale">What Tailscale does.</param>
-internal sealed record MobileSettingsView(int Port, int HttpsPort, string? Address, string Server, string? ServerDetail, MobileSettingsTailscale Tailscale)
+/// <param name="Provider">What the provider does.</param>
+internal sealed record MobileSettingsView(int Port, int HttpsPort, string? Address, string Server, string? ServerDetail, MobileProviderView Provider)
 {
-    /// <summary>Gets why the ports that were asked for are refused, or null.</summary>
+    /// <summary>Gets why the settings that were asked for are refused, or null.</summary>
     public string? Error { get; init; }
+
+    /// <summary>Gets the networks phones can connect through, in the order the page offers them.</summary>
+    public IReadOnlyList<MobileNetworkView> Providers { get; init; } = [];
 }
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileEmpty))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileStatus))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileSettings))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileAccessFile))]
-[System.Text.Json.Serialization.JsonSerializable(typeof(MobilePorts))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(MobileSettingsChange))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(MobileAction))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileSettingsView))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(Dictionary<string, string>))]
 internal sealed partial class MobileJsonContext : System.Text.Json.Serialization.JsonSerializerContext;
