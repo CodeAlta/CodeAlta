@@ -25,9 +25,10 @@ internal sealed class SessionFactsState
     /// Version 9 counts the runs of scripts of Code Mode from their records, the calls scripts make, the <c>exec</c> calls of a
     /// run, <c>exec</c> and <c>wait</c> as tools of their own kind, and the run of the script that started a session.
     /// Version 10 counts the start and the time of a run, until its first request reports its model, under the model that request
-    /// reports (an alias, or what it stood for in an earlier turn, until then).
+    /// reports (an alias, or what it stood for in an earlier turn, until then). Version 11 takes that model from a request of the
+    /// conversation only, never from a compaction.
     /// </summary>
-    public const int CurrentVersion = 10;
+    public const int CurrentVersion = 11;
 
     /// <summary>The number of runs whose end is remembered, so that a late record of a run that ended does not open it again.</summary>
     public const int MaxClosedRuns = 32;

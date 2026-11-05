@@ -1105,15 +1105,16 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         }
 
         _lastOperation = op;
+        var purpose = string.Equals(op.Initiator, "compaction", StringComparison.OrdinalIgnoreCase) ? UsagePurpose.Compaction : UsagePurpose.Turn;
         if (!string.IsNullOrWhiteSpace(op.Model))
         {
             ApplyReportedModel(op.Model);
-            if (run is not null) SettleRunModel(run, op.Model);
+            // A compaction may run on another model: only a request of the conversation says the model of the run.
+            if (run is not null && purpose == UsagePurpose.Turn) SettleRunModel(run, op.Model);
         }
 
         var model = CurrentModel();
         var effort = NormalizeEffort(op.ReasoningEffort) ?? _state.Effort;
-        var purpose = string.Equals(op.Initiator, "compaction", StringComparison.OrdinalIgnoreCase) ? UsagePurpose.Compaction : UsagePurpose.Turn;
 
         // A provider that reports the cost and the duration of a whole turn repeats them: the same pair twice in a run is one. A
         // cost without a duration is the cost of its request (the credits of Copilot), and two requests may well cost the same.
