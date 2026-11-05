@@ -81,6 +81,44 @@ public sealed class FleetHeldSendsTests
             "what the node cannot read is kept for its owner, never overwritten by the next send held");
     }
 
+    [TestMethod]
+    public void ASendThisMachineCannotOpenNow_StaysHeldAndWaiting_AndIsTakenOnceItOpens()
+    {
+        using var folder = new TestFolder();
+        var path = Path.Combine(folder.Path, "held-sends.json");
+        var protector = new SwitchingProtector();
+        var global = Path.Combine(folder.Path, "global");
+        new FleetHeldSends(path, new CodeAlta.Catalog.Secrets.LocalSecretStore(global, protector)).Add(Held("send-blocked", DateTimeOffset.UtcNow));
+
+        // At the next start the protected store of the machine is away: the send is not opened, nor lost, nor shorter the queue.
+        protector.Available = false;
+        var sends = new FleetHeldSends(path, new CodeAlta.Catalog.Secrets.LocalSecretStore(global, protector));
+        Assert.AreEqual(0, sends.List().Count, "what cannot be opened is not sent");
+        CollectionAssert.Contains(sends.SessionIds.ToList(), "session-send-blocked", "its session still waits for a person");
+        Assert.AreEqual(1, sends.Blocked, "it is reported as held and not opened");
+        Assert.IsTrue(File.ReadAllText(path).Contains("send-blocked", StringComparison.Ordinal), "it stays in the file, as it was written");
+
+        // The store is back: the same reader opens it at its next reading, and a send held after it keeps it.
+        protector.Available = true;
+        Assert.AreEqual("send-blocked", sends.List().Single().RunId);
+        sends.Add(Held("send-other", DateTimeOffset.UtcNow.AddSeconds(1)));
+        CollectionAssert.AreEquivalent(new[] { "send-blocked", "send-other" }, new FleetHeldSends(path, new CodeAlta.Catalog.Secrets.LocalSecretStore(global, protector))
+            .List().Select(static send => send.RunId).ToArray());
+        Assert.AreEqual(0, sends.Blocked);
+    }
+
+    // A protection whose store goes away and comes back.
+    private sealed class SwitchingProtector : CodeAlta.Catalog.Secrets.ISecretProtector
+    {
+        public bool Available { get; set; } = true;
+
+        public string Kind => CodeAlta.Catalog.Secrets.SecretProtectionKinds.File;
+
+        public byte[] Protect(ReadOnlySpan<byte> value) => Available ? [.. value.ToArray().Reverse()] : throw new CodeAlta.Catalog.Secrets.SecretStoreUnavailableException("away");
+
+        public byte[] Unprotect(ReadOnlySpan<byte> protectedValue) => Available ? [.. protectedValue.ToArray().Reverse()] : throw new CodeAlta.Catalog.Secrets.SecretStoreUnavailableException("away");
+    }
+
     private static FleetHeldSend Held(string runId, DateTimeOffset at)
         => new(runId, "session-" + runId, "The held work.", null, "nonce-" + runId, null, null, null, null, at);
 }

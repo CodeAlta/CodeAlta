@@ -139,11 +139,34 @@ public sealed partial class FleetNodeService
         _ = Task.Run(ResumeHeldSendsAsync);
     }
 
-    // Takes again the sends a budget held when the node stopped: each asks the same hold, and is sent once admitted.
+    // How often the sends this machine could not open (its protected store away) are tried again.
+    internal TimeSpan BlockedHeldSendsRetry { get; set; } = TimeSpan.FromMinutes(1);
+
+    // The held sends taken again by this process: one opened later is taken again once.
+    private readonly ConcurrentDictionary<string, byte> _resumedHolds = new(StringComparer.Ordinal);
+
+    // Takes again the sends a budget held when the node stopped: each asks the same hold, and is sent once admitted. Those this
+    // machine cannot open now stay held, are reported, and are tried again until they open.
     private async Task ResumeHeldSendsAsync()
+    {
+        while (true)
+        {
+            await ResumeOpenedHeldSendsAsync().ConfigureAwait(false);
+            int blocked;
+            try { blocked = HeldSends.Blocked; }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { blocked = 0; }
+            if (blocked == 0 || Volatile.Read(ref _disposed) != 0) return;
+            LogWarn($"{blocked} held prompts cannot be opened now (the protected store of the machine is away): they stay held, and are tried again.");
+            await Task.Delay(BlockedHeldSendsRetry).ConfigureAwait(false);
+            if (Volatile.Read(ref _disposed) != 0) return;
+        }
+    }
+
+    private async Task ResumeOpenedHeldSendsAsync()
     {
         foreach (var held in HeldSends.List())
         {
+            if (!_resumedHolds.TryAdd(held.HoldId, 0)) continue;
             try
             {
                 if (await _host.RuntimeService.TryGetRecoverableSessionAsync(held.SessionId).ConfigureAwait(false) is not { } session)

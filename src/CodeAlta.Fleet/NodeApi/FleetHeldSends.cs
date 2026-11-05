@@ -53,12 +53,32 @@ internal sealed class FleetHeldSends
         _protection = protection;
     }
 
-    /// <summary>Gets the sessions whose send waits.</summary>
+    /// <summary>
+    /// Gets how many sends are held that this machine cannot open now (its protected store is away, or holds another key): they stay
+    /// in the file as they were written, their sessions wait, and each reading tries to open them again.
+    /// </summary>
+    public int Blocked
+    {
+        get
+        {
+            lock (_gate)
+            {
+                var opened = Load();
+                return _written.Keys.Count(holdId => !opened.ContainsKey(holdId));
+            }
+        }
+    }
+
+    /// <summary>Gets the sessions whose send waits, those of the sends this machine cannot open now included.</summary>
     public IReadOnlyCollection<string> SessionIds
     {
         get
         {
-            lock (_gate) return [.. Load().Values.Select(static send => send.SessionId).Distinct(StringComparer.OrdinalIgnoreCase)];
+            lock (_gate)
+            {
+                Load();
+                return [.. _written.Values.Select(static send => send.SessionId).Distinct(StringComparer.OrdinalIgnoreCase)];
+            }
         }
     }
 
@@ -77,7 +97,8 @@ internal sealed class FleetHeldSends
         lock (_gate)
         {
             var known = Load();
-            if (!known.ContainsKey(send.HoldId) && known.Count >= MaximumKept) throw new FleetHeldSendsFullException(known.Count);
+            // Every send held counts, those this machine cannot open now too.
+            if (!_written.ContainsKey(send.HoldId) && _written.Count >= MaximumKept) throw new FleetHeldSendsFullException(_written.Count);
             Save(known.SetItem(send.HoldId, send), _written.SetItem(send.HoldId, Protect(send)));
         }
     }
@@ -88,7 +109,7 @@ internal sealed class FleetHeldSends
         lock (_gate)
         {
             var sends = Load();
-            if (!sends.ContainsKey(holdId)) return;
+            if (!sends.ContainsKey(holdId) && !_written.ContainsKey(holdId)) return;
             try { Save(sends.Remove(holdId), _written.Remove(holdId)); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -99,7 +120,7 @@ internal sealed class FleetHeldSends
 
     private ImmutableDictionary<string, FleetHeldSend> Load()
     {
-        if (_sends is { } known) return known;
+        if (_sends is { } known) return _written.Count == known.Count ? known : _sends = OpenBlocked(known);
         var sends = ImmutableDictionary.CreateBuilder<string, FleetHeldSend>(StringComparer.Ordinal);
         var written = ImmutableDictionary.CreateBuilder<string, FleetHeldSend>(StringComparer.Ordinal);
         byte[] bytes;
@@ -168,6 +189,25 @@ internal sealed class FleetHeldSends
 
         _written = written.ToImmutable();
         return _sends = sends.ToImmutable();
+    }
+
+    // Tries again to open the sends this machine could not open: those that open now are held as the others.
+    private ImmutableDictionary<string, FleetHeldSend> OpenBlocked(ImmutableDictionary<string, FleetHeldSend> opened)
+    {
+        foreach (var (holdId, send) in _written)
+        {
+            if (opened.ContainsKey(holdId)) continue;
+            try
+            {
+                opened = opened.SetItem(holdId, send with { Text = _protection.UnprotectText(send.Text), Title = send.Title is { } title ? _protection.UnprotectText(title) : null });
+            }
+            catch (Exception exception) when (exception is FormatException or InvalidDataException or CodeAlta.Catalog.Secrets.SecretStoreUnavailableException)
+            {
+                // Still blocked: tried again at the next reading.
+            }
+        }
+
+        return opened;
     }
 
     // The protected form of a send, as the file keeps it.
