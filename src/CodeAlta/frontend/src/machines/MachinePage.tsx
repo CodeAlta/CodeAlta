@@ -111,7 +111,11 @@ function NotManaged({ machine, device }: { machine: MachineView; device: string 
   return <section className="machine-section" aria-label={t("Manage this machine")}>
     <h2>{t("Manage this machine")}</h2>
     <p className="muted-text">{t("This computer sees and drives the sessions of {name}, but does not manage it. The device that installed or first paired it manages it, and can give this computer the permission from its own page of {name}.", { name: machine.name })}</p>
-    {device && <><p className="muted-text">{t("On {name} itself, the owner gives it with:", { name: machine.name })}</p>
+    {/* A machine reached through the server only has no paired device to give the permission to: this computer pairs with it to manage it. */}
+    {!machine.paired ? <><p className="muted-text">{t("This computer reaches {name} through your server and is not paired with it. To manage it from here, run on {name} itself:", { name: machine.name })}</p>
+      <code className="machine-command">altanode pair --manage</code>
+      <p className="muted-text">{t("Then paste the link it shows in Settings > Fleet > Machines > Pair a machine.")}</p></>
+      : device && <><p className="muted-text">{t("On {name} itself, the owner gives it with:", { name: machine.name })}</p>
       <code className="machine-command">altanode permissions {device} --allow manage</code></>}
   </section>;
 }

@@ -164,7 +164,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 
 **Settings** > **Fleet** > **Machines** lists all your machines, whatever the way this computer reaches them: those paired with it, and those added through your server, marked **Through your server**. Both open their page; a machine of the server has nothing to forget here.
 
-A computer manages a machine when its pairing asked for it (`altanode pair --manage`, or **Manage it from this computer** over SSH). Give another computer the **Manage** switch on its row to let it manage the machine too; turning it off for **This computer** asks first, since only the owner can give it back. A computer that does not manage the machine sees its providers, and how its owner gives it the permission.
+A computer manages a machine when its pairing asked for it (`altanode pair --manage`, or **Manage it from this computer** over SSH). Give another computer the **Manage** switch on its row to let it manage the machine too; turning it off for **This computer** asks first, since only the owner can give it back. A computer that does not manage the machine sees its providers, and how its owner gives it the permission. A machine this computer reaches only through your server is not paired with it: to manage it, run `altanode pair --manage` on it and paste the link in **Pair a machine…**.
 
 On the machine itself, the same is done with:
 

@@ -199,6 +199,12 @@ test("giving up managing a machine asks first, and a machine this computer does 
     assert.equal(await page.evaluate(`document.querySelector('.machine-devices')`), null, "no switch for a machine this computer does not manage");
     assert.equal(await page.evaluate(`document.querySelector('.machine-agents')`), null, "nor for the agents of other machines");
     await page.shot("machine-page-not-managed");
+
+    // Reached through the server only, the machine has no paired device to give the permission to: this computer pairs with it to manage it.
+    await page.evaluate(`window.machineFixture.show('relayed')`);
+    await page.until(`document.querySelector('.machine-page-title')?.textContent.includes('pc-ai') && document.querySelector('.machine-command')`, "the command for a machine reached through the server");
+    assert.equal(await page.evaluate(`document.querySelector('.machine-command').textContent`), "altanode pair --manage");
+    assert.match(await page.evaluate(`document.querySelector('[aria-label="Manage this machine"]').textContent`) as string, /Pair a machine/u);
     assert.deepEqual(page.problems, []);
   }, options);
 });

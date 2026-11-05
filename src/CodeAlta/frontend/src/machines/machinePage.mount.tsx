@@ -136,7 +136,10 @@ function Fixture() {
   const [shown, setShown] = useState("managed");
   Object.assign(window, { machineFixture: { calls, show: setShown } });
   return <MachinePage key={shown} epoch="12345678-1234-1234-1234-123456789abc" api={api}
-    machine={shown === "managed" ? machine("managed", "build-box", ["view", "drive", "start", "manage"]) : machine("other", "mac-mini", ["view", "drive", "start"])}
+    machine={shown === "managed" ? machine("managed", "build-box", ["view", "drive", "start", "manage"])
+      // A node of the owner's organization this computer reaches through the relay of the server: it has no pairing of its own.
+      : shown === "relayed" ? { ...machine("relayed", "pc-ai", ["view", "drive", "start"]), paired: false, channel: "relayed" }
+      : machine("other", "mac-mini", ["view", "drive", "start"])}
     onBack={() => calls.push(JSON.stringify({ back: shown }))} />;
 }
 

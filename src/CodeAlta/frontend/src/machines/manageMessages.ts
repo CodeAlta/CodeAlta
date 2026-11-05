@@ -59,6 +59,18 @@ export const machineManageMessages = {
     "Dieser Computer sieht und steuert die Sitzungen von {name}, verwaltet sie aber nicht. Das Gerät, das sie installiert oder zuerst gekoppelt hat, verwaltet sie und kann diesem Computer die Berechtigung auf seiner eigenen Seite von {name} geben.",
     "このコンピューターは {name} のセッションを表示・操作できますが、管理はしていません。最初にインストールまたはペアリングしたデバイスが管理しており、そのデバイスの {name} のページからこのコンピューターに権限を与えられます。",
     "本机可以查看和操作 {name} 的会话，但不管理它。安装或最先配对它的设备管理它，并可在其自己的 {name} 页面中授予本机权限。"],
+  "This computer reaches {name} through your server and is not paired with it. To manage it from here, run on {name} itself:": [
+    "Este equipo llega a {name} a través de tu servidor y no está emparejado con ella. Para administrarla desde aquí, ejecuta en la propia {name}:",
+    "Cet ordinateur atteint {name} par votre serveur et n’est pas associé à elle. Pour la gérer d’ici, lancez sur {name} même :",
+    "Dieser Computer erreicht {name} über Ihren Server und ist nicht mit ihr gekoppelt. Um sie von hier zu verwalten, auf {name} selbst ausführen:",
+    "このコンピューターはサーバー経由で {name} に接続しており、ペアリングされていません。ここから管理するには、{name} 上で次を実行します:",
+    "此计算机通过你的服务器访问 {name}，并未与其配对。要在此管理它，请在 {name} 上运行："],
+  "Then paste the link it shows in Settings > Fleet > Machines > Pair a machine.": [
+    "Luego pega el enlace que muestra en Ajustes > Flota > Máquinas > Emparejar una máquina.",
+    "Puis collez le lien qu’elle affiche dans Paramètres > Flotte > Machines > Associer une machine.",
+    "Dann den angezeigten Link unter Einstellungen > Flotte > Maschinen > Maschine koppeln einfügen.",
+    "表示されたリンクを 設定 > フリート > マシン > マシンをペアリング に貼り付けます。",
+    "然后将其显示的链接粘贴到 设置 > 机群 > 机器 > 配对机器。"],
   "On {name} itself, the owner gives it with:": ["En la propia {name}, el propietario lo da con:", "Sur {name} même, son propriétaire la donne avec :", "Auf {name} selbst gibt der Besitzer sie mit:", "{name} 上で、所有者は次のコマンドで与えます:", "在 {name} 上，所有者可用以下命令授予："],
   "Device": ["Dispositivo", "Appareil", "Gerät", "デバイス", "设备"],
   "Connected": ["Conectado", "Connecté", "Verbunden", "接続中", "已连接"],
