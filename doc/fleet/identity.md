@@ -206,8 +206,10 @@ or required, the break-glass owner) needs it today, one way or the other, each w
 - **Sign in again**: the owner's controller device signs in with a method linked to its person (purpose `confirm`, a
   passkey, a linked account or the company's own sign-in), which gives a single-use confirmation bound to that device
   for 10 minutes. An account is asked to authenticate again at its provider, not to reuse the session the browser keeps
-  there (`prompt=login` for Microsoft, `max_age=0` for Google, both for the others), and its `auth_time` must be of the
-  sign-in; GitHub's device flow has no such request, so its code is entered at GitHub as for any sign-in.
+  there (`prompt=login` for Microsoft, `max_age=0` for Google, both for the others), and its ID token must carry an
+  `auth_time` of the sign-in: a token without one confirms nothing, since the request is in an address the device may
+  change. Microsoft's authorities send it only to an application whose registration adds the optional claim `auth_time`
+  to its ID tokens. GitHub's device flow has no such request, so its code is entered at GitHub as for any sign-in.
 - **Approve on another device**: the device asks for an approval of exactly this change; another approved controller
   device of the same person is shown every field of the change (the client secret by its SHA-256 only), recomputes its
   digest itself, refuses one that does not match, and signs that digest only if the server still holds the change it
