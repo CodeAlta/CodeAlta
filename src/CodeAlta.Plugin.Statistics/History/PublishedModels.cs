@@ -10,12 +10,14 @@ internal static class PublishedModels
     private const string ModelKey = "model";
     private const string ProviderKey = "provider";
     private const string ToolFamily = "tool";
+    private const string ActivityFamily = "activity";
 
     /// <summary>Gives the rows of a session with the models of its provider.</summary>
     /// <param name="rows">The rows of the session, as the store has them.</param>
     /// <param name="aliases">The names the session's provider reported for the models it was given (alias to model); null for none.</param>
     /// <returns>
-    /// The rows: an alias as the model it stands for; a tool call with the model of its provider in its quarter hour, or in the
+    /// The rows: the time and the runs counted under a model no request of their quarter hour reported, as the model it stood for then
+    /// (a model a request reported is never relabelled); a tool call with the model of its provider in its quarter hour, or in the
     /// session, when the session used one model of that provider there, and without one otherwise; rows that became the same
     /// added up (a measure whose name ends with <c>_max</c> keeps the larger value).
     /// </returns>
@@ -23,7 +25,18 @@ internal static class PublishedModels
     public static IReadOnlyList<StatisticsFactRow> Attribute(IReadOnlyList<StatisticsFactRow> rows, IReadOnlyDictionary<string, string>? aliases)
     {
         ArgumentNullException.ThrowIfNull(rows);
-        var renamed = rows.Select(row => Resolve(row, aliases)).ToList();
+        // The models the provider reported: those of the requests and their costs, by quarter hour and in the whole session.
+        var reported = new Dictionary<(string Provider, long Quarter), HashSet<string>>();
+        var reportedEver = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var row in rows)
+        {
+            if (row.Family is ToolFamily or ActivityFamily || Find(row, ModelKey) is not { } model) continue;
+            var provider = Find(row, ProviderKey) ?? string.Empty;
+            Add(reported, (provider, row.Quarter), model);
+            Add(reportedEver, provider, model);
+        }
+
+        var renamed = rows.Select(row => Resolve(row, aliases, reported, reportedEver)).ToList();
         var byQuarter = new Dictionary<(string Provider, long Quarter), HashSet<string>>();
         var byProvider = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (var row in renamed)
@@ -55,12 +68,17 @@ internal static class PublishedModels
         return Merge(renamed);
     }
 
-    private static StatisticsFactRow Resolve(StatisticsFactRow row, IReadOnlyDictionary<string, string>? aliases)
+    // Only the time and the runs are counted under the model in force before a request named one: a row of another family keeps
+    // the model its provider reported. The model a name stood for is the one a request of the same quarter hour reported, or for a
+    // name no request ever reported (an alias), the first model reported for it; never the latest a chain of later turns gives.
+    private static StatisticsFactRow Resolve(StatisticsFactRow row, IReadOnlyDictionary<string, string>? aliases,
+        Dictionary<(string Provider, long Quarter), HashSet<string>> reported, Dictionary<string, HashSet<string>> reportedEver)
     {
-        if (aliases is not { Count: > 0 } || Find(row, ModelKey) is not { } model) return row;
-        var resolved = model;
-        // An alias names the model it stands for, which may have been renamed again: a few steps, never a loop.
-        for (var step = 0; step < 8 && aliases.TryGetValue(resolved, out var next) && !string.IsNullOrEmpty(next) && next != resolved; step++) resolved = next;
+        if (aliases is not { Count: > 0 } || row.Family != ActivityFamily || Find(row, ModelKey) is not { } model) return row;
+        var provider = Find(row, ProviderKey) ?? string.Empty;
+        var inQuarter = reported.GetValueOrDefault((provider, row.Quarter));
+        if (inQuarter?.Contains(model) == true || !aliases.TryGetValue(model, out var next) || string.IsNullOrEmpty(next) || next == model) return row;
+        var resolved = inQuarter?.Contains(next) == true || reportedEver.GetValueOrDefault(provider) is { } ever && !ever.Contains(model) && ever.Contains(next) ? next : model;
         if (resolved == model) return row;
         return row with { Keys = [.. row.Keys.Select(key => key.Key == ModelKey ? new KeyValuePair<string, string>(ModelKey, resolved) : key)] };
     }

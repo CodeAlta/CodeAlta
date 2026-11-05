@@ -10,9 +10,10 @@ internal sealed partial class StatisticsStore
 
     /// <summary>
     /// The version of what a publisher makes of the rows, part of each revision: a new one has every session published again once.
-    /// Version 2 puts the rows of a session on the models its provider reported (<see cref="PublishedModels"/>).
+    /// Version 2 puts the rows of a session on the models its provider reported (<see cref="PublishedModels"/>); version 3 never
+    /// relabels a model a request reported.
     /// </summary>
-    internal const int PublicationVersion = 2;
+    internal const int PublicationVersion = 3;
 
     /// <summary>
     /// Gets the revision of the facts of every session read: where its reading stopped, the version of the facts, the floor and the
