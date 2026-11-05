@@ -132,6 +132,18 @@ internal interface IAutomationRunGate
     /// <param name="spaceId">The space of the run.</param>
     /// <returns>The limits; <see cref="AutomationRunLimits.None"/> when nothing limits the run.</returns>
     AutomationRunLimits LimitsFor(AutomationEntry entry, ModelProviderDescriptor provider, string spaceId) => AutomationRunLimits.None;
+
+    /// <summary>
+    /// Records whose work the session of a run is, before it attaches (<c>doc/fleet/security-and-privacy.md</c>, shared machines):
+    /// a run that is not positively the work of the owner of the machine (an automation of a team or of the organization, or one
+    /// another person gave) resolves none of the owner's own values. Nothing to record on a host whose every session is its owner's.
+    /// </summary>
+    /// <param name="entry">The automation.</param>
+    /// <param name="sessionId">The session of the run.</param>
+    /// <exception cref="IOException">It could not be recorded: the run does not start.</exception>
+    void Attribute(AutomationEntry entry, string sessionId)
+    {
+    }
 }
 
 /// <summary>What a run keeps to besides its provider and model: given to its session before its first prompt.</summary>
@@ -362,6 +374,16 @@ internal sealed class AutomationRunner : IAutomationRunner
             }
 
             sessionId = session.SessionId;
+            // Whose work it is is known before the session attaches: a run that is not its owner's resolves none of the owner's values.
+            try
+            {
+                _gate?.Attribute(entry, sessionId);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return new(sessionId, $"Whose work the run is could not be recorded: {exception.Message}", null);
+            }
+
             // The processes of the session get the values of the environment it was admitted to, from its first attachment.
             if (admitted is not null) _host.Identities.Environments.Admit(sessionId, admitted);
             // The review and the sandbox the automation chose, before anything is sent to the session.

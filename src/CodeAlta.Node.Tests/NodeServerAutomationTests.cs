@@ -468,6 +468,47 @@ public sealed class NodeServerAutomationTests
     }
 
     [TestMethod]
+    public async Task ARunOfAnAutomationOfTheOrganization_IsNotTheWorkOfTheOwnerOfTheMachine_AndResolvesNoneOfTheOwnersValues()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var provider = new ScriptedNodeProvider();
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            ConfigureModelProviders = provider.Register,
+            Automations = new NodeAutomationOptions
+            {
+                TimeProvider = new NodeClock { Now = Noon }, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false, CredentialKind = static _ => AutomationCredentialKind.Account,
+            },
+        }, token);
+        await using var fleet = NodeFleet.Start(node, new NodeListenOptions { Port = 0 }, "test-node", "1.0.0");
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "laptop"));
+        using var tablet = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "tablet"));
+        using var self = DeviceIdentity.LoadOrCreate(node.Host.CatalogOptions);
+        var automations = node.Automations!;
+        var list = DeviceList(laptop, tablet, self, removeTablet: false);
+        automations.ServerDevices = _ => list;
+        var access = FleetAccessState.Empty with { OrganizationId = "org", Number = 1, Owners = ["p1"], OrganizationMachines = [self.DeviceId], OrganizationServices = ["svc-org"] };
+        automations.ServerAccess = _ => access;
+        var sealedText = FleetAutomationSigning.SealForOrganization(new FleetAutomationContent(Definition, null), Id, 1, self.DeviceId, list, access, tablet);
+        var signed = FleetAutomationSigning.Sign(tablet, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, "org", Id, 1, self.DeviceId, false, true, ["hourly"],
+            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = FleetAutomationVersion.OrganizationScope, Provider = "scripted" });
+        var outcome = await automations.AcceptFromServerAsync("link-1", list, "org", signed,
+            version => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, access, out var content, out var reason)
+                ? (content, null) : (null, reason), token);
+        Assert.IsTrue(outcome.Applied, outcome.Message);
+
+        // A run of it starts a session that nobody attends and that is not the owner's: it resolves none of the owner's own values.
+        var run = await automations.RunAsync(new CodeAlta.Fleet.NodeApi.FleetAutomationCaller(laptop.DeviceId, "laptop"), Id, token);
+        var deadline = DateTime.UtcNow + Patience;
+        string? sessionId = null;
+        while (DateTime.UtcNow < deadline && (sessionId = automations.Engine.Runs(Id, 10).FirstOrDefault(candidate => candidate.Id == run.Id)?.SessionId) is null)
+            await Task.Delay(50, token);
+        Assert.IsNotNull(sessionId, "the run started a session");
+        Assert.IsFalse(node.Host.Identities.IsOwnerWork?.Invoke(sessionId) ?? true, "a run of the organization is not the owner's work");
+    }
+
+    [TestMethod]
     public async Task AnAutomationTheDocumentGivesToAnotherOwner_StopsOnTheMachineOfItsFormerOwner_WhoStillTakesItAway()
     {
         var token = TestContext.CancellationToken;

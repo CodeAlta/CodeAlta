@@ -150,6 +150,8 @@ internal sealed class NodeFleet : IAsyncDisposable
             {
                 automations.Devices = deviceId => trusted.List().FirstOrDefault(device => string.Equals(device.DeviceId, deviceId, StringComparison.Ordinal));
                 automations.DeviceId = identity.DeviceId;
+                // A run that is not positively its owner's work is recorded as such before its session attaches: none of the owner's values.
+                automations.RecordNotOwnerWork = service.RecordUnattendedWork;
             }
             string? file = null;
             // Without a listener the node API still serves the channels its servers relay.

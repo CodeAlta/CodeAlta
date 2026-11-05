@@ -221,6 +221,32 @@ internal sealed partial class NodeAutomations
         return null;
     }
 
+    /// <summary>
+    /// Gets or sets what records that a session of this machine is not the work of its owner, with the service identity it acts
+    /// as (null for none); null records nothing, as on a host whose every session is its owner's.
+    /// </summary>
+    internal Action<string, string?>? RecordNotOwnerWork { get; set; }
+
+    /// <inheritdoc />
+    void IAutomationRunGate.Attribute(AutomationEntry entry, string sessionId)
+    {
+        if (RecordNotOwnerWork is not { } record || IsOwnerWorkOf(entry.Id)) return;
+        record(sessionId, AssignmentOf(entry.Id)?.Via is { } link ? ActingAs(link, entry.Id) : null);
+    }
+
+    // Whether the runs of an automation are positively the work of the owner of this machine: one of its own configuration, one a
+    // device paired to it assigned, or a personal one of its owner given through a server; never one of a team or of the
+    // organization, nor one another person gave, nor one whose version does not read.
+    internal bool IsOwnerWorkOf(string automationId)
+    {
+        if (AssignmentOf(automationId) is not { Via: { } link } assignment) return true;
+        if (assignment.Signed is not { } signed || !FleetAutomationVersionDocuments.TryParse(signed.Payload, out var version)) return false;
+        if (version.IsOrganizationScope || version.TeamId is not null) return false;
+        if (DeviceId is not { } self || ServerDevices?.Invoke(link) is not { } devices) return false;
+        var giver = devices.Members.TryGetValue(version.SignerDeviceId, out var signer) ? signer.OwnerId : null;
+        return giver is not null && giver == FleetAccessState.OwnerOfMachine(ServerAccess?.Invoke(link), self, devices);
+    }
+
     // The service identity the runs of an automation of a team or of the organization act as: the first one the signed access
     // document says its scope turned on; null for a personal automation.
     internal string? ActingAs(string linkId, string automationId)
