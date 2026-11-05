@@ -5,15 +5,19 @@ import { TimelineMessage } from "./TimelineMessage";
 import { buildTimelineItems, type HistoryEntry } from "./timeline";
 import { createNotesReader } from "./sessionNotes";
 import { createMutationCapability } from "./sessionOperations";
+import { createSessionOverlayMemory } from "./sessionOverlayMemory";
 import { saveWindowGeometry, type WindowGeometry } from "./windowGeometry";
 import { WorkItemCards } from "./workItems/WorkItemCards";
 import { workItems } from "./workItems/workItems";
 import type { WorkItemsHub } from "./workItems/workItemsHub";
 
 const storageKey = "codealta.desktop.notes-window.v1";
+const dockKey = "codealta.desktop.proposals-dock.v1";
 const root = createRoot(document.getElementById("app")!);
 const epoch = "11111111-1111-4111-8111-111111111111";
-let generation = 0, width = 1080, height = 600, proposals = false, markdown = "", reads = 0, hidden = false;
+let generation = 0, width = 1080, height = 600, proposals = 0, markdown = "", reads = 0, hidden = false;
+// What the window keeps for the session while its pane is mounted again (a switch of space).
+let memory = createSessionOverlayMemory();
 const forbidden = () => { throw Error("The layout fixture must not act on real state."); };
 const reader = createNotesReader(async request => {
   reads++;
@@ -21,12 +25,14 @@ const reader = createNotesReader(async request => {
 }, forbidden);
 const capability = createMutationCapability(epoch);
 const hub = { act: forbidden, read: forbidden } as unknown as WorkItemsHub;
-const items = workItems([{ projectId: "fixture", truncated: false, plans: [], tasks: [{
-  id: "proposal", kind: "task", status: "pending", title: "Keep the session overlays readable",
+const task = (id: string, title: string) => ({
+  id, kind: "task" as const, status: "pending", title,
   summary: "A proposal should stay beside the notes without hiding the checklist or its controls.",
-  category: "problem", statusText: null, created: "2026-10-10", file: ".alta/tasks/proposal.md",
+  category: "problem", statusText: null, created: "2026-10-10", file: `.alta/tasks/${id}.md`,
   proposedBy: "fixture", runner: null, acknowledged: false, runsWith: null,
-}] }], new Set());
+});
+const items = workItems([{ projectId: "fixture", truncated: false, plans: [],
+  tasks: [task("proposal", "Keep the session overlays readable"), task("later", "A proposal that arrives later")] }], new Set());
 const busy = new Set<string>();
 const entry: HistoryEntry = { offset: "1", eventType: "contentCompleted", kind: "User", phase: null,
   sessionId: "fixture", providerId: "fixture", runId: "run", contentId: "body", activityId: null,
@@ -42,22 +48,28 @@ function render() {
     <div className="session-workspace" style={{ width: "100%" }} key={generation}>
       <div className="session-timeline-area">
         <div className="timeline-scroll"><div className="messages"><TimelineMessage item={message} onBranch={forbidden} /></div></div>
-        <SessionNotesOverlay sessionId="fixture" epoch={epoch} capability={capability} reader={reader} fallbackMarkdown="" hidden={hidden} />
-        <WorkItemCards hub={hub} items={proposals ? items : []} preferredStart="worktree" busy={busy} onStart={forbidden} onOpenList={forbidden} />
+        <SessionNotesOverlay sessionId="fixture" epoch={epoch} capability={capability} reader={reader} fallbackMarkdown="" hidden={hidden} memory={memory.notes("fixture")} />
+        <WorkItemCards hub={hub} items={items.slice(0, proposals)} preferredStart="worktree" busy={busy} memory={memory.proposals("fixture")} onStart={forbidden} onOpenList={forbidden} />
       </div>
     </div>
   </div>));
 }
 Object.assign(window, { overlays: {
   reset(options: { width: number; height?: number; stored?: WindowGeometry; notes?: string; proposals?: boolean }) {
-    width = options.width; height = options.height ?? 600; markdown = options.notes ?? ""; proposals = options.proposals ?? false; hidden = false;
+    width = options.width; height = options.height ?? 600; markdown = options.notes ?? ""; proposals = options.proposals ? 1 : 0; hidden = false;
+    memory = createSessionOverlayMemory();
+    localStorage.removeItem(dockKey);
     saveWindowGeometry(storageKey, options.stored ?? null); generation++; render();
   },
+  /** Mounts the pane again with the same memory, as a switch of space does. */
+  remount() { generation++; render(); },
   resize(value: number, tall = height) { width = value; height = tall; render(); },
-  proposals(value: boolean) { proposals = value; render(); },
+  /** Shows the first proposal (true), none (false) or that many. */
+  proposals(value: boolean | number) { proposals = Number(value); render(); },
   hide(value: boolean) { hidden = value; render(); },
   reads: () => reads,
   stored: () => localStorage.getItem(storageKey),
+  dock: () => localStorage.getItem(dockKey),
   unmount() { flushSync(() => root.unmount()); },
 } });
 render();
