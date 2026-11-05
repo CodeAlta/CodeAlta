@@ -18,6 +18,12 @@ public sealed record FleetEnvironmentCheckpoint(long Number, bool Removed, strin
 /// <param name="Secrets">The versions of the values, by their id at the server.</param>
 public sealed record FleetCheckpoint(IReadOnlyDictionary<string, FleetEnvironmentCheckpoint> Environments, IReadOnlyDictionary<string, int> Secrets)
 {
+    /// <summary>
+    /// Gets the values the machine saw taken away (deleted, or withdrawn from it), by their id at the server: the version it held
+    /// then, which it never takes again; only a newer version is taken (a value given to it again is rotated first).
+    /// </summary>
+    public IReadOnlyDictionary<string, int> Withdrawn { get; init; } = new Dictionary<string, int>();
+
     /// <summary>Gets the checkpoint of an organization this machine took nothing from yet.</summary>
     public static FleetCheckpoint Empty { get; } = new(new Dictionary<string, FleetEnvironmentCheckpoint>(), new Dictionary<string, int>());
 }
@@ -85,6 +91,14 @@ public sealed partial class LocalSecretStore
                 changed = true;
             }
 
+            // A value seen taken away: only a value whose version is recorded, so that it adds no entry.
+            foreach (var (id, version) in taken.Withdrawn)
+            {
+                if (!organization.Secrets.ContainsKey(id) || organization.Withdrawn.TryGetValue(id, out var known) && known >= version) continue;
+                organization.Withdrawn[id] = version;
+                changed = true;
+            }
+
             foreach (var (id, version) in taken.Secrets)
             {
                 if (organization.Secrets.TryGetValue(id, out var known) && known >= version) continue;
@@ -112,7 +126,10 @@ public sealed partial class LocalSecretStore
     private static FleetCheckpoint Checkpoint(CheckpointOrganizationDocument organization)
         => new(organization.Environments.Where(static entry => entry.Value is { Digest: not null }).ToDictionary(static entry => entry.Key,
                 static entry => new FleetEnvironmentCheckpoint(entry.Value.Number, entry.Value.Removed, entry.Value.Digest!), StringComparer.Ordinal),
-            new Dictionary<string, int>(organization.Secrets, StringComparer.Ordinal));
+            new Dictionary<string, int>(organization.Secrets, StringComparer.Ordinal))
+        {
+            Withdrawn = new Dictionary<string, int>(organization.Withdrawn, StringComparer.Ordinal),
+        };
 
     private static CheckpointDocument LoadCheckpoints(string path)
     {
@@ -150,6 +167,10 @@ internal sealed class CheckpointOrganizationDocument
 
     [JsonPropertyName("secrets")]
     public Dictionary<string, int> Secrets { get; set; } = new(StringComparer.Ordinal);
+
+    // The values seen taken away, with the version held then.
+    [JsonPropertyName("withdrawn")]
+    public Dictionary<string, int> Withdrawn { get; set; } = new(StringComparer.Ordinal);
 }
 
 internal sealed class CheckpointEnvironmentDocument

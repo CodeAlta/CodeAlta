@@ -219,6 +219,12 @@ public sealed class FleetSecretSync
                 continue;
             }
 
+            if (checkpoint.Withdrawn.TryGetValue(secret.Id, out var withdrawnVersion) && secret.Version <= withdrawnVersion)
+            {
+                refused.Add($"{secret.Name}: version {secret.Version} was taken away from this machine");
+                continue;
+            }
+
             if (!FleetSecretSealing.TryOpen(secret.Copy, FleetSecretBinding.Of(secret), _devices.Identity, list, access, out var value, out var reason))
             {
                 refused.Add($"{secret.Name}: {reason}");
@@ -229,9 +235,17 @@ public sealed class FleetSecretSync
             opened.Add((secret, value));
         }
 
+        // A value this machine took that the server no longer answers was deleted or withdrawn from it: the version it held is
+        // recorded as taken away, so that a server that answers it again later, correctly sealed, does not bring it back. Only a
+        // newer version is taken then (a value given again to this machine is rotated first).
+        var answeredIds = held.Secrets.Select(static secret => secret.Id).ToHashSet(StringComparer.Ordinal);
+        var withdrawn = checkpoint.Secrets.Where(entry => !answeredIds.Contains(entry.Key)
+                && (!checkpoint.Withdrawn.TryGetValue(entry.Key, out var known) || known < entry.Value))
+            .ToDictionary(static entry => entry.Key, static entry => entry.Value, StringComparer.Ordinal);
+
         // The checkpoint first: an environment and a value are taken only once their version is recorded, and one the checkpoint
         // cannot record (it holds as many as it records) is not taken at all.
-        if (organization is not null && _store.AdvanceFleetCheckpoint(organization, new FleetCheckpoint(takenEnvironments, takenSecrets)) is { } unrecorded)
+        if (organization is not null && _store.AdvanceFleetCheckpoint(organization, new FleetCheckpoint(takenEnvironments, takenSecrets) { Withdrawn = withdrawn }) is { } unrecorded)
         {
             foreach (var id in unrecorded.Environments.Keys)
             {

@@ -423,6 +423,41 @@ public sealed class FleetSecretsTests
     }
 
     [TestMethod]
+    public async Task AValueDeletedOrWithdrawn_DoesNotComeBackWhenTheServerAnswersItAgain()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var deleted = await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "DELETED_TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), "deleted-value", false,
+            [fleet.NodeKey.DeviceId], CancellationToken.None);
+        var withdrawn = await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "WITHDRAWN_TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), "withdrawn-value", false,
+            [fleet.NodeKey.DeviceId], CancellationToken.None);
+        using var rewrite = new RewriteHandler { InnerHandler = new HttpClientHandler() };
+        using var nodeRoot = new TempDirectory();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(nodeRoot.Path, new CodeAlta.Catalog.Secrets.MasterKeySecretProtector(
+            new CodeAlta.Catalog.Secrets.FileSecretKeyStore(Path.Combine(nodeRoot.Path, "secrets", "key"))));
+        FleetSecretSync NewSync() => new("link-1", new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey,
+            Path.Combine(fleet.Root.Path, "node-link", FleetOrganizationDevices.PinFileName), rewrite), null, store, null);
+        var sync = NewSync();
+        await sync.SyncAsync(CancellationToken.None);
+        var copies = (await fleet.HeldAsync(fleet.NodeKey)).Secrets;
+        Assert.AreEqual(2, store.ListFleetCopies().Count);
+
+        // One is deleted, the other is taken away from this machine: the machine sees both go.
+        await fleet.Manager.DeleteAsync(deleted.Id, CancellationToken.None);
+        await fleet.Manager.WithdrawAsync(withdrawn.Id, fleet.NodeKey.DeviceId, CancellationToken.None);
+        await sync.SyncAsync(CancellationToken.None);
+        Assert.AreEqual(0, store.ListFleetCopies().Count);
+
+        // The server answers their copies again, correctly sealed: neither comes back, also once the machine restarted.
+        rewrite.Held = held => held with { Secrets = [.. held.Secrets, .. copies] };
+        foreach (var refreshed in new[] { sync, NewSync() })
+        {
+            var result = await refreshed.SyncAsync(CancellationToken.None);
+            Assert.AreEqual(0, store.ListFleetCopies().Count, "a value deleted or withdrawn does not come back: " + string.Join("; ", result.Refused));
+            Assert.AreEqual(2, result.Refused.Count, string.Join("; ", result.Refused));
+        }
+    }
+
+    [TestMethod]
     public async Task AValueOrAnEnvironmentTheCheckpointCannotRecord_IsNotTaken()
     {
         await using var fleet = await SecretsFixture.StartAsync();
