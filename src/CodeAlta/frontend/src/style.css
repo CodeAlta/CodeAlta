@@ -2420,6 +2420,20 @@ svg.pele {
 .markdown-content pre > .markdown-copy[data-copied]::after { opacity: 1; background: var(--green, #3dcc91);
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E"); }
+/* The button of a block of a shell pastes its commands in a terminal of the session. It stays in the corner, after Copy, and says
+   it pasted as Copy says it copied. */
+.markdown-content pre > .markdown-terminal { position: sticky; top: -7px; float: right; display: inline-flex; align-items: center; justify-content: center; width: 23px; height: 21px;
+  margin: -7px -7px 4px 2px; padding: 0; border: 0; border-radius: 5px; color: var(--muted); background: var(--panel-2); cursor: pointer; user-select: none; }
+.markdown-content pre > .markdown-terminal + .markdown-copy { margin-right: 0; }
+.markdown-content pre > .markdown-terminal::after { content: ""; width: 13px; height: 13px; background: currentColor; opacity: .75;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 17 6-6-6-6'/%3E%3Cpath d='M12 19h8'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 17 6-6-6-6'/%3E%3Cpath d='M12 19h8'/%3E%3C/svg%3E") center / contain no-repeat; }
+.markdown-content pre > .markdown-terminal:hover, .markdown-content pre > .markdown-terminal:focus-visible { color: var(--text); background: color-mix(in srgb, var(--text) 12%, var(--panel-2)); }
+.markdown-content pre > .markdown-terminal:hover::after, .markdown-content pre > .markdown-terminal:focus-visible::after { opacity: 1; }
+.markdown-content pre > .markdown-terminal:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.markdown-content pre > .markdown-terminal[data-pasted]::after { opacity: 1; background: var(--green, #3dcc91);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E"); }
 /* Formulas drawn by KaTeX take the color of the text in both themes, a little larger than it as in LaTeX. A displayed
    equation wider than the message scrolls sideways; its buttons, shown under the pointer, copy its LaTeX and its MathML.
    Before KaTeX is loaded, a formula shows its source. */

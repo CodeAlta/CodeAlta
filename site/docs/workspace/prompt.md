@@ -163,7 +163,7 @@ Remote Control needs Claude Code signed in with your claude.ai account, not an A
 
 The timeline shows:
 
-- messages in Markdown; in CodeAlta Desktop a code block has a copy button, a `mermaid` block is drawn as a diagram (or stays code, with the reason, when it cannot be read), and [formulas and footnotes](#equations) are drawn. A picture on disk that a message shows (`![chart](out/chart.png)`, a PNG, JPEG, GIF, WebP or BMP file) is drawn in the message: click it to open it in a window with **Copy image**, its path with **Copy path**, and a button that shows the file in its folder. `Ctrl`+click (`Cmd`+click on macOS) opens the file in the code editor;
+- messages in Markdown; in CodeAlta Desktop a code block has a copy button, a block of a shell a button that [pastes its commands in a terminal](code.md#commands-from-a-message), a `mermaid` block is drawn as a diagram (or stays code, with the reason, when it cannot be read), and [formulas and footnotes](#equations) are drawn. A picture on disk that a message shows (`![chart](out/chart.png)`, a PNG, JPEG, GIF, WebP or BMP file) is drawn in the message: click it to open it in a window with **Copy image**, its path with **Copy path**, and a button that shows the file in its folder. `Ctrl`+click (`Cmd`+click on macOS) opens the file in the code editor;
 - reasoning and status messages;
 - [tool calls](#tool-calls) as compact tiles;
 - the modified-files card, with the lines added and removed per file and their diffs;

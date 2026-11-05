@@ -48,7 +48,7 @@ import { backgroundCalls, runningBackgroundTasks, type BackgroundCallState } fro
 import { MessageLinksContext } from "./TimelineMessage";
 import { markdownHrefKind, openMarkdownLink, type MarkdownLinkScope } from "./markdownLinks";
 import { createMarkdownImageCache, markdownImageRequest, type MarkdownImages } from "./markdownImages";
-import { MarkdownImagesContext, MarkdownLinkScopeContext } from "./MarkdownContent";
+import { MarkdownImagesContext, MarkdownLinkScopeContext, TerminalPasteContext } from "./MarkdownContent";
 import { readTimeline } from "./readTimeline";
 import { createTimelineImageCache } from "./timelineImages";
 import { createToolCallCache } from "./toolCallReader";
@@ -219,6 +219,7 @@ import { carriedBy, readingOrder, sessionCards, workCounts, workItemKey, workIte
 import { TerminalList } from "./terminal/TerminalList";
 import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type TerminalLook } from "./terminal/terminalLook";
 import { applicationKey, terminalsOf } from "./terminal/terminals";
+import { terminalPaste } from "./terminal/shellBlocks";
 import { ExplorerSessions, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey } from "./explorer/ExplorerSessions";
 import { listedSessions, sessionList, withClaudeCodeSessions, type SessionListEntry } from "./explorer/sessionTree";
 import { ClaudeCodeSessionsGroup } from "./claudeCodeImport/ClaudeCodeSessionsGroup";
@@ -2991,17 +2992,68 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }), [terminalWorkspace]);
   // A new terminal, in the folder a session works in when it is opened from one, in the folder of the project otherwise.
   async function createTerminal(terminalProjectId: string | null, terminalSessionId: string | null = null) {
-    if (!owned) return;
+    const terminal = await startTerminal(terminalProjectId, terminalSessionId);
+    if (terminal) showTerminal(terminal);
+  }
+  // A new terminal, or nothing when it does not start: the toast says why.
+  async function startTerminal(terminalProjectId: string | null, terminalSessionId: string | null): Promise<TerminalItem | null> {
+    if (!owned) return null;
     const reply = await terminalWorkspace.hub.create(terminalProjectId, terminalSessionId, terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
-    if (reply?.status === "ok" && reply.terminal) { showTerminal(reply.terminal); return; }
+    if (reply?.status === "ok" && reply.terminal) return reply.terminal;
     const message: MessageKey = reply?.status === "no_shell" ? "No command interpreter was found on this system."
       : reply?.status === "limit" ? "Too many terminals are open. Close one first."
       : reply?.status === "no_folder" || reply?.status === "project_unavailable" ? "The folder of the terminal no longer exists."
       : "The terminal could not be started.";
     showToast({ intent: "danger", icon: "error", timeout: 8000, message: t(message) });
+    return null;
+  }
+  // The commands of a code block of a shell, pasted in the terminal of their session: the one the person opened from it and that still
+  // runs, else a new one in the folder it works in (the project's for a text of a project). Nothing runs: the person reads them, changes
+  // them if needed, and presses Enter. Several lines are pasted as they are to a shell that takes them as one block (bracketed paste);
+  // a shell that would run each line (PowerShell and the Command Prompt of Windows) gets them on one line, joined as it runs one command
+  // after another, and on the clipboard when they cannot be joined safely.
+  async function pasteInTerminal(commands: string, scope: MarkdownLinkScope) {
+    if (!owned) return;
+    const sessionId = scope.sessionId?.toLowerCase() ?? null;
+    // A terminal that runs a program (an editor, a build) is not given commands: a new one is opened.
+    const own = terminalWorkspace.hub.list()
+      .filter(terminal => terminal.running && !terminal.agent && !terminal.busy && (sessionId ? terminal.sessionId?.toLowerCase() === sessionId
+        : !terminal.sessionId && terminal.projectId === (scope.projectId ?? null)))
+      .sort((left, right) => right.created.localeCompare(left.created))[0];
+    // A new terminal is listed with the project of its session, as the one its composer opens.
+    const session = scope.sessionId ? (catalog.current ?? currentSnapshot.current)?.sessions.find(candidate => candidate.id.toLowerCase() === sessionId) : undefined;
+    const terminalProject = scope.projectId ?? (session?.scopeKind === "project" ? session.projectId : null) ?? null;
+    const terminal = own ?? await startTerminal(terminalProject, scope.sessionId ?? null);
+    if (!terminal) return;
+    showTerminal(terminal);
+    // A terminal just opened says whether it takes pastes as a block once its shell has shown its prompt.
+    const deadline = Date.now() + (own ? 1500 : 8000);
+    const waiting = () => { const shown = terminalWorkspace.surface(terminal.id); return shown?.ready && (shown.pastesBlocks || shown.settled) ? null : shown; };
+    while (Date.now() < deadline && waiting() !== null) await new Promise(resolve => window.setTimeout(resolve, 50));
+    const surface = terminalWorkspace.surface(terminal.id);
+    // Checked again after the wait: a shell that never showed its prompt, or a terminal that started a program meanwhile, is given nothing.
+    const now = terminalWorkspace.hub.list().find(item => item.id === terminal.id);
+    const waits = surface?.ready && (surface.pastesBlocks || surface.settled) && now?.running && !now.busy;
+    const paste = waits ? terminalPaste(commands, surface.pastesBlocks, terminal.profile) : null;
+    if (surface && paste && "text" in paste) {
+      surface.paste(paste.text);
+      surface.focus();
+      return;
+    }
+    const refused = paste && "refused" in paste ? paste.refused : null;
+    void navigator.clipboard?.writeText(commands).catch(() => { /* The clipboard is unavailable: the commands stay in the block. */ });
+    showToast({ intent: "warning", icon: "clipboard", timeout: 10_000, message: t(refused === "control"
+      ? "These commands hold control characters, which a terminal could take for keys, so they were copied instead."
+      : refused === "lines"
+      ? "These commands do not fit on one line, and this terminal would run each line as it is pasted, so they were copied instead: paste them once you have checked them."
+      : now?.busy ? "The terminal is running a command, so the commands were copied instead."
+      : "The terminal did not start in time, so the commands were copied instead.") });
+    surface?.focus();
   }
   const createTerminalLatest = useRef(createTerminal); createTerminalLatest.current = createTerminal;
   const [openSessionTerminal] = useState(() => (terminalProjectId: string | null, terminalSessionId: string | null) => void createTerminalLatest.current(terminalProjectId, terminalSessionId));
+  const pasteInTerminalLatest = useRef(pasteInTerminal); pasteInTerminalLatest.current = pasteInTerminal;
+  const [pasteSessionTerminal] = useState(() => (commands: string, scope: MarkdownLinkScope) => void pasteInTerminalLatest.current(commands, scope));
   // The code editor on the folder a session works in: the worktree, as git lists it, while its folder is there; the editor of the project otherwise.
   async function openWorkEditor(project: Readonly<{ id: string; path: string }>, worktreeRoot: string | null) {
     const epoch = currentHostEpoch.current;
@@ -5641,7 +5693,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, wholeCatalog ?? snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><MarkdownLinkFilesContext.Provider value={markdownLinkFiles}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
+  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><MarkdownLinkFilesContext.Provider value={markdownLinkFiles}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><TerminalPasteContext.Provider value={owned ? pasteSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
       style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
     {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
@@ -6473,7 +6525,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
+  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></TerminalPasteContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
 }
 
 /** The search of Settings: the query, the counts of the pages while one is typed (null otherwise), and the results that take the place of the page. */

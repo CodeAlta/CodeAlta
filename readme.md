@@ -85,7 +85,7 @@ CodeAlta Desktop brings together:
 - **[Math & research](https://codealta.io/docs/workspace/prompt/#equations)**: LaTeX formulas, chemistry and footnotes in messages and documents, a live preview of the formula you type and an equation editor in the prompt (`Alt+=`), and LaTeX and BibTeX files highlighted.
 - **Speech to prompt**: [dictate a prompt](https://codealta.io/docs/speech/) with a speech model that runs on your computer, downloaded the first time you use the microphone.
 - **Search your work**: `Ctrl+P` and [`alta search`](https://codealta.io/docs/search/) find the prompts and answers of your sessions, your plans, the guide, the skills and the tools from a local index; turn on search by meaning to find them by what they are about, with a model that runs on your computer. `Ctrl+F` finds in the session you are in, with every match marked and counted.
-- **Code & Git**: search and edit files, run terminals and inspect diffs.
+- **Code & Git**: search and edit files, run terminals and inspect diffs; [paste the commands of an answer](https://codealta.io/docs/workspace/code/#commands-from-a-message) in the terminal of its session, to check them before you press Enter.
 - **Worktrees**: give sessions separate checkouts and branches, move a session to another worktree with its conversation; manage and clean them up.
 - **Prompt suggestions**: after a turn, the model suggests the next prompt in the empty composer, with any provider; `Tab` or `→` takes it.
 - **Session titles**: a title you give stays; other sessions are titled from the first prompt, the last message or by the model, as you choose.

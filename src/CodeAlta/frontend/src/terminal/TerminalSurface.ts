@@ -75,6 +75,8 @@ export class TerminalSurface implements TerminalSink {
   private opened = false;
   private disposed = false;
   private replaying = true;
+  // When its program last wrote: a shell that has shown its prompt waits for a command.
+  private wroteAt = 0;
   private frame = 0;
 
   constructor(options: TerminalSurfaceOptions) {
@@ -176,6 +178,12 @@ export class TerminalSurface implements TerminalSink {
   get selection() { return this.terminal.getSelection(); }
   copySelection() { if (this.terminal.hasSelection()) { this.options.copy(this.terminal.getSelection()); this.terminal.clearSelection(); } }
   paste(text: string) { if (!this.replaying) this.terminal.paste(text); }
+  /** Whether the terminal takes what is typed: what it wrote before is replayed. */
+  get ready() { return this.opened && !this.replaying && !this.disposed; }
+  /** Whether its program asked for pastes as one block (bracketed paste): it runs none of their lines until Enter. */
+  get pastesBlocks() { return this.terminal.modes.bracketedPasteMode; }
+  /** Whether its program wrote something, a prompt, and nothing for a moment since: a shell just started waits for a command. */
+  get settled() { return this.ready && this.wroteAt > 0 && performance.now() - this.wroteAt >= 300; }
   selectAll() { this.terminal.selectAll(); }
   clear() { this.terminal.clear(); }
   scrollToBottom() { this.terminal.scrollToBottom(); }
@@ -211,6 +219,7 @@ export class TerminalSurface implements TerminalSink {
   write(data: string, columns: number, rows: number, replayed: boolean, done: () => void) {
     if (this.disposed) { done(); return; }
     if (columns > 1 && rows > 0 && this.replaying) this.terminal.resize(columns, rows);
+    this.wroteAt = performance.now();
     this.terminal.write(data, () => {
       done();
       if (replayed) this.live();

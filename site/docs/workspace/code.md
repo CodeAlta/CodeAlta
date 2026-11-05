@@ -139,6 +139,21 @@ CodeAlta Desktop has terminals: your own shell, in a tab under your sessions.
 
 The default shell is PowerShell on Windows and your login shell on macOS and Linux. On Windows you can also choose the Command Prompt, Git Bash or a WSL distribution. The built-in font has the icons many prompts use.
 
+## Commands from a message
+
+A code block of a shell in a message (`bash`, `console`, `powershell`, `cmd`...) has a **Paste in terminal** button beside **Copy**. It puts the commands in the terminal of the session, in the folder the session works in, and opens one there if the session has none. Nothing runs: read the commands, change them if you need to, and press `Enter`.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-terminal-paste.webp" alt="A session whose answer has a console block of build and test commands, and a terminal under it with those commands on one line, waiting for Enter" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The commands of a <code>console</code> block, pasted in the terminal of the session: the comment and the output are left out.</figcaption>
+</figure>
+
+- In a `console` block, only the commands after a prompt (`$ `, `> `, `PS C:\…> `) are pasted, without the prompt; the lines they printed are left out. A `$ ` at the start of every line of a script is taken off too.
+- A shell that takes a paste as one block (bash, zsh, fish) gets the lines as they are. PowerShell and the Command Prompt would run each line as it is pasted, so the commands go on one line instead, joined with `;` (`&` for the Command Prompt), without the comments and blank lines.
+- Commands that cannot go on one line safely (a here-document, a string or a block over several lines, a `%VARIABLE%` in the Command Prompt, which expands it before the line runs) are copied to the clipboard instead, and a message says so. So are commands that hold a control character, which a terminal could take for a key.
+- A terminal that runs a program, an editor or a build, is left alone: the commands go to a new terminal.
+- The button is reached with `Tab` and pressed with `Enter` or `Space`.
+
 ## Terminals for agents
 
 An agent can use the same terminals: create one, type in it, wait for a command and read its output. Ask in your own words:

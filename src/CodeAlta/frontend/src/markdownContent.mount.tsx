@@ -2,7 +2,8 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { createExternalOpener, ExternalOpenerContext } from "./externalEditors/externalEditors";
-import { MarkdownContent, MarkdownImagesContext, MarkdownLinkScopeContext } from "./MarkdownContent";
+import { MarkdownContent, MarkdownImagesContext, MarkdownLinkScopeContext, TerminalPasteContext } from "./MarkdownContent";
+import type { MarkdownLinkScope } from "./markdownLinks";
 import type { MarkdownImage, MarkdownImages } from "./markdownImages";
 import { MarkdownLinkFilesContext } from "./MarkdownLinkMenu";
 import { sourceBlocks } from "./markdownSourceLines";
@@ -13,7 +14,7 @@ import MarkdownIt from "markdown-it";
 // Literal fixtures only; no application host, clipboard or bridge.
 const root = createRoot(document.getElementById("app")!);
 const state = { phase: "ready", executed: 0, opens: [] as string[], copies: [] as string[],
-  external: [] as string[], pictures: [] as string[], reveals: [] as string[], linkFiles: [] as string[], sourceLines: false,
+  external: [] as string[], pictures: [] as string[], reveals: [] as string[], linkFiles: [] as string[], pastes: [] as string[], sourceLines: false,
   policies: [] as { directive: string; uri: string; phase: string }[], parses: 0, parsedBases: [] as string[] };
 window.open = ((url?: string | URL) => { state.opens.push(String(url)); return null; }) as typeof window.open;
 Object.defineProperty(navigator, "clipboard", { value: { writeText: async (text: string) => { state.copies.push(text); } } });
@@ -61,7 +62,7 @@ function snapshot() {
   const content = document.querySelector(".markdown-content")!;
   return { ...state, html: content?.innerHTML, text: content?.textContent, location: location.href, base: document.baseURI, frames: frames.length,
     prohibited: content ? Array.from(content.querySelectorAll("script,style,img,picture,source,video,audio,track,iframe,link,base,meta,object,embed,svg,math,form,input,button,textarea,select"))
-      .filter(e => !copyButton(e) && !localImage(e)).map(e => e.outerHTML) : [],
+      .filter(e => !copyButton(e) && !terminalButton(e) && !localImage(e)).map(e => e.outerHTML) : [],
     attributes: content ? Array.from(content.querySelectorAll("*")).flatMap(e => Array.from(e.attributes).filter(a => /^on|^(style|id|name|data-.*|src|srcset|srcdoc|target|download|ping|action|formaction)$/i.test(a.name)
         // A picture of the disk is drawn from the `data:` URL the window read.
         && !(localImage(e) && a.name === "src" && a.value.startsWith("data:image/png;base64,"))
@@ -69,6 +70,7 @@ function snapshot() {
         && !((e.tagName === "PRE" || copyButton(e)) && a.name === "data-language" && /^[a-z0-9_-]{1,32}$/.test(a.value))
         // The button of a code block says for a moment that it copied.
         && !(copyButton(e) && a.name === "data-copied" && a.value === "true")
+        && !(terminalButton(e) && a.name === "data-pasted" && a.value === "true")
         // The renderer names the kind of an alert on its quote.
         && !(e.tagName === "BLOCKQUOTE" && e.className === "markdown-alert" && a.name === "data-alert" && /^(?:note|tip|important|warning|caution)$/.test(a.value))
         // A render that asks for them gives each block its lines.
@@ -77,17 +79,20 @@ function snapshot() {
         && (a.name === "role" && a.value === "region" || a.name === "tabindex" && a.value === "0" || a.name === "aria-label" && a.value === "Code block"))
         // The button of a code block says what it does.
         && !(copyButton(e) && a.name === "aria-label" && a.value === "Copy")
+        && !(terminalButton(e) && a.name === "aria-label" && a.value === "Paste in terminal")
         // The box of a task says what it shows, and that it takes no input.
         && !(e.tagName === "SPAN" && e.className === "markdown-task" && !e.firstChild
           && (a.name === "role" && a.value === "checkbox" || a.name === "aria-checked" && /^(?:true|false)$/.test(a.value) || a.name === "aria-disabled" && a.value === "true"))
       || a.name === "class" && !(e.tagName === "PRE" && a.value === "timeline-code" || e.tagName === "CODE" && /^language-[a-zA-Z0-9_-]{1,32}$/.test(a.value)
         || e.tagName === "SPAN" && !!e.closest("pre > code") && /^(?:(?:hljs-[a-z_-]+|[a-z]+_)(?: |$))+$/.test(a.value)
+        // A transcript (`console`) has its commands highlighted as the language of their shell, in a span that names it.
+        || e.tagName === "SPAN" && !!e.closest("pre > code") && /^language-[a-z0-9_-]{1,32}$/.test(a.value)
         // The elements of the renderer itself: the front matter, the tasks and the alerts.
         || rendererClasses[e.tagName]?.includes(a.value))).map(a => `${e.tagName}:${a.name}=${a.value}`)) : [] };
 }
 // The classes that the renderer gives its own elements. Authored HTML keeps none: see the "spoof" case.
 const rendererClasses: Record<string, readonly string[] | undefined> = { TABLE: ["markdown-front-matter"], DIV: ["markdown-front-matter"], LI: ["markdown-task-item"],
-  UL: ["markdown-task-list"], OL: ["markdown-task-list"], SPAN: ["markdown-task", "markdown-local-image-alt"], BLOCKQUOTE: ["markdown-alert"], P: ["markdown-alert-title"], BUTTON: ["markdown-copy"],
+  UL: ["markdown-task-list"], OL: ["markdown-task-list"], SPAN: ["markdown-task", "markdown-local-image-alt"], BLOCKQUOTE: ["markdown-alert"], P: ["markdown-alert-title"], BUTTON: ["markdown-copy", "markdown-terminal"],
   IMG: ["markdown-local-image"] };
 // The image of the renderer in a link to a picture of the disk: last in its link, after the alternative text.
 const localImage = (e: Element) => e.tagName === "IMG" && e.className === "markdown-local-image" && !e.hasAttribute("srcset")
@@ -103,9 +108,12 @@ function pictures(): MarkdownImages {
     load: async (address, scope) => { state.pictures.push(`${address}@${scope?.sessionId ?? ""}`); return read(address); },
     reveal: (address, scope) => { state.reveals.push(`${address}@${scope?.sessionId ?? ""}`); } };
 }
-// The one control of the renderer: the button of a code block, first in its block, with nothing in it.
+// The controls of the renderer: the button of a code block, first in its block (after the one of a shell), with nothing in it; and the
+// button of a block of a shell, first in its block, before the one that copies.
 const copyButton = (e: Element) => e.tagName === "BUTTON" && e.className === "markdown-copy" && !e.firstChild && e.getAttribute("type") === "button"
-  && e.parentElement?.tagName === "PRE" && e.parentElement.firstElementChild === e && e.nextElementSibling?.tagName === "CODE";
+  && e.parentElement?.tagName === "PRE" && (e.parentElement.firstElementChild === e || terminalButton(e.parentElement.firstElementChild!)) && e.nextElementSibling?.tagName === "CODE";
+const terminalButton = (e: Element) => e.tagName === "BUTTON" && e.className === "markdown-terminal" && !e.firstChild && e.getAttribute("type") === "button"
+  && e.parentElement?.tagName === "PRE" && e.parentElement.firstElementChild === e && e.nextElementSibling?.className === "markdown-copy";
 Object.assign(window, { markdownFixture: { state, cases, render, snapshot,
   // An explicit, inert recording grant, never a real bridge or system-browser launch.
   renderGranted(category: TimelineItem["category"] = "assistant", current = true, source = '[safe](https://remote.invalid/safe)') {
@@ -117,6 +125,12 @@ Object.assign(window, { markdownFixture: { state, cases, render, snapshot,
     flushSync(() => root.render(createElement(MessageLinksContext.Provider, { value: address => state.external.push(address) },
       createElement(MarkdownImagesContext.Provider, { value: pictures() }, createElement(MarkdownLinkScopeContext.Provider, { value: { sessionId: "s1" } },
         createElement(TimelineMessage, { item: item(source), canInspect: () => true }))))));
+  },
+  // A message of a session whose window pastes the commands of a block of a shell in a terminal; the pastes are a list.
+  renderTerminal(source: string, scope: MarkdownLinkScope | null = { sessionId: "s1" }) {
+    flushSync(() => root.render(createElement(MessageLinksContext.Provider, { value: address => state.external.push(address) },
+      createElement(TerminalPasteContext.Provider, { value: (commands, at) => state.pastes.push(`${commands}@${at.sessionId ?? ""}`) },
+        createElement(MarkdownLinkScopeContext.Provider, { value: scope }, createElement(TimelineMessage, { item: item(source), canInspect: () => true }))))));
   },
   // A message whose window knows an external editor and does what the menu of a link asks; the host is a list.
   renderLinkMenu(source: string) {

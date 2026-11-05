@@ -234,6 +234,17 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     assert.equal(await evaluate("markdownFixture.viewer()"), null);
     assert.deepEqual(await evaluate(`markdownFixture.state.external.slice(${gestures + 1})`), ["out/chart.png"]);
     await check();
+    // A block of a shell, in a session whose window opens terminals, pastes its commands there: those of a transcript without its
+    // prompts and what they printed. A block of another language has no such button, nor a text of no session and no project.
+    await evaluate(`markdownFixture.renderTerminal(${JSON.stringify("```console\n$ npm install\nadded 3 packages\n$ npm test\n```\n\n```json\n{}\n```")})`);
+    assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.markdown-content pre'), pre => !!pre.querySelector(':scope > button.markdown-terminal'))"), [true, false]);
+    assert.equal(await evaluate("document.querySelector('button.markdown-terminal').getAttribute('aria-label')"), "Paste in terminal");
+    await evaluate("document.querySelector('button.markdown-terminal').click()");
+    assert.deepEqual(await evaluate("markdownFixture.state.pastes"), ["npm install\nnpm test@s1"]);
+    assert.equal(await evaluate("document.querySelector('button.markdown-terminal').getAttribute('data-pasted')"), "true", "it says it pasted");
+    await check();
+    await evaluate(`markdownFixture.renderTerminal(${JSON.stringify("```bash\nls\n```")}, null)`);
+    assert.equal(await evaluate("document.querySelectorAll('button.markdown-terminal').length"), 0, "a text of no session and no project pastes nowhere");
     // The menu of a link: a page opens and copies its address; a file also copies its full path, as the host finds it, and goes outside CodeAlta.
     await evaluate(`markdownFixture.renderLinkMenu(${JSON.stringify("[page](https://remote.invalid/a) [file](src/Program.cs#L3) [gone](src/gone.cs) [mail](mailto:x@y.invalid)")})`);
     assert.deepEqual(await evaluate("markdownFixture.linkMenu('a[href^=https]')"), { prevented: true, items: ["Open", "Copy link"] });

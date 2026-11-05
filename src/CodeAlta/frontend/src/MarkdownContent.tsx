@@ -9,6 +9,7 @@ import { loadMath } from "./math";
 import type { MarkdownImage, MarkdownImages } from "./markdownImages";
 import { markdownHrefKind, markdownLinkActivation, maximumMarkdownHrefLength, tooLongMarkdownHref, type MarkdownLinkScope } from "./markdownLinks";
 import { isSessionContextKey } from "./sessionRowActions";
+import { shellCommandOf } from "./terminal/shellBlocks";
 import { appearanceKey, subscribeAppearance } from "./shellColors";
 import { useShellLanguage } from "./shellLanguage";
 import { inModalDialog, modalDialogOpen } from "./modalDialogs";
@@ -28,6 +29,11 @@ export const MarkdownLinkScopeContext = createContext<MarkdownLinkScope | null>(
  * nothing reads them (a window without a host): such a picture stays a link to its file.
  */
 export const MarkdownImagesContext = createContext<MarkdownImages | null>(null);
+/**
+ * Pastes the commands of a code block of a shell in a terminal of the session or the project of the text, without running them.
+ * Null where the window opens no terminal: the blocks have no such button.
+ */
+export const TerminalPasteContext = createContext<((commands: string, scope: MarkdownLinkScope) => void) | null>(null);
 
 // A drawn picture opens its window by a click or Enter alone; with a modifier, or by the middle button, its link opens the file.
 const opensPicture = (event: MouseEvent | globalThis.KeyboardEvent) => !event.ctrlKey && !event.metaKey && !event.shiftKey
@@ -54,10 +60,15 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   const opener = useContext(MarkdownLinksContext);
   const scope = useContext(MarkdownLinkScopeContext);
   const openLink = onOpenLink !== undefined ? onOpenLink : opener && ((address: string) => opener(address, scope));
+  // The blocks of a shell paste their commands in a terminal of the session or the project of the text; a text whose links are inert
+  // (the preview of a folded row) has no such button.
+  const pasteInTerminal = useContext(TerminalPasteContext);
+  const terminalScope = pasteInTerminal && onOpenLink !== null && scope && (scope.sessionId || scope.projectId) ? scope : null;
+  const terminalBlocks = terminalScope !== null;
   // The renderer is made once for a language: the titles of the alerts are in it.
   const { locale } = useShellLanguage();
   const render = useMemo(() => createMarkdownRenderer(window, { note: translate(locale, "Note"), tip: translate(locale, "Tip"),
-    important: translate(locale, "Important"), warning: translate(locale, "Warning"), caution: translate(locale, "Caution"), copy: translate(locale, "Copy"),
+    important: translate(locale, "Important"), warning: translate(locale, "Warning"), caution: translate(locale, "Caution"), copy: translate(locale, "Copy"), pasteInTerminal: translate(locale, "Paste in terminal"),
     notDrawn: translate(locale, "Not drawn as a diagram:"), copyLatex: translate(locale, "Copy LaTeX"), copyMathMl: translate(locale, "Copy MathML"),
     footnotes: translate(locale, "Footnotes"), footnote: translate(locale, "Footnote"), backToReference: translate(locale, "Back to reference"),
     source: translate(locale, "Source"), preview: translate(locale, "Preview"), showSource: translate(locale, "Show the source or the drawing") }), [locale]);
@@ -66,8 +77,8 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   const [drawn, setDrawn] = useState(0);
   const rendered = useMemo(() => {
     const pending = markdownPending();
-    return { html: render(source, timelineCodeBlocks, pending, { document: asDocument, sourceLines, webImages: !!webImages }), pending };
-  }, [render, source, timelineCodeBlocks, asDocument, sourceLines, !!webImages, appearance, drawn]);
+    return { html: render(source, timelineCodeBlocks, pending, { document: asDocument, sourceLines, webImages: !!webImages, terminalBlocks }), pending };
+  }, [render, source, timelineCodeBlocks, asDocument, sourceLines, !!webImages, terminalBlocks, appearance, drawn]);
   const html = rendered.html;
   useEffect(() => {
     const { diagrams: undrawn, math } = rendered.pending;
@@ -150,7 +161,7 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     preventDefault(): void; defaultPrevented: boolean }) {
     const target = event.target instanceof Element ? event.target : null;
     // Enter on the renderer's Copy button must still produce its native click, even inside an authored anchor.
-    if (event.nativeEvent.type === "keydown" && target?.closest("button.markdown-copy")) return;
+    if (event.nativeEvent.type === "keydown" && target?.closest("button.markdown-copy, button.markdown-terminal")) return;
     const link = target?.closest("a");
     if (!link || !event.currentTarget.contains(link)) return;
     const activate = !event.defaultPrevented && markdownLinkActivation(event.nativeEvent);
@@ -200,11 +211,24 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
       window.setTimeout(() => button.removeAttribute("data-copied"), 1400);
     }, () => { /* The clipboard is unavailable: nothing was copied and nothing changes. */ });
   }
+  // The button of a block of a shell pastes its commands, without the prompts of a transcript, and says so for a moment.
+  function pasteCode(event: { target: EventTarget }): boolean {
+    const button = event.target instanceof Element ? event.target.closest<HTMLElement>("button.markdown-terminal") : null;
+    const pre = button?.parentElement;
+    const code = pre?.querySelector(":scope > code")?.textContent;
+    if (!button || !pre || code === null || code === undefined || !pasteInTerminal || !terminalScope) return false;
+    const commands = shellCommandOf(pre.getAttribute("data-language"), code);
+    if (!commands.trim()) return true;
+    pasteInTerminal(commands, terminalScope);
+    button.setAttribute("data-pasted", "true");
+    window.setTimeout(() => button.removeAttribute("data-pasted"), 1400);
+    return true;
+  }
   return <><div className="markdown-content" ref={content} onClick={event => {
     const handled = event.defaultPrevented;
     activateLink(event);
     if (!handled && event.target instanceof Element && (followFootnote(event.target) || toggleRenderedSource(event.target))) return;
-    if (!handled) copyCode(event); // Our navigation suppression must not swallow Copy inside an anchor.
+    if (!handled && !pasteCode(event)) copyCode(event); // Our navigation suppression must not swallow Copy inside an anchor.
   }} onAuxClick={activateLink}
     onContextMenu={event => { if (!event.defaultPrevented && openLinkMenu(event.target, { x: event.clientX, y: event.clientY })) event.preventDefault(); }}
     onKeyDown={event => {

@@ -1,4 +1,5 @@
 import createDOMPurify from "dompurify";
+import { isShellLanguage } from "./terminal/shellBlocks";
 import { highlightCode } from "./codeHighlight";
 import { diagramAppearance, diagrams, type DiagramAppearance } from "./diagrams";
 import { loadedMath } from "./math";
@@ -13,6 +14,7 @@ export type AlertKind = typeof alertKinds[number];
 /** The titles of the alerts, in the language of the window. */
 export type MarkdownLabels = Readonly<Record<AlertKind, string> & {
   /** What the button of a code block says it does. */ copy?: string;
+  /** What the button of a code block of a shell that pastes it in a terminal says it does. */ pasteInTerminal?: string;
   /** What the note under a `mermaid` block that could not be drawn says before its reason. */ notDrawn?: string;
   /** What the buttons of a displayed equation say they do. */ copyLatex?: string; copyMathMl?: string;
   /** The name of the notes at the end of a text, and what a reference and the way back from a note say before their number. */
@@ -20,7 +22,7 @@ export type MarkdownLabels = Readonly<Record<AlertKind, string> & {
   /** What the button of a drawn block (a diagram, an equation) says: its source, or its drawing again, and what it does. */
   source?: string; preview?: string; showSource?: string;
 }>;
-const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", copy: "Copy",
+const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", copy: "Copy", pasteInTerminal: "Paste in terminal",
   notDrawn: "Not drawn as a diagram:", copyLatex: "Copy LaTeX", copyMathMl: "Copy MathML",
   footnotes: "Footnotes", footnote: "Footnote", backToReference: "Back to reference",
   source: "Source", preview: "Preview", showSource: "Show the source or the drawing" };
@@ -103,6 +105,8 @@ const fileImageAttribute = "data-file-image";
  * With `sourceLines`, each block says which lines of the text it comes from, in `data-source-lines` (see `markdownSourceLines`).
  */
 export type MarkdownRenderOptions = Readonly<{ document?: boolean; sourceLines?: boolean;
+  /** Whether a code block of a shell has a button that pastes its commands in a terminal: where the window can open one. */
+  terminalBlocks?: boolean;
   /** Whether the images of the web are links marked as pictures, as those of the disk: the text of a tracker, whose host reads its images. */
   webImages?: boolean }>;
 
@@ -471,8 +475,9 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
   }
   // A code block has a button that copies its text: an element of the renderer, with constant attributes and no
   // content of its own. Authored HTML keeps no button and no class, so this one is always the renderer's. It names
-  // the language of the block, which it shows beside its icon.
-  function dressCopy(fragment: DocumentFragment) {
+  // the language of the block, which it shows beside its icon. A block of a shell can also have, before it, a button
+  // that pastes its commands in a terminal.
+  function dressCopy(fragment: DocumentFragment, terminalBlocks: boolean) {
     for (const pre of Array.from(fragment.querySelectorAll("pre"))) {
       if (pre.children.length !== 1 || pre.firstElementChild?.tagName !== "CODE" || pre.closest(".markdown-front-matter")) continue;
       const button = view.document.createElement("button");
@@ -483,6 +488,14 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
       const language = pre.getAttribute("data-language");
       if (language) button.setAttribute("data-language", language);
       pre.prepend(button);
+      if (terminalBlocks && isShellLanguage(language)) {
+        const paste = view.document.createElement("button");
+        paste.type = "button";
+        paste.className = "markdown-terminal";
+        paste.title = labels.pasteInTerminal ?? englishLabels.pasteInTerminal!;
+        paste.setAttribute("aria-label", paste.title);
+        pre.prepend(paste);
+      }
     }
   }
   return (source: string, timelineCodeBlocks: boolean, pending?: MarkdownPending, options: MarkdownRenderOptions = {}) => {
@@ -522,7 +535,7 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
         pre.className = "timeline-code"; pre.tabIndex = 0;
         pre.setAttribute("role", "region"); pre.setAttribute("aria-label", "Code block");
       }
-      dressCopy(fragment);
+      dressCopy(fragment, options.terminalBlocks === true);
       const container = view.document.createElement("div");
       container.append(fragment);
       return container.innerHTML;
