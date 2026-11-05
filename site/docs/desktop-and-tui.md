@@ -213,7 +213,7 @@ Closing the main window can keep CodeAlta running in the notification area, with
 
 - The tray icon opens the window again or exits. Exiting while sessions run asks first.
 - On Windows, the taskbar button shows progress while a session runs or queued prompts are sent.
-- A session that is done or waits for you while CodeAlta is in the background shows a notification, a number on the Dock icon on macOS and a flashing taskbar button on Windows; see [Done or waiting](workspace/readme.md#done-or-waiting).
+- A session that is done or waits for you while CodeAlta is in the background shows a notification and the number of such sessions on the Dock icon, the taskbar button or the Linux launcher; see [Done or waiting](workspace/readme.md#done-or-waiting).
 - On macOS, CodeAlta started from the Applications folder, Launchpad, Spotlight or the Dock stays in the Dock, without a menu bar icon; its Dock icon opens the window again.
 - While CodeAlta runs, the computer does not go to sleep on its own (the display still turns off), so automations and reminders keep going. **Keep computer awake when CodeAlta is running**, in the same place, turns it off.
 

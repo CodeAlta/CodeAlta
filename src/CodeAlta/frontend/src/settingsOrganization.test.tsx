@@ -58,9 +58,8 @@ test("the alerts of the sessions name the mark of the application as each platfo
   const choices = (platform: string, mode: "all" | "mark" | "off" = "all") => [...renderToStaticMarkup(<GeneralSettings turnAlerts={{ mode, platform, set: noop }} />)
     .matchAll(/<option value="([a-z]+)"[^>]*>([^<]+)</g)].filter(match => ["all", "mark", "off"].includes(match[1])).map(match => `${match[1]}=${match[2]}`);
   assert.deepEqual(choices("macos"), ["all=Notification and Dock badge", "mark=Dock badge only", "off=Off"]);
-  assert.deepEqual(choices("windows"), ["all=Notification and flashing taskbar button", "mark=Flashing taskbar button only", "off=Off"]);
-  assert.deepEqual(choices("linux"), ["all=Notification", "off=Off"], "Linux has no mark of the application");
-  assert.deepEqual(choices("linux", "mark"), ["all=Notification", "off=Off", "mark=App icon mark only"], "a choice made elsewhere is still shown");
+  assert.deepEqual(choices("windows"), ["all=Notification and taskbar badge", "mark=Taskbar badge only", "off=Off"]);
+  assert.deepEqual(choices("linux"), ["all=Notification and launcher badge", "mark=Launcher badge only", "off=Off"]);
   const off = renderToStaticMarkup(<GeneralSettings turnAlerts={{ mode: "off", platform: "macos", set: noop }} />);
   assert.match(off, /CodeAlta does not tell you when a session is done or waits for you while it is in the background\./);
 });

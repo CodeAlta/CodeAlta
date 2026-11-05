@@ -253,6 +253,7 @@ When a session finishes its work, or waits for your answer or approval, while yo
 
 - A notification of the system, with the title of the session. Click it to open the session.
 - On macOS, the Dock icon bounces and shows the number of such sessions.
-- On Windows, the taskbar button flashes until you come back.
+- On Windows, the taskbar button shows that number and flashes until you come back.
+- On Linux, the docks that show badges (KDE Plasma, Ubuntu Dock, Plank, Latte, not stock GNOME) show that number on the CodeAlta icon.
 
-The badge and the notifications go once you are back in CodeAlta. A session is done when nothing goes on for it any more, its background jobs included; a sub-agent's end is told to the session that created it, not to you, but its questions are. **Settings > General > Notifications > When a session is done or waits for you** chooses the notification and the mark, the mark alone, or nothing. On Linux there is the notification alone. On macOS the notification needs CodeAlta started as an application (from the Applications folder, Launchpad, Spotlight or the Dock); started with `alta` in a terminal, it has the Dock badge alone.
+The badge and the notifications go once you are back in CodeAlta. A session is done when nothing goes on for it any more, its background jobs included; a sub-agent's end is told to the session that created it, not to you, but its questions are. **Settings > General > Notifications > When a session is done or waits for you** chooses the notification and the mark, the mark alone, or nothing. On macOS the notification needs CodeAlta started as an application (from the Applications folder, Launchpad, Spotlight or the Dock); started with `alta` in a terminal, it has the Dock badge alone.
