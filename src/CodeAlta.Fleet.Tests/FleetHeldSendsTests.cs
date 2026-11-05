@@ -126,6 +126,28 @@ public sealed class FleetHeldSendsTests
         Assert.AreEqual(0, sends.Blocked);
     }
 
+    [TestMethod]
+    public void TheSendsOfAnEarlierFile_ThatCannotBeProtectedYet_StillWaitAndCount_AndAreProtectedOnceTheyCanBe()
+    {
+        using var folder = new TestFolder();
+        var path = Path.Combine(folder.Path, "held-sends.json");
+        File.WriteAllText(path, """
+            [{"RunId":"send-old","SessionId":"session-old","Text":"Deploy with ghp_0123456789abcdefABCDEF0123456789abcd.","Title":null,"Nonce":"nonce-old",
+              "ProviderKey":null,"AgentPromptId":null,"ModelId":null,"ReasoningEffort":null,"HeldAt":"2026-11-04T10:00:00+00:00"}]
+            """);
+        var protector = new SwitchingProtector { Available = false };
+        var sends = new FleetHeldSends(path, new CodeAlta.Catalog.Secrets.LocalSecretStore(Path.Combine(folder.Path, "global"), protector));
+
+        // Its protected store is away: the send of the earlier file is held all the same, and its session waits.
+        Assert.AreEqual("send-old", sends.List().Single().RunId);
+        CollectionAssert.Contains(sends.SessionIds.ToList(), "session-old", "its session waits for a person, and does not move");
+
+        // The store is back: the next reading protects it, and the file in clear is replaced.
+        protector.Available = true;
+        Assert.AreEqual("send-old", sends.List().Single().RunId);
+        Assert.IsFalse(File.ReadAllText(path).Contains("ghp_0123456789abcdef", StringComparison.Ordinal), "the migration is done once it can be");
+    }
+
     // A protection whose store goes away and comes back.
     private sealed class SwitchingProtector : CodeAlta.Catalog.Secrets.ISecretProtector
     {
