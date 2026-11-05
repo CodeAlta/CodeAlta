@@ -114,6 +114,45 @@ public sealed class AutomationIntegrationTests
         Assert.IsTrue(fixture.Logged.Any(line => line.Contains("could not be read from pagerduty", StringComparison.Ordinal) && line.Contains("rotation of its team", StringComparison.Ordinal)));
     }
 
+    // Who is on call is read again before each approval is told, never after: an approval goes to the person on call then, or to
+    // the rotation of the team when the tool names nobody or does not answer, never to the person on call for an earlier one.
+    [TestMethod]
+    public async Task EachApprovalOfARun_GoesToWhoIsOnCallWhenItWaits_OrToTheRotation()
+    {
+        await using var fixture = await Fixture.CreateAsync($$"""{ type = "daily", at = ["09:00"] }""", enabled: false,
+            extra: """autonomy = { approvers = "oncall", oncall = { source = "pagerduty", schedule = "PSCHED", token = "${secret:PD}" } }""");
+        var held = new TaskCompletionSource<CodeAlta.Agent.AgentPermissionDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Runner.Ask = (_, token) => held.Task.WaitAsync(token);
+        fixture.Tools.On(HttpMethod.Get, "/oncalls", """{"oncalls":[{"user":{"email":"alice@acme.test","name":"Alice"}}]}""");
+        await fixture.Service.RunAsync(First, default);
+        CollectionAssert.AreEqual(new[] { "alice@acme.test", "Alice" }, fixture.Service.Runs(First, 1)[0].OnCall!.ToArray(), "on call when the run started");
+        var guard = fixture.Runner.Guard!;
+
+        // Bob is on call when the run waits: the approval is told with Bob, never with Alice.
+        fixture.Tools.On(HttpMethod.Get, "/oncalls", """{"oncalls":[{"user":{"email":"bob@acme.test","name":"Bob"}}]}""");
+        var first = guard.BeforeToolCallAsync(Call("k8s_delete_namespace"), default).AsTask();
+        await fixture.UntilAsync(() => fixture.Service.Runs(First, 1)[0].Status == AutomationRun.Waiting);
+        CollectionAssert.AreEqual(new[] { "bob@acme.test", "Bob" }, fixture.Service.Runs(First, 1)[0].OnCall!.ToArray(), "the person on call when it waits");
+        held.SetResult(new(CodeAlta.Agent.AgentPermissionDecisionKind.Deny));
+        await first;
+        await fixture.UntilAsync(() => fixture.Service.Runs(First, 1)[0].Status == AutomationRun.Running);
+
+        // The tool does not answer at the next approval: it goes to the rotation of the team, not to Bob.
+        held = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Tools.On(HttpMethod.Get, "/oncalls", _ => (System.Net.HttpStatusCode.ServiceUnavailable, """{"error":{"message":"down"}}"""));
+        var second = guard.BeforeToolCallAsync(Call("k8s_delete_namespace"), default).AsTask();
+        await fixture.UntilAsync(() => fixture.Service.Runs(First, 1)[0].Status == AutomationRun.Waiting);
+        Assert.IsNull(fixture.Service.Runs(First, 1)[0].OnCall, "nobody named: the rotation of the team");
+        held.SetResult(new(CodeAlta.Agent.AgentPermissionDecisionKind.Deny));
+        await second;
+        fixture.Runner.Starts.Single().Complete(new(AutomationRun.Completed));
+        await fixture.UntilAsync(() => !fixture.Service.IsRunning(First));
+
+        static CodeAlta.Agent.Runtime.Tools.AgentToolHookCall Call(string tool)
+            => CodeAlta.Agent.Runtime.Tools.AgentToolHookCall.Create(new CodeAlta.Agent.AgentToolInvocation(new CodeAlta.Agent.ModelProviderId("scripted"), "s1", "call-1", tool,
+                System.Text.Json.JsonDocument.Parse("{}").RootElement.Clone()), null, "/work", CodeAlta.Agent.Runtime.Tools.AgentToolHookCapabilities.All);
+    }
+
     [TestMethod]
     public async Task AJiraTrigger_SaysWhichSecretIsMissing_AndReadsNothing()
     {
