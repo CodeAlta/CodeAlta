@@ -39,7 +39,13 @@ internal sealed partial class DesktopFleetServers
             };
         // The machines the signed access document gives this person are theirs to seal values for, those it gives another person no more.
         var access = connector?.Access ?? new FleetOrganizationAccess(devices, Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationAccess.PinFileName));
-        return new FleetSecretsManager(devices) { Access = () => access.Current };
+        // What this computer saw of the values it manages there, kept with the link: a server that answers an older record seals
+        // nothing for a machine this computer withdrew.
+        return new FleetSecretsManager(devices)
+        {
+            Access = () => access.Current,
+            Checkpoint = new FleetSecretControllerCheckpoint(Path.Combine(_store.LinkFolder(link.Id), FleetSecretControllerCheckpoint.FileName)),
+        };
     }
 
     /// <summary>Reads the values, environments and approvals of this computer's person at a server.</summary>

@@ -566,6 +566,10 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     _ => null,
                 },
             };
+            // A secret given to a provider (its key, a variable of its CLI) is masked from then on, before the provider gets it; so is
+            // one a plugin gives out (an MCP server's variables and headers), told to the runtime of the plugins.
+            modelProviderRegistry.SecretIssued = secretMasker.Retain;
+            pluginRuntime.Secrets.Attach(secretMasker.Retain);
             options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
             options.ConfigurePluginModelProviders?.Invoke(modelProviderRegistry, pluginRuntime);
             var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry, null, retentionProtection);
@@ -621,8 +625,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     // then those the fleet gave it for the environment, the project and the space of the session, never a
                     // host-only one; each use of a value of the fleet is recorded for the session.
                     ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog),
+                        // Each secret is masked from the moment it is given, before the processes of the session take it.
                         (identity, scope) => SpaceIdentityEnvironment.Create(identity, SecretReferenceResolver.ForScope(catalogOptions.GlobalRoot, scope, shell: true,
-                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null).Read,
+                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain).Read,
                             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
                         new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles,
                         // An admission to an environment is kept across a restart of the host, bound to the rules and the approval that admitted it.

@@ -18,8 +18,10 @@ namespace CodeAlta.Desktop.Tests;
 internal sealed class FleetNodeFixture : IAsyncDisposable
 {
     private readonly string _root;
-    private readonly CodeAltaHost _host;
-    private readonly FleetDirectListener _listener;
+    private CodeAltaHost _host;
+    private FleetDirectListener _listener;
+    // What the node API was started with, to start it again on a fresh host (RestartHostAsync).
+    private Func<CodeAltaHost, FleetNodeService>? _restart;
 
     private FleetNodeFixture(string root, CodeAltaHost host, FleetNodeService service, FleetDirectListener listener, DeviceIdentity nodeIdentity,
         ScriptedFleetProvider provider, IReadOnlyList<string> addresses)
@@ -43,13 +45,13 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
     /// <summary>Gets a folder of the fixture that is deleted with it.</summary>
     public string Root => _root;
 
-    public FleetNodeService Service { get; }
+    public FleetNodeService Service { get; private set; }
 
     public DeviceIdentity NodeIdentity { get; }
 
     public ScriptedFleetProvider Provider { get; }
 
-    public IReadOnlyList<string> Addresses { get; }
+    public IReadOnlyList<string> Addresses { get; private set; }
 
     public string ViewerFleetRoot { get; }
 
@@ -83,30 +85,57 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         Func<string, string, string?, CancellationToken, Task<CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult>>? admitEnvironment)
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-desktop-fleet-tests", Guid.NewGuid().ToString("N"));
+        var provider = new ScriptedFleetProvider();
+        var host = await CreateHostAsync(root, provider, appliesSpaceIdentities, cancellationToken);
+        var nodeFleet = Path.Combine(root, "node-fleet");
+        var identity = DeviceIdentity.LoadOrCreate(nodeFleet);
+        IReadOnlyList<string> addresses = [];
+        FleetNodeService Service(CodeAltaHost on) => new(new FleetNodeServiceOptions
+        {
+            Host = on, Identity = identity, TrustedDevices = new TrustedDeviceStore(nodeFleet, TimeProvider.System), Name = "test-node", Version = "1.0.0",
+            PairingAddresses = () => addresses, Automations = automations, AdmitBudget = admitBudget, TimeProvider = time ?? TimeProvider.System,
+            AdmitEnvironment = admitEnvironment,
+        });
+        var service = Service(host);
+        var listener = FleetDirectListener.Start(new IPEndPoint(IPAddress.Loopback, 0), service.ServeAsync);
+        addresses = [FleetDirectConnector.Format(IPAddress.Loopback, listener.LocalEndPoint.Port)];
+        return new FleetNodeFixture(root, host, service, listener, identity, provider, addresses)
+        {
+            _restart = Service,
+            _appliesSpaceIdentities = appliesSpaceIdentities,
+        };
+    }
+
+    private bool _appliesSpaceIdentities;
+
+    /// <summary>
+    /// Stops the node API and its host, then starts a fresh host on the same profile and the node API on it, as a node that
+    /// restarts: nothing of the first process (its receipts, its caches) remains. The channels to the first are closed.
+    /// </summary>
+    public async Task RestartHostAsync(CancellationToken cancellationToken)
+    {
+        await _listener.DisposeAsync();
+        await Service.DisposeAsync();
+        await _host.DisposeAsync();
+        _host = await CreateHostAsync(_root, Provider, _appliesSpaceIdentities, cancellationToken);
+        Service = _restart!(_host);
+        _listener = FleetDirectListener.Start(new IPEndPoint(IPAddress.Loopback, 0), Service.ServeAsync);
+        Addresses = [FleetDirectConnector.Format(IPAddress.Loopback, _listener.LocalEndPoint.Port)];
+    }
+
+    private static Task<CodeAltaHost> CreateHostAsync(string root, ScriptedFleetProvider provider, bool appliesSpaceIdentities, CancellationToken cancellationToken)
+    {
         var global = Path.Combine(root, "global");
         var project = Path.Combine(root, "project");
         var home = Path.Combine(root, "home");
         var builtin = Path.Combine(root, "builtin");
         foreach (var path in new[] { global, project, home, builtin }) Directory.CreateDirectory(path);
-        var provider = new ScriptedFleetProvider();
-        var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+        return CodeAltaHost.CreateAsync(new CodeAltaHostOptions
         {
             GlobalRoot = global, CurrentProjectPath = project, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
             PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, OwnsLogging = false, IsHeadless = true,
             ConfigureModelProviders = provider.Register, AppliesSpaceIdentities = appliesSpaceIdentities,
         }, cancellationToken);
-        var nodeFleet = Path.Combine(root, "node-fleet");
-        var identity = DeviceIdentity.LoadOrCreate(nodeFleet);
-        IReadOnlyList<string> addresses = [];
-        var service = new FleetNodeService(new FleetNodeServiceOptions
-        {
-            Host = host, Identity = identity, TrustedDevices = new TrustedDeviceStore(nodeFleet, TimeProvider.System), Name = "test-node", Version = "1.0.0",
-            PairingAddresses = () => addresses, Automations = automations, AdmitBudget = admitBudget, TimeProvider = time ?? TimeProvider.System,
-            AdmitEnvironment = admitEnvironment,
-        });
-        var listener = FleetDirectListener.Start(new IPEndPoint(IPAddress.Loopback, 0), service.ServeAsync);
-        addresses = [FleetDirectConnector.Format(IPAddress.Loopback, listener.LocalEndPoint.Port)];
-        return new FleetNodeFixture(root, host, service, listener, identity, provider, addresses);
     }
 
     /// <summary>Pairs the viewer with the node, as a person does with a pairing link.</summary>

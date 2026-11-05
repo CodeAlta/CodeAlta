@@ -47,8 +47,9 @@ Surprise bills are the first complaint of agent users. So budgets ship with the 
 - At 80% and 100%: a notification; at 100%, new runs in that scope wait for a person's **Continue anyway** (or stop,
   per the budget). A prompt sent through the node API that waits is kept by the node before it says so, protected as the
   secrets of the machine are, bounded (one more is refused, none is evicted), and forgotten only once its run started; a
-  restart asks the same hold again once the budgets and policies of the node are read, and does not send twice a prompt
-  its journal holds.
+  restart asks the same hold again once the budgets and policies of the node are set and its links read, and does not send
+  twice a prompt its journal holds (a journal it cannot search to its start keeps the send held). A machine that keeps
+  budgets it cannot verify yet (its device list not read) holds new runs until it can, never running them as unbudgeted.
 - **Who signs what.** A budget is signed by a controller device of its owner, as policies are: a machine applies only a
   budget that verifies against the device list it anchored, so a server can drop one (deny service) but neither loosen
   nor invent one. Allowances are the server's bookkeeping. **Continue anyway** loosens, so it is signed too, for one run:

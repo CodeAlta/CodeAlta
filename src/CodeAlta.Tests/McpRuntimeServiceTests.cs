@@ -619,6 +619,33 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task ASecretGivenToAnMcpServerOfTheSessions_IsMaskedFromThen_WhateverTheStoreKeepsOfItLater()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: new Dictionary<string, string> { ["MCP_TEST_EXTRA_TOOL"] = "${secret:MCP_TOOL_NAME}" });
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(Path.Combine(_home.Path, ".alta"));
+        store.SetSecret("MCP_TOOL_NAME", "given_to_the_server", "tests");
+        try
+        {
+            // The masking of the host, whose reads of the store come later, once it keeps nothing of the value (rotated past what it keeps).
+            var masker = new CodeAlta.Agent.Runtime.AgentSecretMasker(static () => []);
+            var connections = new McpSessionConnections(new McpConfigCache(), false, false) { SecretIssued = masker.Retain };
+            await using (var runtime = connections.CreateRuntime(_home.Path))
+            {
+                var search = await runtime.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: "tiny", query: null, CancellationToken.None);
+                Assert.IsTrue(search.Tools.Any(static tool => tool.Name == "given_to_the_server"), string.Join(Environment.NewLine, search.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+            }
+
+            // What the server prints of the value it took is masked.
+            Assert.AreEqual("tool: ***", masker.MaskText("tool: given_to_the_server"));
+        }
+        finally
+        {
+            store.Delete();
+        }
+    }
+
+    [TestMethod]
     public async Task Search_StartsAStdioServerWithTheEnvironmentOfTheSession_OneServerPerIdentity()
     {
         using var project = TempDirectory.Create();

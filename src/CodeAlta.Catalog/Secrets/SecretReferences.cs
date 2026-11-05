@@ -175,10 +175,20 @@ public sealed class SecretReferenceResolver
     /// </summary>
     /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
     /// <returns>The resolver.</returns>
-    public static SecretReferenceResolver ForMachine(string root)
+    public static SecretReferenceResolver ForMachine(string root) => ForMachine(root, null);
+
+    /// <summary>
+    /// Gets a resolver for what runs on the host side, as <see cref="ForMachine(string)"/> does, that tells each value of a secret
+    /// before it gives it (<see cref="Issued"/>): the masking of the host, so that what a provider, an MCP server or a tool is given
+    /// is masked from then on.
+    /// </summary>
+    /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
+    /// <param name="issued">Told each value of a secret before it is given; null for none.</param>
+    /// <returns>The resolver.</returns>
+    public static SecretReferenceResolver ForMachine(string root, Action<string>? issued)
     {
         var store = new LocalSecretStore(root);
-        return new(Environment.GetEnvironmentVariable, [store, store.FleetScope(FleetSecretScopes.Person, null, shell: false)]);
+        return new(Environment.GetEnvironmentVariable, [store, store.FleetScope(FleetSecretScopes.Person, null, shell: false)]) { Issued = issued };
     }
 
     /// <summary>Gets a resolver for the work of a run: its environment, its project and its space (<see cref="ForScope(string, SecretScope, bool, Action{FleetSecretCopyInfo}?)"/>).</summary>
@@ -217,6 +227,29 @@ public sealed class SecretReferenceResolver
     /// <summary>Gets the sources of secrets and variables, the narrowest scope first.</summary>
     public IReadOnlyList<ISecretLookup> Sources => _sources;
 
+    /// <summary>
+    /// Gets what is told each value of a secret before it is given (a masking of the host: it masks the value from that moment, for
+    /// as long as it lives, whatever the store keeps of it later); null tells nothing.
+    /// </summary>
+    public Action<string>? Issued { get; init; }
+
+    /// <summary>
+    /// Gets a resolver for the work of a run, as <see cref="ForScope(string, SecretScope, bool, Action{FleetSecretCopyInfo}?)"/> does, that
+    /// tells each value of a secret before it gives it (<see cref="Issued"/>).
+    /// </summary>
+    /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
+    /// <param name="scope">The work of the run.</param>
+    /// <param name="shell">Whether the values go to the agent's shell, which never gets a host-only secret.</param>
+    /// <param name="used">Told each value of the fleet given, for the record of its uses; null for none.</param>
+    /// <param name="issued">Told each value of a secret before it is given; null for none.</param>
+    /// <returns>The resolver.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="scope"/> is null.</exception>
+    public static SecretReferenceResolver ForScope(string root, SecretScope scope, bool shell, Action<FleetSecretCopyInfo>? used, Action<string>? issued)
+    {
+        var resolver = ForScope(root, scope, shell, used);
+        return new SecretReferenceResolver(resolver._environment, resolver._sources) { Issued = issued };
+    }
+
     /// <summary>Gets the value of a reference.</summary>
     /// <param name="reference">The reference.</param>
     /// <param name="value">Its value when it is set.</param>
@@ -234,7 +267,12 @@ public sealed class SecretReferenceResolver
         {
             try
             {
-                if (reference.Kind == SecretReferenceKind.Secret ? source.TryGetSecret(reference.Name, out value) : source.TryGetVariable(reference.Name, out value)) return true;
+                if (reference.Kind == SecretReferenceKind.Secret ? source.TryGetSecret(reference.Name, out value) : source.TryGetVariable(reference.Name, out value))
+                {
+                    // Masked before anything gets it.
+                    if (reference.Kind == SecretReferenceKind.Secret) Issued?.Invoke(value);
+                    return true;
+                }
             }
             catch (Exception exception) when (exception is SecretStoreUnavailableException or InvalidDataException or IOException or UnauthorizedAccessException)
             {

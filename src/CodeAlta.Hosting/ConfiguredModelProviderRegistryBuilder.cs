@@ -101,6 +101,7 @@ public static class ConfiguredModelProviderRegistryBuilder
                     modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, modelProviderRegistry.Application,
                     out var descriptor, out var createRuntime))
             {
+                TellSecrets(modelProviderRegistry, definition, stateRootPath);
                 modelProviderRegistry.RegisterOrReplace(descriptor, createRuntime);
                 descriptors.Add(descriptor);
             }
@@ -181,11 +182,37 @@ public static class ConfiguredModelProviderRegistryBuilder
                 continue;
             }
 
+            TellSecrets(modelProviderRegistry, definition, stateRootPath);
             modelProviderRegistry.RegisterOrReplace(descriptor, createRuntime);
             descriptors.Add(descriptor);
         }
 
         return descriptors;
+    }
+
+    // Tells the registry (the masking of its host) each secret of the store a provider is given, its key and the variables of its
+    // CLI, before the provider gets them: they are masked from then on, whatever the store keeps of them later.
+    private static void TellSecrets(ModelProviderRegistry registry, CodeAltaProviderDocument definition, string stateRootPath)
+    {
+        if (registry.SecretIssued is not { } issued) return;
+        var resolver = SecretReferenceResolver.ForMachine(stateRootPath, issued);
+        try
+        {
+            if (NormalizeText(definition.ApiKey) is { } literal)
+            {
+                if (SecretReferences.TryParseLone(literal, out var reference)) resolver.TryGet(reference, out _);
+            }
+            else if (NormalizeText(definition.ApiKeySecret) is { } secret)
+            {
+                resolver.TryGet(new SecretReference(SecretReferenceKind.Secret, secret), out _);
+            }
+
+            foreach (var value in definition.Env?.Values ?? Enumerable.Empty<string>()) resolver.TryResolve(value, out _, out _);
+        }
+        catch (SecretReferenceException)
+        {
+            // What does not read was not given.
+        }
     }
 
     /// <summary>

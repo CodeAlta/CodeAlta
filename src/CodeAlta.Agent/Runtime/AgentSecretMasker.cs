@@ -55,6 +55,22 @@ public sealed class AgentSecretMasker
         _time = time;
     }
 
+    /// <summary>
+    /// Masks a value from now on, for as long as this masker lives, whatever the store keeps of it: a value given to a session or a
+    /// tool is told before they get it, so that what took it is masked even when nothing was masked meanwhile.
+    /// </summary>
+    /// <param name="value">The value; one shorter than <see cref="MinimumLength"/> is not masked.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="value"/> is <see langword="null"/>.</exception>
+    public void Retain(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (value.Length < MinimumLength) return;
+        lock (_gate)
+        {
+            if (_seen.Add(value)) _patterns = Patterns.Of(_seen);
+        }
+    }
+
     /// <summary>Reads the values again at the next use, after a secret was set, rotated or deleted.</summary>
     public void Refresh()
     {

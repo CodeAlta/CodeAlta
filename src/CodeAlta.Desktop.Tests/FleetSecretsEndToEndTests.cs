@@ -142,7 +142,9 @@ public sealed class FleetSecretsEndToEndTests
                 { Environment = "production" }, cancellationToken: token);
             var waiting = await WaitForAsync(async () => (await service.SecretsAsync(new FleetServerLinkRequest(epoch, linkId), token)).Approvals
                 .FirstOrDefault(approval => approval.RunId == second.SessionId && approval.MayApprove), token);
-            Assert.AreEqual(("production", "e2e-node", "pending"), (waiting.Environment, waiting.Machine, waiting.Status));
+            Assert.AreEqual(("production", "pending"), (waiting.Environment, waiting.Status));
+            // The machine is named by the server and shown with the words of its key in the device list this computer verified.
+            Assert.IsTrue(waiting.Machine.StartsWith("e2e-node (", StringComparison.Ordinal) && !waiting.Machine.Contains("cannot verify", StringComparison.Ordinal), waiting.Machine);
             Assert.AreEqual(1, model.ToolOutputs.Count, "nothing of the second session runs before the approval");
             Assert.AreEqual("ok", (await service.ApproveRunAsync(new FleetApprovalActionRequest(epoch, linkId, waiting.Id, waiting.Review), token)).Status);
             await AllowShellAsync(node, second.SessionId, token);

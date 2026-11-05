@@ -102,6 +102,100 @@ public sealed class FleetNodeBudgetQueueTests
     }
 
     [TestMethod]
+    public async Task ARestart_DoesNotSendAHeldPromptAgain_WhoseRunStartedLongAgoInTheJournal()
+    {
+        var token = TestContext.CancellationToken;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, async (_, held, cancellation) =>
+        {
+            held();
+            await release.Task.WaitAsync(cancellation).ConfigureAwait(false);
+            return FleetBudgetAdmission.Admitted;
+        });
+        await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Report"), "create-long", token);
+        Assert.AreEqual(FleetBudgetCommandStatuses.Held, (await client.SendAsync(created.SessionId, "The work sent long ago.", retryKey: "send-long", cancellationToken: token)).Status);
+        var file = Path.Combine(fixture.Host.CatalogOptions.FleetRoot, "held-sends.json");
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var unblock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Host.Commands.SendStarting = (_, cancellation) => { reached.TrySetResult(); return unblock.Task.WaitAsync(cancellation); };
+        release.SetResult();
+        await reached.Task.WaitAsync(Patience, token);
+        var whileStarting = File.ReadAllText(file);
+        unblock.SetResult();
+        fixture.Host.Commands.SendStarting = null;
+        await WaitUntilAsync(() => fixture.Provider.Prompts.Any(static prompt => prompt.Contains("The work sent long ago.", StringComparison.Ordinal)), token);
+
+        // Many turns after it, with long answers: its prompt is far back in the journal, more pages back than a short search reads.
+        const int Turns = 40;
+        for (var index = 0; index < Turns; index++)
+        {
+            fixture.Provider.Turns.Enqueue((_, _) => Task.FromResult(ScriptedFleetProvider.Answer(new string((char)('a' + index % 26), 30_000))));
+            await WaitUntilAsync(async () => (await client.GetSessionStateAsync(created.SessionId, token)).ActiveRunId is null, token);
+            var sent = await client.SendAsync(created.SessionId, $"Filler {index}.", retryKey: $"filler-{index}", cancellationToken: token);
+            for (var attempt = 0; sent.Status == "busy" && attempt < 200; attempt++)
+            {
+                await Task.Delay(50, token);
+                sent = await client.SendAsync(created.SessionId, $"Filler {index}.", retryKey: $"filler-{index}", cancellationToken: token);
+            }
+
+            var expected = index + 2;
+            await WaitUntilAsync(() => fixture.Provider.Prompts.Count >= expected, token,
+                () => Task.FromResult($"sent {index}: {sent.Status} {sent.Code}; prompts {fixture.Provider.Prompts.Count}"));
+        }
+
+        await WaitUntilAsync(async () => (await client.GetSessionStateAsync(created.SessionId, token)).ActiveRunId is null, token);
+
+        // Its prompt is more pages back in the journal than a short search reads.
+        var (sentBefore, pages) = await JournaledAsync(fixture, created.SessionId, "send-long", token);
+        Assert.AreEqual(1, sentBefore);
+        Assert.IsTrue(pages > 16, $"the prompt is {pages} pages back");
+
+        // The node ended after the run of the held prompt started but before it forgot it: a fresh process, with no receipt of the
+        // first, finds it in the journal.
+        await fixture.RestartHostAsync(token);
+        File.WriteAllText(file, whileStarting);
+        fixture.Service.ResumeHeldSends();
+        await Task.Delay(TimeSpan.FromSeconds(3), token);
+        Assert.AreEqual(1, (await JournaledAsync(fixture, created.SessionId, "send-long", token)).Count, "a send is made once");
+    }
+
+    // How many prompts of a session the journal holds with a retry key, and how many pages back from its end the first is.
+    private static async Task<(int Count, int Pages)> JournaledAsync(FleetNodeFixture fixture, string sessionId, string retryKey, CancellationToken token)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                CodeAlta.Agent.Runtime.AgentSessionHistoryCursor? cursor = null;
+                var (count, pages, at) = (0, 0, 0);
+                while (true)
+                {
+                    var read = await fixture.Host.WorkspaceReads.ReadHistoryTailPageAsync(sessionId, cursor, token);
+                    pages++;
+                    foreach (var entry in read.Entries)
+                    {
+                        if (entry.Event is CodeAlta.Agent.AgentContentCompletedEvent { Kind: CodeAlta.Agent.AgentContentKind.User } user
+                            && CodeAlta.Orchestration.Runtime.PromptImageHistory.ReadClientRequestId(user.Details)?.EndsWith(":" + retryKey, StringComparison.Ordinal) == true)
+                        {
+                            count++;
+                            at = pages;
+                        }
+                    }
+
+                    if (read.Next is not { } next) return (count, at);
+                    cursor = next;
+                }
+            }
+            catch (CodeAlta.Agent.Runtime.AgentSessionHistoryException) when (attempt < 50)
+            {
+                // The journal was written meanwhile: read again from its end.
+                await Task.Delay(100, token);
+            }
+        }
+    }
+
+    [TestMethod]
     public async Task AHeldSend_IsKeptUntilItsRunStarts_AndARestartAfterItStartedDoesNotSendItAgain()
     {
         var token = TestContext.CancellationToken;
@@ -282,6 +376,16 @@ public sealed class FleetNodeBudgetQueueTests
 
         letQueued.SetResult();
         await WaitUntilAsync(() => fixture.Provider.Prompts.Any(static prompt => prompt.Contains("held follow-up", StringComparison.Ordinal)), token, Describe);
+    }
+
+    private static async Task WaitUntilAsync(Func<Task<bool>> condition, CancellationToken token)
+    {
+        var deadline = DateTime.UtcNow + Patience;
+        while (!await condition())
+        {
+            if (DateTime.UtcNow > deadline) Assert.Fail("It did not get there in time.");
+            await Task.Delay(50, token);
+        }
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition, CancellationToken token, Func<Task<string>>? describe = null)

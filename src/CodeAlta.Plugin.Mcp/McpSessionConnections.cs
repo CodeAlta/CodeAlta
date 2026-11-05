@@ -63,7 +63,10 @@ internal sealed class McpSessionConnections : IAsyncDisposable
     internal bool LoadsSkills { get; }
 
     /// <summary>Creates a runtime as the ones of the sessions: same configuration cache, same capabilities.</summary>
-    internal McpRuntimeService CreateRuntime(McpHome home) => new(home, ConfigCache, AdvertiseApps, LoadsSkills);
+    /// <summary>Gets or sets what is told each value of a secret the servers of the sessions are given (the masking of the host); null tells nothing.</summary>
+    internal Action<string>? SecretIssued { get; set; }
+
+    internal McpRuntimeService CreateRuntime(McpHome home) => new(home, ConfigCache, AdvertiseApps, LoadsSkills) { SecretIssued = SecretIssued };
 
     /// <summary>The number of sessions that hold connections.</summary>
     internal int Count { get { lock (_gate) return _entries.Count; } }

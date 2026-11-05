@@ -58,6 +58,7 @@ public sealed partial class FleetNodeService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         Principals.RecordUnattended(sessionId, actingAs);
+        KeepPrincipalsBounded();
     }
 
     /// <summary>Gets the organization of the person who started a session here through a team membership; null otherwise.</summary>
@@ -215,7 +216,39 @@ public sealed partial class FleetNodeService
     // Records that a person started a session here through a team membership: they alone see and drive it.
     private void RecordPrincipal(TrustedDevice? device, string sessionId)
     {
-        if (device is { OwnSessionsOnly: true, PersonId: { } person }) Principals.Record(sessionId, person, device.OrganizationId);
+        if (device is not { OwnSessionsOnly: true, PersonId: { } person }) return;
+        Principals.Record(sessionId, person, device.OrganizationId);
+        KeepPrincipalsBounded();
+    }
+
+    private int _pruningPrincipals;
+
+    // Past the count it keeps, the node forgets the records of the sessions that are gone, in the background; a session still on
+    // the machine keeps its record, so that its work never becomes the owner's.
+    private void KeepPrincipalsBounded()
+    {
+        if (Principals.Count <= FleetSessionPrincipals.MaxSessions || Interlocked.Exchange(ref _pruningPrincipals, 1) != 0) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var gone = new List<string>();
+                foreach (var sessionId in Principals.SessionIds)
+                {
+                    if (await _host.RuntimeService.TryGetRecoverableSessionAsync(sessionId).ConfigureAwait(false) is null) gone.Add(sessionId);
+                }
+
+                Principals.Forget(gone);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ObjectDisposedException)
+            {
+                LogInfo($"The records of the sessions that are gone could not be forgotten: {exception.Message}");
+            }
+            finally
+            {
+                Volatile.Write(ref _pruningPrincipals, 0);
+            }
+        });
     }
 
     private static string? SessionIdOf(object parameters) => parameters switch
@@ -241,7 +274,7 @@ public sealed partial class FleetNodeService
 /// </summary>
 internal sealed class FleetSessionPrincipals
 {
-    /// <summary>The most sessions kept; the oldest go first.</summary>
+    /// <summary>The count of records past which the node forgets those of the sessions that are gone (never one of a session still on the machine).</summary>
     public const int MaxSessions = 5000;
 
     private const string FileName = "session-principals.json";
@@ -254,7 +287,39 @@ internal sealed class FleetSessionPrincipals
     {
         ArgumentException.ThrowIfNullOrEmpty(fleetRoot);
         _path = Path.Combine(fleetRoot, FileName);
-        _items = Load(_path);
+        (_items, _unreadable) = Load(_path);
+    }
+
+    // Whether the file of the records does not read: whose work each session is is not known, so no session is the owner's work and
+    // nothing is written over it until its owner repairs or removes it.
+    private readonly bool _unreadable;
+
+    /// <summary>Gets how many sessions are recorded.</summary>
+    public int Count
+    {
+        get
+        {
+            lock (_gate) return _items.Count;
+        }
+    }
+
+    /// <summary>Gets the sessions recorded.</summary>
+    public IReadOnlyList<string> SessionIds
+    {
+        get
+        {
+            lock (_gate) return [.. _items.Select(static item => item.SessionId)];
+        }
+    }
+
+    /// <summary>Forgets the records of sessions that are gone: a session still on the machine is never forgotten.</summary>
+    /// <exception cref="IOException">It could not be written.</exception>
+    public void Forget(IReadOnlyCollection<string> goneSessionIds)
+    {
+        lock (_gate)
+        {
+            if (_items.RemoveAll(item => goneSessionIds.Contains(item.SessionId)) > 0) Save();
+        }
     }
 
     // A person's id is unique within one organization only: a session is theirs for the same person of the same organization.
@@ -271,9 +336,11 @@ internal sealed class FleetSessionPrincipals
         lock (_gate) return _items.FirstOrDefault(item => item.SessionId == sessionId && !item.Unattended)?.PersonId;
     }
 
-    // Whether whose work a session is was recorded: a person's, or a run nobody attends that is not the owner's.
+    // Whether whose work a session is was recorded: a person's, or a run nobody attends that is not the owner's; every session when
+    // the records do not read.
     public bool IsAttributed(string sessionId)
     {
+        if (_unreadable) return true;
         lock (_gate) return _items.Any(item => item.SessionId == sessionId);
     }
 
@@ -310,39 +377,49 @@ internal sealed class FleetSessionPrincipals
     }
 
     // A session another session started: the work of the same person, or the same run nobody attends, as that session; nothing for a
-    // session of the owner. A file that cannot be written leaves it unrecorded: the session is still not the owner's work while
-    // its parent is not, and it is recorded at its next resolution.
+    // session of the owner. A record that cannot be written refuses the session (its identity is not resolved, it does not attach):
+    // a session whose work is not recorded would be the owner's for the sessions it starts.
+    /// <exception cref="IOException">It could not be written.</exception>
     public void Inherit(string sessionId, string parentSessionId)
     {
         lock (_gate)
         {
             if (_items.Any(item => item.SessionId == sessionId) || _items.FirstOrDefault(item => item.SessionId == parentSessionId) is not { } parent) return;
             _items.Add(parent with { SessionId = sessionId });
-            try { Save(); }
+            try
+            {
+                Save();
+            }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 _items.RemoveAt(_items.Count - 1);
+                throw new IOException($"Whose work the session {sessionId} is could not be recorded: {exception.Message}", exception);
             }
         }
     }
 
-    // Under the gate.
+    // Under the gate. No record is dropped for room: those of sessions that are gone are forgotten (Forget), never one of a session
+    // still on the machine, whose work would then become the owner's.
     private void Save()
     {
-        if (_items.Count > MaxSessions) _items.RemoveRange(0, _items.Count - MaxSessions);
+        if (_unreadable) throw new IOException($"The records of whose work each session is ('{_path}') do not read: nothing is written over them until they are repaired or removed.");
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         FleetFiles.WriteAtomically(_path, JsonSerializer.SerializeToUtf8Bytes(_items, FleetSessionPrincipalJson.Default.ListFleetSessionPrincipal));
     }
 
-    private static List<FleetSessionPrincipal> Load(string path)
+    private static (List<FleetSessionPrincipal> Items, bool Unreadable) Load(string path)
     {
         try
         {
-            return JsonSerializer.Deserialize(File.ReadAllBytes(path), FleetSessionPrincipalJson.Default.ListFleetSessionPrincipal) ?? [];
+            return (JsonSerializer.Deserialize(File.ReadAllBytes(path), FleetSessionPrincipalJson.Default.ListFleetSessionPrincipal) ?? [], false);
         }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException)
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
-            return [];
+            return ([], false);
+        }
+        catch (JsonException)
+        {
+            return ([], true);
         }
     }
 }

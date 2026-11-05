@@ -83,22 +83,47 @@ public sealed partial class FleetNodeService
         HeldSends.Remove(holdId);
     }
 
-    // Whether the journal of a session holds the prompt of a send already: the run of a held send started before the node stopped.
-    private async Task<bool> PromptJournaledAsync(string sessionId, string retryKey)
+    // Whether the journal of a session holds the prompt of a send already (its run started before the node stopped): true when
+    // found, false once the whole journal was read without it, null when the journal could not be read to its start. A send whose
+    // search did not end is not sent: it stays held, and is looked for again at the next start.
+    private async Task<bool?> PromptJournaledAsync(string sessionId, string retryKey)
     {
-        const int MaxPages = 16;
+        // The pages of the longest journal read: one longer is not searched, and its held send waits for a person.
+        const int MaxPages = 100_000;
+        // A journal written while it is read is read again from its end, a few times.
+        const int MaxRestarts = 8;
         CodeAlta.Agent.Runtime.AgentSessionHistoryCursor? cursor = null;
+        var restarts = 0;
         for (var page = 0; page < MaxPages; page++)
         {
-            var read = await _host.WorkspaceReads.ReadHistoryTailPageAsync(sessionId, cursor, CancellationToken.None).ConfigureAwait(false);
+            CodeAlta.Agent.Runtime.AgentSessionHistoryPage read;
+            try
+            {
+                read = await _host.WorkspaceReads.ReadHistoryTailPageAsync(sessionId, cursor, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (CodeAlta.Agent.Runtime.AgentSessionHistoryException exception) when (exception.Code == "history_changed" && restarts < MaxRestarts)
+            {
+                restarts++;
+                cursor = null;
+                page = -1;
+                await Task.Delay(TimeSpan.FromMilliseconds(100)).ConfigureAwait(false);
+                continue;
+            }
+            catch (Exception exception) when (exception is OwnedWorkspaceBusyException or CodeAlta.Agent.Runtime.AgentSessionHistoryException or IOException
+                or UnauthorizedAccessException)
+            {
+                return null;
+            }
+
             if (read.Entries.Any(entry => entry.Event is CodeAlta.Agent.AgentContentCompletedEvent { Kind: CodeAlta.Agent.AgentContentKind.User } prompt
                     && string.Equals(PromptImageHistory.ReadClientRequestId(prompt.Details), retryKey, StringComparison.Ordinal)))
                 return true;
-            if (read.Next is not { } next) return false;
+            // A journal whose end did not read (a record written while it was read) is not known to hold none.
+            if (read.Next is not { } next) return read.TailOmitted ? null : false;
             cursor = next;
         }
 
-        return false;
+        return null;
     }
 
     private int _resumed;
@@ -114,11 +139,34 @@ public sealed partial class FleetNodeService
         _ = Task.Run(ResumeHeldSendsAsync);
     }
 
-    // Takes again the sends a budget held when the node stopped: each asks the same hold, and is sent once admitted.
+    // How often the sends this machine could not open (its protected store away) are tried again.
+    internal TimeSpan BlockedHeldSendsRetry { get; set; } = TimeSpan.FromMinutes(1);
+
+    // The held sends taken again by this process: one opened later is taken again once.
+    private readonly ConcurrentDictionary<string, byte> _resumedHolds = new(StringComparer.Ordinal);
+
+    // Takes again the sends a budget held when the node stopped: each asks the same hold, and is sent once admitted. Those this
+    // machine cannot open now stay held, are reported, and are tried again until they open.
     private async Task ResumeHeldSendsAsync()
+    {
+        while (true)
+        {
+            await ResumeOpenedHeldSendsAsync().ConfigureAwait(false);
+            int blocked;
+            try { blocked = HeldSends.Blocked; }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { blocked = 0; }
+            if (blocked == 0 || Volatile.Read(ref _disposed) != 0) return;
+            LogWarn($"{blocked} held prompts cannot be opened now (the protected store of the machine is away): they stay held, and are tried again.");
+            await Task.Delay(BlockedHeldSendsRetry).ConfigureAwait(false);
+            if (Volatile.Read(ref _disposed) != 0) return;
+        }
+    }
+
+    private async Task ResumeOpenedHeldSendsAsync()
     {
         foreach (var held in HeldSends.List())
         {
+            if (!_resumedHolds.TryAdd(held.HoldId, 0)) continue;
             try
             {
                 if (await _host.RuntimeService.TryGetRecoverableSessionAsync(held.SessionId).ConfigureAwait(false) is not { } session)
@@ -128,11 +176,16 @@ public sealed partial class FleetNodeService
                 }
 
                 // Its run started before the node stopped, which had not forgotten it yet: it is not sent twice.
-                if (await PromptJournaledAsync(held.SessionId, held.RunId).ConfigureAwait(false))
+                switch (await PromptJournaledAsync(held.SessionId, held.RunId).ConfigureAwait(false))
                 {
-                    HeldSends.Remove(held.HoldId);
-                    LogInfo($"The held prompt {held.HoldId} of the session {held.SessionId} was sent before the restart.");
-                    continue;
+                    case true:
+                        HeldSends.Remove(held.HoldId);
+                        LogInfo($"The held prompt {held.HoldId} of the session {held.SessionId} was sent before the restart.");
+                        continue;
+                    case null:
+                        // Not known whether it was sent: never sent twice, it stays held until the journal reads.
+                        LogInfo($"The held prompt {held.HoldId} of the session {held.SessionId} is kept: its journal could not be searched to its start.");
+                        continue;
                 }
 
                 var result = await WithinBudgetAsync(session, held.Title, held).ConfigureAwait(false);
