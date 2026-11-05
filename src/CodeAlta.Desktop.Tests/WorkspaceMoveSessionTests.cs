@@ -219,6 +219,14 @@ public sealed class WorkspaceMoveSessionTests
                 DesktopJsonContext.Default.SpaceChangeResponse)!;
             Assert.AreEqual(("Busy", 1), (copy.LeftSessions!.Single().Title, copy.MovedSessions));
 
+            // Dragged again onto a space it is in already: it changes no space of the project, and gathers the sessions
+            // left in the default space, as a project split before its sessions followed it.
+            var late = await host.Commands.CreateDraftSessionAsync(project, Provider, "Late", spaceId: "default");
+            var gathered = await spaces.AssignAsync(new(Epoch, project.Id, [], [], "default", "business"), CancellationToken.None);
+            Assert.AreEqual(("ok", 1, "ok"), (gathered.Status, gathered.MovedSessions, gathered.SessionsStatus));
+            Assert.AreEqual("business", await SpaceOf(late.SessionId));
+            CollectionAssert.AreEqual(new[] { "business" }, (await host.ProjectCatalog.LoadAsync()).Single(value => value.Id == project.Id).Spaces.ToArray());
+
             // A plain assignment moves no session.
             var plain = await spaces.AssignAsync(new(Epoch, project.Id, ["personal"], []), CancellationToken.None);
             Assert.AreEqual(("ok", 0, (string?)null), (plain.Status, plain.MovedSessions, plain.SessionsStatus));

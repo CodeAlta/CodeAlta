@@ -77,9 +77,9 @@ Drag projects to choose the spaces they are in:
 | The same with `Ctrl` or `Alt` held | The project stays in both. | None move. |
 | From a card back to the list | The project leaves that space. | Those in that space move to Default. |
 
-Sessions in any other space stay where they are, so a project can keep its sessions in several spaces. A session that runs or waits for an answer stays too: the page names it, and you move it with [Move to space…](#move-a-session) once it is idle. A session that moved uses the setup of its new space from its next turn.
+Sessions in any other space stay where they are, so a project can keep its sessions in several spaces. Dragging a project from the list onto a space it is already in gathers there its sessions left in Default. A session that runs or waits for an answer stays too: the page names it, and you move it with [Move to space…](#move-a-session) once it is idle. A session that moved uses the setup of its new space from its next turn.
 
-The `×` of a project on a card also removes it, as a drag back to the list does. A card has **Show**, and arrows that move the space up or down the list.
+The `×` of a project on a card also removes it, as a drag back to the list does, and the checkboxes of **Projects** on the page of a space add and remove projects the same way, sessions included. A card has **Show**, and arrows that move the space up or down the list.
 
 Click a card to open the page of its space. Each tab of the page says what its section sets:
 

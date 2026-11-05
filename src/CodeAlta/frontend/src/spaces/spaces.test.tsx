@@ -6,7 +6,8 @@ import { SpaceAvailable } from "./SpaceAvailable";
 import { SpacePage } from "./SpacePage";
 import type { AvailableResource, ResourceLists } from "./spaceResources";
 import { ownResources, readSpacePageLink, spaceCardSummary, spacePageLink, spaceSectionStatus } from "./spaceSummary";
-import { dropChange, movedOrder, sessionsNotice, SpaceSettings } from "./SpaceSettings";
+import { dropChange, movedOrder, SpaceSettings } from "./SpaceSettings";
+import { joinedSessions, sessionsNotice } from "./sessionSpaceMove";
 import { SpaceActivityBar, SpaceSwitch } from "./SpaceViews";
 import { archivedInView, defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, waitingSubSessions, restoreShownSpace, sameSpaces, scopeSnapshot,
   sessionHome, sessionSpaces, spaceActivities, spaceBrand, spaceCalls, spaceChatCounts, spaceNameProblem, spaceQuiet, spaceShows, spaceStorageKey, spaceView, spaceViewKey, subSessionsAtWork, viewLists } from "./spaces";
@@ -224,7 +225,9 @@ test("dropping a project on a space adds it, moves it or copies it, and dropping
   // From the list: the sessions of the default space go with it.
   assert.deepEqual(dropChange({ projectId: "c", from: null }, "work", members, false), { join: ["work"], leave: [], sessions: { from: "default", to: "work" } });
   assert.deepEqual(dropChange({ projectId: "c", from: null }, "work", members, true), { join: ["work"], leave: [], sessions: null }, "A copy moves no session.");
-  assert.equal(dropChange({ projectId: "a", from: null }, "work", members, false), null, "It is in that space already.");
+  // Dropped again onto a space it is in already: it gathers there its sessions of the default space; a copy does nothing.
+  assert.deepEqual(dropChange({ projectId: "a", from: null }, "work", members, false), { join: [], leave: [], sessions: { from: "default", to: "work" } });
+  assert.equal(dropChange({ projectId: "a", from: null }, "work", members, true), null);
   // From a space to another: the sessions of the first one go; with Ctrl it is in both, and none moves.
   assert.deepEqual(dropChange({ projectId: "a", from: "work" }, "personal", members, false), { join: ["personal"], leave: ["work"], sessions: { from: "work", to: "personal" } });
   assert.deepEqual(dropChange({ projectId: "a", from: "work" }, "personal", members, true), { join: ["personal"], leave: [], sessions: null });
@@ -235,6 +238,9 @@ test("dropping a project on a space adds it, moves it or copies it, and dropping
   // Back on the list: the sessions of the space it leaves go to the default one.
   assert.deepEqual(dropChange({ projectId: "a", from: "work" }, null, members, false), { join: [], leave: ["work"], sessions: { from: "work", to: "default" } });
   assert.equal(dropChange({ projectId: "a", from: null }, null, members, false), null);
+  // The checkbox of a space page and the × of a card move them as the drags from and back to the list do.
+  assert.deepEqual(joinedSessions("work", true), { from: "default", to: "work" });
+  assert.deepEqual(joinedSessions("work", false), { from: "work", to: "default" });
   const spaces = readSpaces([item("default"), item("one"), item("two"), item("three")]);
   assert.deepEqual(movedOrder(spaces, "two", -1), ["two", "one", "three"]);
   assert.deepEqual(movedOrder(spaces, "two", 1), ["one", "three", "two"]);
