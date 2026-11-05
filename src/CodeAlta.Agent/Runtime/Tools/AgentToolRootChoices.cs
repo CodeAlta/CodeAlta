@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -27,6 +28,12 @@ internal static class AgentToolRootChoices
     private const int MaxDepth = 8;
 
     private static readonly string[] ChoiceKeywords = ["anyOf", "oneOf", "allOf"];
+
+    // The keywords beside a $ref that say nothing of the values: the branch is then the definition alone.
+    private static readonly FrozenSet<string> AnnotationKeywords = new[]
+    {
+        "$ref", "$comment", "$id", "$anchor", "$schema", "title", "description", "examples", "default", "deprecated", "readOnly", "writeOnly",
+    }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>
     /// Says whether a tool input schema has a choice at its root.
@@ -238,7 +245,9 @@ internal static class AgentToolRootChoices
         }
     }
 
-    // A branch that is a local reference, such as {"$ref":"#/$defs/byKey"}, is the definition it names.
+    // A branch that is a local reference, such as {"$ref":"#/$defs/byKey"}, is the definition it names. As in JSON Schema
+    // 2020-12, a reference applies beside the other keywords of its schema: a branch that also has properties, required
+    // names or choices of its own is both, an allOf of the definition and of the rest of the branch.
     private static JsonNode? Resolve(JsonNode? node, JsonObject root)
     {
         for (var hop = 0; hop < MaxDepth && node is JsonObject schema && schema["$ref"] is JsonValue reference &&
@@ -250,7 +259,22 @@ internal static class AgentToolRootChoices
                 return node;
             }
 
-            node = definitions[name.Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal)];
+            var definition = definitions[name.Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal)];
+            if (schema.Any(static keyword => !AnnotationKeywords.Contains(keyword.Key)))
+            {
+                var rest = new JsonObject();
+                foreach (var (keyword, value) in schema)
+                {
+                    if (keyword != "$ref")
+                    {
+                        rest[keyword] = value?.DeepClone();
+                    }
+                }
+
+                return new JsonObject { ["allOf"] = new JsonArray(definition?.DeepClone(), rest) };
+            }
+
+            node = definition;
         }
 
         return node;

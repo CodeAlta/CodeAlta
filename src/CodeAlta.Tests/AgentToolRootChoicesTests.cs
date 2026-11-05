@@ -167,6 +167,36 @@ public sealed class AgentToolRootChoicesTests
         Assert.AreEqual(JsonValueKind.True, merged.GetProperty("additionalProperties").ValueKind);
     }
 
+    // In JSON Schema 2020-12 a $ref applies beside the other keywords of its schema: a branch that refers to a definition
+    // and declares its own properties takes both, and requires what both require.
+    [TestMethod]
+    public void ABranchWithARefAndPropertiesOfItsOwn_KeepsBoth()
+    {
+        using var schema = JsonDocument.Parse(
+            """
+            {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "oneOf": [
+                { "$ref": "#/$defs/byToken", "properties": { "url": { "type": "string", "format": "uri" } }, "required": ["url"] },
+                { "type": "object", "properties": { "id": { "type": "string" } }, "required": ["id"], "additionalProperties": false }
+              ],
+              "$defs": {
+                "byToken": { "type": "object", "properties": { "token": { "type": "string" } }, "required": ["token"], "additionalProperties": false }
+              }
+            }
+            """);
+
+        Assert.IsTrue(AgentToolRootChoices.TryMerge(schema.RootElement, out var merged));
+
+        var properties = merged.GetProperty("properties");
+        CollectionAssert.AreEquivalent(new[] { "token", "url", "id" }, properties.EnumerateObject().Select(static property => property.Name).ToArray());
+        Assert.AreEqual("uri", properties.GetProperty("url").GetProperty("format").GetString());
+        StringAssert.Contains(merged.GetProperty("description").GetString(), "(token, url) or (id)");
+        Assert.IsFalse(merged.TryGetProperty("required", out _), "No name is required by both choices.");
+        Assert.AreEqual("https://json-schema.org/draft/2020-12/schema", merged.GetProperty("$schema").GetString());
+    }
+
     [TestMethod]
     public void ASchemaWithoutAChoiceAtItsRoot_IsLeftAsItIs()
     {
