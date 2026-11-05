@@ -169,6 +169,37 @@ public sealed class IntegrationClientTests
         second.Dispose();
     }
 
+    // Slack spreads the events of an app among its connections: a machine whose app is connected elsewhere too (another machine
+    // listens with it) would take events of the triggers there. It closes its connection, says why, and takes no event.
+    [TestMethod]
+    public async Task SlackSocketMode_StepsAside_WhenItsAppIsConnectedElsewhereToo()
+    {
+        var opened = 0;
+        var fake = new FakeToolServer().On(HttpMethod.Post, "/api/apps.connections.open", _ =>
+            (HttpStatusCode.OK, $$"""{"ok":true,"url":"wss://wss.slack.test/link/?ticket={{Interlocked.Increment(ref opened)}}"}"""));
+        using var http = new HttpClient(fake);
+        await using var sockets = new FakeSlackSockets();
+        var listener = new SlackSocketListener(new SlackClient(http, new Uri("https://slack.test/api/")), sockets.ConnectAsync);
+        var messages = System.Threading.Channels.Channel.CreateUnbounded<SlackMessage>();
+        var changed = System.Threading.Channels.Channel.CreateUnbounded<bool>();
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var running = listener.RunAsync("xapp-app", message => messages.Writer.WriteAsync(message).AsTask(), () => changed.Writer.TryWrite(listener.Connected), stop.Token);
+
+        var socket = await sockets.Accepted.Reader.ReadAsync(stop.Token);
+        Assert.IsTrue(await changed.Reader.ReadAsync(stop.Token), "connected");
+        await FakeSlackSockets.SendAsync(socket, """{"type":"hello","num_connections":2,"connection_info":{"app_id":"A1"}}""");
+        Assert.IsFalse(await changed.Reader.ReadAsync(stop.Token), "it closed its connection");
+        StringAssert.Contains(listener.Problem, "connected 2 times");
+        var buffer = new byte[1024];
+        Assert.AreEqual(System.Net.WebSockets.WebSocketMessageType.Close, (await socket.ReceiveAsync(buffer, stop.Token)).MessageType, "Slack is told");
+        await Task.Delay(300, stop.Token);
+        Assert.AreEqual(1, Volatile.Read(ref opened), "it does not connect again at once");
+        await stop.CancelAsync();
+        await running;
+        Assert.IsFalse(messages.Reader.TryRead(out _));
+        socket.Dispose();
+    }
+
     [TestMethod]
     public async Task IncidentIo_ReadsTheIncidentAgain_AndAddsAnItemToItsTimeline()
     {
