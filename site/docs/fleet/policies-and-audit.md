@@ -10,6 +10,11 @@ A [CodeAlta Server](server.md) keeps the rules of your organization for the work
 
 The kill switch stops the work of the fleet at once: the sessions started from another device, the sessions of agents of other machines, and the runs of automations. What a person does at a machine goes on.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-kill-switch.webp" alt="The kill switch of Settings > Fleet > Policies with Stop the work of the fleet open: every machine, chosen machines or the machines of chosen teams, and why" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The kill switch stops the work of the fleet, signed by your computer.</figcaption>
+</figure>
+
 1. Open **Settings** > **Fleet** > **Policies** and click **Stop the fleet…**.
 2. Choose **Every machine**, **Chosen machines** or **The machines of chosen teams**, and say why: the machines show it.
 3. Click **Stop the work**.
@@ -23,6 +28,11 @@ Owners and the admins who sign the [access document](people-and-access.md#sign-w
 ## Rules of your organization
 
 The rules apply to the work of the fleet in the spaces linked to the server. A rule only narrows what a machine allows; an empty one says nothing.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-policies.webp" alt="Settings > Fleet > Policies: the kill switch, then the rules of the organization (providers, models, sandbox at least, network, tools turned off, permission mode, sessions elsewhere, longest session)" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The rules of your organization narrow what machines allow.</figcaption>
+</figure>
 
 | Rule | What a machine does |
 | --- | --- |
@@ -45,6 +55,11 @@ Each version is signed with the key of the computer of an owner or an admin who 
 ## Read the audit log
 
 **Settings** > **Fleet** > **Audit** shows who did what, newest first, by day: the action, the person and their device, and how it ended. A refused attempt is marked **Refused** with its code. Click a record to see its target, the address it came from, its request and its hashes.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-audit.webp" alt="Settings > Fleet > Audit: the audit log with its filters and the records of today (signed the access document, accepted a transfer, created a team, invited a person, set a budget, approved a device)" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The audit log: who did what, with which device, and how it ended.</figcaption>
+</figure>
 
 Narrow it with the search box and **What**, **Who**, **Result** and **Period** (**Between two days…** takes two days). **Show older records** reads the next page.
 

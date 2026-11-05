@@ -10,6 +10,11 @@ The sessions of a [paired machine](machines.md#pair-it-with-codealta-desktop), o
 
 The sessions of a paired machine are listed in the Explorer with your own, with a chip that names their machine:
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-remote-session.webp" alt="A session of the machine Workstation open in CodeAlta Desktop: its row in the Explorer under markdig with the Workstation chip, its tab marked Relayed, and the answer of the agent" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A session of the Workstation, listed under its project and driven from this computer.</figcaption>
+</figure>
+
 - A session in a project you also have here, a checkout of the same git repository, is listed under that project, whatever its folder and its name on each computer.
 - The other sessions of the machine are listed under a row named after the machine. That row is there as soon as the machine is paired, sessions or none, and is dimmed while the machine is offline; its tooltip says its state.
 
@@ -28,6 +33,11 @@ While a machine is offline, its sessions stay listed with what was last known of
 3. Choose the project of that machine: when the machine has a checkout of the same repository as the project you are in, it is already chosen. **Chat (no project)** starts a session in no project.
 4. Choose the provider and the model among the ones ready on that machine.
 5. Write your prompt and send it. The session starts on the machine and opens in its tab.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-run-on.webp" alt="The prompt of a new session with the Run on menu open: This machine, Build box and Workstation" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Run on chooses the machine the session starts on.</figcaption>
+</figure>
 
 The **+** of the row of a machine in the Explorer opens the same prompt, already set to run on that machine.
 

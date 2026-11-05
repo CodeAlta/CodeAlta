@@ -12,6 +12,11 @@ A CodeAlta Server shows the machines of all your computers, whether they are onl
 
 In CodeAlta Desktop, open **Settings** > **Fleet** > **Server** and click **Create my server…**. Choose where it runs:
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-create-server.webp" alt="The Create my server window over Settings > Fleet > Server: On a machine over SSH (recommended), On this computer, and It runs already" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Create my server: on a machine over SSH, on this computer, or one that runs already.</figcaption>
+</figure>
+
 - **On a machine over SSH**, the usual place: an always-on Linux or macOS machine you reach with `ssh`. Give it as `user@host`, and how your machines reach it: **An address I put in front of it** (the default), a domain or Tailscale Serve that forwards to the server over HTTPS, which then stays on the machine's own loopback and trusts the proxy there (`--trusted-proxy "127.0.0.1;::1"`, below); **The local network, encrypted with the server's own certificate** (`https://host:2586`), when nothing stands in front of it: the server makes a certificate of its own, CodeAlta reads its fingerprint over SSH, and every device checks it at each connection, so nothing travels in clear and no other machine can pass for the server; or **The local network, not encrypted** (`http://host:2586`, plain HTTP), only on a network you trust. CodeAlta checks the system and .NET there, installs CodeAlta Server, starts it as a service with `altaserver install` (a `systemd --user` unit with lingering, or a LaunchAgent), checks that it answers from this computer at that address, then reads its setup code over SSH and makes you its owner. Nothing to copy.
 - **On this computer**: CodeAlta installs CodeAlta Server here, runs it as a service with `altaserver install` (see [Run a server as a service](#run-a-server-as-a-service)), so that it starts again after a restart, and makes you its owner.
 - **It runs already**: a server you started with `altaserver run`; give its address, its setup code (`altaserver setup-code` prints it on its machine) and your name. A setup code typed in **Connect to my server…** by mistake is recognized: CodeAlta says the server has no owner yet, and **Set it up…** opens this form with the address.
@@ -52,6 +57,16 @@ It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--
 - **A computer or a machine you no longer trust**: the trash button of its row among the devices of the server's card, then **Revoke**. Every machine refuses it at once, and the server cannot bring it back.
 - **Entries from a newer version**: when computers of your fleet run a newer CodeAlta than this one, the devices of the server's card may say that entries of the device list come from a newer version and were skipped. This computer trusts none of the devices they add until you update CodeAlta here.
 
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-join-command.webp" alt="The Add a machine window of the server card with the command altanode join and its one-time code" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The command a machine runs to join your server.</figcaption>
+</figure>
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-approve-machine.webp" alt="CodeAlta Desktop with Settings > Fleet > Server open: the message Workstation asks to join CodeAlta as a machine, with its six words, Approve and Refuse, and beside the new device the question Does Workstation show these words?" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Approve a machine when it shows the same six words.</figcaption>
+</figure>
+
 ## Join an organization
 
 To join the server of your company, open **Settings** > **Fleet** > **Server** and click **Join an organization…**:
@@ -78,11 +93,21 @@ The card of the server shows **Sign-in**: the ways people sign in on a new compu
 
 The recovery key lets you get your keys back on a new computer if every computer of yours that holds them is lost. The card of the server shows **Recovery key**: **Kept** once you have one. **Make a recovery key…** makes one for a server you created before; **New recovery key…** makes another, and the words you kept before stop working. Once you have a way to sign in, making one asks you to sign in again with it first (**Continue with**). Without your computers and without these words, what was encrypted for them cannot be read again, by you or by the server.
 
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-recovery-key.webp" alt="The Recovery key window with 32 numbered words, Copy and I wrote them down" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The recovery key is shown once: write the 32 words down.</figcaption>
+</figure>
+
 On a new computer, click **Recover with the recovery key…** on the empty **Server** page, or in **Join an organization…**, give the address of the server and type the 32 words: this computer becomes one of yours again, with your keys, without waiting for an approval. A word that is not a word of a recovery key is named by its position (**Word 7…**), never shown back.
 
 ## Choose what a server sees
 
 A space publishes to a server only when you choose it: **Spaces on this server** on the server's card, or **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server. Each space has a key of its own, so the titles of one space never open with the key of another.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-server-card.webp" alt="The card of the server in Settings > Fleet > Server: the spaces on this server with Open source linked, the recovery key kept, the machines and this computer with their state, sign-in, telemetry and updates" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The card of your server: its spaces, recovery key, devices, sign-in, telemetry and updates.</figcaption>
+</figure>
 
 ## Reach machines through the server
 
@@ -96,6 +121,11 @@ The nodes of your server are reachable from CodeAlta Desktop without pairing and
 ## The Fleet canvas
 
 The **Fleet** button of the title bar opens the **Fleet** canvas (`/fleet`): the machines of the server and their sessions, with their titles, as they change; without a server, the machines paired with this computer. Its **Settings** button opens **Settings** > **Fleet** > **Server**. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. The name of a machine this computer reaches opens its page. `altanode status` says whether the node is connected to its server.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-canvas.webp" alt="The Fleet canvas: the server CodeAlta online, the machines online, at work and waiting, and a card per machine (this computer, Build box with its labels gpu and always-on, Workstation) with their sessions" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Fleet canvas shows your machines and their sessions.</figcaption>
+</figure>
 
 ## Leave a server
 

@@ -15,6 +15,11 @@ At home, the page shows your people and your machines: everything is yours, and 
 3. On their computer, they open **Settings** > **Fleet** > **Server**, click **Join an organization…**, give the address and choose **Use an enrollment code instead**.
 4. Their computer shows six words. Approve it on yours when it shows the same words (see [what waits for you](server.md#add-machines-and-computers)).
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-people-and-access.webp" alt="Settings > Fleet > People and access: Waiting for you, with the changes to sign and the machine Build box offered to the team Infra, then the people and their roles" loading="lazy">
+  <figcaption class="small text-secondary mt-2">People and access: what waits for you, then the people of your organization.</figcaption>
+</figure>
+
 Until then they are listed as **Invited**. People who sign in with your company's sign-in join without an invitation, as members.
 
 ## Roles
@@ -77,6 +82,11 @@ A machine given to the organization runs the automations of the organization onl
 ## Sign what machines follow
 
 Machines never take teams, team machines or suspensions from the server alone: they follow them once an owner or an admin signs them. When something changed, **Waiting for you** lists it under **Changes machines do not follow yet**. Click **Review and sign…**: your computer reads the changes itself, lists them, and signs them with its key when you click **Sign**. A change made by a maintainer who is not an admin waits there too.
+
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-sign-access.webp" alt="Review and sign: This computer signs these changes with its key, the list of changes, and Sign" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Your computer signs the changes the machines follow.</figcaption>
+</figure>
 
 ## When a person leaves
 

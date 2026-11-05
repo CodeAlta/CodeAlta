@@ -12,6 +12,11 @@ Each machine keeps its own sessions, providers and sign-ins. Nothing is copied f
 
 In CodeAlta Desktop, open **Settings** > **Fleet** > **Machines** and click **Add a machine…**. Choose how this computer reaches the machine:
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-add-machine.webp" alt="The Add a machine window of CodeAlta Desktop, over Settings > Fleet > Machines: Over SSH (recommended), With a pairing link, and Through my server" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Add a machine: over SSH, with a pairing link, or through your server.</figcaption>
+</figure>
+
 | Choice | When |
 | --- | --- |
 | **Over SSH** | A Linux or macOS computer you reach with `ssh`. CodeAlta does everything there; nothing to type on the machine |
@@ -142,6 +147,11 @@ A machine linked to a CodeAlta Server publishes its labels there: the **Fleet** 
 3. Paste the link. CodeAlta shows the name of the machine and six words: check that they are the words `altanode pair` printed.
 4. Click **Pair**. `altanode pair` says which device paired, and the machine is listed as **Online**.
 
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-pair.webp" alt="The Pair a machine window with a pairing link pasted, the name and address of the machine, and the six words it shows" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Check that the machine shows the same six words, then pair.</figcaption>
+</figure>
+
 The link works once and expires after 10 minutes (`altanode pair --minutes <n>` gives it more). Pairing again with a new link replaces the machine, for example after its address changed.
 
 A paired computer may see the sessions of the machine, drive them and start new ones. Moving sessions to the machine stays off (see [Move a session](sessions.md#move-a-session)). A computer also manages the machine only when you ask, the first one included: `altanode pair --manage` makes a link for that, and **Add a machine…** > **Over SSH** has **Manage it from this computer** (off until you tick it). Its row then says **Managed from here** (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
@@ -149,6 +159,11 @@ A paired computer may see the sessions of the machine, drive them and start new 
 ## Manage a machine from CodeAlta Desktop
 
 In **Settings** > **Fleet** > **Machines**, click the name of a machine to open its page. A computer that manages the machine changes everything there, without a terminal on the machine:
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-machine-page.webp" alt="The page of the machine Workstation in Settings > Fleet > Machines, managed from this computer: its devices with a switch per permission, the agents of other machines, its people and its labels" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The page of a machine you manage.</figcaption>
+</figure>
 
 | Section | What you do |
 | --- | --- |

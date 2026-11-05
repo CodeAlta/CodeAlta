@@ -46,6 +46,11 @@ A node starts counting with the day it first runs.
 
 A budget limits the tokens or the estimated cost (in US dollars) your machines spend per day, week or month.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-budgets.webp" alt="Settings > Fleet > Budgets with two budgets: Build box per day (advisory, stops new runs, 22% of 2M tokens) and Monthly spend (all my work, enforced, holds new runs, $0.29 of $50)" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Budgets of tokens or estimated cost, with what each scope used.</figcaption>
+</figure>
+
 1. In CodeAlta Desktop, on the owner's computer, open **Settings** > **Fleet** > **Budgets** and click **Add a budget…**.
 2. Name it and choose **Where it applies**: **All my work**, one machine, a space or a project.
 3. Choose **Tokens** or **Estimated cost (USD)**, the **Limit** and the **Period**. Periods start at midnight of your computer's time zone, a week on Monday.
@@ -72,6 +77,11 @@ Your nodes tell the server how they are: little disk space left, a provider whos
 ## Give secrets to your machines
 
 **Settings > Fleet > Secrets and environments** sets the secrets and variables of your machines from the computer that made the server: for all your work, a space, a project or an environment, for the machines you choose, rotated from there. Environments such as `production` run only on the machines they name and can wait for your approval before a run starts. See [Secrets of your machines with a server](../secrets.md#secrets-of-your-machines-with-a-server).
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-secrets.webp" alt="Settings > Fleet > Secrets and environments with a new secret GRAFANA_TOKEN being added for all my work on the machine Build box, and the environments with who approves them" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A secret is sealed on this computer for the machines you choose.</figcaption>
+</figure>
 
 ## Receive events of other tools
 
