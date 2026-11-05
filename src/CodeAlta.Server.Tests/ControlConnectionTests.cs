@@ -207,6 +207,25 @@ public sealed class ControlConnectionTests
     }
 
     [TestMethod]
+    public async Task ANodeRenamedByItsInventoryIsListedByItsNewNameInTheDevices()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var mac = new TestDevice("Mac mini");
+        await server.SetUpWithNodeAsync(owner, mac);
+        var (node, _) = await server.ConnectAsync(mac);
+        await using (node)
+        {
+            // altanode run --name: the node says its new name in its inventory.
+            await node.SendRequestAsync(FleetServerMethods.InventoryPublish, JsonSerializer.SerializeToElement(
+                new FleetInventoryPublish(1, new FleetMachineInventory("studio", "macos")), FleetServerJsonContext.Default.FleetInventoryPublish));
+        }
+
+        Assert.AreEqual("studio", (await server.SendAsync(owner, HttpMethod.Get, $"/api/v1/devices/{mac.DeviceId}")).Read<DeviceDto>().Name);
+        Assert.AreEqual("studio", (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/machines")).Read<ListResponse<MachineDto>>().Items.Single().Name);
+    }
+
+    [TestMethod]
     public void ARemovedMachineLeavesTheDirectoryViewWithItsSessionsAndPresence()
     {
         var machine = new FleetDirectoryMachine("mac", FleetDeviceKinds.Node, new FleetMachineInventory("Mac mini", "macos"), Created);
