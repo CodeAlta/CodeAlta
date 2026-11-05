@@ -131,15 +131,14 @@ public sealed class AgentSessionCatalog : IAgentSessionCatalog
     public Task NotifySessionUpdatedAsync(string sessionId, CancellationToken cancellationToken = default)
         => InvalidateAsync(sessionId, cancellationToken);
 
-    // Under _gate.
+    // Under _gate. A load under way is no longer kept, and the next listing starts another one; it still ends for the readers
+    // already on it, which would otherwise take a list cut short for the whole list.
     private void InvalidateAll()
     {
-        var loadState = _loadState;
         _version++;
         _snapshot = null;
         _loadState = null;
         _staleSessions.Clear();
-        loadState?.Complete(error: null);
     }
 
     // Reads the stale sessions of a snapshot again, one by one, and returns the snapshot with them; null when the snapshot
@@ -258,10 +257,7 @@ public sealed class AgentSessionCatalog : IAgentSessionCatalog
             await foreach (var session in _store.ListSessionsAsync(filter: null, CancellationToken.None).ConfigureAwait(false))
             {
                 sessions.Add(session);
-                if (!TryPublishLoadedSession(state, session))
-                {
-                    return;
-                }
+                PublishLoadedSession(state, session);
             }
 
             var snapshot = sessions
@@ -271,39 +267,36 @@ public sealed class AgentSessionCatalog : IAgentSessionCatalog
 
             lock (_gate)
             {
+                // Kept only while nothing invalidated it since it started.
                 if (_version == state.Version && ReferenceEquals(_loadState, state))
                 {
                     _snapshot = snapshot;
                     _loadState = null;
-                    state.Complete(error: null);
                 }
+
+                state.Complete(error: null);
             }
         }
         catch (Exception ex)
         {
             lock (_gate)
             {
-                if (_version == state.Version && ReferenceEquals(_loadState, state))
+                if (ReferenceEquals(_loadState, state))
                 {
                     _loadState = null;
-                    state.Complete(ex);
                 }
+
+                state.Complete(ex);
             }
         }
     }
 
-    private bool TryPublishLoadedSession(CatalogLoadState state, AgentSessionMetadata session)
+    private void PublishLoadedSession(CatalogLoadState state, AgentSessionMetadata session)
     {
         lock (_gate)
         {
-            if (_version != state.Version || !ReferenceEquals(_loadState, state))
-            {
-                return false;
-            }
-
             state.Sessions.Add(session);
             state.SignalChange();
-            return true;
         }
     }
 

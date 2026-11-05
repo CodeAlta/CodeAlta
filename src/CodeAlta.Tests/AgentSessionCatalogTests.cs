@@ -105,6 +105,32 @@ public sealed class AgentSessionCatalogTests
     }
 
     [TestMethod]
+    public async Task ListSessionsAsync_InvalidatedWhileItLoads_StillListsEverySessionToItsReader_AndTheNextListingLoadsAgain()
+    {
+        var first = new AgentSessionMetadata("session-first", DateTimeOffset.Parse("2026-04-06T10:00:00+00:00"), DateTimeOffset.Parse("2026-04-06T11:00:00+00:00"));
+        var second = new AgentSessionMetadata("session-second", DateTimeOffset.Parse("2026-04-06T10:05:00+00:00"), DateTimeOffset.Parse("2026-04-06T11:05:00+00:00"));
+        var store = new PartiallyBlockingSessionStore(first, second);
+        var catalog = new AgentSessionCatalog(store);
+
+        await using var enumerator = catalog.ListSessionsAsync().GetAsyncEnumerator();
+        Assert.IsTrue(await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false));
+        Assert.AreEqual("session-first", enumerator.Current.SessionId);
+        await store.WaitingAfterFirst.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+
+        // A session is created while the listing reads: the load it reads is not kept, but its reader never loses a session.
+        await catalog.NotifySessionCreatedAsync("session-third").ConfigureAwait(false);
+        var next = enumerator.MoveNextAsync().AsTask();
+        store.ReleaseRemaining.SetResult();
+        Assert.IsTrue(await next.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false), "The listing ended before the store did.");
+        Assert.AreEqual("session-second", enumerator.Current.SessionId);
+        Assert.IsFalse(await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false));
+
+        CollectionAssert.AreEquivalent(new[] { "session-first", "session-second" },
+            (await catalog.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Select(static session => session.SessionId).ToArray());
+        Assert.AreEqual(2, store.LoadCount, "The next listing reads the store again: the load that was invalidated is not kept.");
+    }
+
+    [TestMethod]
     public async Task ListSessionsAsync_StreamsCachedSnapshotUntilInvalidated()
     {
         var store = new BlockingSessionStore(
