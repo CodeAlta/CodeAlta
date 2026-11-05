@@ -24,6 +24,27 @@ public sealed class HeadlessToolPatternTests
     }
 
     [TestMethod]
+    public async Task TheToolsTheHostRequiresASessionToDoWithout_AreOffAtItsAttachment_ThoughTheRuntimeHeldNone()
+    {
+        await using var root = new HeadlessTestRoot();
+        var provider = new ScriptedTurnProvider();
+        var host = await root.CreateHostAsync(provider, readOnlyGlobalState: true);
+        var options = HeadlessTestRoot.Options(provider, root.ProjectRoot, [Tool("kept_tool")]);
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Fleet work", null, null, null, null);
+        // A runtime that started again holds no pattern for the session: the host requires them at every attachment.
+        host.RuntimeService.ToolPatternGate = (candidate, _) => ValueTask.FromResult<IReadOnlyList<string>?>(candidate.SessionId == session.SessionId ? ["shell_command"] : null);
+        Assert.AreEqual(0, host.RuntimeService.GetDisabledToolPatterns(session.SessionId).Count);
+
+        await host.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("hello") });
+
+        Assert.IsTrue(provider.Requests.TryDequeue(out var request));
+        var offered = request.Tools.Select(static tool => tool.Spec.Name).ToArray();
+        CollectionAssert.DoesNotContain(offered, "shell_command", "a tool the host requires the session to do without is never offered");
+        CollectionAssert.Contains(offered, "kept_tool");
+        CollectionAssert.Contains(host.RuntimeService.GetDisabledToolPatterns(session.SessionId).ToArray(), "shell_command");
+    }
+
+    [TestMethod]
     public async Task DisabledPatterns_KeepTheToolsTheyNameFromTheModel_AndChildrenInheritThem()
     {
         await using var root = new HeadlessTestRoot();

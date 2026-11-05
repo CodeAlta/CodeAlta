@@ -1942,6 +1942,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         if (_transitions.TryGetValue(session.SessionId, out var transition))
             return new CoordinatorPreparation(null, transition);
         _entries.TryGetValue(session.SessionId, out var existing);
+        // What the host requires the session to do without, also after a restart that lost what was set on it: an attachment
+        // that does not do without it is not reused.
+        await RequireHostToolPatternsAsync(session, actorCancellationToken).ConfigureAwait(false);
         // A session that runs in the cloud has no conversation here to attach: a prompt, a queue, a compaction or Remote
         // Control of it is refused until it is brought back.
         if (existing is null && await RunsInCloudAsync(session, actorCancellationToken).ConfigureAwait(false))
