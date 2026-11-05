@@ -10,6 +10,11 @@ const options = { entry: "../editor/editorWorktrees.mount.tsx", fixture: "worktr
   styles: ["../editor/editor.css", "../worktrees/worktrees.css"] } as const;
 const button = "button[aria-label=\"Open a worktree in the editor\"]";
 const items = "[...document.querySelectorAll('.branch-switcher-list .bp6-menu-item')]";
+// The popover takes the focus a moment after its rows show, and only then hears Escape.
+const escape = async (page: { until(expression: string, what: string): Promise<void>; key(name: string, code: number): Promise<void> }) => {
+  await page.until("document.activeElement?.closest('.bp6-overlay')", "the focus in the list");
+  await page.key("Escape", 27);
+};
 
 test("the worktree button shows for a repository with several checkouts, and opens the one that is chosen", { skip: !edge, timeout: 120_000 }, async () => {
   await withCanvas(async page => {
@@ -56,7 +61,7 @@ test("the worktree button shows for a repository with several checkouts, and ope
     await page.until(`worktreesFixture.state.lists > ${lists}`, "the failing read");
     await new Promise(resolve => setTimeout(resolve, 300));
     await page.until(`${items}.length === 3`, "the known worktrees while the host is gone");
-    await page.key("Escape", 27);
+    await escape(page);
     await page.until(`${items}.length === 0`, "the list closed");
     assert.equal(await page.evaluate(`!!document.querySelector('${button}')`), true);
 
@@ -65,7 +70,7 @@ test("the worktree button shows for a repository with several checkouts, and ope
     await page.click(button);
     await page.until(`${items}.length === 2`, "the list read again");
     assert.deepEqual(await page.evaluate(`${items}.map(item => item.querySelector('.bp6-fill')?.textContent)`), ["App", "old-fox"]);
-    await page.key("Escape", 27);
+    await escape(page);
     await page.until(`${items}.length === 0`, "the list closed");
 
     // The last other checkout goes while the list is open: the button goes, and does not come back open.
