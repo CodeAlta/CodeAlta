@@ -15,6 +15,9 @@ internal sealed partial class FleetServerService
     // The name shown for the environment of an approval this computer cannot verify, which it does not approve.
     private const string UnverifiedEnvironment = "An environment this computer cannot verify";
 
+    // What stands for the key of a machine of an approval that the device list this computer verified does not hold.
+    private const string UnverifiedMachine = "a machine this computer cannot verify";
+
     /// <summary>The secrets, variables, environments and approvals of this computer's person at a server.</summary>
     [NeoRpcMethod("secrets")]
     public async Task<FleetSecretsOverview> SecretsAsync(FleetServerLinkRequest request, CancellationToken cancellationToken)
@@ -25,6 +28,12 @@ internal sealed partial class FleetServerService
         {
             var read = await _servers!.ReadSecretsAsync(request.LinkId, cancellationToken).ConfigureAwait(false);
             string DeviceName(string id) => read.Devices.TryGetValue(id, out var device) ? device.Name : id;
+            // The machine of an approval, by the key the device list this computer verified holds for it, beside the name the server
+            // gives it (which the server alone chooses): what the person confirms is the machine of that key.
+            string MachineOf(string id) => read.Manager.Devices.Current is { } verified && verified.Members.TryGetValue(id, out var member)
+                && !verified.Removed.Contains(id) && CodeAlta.Fleet.Identity.DeviceFingerprint.TryParse(member.Key.Fingerprint, out var fingerprint)
+                ? $"{DeviceName(id)} ({fingerprint.ToShortWords()})"
+                : $"{DeviceName(id)} ({UnverifiedMachine})";
             string PersonName(string id) => read.People.FirstOrDefault(person => person.Id == id)?.DisplayName ?? id;
             var environments = read.Environments.ToDictionary(static pair => pair.Environment.Id, StringComparer.Ordinal);
             string ScopeLabel(FleetSecretScopeDto scope) => scope.Kind switch
@@ -51,7 +60,7 @@ internal sealed partial class FleetServerService
                 var environment = read.Manager.Devices.Current is { } devices
                     ? CodeAlta.Fleet.Server.FleetSecretsManager.VerifiedEnvironmentOf(approval, verified, devices, read.PersonId)
                     : CodeAlta.Fleet.Server.FleetSecretsManager.VerifiedEnvironmentOf(approval, verified);
-                return new FleetApprovalView(approval.Id, environment?.Name ?? UnverifiedEnvironment, DeviceName(approval.MachineId), approval.RunId, approval.Title,
+                return new FleetApprovalView(approval.Id, environment?.Name ?? UnverifiedEnvironment, MachineOf(approval.MachineId), approval.RunId, approval.Title,
                     approval.Status, approval.RequestedAt, approval.Status == FleetApprovalStates.Pending && environment is not null
                         && environment.Approvers.Contains(read.PersonId, StringComparer.Ordinal)
                         // Only a run its machine asked itself is approved: never one the server made up or changed.
