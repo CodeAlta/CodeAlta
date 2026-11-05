@@ -102,10 +102,11 @@ public sealed class FleetSecretsManager
         var copies = FleetSecretSealing.Seal(value, binding, FleetSecretSealing.Recipients(list, access, person, machines), list, access, _devices.Identity);
         var stored = await client.PutSecretAsync(binding.SecretId, new SetFleetSecretRequest(kind, binding.Name, scope, binding.Version, hostOnly, copies), cancellationToken)
             .ConfigureAwait(false);
-        // The machines the person names are given the value again, a machine withdrawn before included.
-        foreach (var machine in machines) Checkpoint?.Regrant(stored.Id, machine);
-        Observed(stored);
-        return stored;
+        // What this device sealed is recorded, never what the server answers: the machines the person names are given this value
+        // again (a machine withdrawn before included), and its version and key are the ones sealed.
+        foreach (var machine in machines) Checkpoint?.Regrant(binding.SecretId, machine);
+        Sealed(binding.SecretId, binding.Version, copies);
+        return Acknowledged(stored, binding.SecretId, binding.Version);
     }
 
     // Refuses a value the server answers older than what this device saw of it (a version, or another key for the same version):
@@ -120,7 +121,15 @@ public sealed class FleetSecretsManager
     // The machines this device withdrew a value from: none is given a version again unless this device gives it back.
     private IReadOnlyCollection<string> WithdrawnFrom(string secretId) => Checkpoint?.Read(secretId)?.Withdrawn.Keys.ToArray() ?? [];
 
-    private void Observed(FleetSecretDto stored) => Checkpoint?.Observe(stored.Id, stored.Version, FleetSecretSealing.KeyIdOf(stored.Copy));
+    // Records a version this device sealed, with the key of its own copy of it: from the request, never from the server's answer.
+    private void Sealed(string secretId, int version, IReadOnlyList<FleetSecretCopyDto> copies)
+        => Checkpoint?.Observe(secretId, version, FleetSecretSealing.KeyIdOf(copies.FirstOrDefault(copy => copy.DeviceId == _devices.Identity.DeviceId)?.Sealed));
+
+    // The value the server says it stored, which must be the one this device sealed: another (an older record, another value) is refused.
+    private static FleetSecretDto Acknowledged(FleetSecretDto stored, string secretId, int version)
+        => stored.Id == secretId && stored.Version == version
+            ? stored
+            : throw new InvalidDataException($"The server answers version {stored.Version} of another value than the one this device sealed (version {version}): what it stored is not known.");
 
     /// <summary>
     /// Rotates a value: its next version, sealed for the machines that hold it now by a grant a controller device of the
@@ -153,8 +162,8 @@ public sealed class FleetSecretsManager
             .Where(member => !withdrawn.Contains(member.DeviceId, StringComparer.Ordinal)).ToArray(), list, access, _devices.Identity);
         var stored = await client.PutSecretAsync(id, new SetFleetSecretRequest(held.Kind, held.Name, held.Scope, binding.Version, held.HostOnly, copies), cancellationToken)
             .ConfigureAwait(false);
-        Observed(stored);
-        return stored;
+        Sealed(id, binding.Version, copies);
+        return Acknowledged(stored, id, binding.Version);
     }
 
     /// <summary>Deletes a value and every copy of it.</summary>
@@ -200,9 +209,9 @@ public sealed class FleetSecretsManager
         var own = held.Copy ?? throw new InvalidDataException("This device holds no copy of the value to give.");
         var copy = FleetSecretSealing.Regrant(own, FleetSecretBinding.Of(held), machine, _devices.Identity, list, access);
         var stored = await client.AddSecretCopiesAsync(id, new AddFleetSecretCopiesRequest(held.Version, [copy]), cancellationToken).ConfigureAwait(false);
+        // The machine is given this value again, at the version this device gave it: nothing of the server's answer is recorded.
         Checkpoint?.Regrant(id, machineId);
-        Observed(stored);
-        return stored;
+        return Acknowledged(stored, id, held.Version);
     }
 
     /// <summary>
@@ -244,8 +253,8 @@ public sealed class FleetSecretsManager
             .Where(member => !withdrawn.Contains(member.DeviceId, StringComparer.Ordinal)).ToArray(), list, access, _devices.Identity);
         var stored = await client.PutSecretAsync(id, new SetFleetSecretRequest(held.Kind, held.Name, held.Scope, held.Version + 1, held.HostOnly, copies), cancellationToken)
             .ConfigureAwait(false);
-        Observed(stored);
-        return stored;
+        Sealed(id, held.Version + 1, copies);
+        return Acknowledged(stored, id, held.Version + 1);
     }
 
     /// <summary>Reads a variable back from the copy sealed for this device; a secret is never read back.</summary>

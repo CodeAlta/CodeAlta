@@ -209,10 +209,19 @@ public sealed class FleetServerConnections : IAsyncDisposable
     private readonly TaskCompletionSource _loaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
-    /// Gets a task that completes once the file of the links was read the first time after <see cref="Start"/> and the connectors of
-    /// its links exist (whether their servers answer or not): what applies the budgets and policies of the links waits for it.
+    /// Gets a task that completes once the file of the links was read after <see cref="Start"/> and the connectors of its links exist
+    /// (whether their servers answer or not): what applies the budgets and policies of the links waits for it. A file that does not
+    /// read completes nothing (<see cref="LoadProblem"/>): it is read again until it does.
     /// </summary>
     public Task Loaded => _loaded.Task;
+
+    private string? _loadProblem;
+
+    /// <summary>
+    /// Gets why the file of the links does not read now; null once it read. While it does not, the budgets and the stops of the
+    /// servers are not known: no run of the fleet is admitted.
+    /// </summary>
+    public string? LoadProblem => Volatile.Read(ref _loadProblem);
 
     /// <summary>Reads the file of the links again now: starts the connectors of new links and stops those of removed or revoked ones.</summary>
     /// <param name="cancellationToken">Cancels the wait for the change.</param>
@@ -286,11 +295,15 @@ public sealed class FleetServerConnections : IAsyncDisposable
             try
             {
                 var written = File.Exists(_store.FilePath) ? File.GetLastWriteTimeUtc(_store.FilePath) : DateTime.MinValue;
-                if (written != _seen || _running.IsEmpty && written != DateTime.MinValue)
+                if (written != _seen || _running.IsEmpty && written != DateTime.MinValue || LoadProblem is not null)
                 {
                     _seen = written;
                     await ReloadAsync(stop).ConfigureAwait(false);
                 }
+
+                // Read: the links are known, and what waited for them goes on.
+                Volatile.Write(ref _loadProblem, null);
+                _loaded.TrySetResult();
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested)
             {
@@ -298,11 +311,11 @@ public sealed class FleetServerConnections : IAsyncDisposable
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
             {
+                // Not read: nothing that waits for the links goes on, and the file is read again at the next turn.
+                Volatile.Write(ref _loadProblem, $"The server links of this machine do not read: {exception.Message}");
                 if (LogManager.IsInitialized) _logger.Warn(exception, "The server links could not be read");
             }
 
-            // Read once, whatever came of it: a file that does not read is read again, and its links' budgets are not known meanwhile.
-            _loaded.TrySetResult();
             try { await Task.Delay(_options.ReloadInterval, stop).ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
         }
@@ -330,14 +343,16 @@ public sealed class FleetServerConnections : IAsyncDisposable
         {
             if (link.State == FleetServerLinkStates.Revoked || Volatile.Read(ref _running).ContainsKey(link.Id)) continue;
             if (!string.Equals(link.DeviceId, _options.Identity.DeviceId, StringComparison.Ordinal)) continue;
-            StartConnector(link);
+            // The spaces linked to the server are read before the links count as loaded: the budgets and policies of spaces need
+            // them from the start, also while the server is away and nothing is published.
+            await StartConnector(link).RefreshAsync(CancellationToken.None).ConfigureAwait(false);
             changed = true;
         }
 
         return changed;
     }
 
-    private void StartConnector(FleetServerLink link)
+    private LinkedSpaces StartConnector(FleetServerLink link)
     {
         var linked = new LinkedSpaces(link.Url, _options.Spaces);
         var source = _options.Source is null ? null : new LinkedSource(_options.Source, linked);
@@ -393,6 +408,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
         connector.DirectoryChanged += _ => Changed?.Invoke();
         ImmutableInterlocked.Update(ref _running, static (map, item) => map.SetItem(item.Id, item.Running), (Id: link.Id, Running: running));
         connector.Start();
+        return linked;
     }
 
     // What a server gave is taken away once its link is gone; a failure is logged, the link stays gone.

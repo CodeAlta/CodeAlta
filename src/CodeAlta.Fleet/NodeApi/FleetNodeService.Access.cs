@@ -58,7 +58,6 @@ public sealed partial class FleetNodeService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         Principals.RecordUnattended(sessionId, actingAs);
-        KeepPrincipalsBounded();
     }
 
     /// <summary>Gets the organization of the person who started a session here through a team membership; null otherwise.</summary>
@@ -218,37 +217,21 @@ public sealed partial class FleetNodeService
     {
         if (device is not { OwnSessionsOnly: true, PersonId: { } person }) return;
         Principals.Record(sessionId, person, device.OrganizationId);
-        KeepPrincipalsBounded();
     }
 
-    private int _pruningPrincipals;
-
-    // Past the count it keeps, the node forgets the records of the sessions that are gone, in the background; a session still on
-    // the machine keeps its record, so that its work never becomes the owner's.
-    private void KeepPrincipalsBounded()
+    // Whose work a session is is forgotten once the session is deleted (SessionDeleted): a session the runtime does not find now
+    // (in flight, or of a project its catalog does not have yet) is never taken for one that is gone, since its work would then
+    // become the owner's.
+    private void ForgetPrincipalOfDeleted(string sessionId)
     {
-        if (Principals.Count <= FleetSessionPrincipals.MaxSessions || Interlocked.Exchange(ref _pruningPrincipals, 1) != 0) return;
-        _ = Task.Run(async () =>
+        try
         {
-            try
-            {
-                var gone = new List<string>();
-                foreach (var sessionId in Principals.SessionIds)
-                {
-                    if (await _host.RuntimeService.TryGetRecoverableSessionAsync(sessionId).ConfigureAwait(false) is null) gone.Add(sessionId);
-                }
-
-                Principals.Forget(gone);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ObjectDisposedException)
-            {
-                LogInfo($"The records of the sessions that are gone could not be forgotten: {exception.Message}");
-            }
-            finally
-            {
-                Volatile.Write(ref _pruningPrincipals, 0);
-            }
-        });
+            Principals.Forget([sessionId]);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            LogInfo($"Whose work the deleted session {sessionId} was could not be forgotten: {exception.Message}");
+        }
     }
 
     private static string? SessionIdOf(object parameters) => parameters switch
@@ -274,7 +257,7 @@ public sealed partial class FleetNodeService
 /// </summary>
 internal sealed class FleetSessionPrincipals
 {
-    /// <summary>The count of records past which the node forgets those of the sessions that are gone (never one of a session still on the machine).</summary>
+    /// <summary>The count of records the node expected to keep; none is dropped for room, a record goes when its session is deleted.</summary>
     public const int MaxSessions = 5000;
 
     private const string FileName = "session-principals.json";

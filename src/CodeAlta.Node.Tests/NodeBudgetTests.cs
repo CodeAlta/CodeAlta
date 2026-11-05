@@ -250,6 +250,79 @@ public sealed class NodeBudgetTests
         }
     }
 
+    [TestMethod]
+    public async Task ANodeWhoseServerLinksDoNotRead_SendsNoHeldPrompt_AndAdmitsNoRun()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var provider = new ScriptedNodeProvider();
+        var options = root.Options() with { ConfigureModelProviders = provider.Register };
+        var node = await NodeHost.StartAsync(options, token);
+        NodeFleet? fleet = null;
+        NodeServers? servers = null;
+        try
+        {
+            var session = await node.Host.Commands.CreateDraftSessionAsync(null, provider.Descriptor, "Report");
+            var fleetRoot = node.Host.CatalogOptions.FleetRoot;
+            new CodeAlta.Fleet.NodeApi.FleetHeldSends(Path.Combine(fleetRoot, "held-sends.json"), new CodeAlta.Catalog.Secrets.LocalSecretStore(node.Host.CatalogOptions.GlobalRoot))
+                .Add(new CodeAlta.Fleet.NodeApi.FleetHeldSend("fleet:held:send-1", session.SessionId, "The held work.", null, "nonce-1", null, null, null, null, DateTimeOffset.UtcNow));
+            // The file of the server links is damaged: the budgets and the stops of its servers are not known.
+            var links = new FleetServerLinkStore(fleetRoot).FilePath;
+            Directory.CreateDirectory(Path.GetDirectoryName(links)!);
+            File.WriteAllText(links, "{ damaged");
+
+            fleet = NodeFleet.Start(node, new NodeListenOptions { Port = 0 }, "test-node", "1.0.0");
+            servers = NodeServers.Start(node, fleet.Service, "test-node", "1.0.0", Fast);
+            await Task.Delay(TimeSpan.FromSeconds(3), token);
+            Assert.AreEqual(string.Empty, provider.LastUserText, "the held prompt is not sent as if no server held it");
+            var admission = await node.Budgets!.AdmitAsync(new CodeAlta.Fleet.NodeApi.FleetNodeBudgetRun("run-new", null, session.SpaceId, null), null, token);
+            Assert.IsNotNull(admission.Problem, "no run starts while the links of the node do not read");
+        }
+        finally
+        {
+            if (servers is not null) await servers.DisposeAsync();
+            if (fleet is not null) await fleet.DisposeAsync();
+            await node.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task TheSpacesLinkedToAServer_AreKnownOnceTheLinksAreLoaded_AlsoWhileTheServerIsAway()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+        {
+            DataRoot = Path.Combine(root.Root, "server"), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+        }, token);
+        var address = server.Addresses.First(static uri => uri.Scheme == "http");
+        using var desktopKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "desktop-fleet"));
+        using (var desktop = new FleetServerClient(address, desktopKey))
+        {
+            await desktop.SetUpAsync(server.SetupCode!.Code, "Alex", "Desktop", "Home", token);
+            var enrollment = await desktop.CreateEnrollmentTokenAsync(null, "test-node", token);
+            // Joined, the default space of the node publishes to the server.
+            Assert.AreEqual(NodeExitCodes.Success, await new NodeApplication(TextWriter.Null, TextWriter.Null) { InitializeLogging = false, ServiceEnvironment = static () => null }
+                .RunAsync(["join", address.ToString(), "--token", enrollment.Token, "--data-root", root.DataRoot, "--name", "test-node", "--no-wait"]));
+        }
+
+        // The server is away when the node starts: its connector does not connect, nor publish.
+        await server.DisposeAsync();
+        var node = await NodeHost.StartAsync(root.Options(), token);
+        var servers = NodeServers.Start(node, null, "test-node", "1.0.0", Fast);
+        try
+        {
+            await servers.Connections.Loaded.WaitAsync(Patience, token);
+            // What the policies and budgets of spaces read is known as soon as the links are: the default space is linked to that server.
+            Assert.IsTrue(servers.Connections.Connections.Single().Connector!.LinksSpace(null), "the spaces linked to the server are known before it answers");
+        }
+        finally
+        {
+            await servers.DisposeAsync();
+            await node.DisposeAsync();
+        }
+    }
+
     // A version signed by a controller for a machine.
     private static FleetSignedAutomationVersion Sign(DeviceIdentity signer, FleetDeviceListState list, string organization, string machine, string id)
     {

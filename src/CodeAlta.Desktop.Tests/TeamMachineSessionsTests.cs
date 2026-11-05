@@ -140,6 +140,32 @@ public sealed class TeamMachineSessionsTests
             "the session an agent of a member's machine starts never gets the owner's secrets");
     }
 
+    [TestMethod]
+    public async Task WhoseWorkASessionIs_IsForgottenWhenItIsDeleted_NeverBecauseItIsNotFoundNow()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        using var maxKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "max"));
+        var trust = new TeamTrust();
+        trust.Members[maxKey.Fingerprint] = ("max", maxKey.DeviceId);
+        await using var max = await ConnectAsync(fixture, trust, maxKey, token);
+        var created = await max.CreateSessionAsync(new FleetCreateSessionParams(Title: "Max's work"), "create-max", token);
+
+        // A run of the organization recorded before its session is in the catalog (in flight), then more records than the node keeps
+        // without looking: the node does not take a session it does not find now for one that is gone.
+        fixture.Service.RecordUnattendedWork("in-flight", "svc-org");
+        for (var index = 0; index <= 5000; index++) fixture.Service.RecordUnattendedWork($"other-{index}", "svc-org");
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (DateTime.UtcNow < until && !fixture.Host.Identities.IsOwnerWork!("in-flight")) await Task.Delay(200, token);
+        Assert.IsFalse(fixture.Host.Identities.IsOwnerWork!("in-flight"), "the run in flight is still not the owner's work");
+        Assert.AreEqual("max", fixture.Service.PersonOfSession(created.SessionId));
+
+        // Deleted, the session is gone for sure: its record is forgotten.
+        var session = await fixture.Host.RuntimeService.TryGetRecoverableSessionAsync(created.SessionId, token);
+        Assert.IsTrue(await fixture.Host.RuntimeService.DeleteSessionAsync(session!, token));
+        Assert.IsNull(fixture.Service.PersonOfSession(created.SessionId));
+    }
+
     private static async Task<FleetNodeClient> ConnectAsync(FleetNodeFixture fixture, IDeviceTrustPolicy trust, DeviceIdentity identity, CancellationToken token)
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);

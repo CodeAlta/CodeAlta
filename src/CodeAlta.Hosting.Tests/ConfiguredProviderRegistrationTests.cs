@@ -387,6 +387,23 @@ public sealed class ConfiguredProviderRegistrationTests
     private static string NewStateRoot()
         => Path.Combine(Path.GetTempPath(), "CodeAlta.Hosting.Tests", Guid.NewGuid().ToString("N"));
 
+    [TestMethod]
+    public void TheKeyAProviderIsGiven_IsTheOneToldToTheMasking_AsItIsGiven()
+    {
+        var stateRoot = NewStateRoot();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(stateRoot);
+        // A key kept with spaces around it: the provider is given it without them.
+        store.SetSecret("FIXTURE_KEY", "  key-of-the-secret-0123456789  ", "tests");
+        var told = new List<string>();
+        var registry = new ModelProviderRegistry { SecretIssued = told.Add };
+        var definition = CreateDefinition("openai-responses");
+        definition.ApiKey = null;
+        definition.ApiKeySecret = "FIXTURE_KEY";
+
+        Assert.AreEqual(1, ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(registry, [definition], stateRoot).Count);
+        CollectionAssert.Contains(told, "key-of-the-secret-0123456789", "what the masking is told is the key the provider is given");
+    }
+
     private static CodeAltaProviderDocument CreateDefinition(string providerType)
         => new()
         {

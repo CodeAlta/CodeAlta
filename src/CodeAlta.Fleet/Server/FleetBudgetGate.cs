@@ -22,6 +22,13 @@ public sealed record FleetBudgetLink(string LinkId, FleetOrganizationDevices Dev
     /// the budgets of that person hold there, and those of the person the device list names no more. Null reads the device list alone.
     /// </summary>
     public FleetOrganizationAccess? Access { get; init; }
+
+    /// <summary>
+    /// Gets whether a space of this machine is linked to the server (<see cref="FleetConnector.LinksSpace"/>): the key of such a space
+    /// names it as the server knows it, and a run of it waits for that key while the budgets of spaces and projects need it. Null
+    /// links none.
+    /// </summary>
+    public Func<string?, bool>? LinksSpace { get; init; }
 }
 
 /// <summary>A run that a budget may limit: a session of the machine, in a space, of a project.</summary>
@@ -156,6 +163,16 @@ public sealed class FleetBudgetGate
 
                 var access = link.Access?.Current;
                 var scope = ScopeOf(link, list, access, run);
+                // A run of a space linked to the server whose key is not read yet (a start, its connector reads the keys later) is not one
+                // of no space: while budgets of spaces or projects are kept, it waits for that key, never runs as if they did not cover it.
+                if (scope.SpaceKey is null && link.Keys is { } keys && link.LinksSpace?.Invoke(run.SpaceId) == true && KeepsBudgetsOfSpaces(link, state, list, access))
+                {
+                    if (await WaitForSpaceKeyAsync(link, keys, list, access, run, held, cancellationToken).ConfigureAwait(false) is not { } scoped)
+                        return new FleetBudgetAdmission("The key of the space of the run could not be read, which its budgets need: the run does not start.", continued);
+                    scope = scoped;
+                    held = null;
+                }
+
                 foreach (var kept in state.Budgets())
                 {
                     // Kept once verified: a signer removed since takes no restriction away (FleetBudgetDocuments.TryVerifyKept).
@@ -186,6 +203,48 @@ public sealed class FleetBudgetGate
         }
 
         return continued.Count == 0 ? FleetBudgetAdmission.Admitted : new FleetBudgetAdmission(null, continued);
+    }
+
+    // Whether a link keeps budgets of spaces or projects, which the key of the space of a run names it for.
+    private static bool KeepsBudgetsOfSpaces(FleetBudgetLink link, LinkState state, FleetDeviceListState list, FleetAccessState? access)
+        => state.Budgets().Any(kept => FleetBudgetDocuments.TryVerifyKept(kept.Signed, list, access, link.Devices.Identity.DeviceId, out var budget, out _)
+            && budget.ScopeKind is FleetBudgetScopeKinds.Space or FleetBudgetScopeKinds.Project);
+
+    // Waits, as a run a budget holds, for the key of the space of a run: its scope once the key is read, null when it is not within the wait.
+    private async Task<FleetBudgetRunScope?> WaitForSpaceKeyAsync(FleetBudgetLink link, FleetMetadataKeyring keys, FleetDeviceListState list, FleetAccessState? access,
+        FleetBudgetRun run, Action? held, CancellationToken cancellationToken)
+    {
+        var deadline = _time.GetUtcNow() + HoldWait;
+        var told = false;
+        while (true)
+        {
+            var changed = Volatile.Read(ref _changed).Task;
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(ReadTimeout);
+                await keys.RefreshAsync(run.SpaceId, timeout.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is HttpRequestException or FleetServerException or FleetDeviceListException
+                or OperationCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                // Not read now: tried again.
+            }
+
+            if (ScopeOf(link, link.Devices.Current ?? list, access, run) is { SpaceKey: not null } scope) return scope;
+            if (_time.GetUtcNow() >= deadline) return null;
+            if (!told)
+            {
+                Log($"The run {run.RunId} waits: the key of its space, which its budgets need, is not read yet.");
+                held?.Invoke();
+                told = true;
+            }
+
+            using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            wait.CancelAfter(HoldPoll);
+            try { await changed.WaitAsync(wait.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+        }
     }
 
     // Waits, as a run a budget holds, for the device list of a link that keeps budgets: null when it is not read within the wait.

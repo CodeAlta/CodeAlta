@@ -10,7 +10,9 @@ namespace CodeAlta.Plugins;
 public sealed class PluginSecretSink : IPluginSecretService
 {
     private readonly Lock _gate = new();
+    // Every value told before the host attached, in order and once each: none is dropped, however many.
     private readonly List<string> _pending = [];
+    private readonly HashSet<string> _pendingSet = new(StringComparer.Ordinal);
     private Action<string>? _target;
 
     /// <summary>Attaches the masking of the host: it is told what the plugins told before, then each value they tell.</summary>
@@ -25,6 +27,7 @@ public sealed class PluginSecretSink : IPluginSecretService
             _target = mask;
             pending = [.. _pending];
             _pending.Clear();
+            _pendingSet.Clear();
         }
 
         foreach (var value in pending) mask(value);
@@ -40,8 +43,8 @@ public sealed class PluginSecretSink : IPluginSecretService
             target = _target;
             if (target is null)
             {
-                // Bounded meanwhile: a host that never attaches keeps a few values of no use, never all of them.
-                if (_pending.Count < 1024 && !_pending.Contains(value, StringComparer.Ordinal)) _pending.Add(value);
+                // Kept until the host attaches, every one: a value dropped here would be given out unmasked.
+                if (_pendingSet.Add(value)) _pending.Add(value);
                 return;
             }
         }

@@ -339,6 +339,24 @@ public sealed class BudgetTests
     // A controller device removed after it signed a budget takes no restriction away: the machine keeps enforcing the version
     // it verified, after a restart too, until a newer signed version (a removal included) of another controller ends it.
     [TestMethod]
+    public async Task ARunOfALinkedSpace_IsNotAdmittedAsOfNoSpace_BeforeTheKeyOfItsSpaceIsRead()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        // The key of the space, made by the desktop and given to the node; the server knows the space by an opaque id only.
+        var spaceKey = (await new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey,
+            Path.Combine(fleet.Root.Path, "desktop-link", FleetOrganizationDevices.PinFileName))).RefreshAsync("default", CancellationToken.None))!;
+        await fleet.Manager.PutAsync(null, Settings(100) with { Name = "Default space", ScopeKind = FleetBudgetScopeKinds.Space, ScopeId = spaceKey.Grant!.SpaceId,
+            Mode = FleetBudgetModes.Advisory, Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
+
+        // The node starts: its keys are not read yet (its connector reads them later) when a run of that space asks to start.
+        var devices = new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey, null);
+        var link = new FleetBudgetLink("link", devices, new FleetMetadataKeyring(devices), null) { LinksSpace = static space => space == "default" };
+        var gate = new FleetBudgetGate(() => [link], new FakeSpend { Spent = 100 }) { HoldPoll = TimeSpan.FromMilliseconds(100) };
+        var admission = await gate.AdmitAsync(new FleetBudgetRun("run-1", null, "default", null), TestContext.CancellationToken);
+        StringAssert.Contains(admission.Problem, "is reached", "the run is the space's: its budget holds it, not the absence of a key read");
+    }
+
+    [TestMethod]
     public async Task ABudget_StaysEnforced_WhenTheDeviceThatSignedItIsRemoved()
     {
         var root = new TempDirectory();
