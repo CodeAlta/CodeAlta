@@ -43,6 +43,7 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
   let seq = 0;
   const event = (kind: string, text: string, activityId: string | null = null): TimelineEvent => ({ seq: ++seq, at: new Date().toISOString(), kind, text, activityId });
   server.state.options = options;
+  server.state.projects.push({ id: "audast", path: "C:\\code\\audast", name: "audast", space: { id: "default", name: "Default", color: null, icon: null } });
   server.state.sessions = [
     session("s1", "Fix the parser", "p1", 2, { kind: "assistant", line: "Fixed." }),
     session("s2", "Write the docs", "p2", 30, {}, { worktree: "docs-site", agent: { id: "plan", name: "Plan" } }),
@@ -318,6 +319,8 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     const row = (project: string) => `document.querySelector('#sheet-list button[data-project="${project}"]')`;
     await click("#filter");
     await waitFor(shown("#sheet"), "the project sheet");
+    assert.equal(await evaluate(`${row("audast")}.querySelector("small")?.textContent`), "Default C:\\code\\audast", "the default space is named in front of the path");
+    assert.equal(await evaluate(`${row("p1")}.querySelector("small")?.textContent`), "Work C:/code/parser", "another space stays in front of the path");
     await evaluate(`${row("p2")}.click()`);
     await evaluate(`${row("p1")}.click()`);
     assert.deepEqual(await evaluate<string[]>("[...document.querySelectorAll('#sheet-list button[aria-pressed=\"true\"]')].map(b => b.dataset.project)"), ["p1", "p2"],
@@ -339,15 +342,13 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     await waitFor(`!document.querySelector('.row[data-id="s2"]') && document.querySelector('.row[data-id="s1"]')`, "the sessions of parser only");
     await click("#filter");
     await waitFor(shown("#sheet"), "the project sheet");
-    assert.deepEqual(await evaluate<string[]>("[...document.querySelectorAll('#sheet-list button[data-project]')].map(b => b.dataset.project)"), ["p1", "p2"],
+    assert.deepEqual(await evaluate<string[]>("[...document.querySelectorAll('#sheet-list button[data-project]')].map(b => b.dataset.project)"), ["p1", "p2", "audast"],
       "the checked project first");
     // All projects unchecks them all, and closes the sheet.
     await evaluate("document.querySelector('#sheet-list li:first-child button').click()");
     await waitFor(`!(${shown("#sheet")}) && document.querySelector('.row[data-id="s2"]')`, "every project again");
     assert.equal(await evaluate("document.querySelector('#filter .badge').hidden"), true);
 
-    // A new session: the default tier of the settings; a prompt that did not go is back in the composer of its session.
-    // The screen is the project, the prompt, and one line of chips beside Start.
     // The viewed session takes precedence over the last project; from the list, the last selection is used.
     await evaluate("location.hash = '#/session/s2'");
     await waitFor(`document.querySelector('#detail-title').textContent === "Write the docs"`, "the docs session");
@@ -367,14 +368,24 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     await waitFor(`!(${shown("#sheet")}) && !document.querySelector('.row[data-id="s1"]')`, "the sessions of site only");
     await click("#new");
     await waitFor(`document.getElementById('new-project').value === 'p2'`, "the project the list keeps to");
-    await click("#back");
+    assert.deepEqual(await evaluate<string[]>("[...document.querySelector('#new-project').options].map(o => o.value)"), ["p2"]);
+    assert.equal(await evaluate("document.getElementById('filter').hidden"), false);
+    await click("#filter");
+    await waitFor(shown("#sheet"), "the project sheet");
+    await evaluate(`${row("p1")}.click()`);
+    await evaluate(`${row("p2")}.click()`);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await waitFor(`document.getElementById('new-project').value === 'p1'`, "the project after changing the filter in the form");
+    assert.deepEqual(await evaluate<string[]>("[...document.querySelector('#new-project').options].map(o => o.value)"), ["p1"]);
     await click("#filter");
     await waitFor(shown("#sheet"), "the project sheet");
     await evaluate("document.querySelector('#sheet-list li:first-child button').click()");
-    await waitFor(`!(${shown("#sheet")}) && document.querySelector('.row[data-id="s1"]')`, "every project again");
-    await click("#new");
+    await waitFor(`!(${shown("#sheet")}) && document.querySelector('#new-project').options.length === 3`, "every project available again");
     await waitFor(`document.getElementById('new-project').value === 'p1'`, "the last selected project again");
 
+    // A new session: the default tier of the settings; a prompt that did not go is back in the composer of its session.
+    // The screen is the project, the prompt, and one line of chips beside Start.
     await waitFor(`document.getElementById('new-model-name').textContent === "Standard · GPT-6.1 · medium"`, "the default tier");
     const bar = await evaluate<{ chip: number; more: number; attach: number; start: number; height: number }>(`(() => { const r = e => document.getElementById(e).getBoundingClientRect();
       return { chip: r("new-model").top, more: r("new-more").top, attach: r("new-attach").top, start: r("new-start").top, height: r("create-bar").height }; })()`);
