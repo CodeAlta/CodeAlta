@@ -855,6 +855,15 @@ internal sealed class ProjectFilesService
         _ => encoding.WebName,
     };
 
+    /// <summary>
+    /// Resolves a normalized path to a file inside a folder, from the folder down and without crossing a link.
+    /// </summary>
+    /// <param name="root">The folder.</param>
+    /// <param name="relative">The path from <see cref="Normalize"/>, with forward slashes.</param>
+    /// <param name="full">The full path of the file; meaningful when the result is <c>ok</c>.</param>
+    /// <returns><c>ok</c>, <c>outside_root</c> or <c>not_found</c>.</returns>
+    internal static string LocateFile(string root, string relative, out string full) => Locate(root, relative, EntryKind.File, out full, out _);
+
     // Resolves a normalized path to the entry it names inside the folder: ok, outside_root or not_found.
     private static string Locate(string root, string relative, EntryKind kind, out string full, out bool isDirectory)
     {

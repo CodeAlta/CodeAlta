@@ -3057,11 +3057,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const pasteInTerminalLatest = useRef(pasteInTerminal); pasteInTerminalLatest.current = pasteInTerminal;
   const [pasteSessionTerminal] = useState(() => (commands: string, scope: MarkdownLinkScope) => void pasteInTerminalLatest.current(commands, scope));
   // The code editor on the folder a session works in: the worktree, as git lists it, while its folder is there; the editor of the project otherwise.
-  async function openWorkEditor(project: Readonly<{ id: string; path: string }>, worktreeRoot: string | null) {
+  // A file of the worktree ("a/b.ts" from its root) is opened in it, which the Changes tab of a worktree asks for.
+  async function openWorkEditor(project: Readonly<{ id: string; path: string }>, worktreeRoot: string | null, file: string | null = null) {
     const epoch = currentHostEpoch.current;
     if (!owned || !epoch) return;
     if (!worktreeRoot) { openProjectEditor(project); return; }
-    const status = await worktreesApi.openEditor({ expectedEpoch: epoch, projectId: project.id, path: worktreeRoot }, { timeoutMilliseconds: 30_000 })
+    const status = await worktreesApi.openEditor({ expectedEpoch: epoch, projectId: project.id, path: worktreeRoot, file, line: null }, { timeoutMilliseconds: 30_000 })
       .then(reply => reply.status, () => "failed");
     if (status !== "ok") showToast({ intent: "warning", icon: "warning-sign", timeout: 6000, message: editorFailure(status, t) });
   }
@@ -3203,7 +3204,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       { timeoutMilliseconds: 15_000 })).status,
     openEntry: async (target, projectId, path, line) => (await projectFiles.openExternal({ expectedEpoch: currentHostEpoch.current ?? null, projectId, path, target, line, column: null },
       { timeoutMilliseconds: 15_000 })).status,
-    openWorktree: async (target, projectId, path) => (await worktreesApi.openExternal({ expectedEpoch: currentHostEpoch.current ?? null, projectId, path, target },
+    openWorktree: async (target, projectId, path, file, line) => (await worktreesApi.openExternal({ expectedEpoch: currentHostEpoch.current ?? null, projectId, path, target, file, line },
       { timeoutMilliseconds: 15_000 })).status,
     failed: message => showToast({ message: translate(shownLocale.current, message), intent: "warning", icon: "warning-sign", timeout: 6000 }),
   }));
@@ -6189,7 +6190,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 projectName={snapshot?.projects.find(project => project.id === tab.projectId)?.name} request={changeRequests.get(tab.projectId)}
                 sessions={snapshot?.sessions} onWorktreesChanged={refreshSessionList} onOpenSession={id => void openAutomationSession(id)}
                 visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={activateShown(tab, visible)}
-                onOpenFile={path => openEditor({ id: tab.projectId, path: tab.projectPath }, { path, line: null, column: null, explorer: null })} />
+                onOpenFile={(path, worktree) => worktree === null ? openEditor({ id: tab.projectId, path: tab.projectPath }, { path, line: null, column: null, explorer: null })
+                  : void openWorkEditorLatest.current({ id: tab.projectId, path: tab.projectPath }, worktree, path)} />
               : <ProjectEditor key={fileTabKey(tab)} tab={tab} editors={fileEditors} request={editorRequests.get(tab.projectId)}
               projectName={tab.name ?? snapshot?.projects.find(project => project.id === tab.projectId)?.name} platform={shellPreferences?.platform ?? "windows"}
               epoch={!status ? undefined : owned ? status.hostEpoch : null} onPickFile={isFolderTab(tab) ? undefined : openFilePicker}

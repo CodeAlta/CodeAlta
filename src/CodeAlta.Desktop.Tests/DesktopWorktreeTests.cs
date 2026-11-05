@@ -983,6 +983,119 @@ public sealed class DesktopWorktreeTests
     }
 
     [TestMethod]
+    public async Task OpenEditor_OpensAFileOfTheCheckoutAtItsLine_AndNeverOneThatIsNotInIt()
+    {
+        using var repository = await Repository.CreateAsync();
+        repository.Write("src/app/main.txt", "app");
+        repository.Write("docs/readme.txt", "docs");
+        repository.Commit("files");
+        var whole = await repository.Projects.UpsertFromPathAsync(repository.Root);
+        var below = await repository.Projects.UpsertFromPathAsync(Path.Combine(repository.Root, "src", "app"));
+        var created = await repository.Worktrees.CreateAsync(whole);
+        var editor = new DesktopEditorView();
+        var service = repository.Manager(static () => [], static () => [], new DiskFolders(), editor);
+        var opened = new List<ProjectFileShowEvent>();
+        using var watching = editor.Watch(opened.Add);
+
+        // The file is named from the folder of the worktree, as the Changes tab lists it.
+        Assert.AreEqual("ok", (await service.OpenEditorAsync(new(Epoch, whole.Id, created.Root, "src/app/main.txt", 12), default)).Status);
+        var tab = opened.Single();
+        Assert.AreEqual((created.Root, "src/app/main.txt", 12), (tab.Root, tab.Path, tab.Line));
+
+        // The editor of a project below the root of its repository names it from that folder; a file beside it opens the whole worktree.
+        opened.Clear();
+        Assert.AreEqual("ok", (await service.OpenEditorAsync(new(Epoch, below.Id, created.Root, "src/app/main.txt", 3), default)).Status);
+        tab = opened.Single();
+        Assert.AreEqual((Path.Combine(created.Root!, "src", "app"), "main.txt", 3), (tab.Root, tab.Path, tab.Line));
+        opened.Clear();
+        Assert.AreEqual("ok", (await service.OpenEditorAsync(new(Epoch, below.Id, created.Root, "docs/readme.txt", 4), default)).Status);
+        tab = opened.Single();
+        Assert.AreEqual((created.Root, "docs/readme.txt", 4), (tab.Root, tab.Path, tab.Line));
+
+        // A line goes with a file only.
+        opened.Clear();
+        Assert.AreEqual("ok", (await service.OpenEditorAsync(new(Epoch, whole.Id, created.Root, Line: 9), default)).Status);
+        Assert.AreEqual((null, null), (opened.Single().Path, opened.Single().Line));
+
+        // The checkout the project lives in is the editor of the project, which names the file from the folder of the project.
+        opened.Clear();
+        Assert.AreEqual("ok", (await service.OpenEditorAsync(new(Epoch, whole.Id, repository.Root, "src/app/main.txt", 5), default)).Status);
+        Assert.AreEqual(new ProjectFileShowEvent(whole.Id, "src/app/main.txt", 5, null), opened.Single());
+        opened.Clear();
+        Assert.AreEqual("ok", (await service.OpenEditorAsync(new(Epoch, below.Id, repository.Root, "src/app/main.txt", 5), default)).Status);
+        Assert.AreEqual(new ProjectFileShowEvent(below.Id, "main.txt", 5, null), opened.Single());
+        opened.Clear();
+        Assert.AreEqual("invalid_request", (await service.OpenEditorAsync(new(Epoch, below.Id, repository.Root, "docs/readme.txt", 5), default)).Status);
+
+        // What leaves the worktree, or is not a file in it, opens nothing.
+        Assert.AreEqual("invalid_request", (await service.OpenEditorAsync(new(Epoch, whole.Id, created.Root, "../outside.txt"), default)).Status);
+        Assert.AreEqual("invalid_request", (await service.OpenEditorAsync(new(Epoch, whole.Id, created.Root, "src/../../outside.txt"), default)).Status);
+        Assert.AreEqual("invalid_request", (await service.OpenEditorAsync(new(Epoch, whole.Id, created.Root, "/etc/passwd"), default)).Status);
+        Assert.AreEqual("invalid_request", (await service.OpenEditorAsync(new(Epoch, whole.Id, created.Root, ""), default)).Status);
+        Assert.AreEqual("file_missing", (await service.OpenEditorAsync(new(Epoch, whole.Id, created.Root, "src/app/gone.txt"), default)).Status);
+        Assert.AreEqual("file_missing", (await service.OpenEditorAsync(new(Epoch, whole.Id, created.Root, "src/app"), default)).Status);
+        Assert.IsEmpty(opened);
+
+        // A name that only starts with two dots is a name: it is opened like any other.
+        repository.Write("src/app/..hidden.txt", "hidden");
+        repository.Commit("hidden");
+        var second = await repository.Worktrees.CreateAsync(whole);
+        Assert.AreEqual("ok", (await service.OpenEditorAsync(new(Epoch, below.Id, second.Root, "src/app/..hidden.txt"), default)).Status);
+        Assert.AreEqual("..hidden.txt", opened.Single().Path);
+        opened.Clear();
+
+        var request = new WorktreeOpenRequest(Epoch, whole.Id, created.Root, "src/app/main.txt", 12);
+        Assert.AreEqual(request, JsonSerializer.Deserialize(JsonSerializer.Serialize(request, DesktopJsonContext.Default.WorktreeOpenRequest), DesktopJsonContext.Default.WorktreeOpenRequest));
+
+        // A link is never followed, whatever it points at.
+        try { File.CreateSymbolicLink(Path.Combine(created.Root!, "link.txt"), Path.Combine(created.Root!, "src", "app", "main.txt")); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return; }
+        Assert.AreEqual("invalid_request", (await service.OpenEditorAsync(new(Epoch, whole.Id, created.Root, "link.txt"), default)).Status);
+        Assert.IsEmpty(opened);
+    }
+
+    [TestMethod]
+    public async Task OpenExternal_OpensAFileOfTheCheckoutAtItsLine_AndNeverOneThatIsNotInIt()
+    {
+        using var repository = await Repository.CreateAsync();
+        repository.Write("src/app/main.txt", "app");
+        repository.Commit("files");
+        var project = await repository.Projects.UpsertFromPathAsync(repository.Root);
+        var created = await repository.Worktrees.CreateAsync(project);
+        var program = Path.Combine(repository.Home, "editor.exe");
+        File.WriteAllBytes(program, []);
+        var started = new List<System.Diagnostics.ProcessStartInfo>();
+        var shown = new List<string>();
+        var service = new WorktreesService(repository.Worktrees, repository.Projects, repository.Config, static () => [], Epoch)
+        {
+            ExternalEditors = new ExternalEditors(() => new ExternalEditorChoice(ExternalEditors.CustomId, program, "{folder} \"{file}:{line}\""), ExternalEditorEnvironment.Current(),
+                start => { started.Add(start); return true; }),
+            OpenFolder = folder => { shown.Add(folder); return true; },
+        };
+
+        // The editor gets the worktree and the file in it at its line.
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, project.Id, created.Root, "editor", "src/app/main.txt", 7), default)).Status);
+        CollectionAssert.AreEqual(new[] { created.Root, Path.Combine(created.Root!, "src", "app", "main.txt") + ":7" }, started.Single().ArgumentList.ToArray());
+        // Without a file it gets the folder only, whatever the line.
+        started.Clear();
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, project.Id, created.Root, "editor", Line: 7), default)).Status);
+        CollectionAssert.AreEqual(new[] { created.Root }, started.Single().ArgumentList.ToArray());
+        // The file manager opens the folder of the worktree, never a file.
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, project.Id, created.Root, "explorer", "src/app/main.txt", 7), default)).Status);
+        Assert.AreEqual(created.Root, shown.Single());
+
+        // What leaves the worktree, or is not a file in it, starts nothing.
+        started.Clear();
+        Assert.AreEqual("invalid_request", (await service.OpenExternalAsync(new(Epoch, project.Id, created.Root, "editor", "../outside.txt"), default)).Status);
+        Assert.AreEqual("invalid_request", (await service.OpenExternalAsync(new(Epoch, project.Id, created.Root, "editor", "/etc/passwd"), default)).Status);
+        Assert.AreEqual("file_missing", (await service.OpenExternalAsync(new(Epoch, project.Id, created.Root, "editor", "src/app/gone.txt"), default)).Status);
+        Assert.AreEqual("file_missing", (await service.OpenExternalAsync(new(Epoch, project.Id, created.Root, "editor", "src/app"), default)).Status);
+        Assert.IsEmpty(started);
+        var request = new WorktreeOpenExternalRequest(Epoch, project.Id, created.Root, "editor", "src/app/main.txt", 7);
+        Assert.AreEqual(request, JsonSerializer.Deserialize(JsonSerializer.Serialize(request, DesktopJsonContext.Default.WorktreeOpenExternalRequest), DesktopJsonContext.Default.WorktreeOpenExternalRequest));
+    }
+
+    [TestMethod]
     public async Task OpenExternal_OpensTheCheckoutThatWasAsked_InTheEditorOrTheFileManager()
     {
         using var repository = await Repository.CreateAsync();

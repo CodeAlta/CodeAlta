@@ -32,8 +32,8 @@ export interface ExternalOpenerApi {
   openFolder(target: ExternalTarget, projectId: string | null, sessionId: string | null): Promise<string>;
   /** Opens an entry of a project or of the folder of a code editor ("" for the folder itself), a file at a line. */
   openEntry(target: ExternalTarget, projectId: string, path: string, line: number | null): Promise<string>;
-  /** Opens a checkout of the repository of a project, as the inventory of the worktrees names it. */
-  openWorktree(target: ExternalTarget, projectId: string, path: string): Promise<string>;
+  /** Opens a checkout of the repository of a project, as the inventory of the worktrees names it, and a file of it ("a/b.ts" from its root) at a line. */
+  openWorktree(target: ExternalTarget, projectId: string, path: string, file: string | null, line: number | null): Promise<string>;
   /** Tells the user why something was not opened. */
   failed(message: MessageKey): void;
 }
@@ -79,7 +79,8 @@ export function createExternalOpener(api: ExternalOpenerApi) {
     accept,
     openFolder: (target: ExternalTarget, projectId: string | null, sessionId: string | null = null) => run(target, () => api.openFolder(target, projectId, sessionId)),
     openEntry: (target: ExternalTarget, projectId: string, path: string, line: number | null = null) => run(target, () => api.openEntry(target, projectId, path, line)),
-    openWorktree: (target: ExternalTarget, projectId: string, path: string) => run(target, () => api.openWorktree(target, projectId, path)),
+    openWorktree: (target: ExternalTarget, projectId: string, path: string, file: string | null = null, line: number | null = null) =>
+      run(target, () => api.openWorktree(target, projectId, path, file, line)),
   };
 }
 
@@ -92,6 +93,7 @@ export function failure(target: ExternalTarget, status: string): MessageKey {
     case "no_editor": return "No external editor was found. Choose one in Settings > General.";
     case "refused": return "The custom editor cannot be started: choose a program that exists and is not a batch file.";
     case "failed": return "The external editor could not be started.";
+    case "file_missing": return "This file is no longer in the worktree.";
     default: return "The folder could not be opened.";
   }
 }

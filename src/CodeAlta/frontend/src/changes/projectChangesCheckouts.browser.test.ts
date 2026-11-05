@@ -157,6 +157,35 @@ test("the Changes tab keeps the chosen checkout and collapses its sidebar withou
       checkoutsFixture.state.commits = [{ id: 'a'.repeat(40), shortId: 'aaaaaaa', author: 'Test', time: '2026-10-11T12:00:00Z', subject: 'A commit' }];
       checkoutsFixture.show({ path: 'src/b.ts', worktree: checkoutsFixture.other.folder });`);
     assert.equal(await wait("document.querySelector('.changes-file[data-path=\"src/b.ts\"][aria-selected=true]') && document.querySelector('[data-commit]')"), true);
+    assert.equal(await wait("document.querySelector('.changes-diff-path strong')?.textContent === 'b.ts'"), true);
+    // The file of a worktree opens, named from the folder of that worktree; the file of the project folder, with no worktree.
+    const openFile = "document.querySelector('.changes-diff-header button[aria-label=\"Open file\"]')";
+    assert.equal(await evaluate(`${openFile}.disabled`), false);
+    await evaluate(`${openFile}.click()`);
+    assert.deepEqual(await evaluate("checkoutsFixture.state.opened"), [["src/b.ts", "C:\\trees\\app\\other"]]);
+    await press("App");
+    assert.equal(await wait(`${shownRoot} === 'C:\\\\code\\\\plain' && ${openFile} && !${openFile}.disabled`), true);
+    await evaluate(`${openFile}.click()`);
+    assert.deepEqual(await evaluate("checkoutsFixture.state.opened.at(-1)"), ["src/b.ts", null]);
+    await press("other");
+    assert.equal(await wait(`${shownRoot} === 'C:\\\\trees\\\\app\\\\other'`), true);
+    // A project below the root of its repository: the worktree is named by its root, and the file from that root, not from the folder of the project.
+    await evaluate(`checkoutsFixture.clear(); checkoutsFixture.state.rows = [checkoutsFixture.plain, checkoutsFixture.nested];
+      checkoutsFixture.state.prefixes[checkoutsFixture.nested.folder] = 'src/app/';
+      checkoutsFixture.state.files = [{ path: 'src/app/b.ts', originalPath: null, status: 'modified', insertions: 1, deletions: 1, binary: false, revision: 'f' },
+        { path: 'docs/c.md', originalPath: null, status: 'modified', insertions: 1, deletions: 1, binary: false, revision: 'f' }];
+      checkoutsFixture.show({ path: 'docs/c.md', worktree: checkoutsFixture.nested.folder });`);
+    assert.equal(await wait("document.querySelector('.changes-diff-path strong')?.textContent === 'c.md' && " + openFile + " && !" + openFile + ".disabled"), true);
+    await evaluate(`${openFile}.click()`);
+    assert.deepEqual(await evaluate("checkoutsFixture.state.opened.at(-1)"), ["docs/c.md", "C:\\trees\\app\\nested"]);
+    await evaluate("document.querySelector('.changes-file[data-path=\"src/app/b.ts\"]').click()");
+    assert.equal(await wait("document.querySelector('.changes-diff-path strong')?.textContent === 'b.ts'"), true);
+    await evaluate(`${openFile}.click()`);
+    assert.deepEqual(await evaluate("checkoutsFixture.state.opened.at(-1)"), ["src/app/b.ts", "C:\\trees\\app\\nested"]);
+    await evaluate(`checkoutsFixture.clear(); checkoutsFixture.state.rows = [checkoutsFixture.plain, checkoutsFixture.other]; checkoutsFixture.state.prefixes = {};
+      checkoutsFixture.state.files = ['a.ts', 'src/b.ts'].map(path => ({ path, originalPath: null, status: 'modified', insertions: 1, deletions: 1, binary: false, revision: 'f' }));
+      checkoutsFixture.show({ path: 'src/b.ts', worktree: checkoutsFixture.other.folder });`);
+    assert.equal(await wait("document.querySelector('.changes-file[data-path=\"src/b.ts\"][aria-selected=true]') && document.querySelector('[data-commit]')"), true);
     await evaluate("document.querySelector('[data-commit]').click()");
     assert.equal(await wait("document.querySelector('.changes-scope')?.textContent.includes('aaaaaaa') && document.querySelector('.changes-diff .monaco-editor')"), true);
     await evaluate("document.querySelector('.changes-file[data-path=\"src/b.ts\"]').click()");
