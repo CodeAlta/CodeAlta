@@ -194,7 +194,7 @@ internal sealed class NodeFleetSecrets : IAsyncDisposable
             state.Synced = !result.Revoked;
             foreach (var refused in result.Refused) Log(true, $"A value of {FleetServerAddress.Format(connector.ServerAddress)} was refused: {refused}.");
             if (result.Revoked) Log(true, $"This machine was revoked by {FleetServerAddress.Format(connector.ServerAddress)}: the values it gave were taken away.");
-            // The sessions of the node mask the values they may now be given, and stop masking those taken away.
+            // The sessions of the node mask the values they may now be given; those taken away stay masked while the node runs.
             _host.AgentHub.SecretMasker?.Refresh();
         }
         catch (Exception exception) when (exception is FleetServerException or HttpRequestException or TaskCanceledException or FleetDeviceListException
