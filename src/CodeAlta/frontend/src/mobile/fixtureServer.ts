@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { WaitingRun } from "./contract";
-import type { ApprovalAutomation, ApprovalRequest, ApprovalResult, Ask, AskResult, BackgroundJob, Live, Options, PromptSelection, Session, SessionChoices, Space, TimelineEvent } from "./contract";
+import type { ApprovalAutomation, ApprovalRequest, ApprovalResult, Ask, AskResult, BackgroundJob, Live, Options, PromptSelection, QueuedPrompt, Session, SessionChoices, Space, TimelineEvent, ToolCallDetail, UnqueueResult } from "./contract";
 
 /** The policy the plugin's server sets on the page (the contract of the phone page). */
 export const mobilePolicy = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -56,6 +56,16 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     messagesPerPage: null as number | null,
     /** The reads of older events fail. */
     olderFails: false,
+    /** The prompts that wait in the queues of the sessions. */
+    queues: new Map<string, QueuedPrompt[]>(),
+    /** What the next removal from a queue answers; null: the prompt is removed. */
+    unqueueStatus: null as UnqueueResult["status"] | null,
+    /** The steered prompts the runs still hold, by their ids: taking one back works once. */
+    steers: new Set<string>(),
+    /** The tool calls of the sessions, by `<session>/<activity id>`. */
+    tools: new Map<string, ToolCallDetail>(),
+    /** The whole outputs of the tool calls, read a page at a time, by `<session>/<activity id>`. */
+    toolOutputs: new Map<string, string>(),
     /**
      * The images of the sessions, by `<session>/<image id>` for a saved copy and `<session>/linked/<seq>/<position>` for a
      * picture of the disk an answer shows; any other image is not found.
@@ -64,7 +74,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
   };
   const requests: FixtureRequest[] = [];
   const streams = new Set<ServerResponse>();
-  let cookieSeq = 0, keySeq = 0;
+  let cookieSeq = 0, keySeq = 0, takeBackSeq = 0;
 
   const send = (response: ServerResponse, status: number, body?: unknown, headers: Record<string, string> = {}) => {
     response.writeHead(status, { "Content-Security-Policy": mobilePolicy, "Cache-Control": "no-store", ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...headers });
@@ -162,6 +172,34 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       return send(response, 200, result);
     }
     if (path === "/api/options") return send(response, 200, state.options);
+    const queuePath = /^\/api\/sessions\/([^/]+)\/queue(?:\/([^/]+)\/remove)?$/.exec(path);
+    if (queuePath) {
+      const id = decodeURIComponent(queuePath[1]);
+      if (!sessionOf(id)) return send(response, 404);
+      if (!queuePath[2]) return send(response, 200, { items: state.queues.get(id) ?? [], error: null });
+      const status = state.unqueueStatus;
+      state.unqueueStatus = null;
+      if (status) return send(response, 200, { status, error: null });
+      const item = decodeURIComponent(queuePath[2]), held = state.queues.get(id) ?? [];
+      state.queues.set(id, held.filter(prompt => prompt.id !== item));
+      return send(response, 200, { status: held.some(prompt => prompt.id === item) ? "removed" : "not_found", error: null });
+    }
+    const steerPath = /^\/api\/sessions\/([^/]+)\/steer\/([^/]+)\/withdraw$/.exec(path);
+    if (steerPath) return send(response, 200, { withdrawn: state.steers.delete(decodeURIComponent(steerPath[2])), error: null });
+    const outputPath = /^\/api\/sessions\/([^/]+)\/tools\/([^/]+)\/output$/.exec(path);
+    if (outputPath) {
+      const key = `${decodeURIComponent(outputPath[1])}/${decodeURIComponent(outputPath[2])}`, whole = state.toolOutputs.get(key);
+      if (whole === undefined) return send(response, 200, { error: "The output was not read." });
+      const page = 16_000, offset = url.searchParams.get("offset"), before = url.searchParams.get("before");
+      const start = before !== null ? Math.max(0, Number(before) - page) : offset !== null ? Number(offset) : state.tools.get(key)?.command ? Math.max(0, whole.length - page) : 0;
+      const end = before !== null ? Number(before) : Math.min(whole.length, start + page);
+      return send(response, 200, { output: whole.slice(start, end), outputOffset: start, outputLength: whole.length, error: null });
+    }
+    const toolPath = /^\/api\/sessions\/([^/]+)\/tools\/([^/]+)$/.exec(path);
+    if (toolPath) {
+      const call = state.tools.get(`${decodeURIComponent(toolPath[1])}/${decodeURIComponent(toolPath[2])}`);
+      return send(response, 200, call ?? { error: "The tool call was not read." });
+    }
     const jobPath = /^\/api\/sessions\/([^/]+)\/jobs(?:\/([^/]+)(\/stop)?)?$/.exec(path);
     if (jobPath) {
       const id = decodeURIComponent(jobPath[1]), jobId = jobPath[2] && decodeURIComponent(jobPath[2]);
@@ -254,6 +292,17 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
           if (permissionMode) current.permissionMode = permissionMode === "provider" ? null : permissionMode;
           state.choices.set(id, { ...choices, current });
           Object.assign(target, { model: { ...target.model!, id: current.model, name: current.modelName, reasoning: current.reasoning }, agent: { id: current.agent!, name: current.agentName } });
+        }
+        // What takes the prompt back, as the plugin answers it.
+        if (mode === "queue") {
+          const item: QueuedPrompt = { id: `queue-${++takeBackSeq}`, text: (body as { text: string }).text, at: new Date().toISOString(), state: "queued" };
+          state.queues.set(id, [...state.queues.get(id) ?? [], item]);
+          return send(response, 200, { ok: true, mode, queueItemId: item.id });
+        }
+        if (mode === "steer") {
+          const withdrawalId = `steer-${++takeBackSeq}`;
+          state.steers.add(withdrawalId);
+          return send(response, 200, { ok: true, mode, withdrawalId });
         }
         return send(response, 200, { ok: true, mode });
       }

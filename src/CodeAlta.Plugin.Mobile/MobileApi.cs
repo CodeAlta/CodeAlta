@@ -286,7 +286,11 @@ internal sealed partial class MobileApi(IPluginAltaService alta, MobileSessions 
 
         var result = await RunPromptAsync(args, text ?? "", attachmentFile).ConfigureAwait(false);
         if (result is null) return new JsonObject { ["ok"] = true, ["mode"] = mode, ["pending"] = true, ["error"] = null };
-        return new JsonObject { ["ok"] = result.Error is null, ["mode"] = mode, ["error"] = result.Error };
+        var answer = new JsonObject { ["ok"] = result.Error is null, ["mode"] = mode, ["error"] = result.Error };
+        // What names the prompt to take it back: a send to a session that works is queued too.
+        if (MobileAlta.Text(result.OfType("alta.session.queued").FirstOrDefault(), "queueItemId") is { } queueItemId) answer["queueItemId"] = queueItemId;
+        if (MobileAlta.Text(result.OfType("alta.session.steered").FirstOrDefault(), "withdrawalId") is { } withdrawalId) answer["withdrawalId"] = withdrawalId;
+        return answer;
     }
 
     /// <summary>

@@ -211,6 +211,26 @@ public sealed partial class AgentHub : IAsyncDisposable
     }
 
     /// <summary>
+    /// Takes back a steering input that the active run has not given to the model yet.
+    /// </summary>
+    /// <param name="sessionHandleId">The active session handle.</param>
+    /// <param name="withdrawalId">The identifier given with the input.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Whether the input was taken back.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the handle does not reference an active session.</exception>
+    public async Task<bool> TryWithdrawSteerAsync(
+        AgentSessionHandleId sessionHandleId,
+        string withdrawalId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(withdrawalId);
+
+        var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
+        return await ExecuteReferencedAsync(entry,
+            () => entry.Coordinator.TryWithdrawSteerAsync(withdrawalId, cancellationToken)).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Subscribes to normalized agent events from the active session attachment.
     /// </summary>
     /// <param name="sessionHandleId">The active session handle.</param>
@@ -1023,6 +1043,19 @@ public sealed partial class AgentHub : IAsyncDisposable
             {
                 events.TryPublish(new RunFailedEvent(DateTimeOffset.UtcNow, sessionHandleId, ex.Message));
                 throw;
+            }
+            finally
+            {
+                _controlGate.Release();
+            }
+        }
+
+        public async Task<bool> TryWithdrawSteerAsync(string withdrawalId, CancellationToken cancellationToken)
+        {
+            await _controlGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await InvokeOriginalAsync(() => _session.TryWithdrawSteerAsync(withdrawalId, cancellationToken)).ConfigureAwait(false);
             }
             finally
             {

@@ -31,6 +31,8 @@ export type ActivityFacts = Readonly<{
   succeeded: number;
   failed: number;
   running?: number;
+  /** What the running tool works on, as the line of a running activity says it. */
+  current?: string | null;
   startedAt?: string | null;
   endedAt?: string | null;
 }>;
@@ -171,6 +173,8 @@ export type WorkflowFacts = Readonly<{
 export type TimelineEvent = Readonly<{
   seq: number; at: string | null; kind: string; text: string | null; activityId: string | null; attachments?: readonly EventAttachment[] | null;
   provenance?: string | null; sourceSessionId?: string | null; parentId?: string | null; images?: readonly EventImage[] | null; workflow?: WorkflowFacts | null;
+  /** For a tool call: what it works on, on one line (its command, its file...). The rest is read when the phone opens it. */
+  subject?: string | null;
 }>;
 
 /** The events of a session after a sequence number. */
@@ -248,7 +252,52 @@ export type NewSessionRequest = Readonly<{
 export type NewSessionResult = Readonly<{ id: string; pending?: boolean; sendError?: string | null; error?: string | null }>;
 
 /** What the commands of a session answer. */
-export type ActionResult = Readonly<{ ok?: boolean; mode?: PromptMode; pending?: boolean; error?: string | null }>;
+export type ActionResult = Readonly<{
+  ok?: boolean; mode?: PromptMode; pending?: boolean; error?: string | null;
+  /** The prompt waits in the queue of the session, under this id: it can be removed. */
+  queueItemId?: string | null;
+  /** The prompt was steered into the run: this id takes it back, until the run gives it to the model. */
+  withdrawalId?: string | null;
+}>;
+
+/** A prompt of a person that waits in the queue of a session. */
+export type QueuedPrompt = Readonly<{ id: string; text: string; at?: string | null; state?: string | null; files?: readonly Readonly<{ title: string; mediaType?: string | null }>[] }>;
+
+/** `GET /api/sessions/<id>/queue`: the prompts in the order they will be sent. */
+export type QueuePage = Readonly<{ items: readonly QueuedPrompt[]; error: string | null }>;
+
+/** What became of a removal from the queue: `sending` when the session is taking the prompt. */
+export type UnqueueResult = Readonly<{ status: "removed" | "sending" | "not_found" | null; error: string | null }>;
+
+/** What became of taking back a steered prompt: false when the model has it, or the run ended. */
+export type UnsteerResult = Readonly<{ withdrawn: boolean; error: string | null }>;
+
+/** One tool call, read when the phone opens it (`GET /api/sessions/<id>/tools/<activity id>`). */
+export type ToolCallDetail = Readonly<{
+  activityId?: string; kind?: string; phase?: string; name?: string | null; startedAt?: string | null; at?: string | null;
+  command?: string | null;
+  /** The folder the call asked to run in, when it names one. */
+  workingDirectory?: string | null;
+  /** The folder the session works in: its worktree, when it has one. */
+  sessionFolder?: string | null;
+  exitCode?: number | null;
+  /** What the call reported when it failed. */
+  failure?: string | null;
+  /** The start of its arguments. */
+  arguments?: string | null; argumentsLength?: number;
+  /** A short part of its output: the end of what a command printed, the start of anything else. */
+  output?: string | null; outputOffset?: number; outputLength?: number;
+  /** The start of its diff. */
+  diff?: string | null; diffLength?: number;
+  readFiles?: readonly string[]; modifiedFiles?: readonly string[];
+  error: string | null;
+}>;
+
+/** Which page of an output to read: where it says the most, the page from a character, or the page before one. */
+export type ToolOutputPlace = Readonly<{ offset?: number; before?: number }>;
+
+/** A page of the output of a tool call, from its character `outputOffset` (`GET /api/sessions/<id>/tools/<activity id>/output`). */
+export type ToolOutputPage = Readonly<{ output?: string | null; outputOffset?: number; outputLength?: number; error: string | null }>;
 
 /** A question of an ask: answered with one of its choices, with text, or both. */
 export type AskQuestion = Readonly<{

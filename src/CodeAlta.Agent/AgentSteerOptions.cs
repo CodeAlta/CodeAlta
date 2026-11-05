@@ -42,4 +42,10 @@ public sealed class AgentSteerOptions
     /// run took never calls it.
     /// </summary>
     public Action? NotTaken { get; init; }
+
+    /// <summary>
+    /// Gets the identifier by which the sender can take the input back (<see cref="IAgentSession.TryWithdrawSteerAsync"/>)
+    /// until the run gives it to the model; null when it never does.
+    /// </summary>
+    public string? WithdrawalId { get; init; }
 }

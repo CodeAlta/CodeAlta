@@ -413,6 +413,106 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionTool_ReadsOneCallWhole_AndSessionEventsNameWhatEachCallWorksOn()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("tool-calls");
+        var runtime = CreateRuntime(options, providerId);
+        await using var _ = runtime.ConfigureAwait(false);
+        var catalog = new SessionViewCatalog(options);
+        var sessionId = await WriteTurnScenarioAsync(catalog, providerId, root.Path, "completed").ConfigureAwait(false);
+        var store = catalog.JournalStore.CreateSessionStore();
+        var at = new DateTimeOffset(2026, 10, 3, 9, 0, 0, TimeSpan.Zero);
+        var run = new AgentRunId("tool-run");
+        var longOutput = "start of the output " + new string('x', 200) + " end of the output";
+        AgentActivityEvent Call(AgentActivityPhase phase, string details) => new(providerId, sessionId, at = at.AddSeconds(1), run, AgentActivityKind.ToolCall, phase, "call-1", null, "Bash", null,
+            System.Text.Json.JsonDocument.Parse(details).RootElement.Clone());
+        await store.AppendEventsAsync("openai", providerId.Value, sessionId,
+        [
+            Call(AgentActivityPhase.Requested, """{"arguments":{"command":"git status\nmore","cwd":"C:/work/tree"}}"""),
+            new AgentContentCompletedEvent(providerId, sessionId, at, run, AgentContentKind.ToolOutput, "output-1", "call-1", longOutput),
+            Call(AgentActivityPhase.Failed, """{"exitCode":3,"error":{"message":"it broke"},"modifiedFiles":["a.txt"]}"""),
+            new AgentActivityEvent(providerId, sessionId, at, run, AgentActivityKind.ToolCall, AgentActivityPhase.Completed, "call-2", null, "Bash", null,
+                System.Text.Json.JsonDocument.Parse("""{"arguments":{"command":"another"}}""").RootElement.Clone()),
+            new AgentActivityEvent(providerId, sessionId, at, run, AgentActivityKind.ToolCall, AgentActivityPhase.Completed, "call-3", null, "grep", null,
+                System.Text.Json.JsonDocument.Parse("""{"arguments":{"pattern":"needle","path":"src/app"}}""").RootElement.Clone()),
+        ]).ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(catalog).Add(runtime));
+
+        var read = await dispatcher.InvokeAsync(["session", "tool", sessionId, "call-1", "--max-text", "20"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, read.ExitCode, read.Stderr);
+        var call = ReadJsonLines(read.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.tool");
+        Assert.AreEqual("Bash", call.GetProperty("name").GetString());
+        Assert.AreEqual("failed", call.GetProperty("phase").GetString(), "The newest record says how it ended.");
+        Assert.AreEqual("git status\nmore", call.GetProperty("command").GetString(), "An earlier record says what it runs.");
+        Assert.AreEqual("C:/work/tree", call.GetProperty("workingDirectory").GetString());
+        Assert.AreEqual(root.Path, call.GetProperty("sessionFolder").GetString());
+        Assert.AreEqual(3, call.GetProperty("exitCode").GetInt32());
+        Assert.AreEqual("it broke", call.GetProperty("error").GetString());
+        Assert.AreEqual(" end of the output".PadLeft(20, 'x'), call.GetProperty("output").GetString(), "The end of an output says the most.");
+        Assert.AreEqual(longOutput.Length, call.GetProperty("outputLength").GetInt32());
+        Assert.AreEqual("a.txt", call.GetProperty("modifiedFiles")[0].GetString());
+
+        var missing = await dispatcher.InvokeAsync(["session", "tool", sessionId, "call-unknown"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.NotFound, missing.ExitCode, missing.Stdout);
+
+        var events = await dispatcher.InvokeAsync(["session", "tail", sessionId, "--last", "5", "--no-tool-output"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var subjects = ReadJsonLines(events.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.session.event")
+            .Select(static line => line.TryGetProperty("metadata", out var metadata) && metadata.ValueKind == System.Text.Json.JsonValueKind.Object && metadata.TryGetProperty("subject", out var subject) ? subject.GetString() : null).ToArray();
+        CollectionAssert.Contains(subjects, "git status", "One line of what the call runs.");
+        CollectionAssert.Contains(subjects, "another");
+        CollectionAssert.Contains(subjects, "needle", "A search says what it looks for, not the folder it looks in.");
+    }
+
+    [TestMethod]
+    public async Task SessionTool_GivesTheStartOfAFile_TheEndOfACommand_AndPartsThatMeet()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("tool-outputs");
+        var runtime = CreateRuntime(options, providerId);
+        await using var _ = runtime.ConfigureAwait(false);
+        var catalog = new SessionViewCatalog(options);
+        var sessionId = await WriteTurnScenarioAsync(catalog, providerId, root.Path, "completed").ConfigureAwait(false);
+        var at = new DateTimeOffset(2026, 10, 3, 9, 0, 0, TimeSpan.Zero);
+        var run = new AgentRunId("output-run");
+        const string Text = "ab\U0001F600cd";
+        AgentEvent[] Call(string id, string name, string arguments) =>
+        [
+            new AgentActivityEvent(providerId, sessionId, at, run, AgentActivityKind.ToolCall, AgentActivityPhase.Completed, id, null, name, null, System.Text.Json.JsonDocument.Parse(arguments).RootElement.Clone()),
+            new AgentContentCompletedEvent(providerId, sessionId, at, run, AgentContentKind.ToolOutput, $"output-{id}", id, Text),
+        ];
+        await catalog.JournalStore.CreateSessionStore().AppendEventsAsync("openai", providerId.Value, sessionId,
+            [.. Call("read", "read_file", """{"arguments":{"path":"a.txt"}}"""), .. Call("run", "Bash", """{"arguments":{"command":"git log"}}""")]).ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(catalog).Add(runtime));
+
+        async Task<(string? Text, int Offset, int Length)> Output(params string[] args)
+        {
+            var read = await dispatcher.InvokeAsync(["session", "tool", sessionId, .. args], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, read.ExitCode, read.Stderr);
+            var call = ReadJsonLines(read.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.tool");
+            return (call.GetProperty("output").GetString(), call.GetProperty("outputOffset").GetInt32(), call.GetProperty("outputLength").GetInt32());
+        }
+
+        Assert.AreEqual(("ab", 0, 6), await Output("read", "--max-output", "3"), "The start of a file, and never half a character.");
+        Assert.AreEqual(("cd", 4, 6), await Output("run", "--max-output", "3"), "The end of what a command printed.");
+        Assert.AreEqual((Text, 0, 6), await Output("run", "--max-text", "1", "--max-output", "99"), "The limit of the texts leaves the output alone.");
+
+        Assert.AreEqual(("ab", 0, 6), await Output("run", "--output-offset", "0", "--max-output", "3"), "A part ends before a pair it would cut.");
+        Assert.AreEqual(("\U0001F600c", 2, 6), await Output("run", "--output-offset", "2", "--max-output", "3"), "The next part starts where it ended.");
+        Assert.AreEqual(("d", 5, 6), await Output("run", "--output-offset", "5", "--max-output", "3"));
+        Assert.AreEqual(("\U0001F600c", 2, 6), await Output("run", "--output-offset", "3", "--max-output", "2"), "A part asked from inside a pair has all of it.");
+        Assert.AreEqual(("", 6, 6), await Output("run", "--output-offset", "99"), "Past the end, nothing.");
+
+        foreach (var args in new[] { new[] { "--output-offset", "-1" }, new[] { "--max-output", "0" } })
+        {
+            var refused = await dispatcher.InvokeAsync(["session", "tool", sessionId, "run", .. args], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Usage, refused.ExitCode, refused.Stdout);
+        }
+    }
+
+    [TestMethod]
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     public async Task SessionEventsAndTail_ReadOnlyTheTurnsTheyShow_NumberedAsInTheWholeHistory()
     {
