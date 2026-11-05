@@ -1,3 +1,4 @@
+using CodeAlta.Catalog;
 using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;
@@ -55,7 +56,7 @@ internal sealed class MarkdownLinksService
             catch (Exception) { return Reply("failed"); } // Never send OS/browser diagnostics to the page.
         }
 
-        if (_files is null || !DesktopFileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
+        if (_files is null || !FileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
         cancellationToken.ThrowIfCancellationRequested();
         try { return Reply(await _files.OpenAsync(link, request.SessionId, request.ProjectId, request.Directory, originLabel, cancellationToken).ConfigureAwait(false)); }
         catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); } // Nor the paths of the disk.
@@ -76,7 +77,7 @@ internal sealed class MarkdownLinksService
     {
         MarkdownImageResponse Reply(string status) => new(status, _epoch, null, null, null);
         if (Validate(request) is { } refused) return Reply(refused);
-        if (_files is null || !DesktopFileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
+        if (_files is null || !FileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
@@ -94,7 +95,7 @@ internal sealed class MarkdownLinksService
     {
         MarkdownLinkResponse Reply(string status) => new(status, _epoch);
         if (Validate(request) is { } refused) return Reply(refused);
-        if (_files is null || !DesktopFileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
+        if (_files is null || !FileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
         cancellationToken.ThrowIfCancellationRequested();
         try { return Reply(await _files.RevealAsync(link, request.SessionId, request.ProjectId, request.Directory, cancellationToken).ConfigureAwait(false)); }
         catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); }
@@ -108,7 +109,7 @@ internal sealed class MarkdownLinksService
     {
         MarkdownLinkPathResponse Reply(string status, string? path = null) => new(status, _epoch, path);
         if (Validate(request) is { } refused) return Reply(refused);
-        if (_files is null || !DesktopFileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
+        if (_files is null || !FileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
         cancellationToken.ThrowIfCancellationRequested();
         try { return await _files.FullPathAsync(link, request.SessionId, request.ProjectId, request.Directory, cancellationToken).ConfigureAwait(false) is { } full ? Reply("ok", full) : Reply("not_found"); }
         catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); }
@@ -124,7 +125,7 @@ internal sealed class MarkdownLinksService
     {
         MarkdownLinkResponse Reply(string status) => new(status, _epoch);
         if (Validate(request) is { } refused) return Reply(refused);
-        if (_files is null || !DesktopFileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
+        if (_files is null || !FileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
         cancellationToken.ThrowIfCancellationRequested();
         try { return Reply(await _files.OpenExternalAsync(link, request.SessionId, request.ProjectId, request.Directory, cancellationToken).ConfigureAwait(false)); }
         catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); }

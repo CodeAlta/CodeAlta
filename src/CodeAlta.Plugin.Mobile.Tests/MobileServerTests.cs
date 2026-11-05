@@ -474,21 +474,14 @@ public sealed class MobileServerTests
     [TestMethod]
     public void LinkedImages_NeverNameAnotherComputer()
     {
-        // Only parsed, never opened: opening one is what would send the credentials of the user to that computer.
-        foreach (var target in (string[])[
-            "//server/share/a.png", @"\\server\share\a.png", @"/\server/share/a.png", "%5C%5Cserver%5Cshare%5Ca.png", "%2F%2Fserver/share/a.png",
-            "file://server/share/a.png", "file:////server/share/a.png", "file:///%5C%5Cserver/share/a.png", @"file:\\server\share\a.png",
-            @"\\?\UNC\server\share\a.png", @"\\.\UNC\server\share\a.png", "//?/C:/shots/a.png",
-            @"\??\UNC\server\share\a.png", @"/??\UNC\server\share\a.png", "/??/UNC/server/share/a.png", "%5C%3F%3F%5CUNC%5Cserver%5Cshare%5Ca.png", "file:///%5C%3F%3F%5CUNC%5Cserver%5Cshare%5Ca.png"])
+        // Only parsed, never opened: opening one is what would send the credentials of the user to that computer. FileLinkTests
+        // has every form of such a path; these show that a picture goes through that rule.
+        foreach (var target in (string[])["//server/share/a.png", @"\\server\share\a.png", @"\??\UNC\server\share\a.png", "%5C%5Cserver%5Cshare%5Ca.png", "file://server/share/a.png"])
         {
             Assert.IsEmpty(MobileTimeline.LinkedImages($"![a](<{target}>)"), target);
             Assert.IsEmpty(MobileTimeline.LinkedImages($"![a]({target})"), target);
+            Assert.IsNull(MobileImages.Locate(target, Path.GetFullPath("/start")), target);
         }
-
-        // A picture of this computer still shows.
-        Assert.AreEqual(
-            string.Join('|', (string[])["shots/a.png", @"C:\shots\b.png", "file:///C:/shots/c.png"]),
-            string.Join('|', MobileTimeline.LinkedImages(@"![a](shots/a.png) ![b](<C:\shots\b.png>) ![c](file:///C:/shots/c.png)").Select(static image => image.Target)));
     }
 
     private sealed class TempFolder : IDisposable
