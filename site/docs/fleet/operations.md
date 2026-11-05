@@ -35,6 +35,11 @@ Each machine linked to your server counts the statistics of its sessions, a node
 
 **My fleet** shows the totals, then the numbers **By machine** (with when each machine last sent its statistics, so a machine that stopped sending shows), **By project** and **By model**. The days are those of your computer's time zone.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-statistics.webp" alt="Statistics, My fleet, Last 30 days: the totals of tokens, active time, runs, tool calls and cost, then By machine with Build box, Workstation, Mac mini and this computer, each with when it last sent its statistics" loading="lazy">
+  <figcaption class="small text-secondary mt-2">My fleet adds up the statistics of all your machines.</figcaption>
+</figure>
+
 - A machine sends the statistics of the sessions it publishes to the server, from the day it was linked to it. A **Private** session sends nothing; a session made Private later, or whose space you unlink, has its statistics removed from the server.
 - The server receives numbers and the names of providers, models and tools, never prompts, answers or file names. Projects travel as keys made with the key only your computers hold: the server cannot tell which project a key is, and your computer names the projects it has too (the same repository on two machines is one project). A project only another machine has shows as **Project** and the start of its key.
 - A machine that was offline sends what it counted when it comes back, and sending the same statistics again changes nothing.
