@@ -336,6 +336,8 @@ public sealed class DeviceService
         // still waits or not, with no token of the request.
         if (Directory is { } directory)
         {
+            // From now on, what it publishes is announced no more; what was announced before is listed below.
+            directory.MarkRemoved(revoked.Id);
             foreach (var session in (await _store.ListSessionsAsync(revoked.OrganizationId, CancellationToken.None).ConfigureAwait(false)).Where(session => session.MachineId == revoked.Id))
                 directory.Publish(revoked.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.SessionRemoved, session.Id, Session: session.ToDirectory()));
             directory.Publish(revoked.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.MachineRemoved, revoked.Id));

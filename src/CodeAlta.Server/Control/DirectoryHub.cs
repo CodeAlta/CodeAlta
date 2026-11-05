@@ -20,6 +20,10 @@ public sealed class DirectoryHub
     public const int WatcherCapacity = 512;
 
     private readonly ConcurrentDictionary<ControlSession, DirectoryWatcher> _watchers = new();
+    // The devices revoked since the start, whose publications are announced no more: decided under one lock with each
+    // announcement of what a device published, so that one is either sent before the revoke lists what it removes, or never.
+    private readonly Lock _removals = new();
+    private readonly HashSet<string> _removed = new(StringComparer.Ordinal);
 
     /// <summary>Gets the instruments of the watchers; null for none.</summary>
     public Telemetry.ServerMetrics? Metrics { get; init; }
@@ -64,6 +68,34 @@ public sealed class DirectoryHub
         foreach (var (session, watcher) in _watchers)
         {
             if (session.Device.OrganizationId == organizationId) watcher.Post(change);
+        }
+    }
+
+    /// <summary>
+    /// Says that a device was revoked: what it published is announced no more. Called once the revoke committed and before it
+    /// lists what to remove, so that what was announced before is among it.
+    /// </summary>
+    /// <param name="deviceId">The device.</param>
+    public void MarkRemoved(string deviceId)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        lock (_removals) _removed.Add(deviceId);
+    }
+
+    /// <summary>Sends the changes a device published to the watchers that may see them, unless the device was revoked.</summary>
+    /// <param name="organizationId">The organization of the device.</param>
+    /// <param name="deviceId">The device that published them.</param>
+    /// <param name="changes">The changes.</param>
+    /// <returns>Whether they were sent.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="changes"/> is <see langword="null"/>.</exception>
+    public bool PublishFrom(string organizationId, string deviceId, IReadOnlyList<FleetDirectoryChange> changes)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+        lock (_removals)
+        {
+            if (_removed.Contains(deviceId)) return false;
+            foreach (var change in changes) Publish(organizationId, change);
+            return true;
         }
     }
 

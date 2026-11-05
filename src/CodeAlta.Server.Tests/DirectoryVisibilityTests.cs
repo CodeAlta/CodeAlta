@@ -132,6 +132,37 @@ public sealed class DirectoryVisibilityTests
     }
 
     [TestMethod]
+    public async Task LateFactsOfARevokedMachine_CheckedBeforeTheRevoke_DoNotBringASessionBackToAViewerOfTheSessionOnly()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        var (owner, box, max, maxId, organizationId) = await SessionOnlyViewerAsync(server);
+        var events = new ConcurrentQueue<FleetDirectoryChange>();
+        var (connection, _) = await WatchAsync(server, max, events);
+        await using (connection)
+        {
+            var snapshot = (await connection.SendRequestAsync(FleetServerMethods.DirectoryWatch, null))!.Value.Deserialize(FleetServerJsonContext.Default.FleetDirectorySnapshot)!;
+            // A facts handler of the machine read its device before the revoke: approved.
+            var held = (await server.GetService<ICoordinatorStore>().GetDeviceAsync(box.DeviceId))!;
+            var late = new PublicationService(InterceptedStore.Over(server.GetService<ICoordinatorStore>(),
+                replace: (method, args) => method == nameof(ICoordinatorStore.GetDeviceAsync) && Equals(args?[0], box.DeviceId) ? ValueTask.FromResult<DeviceRecord?>(held) : null),
+                server.GetService<Control.DirectoryHub>(), server.Clock);
+            await RevokeAsync(server, owner, box, organizationId);
+            await WaitForAsync(() => events.Any(static change => change.Kind == FleetServerMethods.ChangeKinds.SessionRemoved && change.Id == "s-max"));
+
+            // Its facts land after the removals: no viewer hears them.
+            var cursors = await server.GetService<ICoordinatorStore>().GetPublicationCursorsAsync(box.DeviceId);
+            await late.PublishFactsAsync(held, new FleetFactsPublish(cursors.Facts + 1, [new FleetSessionFact("s-max", 1, 2, "idle", server.Clock.Now, server.Clock.Now,
+                "anthropic", "claude", new FleetSessionCounts(1, 0, 10, 5), PersonId: maxId)]), CancellationToken.None);
+            await connection.SendRequestAsync(FleetServerMethods.PresenceUpdate,
+                JsonSerializer.SerializeToElement(new FleetPresenceUpdate("busy", 1), FleetServerJsonContext.Default.FleetPresenceUpdate));
+            await WaitForAsync(() => events.Any(change => change.Kind == FleetServerMethods.ChangeKinds.Presence && change.Id == max.DeviceId && change.Presence?.State == "busy"));
+            var view = CodeAlta.Fleet.Server.FleetDirectoryView.From(snapshot);
+            foreach (var change in events) view = view.Apply(change);
+            Assert.AreEqual(0, view.Sessions.Count, "the session of the revoked machine stays removed");
+        }
+    }
+
+    [TestMethod]
     public async Task ARevokeWhoseRequestIsCancelledOnceItCommitted_StillRemovesTheMachineAndItsSessions()
     {
         await using var server = await ServerFixture.StartAsync();
