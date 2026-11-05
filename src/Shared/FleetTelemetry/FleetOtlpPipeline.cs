@@ -309,8 +309,11 @@ internal sealed class FleetTelemetryRuntime : ILoggerProvider
             _plan = plan;
         }
 
-        // The previous pipeline sends what it holds in the background: an apply never waits for a collector.
-        if (previous is not null) _ = Task.Run(previous.Dispose);
+        // The previous pipeline sends what it holds in the background: an apply never waits for a collector. Its end
+        // blocks for up to a shutdown per signal, so it runs on a thread of its own: plans applied in a burst would
+        // otherwise hold the threads of the pool, and the process (its HTTP server, its exports) would starve.
+        if (previous is not null)
+            _ = Task.Factory.StartNew(previous.Dispose, CancellationToken.None, TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
         return true;
     }
 
