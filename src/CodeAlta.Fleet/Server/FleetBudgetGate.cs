@@ -29,6 +29,13 @@ public sealed record FleetBudgetLink(string LinkId, FleetOrganizationDevices Dev
     /// links none.
     /// </summary>
     public Func<string?, bool>? LinksSpace { get; init; }
+
+    /// <summary>
+    /// Gets what asks the one that reads <see cref="Keys"/> (<see cref="FleetConnector.RefreshKeysAsync"/>) to read them now, for every
+    /// space the link publishes, and completes once it did: a run that waits for the key of its space asks it, never reads the keys
+    /// itself. Null asks nothing: the run waits for the keys read otherwise.
+    /// </summary>
+    public Func<CancellationToken, Task>? ReadKeys { get; init; }
 }
 
 /// <summary>A run that a budget may limit: a session of the machine, in a space, of a project.</summary>
@@ -165,9 +172,9 @@ public sealed class FleetBudgetGate
                 var scope = ScopeOf(link, list, access, run);
                 // A run of a space linked to the server whose key is not read yet (a start, its connector reads the keys later) is not one
                 // of no space: while budgets of spaces or projects are kept, it waits for that key, never runs as if they did not cover it.
-                if (scope.SpaceKey is null && link.Keys is { } keys && link.LinksSpace?.Invoke(run.SpaceId) == true && KeepsBudgetsOfSpaces(link, state, list, access))
+                if (scope.SpaceKey is null && link.Keys is not null && link.LinksSpace?.Invoke(run.SpaceId) == true && KeepsBudgetsOfSpaces(link, state, list, access))
                 {
-                    if (await WaitForSpaceKeyAsync(link, keys, list, access, run, held, cancellationToken).ConfigureAwait(false) is not { } scoped)
+                    if (await WaitForSpaceKeyAsync(link, list, access, run, held, cancellationToken).ConfigureAwait(false) is not { } scoped)
                         return new FleetBudgetAdmission("The key of the space of the run could not be read, which its budgets need: the run does not start.", continued);
                     scope = scoped;
                     held = null;
@@ -211,7 +218,9 @@ public sealed class FleetBudgetGate
             && !budget.Removed && budget.ScopeKind is FleetBudgetScopeKinds.Space or FleetBudgetScopeKinds.Project);
 
     // Waits, as a run a budget holds, for the key of the space of a run: its scope once the key is read, null when it is not within the wait.
-    private async Task<FleetBudgetRunScope?> WaitForSpaceKeyAsync(FleetBudgetLink link, FleetMetadataKeyring keys, FleetDeviceListState list, FleetAccessState? access,
+    // The keys are read by the one that reads them for the link (its connector, for every space it links), asked to now: a read of
+    // the keys of this space alone, here, would take the keys of the other spaces away from the keyring and race that reader.
+    private async Task<FleetBudgetRunScope?> WaitForSpaceKeyAsync(FleetBudgetLink link, FleetDeviceListState list, FleetAccessState? access,
         FleetBudgetRun run, Action? held, CancellationToken cancellationToken)
     {
         var deadline = _time.GetUtcNow() + HoldWait;
@@ -219,16 +228,19 @@ public sealed class FleetBudgetGate
         while (true)
         {
             var changed = Volatile.Read(ref _changed).Task;
-            try
+            if (link.ReadKeys is { } read)
             {
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(ReadTimeout);
-                await keys.RefreshAsync(run.SpaceId, timeout.Token).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is HttpRequestException or FleetServerException or FleetDeviceListException
-                or OperationCanceledException && !cancellationToken.IsCancellationRequested)
-            {
-                // Not read now: tried again.
+                try
+                {
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    timeout.CancelAfter(ReadTimeout);
+                    await read(timeout.Token).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is HttpRequestException or FleetServerException or FleetDeviceListException
+                    or OperationCanceledException && !cancellationToken.IsCancellationRequested)
+                {
+                    // Not read now (the server away, the reader not connected): asked again.
+                }
             }
 
             if (ScopeOf(link, link.Devices.Current ?? list, access, run) is { SpaceKey: not null } scope) return scope;

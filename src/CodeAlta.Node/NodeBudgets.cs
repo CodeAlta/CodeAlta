@@ -29,7 +29,7 @@ internal sealed class NodeBudgets
             .Select(connection => new FleetBudgetLink(connection.Link.Id, connection.Connector!.Devices, connection.Connector.MetadataKeys,
                 Path.Combine(connections.Store.LinkFolder(connection.Link.Id), FileName))
             {
-                Access = connection.Connector.Access, LinksSpace = connection.Connector.LinksSpace,
+                Access = connection.Connector.Access, LinksSpace = connection.Connector.LinksSpace, ReadKeys = connection.Connector.RefreshKeysAsync,
             })], new FleetBudgetLocalSpend(sessions, statistics));
     }
 
