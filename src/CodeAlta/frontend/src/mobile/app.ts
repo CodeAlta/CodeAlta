@@ -272,6 +272,7 @@ export function startMobile(window: Window & typeof globalThis) {
     list.replaceChildren();
     sessionList.settle();
     showFilter();
+    if (window.location.hash === "#/new" && projects) updateNewProjects(newProject.value);
     void readList();
   }
   filterButton.addEventListener("click", async () => {
@@ -295,7 +296,10 @@ export function startMobile(window: Window & typeof globalThis) {
       if (project.path || space) {
         const small = make("small");
         if (space) small.append(spaceMark(space));
-        if (project.path) small.append(document.createTextNode(project.path));
+        if (project.path) {
+          if (small.childNodes.length > 0) small.append(document.createTextNode(" "));
+          small.append(document.createTextNode(project.path));
+        }
         button.append(small);
       }
       // A tap checks the project or unchecks it; the rows stay where they are while the sheet is open.
@@ -1227,23 +1231,31 @@ export function startMobile(window: Window & typeof globalThis) {
       ? `The ${tierLabel(tier.tier)} tier is not ready: ${tier.error || "it has no model"}.` : "");
   }
 
+  // The projects of the form are those the list keeps to, all of them without a filter. The one chosen is `preferred` (the
+  // project of the viewed session, or the one of the form), else the last one, while the list keeps to them; else the first
+  // one the filter keeps, or without a filter the default project.
+  function updateNewProjects(preferred: string | null) {
+    if (!projects) return;
+    const filter = sessions.filter;
+    const eligible = projects.projects.filter(p => !filter.length || filter.includes(p.id));
+    const available = (id: string | null) => id && eligible.some(p => p.id === id) ? id : null;
+    const selected = available(preferred) ?? available(store.get(lastProjectKey))
+      ?? (filter.length ? eligible[0]?.id : available(projects.default) ?? eligible[0]?.id);
+    newProject.replaceChildren(...eligible.map(p => option(p.id, p.name, p.id === selected)));
+    initForm();
+  }
+
   async function openCreate(activeProject: string | null = null) {
     newNote.textContent = options ? "" : "Loading…";
     try {
-      const [projectList, read] = await Promise.all([readProjects(), options ? Promise.resolve(options) : api.options()]);
+      const [, read] = await Promise.all([readProjects(), options ? Promise.resolve(options) : api.options()]);
       options = {
         models: read.models ?? [], prompts: read.prompts ?? [], tiers: read.tiers ?? [], defaultTier: read.defaultTier ?? null, defaults: read.defaults ?? null,
         permissionModes: read.permissionModes ?? {}, error: read.error ?? null,
       };
-      const available = (id: string | null) => id && projectList.projects.some(p => p.id === id) ? id : null;
-      // The project of the viewed session, else the last one, as long as the list keeps to it, else the first one checked.
-      const filter = sessions.filter, last = store.get(lastProjectKey);
-      const selected = available(activeProject) ?? available(last && (!filter.length || filter.includes(last)) ? last : null)
-        ?? available(filter[0] ?? null) ?? projectList.default;
-      newProject.replaceChildren(...projectList.projects.map(p => option(p.id, p.name, p.id === selected)));
       newAgent.replaceChildren(...options.prompts.map(p => option(p.id, p.name, p.id === options!.defaults?.prompt)));
       if (!newText.value) newText.value = drafts.get(newSessionDraft);
-      initForm();
+      updateNewProjects(activeProject);
       files.reconcile(newSessionFiles);
       padComposer();
     } catch (error) {
@@ -1267,10 +1279,10 @@ export function startMobile(window: Window & typeof globalThis) {
         ...(newPermission ? { permissionMode: newPermission } : {}), worktree: newWorktree.checked,
         ...(held.length ? { attachments: held } : {}),
       });
+      store.set(lastProjectKey, newProject.value);
       newText.value = "";
       files.take(newSessionFiles);
       drafts.clear(newSessionDraft);
-      store.set(lastProjectKey, newProject.value);
       newNote.textContent = "";
       // A prompt that did not go is shown on the page of its session, back in its composer.
       if (created.sendError) {
@@ -1399,7 +1411,7 @@ export function startMobile(window: Window & typeof globalThis) {
     $("detail").hidden = !id;
     $("create").hidden = !creating;
     back.hidden = !id && !creating;
-    filterButton.hidden = !!id || creating;
+    filterButton.hidden = !!id;
     const plus = $("new");
     plus.classList.toggle("on", creating);
     if (creating) plus.setAttribute("aria-current", "page"); else plus.removeAttribute("aria-current");
