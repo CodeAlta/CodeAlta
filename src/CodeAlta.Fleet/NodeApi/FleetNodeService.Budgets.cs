@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using CodeAlta.Catalog;
+using CodeAlta.Fleet.Protocol;
 using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Fleet.NodeApi;
@@ -46,14 +47,52 @@ public sealed partial class FleetNodeService
         => new(runId, sessionId, text, title, System.Buffers.Text.Base64Url.EncodeToString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)),
             selection?.ProviderKey, selection?.AgentPromptId, selection?.ModelId, selection?.ReasoningEffort?.ToString(), DateTimeOffset.UtcNow);
 
-    // The send a held one makes once admitted: the owned command of its session, with its retry key.
+    // The send a held one makes once admitted: the owned command of its session, with its retry key. A send held is kept until
+    // the runtime started its run (its prompt is in the journal then) or refused it: a process that ends before takes it again.
     private FleetCommandResult SendHeld(FleetHeldSend held)
     {
         OwnedSessionSelection? selection = held.ProviderKey is { } provider && held.AgentPromptId is { } prompt
             ? new OwnedSessionSelection(provider, prompt, held.ModelId,
                 Enum.TryParse<CodeAlta.Agent.AgentReasoningEffort>(held.ReasoningEffort, ignoreCase: true, out var effort) ? effort : null)
             : null;
-        return Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(held.RunId, held.SessionId, held.Text) { Selection = selection }, CancellationToken.None));
+        var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest(held.RunId, held.SessionId, held.Text) { Selection = selection }, CancellationToken.None);
+        if (admission is { Kind: OwnedSessionCommandAdmissionKind.Accepted or OwnedSessionCommandAdmissionKind.Replay, Receipt: { } receipt })
+            _ = ForgetOnceStartedAsync(held.HoldId, receipt.Completion);
+        else HeldSends.Remove(held.HoldId);
+        return Admit(admission);
+    }
+
+    // Forgets a held send once the runtime started its run, or ended it otherwise (a failure, a cancellation).
+    private async Task ForgetOnceStartedAsync(string holdId, Task<OwnedSessionCommandResult> started)
+    {
+        try
+        {
+            await started.ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or InvalidOperationException or ObjectDisposedException)
+        {
+            // Ended all the same: the runtime took it.
+        }
+
+        HeldSends.Remove(holdId);
+    }
+
+    // Whether the journal of a session holds the prompt of a send already: the run of a held send started before the node stopped.
+    private async Task<bool> PromptJournaledAsync(string sessionId, string retryKey)
+    {
+        const int MaxPages = 16;
+        CodeAlta.Agent.Runtime.AgentSessionHistoryCursor? cursor = null;
+        for (var page = 0; page < MaxPages; page++)
+        {
+            var read = await _host.WorkspaceReads.ReadHistoryTailPageAsync(sessionId, cursor, CancellationToken.None).ConfigureAwait(false);
+            if (read.Entries.Any(entry => entry.Event is CodeAlta.Agent.AgentContentCompletedEvent { Kind: CodeAlta.Agent.AgentContentKind.User } prompt
+                    && string.Equals(PromptImageHistory.ReadClientRequestId(prompt.Details), retryKey, StringComparison.Ordinal)))
+                return true;
+            if (read.Next is not { } next) return false;
+            cursor = next;
+        }
+
+        return false;
     }
 
     // Takes again the sends a budget held when the node stopped: each asks the same hold, and is sent once admitted.
@@ -69,10 +108,19 @@ public sealed partial class FleetNodeService
                     continue;
                 }
 
+                // Its run started before the node stopped, which had not forgotten it yet: it is not sent twice.
+                if (await PromptJournaledAsync(held.SessionId, held.RunId).ConfigureAwait(false))
+                {
+                    HeldSends.Remove(held.HoldId);
+                    LogInfo($"The held prompt {held.HoldId} of the session {held.SessionId} was sent before the restart.");
+                    continue;
+                }
+
                 var result = await WithinBudgetAsync(session, held.Title, held).ConfigureAwait(false);
                 LogInfo($"The held prompt {held.HoldId} of the session {held.SessionId} was taken again after a restart ({result.Status}).");
             }
-            catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException or UnauthorizedAccessException)
+            catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException or UnauthorizedAccessException
+                or FleetException or OwnedWorkspaceBusyException or CodeAlta.Agent.Runtime.AgentSessionHistoryException)
             {
                 LogInfo($"The held prompt {held.HoldId} of the session {held.SessionId} was not taken again: {exception.Message}");
             }
@@ -96,15 +144,17 @@ public sealed partial class FleetNodeService
         if (await Task.WhenAny(admission, waits.Task).ConfigureAwait(false) == admission)
         {
             var decided = await admission.ConfigureAwait(false);
-            HeldSends.Remove(runId);
             if (decided.Problem is { } problem)
             {
+                HeldSends.Remove(runId);
                 LogInfo($"The prompt of the session {session.SessionId} was not sent: {problem}");
                 return new FleetCommandResult(FleetBudgetCommandStatuses.Reached, Code: FleetBudgetCommandStatuses.Reached);
             }
 
-            // A stop that came while the budgets decided reaches it: checked again right before it is sent.
+            // A stop that came while the budgets decided reaches it: checked again right before it is sent, and never sent then.
+            if (Policy?.Halt is not null) HeldSends.Remove(runId);
             RequireNotHalted();
+            // Forgotten once its run started (SendHeld), not before: a process that ends meanwhile takes it again.
             return Admitted(runId, send);
         }
 
@@ -140,10 +190,9 @@ public sealed partial class FleetNodeService
             var decided = await admission.ConfigureAwait(false);
             // A node that stopped meanwhile leaves the send kept: its next start takes it again.
             if (Volatile.Read(ref _disposed) != 0) return;
-            // Forgotten before it is sent: a send is made at most once, also when the node stops right after.
-            HeldSends.Remove(runId);
             if (decided.Problem is { } problem)
             {
+                HeldSends.Remove(runId);
                 LogInfo($"The prompt of the session {sessionId} was not sent: {problem}");
                 return;
             }
@@ -151,10 +200,13 @@ public sealed partial class FleetNodeService
             // A stop of the kill switch that came while it waited reaches it: it is never sent.
             if (Policy?.Halt is { } halt)
             {
+                HeldSends.Remove(runId);
                 LogInfo($"The prompt of the session {sessionId} that waited for its budget was not sent: {halt.Describe(_options.Name)}");
                 return;
             }
 
+            // Forgotten once its run started (SendHeld), not before: a process that ends meanwhile takes it again, and finds
+            // its prompt in the journal when its run had started.
             var result = Admitted(runId, send);
             LogInfo($"The prompt of the session {sessionId} was sent once its budget let it ({result.Status}).");
         }
