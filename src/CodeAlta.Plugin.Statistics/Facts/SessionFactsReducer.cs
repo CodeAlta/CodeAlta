@@ -480,10 +480,7 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
                 if (!run.ModelReported)
                 {
                     // Before a request of the run said its model: the time goes on the model it says, once it says it.
-                    if (run.Unreported is [.., var last] && last.Quarter == quarter.Index && last.Provider == provider && last.Model == model && last.Effort == effort)
-                        last.Milliseconds += milliseconds;
-                    else if (run.Unreported.Count < 64)
-                        run.Unreported.Add(new UnreportedTimeState { Quarter = quarter.Index, Provider = provider, Model = model, Effort = effort, Milliseconds = milliseconds });
+                    RememberUnreported(run, quarter.Index, provider, model, effort, milliseconds);
                 }
             }
 
@@ -1105,15 +1102,16 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         }
 
         _lastOperation = op;
+        var purpose = string.Equals(op.Initiator, "compaction", StringComparison.OrdinalIgnoreCase) ? UsagePurpose.Compaction : UsagePurpose.Turn;
         if (!string.IsNullOrWhiteSpace(op.Model))
         {
             ApplyReportedModel(op.Model);
-            if (run is not null) SettleRunModel(run, op.Model);
+            // A compaction may run on another model: only a request of the conversation says the model of the run.
+            if (run is not null && purpose == UsagePurpose.Turn) SettleRunModel(run, op.Model);
         }
 
         var model = CurrentModel();
         var effort = NormalizeEffort(op.ReasoningEffort) ?? _state.Effort;
-        var purpose = string.Equals(op.Initiator, "compaction", StringComparison.OrdinalIgnoreCase) ? UsagePurpose.Compaction : UsagePurpose.Turn;
 
         // A provider that reports the cost and the duration of a whole turn repeats them: the same pair twice in a run is one. A
         // cost without a duration is the cost of its request (the credits of Copilot), and two requests may well cost the same.
@@ -1207,6 +1205,41 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
     // The first request of a run that reports its model: the start of the run and the time counted before it, under the model in force
     // then (an alias, or the model the alias stood for in an earlier turn), go on the model it reports. Later reports of the run move
     // nothing: what the run counted under a model its own request reported is that model's.
+    // The stretches of time of a run kept to move once its model is reported: one per change of model or effort, or long gap.
+    private const int MaxUnreportedTimes = 64;
+
+    // The milliseconds of a whole quarter hour.
+    private const long QuarterMilliseconds = 15 * 60 * 1000;
+
+    // The time of a run is counted without holes between its records: a stretch under one model keeps its first and last quarter
+    // hours, and those between are whole. A stretch that cannot be kept (more than the limit) leaves the run where it was counted.
+    private static void RememberUnreported(OpenRunState run, int quarter, string provider, string model, string effort, long milliseconds)
+    {
+        if (run.Unreported is [.., var last] && last.Provider == provider && last.Model == model && last.Effort == effort)
+        {
+            var end = Math.Max(last.LastQuarter, last.Quarter);
+            if (quarter == end)
+            {
+                if (end == last.Quarter) last.Milliseconds += milliseconds;
+                else last.LastMilliseconds += milliseconds;
+                return;
+            }
+
+            // The quarter it ended in becomes one between, unless it is the first: kept so only when it is whole.
+            if (quarter == end + 1 && (end == last.Quarter || last.LastMilliseconds == QuarterMilliseconds))
+            {
+                last.LastQuarter = quarter;
+                last.LastMilliseconds = milliseconds;
+                return;
+            }
+        }
+
+        if (run.Unreported.Count < MaxUnreportedTimes)
+            run.Unreported.Add(new UnreportedTimeState { Quarter = quarter, LastQuarter = quarter, Provider = provider, Model = model, Effort = effort, Milliseconds = milliseconds });
+        else
+            run.UnreportedOverflow = true;
+    }
+
     private void SettleRunModel(OpenRunState run, string model)
     {
         if (run.ModelReported)
@@ -1215,6 +1248,13 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         }
 
         run.ModelReported = true;
+        if (run.UnreportedOverflow)
+        {
+            // More time than is kept was counted before: moving part of it would split the run, so all of it stays where it was counted.
+            run.Unreported.Clear();
+            return;
+        }
+
         if (!string.Equals(run.Model, model, StringComparison.Ordinal))
         {
             var start = QuarterHour.Of(run.Start);
@@ -1226,9 +1266,14 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         foreach (var time in run.Unreported)
         {
             if (string.Equals(time.Model, model, StringComparison.Ordinal)) continue;
-            var quarter = new QuarterHour(time.Quarter);
-            _batch.ActivityFor(new ActivityKey(quarter, time.Provider, time.Model, time.Effort)).ActiveMs -= time.Milliseconds;
-            _batch.ActivityFor(new ActivityKey(quarter, time.Provider, model, time.Effort)).ActiveMs += time.Milliseconds;
+            var end = Math.Max(time.LastQuarter, time.Quarter);
+            for (var index = time.Quarter; index <= end; index++)
+            {
+                var milliseconds = index == time.Quarter ? time.Milliseconds : index == end ? time.LastMilliseconds : QuarterMilliseconds;
+                var quarter = new QuarterHour(index);
+                _batch.ActivityFor(new ActivityKey(quarter, time.Provider, time.Model, time.Effort)).ActiveMs -= milliseconds;
+                _batch.ActivityFor(new ActivityKey(quarter, time.Provider, model, time.Effort)).ActiveMs += milliseconds;
+            }
         }
 
         run.Unreported.Clear();

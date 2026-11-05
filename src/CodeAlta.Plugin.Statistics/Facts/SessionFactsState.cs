@@ -25,9 +25,10 @@ internal sealed class SessionFactsState
     /// Version 9 counts the runs of scripts of Code Mode from their records, the calls scripts make, the <c>exec</c> calls of a
     /// run, <c>exec</c> and <c>wait</c> as tools of their own kind, and the run of the script that started a session.
     /// Version 10 counts the start and the time of a run, until its first request reports its model, under the model that request
-    /// reports (an alias, or what it stood for in an earlier turn, until then).
+    /// reports (an alias, or what it stood for in an earlier turn, until then). Version 11 takes that model from a request of the
+    /// conversation only, never from a compaction, and moves all the time a run counted before it, however many quarter hours.
     /// </summary>
-    public const int CurrentVersion = 10;
+    public const int CurrentVersion = 11;
 
     /// <summary>The number of runs whose end is remembered, so that a late record of a run that ended does not open it again.</summary>
     public const int MaxClosedRuns = 32;
@@ -403,13 +404,28 @@ internal sealed class OpenRunState
     /// goes on the model that request reports, with the start of the run.
     /// </summary>
     public List<UnreportedTimeState> Unreported { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the run counted time in more quarter hours before its model was reported than
+    /// <see cref="Unreported"/> keeps: then nothing of the run moves, so that it stays on one model.
+    /// </summary>
+    public bool UnreportedOverflow { get; set; }
 }
 
-/// <summary>Active time of a run counted in a quarter hour before a request of the run reported its model.</summary>
+/// <summary>
+/// Active time of a run counted before a request of the run reported its model, in a stretch of quarter hours under one model: its
+/// first and its last quarter hour, and those between them, which are whole.
+/// </summary>
 internal sealed class UnreportedTimeState
 {
-    /// <summary>Gets or sets the quarter hour.</summary>
+    /// <summary>Gets or sets the first quarter hour.</summary>
     public int Quarter { get; set; }
+
+    /// <summary>Gets or sets the last quarter hour; the first one for a stretch of one.</summary>
+    public int LastQuarter { get; set; }
+
+    /// <summary>Gets or sets the milliseconds of the last quarter hour, when it is not the first.</summary>
+    public long LastMilliseconds { get; set; }
 
     /// <summary>Gets or sets the provider it was counted under.</summary>
     public string Provider { get; set; } = string.Empty;
@@ -420,7 +436,7 @@ internal sealed class UnreportedTimeState
     /// <summary>Gets or sets the effort it was counted under.</summary>
     public string Effort { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets the milliseconds.</summary>
+    /// <summary>Gets or sets the milliseconds of the first quarter hour.</summary>
     public long Milliseconds { get; set; }
 }
 

@@ -49,13 +49,13 @@ console queries them by scope.
   reading stopped, the version of the definitions, the floor), so publishing costs nothing while nothing is counted.
 - Published today: the families a fleet sums (`activity`, `usage`, `cost`, `tool`), keyed by provider, model and the
   other keys of the family. The others (content, details, histograms, scripts) stay on the machine for now. One run is on one
-  model: its start and its time go on the model its own first request reports (the facts move them there from the
-  alias in force before), a request or a cost keeps the model it reported, and tool calls, which the facts keep without a
+  model: its start and its time go on the model its own first request of the conversation reports, never a
+  compaction's (the facts move them there from the alias in force before), a request or a cost keeps the model it reported, and tool calls, which the facts keep without a
   model, take the session's model of their provider when the session used one then.
 - **Generations**: a machine that lost its publication outbox (a new disk, a reinstall) starts a new publication
   generation; the server replaces everything that machine published before, instead of keeping old sets whose versions
   look newer.
-- **Definition versions**: each row names the version of the definitions that produced it (today 10). A total that
+- **Definition versions**: each row names the version of the definitions that produced it (today 11). A total that
   would mix versions while machines catch up is marked as such in its coverage, never presented as exact.
 - Publication follows the store's transactions: what a catch-up saved is what the machine sends, coalesced to a few
   seconds, through the outbox of the control connection ([protocol](protocol.md#durability)).

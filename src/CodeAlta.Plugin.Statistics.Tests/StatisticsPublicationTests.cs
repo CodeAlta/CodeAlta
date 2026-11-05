@@ -72,6 +72,37 @@ public sealed class StatisticsPublicationTests
     }
 
     [TestMethod]
+    public async Task ARunSavedUnderItsAliasWhileItRuns_LeavesNoModelBehindOnceItsRequestNamesOne()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        IStatisticsPublication publication = harness.Engine;
+        // A live session is read while its run, started under the alias, has made no request yet: that much is saved.
+        var start = new JournalBuilder("g", "claude-code").Header(Today9).State(Today9, model: "haiku")
+            .User(Today9.AddSeconds(1), "g-run0", "a prompt of some words")
+            .Reasoning(Today9.AddSeconds(3), "g-run0");
+        harness.Journals.Set(start, Today9.AddSeconds(3));
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+        Assert.IsTrue((await publication.ReadRowsAsync("g", long.MinValue)).Any(static row => row.Keys.Any(static key => key.Key == "model" && key.Value == "haiku")),
+            "the run is counted under its alias until its request says the model");
+
+        // It goes on: its request names v1, and it calls a tool.
+        var more = new JournalBuilder("g", "claude-code")
+            .Usage(Today9.AddSeconds(5), "g-run0", model: "v1")
+            .ToolStarted(Today9.AddSeconds(6), "g-run0", "t1", "Read")
+            .ToolDone(Today9.AddSeconds(7), "g-run0", "t1", "Read")
+            .Idle(Today9.AddSeconds(20), "g-run0");
+        harness.Journals.Append("g", more.ToBytes(), Today9.AddSeconds(20));
+        harness.Engine.Signal("g");
+        await harness.Engine.DrainAsync();
+
+        var rows = await publication.ReadRowsAsync("g", long.MinValue);
+        Assert.IsFalse(rows.Any(static row => row.Keys.Any(static key => key.Key == "model" && key.Value == "haiku")), "no row of the alias is left behind");
+        Assert.IsTrue(rows.Where(static row => row.Family == "tool").All(static row => row.Keys.Any(static key => key.Key == "model" && key.Value == "v1")),
+            "the tool call is on the model of the run");
+    }
+
+    [TestMethod]
     public async Task TheTimeOfARun_StaysOnTheModelItsOwnRequestsReported_WhenALaterRunOfItsQuarterReportsAnother()
     {
         await using var harness = await EngineHarness.CreateAsync();
