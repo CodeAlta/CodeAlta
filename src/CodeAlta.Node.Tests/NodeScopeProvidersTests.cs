@@ -194,6 +194,41 @@ public sealed class NodeScopeProvidersTests
     }
 
     [TestMethod]
+    public async Task TwoServersGivingAProviderOfTheSameId_NeverReplaceEachOther()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options(), token);
+        var catalog = node.Host.CatalogOptions;
+        using var identity = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var store = new LocalSecretStore(Path.Combine(root.Root, "secrets"), new PlainProtector());
+        var config = new CodeAltaConfigStore(catalog);
+        var providers = new NodeScopeProviders(catalog, store, identity);
+        ScopeProviderDto Provider(string id, string endpoint) => new(id, FleetPrincipalKinds.Organization, "org", "Gateway", "openai-responses", endpoint, ["gpt-6.1"], 1,
+            "p2", DateTimeOffset.UtcNow, ["self"]);
+        (string? Endpoint, string? Key) Installed()
+        {
+            var definition = config.LoadGlobalProviderDefinitions(includeDisabled: true).SingleOrDefault(static definition => definition.ProviderKey == "gateway");
+            return (definition?.ApiUrl, store.TryGetSecret(NodeScopeProviders.SecretName("gateway"), out var key) ? key : null);
+        }
+
+        providers.Apply("link-1", [(Provider("gateway", "https://first.example/v1"), "sk-first")]);
+        // The second organization names its provider the same: the first one stays as its server gave it.
+        Assert.AreEqual(0, providers.Apply("link-2", [(Provider("gateway", "https://second.example/v1"), "sk-second")]).Count);
+        Assert.AreEqual(("https://first.example/v1", "sk-first"), Installed());
+        Assert.AreEqual(0, providers.Apply("link-2", [(Provider("Gateway", "https://second.example/v1"), "sk-second")]).Count, "nor in other letters");
+        Assert.AreEqual(("https://first.example/v1", "sk-first"), Installed());
+        // Taken away by the second server: the provider of the first one is not removed either.
+        Assert.AreEqual(0, providers.Apply("link-2", []).Count);
+        Assert.AreEqual(("https://first.example/v1", "sk-first"), Installed());
+
+        // Once the first server no longer gives it, the id is free.
+        providers.Apply("link-1", []);
+        CollectionAssert.AreEqual(new[] { "gateway" }, providers.Apply("link-2", [(Provider("gateway", "https://second.example/v1"), "sk-second")]).ToArray());
+        Assert.AreEqual(("https://second.example/v1", "sk-second"), Installed());
+    }
+
+    [TestMethod]
     public void TwoProvidersWhoseIdsReadAlike_NeverShareTheSecretOfTheirKey()
     {
         Assert.AreEqual("CODEALTA_PROVIDER_MY_GATEWAY", NodeScopeProviders.SecretName("my-gateway"), "an id of words joined by dashes reads in its name");

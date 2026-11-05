@@ -125,7 +125,9 @@ internal sealed class NodeScopeProviders
         var before = new Dictionary<string, long>(link.Applied, StringComparer.Ordinal);
         var store = new CodeAltaConfigStore(_catalog);
         var definitions = store.LoadGlobalProviderDefinitions(includeDisabled: true).ToList();
-        var ours = applied.Values.SelectMany(static other => other.Applied.Keys).ToHashSet(StringComparer.Ordinal);
+        // An id is the one of the link that installed it first: another server, another organization, never replaces its
+        // definition or its key; it is free again once that link no longer gives it.
+        var others = applied.Where(pair => pair.Key != linkId).SelectMany(static pair => pair.Value.Applied.Keys).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var kept = new Dictionary<string, long>(StringComparer.Ordinal);
         var changed = new List<string>();
         foreach (var (provider, key) in opened)
@@ -144,8 +146,14 @@ internal sealed class NodeScopeProviders
                 continue;
             }
 
+            if (others.Contains(provider.Id))
+            {
+                if (LogManager.IsInitialized) _logger.Warn($"The provider {provider.Id} of {linkId} has the id of a provider another server gave this machine: it is not installed.");
+                continue;
+            }
+
             var existing = definitions.FirstOrDefault(definition => string.Equals(definition.ProviderKey, provider.Id, StringComparison.OrdinalIgnoreCase));
-            if (existing is not null && !ours.Contains(provider.Id)) continue;
+            if (existing is not null && !before.ContainsKey(provider.Id)) continue;
             if (Differs(existing, provider, key)) changed.Add(provider.Id);
             if (existing is not null) definitions.Remove(existing);
             _secrets.SetSecret(SecretName(provider.Id), key, "fleet");
