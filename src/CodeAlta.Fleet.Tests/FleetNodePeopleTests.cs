@@ -29,4 +29,34 @@ public sealed class FleetNodePeopleTests
         Assert.IsNull(new FleetNodePeople(folder.Path, TimeProvider.System) { SoleOrganization = () => sole }.Named("bea", "globex"));
         Assert.AreEqual("acme", people.Read().People.Single().OrganizationId, "kept with the organization it was bound to");
     }
+
+    [TestMethod]
+    public void APersonNamedBeforeOrganizationsWereKept_GetsNothing_WhileTheirOrganizationCannotBeKeptWithThem()
+    {
+        using var folder = new TestFolder();
+        var path = Path.Combine(folder.Path, "people.json");
+        var legacy = """{ "people": [ { "personId": "bea", "permissions": ["view", "drive", "start"], "addedAt": "2026-10-01T09:00:00+00:00" } ], "asks": [], "refused": [] }""";
+        File.WriteAllText(path, legacy);
+        // The file cannot be written: the organization the person is bound to is not kept.
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+        try
+        {
+            var people = new FleetNodePeople(folder.Path, TimeProvider.System) { SoleOrganization = () => "acme" };
+            Assert.IsNull(people.Named("bea", "acme"), "a binding that is not kept would be another one after a restart: nothing until it is");
+
+            // Restarted while the machine is linked to Globex alone: its "bea" is not the person the owner named.
+            var restarted = new FleetNodePeople(folder.Path, TimeProvider.System) { SoleOrganization = () => "globex" };
+            Assert.IsNull(restarted.Named("bea", "globex"));
+            Assert.AreEqual(legacy, File.ReadAllText(path));
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+        }
+
+        // Once it can be written, the person is bound and kept so.
+        var kept = new FleetNodePeople(folder.Path, TimeProvider.System) { SoleOrganization = () => "acme" };
+        Assert.AreEqual(FleetNodePeople.Allowed, kept.Named("bea", "acme"));
+        Assert.AreEqual(FleetNodePeople.Allowed, new FleetNodePeople(folder.Path, TimeProvider.System).Named("bea", "acme"));
+    }
 }
