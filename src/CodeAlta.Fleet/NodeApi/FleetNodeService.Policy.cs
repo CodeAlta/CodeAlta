@@ -33,21 +33,37 @@ public sealed partial class FleetNodeService
     /// <param name="cancellationToken">Cancels the reads of its lineage.</param>
     /// <returns>The patterns; null when the session is not work of the fleet or the policy turns nothing off.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
+    /// <exception cref="SessionLineageException">
+    /// The lineage is deeper than <see cref="SessionToolGuards.MaximumLineageDepth"/>, or its links make a cycle: whether the session
+    /// is work of the fleet cannot be told, so its attachment fails rather than give it the tools the policy turns off.
+    /// </exception>
     public async ValueTask<IReadOnlyList<string>?> PolicyToolsOffAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         if (Policy is not { } policy) return null;
-        var work = Work.List();
+        var item = await WorkOfLineageAsync(session, Work.List(), parent => _host.RuntimeService.TryGetRecoverableSessionAsync(parent, cancellationToken),
+            cancellationToken).ConfigureAwait(false);
+        return item is not null && policy.RulesFor(item.SpaceId ?? session.SpaceId)?.ToolsOff is { Count: > 0 } off ? off : null;
+    }
+
+    // The work of the fleet a session is, or comes from: its lineage followed to its start (a session without a parent, or one
+    // this machine does not have), as the guards of a session follow it; one too deep or whose links make a cycle is refused.
+    internal static async ValueTask<FleetWorkSession?> WorkOfLineageAsync(SessionViewDescriptor session, IReadOnlyList<FleetWorkSession> work,
+        Func<string, Task<SessionViewDescriptor?>> parentOf, CancellationToken cancellationToken)
+    {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (var current = session; current is not null && seen.Add(current.SessionId) && seen.Count <= 32;)
+        for (var current = session; current is not null;)
         {
-            if (work.FirstOrDefault(item => string.Equals(item.SessionId, current.SessionId, StringComparison.OrdinalIgnoreCase)) is { } item)
-                return policy.RulesFor(item.SpaceId ?? session.SpaceId)?.ToolsOff is { Count: > 0 } off ? off : null;
-            if ((current.ParentSessionId ?? current.CreatedBy?.SourceSessionId) is not { Length: > 0 } parent) return null;
-            current = await _host.RuntimeService.TryGetRecoverableSessionAsync(parent, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!seen.Add(current.SessionId) || seen.Count > SessionToolGuards.MaximumLineageDepth) throw new SessionLineageException(session.SessionId);
+            if (work.FirstOrDefault(item => string.Equals(item.SessionId, current.SessionId, StringComparison.OrdinalIgnoreCase)) is { } found) return found;
+            if ((NonEmpty(current.ParentSessionId) ?? NonEmpty(current.CreatedBy?.SourceSessionId)) is not { } parent) return null;
+            current = await parentOf(parent).ConfigureAwait(false);
         }
 
         return null;
+
+        static string? NonEmpty(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
     }
 
     /// <summary>
