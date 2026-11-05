@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findKeyKept, findMatches, findPattern, findPatternInvalid, isFindKey, maximumFindMatches } from "./findInPage";
+import { findKeyKept, findMatches, findPattern, findPatternInvalid, firstBelow, isFindKey, maximumFindMatches } from "./findInPage";
+
+test("the place to go to is the first that ends below the top of the view, and few places are measured to find it", () => {
+  const bottoms = Array.from({ length: 1000 }, (_, index) => index * 10);
+  let measured = 0;
+  const bottom = (value: number) => { measured++; return value; };
+  assert.equal(firstBelow(bottoms, 2005, bottom), 201);
+  assert.ok(measured <= 11, `${measured} places measured`);
+  assert.equal(firstBelow(bottoms, -1, bottom), 0, "Every place is below.");
+  assert.equal(firstBelow(bottoms, 99_990, bottom), -1, "Every place is above.");
+  assert.equal(firstBelow([], 0, bottom), -1);
+});
 
 test("a text of the page is found whatever the case of its letters, and its spaces match any spaces", () => {
   assert.deepEqual(findMatches("A prompt queue, the Prompt\nQueue and PROMPT   queue.", "prompt queue"), [{ start: 2, end: 14 }, { start: 20, end: 32 }, { start: 37, end: 51 }]);

@@ -1,5 +1,5 @@
 import { matchesOutgoing } from "./outgoingEcho";
-import { Component, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { Component, memo, useCallback, useContext, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { Button } from "@blueprintjs/core";
 import { workspace, type HistoryRequest, type SessionDisplayView, type SessionPluginEvent } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
@@ -43,6 +43,10 @@ export type NewestHistoryRequest = () => number;
  * chunk of turns before it is read, as far as the rules of `olderHistoryStep` allow. Says whether a read started.
  */
 export type OlderHistoryRequest = () => boolean;
+/** Reads everything before the window, as the button at its top does. */
+export type LoadAllRequest = () => void;
+/** Whether turns before the window are not read yet, and whether all of them are being read. */
+export type OlderHistoryState = "none" | "more" | "loading";
 
 // `olderFrom` is the first record of the window when older history was asked for; `known` is the settled
 // window a refresh of the newest history keeps and appends to. `all` reads older history to the start of
@@ -58,6 +62,7 @@ type HistoryTarget = { request: HistoryRequest; explicitOlder: boolean; explicit
 const publicationRecords = 300, publicationInterval = 400;
 const noEntries: HistoryTimeline["entries"] = [];
 const noChoices: ReadonlyMap<string, boolean> = new Map();
+const minimumFoldSearch = 2;
 
 /**
  * The rows of the timeline: the persisted and live records, the prompts being sent and the cards plugins
@@ -66,7 +71,7 @@ const noChoices: ReadonlyMap<string, boolean> = new Map();
  * each group only when one of its rows did, and each row only when its own item changed.
  */
 const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outgoing, onAcknowledgeOutgoing, pluginEvents, echoes: showEchoes, empty,
-  revision, sources, readImages, readTool, readPrompt, toolOutputs, canInspect, onOpenSource, promptKeys, onBranch, running, shown }: {
+  revision, sources, readImages, readTool, readPrompt, toolOutputs, canInspect, onOpenSource, promptKeys, onBranch, running, shown, find }: {
   sessionId: string; rows: readonly ReconciledRow[]; entries: HistoryTimeline["entries"];
   outgoing: readonly OutgoingMessage[]; onAcknowledgeOutgoing?: (keys: readonly string[]) => void;
   pluginEvents?: readonly SessionPluginEvent[];
@@ -86,10 +91,15 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   running?: boolean;
   /** The journal offset of a message the timeline is asked to show: the activity that holds it opens. */
   shown?: string | null;
+  /** What the timeline is searched for: an activity that holds it opens while it is. */
+  find?: RegExp | null;
 }) {
   const { t } = useShellLanguage();
   const [emphasis] = useTimelineEmphasis();
   const focused = emphasis.focused;
+  // Typing stays quick: the folds open behind it, and one letter, found everywhere, opens none.
+  const deferredFind = useDeferredValue(find);
+  const opening = deferredFind && deferredFind.source.length >= minimumFoldSearch ? deferredFind : null;
   // The activities the reader opened or closed, by the keys of their rows: a line keeps the reader's choice while
   // it grows, and changing the mode of the timeline gives every line the default of the new mode.
   const [choices, setChoices] = useState<{ sessionId: string; focused: boolean; map: ReadonlyMap<string, boolean> }>(() => ({ sessionId, focused, map: noChoices }));
@@ -180,7 +190,7 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
       {blocks.map(block => block.kind === "row"
         ? <TimelineGroupView key={`${sessionId}:${block.key}`} {...context} group={block.group} entryType={entryTypes.get(block.key) ?? "status"} />
         : <TimelineActivity key={`${sessionId}:${block.key}`} {...context} groups={block.groups} entryTypes={entryTypes}
-          expanded={activityExpanded(block.groups, chosen, focused, shown)} live={block.key === liveActivity} images={emphasis.foldedImages} onToggle={toggleActivity} />)}
+          expanded={activityExpanded(block.groups, chosen, focused, shown, opening)} live={block.key === liveActivity} images={emphasis.foldedImages} onToggle={toggleActivity} />)}
     </div>
     {shownTool && <ToolCallDialog item={shownTool} reader={readTool} outputs={toolOutputs} imageSource={toolImages} current={canInspect} onClose={closeToolWindow} />}
   </SystemPromptReaderContext.Provider>;
@@ -208,7 +218,7 @@ function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
 
 export function History({ sessionId, observing = true, onNotesChange, onUsageChange, onUnsentPrompt, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
   newestRequest, olderRequest, onNewestResult, live, read, readPluginEvents, readImages, readTool, readPrompt, toolOutputs, canInspect, outgoing = [], onAcknowledgeOutgoing, onBranch,
-  reveal = null, onReveal, running }: {
+  reveal = null, onReveal, running, find = null, onOlderState, loadAllRequest }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
   /** Reports the newest persisted usage record text of the loaded window. */
   onUsageChange?: (text: string | null) => void;
@@ -244,6 +254,12 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   onReveal?: (request: RevealRequest, outcome: RevealOutcome) => void;
   /** Whether a run of the session goes on, when it is known. */
   running?: boolean;
+  /** What the timeline is searched for: the folded work that holds it opens. */
+  find?: RegExp | null;
+  /** Says whether turns before the window are not read yet. */
+  onOlderState?: (state: OlderHistoryState) => void;
+  /** Filled with what reads every turn before the window. */
+  loadAllRequest?: RefObject<LoadAllRequest | null>;
 }) {
   const { t } = useShellLanguage();
   const bookmarkMarks = useContext(TimelineBookmarksContext);
@@ -440,6 +456,14 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   const readingOlder = target.explicitOlder && !target.all && current?.kind !== "error" && !olderSettled;
   // Reading everything can start while a chunk is read, and goes on from what that read has brought in.
   const loadDisabled = current?.kind === "error" || current?.kind === "loading" && !readingOlder;
+  const olderState: OlderHistoryState = !timeline?.next ? "none" : loadingAll ? "loading" : "more";
+  useLayoutEffect(() => { onOlderState?.(olderState); }, [olderState, onOlderState]);
+  useLayoutEffect(() => {
+    if (!loadAllRequest) return;
+    const invoke = () => { if (!loadDisabled && !loadingAll) loadOlder(true); };
+    loadAllRequest.current = invoke;
+    return () => { if (loadAllRequest.current === invoke) loadAllRequest.current = null; };
+  });
   // The rows of a long timeline are costly to build and to compare: they are rebuilt when the window or the
   // live view changes, and a row is rendered again only when its item did.
   const entries = timeline?.entries ?? noEntries;
@@ -516,7 +540,7 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
       pluginEvents={pluginCards?.sessionId === sessionId && timeline && !timeline.newerOmitted ? pluginCards.events : undefined}
       echoes={!timeline?.newerOmitted} empty={reconciled.length === 0 && current?.kind === "ready"} revision={timeline?.revision ?? null} sources={sources}
       readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs} canInspect={inspectable} onOpenSource={openSource}
-      promptKeys={promptKeys} onBranch={onBranch} running={running} shown={reveal?.offset ?? null} />
+      promptKeys={promptKeys} onBranch={onBranch} running={running} shown={reveal?.offset ?? null} find={find} />
     {sourceTarget && sourceTarget.revision.sessionId === sessionId && <HistorySource key={JSON.stringify(sourceTarget)} target={sourceTarget}
       canInspect={() => sourceTarget.current() && (canInspect?.() ?? true)
         && JSON.stringify(sourceTarget.revision) === JSON.stringify(timeline?.revision)} onClose={() => setSourceTarget(null)} />}

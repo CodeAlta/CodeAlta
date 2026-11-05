@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Button, InputGroup } from "@blueprintjs/core";
 import { AppIcon, type IconName } from "../AppIcon";
+import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
-import { clearFound, defaultFindOptions, findPatternInvalid, findRanges, isFindKey, markFound, noFoundMarks, rangeShown, revealRange, type FindOptions } from "./findInPage";
+import { clearFound, defaultFindOptions, findPattern, findPatternInvalid, findRanges, firstBelow, isFindKey, markFound, noFoundMarks, rangeShown, revealRange, samePlace, type FindOptions } from "./findInPage";
 
 const mac = typeof navigator !== "undefined" && navigator.platform.startsWith("Mac");
 /** The key that finds in a page, as the window names it. */
@@ -24,7 +25,12 @@ export type FindInPage = Readonly<{
   keyDown: (event: ReactKeyboardEvent) => boolean;
   /** The box of the search, rendered over the page by its host, which positions it. */
   bar: ReactNode;
+  /** What is looked for while the search is open; null otherwise. A page opens by it what hides a place. */
+  pattern: RegExp | null;
 }>;
+
+// How many frames a place just gone to is kept in view: the rows that come into view take their real height, and move it.
+const revealFrames = 3;
 
 // The element that scrolls a place of the page into view: the page itself, or the first of its parents that scrolls.
 function scrollerOf(element: HTMLElement): HTMLElement {
@@ -38,9 +44,9 @@ function scrollerOf(element: HTMLElement): HTMLElement {
 /**
  * Finds a text in a rendered page, as it is typed: the first place from where the reader is is shown, Enter and
  * Shift+Enter go to the next and the previous one, Escape closes. The places are found again, without moving the
- * page, when the page is drawn again (another file, new colors).
+ * page, when the page is drawn again (another file, new colors, what a session writes), and the place shown stays.
  */
-export function useFindInPage({ page, available = true, className, returnTo }: {
+export function useFindInPage({ page, available = true, className, returnTo, label = "Find in this page", endFirst = false, refreshDelay = 0, partial = false, extra = null, onMoved }: {
   /** The element whose text is searched; it stays in the document while the search is open. */
   page: () => HTMLElement | null;
   /** Whether the page can be searched now: it is read and shown. The search closes when it no longer can. */
@@ -49,12 +55,25 @@ export function useFindInPage({ page, available = true, className, returnTo }: {
   className?: string;
   /** What takes the keyboard when the search closes; else what had it when it opened, else the page. */
   returnTo?: () => HTMLElement | null;
+  /** What the box is called. */
+  label?: MessageKey;
+  /** With no place after the reader, the nearest one before them is shown, not the first of the page: a timeline is read from its end. */
+  endFirst?: boolean;
+  /** How long a page that keeps changing is left alone, in milliseconds, before it is searched again. */
+  refreshDelay?: number;
+  /** Whether the page holds only part of what could be searched: the count says it. */
+  partial?: boolean;
+  /** What the box shows after the count. */
+  extra?: ReactNode;
+  /** The search moved the page to show a place. */
+  onMoved?: () => void;
 }): FindInPage {
   const { t } = useShellLanguage();
-  const pageOf = useRef(page), returnOf = useRef(returnTo);
+  const pageOf = useRef(page), returnOf = useRef(returnTo), movedOf = useRef(onMoved);
   pageOf.current = page;
   returnOf.current = returnTo;
-  const input = useRef<HTMLInputElement>(null), box = useRef<HTMLDivElement>(null), opener = useRef<HTMLElement | null>(null);
+  movedOf.current = onMoved;
+  const input = useRef<HTMLInputElement>(null), box = useRef<HTMLDivElement>(null), opener = useRef<HTMLElement | null>(null), revealing = useRef(0);
   const [finding, setFinding] = useState(false);
   const [text, setText] = useState("");
   const [options, setOptions] = useState<FindOptions>(defaultFindOptions);
@@ -68,25 +87,41 @@ export function useFindInPage({ page, available = true, className, returnTo }: {
   useEffect(() => {
     const host = searched;
     if (!host) { ranges.current = []; shown.current = -1; clearFound(marks.current); setFound({ index: -1, count: 0 }); return; }
-    let frame = 0;
+    let frame = 0, timer: ReturnType<typeof setTimeout> | undefined;
     const run = (typed: boolean) => {
+      const before = ranges.current[shown.current];
       const next = host.isConnected ? findRanges(host, text, options) : [];
-      const view = scrollerOf(host), top = view.getBoundingClientRect().top;
-      const index = next.length === 0 ? -1 : typed ? Math.max(0, next.findIndex(range => range.getBoundingClientRect().bottom > top))
-        : Math.max(0, Math.min(shown.current, next.length - 1));
+      const view = scrollerOf(host);
+      // Text typed, or a page that had nothing and now has a place (a fold that opened for it), goes to the nearest place.
+      const going = next.length > 0 && (typed || !before);
+      const index = next.length === 0 ? -1 : going ? nearest(next, view, endFirst) : placeKept(next, before, shown.current);
       ranges.current = next;
       shown.current = index;
       markFound(marks.current, next, index);
       setFound({ index, count: next.length });
-      if (typed && index >= 0 && !rangeShown(next[index], view)) revealRange(next[index], view);
+      if (going && !rangeShown(next[index], view)) reveal(next[index], view);
     };
     run(true);
-    const observer = new MutationObserver(() => { frame ||= requestAnimationFrame(() => { frame = 0; run(false); }); });
+    const again = () => { timer = undefined; frame ||= requestAnimationFrame(() => { frame = 0; run(false); }); };
+    const observer = new MutationObserver(() => { if (refreshDelay <= 0) again(); else timer ??= setTimeout(again, refreshDelay); });
     observer.observe(host, { childList: true, subtree: true, characterData: true });
-    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); clearTimeout(timer); };
   }, [searched, text, options]);
-  useEffect(() => () => clearFound(marks.current), []);
+  useEffect(() => () => { clearFound(marks.current); cancelAnimationFrame(revealing.current); }, []);
   useEffect(() => { if (!available) setFinding(false); }, [available]);
+
+  function reveal(range: Range, view: HTMLElement) {
+    cancelAnimationFrame(revealing.current);
+    let frames = revealFrames;
+    const place = () => {
+      if (ranges.current[shown.current] !== range) return;
+      const top = view.scrollTop;
+      revealRange(range, view);
+      if (view.scrollTop !== top) movedOf.current?.();
+      if (--frames > 0) revealing.current = requestAnimationFrame(place);
+    };
+    place();
+  }
 
   function start() {
     if (!available) return;
@@ -111,7 +146,7 @@ export function useFindInPage({ page, available = true, className, returnTo }: {
     shown.current = index;
     markFound(marks.current, list, index);
     setFound({ index, count: list.length });
-    if (host) revealRange(list[index], scrollerOf(host));
+    if (host) reveal(list[index], scrollerOf(host));
   }
   const inBar = (target: EventTarget | null) => target instanceof Node && !!box.current?.contains(target);
   function keyDown(event: ReactKeyboardEvent) {
@@ -134,7 +169,7 @@ export function useFindInPage({ page, available = true, className, returnTo }: {
   const toggles: readonly (readonly [keyof FindOptions, IconName, "Match case" | "Match whole word" | "Use regular expression", string])[] = [
     ["matchCase", "caseSensitive", "Match case", "c"], ["wholeWord", "wholeWord", "Match whole word", "w"], ["regex", "regex", "Use regular expression", "r"]];
   const toggle = (option: keyof FindOptions) => setOptions(current => ({ ...current, [option]: !current[option] }));
-  const bar = open ? <div className={className ? `find-in-page ${className}` : "find-in-page"} role="search" aria-label={t("Find in this page")} ref={box}
+  const bar = open ? <div className={className ? `find-in-page ${className}` : "find-in-page"} role="search" aria-label={t(label)} ref={box}
     onKeyDown={event => {
       if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       const chosen = toggles.find(entry => entry[3] === event.key.toLowerCase());
@@ -143,7 +178,7 @@ export function useFindInPage({ page, available = true, className, returnTo }: {
       toggle(chosen[0]);
     }}>
     <InputGroup inputRef={input} size="small" className="find-in-page-query" value={text} maxLength={200} autoComplete="off" spellCheck={false}
-      placeholder={t("Find in this page")} aria-label={t("Find in this page")} aria-invalid={invalid || undefined} intent={invalid ? "danger" : undefined}
+      placeholder={t(label)} aria-label={t(label)} aria-invalid={invalid || undefined} intent={invalid ? "danger" : undefined}
       title={invalid ? t("The regular expression is not valid.") : undefined} onChange={event => setText(event.target.value)}
       onKeyDown={event => {
         // Enter goes to the next place, Shift+Enter to the one before. A text being composed is left to its input method.
@@ -157,12 +192,26 @@ export function useFindInPage({ page, available = true, className, returnTo }: {
           onClick={() => { toggle(option); input.current?.focus(); }} />)}
       </span>} />
     <span className="find-in-page-count" role="status" data-empty={text.trim() && found.count === 0 || undefined}>
-      {text.trim() ? t("{index} of {count}", { index: found.index + 1, count: found.count }) : ""}</span>
+      {text.trim() ? t("{index} of {count}", { index: found.index + 1, count: partial ? `${found.count}+` : found.count }) : ""}</span>
+    {extra}
     <Button variant="minimal" size="small" icon={<AppIcon name="arrowUp" size={15} />} aria-label={t("Previous match")} title={`${t("Previous match")} (Shift+Enter)`}
       disabled={found.count === 0} onClick={() => step(-1)} />
     <Button variant="minimal" size="small" icon={<AppIcon name="arrowDown" size={15} />} aria-label={t("Next match")} title={`${t("Next match")} (Enter)`}
       disabled={found.count === 0} onClick={() => step(1)} />
     <Button variant="minimal" size="small" icon={<AppIcon name="close" size={15} />} aria-label={t("Close")} title={`${t("Close")} (Esc)`} onClick={() => close()} />
   </div> : null;
-  return { finding: open, available, open: start, close, inBar, keyDown, bar };
+  const looked = useMemo(() => findPattern(text, options), [text, options]);
+  return { finding: open, available, open: start, close, inBar, keyDown, bar, pattern: open ? looked : null };
+}
+
+// The place to go to from where the reader is: the first that ends in view or after it.
+function nearest(places: readonly Range[], view: HTMLElement, endFirst: boolean): number {
+  const at = firstBelow(places, view.getBoundingClientRect().top, range => range.getBoundingClientRect().bottom);
+  return at >= 0 ? at : endFirst ? places.length - 1 : 0;
+}
+
+// The place shown once the page is searched again: the same one wherever it is now (rows came before it), else the same rank.
+function placeKept(places: readonly Range[], before: Range | undefined, index: number): number {
+  const same = before ? places.findIndex(range => samePlace(range, before)) : -1;
+  return same >= 0 ? same : Math.max(0, Math.min(index, places.length - 1));
 }

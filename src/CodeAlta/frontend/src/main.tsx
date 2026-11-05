@@ -400,6 +400,7 @@ import "./documentation/documentation.css";
 import "./promptInheritance/promptInheritance.css";
 import { DocumentationPanel } from "./documentation/DocumentationPanel";
 import { findKeyKept } from "./findInPage/findInPage";
+import { useTimelineFind } from "./findInPage/useTimelineFind";
 import { createDocumentationHub } from "./documentation/documentationHub";
 import "./pluginButtons/pluginButtons.css";
 import "./sessionBranch/sessionBranch.css";
@@ -460,7 +461,9 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
   /** Scrolls to a user message, by the journal offset that keys its row; false when the loaded window does not hold it. */
   showRow: (key: string) => boolean;
   /** Goes to the bookmarked message before or after the rows in view; false when there is none that way. */
-  stepBookmark: (direction: -1 | 1) => boolean }>;
+  stepBookmark: (direction: -1 | 1) => boolean;
+  /** Opens the search in the timeline. */
+  find: () => void }>;
 
 /**
  * What a pane of a session asks about bookmarks: the list the host keeps, the requests that show a message of a
@@ -3491,7 +3494,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const session = view === "workspace" && !!selectedSession && !fileTabs.active;
     const ownedSession = session && owned;
     switch (command) {
-      case "sessionInfo": case "messagePrevious": case "messageNext": case "messageFirst": case "messageLatest": case "toggleNotes": return session;
+      case "sessionInfo": case "messagePrevious": case "messageNext": case "messageFirst": case "messageLatest": case "toggleNotes": case "findInSession": return session;
       case "bookmarkPrevious": case "bookmarkNext": case "bookmarkSession": return ownedSession && bookmarkHost.hub.getSnapshot().available;
       case "usage": case "reminders": case "nextPrompt": case "modelSelector": case "steer": return ownedSession;
       // The control of the composer in front decides: the command runs exactly when pressing it would.
@@ -3660,6 +3663,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       // The microphone of the composer in front starts, or stops what it records.
       case "dictate": invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#dictate-prompt")); break;
       case "searchSessions": openSearch({ category: "sessions" }); break;
+      case "findInSession": timelineCommand.current?.find(); break;
       case "refreshStatuses": runtimeObservationControls().refresh(tabs.open); break;
       case "send": case "abort": case "clearQueue": case "compact": invokeComposerControl(composerControl(command)); break;
       case "nextPrompt": composerCommand(command); break;
@@ -3735,6 +3739,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (!commandChord.current && event.key === "Tab" && target?.closest("[data-file-tab-keys]")) return;
       // A list that renames its own rows (the files of the code editor) keeps F2.
       if (!commandChord.current && event.key === "F2" && target?.closest("[data-rename-keys]")) return;
+      // The code editor searches the files of its project with Ctrl+Shift+F, which searches the sessions elsewhere.
+      if (!commandChord.current && event.shiftKey && event.key.toLowerCase() === "f" && target?.closest("[data-find-files-keys]")) return;
       // The row of a session forks and archives its own session with the keys of Fork Session and Archive Session.
       if (!commandChord.current && isSessionRowKeyTarget(target) && sessionRowShortcut(event, false)) return;
       // A rendered page (the Documentation tab, a Markdown preview, a plan under review) finds in itself with Ctrl+F,
@@ -6804,6 +6810,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null,
   const [newerOmitted, setNewerOmitted] = useState(false);
   const newest = useExplicitNewestHistory(session.id, selectedProjectId, status?.hostEpoch ?? null, timeline, setMessageNotice, !newerOmitted);
   // Stable across History's auto-pages; do not cancel an admitted request on a parent render.
+  // Ctrl+F anywhere in the session, the prompt included, finds in its timeline. A file under review in its place finds in itself.
+  const timelineFind = useTimelineFind(timeline, !demoMode && !inCloud(session) && askMode !== "file", newest.cancel);
   const resetMessageNotice = useCallback((generation: number, explicitNewest: boolean) => {
     timeline.resetMessageNavigation();
     if (newest.onTarget(generation)) return;
@@ -6824,7 +6832,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null,
           : { key: action === "messageFirst" ? "First retained message (not necessarily the first journal message): {label}" : "Retained message: {label}", parameters: result.label === undefined ? undefined : { label: result.label } });
       },
       latestReady: newest.available, latest: newest.latest, cancelLatest: newest.cancel,
-      showRow: key => { newest.cancel(); return timeline.showRow(key); }, stepBookmark: direction => bookmarkStep.current?.(direction) ?? false };
+      showRow: key => { newest.cancel(); return timeline.showRow(key); }, stepBookmark: direction => bookmarkStep.current?.(direction) ?? false,
+      find: () => timelineFind.finder.open() };
     timelineCommand.current = command;
     return () => { if (timelineCommand.current === command) timelineCommand.current = null; };
   });
@@ -6984,7 +6993,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null,
   // It is read when a card shows it, and again when the run of the session starts or ends.
   const resumeHub = useMemo(() => cliEpoch ? createResumeHub(sessionOperations, cliEpoch, session.id) : null, [cliEpoch, session.id]);
   useEffect(() => { resumeHub?.noteRunning(running === true); }, [resumeHub, running]);
-  return <MarkdownLinkScopeContext.Provider value={linkScope}><SessionResumeContext.Provider value={resumeHub}><ScriptRunActionsContext.Provider value={scriptActions}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><MessageReaderContext.Provider value={readMessage}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
+  return <MarkdownLinkScopeContext.Provider value={linkScope}><SessionResumeContext.Provider value={resumeHub}><ScriptRunActionsContext.Provider value={scriptActions}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><MessageReaderContext.Provider value={readMessage}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate} {...timelineFind.keys}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       // The conversation of the Claude Code CLI the session continues: read when the window opens; another provider has none.
       conversation={ownedSession && !demoMode && session.providerConversation === true
@@ -7007,6 +7016,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null,
         {cloud && <CloudOriginLine session={session} onOpenLink={cloud.onOpenLink} />}
         <div className="session-timeline-area" data-ask={askMode}>
         <div className="ask-file-slot" ref={setAskFileSlot} hidden={askMode !== "file"} />
+        {timelineFind.finder.bar}
         {/* A press in the timeline gives it the keyboard, so that the keys scroll it: the panel of the tab around
             it would take the press otherwise, and the keys scroll from what has the keyboard upwards. */}
         <div className="timeline-scroll" tabIndex={-1} ref={timeline.elementRef}
@@ -7014,7 +7024,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null,
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
           onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}
           onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
-        <PluginPaneContext.Provider value={timelinePane}><TimelineBookmarksContext.Provider value={bookmarkMarks}><McpAppsContext.Provider value={mcpAppsHost}><AutomationOriginContext.Provider value={automationOrigin}><History observing={observing} reveal={revealRequest} onReveal={onReveal} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onUnsentPrompt={onUnsentPrompt} onSettled={onHistorySettled}
+        <PluginPaneContext.Provider value={timelinePane}><TimelineBookmarksContext.Provider value={bookmarkMarks}><McpAppsContext.Provider value={mcpAppsHost}><AutomationOriginContext.Provider value={automationOrigin}><History {...timelineFind.history} observing={observing} reveal={revealRequest} onReveal={onReveal} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onUnsentPrompt={onUnsentPrompt} onSettled={onHistorySettled}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} olderRequest={timeline.olderRequestRef} onNewestResult={newest.onResult}
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs}

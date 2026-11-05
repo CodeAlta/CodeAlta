@@ -1,7 +1,7 @@
 /**
  * The search of a text in a rendered page (Ctrl+F, Cmd+F on macOS): the page of the Documentation tab, the Markdown
- * preview of the code editor, a plan or a file under review. The places of the page where the text is are marked
- * without changing the page, which the Markdown boundary of the window draws.
+ * preview of the code editor, a plan or a file under review, the timeline of a session. The places of the page where
+ * the text is are marked without changing the page, which the Markdown boundary of the window draws.
  */
 
 /** The names of the marks of the page: every place found, and the place shown. */
@@ -11,8 +11,8 @@ export const maximumFindMatches = 1000;
 
 const blocks = "p, li, h1, h2, h3, h4, h5, h6, td, th, pre, blockquote, figcaption, dt, dd, summary";
 // What is not a word of the page: the links to the pages before and after, the button that copies a code block, the
-// gutter and the comment cards of a review.
-const skipped = ".documentation-pager, .review-block-gutter, .review-block-host, button, script, style, [aria-hidden='true']";
+// gutter and the comment cards of a review, the time and the buttons of a message of a timeline.
+const skipped = ".documentation-pager, .review-block-gutter, .review-block-host, .message-actions, button, script, style, [aria-hidden='true']";
 
 /** How a text is looked for: as the search of the text editor, whatever the case unless asked, and as typed. */
 export type FindOptions = Readonly<{ matchCase: boolean; wholeWord: boolean; regex: boolean }>;
@@ -105,6 +105,26 @@ export function findRanges(root: HTMLElement, text: string, options: FindOptions
   return ranges;
 }
 
+/**
+ * The first of the places, in the order they are read, that ends below a height of the window; -1 when all end above it.
+ * Measured by halves: a page can hold a thousand places, and it is searched again as it changes.
+ */
+export function firstBelow<T>(places: readonly T[], top: number, bottomOf: (place: T) => number): number {
+  let low = 0, high = places.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (bottomOf(places[middle]) > top) high = middle;
+    else low = middle + 1;
+  }
+  return low < places.length ? low : -1;
+}
+
+/** Whether two ranges are the same place of the page: a page that is searched again keeps the place shown. */
+export function samePlace(left: AbstractRange, right: AbstractRange): boolean {
+  return left.startContainer === right.startContainer && left.startOffset === right.startOffset
+    && left.endContainer === right.endContainer && left.endOffset === right.endOffset;
+}
+
 /** Whether a key asks for the search in the page: Ctrl+F, and Cmd+F on macOS. */
 export function isFindKey(event: Readonly<{ key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }>, mac: boolean): boolean {
   return event.key.toLowerCase() === "f" && !event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey);
@@ -112,7 +132,7 @@ export function isFindKey(event: Readonly<{ key: string; ctrlKey: boolean; metaK
 
 /**
  * Whether the window leaves Ctrl+F to the element that has the keyboard: a rendered page (`data-find-keys`) finds
- * in itself there, where Ctrl+F elsewhere searches the sessions.
+ * in itself there, as a session finds in its timeline, where Ctrl+F elsewhere searches the sessions.
  */
 export function findKeyKept(event: Readonly<{ key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }>, target: Element | null): boolean {
   return isFindKey(event, false) && !!target?.closest("[data-find-keys]");

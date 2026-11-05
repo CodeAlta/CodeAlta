@@ -54,6 +54,12 @@ test("caret and typing keys stay with text fields and only navigate outside text
   assert.deepEqual(resolveCommandKey(key("ArrowUp", { altKey: true }), false, "prompt"), { command: null, chord: false, handled: false });
   assert.equal(resolveCommandKey(ctrl("f"), false, "none").command, "searchSessions");
   assert.equal(resolveCommandKey(ctrl("f"), false, "prompt").handled, false);
+  // Ctrl+Shift+F searches the sessions from the prompt too, where Ctrl+F finds in the session.
+  for (const focus of ["none", "prompt", "text"] as const) {
+    assert.equal(resolveCommandKey(key("F", { ctrlKey: true, shiftKey: true }), false, focus, false).command, "searchSessions", focus);
+    assert.equal(resolveCommandKey(key("f", { metaKey: true, shiftKey: true }), false, focus, true).command, "searchSessions", focus);
+  }
+  assert.equal(resolveCommandKey(ctrl("f"), false, "none", true).command, "searchSessions", "Ctrl+F on macOS, as before.");
   assert.equal(resolveCommandKey(key("F2"), false, "text").handled, false);
   for (const typed of ["a", "?", "/", "Enter", "Escape", "ArrowDown"])
     assert.equal(resolveCommandKey(key(typed), false, "prompt").handled, false, typed);
@@ -86,6 +92,9 @@ test("help lists bindings then typed hints", () => {
   const help = commandDefinitions.find(command => command.id === "help")!;
   assert.deepEqual(commandKeys(help), ["F1", "?"]);
   assert.deepEqual(commandKeys(commandDefinitions.find(command => command.id === "send")!), ["Enter"]);
+  const find = commandDefinitions.find(command => command.id === "findInSession")!;
+  assert.deepEqual(commandKeys(find, false), ["Ctrl+F"]);
+  assert.deepEqual(commandKeys(find, true), ["Cmd+F"], "A hint names the gesture of the platform.");
 });
 
 test("the commands a search finds come with their score: nothing typed lists them all as they are registered", () => {
