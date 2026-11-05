@@ -133,6 +133,81 @@ public sealed class NamedPeopleTests
             await Assert.ThrowsExactlyAsync<FleetException>(() => bea.ReadHistoryAsync(new FleetHistoryParams(shared.SessionId), token));
     }
 
+    [TestMethod]
+    public async Task ALiveReadOfAGrantee_EndsOnceTheGrantIsGone()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        using var beaKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "bea"));
+        var acme = new OtherPeople("acme") { [beaKey.Fingerprint] = ("bea", beaKey.DeviceId) };
+        FleetCreateSessionResult shared;
+        await using (var owner = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token))
+            shared = await owner.CreateSessionAsync(new FleetCreateSessionParams(Title: "Fix the parser"), "create-shared", token);
+        var gone = 0;
+        fixture.Service.ContentGrants = (organization, person, session) => Volatile.Read(ref gone) == 0 && (organization, person, session) == ("acme", "bea", shared.SessionId);
+
+        await using var bea = await ConnectAsync(fixture, acme, beaKey, token);
+        var watch = await bea.WatchAsync(shared.SessionId, token);
+        // The grant expires, or a newer signed document takes it away: what she reads live ends, while nothing new is sent too.
+        Interlocked.Exchange(ref gone, 1);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        try
+        {
+            await foreach (var _ in watch.Updates.ReadAllAsync(timeout.Token)) { }
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            Assert.Fail("the live read of a grant that is gone goes on");
+        }
+
+        Assert.AreEqual("forbidden", watch.EndReason);
+    }
+
+    [TestMethod]
+    public async Task TheBudgetsOfTheMachine_AdmitTheRunOfANamedPerson_AsTheirs()
+    {
+        var token = TestContext.CancellationToken;
+        var runs = new System.Collections.Concurrent.ConcurrentQueue<FleetNodeBudgetRun>();
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, (run, _, _) =>
+        {
+            runs.Enqueue(run);
+            return Task.FromResult(FleetBudgetAdmission.Admitted);
+        });
+        using var beaKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "bea"));
+        var acme = new OtherPeople("acme") { [beaKey.Fingerprint] = ("bea", beaKey.DeviceId) };
+        fixture.Service.People.Set(new FleetNodePeopleChange("bea", ["view", "drive", "start"], OrganizationId: "acme"));
+        await using var bea = await ConnectAsync(fixture, acme, beaKey, token);
+        await bea.CreateSessionAsync(new FleetCreateSessionParams(Title: "Bea's work", Prompt: "Find the bug."), "create-bea", token);
+
+        // Her run spends from the budgets of her space and her project, by her keys: the gate is told whose it is.
+        var admitted = runs.Single();
+        Assert.AreEqual(("bea", "acme"), (admitted.PersonId, admitted.PersonOrganizationId));
+    }
+
+    [TestMethod]
+    public async Task AGranteeEndsTheLiveReadsItStarted()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        using var beaKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "bea"));
+        var acme = new OtherPeople("acme") { [beaKey.Fingerprint] = ("bea", beaKey.DeviceId) };
+        FleetCreateSessionResult shared;
+        await using (var owner = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token))
+            shared = await owner.CreateSessionAsync(new FleetCreateSessionParams(Title: "Fix the parser"), "create-shared", token);
+        fixture.Service.ContentGrants = (organization, person, session) => (organization, person, session) == ("acme", "bea", shared.SessionId);
+
+        // She has no right of the machine but her grant: the watches she ends are ended on the node, so she may watch again.
+        await using var bea = await ConnectAsync(fixture, acme, beaKey, token);
+        for (var round = 0; round < 2; round++)
+        {
+            var watches = new List<FleetSessionWatch>();
+            // The most a channel watches at a time.
+            for (var index = 0; index < 16; index++) watches.Add(await bea.WatchAsync(shared.SessionId, token));
+            foreach (var watch in watches) await watch.DisposeAsync();
+        }
+    }
+
     private static async Task<FleetNodeClient> ConnectAsync(FleetNodeFixture fixture, IDeviceTrustPolicy trust, DeviceIdentity identity, CancellationToken token)
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);

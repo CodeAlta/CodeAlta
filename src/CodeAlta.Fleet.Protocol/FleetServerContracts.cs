@@ -188,6 +188,10 @@ public sealed record FleetSessionCounts(long Turns = 0, long ToolCalls = 0, long
 /// <param name="Counts">Its counts.</param>
 /// <param name="SealedMetadata">Its descriptive metadata sealed for the person's devices, as opaque text, or <see langword="null"/>.</param>
 /// <param name="PersonId">The person who started it through a role on a machine of a team or of the organization, which decides who sees it; null otherwise.</param>
+/// <param name="PersonSignature">
+/// The machine's signature that <paramref name="PersonId"/> started the session there (<see cref="FleetSessionPersons"/>), which a
+/// device that opens a grant of its content verifies; null for none, or a machine of an earlier version.
+/// </param>
 public sealed record FleetSessionFact(
     string SessionId,
     long Epoch,
@@ -199,7 +203,8 @@ public sealed record FleetSessionFact(
     string? Model = null,
     FleetSessionCounts? Counts = null,
     string? SealedMetadata = null,
-    string? PersonId = null);
+    string? PersonId = null,
+    string? PersonSignature = null);
 
 /// <summary>The parameters of <c>facts.publish</c>.</summary>
 /// <param name="Sequence">The sequence of the batch on this device.</param>

@@ -44,9 +44,21 @@ public sealed class FleetNodePeople
 
     /// <summary>
     /// Gets or sets what gives the organization of the machine when it is linked to exactly one: a person named before their
-    /// organization was kept is that organization's; on a machine of several, they are nobody's until named again. Null: none.
+    /// organization was kept is that organization's, and is kept as such from the first time the machine knows it, so that an
+    /// organization the machine joins later never takes them for one of its people with the same id; on a machine of several, they
+    /// are nobody's until named again. Null: none.
     /// </summary>
-    public Func<string?>? SoleOrganization { get; set; }
+    public Func<string?>? SoleOrganization
+    {
+        get => _soleOrganization;
+        set
+        {
+            _soleOrganization = value;
+            lock (_gate) BindLegacy();
+        }
+    }
+
+    private Func<string?>? _soleOrganization;
 
     /// <summary>Gets what a person of an organization may do on the machine, or null when the machine does not name them.</summary>
     /// <param name="personId">The person.</param>
@@ -56,15 +68,36 @@ public sealed class FleetNodePeople
     {
         lock (_gate)
         {
+            BindLegacy();
             return _state.People.FirstOrDefault(person => person.PersonId == personId && Same(person.OrganizationId, organizationId)) is { } named
                 && DevicePermissionNames.TryParse(named.Permissions, out var permissions, out _) ? permissions & Allowed : null;
         }
     }
 
-    // Whether what the machine keeps for a person of an organization is for this one: the same organization, or one kept
-    // before organizations were, on a machine of a single organization.
-    private bool Same(string? kept, string? organizationId)
-        => string.Equals(kept, organizationId, StringComparison.Ordinal) || kept is null && organizationId is not null && SoleOrganization?.Invoke() == organizationId;
+    // Whether what the machine keeps for a person of an organization is for this one: the same organization. One kept before
+    // organizations were is bound to the sole organization of the machine first (BindLegacy), and else is nobody's.
+    private static bool Same(string? kept, string? organizationId) => string.Equals(kept, organizationId, StringComparison.Ordinal);
+
+    // Binds the people and the requests kept before organizations were to the organization of the machine, once it is linked to
+    // exactly one, and keeps them so: from then on they are of that organization only, whatever the machine joins later.
+    private void BindLegacy()
+    {
+        if (!_state.People.Any(static person => person.OrganizationId is null) && !_state.Asks.Any(static ask => ask.OrganizationId is null)) return;
+        if (_soleOrganization?.Invoke() is not { } sole) return;
+        _state = _state with
+        {
+            People = [.. _state.People.Select(person => person.OrganizationId is null ? person with { OrganizationId = sole } : person)],
+            Asks = [.. _state.Asks.Select(ask => ask.OrganizationId is null ? ask with { OrganizationId = sole } : ask)],
+        };
+        try
+        {
+            Save();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Bound in memory; written with the next change.
+        }
+    }
 
     private static string RefusalKey(string personId, string? organizationId) => organizationId is null ? personId : organizationId + "/" + personId;
 
@@ -72,7 +105,11 @@ public sealed class FleetNodePeople
     /// <returns>What the node holds.</returns>
     public FleetNodePeopleInfo Read()
     {
-        lock (_gate) return new FleetNodePeopleInfo([.. _state.People], [.. _state.Asks], [.. _state.Refused]);
+        lock (_gate)
+        {
+            BindLegacy();
+            return new FleetNodePeopleInfo([.. _state.People], [.. _state.Asks], [.. _state.Refused]);
+        }
     }
 
     /// <summary>Records that a person the machine does not name tried to use it, once, unless its owner refused them.</summary>
@@ -86,6 +123,7 @@ public sealed class FleetNodePeople
         ArgumentException.ThrowIfNullOrEmpty(deviceId);
         lock (_gate)
         {
+            BindLegacy();
             if (_state.Refused.Contains(RefusalKey(personId, organizationId), StringComparer.Ordinal)
                 || _state.Asks.Any(ask => ask.PersonId == personId && Same(ask.OrganizationId, organizationId))
                 || _state.People.Any(person => person.PersonId == personId && Same(person.OrganizationId, organizationId))) return false;
@@ -111,6 +149,7 @@ public sealed class FleetNodePeople
             throw new ArgumentException($"A person may view, drive and start their own sessions: '{unknown ?? string.Join(",", names)}' is not one of those.", nameof(change));
         lock (_gate)
         {
+            BindLegacy();
             // The organization of the person: the one named, else the one of their request, else the only one of the machine.
             var asked = _state.Asks.Where(ask => ask.PersonId == change.PersonId).Select(static ask => ask.OrganizationId).Distinct(StringComparer.Ordinal).ToArray();
             if (change.OrganizationId is null && asked.Length > 1)

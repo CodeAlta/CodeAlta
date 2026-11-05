@@ -175,7 +175,6 @@ export const fleetAccessMessages = {
   "Start sessions on machines": ["Iniciar sesiones en máquinas", "Démarrer des sessions sur des machines", "Sitzungen auf Maschinen starten", "マシンでセッションを開始", "在机器上启动会话"],
   "Manage machines": ["Administrar máquinas", "Gérer les machines", "Maschinen verwalten", "マシンを管理", "管理机器"],
   "Run automations by hand": ["Ejecutar automatizaciones a mano", "Exécuter des automatisations à la main", "Automationen von Hand ausführen", "自動化を手動で実行", "手动运行自动化"],
-  "Edit automations": ["Editar automatizaciones", "Modifier les automatisations", "Automationen bearbeiten", "自動化を編集", "编辑自动化"],
   "Answer the approvals of automations": ["Responder a las aprobaciones de automatizaciones", "Répondre aux approbations des automatisations", "Freigaben von Automationen beantworten",
     "自動化の承認に応答", "处理自动化的审批"],
   "See runs": ["Ver ejecuciones", "Voir les exécutions", "Läufe sehen", "実行を表示", "查看运行"],

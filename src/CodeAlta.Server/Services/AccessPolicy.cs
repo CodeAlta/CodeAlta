@@ -128,12 +128,23 @@ internal static class AccessPolicy
         foreach (var grant in snapshot.Grants)
         {
             if (grant.Status != FleetGrantStatuses.Active || grant.Capability != capability || grant.ExpiresAt is { } expires && expires <= now) continue;
+            // A capability no grant gives (IsGrantable) is not given by one kept from before either.
+            if (!IsGrantable(grant.Capability)) continue;
             if (!IsSubject(snapshot, grant, personId)) continue;
             if (Covers(grant, target, content)) return new(true, "grant:" + grant.Id);
         }
 
         return new(false, "denied");
     }
+
+    /// <summary>
+    /// Gets whether a capability may be granted. Editing automations is not: machines take the versions of an automation from
+    /// the owner of the machine and the maintainers of its team only, which no grant changes, so such a grant is refused when
+    /// made and never honored when one is kept.
+    /// </summary>
+    /// <param name="capability">The capability.</param>
+    /// <returns>Whether a grant may give it.</returns>
+    public static bool IsGrantable(string capability) => !string.Equals(capability, "automation.edit", StringComparison.Ordinal);
 
     /// <summary>Gets whether a person holds a capability on a target.</summary>
     /// <param name="snapshot">The access of the organization.</param>
@@ -234,9 +245,9 @@ internal static class AccessPolicy
             DateTimeOffset? end = null;
             foreach (var grant in granted)
             {
-                if (Decide(snapshot with { Grants = [grant] }, person.Id, "automation.run", automation, now) is not { Allowed: true } decision
-                    || !decision.Source.StartsWith("grant:", StringComparison.Ordinal))
-                    continue;
+                // The grant itself decides, its subject and its scope: what else the person holds (the role of an admin, who is
+                // no runner on the machines of a team by it) never hides it.
+                if (!IsSubject(snapshot, grant, person.Id) || !Covers(grant, automation, content: false)) continue;
                 end = !holds ? grant.ExpiresAt : end is null || grant.ExpiresAt is null ? null : grant.ExpiresAt > end ? grant.ExpiresAt : end;
                 holds = true;
             }

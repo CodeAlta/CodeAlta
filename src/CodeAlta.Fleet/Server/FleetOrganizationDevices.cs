@@ -283,11 +283,32 @@ public sealed class FleetOrganizationTrust(Func<FleetDeviceListState?> list, str
     /// <summary>What its maintainers may do there: their own sessions, the automations of the team, and manage the machine.</summary>
     public const DevicePermissions TeamMaintainerPermissions = TeamMemberPermissions | DevicePermissions.Automate | DevicePermissions.Manage;
 
+    private readonly Func<bool>? _accessUnavailable;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FleetOrganizationTrust"/> class over the anchored access document of the link,
+    /// which also says when a version it verified cannot be read back (<see cref="FleetOrganizationAccess.IsUnavailable"/>): then
+    /// nobody is let in through the organization, never the person the device list names as if no document were signed.
+    /// </summary>
+    /// <param name="list">Gives the list as last verified; null refuses everyone.</param>
+    /// <param name="selfDeviceId">The device of this node, never trusted through the list.</param>
+    /// <param name="access">The anchored access document of the same link.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="access"/> is null.</exception>
+    public FleetOrganizationTrust(Func<FleetDeviceListState?> list, string selfDeviceId, FleetOrganizationAccess access)
+        : this(list, selfDeviceId, () => access.Current)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        _accessUnavailable = () => access.IsUnavailable;
+    }
+
     /// <inheritdoc />
     public TrustedDevice? FindTrusted(DeviceFingerprint fingerprint)
     {
         if (list() is not { } current || current.FindByFingerprint(fingerprint) is not { } member || member.DeviceId == selfDeviceId) return null;
         var document = access?.Invoke();
+        // A document this device verified but cannot read back may give the machine to another owner: until it is read again,
+        // the device list decides nothing here.
+        if (document is null && _accessUnavailable?.Invoke() == true) return null;
         if (document is not null && document.IsSuspended(member.OwnerId)) return null;
         if (member.Kind == FleetDeviceKinds.Controller && document?.TeamOf(selfDeviceId) is { } team)
         {

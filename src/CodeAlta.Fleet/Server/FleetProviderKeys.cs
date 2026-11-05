@@ -132,6 +132,32 @@ public static class FleetProviderKeys
     /// </exception>
     public static string Open(string sealedText, string wrapped, string organizationId, string providerId, long version, FleetProviderDefinition definition,
         DeviceIdentity identity, FleetDeviceListState list, FleetAccessState access)
+        => Open(sealedText, wrapped, organizationId, providerId, version, definition, identity, list, access, signedNow: false);
+
+    /// <summary>
+    /// Opens the key of a provider as
+    /// <see cref="Open(string, string, string, string, long, FleetProviderDefinition, DeviceIdentity, FleetDeviceListState, FleetAccessState)"/>
+    /// does; for a version the machine takes for the first time, also only when the device that signed the copy is still a
+    /// controller device of the device list as this machine holds it now, of the same person: a device removed since cannot give a
+    /// new version against the entry of the list it signed at. A copy of a version already installed holds against that entry.
+    /// </summary>
+    /// <param name="sealedText">The sealed key.</param>
+    /// <param name="wrapped">This machine's copy of its sealing key.</param>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="providerId">The provider.</param>
+    /// <param name="version">Its version.</param>
+    /// <param name="definition">What the machine installs with the key: its owner, name, type, endpoint and models.</param>
+    /// <param name="identity">The key of this machine.</param>
+    /// <param name="list">The device list as this machine verified it.</param>
+    /// <param name="access">The access document as this machine verified it.</param>
+    /// <param name="signedNow">Whether the signer must hold its device now: true for a version this machine never installed.</param>
+    /// <returns>The key of the account.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="InvalidDataException">
+    /// The copy is not for this machine, provider, version and definition, is not signed by someone who answers for its owner, or does not open.
+    /// </exception>
+    public static string Open(string sealedText, string wrapped, string organizationId, string providerId, long version, FleetProviderDefinition definition,
+        DeviceIdentity identity, FleetDeviceListState list, FleetAccessState access, bool signedNow)
     {
         ArgumentNullException.ThrowIfNull(sealedText);
         ArgumentNullException.ThrowIfNull(wrapped);
@@ -140,7 +166,7 @@ public static class FleetProviderKeys
         ArgumentNullException.ThrowIfNull(list);
         ArgumentNullException.ThrowIfNull(access);
         var key = FleetGrantKeys.Unwrap(wrapped, organizationId, providerId, Subject(version, definition), identity, list,
-            signer => access.Answers(definition.OwnerKind, definition.OwnerId, signer.OwnerId), Providers);
+            signer => access.Answers(definition.OwnerKind, definition.OwnerId, signer.OwnerId) && (!signedNow || SignsNow(list, signer)), Providers);
         try
         {
             using var document = JsonDocument.Parse(sealedText);
@@ -167,6 +193,11 @@ public static class FleetProviderKeys
             throw new InvalidDataException("The key of the provider does not open with its copy.", exception);
         }
     }
+
+    // Whether the device that signed a copy is a controller device of the list as it is now, not removed, of the same person.
+    private static bool SignsNow(FleetDeviceListState list, FleetDeviceListMember signer)
+        => !list.Removed.Contains(signer.DeviceId) && list.Members.TryGetValue(signer.DeviceId, out var now) && now.Kind == FleetDeviceKinds.Controller
+            && string.Equals(now.OwnerId, signer.OwnerId, StringComparison.Ordinal);
 
     // What the signature of a copy binds besides the provider: its version and the hash of its definition.
     private static string Subject(long version, FleetProviderDefinition definition)

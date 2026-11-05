@@ -140,6 +140,49 @@ public sealed class PolicyNodeTests
     }
 
     [TestMethod]
+    public async Task AnAdminNoLongerASigner_SignsNoNewVersion_ForAMachineThatReadsThePolicyForTheFirstTime()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var root = new TempDirectory();
+        using var ownerKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "owner"));
+        using var beaKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "bea"));
+        using var owner = new FleetServerClient(server.BaseAddress, ownerKey);
+        await owner.SetUpAsync(server.SetupCode, "Alex", "Desktop", "Acme", CancellationToken.None);
+        var invitation = await owner.InvitePersonAsync(new Fleet.Protocol.Api.InvitePersonRequest("Bea"));
+        using (var bea = new FleetServerClient(server.BaseAddress, beaKey)) await bea.EnrollAsync(invitation.Token, "Bea laptop", FleetDeviceKinds.Controller, CancellationToken.None);
+        await owner.ApproveAsync(beaKey.DeviceId, FleetDeviceKinds.Controller, CancellationToken.None);
+        await owner.SetPersonRoleAsync(invitation.Person.Id, FleetOrganizationRoles.Admin);
+        var access = new FleetOrganizationAccess(new FleetOrganizationDevices(server.BaseAddress, ownerKey, Path.Combine(root.Path, "owner-link", FleetOrganizationDevices.PinFileName)),
+            Path.Combine(root.Path, "owner-link", FleetOrganizationAccess.PinFileName));
+        await access.SignAsync((await access.PrepareAsync(CancellationToken.None))!, CancellationToken.None);
+
+        // The owner stops the fleet; then Bea is no longer an admin, and with the server she lifts the stop against the
+        // authority she held before.
+        var owners = Console(server.BaseAddress, ownerKey, Path.Combine(root.Path, "owner-link"));
+        var stopped = await owners.SignAsync(await owners.PrepareAsync(FleetPolicyRules.None, new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [], "Incident"), null,
+            CancellationToken.None), CancellationToken.None);
+        await owner.SetPersonRoleAsync(invitation.Person.Id, FleetOrganizationRoles.Member);
+        await access.SignAsync((await access.PrepareAsync(CancellationToken.None))!, CancellationToken.None);
+        var lifted = new FleetPolicyDocument(FleetPolicyDocument.CurrentVersion, stopped.OrganizationId!, stopped.Number + 1, stopped.LastHash, stopped.DeviceListSequence,
+            stopped.AccessNumber, FleetPolicyRules.None, null, beaKey.DeviceId, DateTimeOffset.UtcNow);
+        var text = FleetPolicyDocuments.Serialize(lifted);
+        var signed = new FleetSignedPolicyDocument(text, System.Buffers.Text.Base64Url.EncodeToString(beaKey.SignData(FleetPolicyDocuments.GetSignedBytes(text))));
+        using var forging = new AppendingHandler { InnerHandler = new HttpClientHandler() };
+        forging.Appended = new PolicyDocumentDto(lifted.Number, FleetPolicyDocuments.Hash(signed), signed, DateTimeOffset.UtcNow);
+
+        // A machine that reads the policy for the first time does not take her version: its work stays stopped, and nothing
+        // is kept that a restart would trust.
+        var machine = Console(server.BaseAddress, ownerKey, Path.Combine(root.Path, "machine-link"), forging);
+        var refused = await Assert.ThrowsExactlyAsync<FleetPolicyDocumentException>(() => machine.RefreshAsync(CancellationToken.None));
+        StringAssert.Contains(refused.Message, "signs no more");
+        Assert.IsNotNull(machine.Current?.Stop, "the work of the fleet does not go on on a version its signer could no longer sign");
+        Assert.IsTrue(machine.Current!.Stops(ownerKey.DeviceId, null));
+        var restarted = Console(server.BaseAddress, ownerKey, Path.Combine(root.Path, "machine-link"), forging);
+        await Assert.ThrowsExactlyAsync<FleetPolicyDocumentException>(() => restarted.RefreshAsync(CancellationToken.None));
+        Assert.IsNotNull(restarted.Current?.Stop);
+    }
+
+    [TestMethod]
     public async Task AKeptPolicyThatDoesNotRead_StopsTheWorkOfTheFleet_AndIsNotReplacedByWhatTheServerSays()
     {
         using var root = new TempDirectory();

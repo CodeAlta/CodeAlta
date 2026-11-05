@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Server;
 using CodeAlta.Orchestration.Runtime;
@@ -21,6 +22,33 @@ public sealed partial class FleetNodeService
 
     /// <summary>Gets the sessions this node started as work of the fleet, kept in its fleet folder.</summary>
     internal FleetWorkSessions Work => LazyInitializer.EnsureInitialized(ref _work, () => new FleetWorkSessions(_host.CatalogOptions.FleetRoot));
+
+    /// <summary>
+    /// Gives the tools the policy of its space turns off for a session of the work of the fleet, or one it started (its parent or
+    /// its creator up its lineage), as when the work was started: the runtime holds them in memory only, and asks them again at
+    /// every attachment (<see cref="SessionRuntimeService.ToolPatternGate"/>), so that a session resumed after a restart of the
+    /// node does without them again.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="cancellationToken">Cancels the reads of its lineage.</param>
+    /// <returns>The patterns; null when the session is not work of the fleet or the policy turns nothing off.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
+    public async ValueTask<IReadOnlyList<string>?> PolicyToolsOffAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        if (Policy is not { } policy) return null;
+        var work = Work.List();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var current = session; current is not null && seen.Add(current.SessionId) && seen.Count <= 32;)
+        {
+            if (work.FirstOrDefault(item => string.Equals(item.SessionId, current.SessionId, StringComparison.OrdinalIgnoreCase)) is { } item)
+                return policy.RulesFor(item.SpaceId ?? session.SpaceId)?.ToolsOff is { Count: > 0 } off ? off : null;
+            if ((current.ParentSessionId ?? current.CreatedBy?.SourceSessionId) is not { Length: > 0 } parent) return null;
+            current = await _host.RuntimeService.TryGetRecoverableSessionAsync(parent, cancellationToken).ConfigureAwait(false);
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Applies the policies as verified: when a stop reaches this machine, the sessions of the work of the fleet that run here
