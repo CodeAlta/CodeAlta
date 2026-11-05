@@ -1,5 +1,5 @@
 import { thoughtHeadline } from "../timelineActivity/activityText";
-import type { ActivityFacts, EventImage, QueuedPrompt, TimelineEvent } from "./contract";
+import type { ActivityFacts, EventImage, QueuedPrompt, TimelineEvent, ToolOutputPage, ToolOutputPlace } from "./contract";
 import { hostPromptOf, type HostPrompt } from "./hostPrompt";
 import { foldWorkflows, type WorkflowRun } from "./workflowRun";
 
@@ -53,6 +53,27 @@ export function outputPreview(output: string, length: number, fromEnd: boolean):
   const lines = output.replace(/\r\n/gu, "\n").replace(/\n+$/u, "").split("\n");
   const kept = fromEnd ? lines.slice(-outputPreviewLines) : lines.slice(0, outputPreviewLines);
   return { text: kept.join("\n"), whole: lines.length <= outputPreviewLines && output.length >= length };
+}
+
+/** The most of an output a copy reads, in characters: it comes a page at a time, and the phone holds all of it at once. */
+export const outputCopyLimit = 1_000_000;
+
+/** Reads a whole output for a copy, from its first page to its last. It fails rather than give a part of it. */
+export async function readWholeOutput(read: (place: ToolOutputPlace) => Promise<ToolOutputPage>, length: number): Promise<string> {
+  const parts: string[] = [];
+  let offset = 0, total = length;
+  for (;;) {
+    if (total > outputCopyLimit) throw new Error(`this output has ${total.toLocaleString()} characters, too many to copy.`);
+    const page = await read({ offset });
+    if (page.error) throw new Error(page.error);
+    const next = (page.outputOffset ?? offset) + (page.output?.length ?? 0);
+    if (!page.output || next <= offset) throw new Error("the output was not read to its end.");
+    parts.push(page.output);
+    offset = next;
+    // An output still growing has more than when the copy started.
+    total = page.outputLength ?? total;
+    if (offset >= total) return parts.join("");
+  }
 }
 
 /** Whether an event is a thought: `assistant.reasoning`, `assistant.reasoningSummary` (or `reasoning.*`). */

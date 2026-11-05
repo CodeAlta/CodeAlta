@@ -4,13 +4,14 @@
 // on a tap; what is open stays open while the page shows the session.
 import { activityDuration } from "../timelineActivity/activityText";
 import { plainResult } from "../workflows/scriptResult";
+import { copyText } from "./clipboard";
 import type { ToolCallDetail, ToolOutputPage, ToolOutputPlace } from "./contract";
 import { activityLine, el, icon } from "./dom";
 import { previewLine, type HostPrompt } from "./hostPrompt";
 import { linkedImageUrl, matchLinkedImages, savedImageUrl, splitFiles, type ImageItem } from "./imageModel";
 import type { ImageViewer } from "./imageViewer";
 import type { OutputViewer } from "./outputViewer";
-import { activityFacts, canWithdraw, clockTime, outputPreview, subjectPath, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
+import { activityFacts, canWithdraw, clockTime, outputPreview, readWholeOutput, subjectPath, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
 import { timelineIcon, type TimelineIconName } from "./timelineIcons";
 import type { WorkflowCall, WorkflowRun, WorkflowState } from "./workflowRun";
 
@@ -333,7 +334,7 @@ export function createTimelineView(options: TimelineViewOptions) {
         const subject = element.dataset.subject;
         return [make("strong", null, call.name ?? "Output"), ...(subject ? [subjectElement(subject)] : [])];
       };
-      content = call.error ? [make("p", "tool-note", call.error)] : toolParts(call, place => options.readToolOutput(activityId, seq, place), caption);
+      content = call.error ? [make("p", "tool-note", call.error)] : toolParts(call, element.dataset.subject, place => options.readToolOutput(activityId, seq, place), caption);
     } catch (error) {
       if (!current()) return;
       content = [make("p", "tool-note", error instanceof Error ? error.message : String(error))];
@@ -341,12 +342,46 @@ export function createTimelineView(options: TimelineViewOptions) {
     panel.replaceChildren(...content);
   }
 
+  // Copies a value of a call, whole: selecting it is what is hard on a phone. The icon says how it went, and a failure says why under the line.
+  function copyButton(label: string, value: () => string | Promise<string>): HTMLButtonElement {
+    const item = button("tool-copy", `Copy ${label.toLowerCase()}`);
+    const show = (state: "idle" | "copying" | "copied" | "failed") => {
+      item.dataset.state = state;
+      item.replaceChildren(timelineIcon(document, state === "copied" ? "check" : state === "failed" ? "close" : state === "copying" ? "spinner" : "copy"));
+    };
+    show("idle");
+    let timer = 0, failure: HTMLElement | null = null;
+    item.addEventListener("click", async () => {
+      if (item.dataset.state === "copying") return;
+      document.defaultView!.clearTimeout(timer);
+      failure?.remove();
+      show("copying");
+      try {
+        await copyText(document.defaultView!, value());
+        show("copied");
+        timer = document.defaultView!.setTimeout(() => show("idle"), 1500);
+      } catch (error) {
+        show("failed");
+        failure = make("p", "tool-note tool-bad", `Could not copy: ${error instanceof Error ? error.message : String(error)}`);
+        item.parentElement?.after(failure);
+      }
+    });
+    return item;
+  }
+
+  // The name of a part of a call, with the button that copies it.
+  function sectionTitle(label: string, value: () => string | Promise<string>): HTMLElement {
+    const section = make("div", "tool-section", label);
+    section.append(copyButton(label, value));
+    return section;
+  }
+
   // The few lines of an output, under its call; a tap on them reads it all, full screen. An output these lines hold is only shown.
   function outputParts(call: ToolCallDetail, read: (place: ToolOutputPlace) => Promise<ToolOutputPage>, caption: () => Node[]): Node[] {
     if (!call.output) return [];
-    const fromEnd = !!call.command, length = call.outputLength ?? call.output.length;
-    const preview = outputPreview(call.output, length, fromEnd);
-    const section = make("div", "tool-section", "Output");
+    const output = call.output, fromEnd = !!call.command, length = call.outputLength ?? output.length;
+    const preview = outputPreview(output, length, fromEnd);
+    const section = sectionTitle("Output", () => output.length >= length ? output : readWholeOutput(read, length));
     if (preview.whole) return [section, make("pre", "tool-text", preview.text)];
     const more = `Read all ${length.toLocaleString()} characters`;
     const open = button("tool-output", more);
@@ -356,21 +391,24 @@ export function createTimelineView(options: TimelineViewOptions) {
   }
 
   // What a call does, each fact on its own line. Its long texts scroll, and say when only a part of them came.
-  function toolParts(call: ToolCallDetail, readOutput: (place: ToolOutputPlace) => Promise<ToolOutputPage>, caption: () => Node[]): Node[] {
+  function toolParts(call: ToolCallDetail, subject: string | undefined, readOutput: (place: ToolOutputPlace) => Promise<ToolOutputPage>, caption: () => Node[]): Node[] {
     const parts: Node[] = [];
-    const fact = (label: string, value: string, className?: string) => {
+    const fact = (label: string, value: string, className?: string, copied = true) => {
       const line = make("div", "tool-fact");
       line.append(make("span", "tool-fact-label", label), make("code", className, value));
+      if (copied) line.append(copyButton(label, () => value));
       parts.push(line);
     };
     const text = (label: string, value: string | null | undefined, length: number | undefined, kept: "start" | "end") => {
       if (!value) return;
-      parts.push(make("div", "tool-section", label), make("pre", "tool-text", value));
+      parts.push(sectionTitle(label, () => value), make("pre", "tool-text", value));
       if (length !== undefined && length > value.length) parts.push(make("p", "tool-note", `The ${kept === "start" ? "first" : "last"} ${value.length.toLocaleString()} of ${length.toLocaleString()} characters.`));
     };
+    // The row is a button, whose text cannot be selected: the path it shows comes here, unless a list of files below has it.
+    if (subject && subjectPath(subject) && !call.readFiles?.includes(subject) && !call.modifiedFiles?.includes(subject)) fact("Path", subject);
     const folder = call.workingDirectory || call.sessionFolder;
     if (folder) fact("Folder", folder);
-    if (call.exitCode !== null && call.exitCode !== undefined) fact("Exit code", String(call.exitCode), call.exitCode !== 0 ? "tool-bad" : undefined);
+    if (call.exitCode !== null && call.exitCode !== undefined) fact("Exit code", String(call.exitCode), call.exitCode !== 0 ? "tool-bad" : undefined, false);
     if (call.failure) fact("Error", call.failure, "tool-bad");
     if (call.command) text("Command", call.command, undefined, "start");
     else text("Arguments", call.arguments, call.argumentsLength, "start");

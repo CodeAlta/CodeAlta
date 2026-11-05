@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { TimelineEvent } from "./contract";
 import {
-  activityFacts, appendEvents, blockTime, blockVersion, canWithdraw, clockTime, dayLabel, foldEvents, liveBlock, outputPreview, pendingBlock, pendingGrace, planTimeline, prependEvents, stillPending, subjectPath, withDays, withQueue,
+  activityFacts, appendEvents, blockTime, blockVersion, canWithdraw, clockTime, dayLabel, foldEvents, liveBlock, outputCopyLimit, outputPreview, pendingBlock, pendingGrace, planTimeline, prependEvents, readWholeOutput, stillPending, subjectPath, withDays, withQueue,
   type ActivityBlock, type DayBlock, type MessageBlock, type PendingPrompt, type TimelineBlock,
 } from "./timeline";
 
@@ -23,6 +23,26 @@ test("a row shows the first lines of a file and the last lines of a command, and
   assert.deepEqual(outputPreview(seven, seven.length, true), { text: "3\n4\n5\n6\n7", whole: false });
   assert.deepEqual(outputPreview("1\r\n2\r\n", 6, true), { text: "1\n2", whole: true }, "the end of a file is no line of its own");
   assert.deepEqual(outputPreview("1\n2", 9000, false), { text: "1\n2", whole: false }, "the part read holds few lines, not all of the output");
+});
+
+test("a copy reads an output from its start to its end, and fails rather than give a part of it", async () => {
+  const whole = "abcdefgh";
+  const offsets: (number | undefined)[] = [];
+  assert.equal(await readWholeOutput(async place => {
+    offsets.push(place.offset);
+    return { output: whole.slice(place.offset, place.offset! + 3), outputOffset: place.offset, outputLength: whole.length, error: null };
+  }, whole.length), whole);
+  assert.deepEqual(offsets, [0, 3, 6]);
+
+  const grown = "abcdef";
+  assert.equal(await readWholeOutput(async place => ({ output: grown.slice(place.offset, place.offset! + 3), outputOffset: place.offset, outputLength: 6, error: null }), 3), grown, "an output still growing is read to where it is now");
+
+  await assert.rejects(readWholeOutput(async () => ({ error: "It broke" }), 5), { message: "It broke" });
+  await assert.rejects(readWholeOutput(async () => ({ output: "", outputOffset: 0, outputLength: 5, error: null }), 5), { message: "the output was not read to its end." });
+  await assert.rejects(readWholeOutput(async () => ({ output: "ab", outputOffset: 0, outputLength: 5, error: null }), 5), { message: "the output was not read to its end." }, "a page that does not go further ends the copy");
+  let read = false;
+  await assert.rejects(readWholeOutput(async () => { read = true; return { error: null }; }, outputCopyLimit + 1), /too many to copy/u);
+  assert.equal(read, false, "nothing is read of an output too long");
 });
 
 test("prompts, answers and errors stand alone; the work between them is one activity; turns and notices are not rows", () => {

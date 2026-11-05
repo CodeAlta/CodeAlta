@@ -115,6 +115,28 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     assert.equal(await evaluate("document.documentElement.scrollWidth <= window.innerWidth"), true, "a long line stays inside its box, never wider than the page");
     await shot("tool-call");
 
+    // ---- A small button copies a value whole, and says that it did; a long press takes the whole value ----
+    const copyControl = (label: string) => `document.querySelector('.tool-detail .tool-copy[aria-label="Copy ${label}"]')`;
+    // A browser without a person refuses the clipboard: this one holds what is written, through the same two ways of writing.
+    await evaluate(`Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+      writeText: async text => { window.copied = text; },
+      write: async ([item]) => { window.copied = await (await item.getType("text/plain")).text(); },
+    } })`);
+    const copy = async (label: string) => {
+      await evaluate('window.copied = "nothing yet"');
+      await evaluate(`${copyControl(label)}.click()`);
+      await waitFor(`${copyControl(label)}.dataset.state === "copied"`);
+      return evaluate<string>("window.copied");
+    };
+    assert.equal(await copy("folder"), "C:\\work\\worktrees\\calm-otter");
+    assert.equal(await copy("command"), "dotnet build -c Release");
+    await waitFor(`${copyControl("folder")}.dataset.state === "idle"`);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector(".tool-detail .tool-fact code")).userSelect`), "all");
+    const buttonSizes = await evaluate<number[][]>('[...document.querySelectorAll(".tool-detail .tool-copy")].map(e => { const box = e.getBoundingClientRect(); return [box.width, box.height]; })');
+    assert.ok(buttonSizes.length === 3 && buttonSizes.every(([width, height]) => width >= 44 && height >= 32), JSON.stringify(buttonSizes));
+    const buttonTops = await evaluate<number[]>('[...document.querySelectorAll(".tool-detail .tool-copy")].map(e => e.getBoundingClientRect().top)');
+    assert.ok(buttonTops.every((top, index) => !index || top - buttonTops[index - 1]! >= 32), `two buttons overlap: ${JSON.stringify(buttonTops)}`);
+
     // ---- A tap on those lines reads the output full screen, a page at a time, and Back closes it ----
     const pagesOf = (call: string) => server.requests.filter(request => request.path.endsWith(`/tools/${call}/output`));
     const shownText = () => evaluate<string>('document.querySelector(".output-viewer-text").textContent');
@@ -146,6 +168,11 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     await waitFor('!document.querySelector(".output-viewer")');
     assert.equal(await evaluate("location.hash"), hash, "Back closes the output and stays on the session");
     assert.equal(await evaluate('document.activeElement.className'), "tool-output", "the keyboard goes back to what opened it");
+    // Its copy reads all of it, from its start, though a command shows its end; it does not open the full-screen view.
+    const pagesBefore = pagesOf("call-1").length;
+    assert.equal(await copy("output"), buildOutput);
+    assert.deepEqual(pagesOf("call-1").slice(pagesBefore).map(request => request.query), ["?since=1&offset=0", "?since=1&offset=16000", "?since=1&offset=32000"]);
+    assert.equal(await evaluate('document.querySelector(".output-viewer")'), null);
     // What is open follows the call: once it ended, it says how.
     server.state.tools.set("s1/call-1", { name: "Bash", phase: "failed", command: "dotnet build -c Release", sessionFolder: "C:\\work\\worktrees\\calm-otter", exitCode: 1, failure: "It broke", output: "error CS0001", outputLength: 12, error: null });
     server.state.events.get("s1")!.push(event("activity.toolcall.failed", "Bash", { activityId: "call-1", subject: "dotnet build -c Release" }));
@@ -154,6 +181,8 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     assert.equal(await evaluate('document.querySelector(".tool-detail .tool-bad")?.textContent'), "1");
     assert.equal(await evaluate('[...document.querySelectorAll(".tool-detail .tool-text")].at(-1).textContent'), "error CS0001", "an output these lines hold is only shown");
     assert.equal(await evaluate('document.querySelector(".tool-detail .tool-output")'), null, "with nothing more to open");
+    assert.equal(await copy("output"), "error CS0001", "what it shows is all there is to read");
+    assert.equal(await evaluate(copyControl("exit code")), null, "a number is not worth a button");
     // A second tap folds it.
     await evaluate('document.querySelector("#timeline .tool-row[data-activity=call-1]").click()');
     await waitFor('!document.querySelector(".tool-detail")');
@@ -163,6 +192,19 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     await evaluate('document.querySelector("#timeline .tool-row[data-activity=call-3]").click()');
     await waitFor('document.querySelector(".tool-detail .tool-output-text")');
     assert.equal(await evaluate('document.querySelector(".tool-detail .tool-output-text").textContent'), "line 1\nline 2\nline 3\nline 4\nline 5", "the first lines of a file");
+    // The row is a button, whose path cannot be selected: it comes again on a line that can be.
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".tool-detail .tool-fact")].map(e => e.textContent)'), ["PathC:\\work\\skills\\SKILL.md"]);
+    assert.equal(await copy("path"), "C:\\work\\skills\\SKILL.md");
+    assert.equal(await copy("output"), fileOutput);
+    // A copy that fails says why, and leaves the clipboard as it was.
+    const kept = server.state.toolOutputs.get("s1/call-3")!;
+    server.state.toolOutputs.delete("s1/call-3");
+    await evaluate('window.copied = "kept"');
+    await evaluate(`${copyControl("output")}.click()`);
+    await waitFor(`${copyControl("output")}.dataset.state === "failed"`);
+    assert.equal(await evaluate('document.querySelector(".tool-detail .tool-note.tool-bad").textContent'), "Could not copy: The output was not read.");
+    assert.equal(await evaluate("window.copied"), "kept");
+    server.state.toolOutputs.set("s1/call-3", kept);
     await evaluate('document.querySelector(".tool-detail .tool-output").click()');
     await pageRead(16_000);
     assert.equal(await shownText(), fileOutput.slice(0, 16_000));
