@@ -94,24 +94,37 @@ const spacesApi: JoinOrganizationSpacesApi = {
   list: async () => ({ status: "ok", spaces: [{ id: "default", name: "Default" }, { id: "home", name: "Home" }] as never }),
   create: async request => { calls.push(JSON.stringify({ space: request.name })); return { status: "ok", message: null, movedSessions: 0, space: { id: "work-1", name: request.name } } as never; },
 };
+let devicesChanged: (() => void) | null = null;
 let devices: FleetDeviceView[] = [{ id: "box", name: "build-box", kind: "node", status: "pending", online: true, words: "ruby scarf apple ember camera finch", createdAt: "2026-11-03T00:00:00Z" }];
 const approvalsApi: FleetApprovalsApi = {
   status: async () => ({ status: "ok", deviceId: "me", words: null, personName: null, servers: [{ id: "home", url: "https://fleet.example", organization: "Home", link: "approved", connection: "online",
     problem: null, controller: true, spaces: [], recoveryKey: true, shareUrl: null, stop: null }] }),
   devices: async () => ({ status: "ok", devices, message: null, skippedEntries: 0 }),
-  approve: async request => { calls.push(JSON.stringify({ approve: request.deviceId, words: request.words, kind: request.kind })); devices = devices.map(item => ({ ...item, status: "approved" })); return { status: "ok", device: null, message: null }; },
+  approve: async request => {
+    calls.push(JSON.stringify({ approve: request.deviceId, words: request.words, kind: request.kind, ...(request.confirmWith ? { confirmWith: request.confirmWith } : {}) }));
+    // A computer that joined with an enrollment code of the person: the server asks them to sign in again first.
+    if (request.kind === "controller" && !request.confirmWith) return { status: "sign_in.confirmation_required", device: null, message: null };
+    devices = devices.map(item => item.id === request.deviceId ? { ...item, status: "approved" } : item); return { status: "ok", device: null, message: null };
+  },
   revoke: async request => { calls.push(JSON.stringify({ refuse: request.deviceId })); return { status: "ok", device: null, message: null }; },
-  watch: async () => (async function* () { })(),
+  // The host says a change when a test adds a device.
+  watch: (async () => (async function* () { while (true) { await new Promise<void>(resolve => { devicesChanged = resolve; }); yield null; } })()) as never,
   budgets: async () => ({ status: "ok", message: null, budgets: [], holds: [], notifications: [], machines: [], spaces: [], projects: [], timeZone: "UTC" }),
   continueRun: async () => ({ status: "ok", message: null }),
   stopRun: async () => ({ status: "ok", message: null }),
   readNotification: async () => ({ status: "ok", message: null }),
   directory: async () => ({ status: "ok", machines: [], sessions: [] }) as never,
+  signInSettings: async () => ({ status: "ok", settings: null, logins: [{ method: "passkey", name: "Passkey", createdAt: "2026-11-01T00:00:00Z", lastUsedAt: null, id: "p_1" }],
+    message: null }) as never,
+  startSignInCode: async () => ({ status: "invalid_request", code: null, message: null }),
+  openSignInPage: async () => ({ status: "ok", message: null }),
 };
 
 function Fixture() {
   const [shown, setShown] = useState("create");
-  Object.assign(window, { serverFixture: { calls, show: setShown, approveJoin: () => { joinApproved = true; } } });
+  Object.assign(window, { serverFixture: { calls, show: setShown, approveJoin: () => { joinApproved = true; },
+    addLaptop: () => { devices = [...devices, { id: "laptop", name: "Laptop", kind: "controller", status: "pending", online: true, words: "acid acorn actor agent alarm album",
+      createdAt: "2026-11-03T00:00:00Z" }]; devicesChanged?.(); } } });
   return <>
     <FleetApprovals epoch={epoch} api={approvalsApi} onOpen={() => calls.push(JSON.stringify({ open: "fleetServer" }))} />
     {shown === "create" && <CreateServerDialog epoch={epoch} api={api} machinesApi={machinesApi} spacesApi={{ link: { linkSpace: joinApi.linkSpace }, list: spacesApi }} onExisting={() => calls.push(JSON.stringify({ existing: true }))}

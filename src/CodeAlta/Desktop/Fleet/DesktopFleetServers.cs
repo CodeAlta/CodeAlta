@@ -564,10 +564,30 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// <exception cref="FleetDeviceListException">The list does not verify, the server lists the device as another class, or the key is not the one whose words were confirmed: nothing was signed.</exception>
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<DeviceDto> ApproveAsync(string linkId, string deviceId, string kind, string? confirmedWords, CancellationToken cancellationToken)
+    public Task<DeviceDto> ApproveAsync(string linkId, string deviceId, string kind, string? confirmedWords, CancellationToken cancellationToken)
+        => ApproveAsync(linkId, deviceId, kind, confirmedWords, null, cancellationToken);
+
+    /// <summary>
+    /// Approves a pending device as <see cref="ApproveAsync(string, string, string, string?, CancellationToken)"/> does, with
+    /// the confirmation that the person signed in again from this computer (<see cref="ConfirmSignInAsync"/>), which a
+    /// computer that joined with an enrollment code of the person needs once they have a way to sign in.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="deviceId">The device.</param>
+    /// <param name="kind">The class the person approves it as.</param>
+    /// <param name="confirmedWords">The words of its key the person compared; null when none were compared.</param>
+    /// <param name="confirmation">The confirmation; null for none.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The device.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="ArgumentException"><paramref name="kind"/> is not a class of device.</exception>
+    /// <exception cref="FleetDeviceListException">The list does not verify, the server lists the device as another class, or the key is not the one whose words were confirmed: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused (<c>sign_in.confirmation_required</c> without the confirmation it needs).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<DeviceDto> ApproveAsync(string linkId, string deviceId, string kind, string? confirmedWords, string? confirmation, CancellationToken cancellationToken)
     {
         using var client = Client(linkId);
-        var approved = await client.ApproveAsync(deviceId, kind, confirmedWords, cancellationToken).ConfigureAwait(false);
+        var approved = await client.ApproveAsync(deviceId, kind, confirmedWords, confirmation, cancellationToken).ConfigureAwait(false);
         // The approved device gets its copy of the metadata key at the next publication of this computer.
         Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.RefreshKeys();
         return approved;
@@ -607,10 +627,24 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// <exception cref="FleetDeviceListException">This device is not a controller device of the verified device list.</exception>
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<string> CreateRecoveryKeyAsync(string linkId, CancellationToken cancellationToken)
+    public Task<string> CreateRecoveryKeyAsync(string linkId, CancellationToken cancellationToken) => CreateRecoveryKeyAsync(linkId, null, cancellationToken);
+
+    /// <summary>
+    /// Makes the recovery key of this computer's person at a server as <see cref="CreateRecoveryKeyAsync(string, CancellationToken)"/>
+    /// does, with the confirmation that the person signed in again from this computer, which a person with a way to sign in needs.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="confirmation">The confirmation (<see cref="ConfirmSignInAsync"/>); null for none.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>The words of the recovery key.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetDeviceListException">This device is not a controller device of the verified device list.</exception>
+    /// <exception cref="FleetServerException">The server refused (<c>sign_in.confirmation_required</c> without the confirmation it needs).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<string> CreateRecoveryKeyAsync(string linkId, string? confirmation, CancellationToken cancellationToken)
     {
         using var key = FleetRecoveryKey.Generate();
-        using (var client = Client(linkId)) await client.AddRecoveryKeyAsync(key, cancellationToken).ConfigureAwait(false);
+        using (var client = Client(linkId)) await client.AddRecoveryKeyAsync(key, confirmation, cancellationToken).ConfigureAwait(false);
         // The recovery key gets its copy of the keys at the next publication of this computer.
         Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.RefreshKeys();
         Changed?.Invoke();

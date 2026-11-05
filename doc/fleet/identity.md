@@ -118,8 +118,12 @@ to it.
   approved controller device of theirs approves this very link (its method and the device that links, signed by its
   digest, used once), or their recovery key does on the device that links (the words make its key in the device
   list there and sign the same digest; they never leave the device, and attempts count as recoveries); and their first
-  way in is linked within an hour of the device joining (the setup of the server, or a device another one just
-  approved), when its key was just proved. A passkey the server's page registers is only verified there: the signed
+  way in is linked within an hour of the device joining independently of the keys of its person (the setup code, a
+  sign-in, the recovery key, the owner's approval of an invited person's first device), when its key was just proved.
+  For the same reason the device key alone admits no other key that signs for the person: a controller device that
+  joined with an enrollment token of the person, or a new recovery key (and the removal of the one it replaces), takes
+  the same step up, a confirmation of a sign-in again from the approving device, or, for a person with no way in yet,
+  that device's own first hour; a device such a token brought opens no hour of its own. A passkey the server's page registers is only verified there: the signed
   completion of the device adds it, in the same write that checks the device is still an approved controller of its
   acting person, and a revocation ends what the device had in progress.
 - Sign-in on the server's own web pages (a browser, the phone) needs an application the admin registers with the

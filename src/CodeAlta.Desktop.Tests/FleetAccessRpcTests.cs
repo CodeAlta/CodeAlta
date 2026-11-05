@@ -45,7 +45,7 @@ public sealed class FleetAccessRpcTests
             var created = await service.CreateAsync(new FleetServerCreateRequest(epoch, address.ToString(), server.SetupCode!.Code, "Alex", "Home"), token);
             Assert.AreEqual("ok", created.Status, created.Message);
             var linkId = created.Server!.Id;
-            Assert.AreEqual("ok", (await service.CreateRecoveryKeyAsync(new FleetServerLinkRequest(epoch, linkId), token)).Status);
+            Assert.AreEqual("ok", (await service.CreateRecoveryKeyAsync(new FleetRecoveryKeyRequest(epoch, linkId), token)).Status);
 
             var home = await service.AccessAsync(new FleetServerLinkRequest(epoch, linkId), token);
             Assert.AreEqual(("ok", "owner", true, false), (home.Status, home.Me!.Role, home.Signer, home.Advanced), "a home server is not advanced");

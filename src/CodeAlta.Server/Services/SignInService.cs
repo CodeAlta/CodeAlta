@@ -484,8 +484,8 @@ public sealed class SignInService : IDisposable
     // A new way to sign in becomes a factor of its own (a later confirmation, a new device): the device key alone, which a
     // thief may hold, does not add one. Another approved controller device of the person approves this very link; or a
     // person who has a way in proves it again first, from this device; or a person who has none links their first one soon
-    // after the device joined, when its key was just proved by the setup code or by another device. Returns whether the
-    // link is of the first way in, which its completion checks again.
+    // after the device joined, when its key was just proved by the setup code, a sign-in or the recovery key. Returns
+    // whether the link is of the first way in, which its completion checks again.
     private async Task<bool> RequireLinkAuthorityAsync(DeviceRecord actor, string method, string? confirmation, string? approvalId, RequestOrigin origin,
         CancellationToken cancellationToken)
     {
@@ -508,7 +508,9 @@ public sealed class SignInService : IDisposable
                 "Adding a way to sign in needs you to sign in again with one you have, from this device.", cancellationToken).ConfigureAwait(false);
         }
 
-        if (actor.ApprovedAt is { } approved && _time.GetUtcNow() - approved <= _options.FirstWayInWindow) return true;
+        // A device that joined with an enrollment token, which another device key made, opens no window of its own: that key
+        // would otherwise renew it at will.
+        if (await DeviceService.IsInFirstWayInWindowAsync(_store, actor, _time.GetUtcNow(), _options.FirstWayInWindow, cancellationToken).ConfigureAwait(false)) return true;
         throw await RefuseStartAsync(origin, actor, SignInErrorCodes.FirstWayInExpired,
             "A first way to sign in is linked soon after this device joined the server: link it from a device of yours that just joined.", cancellationToken).ConfigureAwait(false);
     }

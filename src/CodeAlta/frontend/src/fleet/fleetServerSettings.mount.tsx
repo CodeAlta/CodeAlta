@@ -66,8 +66,10 @@ const api: FleetServerApi = {
     devices = devices.map(device => device.id === request.deviceId ? { ...device, status: "approved" } : device);
     return { status: "ok", device: devices.find(device => device.id === request.deviceId) ?? null, message: null };
   },
-  createRecoveryKey: async () => {
-    calls.push(JSON.stringify({ recoveryKey: "made" }));
+  createRecoveryKey: async (request: { confirmWith: string | null }) => {
+    // As the server: a person with a way to sign in signs in again with it first.
+    if (logins.length > 0 && !request.confirmWith) return { status: "sign_in.confirmation_required", words: null, message: null };
+    calls.push(JSON.stringify(request.confirmWith ? { recoveryKey: "made", confirmWith: request.confirmWith } : { recoveryKey: "made" }));
     recoveryKey = true;
     return { status: "ok", words: recoveryWords, message: null };
   },

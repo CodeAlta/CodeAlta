@@ -472,7 +472,7 @@ public sealed partial class FleetServerClient : IDisposable
     /// <exception cref="FleetDeviceListException">The device list does not verify, this device is not a controller device in it, or the server lists the device as another class: nothing was signed.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public Task<DeviceDto> ApproveAsync(string deviceId, string kind, CancellationToken cancellationToken = default)
-        => ApproveCoreAsync(deviceId, kind, null, null, cancellationToken);
+        => ApproveCoreAsync(deviceId, kind, null, null, null, cancellationToken);
 
     /// <summary>
     /// Approves a pending device once the person confirmed its class and that it shows the words of its key: this controller
@@ -489,7 +489,25 @@ public sealed partial class FleetServerClient : IDisposable
     /// <exception cref="FleetDeviceListException">The device list does not verify, this device is not a controller device in it, the server lists the device as another class, or its key is not the one whose words were confirmed: nothing was signed.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public Task<DeviceDto> ApproveAsync(string deviceId, string kind, string? confirmedWords, CancellationToken cancellationToken = default)
-        => ApproveCoreAsync(deviceId, kind, confirmedWords, null, cancellationToken);
+        => ApproveCoreAsync(deviceId, kind, confirmedWords, null, null, cancellationToken);
+
+    /// <summary>
+    /// Approves a pending device as <see cref="ApproveAsync(string, string, string?, CancellationToken)"/> does, with the
+    /// confirmation that this device's person signed in again from it, which a controller device that joined with an
+    /// enrollment token of the person needs once the person has a way to sign in.
+    /// </summary>
+    /// <param name="deviceId">The pending device.</param>
+    /// <param name="kind">The class the person approves (<see cref="FleetDeviceKinds.Controller"/> or <see cref="FleetDeviceKinds.Node"/>).</param>
+    /// <param name="confirmedWords">The words the person compared (<see cref="DeviceFingerprint.ToShortWords()"/>); null when none were compared.</param>
+    /// <param name="confirmation">The confirmation of a sign-in again (<c>purpose</c> <c>confirm</c>); null for none.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approved device.</returns>
+    /// <exception cref="ArgumentException"><paramref name="deviceId"/> is empty, or <paramref name="kind"/> is not a class of device.</exception>
+    /// <exception cref="FleetServerException">The server refused the approval: not a controller, not pending, a confirmation needed (<c>sign_in.confirmation_required</c>), or the list moved on twice.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not verify, this device is not a controller device in it, the server lists the device as another class, or its key is not the one whose words were confirmed: nothing was signed.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<DeviceDto> ApproveAsync(string deviceId, string kind, string? confirmedWords, string? confirmation, CancellationToken cancellationToken = default)
+        => ApproveCoreAsync(deviceId, kind, confirmedWords, null, confirmation, cancellationToken);
 
     /// <summary>
     /// Approves a pending device whose whole key this device knows already (the machine it paired with, over the channel
@@ -507,10 +525,11 @@ public sealed partial class FleetServerClient : IDisposable
     public Task<DeviceDto> ApproveAsync(string deviceId, string kind, DeviceFingerprint key, CancellationToken cancellationToken = default)
     {
         if (key.IsEmpty) throw new ArgumentException("The key of the device to approve is needed.", nameof(key));
-        return ApproveCoreAsync(deviceId, kind, null, key, cancellationToken);
+        return ApproveCoreAsync(deviceId, kind, null, key, null, cancellationToken);
     }
 
-    private Task<DeviceDto> ApproveCoreAsync(string deviceId, string kind, string? confirmedWords, DeviceFingerprint? expected, CancellationToken cancellationToken)
+    private Task<DeviceDto> ApproveCoreAsync(string deviceId, string kind, string? confirmedWords, DeviceFingerprint? expected, string? confirmation,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
         if (!FleetDeviceKinds.IsKnown(kind)) throw new ArgumentException($"'{kind}' is not a class of device to approve.", nameof(kind));
@@ -533,7 +552,7 @@ public sealed partial class FleetServerClient : IDisposable
             // device list this device verifies refuses it for anyone but the owner, and for a person who holds a device.
             var owner = kind == FleetDeviceKinds.Controller && device.OwnerId is { } person && person != self.OwnerId ? person : self.OwnerId;
             return (FleetDeviceListOperations.Add, device.PublicKey, kind, owner);
-        }, cancellationToken);
+        }, cancellationToken, confirmation);
     }
 
     /// <summary>
@@ -755,7 +774,8 @@ public sealed partial class FleetServerClient : IDisposable
 
     // Signs the entry that follows the last one of the verified list and posts it; read again once when another entry was appended meanwhile.
     private async Task<DeviceDto> ChangeListAsync(string deviceId, string action,
-        Func<OrganizationDto, DeviceDto, CancellationToken, Task<(string Operation, string? Key, string? Kind, string? Owner)>> describe, CancellationToken cancellationToken)
+        Func<OrganizationDto, DeviceDto, CancellationToken, Task<(string Operation, string? Key, string? Kind, string? Owner)>> describe, CancellationToken cancellationToken,
+        string? confirmation = null)
     {
         var organization = await GetOrganizationAsync(cancellationToken).ConfigureAwait(false);
         var self = await GetDeviceAsync(null, cancellationToken).ConfigureAwait(false);
@@ -783,7 +803,7 @@ public sealed partial class FleetServerClient : IDisposable
             try
             {
                 return await SendAsync(HttpMethod.Post, $"api/v1/devices/{Uri.EscapeDataString(deviceId)}/{action}",
-                    Body(new DeviceListChangeRequest(entry), ServerApiJsonContext.Default.DeviceListChangeRequest), ServerApiJsonContext.Default.DeviceDto, cancellationToken)
+                    Body(new DeviceListChangeRequest(entry, confirmation), ServerApiJsonContext.Default.DeviceListChangeRequest), ServerApiJsonContext.Default.DeviceDto, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (FleetServerException exception) when (exception.Code == "device_list.conflict" && attempt == 0)

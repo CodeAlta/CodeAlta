@@ -8,9 +8,12 @@ import { useShellLanguage } from "../shellLanguage";
 import { keyWords, waitingRuns } from "./fleetServer";
 import { continueHeldRun, heldRunToastKey, waitingApprovals, type HeldRunOutcome, type WaitingApproval } from "./approvals";
 import { approvalRun, newNotifications, notificationIntent, notificationPhrase, waitingHolds } from "./budgets";
+import { signInProblem } from "./signIn";
+import { SignInAgain } from "./SignInAgain";
 
 /** The calls of the Fleet button. */
-export type FleetApprovalsApi = Pick<typeof fleetServer, "status" | "devices" | "approve" | "revoke" | "watch" | "budgets" | "continueRun" | "stopRun" | "readNotification" | "directory">;
+export type FleetApprovalsApi = Pick<typeof fleetServer, "status" | "devices" | "approve" | "revoke" | "watch" | "budgets" | "continueRun" | "stopRun" | "readNotification" | "directory"
+  | "signInSettings" | "startSignInCode" | "openSignInPage">;
 
 // How often the devices of the servers are read again, beside the changes the host says.
 const ReadInterval = 20_000;
@@ -83,14 +86,36 @@ export function FleetApprovals({ epoch, api = fleetServer, active = false, onOpe
 
   const act = useCallback(async (approval: WaitingApproval, approve: boolean) => {
     if (!epoch) return;
-    close(toastKey(approval));
+    const key = toastKey(approval);
     // An approval names the words the person compared in the toast and the class it said: the host signs the key of those
     // words only, as that class only.
     const request = { expectedEpoch: epoch, linkId: approval.server.id, deviceId: approval.device.id, words: approve ? approval.device.words : null,
-      kind: approve ? approval.device.kind : null };
-    await (approve ? api.approve(request, { timeoutMilliseconds: 30_000 }) : api.revoke(request, { timeoutMilliseconds: 30_000 })).catch(() => null);
-    setWaiting(current => current.filter(item => item.device.id !== approval.device.id || item.server.id !== approval.server.id));
-  }, [api, close, epoch]);
+      kind: approve ? approval.device.kind : null, confirmWith: null, handle: null };
+    const done = () => setWaiting(current => current.filter(item => item.device.id !== approval.device.id || item.server.id !== approval.server.id));
+    const result = await (approve ? api.approve(request, { timeoutMilliseconds: 30_000 }) : api.revoke(request, { timeoutMilliseconds: 30_000 })).catch(() => null);
+    if (!approve || result?.status !== "sign_in.confirmation_required") close(key);
+    if (approve && result?.status === "sign_in.first_way_in_expired") {
+      showToast({ intent: "warning", icon: <AppIcon name="warning" size={16} />, message: t("Link a way to sign in first: adding a computer or a recovery key needs one to sign in again with.") });
+      return;
+    }
+    if (!approve || result?.status !== "sign_in.confirmation_required") { done(); return; }
+    // A computer that joined with an enrollment code of the person: its toast now asks them to sign in again with a way they
+    // have, then approves it.
+    showToast({
+      intent: "primary", icon: <AppIcon name="shield" size={16} />, timeout: 0,
+      message: <div className="fleet-approval-toast fleet-approval-confirm">
+        <SignInAgain server={approval.server} epoch={epoch} api={api} message="Approving {name} needs you to sign in again with a way you have."
+          values={{ name: approval.device.name }}
+          run={async (method, handle) => {
+            const confirmed = await api.approve({ ...request, confirmWith: method, handle }, { timeoutMilliseconds: 11 * 60_000 }).catch(() => null);
+            if (confirmed?.status === "ok") { close(key); done(); return; }
+            if (confirmed?.status === "sign_in.confirmation_required") return;
+            showToast({ intent: "danger", icon: <AppIcon name="error" size={16} />,
+              message: t(confirmed ? signInProblem(confirmed.status) ?? "The operation did not complete." : "The server does not answer.") });
+          }} />
+      </div>,
+    }, key);
+  }, [api, close, epoch, t]);
 
   const decide = useCallback(async (item: WaitingHold, carryOn: boolean) => {
     if (!epoch) return;

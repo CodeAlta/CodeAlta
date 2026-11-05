@@ -332,11 +332,12 @@ public sealed class SignInTests
         var entry = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, laptop.DeviceId, laptop.PublicKey, FleetDeviceKinds.Controller, setup.Owner.Id, setup.Organization.Id);
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{laptop.DeviceId}/approve", new DeviceListChangeRequest(entry))).Status);
 
-        // Or the recovery key confirms the device the person signed in on, when every device is lost.
+        // Or the recovery key confirms the device the person signed in on, when every device is lost. The owner, who has a
+        // way in, signs in again with it to make the recovery key.
         var recoveryEntry = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, recovery.DeviceId, recovery.PublicKey, FleetDeviceKinds.Recovery, setup.Owner.Id,
             setup.Organization.Id);
         Assert.AreEqual(HttpStatusCode.Created, (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/recovery-keys",
-            new CreateRecoveryKeyRequest(recovery.PublicKey, recoveryEntry, "sealed-anchor"))).Status);
+            new CreateRecoveryKeyRequest(recovery.PublicKey, recoveryEntry, "sealed-anchor", await ConfirmWithAsync(server, owner, FleetSignInMethods.Microsoft)))).Status);
         var (again, againBack) = await StartAsync(server, lost, FleetSignInMethods.Microsoft);
         var grant = (await CompleteAsync(server, lost, again, againBack)).Read<CompleteSignInResponse>().Grant;
         Assert.AreEqual(HttpStatusCode.Created, (await server.SendAsync(lost, HttpMethod.Post, "/api/v1/enroll", new EnrollRequest(string.Empty, lost.PublicKey, lost.Name, null, grant))).Status);
@@ -859,7 +860,8 @@ public sealed class SignInTests
         var key = (await LoginsAsync()).Single();
         Assert.AreEqual(SignInErrorCodes.LastWayIn, (await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{key.Id}")).Code);
         var entry = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, recovery.DeviceId, recovery.PublicKey, FleetDeviceKinds.Recovery, setup.Owner.Id, setup.Organization.Id);
-        Assert.AreEqual(HttpStatusCode.Created, (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/recovery-keys", new CreateRecoveryKeyRequest(recovery.PublicKey, entry, "sealed-anchor"))).Status);
+        Assert.AreEqual(HttpStatusCode.Created, (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/recovery-keys",
+            new CreateRecoveryKeyRequest(recovery.PublicKey, entry, "sealed-anchor", await ConfirmAsync(server, owner, passkey)))).Status);
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{key.Id}")).Status);
         Assert.AreEqual(0, (await LoginsAsync()).Count);
 
@@ -1223,6 +1225,95 @@ public sealed class SignInTests
 
         var audit = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
         Assert.AreEqual(3, audit.Count(static record => record.Action == "sign_in.start" && record.Result == SignInErrorCodes.ConfirmationRequired), "refusals are audited");
+    }
+
+    [TestMethod]
+    public async Task AStolenControllerKeyAloneAdmitsNoOtherControllerNorRecoveryKey_ThatWouldApproveWhatItAsks()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var thief = new TestDevice("Thief's computer");
+        using var recovery = new TestDevice("Thief's recovery key");
+        using var key = new SoftwareAuthenticator();
+        var setup = await server.SetUpAsync(owner);
+        var origin = server.BaseAddress.GetLeftPart(UriPartial.Authority);
+        // The owner has a passkey; days later, a thief holds the key of their desktop, not the passkey.
+        await RegisterPasskeyAsync(server, owner, key, origin);
+        server.Clock.Advance(TimeSpan.FromDays(3));
+
+        // The thief's computer joins with an enrollment token the stolen key makes: the stolen key alone does not approve it.
+        var pending = await server.EnrollAsync(owner, thief, FleetDeviceKinds.Controller);
+        var add = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, pending.Id, thief.PublicKey, FleetDeviceKinds.Controller, setup.Owner.Id, setup.Organization.Id);
+        var alone = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{pending.Id}/approve", new DeviceListChangeRequest(add));
+        Assert.AreEqual((HttpStatusCode.Forbidden, SignInErrorCodes.ConfirmationRequired), Answer(alone), alone.Body.ToString());
+        Assert.AreEqual(SignInErrorCodes.ConfirmationRequired, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{pending.Id}/approve",
+            new DeviceListChangeRequest(add, "asc_guessed"))).Code, "a confirmation the thief makes up");
+
+        // Nor a recovery key of the thief's, which would approve a link and recover a computer.
+        var recoveryEntry = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, recovery.DeviceId, recovery.PublicKey, FleetDeviceKinds.Recovery, setup.Owner.Id,
+            setup.Organization.Id);
+        var made = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/recovery-keys", new CreateRecoveryKeyRequest(recovery.PublicKey, recoveryEntry, "sealed-anchor"));
+        Assert.AreEqual((HttpStatusCode.Forbidden, SignInErrorCodes.ConfirmationRequired), Answer(made), made.Body.ToString());
+
+        // So no second computer approves the link the stolen key asks for: nothing approves it.
+        var asked = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/sign-in/link-approvals", new RequestLinkApprovalRequest(FleetSignInMethods.Microsoft)))
+            .Read<SignInLinkApprovalDto>();
+        var payload = FleetSignInApprovals.Serialize(new FleetSignInApproval(1, setup.Organization.Id, asked.Id, owner.DeviceId, asked.Digest, thief.DeviceId, server.Clock.Now));
+        Assert.AreNotEqual(HttpStatusCode.OK, (await server.SendAsync(thief, HttpMethod.Post, $"/api/v1/sign-in/link-approvals/{asked.Id}/approve",
+            new FleetSignedSignInApproval(payload, thief.Sign(FleetSignInApprovals.GetSignedBytes(payload))))).Status, "the thief's computer is not approved");
+        Assert.AreEqual("pending", (await server.SendAsync(owner, HttpMethod.Get, $"/api/v1/sign-in/link-approvals/{asked.Id}")).Read<SignInLinkApprovalDto>().Status);
+
+        // The owner, who signs in again with their passkey from the desktop, approves a computer of theirs; the confirmation works once.
+        var confirmation = await ConfirmAsync(server, owner, key);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{pending.Id}/approve",
+            new DeviceListChangeRequest(add, confirmation))).Status);
+        var again = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, recovery.DeviceId, recovery.PublicKey, FleetDeviceKinds.Recovery, setup.Owner.Id,
+            setup.Organization.Id);
+        Assert.AreEqual(SignInErrorCodes.ConfirmationRequired, (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/recovery-keys",
+            new CreateRecoveryKeyRequest(recovery.PublicKey, again, "sealed-anchor", confirmation))).Code, "a confirmation works once");
+        Assert.AreEqual(HttpStatusCode.Created, (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/recovery-keys",
+            new CreateRecoveryKeyRequest(recovery.PublicKey, again, "sealed-anchor", await ConfirmAsync(server, owner, key)))).Status);
+
+        // Nor does the stolen key alone remove the recovery key the owner has.
+        var removal = await server.NextEntryAsync(owner, FleetDeviceListOperations.Remove, recovery.DeviceId, null, null, null, setup.Organization.Id);
+        var removed = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{recovery.DeviceId}/revoke", new DeviceListChangeRequest(removal));
+        Assert.AreEqual((HttpStatusCode.Forbidden, SignInErrorCodes.ConfirmationRequired), Answer(removed), removed.Body.ToString());
+
+        var audit = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        Assert.AreEqual(2, audit.Count(static record => record.Action == "device.approve" && record.Result == SignInErrorCodes.ConfirmationRequired), "refusals are audited");
+    }
+
+    [TestMethod]
+    public async Task APersonWithNoWayInAdmitsAComputerOnlySoonAfterSetup_AndAComputerOfAnEnrollmentTokenRenewsNoWindow()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var desktop = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        using var third = new TestDevice("Third computer");
+        var setup = await server.SetUpAsync(desktop);
+        async Task<ApiAnswer> ApproveAsync(TestDevice approver, TestDevice device)
+        {
+            var pending = await server.EnrollAsync(approver, device, FleetDeviceKinds.Controller);
+            var entry = await server.NextEntryAsync(approver, FleetDeviceListOperations.Add, pending.Id, device.PublicKey, FleetDeviceKinds.Controller, setup.Owner.Id,
+                setup.Organization.Id);
+            return await server.SendAsync(approver, HttpMethod.Post, $"/api/v1/devices/{pending.Id}/approve", new DeviceListChangeRequest(entry));
+        }
+
+        // Soon after the setup, the desktop, whose key the setup code proved, admits the laptop by itself.
+        server.Clock.Advance(TimeSpan.FromMinutes(55));
+        Assert.AreEqual(HttpStatusCode.OK, (await ApproveAsync(desktop, laptop)).Status);
+
+        // The laptop joined with a token the desktop's key made: its approval opens no window of its own, in which its key
+        // alone would link a first way in or admit another computer.
+        server.Clock.Advance(TimeSpan.FromMinutes(10));
+        Assert.AreEqual(SignInErrorCodes.FirstWayInExpired, (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start",
+            new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect, FleetSignInPurposes.Link))).Code);
+        var byLaptop = await ApproveAsync(laptop, third);
+        Assert.AreEqual((HttpStatusCode.Forbidden, SignInErrorCodes.FirstWayInExpired), Answer(byLaptop), byLaptop.Body.ToString());
+
+        // Past the window, the desktop admits nothing by itself either.
+        using var fourth = new TestDevice("Fourth computer");
+        Assert.AreEqual(SignInErrorCodes.FirstWayInExpired, (await ApproveAsync(desktop, fourth)).Code);
     }
 
     internal static SignInOptions Options(FakeOidcProvider provider) => new()

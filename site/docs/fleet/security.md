@@ -56,6 +56,7 @@ Each machine signs in to its providers itself; nothing is copied from your deskt
 
 - **Signing in does not let a computer in by itself.** A new computer gets the keys that open your titles only once one of your computers approved it, after you compared its six words.
 - **A new way to sign in needs one you already have.** Linking a passkey or an account asks you to sign in again with a way you have, to approve it on another of your computers, or, on your only computer, to use your recovery key ([Sign-in methods](server.md#sign-in-methods)).
+- **A new computer or recovery key needs one too.** Approving a computer that joined with an enrollment code, or making a recovery key, asks you to sign in again with a way you have: the key of one computer alone, if it is stolen, adds no other that would approve what it asks.
 - **Attempts are limited.** A server refuses for a while the sign-ins, enrollment codes, recoveries and setup codes that come too often from one address, and the recoveries in the name of one person: CodeAlta says when to try again.
 
 ## When something goes wrong
