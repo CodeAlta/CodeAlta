@@ -96,6 +96,7 @@ internal sealed class NodeScopeProviders
     internal IReadOnlyList<(ScopeProviderDto Provider, string Key)> Open(string linkId, IReadOnlyList<ScopeProviderKeyDto> keys, FleetDeviceListState list, FleetAccessState access)
     {
         var link = ReadApplied().GetValueOrDefault(linkId) ?? new ScopeProvidersOfLink();
+        IReadOnlyList<CodeAltaProviderDocument>? installed = null;
         var opened = new List<(ScopeProviderDto Provider, string Key)>();
         foreach (var key in keys)
         {
@@ -107,7 +108,14 @@ internal sealed class NodeScopeProviders
                 var definition = FleetProviderDefinition.Of(provider);
                 var apiKey = FleetProviderKeys.Open(key.Sealed, key.Wrapped, list.OrganizationId ?? string.Empty, provider.Id, provider.Version, definition, _identity, list, access,
                     signedNow: !known);
-                if (known && !(link.Accepted.TryGetValue(provider.Id, out var pinned) && string.Equals(pinned, Pin(provider, apiKey), StringComparison.Ordinal)))
+                // Installed by a version that recorded nothing of what it was given as: what runs here and is given unchanged is what
+                // was accepted then, and Apply records it; anything else of that version is held to the authority of now.
+                var accepted = link.Accepted.TryGetValue(provider.Id, out var pinned)
+                    ? string.Equals(pinned, Pin(provider, apiKey), StringComparison.Ordinal)
+                    : (installed ??= new CodeAltaConfigStore(_catalog).LoadGlobalProviderDefinitions(includeDisabled: true))
+                        .FirstOrDefault(definition => string.Equals(definition.ProviderKey, provider.Id, StringComparison.OrdinalIgnoreCase)) is { } running
+                        && !Differs(running, provider, apiKey);
+                if (known && !accepted)
                     apiKey = FleetProviderKeys.Open(key.Sealed, key.Wrapped, list.OrganizationId ?? string.Empty, provider.Id, provider.Version, definition, _identity, list, access,
                         signedNow: true);
                 opened.Add((provider, apiKey));
