@@ -433,6 +433,30 @@ public sealed class BudgetTests
         StringAssert.Contains((await stopped.WaitAsync(Patience, TestContext.CancellationToken)).Problem, "is reached");
     }
 
+    // A Continue anyway is for the version of the budget the run started to wait under: once the machine verified a newer version
+    // that still holds the run (a lower limit), a Continue anyway signed for the earlier one does not start it.
+    [TestMethod]
+    public async Task AContinueAnywayForAnEarlierVersionOfTheBudget_DoesNotStartTheRun()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        var budget = await fleet.Manager.PutAsync(null, Settings(100), CancellationToken.None);
+        using (var other = new FleetServerClient(fleet.Server.BaseAddress, fleet.OtherKey))
+            Assert.AreEqual(100, (await other.AskAllowanceAsync(budget.Id, new FleetAllowanceRequest(1, 0, 100))).Granted);
+        var gate = fleet.Gate(new FakeSpend());
+        var held = new TaskCompletionSource();
+        var admission = gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), () => held.TrySetResult(), TestContext.CancellationToken);
+        await held.Task.WaitAsync(Patience, TestContext.CancellationToken);
+        var hold = await WaitForAsync(async () => (await fleet.Manager.ListHoldsAsync(CancellationToken.None)).Holds.FirstOrDefault(), TestContext.CancellationToken);
+
+        // A lower limit, then the hold of the first version is continued anyway.
+        await fleet.Manager.PutAsync(budget.Id, Settings(50), CancellationToken.None);
+        Assert.AreEqual(FleetBudgetHoldStates.Continued, (await fleet.Manager.ContinueAsync(hold.Id, CancellationToken.None)).Status);
+        gate.Changed();
+        var result = await admission.WaitAsync(Patience, TestContext.CancellationToken);
+        StringAssert.Contains(result.Problem, "earlier version or period", "the run does not start on a decision about another version");
+        Assert.IsEmpty(result.Continued);
+    }
+
     // What the server gives of an enforced budget is not signed: the machine never holds more than its signed limit, and what it
     // spent itself reaching the limit holds the run, whatever allowance the server gives.
     [TestMethod]

@@ -63,7 +63,7 @@ A budget limits the tokens or the estimated cost (in US dollars) your machines s
 
 Each budget shows a bar of what its scope used in its period, red once it is reached. **Edit** and the trash button change or remove it, beside its row. You hear of a budget once at 80% and once at 100% of each period: a message you dismiss, or close, is gone from all your computers.
 
-A run that waits comes as a message wherever you are in CodeAlta, with **Continue anyway** and **Stop**, and in **Runs that wait for a budget** at the top of the page. A session you start on a machine whose budget holds new runs starts, and its prompt waits on the machine: the message says so, with **Continue anyway**. Your computer signs each **Continue anyway** for that one run: the machine checks it, so the server alone cannot start a run past your budget. Estimated costs come from the prices of the model catalog, as in the Statistics tab.
+A run that waits comes as a message wherever you are in CodeAlta, with **Continue anyway** and **Stop**, and in **Runs that wait for a budget** at the top of the page. A session you start on a machine whose budget holds new runs starts, and its prompt waits on the machine: the message says so, with **Continue anyway**. Your computer signs each **Continue anyway** for that one run: the machine checks it, so the server alone cannot start a run past your budget. A budget you edit while a run waits decides again: when it still holds the run, a **Continue anyway** given for the budget as it was does not start it: start the run again. Estimated costs come from the prices of the model catalog, as in the Statistics tab.
 
 ## Hear of problems of your machines
 
