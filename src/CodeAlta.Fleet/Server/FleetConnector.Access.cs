@@ -42,7 +42,7 @@ public sealed partial class FleetConnector
     /// Gets the trust a node gives the members of the organization on a relayed channel: the device list and the access
     /// document, both as this device verified them, read live at each call.
     /// </summary>
-    public IDeviceTrustPolicy Trust => new FleetOrganizationTrust(() => Devices.Current, _options.Identity.DeviceId, () => Access.Current);
+    public IDeviceTrustPolicy Trust => new FleetOrganizationTrust(() => Devices.Current, _options.Identity.DeviceId, Access);
 
     private void InitializeAccess()
     {
