@@ -184,6 +184,10 @@ footer { display: flex; align-items: center; justify-content: center; gap: .4rem
 button.tool-row { cursor: pointer; min-height: 2.25rem; }
 button.tool-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
 .tool-subject { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A path too long for its line loses the end of its folders first, then the end of the name of its file. */
+.tool-path { display: flex; }
+.tool-path-folders, .tool-path-file { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-path-folders { flex-shrink: 1000; }
 /* What a call does, read when its row opens: long texts scroll inside, never the page. */
 .tool-detail { display: flex; flex-direction: column; gap: .25rem; min-width: 0; margin: 0 0 .5rem 1.375rem; font-size: .75rem; color: var(--muted); }
 .tool-fact { display: flex; gap: .5rem; min-width: 0; align-items: baseline; }
@@ -704,7 +708,9 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .wf-step-title, .wf-session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wf-step-title small { color: var(--muted); }
 .wf-call { min-height: 1.75rem; }
-.wf-call .wf-step-title { font-family: var(--code-font); }
+.wf-call .wf-step-title { flex: 0 1 auto; font-family: var(--code-font); }
+.wf-call .tool-subject { color: var(--muted); font-family: var(--code-font); font-size: .75rem; }
+.wf-call .wf-step-time { margin-left: auto; }
 .wf-call[data-state="failed"] .wf-step-title { color: var(--red); }
 .wf-step-time { flex: none; color: var(--muted); font-size: .75rem; font-variant-numeric: tabular-nums; }
 .wf-section { margin-top: .25rem; color: var(--muted); font-size: .6875rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }

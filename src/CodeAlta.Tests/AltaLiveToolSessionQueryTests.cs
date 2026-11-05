@@ -435,6 +435,8 @@ public sealed partial class AltaLiveToolTests
             Call(AgentActivityPhase.Failed, """{"exitCode":3,"error":{"message":"it broke"},"modifiedFiles":["a.txt"]}"""),
             new AgentActivityEvent(providerId, sessionId, at, run, AgentActivityKind.ToolCall, AgentActivityPhase.Completed, "call-2", null, "Bash", null,
                 System.Text.Json.JsonDocument.Parse("""{"arguments":{"command":"another"}}""").RootElement.Clone()),
+            new AgentActivityEvent(providerId, sessionId, at, run, AgentActivityKind.ToolCall, AgentActivityPhase.Completed, "call-3", null, "grep", null,
+                System.Text.Json.JsonDocument.Parse("""{"arguments":{"pattern":"needle","path":"src/app"}}""").RootElement.Clone()),
         ]).ConfigureAwait(false);
         var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(catalog).Add(runtime));
 
@@ -455,11 +457,12 @@ public sealed partial class AltaLiveToolTests
         var missing = await dispatcher.InvokeAsync(["session", "tool", sessionId, "call-unknown"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
         Assert.AreEqual(AltaExitCodes.NotFound, missing.ExitCode, missing.Stdout);
 
-        var events = await dispatcher.InvokeAsync(["session", "tail", sessionId, "--last", "4", "--no-tool-output"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var events = await dispatcher.InvokeAsync(["session", "tail", sessionId, "--last", "5", "--no-tool-output"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
         var subjects = ReadJsonLines(events.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.session.event")
             .Select(static line => line.TryGetProperty("metadata", out var metadata) && metadata.ValueKind == System.Text.Json.JsonValueKind.Object && metadata.TryGetProperty("subject", out var subject) ? subject.GetString() : null).ToArray();
         CollectionAssert.Contains(subjects, "git status", "One line of what the call runs.");
         CollectionAssert.Contains(subjects, "another");
+        CollectionAssert.Contains(subjects, "needle", "A search says what it looks for, not the folder it looks in.");
     }
 
     [TestMethod]

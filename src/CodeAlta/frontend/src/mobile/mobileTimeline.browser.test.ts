@@ -88,7 +88,7 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     done("stepsDeclared", 5, declared),
     done("stepStarted", 6, { stepId: "research" }),
     done("sessionStarted", 6, { stepId: "research", childSessionId: "s-redis", title: "Research: Redis" }),
-    event("activity.toolcall.started", "read_file", 7, { activityId: "inner-1", parentId: "exec-1" }),
+    event("activity.toolcall.started", "read_file", 7, { activityId: "inner-1", parentId: "exec-1", subject: "C:/dev2/stride-sdsl-corpus/sources/shaders/Stride.Shaders.Parsers/Upgrade/ShaderDataUpgrader.cs" }),
     event("activity.toolcall.completed", "read_file", 8, { activityId: "inner-1", parentId: "exec-1" }),
     done("sessionEnded", 40, { childSessionId: "s-redis", status: "completed", durationMs: 34_000 }),
     done("stepEnded", 41, { stepId: "research", status: "completed", durationMs: 35_000 }),
@@ -258,6 +258,12 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     // The calls of the script, after its steps and sessions.
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.wf-card .wf-call')].map(c => [c.dataset.state, c.querySelector('.wf-step-title').textContent, c.querySelector('.wf-step-time').textContent])"),
       [["completed", "read_file", "1s"]]);
+    // What a call reads, on its line: a long path loses the end of its folders, never the name of its file.
+    assert.deepEqual(await evaluate(`(() => {
+      const subject = document.querySelector('.wf-card .wf-call .tool-subject');
+      const file = subject.querySelector('.tool-path-file'), folders = subject.querySelector('.tool-path-folders');
+      return [subject.textContent, file.textContent, file.scrollWidth <= file.clientWidth, folders.scrollWidth > folders.clientWidth, subject.scrollWidth <= subject.clientWidth];
+    })()`), ["C:/dev2/stride-sdsl-corpus/sources/shaders/Stride.Shaders.Parsers/Upgrade/ShaderDataUpgrader.cs", "/ShaderDataUpgrader.cs", true, true, true]);
     assert.deepEqual(await texts(".wf-card .wf-section"), ["Sessions", "Calls"]);
     await theme("light");
     await evaluate(`document.querySelector('.msg-user').scrollIntoView({ block: "start" })`);

@@ -32,6 +32,16 @@ export type ActivityBlock = Readonly<{ kind: "activity"; key: string; rows: read
 export type WorkflowBlock = Readonly<{ kind: "workflow"; key: string; run: WorkflowRun }>;
 export type TimelineBlock = MessageBlock | ActivityBlock | WorkflowBlock;
 
+/**
+ * What a call works on as a path: its folders, and the name of its file with the separator before it. Null for what is
+ * not one, such as a command. A wrong guess costs nothing: the row shows the same text, and only the part it cuts first differs.
+ */
+export function subjectPath(subject: string): { folders: string; file: string } | null {
+  if (/\s/u.test(subject) && !/^(?:[A-Za-z]:[\\/]|[\\/]|~[\\/]|\.{1,2}[\\/])/u.test(subject)) return null;
+  const last = Math.max(subject.lastIndexOf("/"), subject.lastIndexOf("\\"));
+  return last > 0 && last < subject.length - 1 ? { folders: subject.slice(0, last), file: subject.slice(last) } : null;
+}
+
 /** Whether an event is a thought: `assistant.reasoning`, `assistant.reasoningSummary` (or `reasoning.*`). */
 export const isThought = (kind: string): boolean => kind.startsWith("assistant.reasoning") || kind.startsWith("reasoning.");
 

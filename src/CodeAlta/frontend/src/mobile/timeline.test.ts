@@ -2,13 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { TimelineEvent } from "./contract";
 import {
-  activityFacts, appendEvents, blockTime, blockVersion, canWithdraw, clockTime, dayLabel, foldEvents, liveBlock, pendingBlock, pendingGrace, planTimeline, prependEvents, stillPending, withDays, withQueue,
+  activityFacts, appendEvents, blockTime, blockVersion, canWithdraw, clockTime, dayLabel, foldEvents, liveBlock, pendingBlock, pendingGrace, planTimeline, prependEvents, stillPending, subjectPath, withDays, withQueue,
   type ActivityBlock, type DayBlock, type MessageBlock, type PendingPrompt, type TimelineBlock,
 } from "./timeline";
 
 let seq = 0;
 const at = (second: number) => new Date(Date.UTC(2026, 9, 24, 12, 0, second)).toISOString();
 const event = (kind: string, text: string | null = null, activityId: string | null = null, second = seq): TimelineEvent => ({ seq: ++seq, at: at(second), kind, text, activityId });
+
+test("a subject that is a path comes apart before the name of its file; anything else stays whole", () => {
+  assert.deepEqual(subjectPath("C:/dev2/stride/Upgrade/Shader.cs"), { folders: "C:/dev2/stride/Upgrade", file: "/Shader.cs" });
+  assert.deepEqual(subjectPath("C:\\Users\\me\\Stride Projects\\a b.cs"), { folders: "C:\\Users\\me\\Stride Projects", file: "\\a b.cs" });
+  assert.deepEqual(subjectPath("src/app.ts"), { folders: "src", file: "/app.ts" });
+  for (const whole of ["dotnet build src/a.csproj -c Release", "a.txt", "login", "src/", "/root"]) assert.equal(subjectPath(whole), null, whole);
+});
 
 test("prompts, answers and errors stand alone; the work between them is one activity; turns and notices are not rows", () => {
   seq = 0;

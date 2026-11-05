@@ -63,6 +63,13 @@ test("the calls a script made: one line per call, its last phase and title, in t
   assert.deepEqual(foldWorkflows([record("runStarted", 0, {})])[0].calls, []);
 });
 
+test("what a call of a script works on, from the first of its events that says it", () => {
+  const call = (kind: string, second: number, subject?: string): TimelineEvent =>
+    ({ seq: ++seq, at: at(second), kind: `activity.toolcall.${kind}`, text: "read_file", activityId: "read-1", parentId: "call-1", ...(subject ? { subject } : {}) });
+  const [run] = foldWorkflows([record("runStarted", 0, {}), call("started", 1), call("progressed", 2, "src/app.ts"), call("completed", 3)]);
+  assert.deepEqual(run.calls.map(item => [item.title, item.subject, item.phase]), [["read_file", "src/app.ts", "completed"]]);
+});
+
 test("what a run presented, in its order, and whether the host started it for the user", () => {
   const records = [record("runStarted", 0, { title: "Review", forUser: true }), record("presented", 1, { stepId: "read" }, "## Reading"),
     record("presented", 2, {}, "  "), record("presented", 3, { stepId: "report" }, "## Findings\n- one")];

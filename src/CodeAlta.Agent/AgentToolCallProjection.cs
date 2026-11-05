@@ -73,8 +73,9 @@ public static class AgentToolCallProjection
     {
         ArgumentNullException.ThrowIfNull(activity);
         var details = activity.Details;
-        return CommandLine(activity) ?? Text(details, "arguments", "path") ?? Text(details, "path")
-            ?? Text(details, "arguments", "query") ?? Text(details, "arguments", "pattern") ?? Text(details, "query")
+        // A search names what it looks for before the folder it looks in.
+        return CommandLine(activity) ?? Text(details, "arguments", "query") ?? Text(details, "arguments", "pattern")
+            ?? Text(details, "arguments", "path") ?? Text(details, "path") ?? Text(details, "query")
             ?? Text(details, "arguments", "url") ?? Text(details, "arguments") ?? Files(details) ?? Arguments(Value(details, "arguments"));
     }
 

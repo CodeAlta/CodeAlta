@@ -9,7 +9,7 @@ import { activityLine, el, icon } from "./dom";
 import { previewLine, type HostPrompt } from "./hostPrompt";
 import { linkedImageUrl, matchLinkedImages, savedImageUrl, splitFiles, type ImageItem } from "./imageModel";
 import type { ImageViewer } from "./imageViewer";
-import { activityFacts, canWithdraw, clockTime, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
+import { activityFacts, canWithdraw, clockTime, subjectPath, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
 import { timelineIcon, type TimelineIconName } from "./timelineIcons";
 import type { WorkflowCall, WorkflowRun, WorkflowState } from "./workflowRun";
 
@@ -278,6 +278,15 @@ export function createTimelineView(options: TimelineViewOptions) {
 
   const toolKey = (activityId: string) => `tool:${activityId}`;
 
+  // What a call works on, on its line. A path keeps the name of its file when the line is too short for it.
+  function subjectElement(subject: string): HTMLElement {
+    const path = subjectPath(subject);
+    if (!path) return make("span", "tool-subject", subject);
+    const element = make("span", "tool-subject tool-path");
+    element.append(make("span", "tool-path-folders", path.folders), make("span", "tool-path-file", path.file));
+    return element;
+  }
+
   // A row says its state by an icon, what the call works on, and how long the call took once it ended.
   function toolState(element: HTMLElement, tool: ToolRow) {
     element.dataset.phase = tool.phase;
@@ -292,7 +301,7 @@ export function createTimelineView(options: TimelineViewOptions) {
     const took = Date.parse(tool.end ?? "") - Date.parse(tool.at ?? "");
     const time = state !== "running" && took >= 1000 ? duration(took) : null;
     row.replaceChildren(mark, make("strong", null, tool.title));
-    if (tool.subject) row.append(make("span", "tool-subject", tool.subject));
+    if (tool.subject) row.append(subjectElement(tool.subject));
     row.append(make("span", "tool-phase", time ?? (state === "running" ? "" : tool.phase === "completed" ? "" : tool.phase)));
     row.setAttribute("aria-label", `${tool.title}${tool.subject ? ` ${tool.subject}` : ""}: ${tool.phase}`);
     // What is open follows the call: it says more once the call has ended, and the row comes open again when its activity does.
@@ -523,8 +532,8 @@ export function createTimelineView(options: TimelineViewOptions) {
     return body;
   }
 
-  // A call of the script: its state, its title (the tool and what it was given) and how long it took. A call still
-  // running in a run that ended was stopped with it.
+  // A call of the script: its state, its title (the tool and what it was given), what it works on and how long it took.
+  // A call still running in a run that ended was stopped with it.
   function callRow(call: WorkflowCall, live: boolean): HTMLLIElement {
     const state: WorkflowState = call.phase === "completed" ? "completed" : call.phase === "failed" ? "failed" : call.phase === "canceled" ? "canceled" : live ? "running" : "interrupted";
     const row = make("li", "wf-call");
@@ -532,8 +541,10 @@ export function createTimelineView(options: TimelineViewOptions) {
     const mark = timelineIcon(document, stateIcons[state], "wf-step-mark");
     mark.title = stateWords[state];
     const took = Date.parse(call.end ?? "") - Date.parse(call.at ?? "");
-    row.append(mark, make("span", "wf-step-title", call.title), make("span", "wf-step-time", state !== "running" && took >= 1000 ? duration(took) : ""));
-    row.setAttribute("aria-label", `${call.title}: ${stateWords[state]}`);
+    row.append(mark, make("span", "wf-step-title", call.title));
+    if (call.subject) row.append(subjectElement(call.subject));
+    row.append(make("span", "wf-step-time", state !== "running" && took >= 1000 ? duration(took) : ""));
+    row.setAttribute("aria-label", `${call.title}${call.subject ? ` ${call.subject}` : ""}: ${stateWords[state]}`);
     return row;
   }
 
