@@ -165,6 +165,27 @@ public sealed class NamedPeopleTests
     }
 
     [TestMethod]
+    public async Task TheBudgetsOfTheMachine_AdmitTheRunOfANamedPerson_AsTheirs()
+    {
+        var token = TestContext.CancellationToken;
+        var runs = new System.Collections.Concurrent.ConcurrentQueue<FleetNodeBudgetRun>();
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, (run, _, _) =>
+        {
+            runs.Enqueue(run);
+            return Task.FromResult(FleetBudgetAdmission.Admitted);
+        });
+        using var beaKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "bea"));
+        var acme = new OtherPeople("acme") { [beaKey.Fingerprint] = ("bea", beaKey.DeviceId) };
+        fixture.Service.People.Set(new FleetNodePeopleChange("bea", ["view", "drive", "start"], OrganizationId: "acme"));
+        await using var bea = await ConnectAsync(fixture, acme, beaKey, token);
+        await bea.CreateSessionAsync(new FleetCreateSessionParams(Title: "Bea's work", Prompt: "Find the bug."), "create-bea", token);
+
+        // Her run spends from the budgets of her space and her project, by her keys: the gate is told whose it is.
+        var admitted = runs.Single();
+        Assert.AreEqual(("bea", "acme"), (admitted.PersonId, admitted.PersonOrganizationId));
+    }
+
+    [TestMethod]
     public async Task AGranteeEndsTheLiveReadsItStarted()
     {
         var token = TestContext.CancellationToken;
