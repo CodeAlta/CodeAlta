@@ -262,8 +262,19 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     assert.deepEqual(await evaluate(`(() => {
       const subject = document.querySelector('.wf-card .wf-call .tool-subject');
       const file = subject.querySelector('.tool-path-file'), folders = subject.querySelector('.tool-path-folders');
-      return [subject.textContent, file.textContent, file.scrollWidth <= file.clientWidth, folders.scrollWidth > folders.clientWidth, subject.scrollWidth <= subject.clientWidth];
-    })()`), ["C:/dev2/stride-sdsl-corpus/sources/shaders/Stride.Shaders.Parsers/Upgrade/ShaderDataUpgrader.cs", "/ShaderDataUpgrader.cs", true, true, true]);
+      // scrollWidth rounds to a whole pixel, and a fraction of a pixel less is enough to cut the name: its box is compared with what its text takes.
+      const probe = file.cloneNode(true);
+      probe.style.cssText = 'position: absolute; visibility: hidden; flex: none; max-width: none; overflow: visible';
+      subject.append(probe);
+      const needed = probe.getBoundingClientRect().width;
+      probe.remove();
+      const whole = file.getBoundingClientRect().width >= needed;
+      // A name too long for the line is cut itself, and stays in the line.
+      subject.style.maxWidth = '60px';
+      const cut = [file.getBoundingClientRect().width <= 60, subject.scrollWidth <= subject.clientWidth];
+      subject.style.maxWidth = '';
+      return [subject.textContent, file.textContent, whole, folders.scrollWidth > folders.clientWidth, subject.scrollWidth <= subject.clientWidth, cut];
+    })()`), ["C:/dev2/stride-sdsl-corpus/sources/shaders/Stride.Shaders.Parsers/Upgrade/ShaderDataUpgrader.cs", "/ShaderDataUpgrader.cs", true, true, true, [true, true]]);
     assert.deepEqual(await texts(".wf-card .wf-section"), ["Sessions", "Calls"]);
     await theme("light");
     await evaluate(`document.querySelector('.msg-user').scrollIntoView({ block: "start" })`);

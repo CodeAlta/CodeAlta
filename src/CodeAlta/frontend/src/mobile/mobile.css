@@ -187,7 +187,8 @@ button.tool-row:focus-visible { outline: 2px solid var(--accent); outline-offset
 /* A path too long for its line loses the end of its folders first, then the end of the name of its file. */
 .tool-path { display: flex; }
 .tool-path-folders, .tool-path-file { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tool-path-folders { flex-shrink: 1000; }
+/* Not a small share of the shrinking: a fraction of a pixel less is enough to cut the name, with the folders still long. */
+.tool-path-file { flex-shrink: 0; max-width: 100%; }
 /* What a call does, read when its row opens: long texts scroll inside, never the page. */
 .tool-detail { display: flex; flex-direction: column; gap: .25rem; min-width: 0; margin: 0 0 .5rem 1.375rem; font-size: .75rem; color: var(--muted); }
 .tool-fact { display: flex; gap: .5rem; min-width: 0; align-items: baseline; }
