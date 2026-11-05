@@ -23,10 +23,13 @@ internal sealed class NodeBudgets
     public NodeBudgets(FleetServerConnections connections, IFleetPublicationSource sessions, IFleetStatisticsSource statistics)
     {
         ArgumentNullException.ThrowIfNull(connections);
+        _connections = connections;
         Gate = new FleetBudgetGate(() => [.. connections.Connections.Where(static connection => connection.Connector is not null)
             .Select(connection => new FleetBudgetLink(connection.Link.Id, connection.Connector!.Devices, connection.Connector.MetadataKeys,
                 Path.Combine(connections.Store.LinkFolder(connection.Link.Id), FileName)) { Access = connection.Connector.Access })], new FleetBudgetLocalSpend(sessions, statistics));
     }
+
+    private readonly FleetServerConnections _connections;
 
     /// <summary>Gets the gate.</summary>
     public FleetBudgetGate Gate { get; }
@@ -42,6 +45,8 @@ internal sealed class NodeBudgets
     public async Task<FleetBudgetAdmission> AdmitAsync(FleetNodeBudgetRun run, Action? held, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(run);
+        // The links of the node do not read: their budgets and stops are not known, and no run starts as if none held it.
+        if (_connections.LoadProblem is { } problem) return new FleetBudgetAdmission($"{problem}: the run does not start.", []);
         var identity = run.Project is { } project ? await FleetProjectKeys.IdentityAsync(project, _repositories, cancellationToken).ConfigureAwait(false) : null;
         return await Gate.AdmitAsync(new FleetBudgetRun(run.RunId, run.Title, run.SpaceId, identity)
         {
