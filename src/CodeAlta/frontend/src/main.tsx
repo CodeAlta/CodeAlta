@@ -414,7 +414,8 @@ import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
 import { changedSessionOptions, sessionContextSize, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { SandboxSettings } from "./sandbox/SandboxSettings";
 import { SessionSandboxSelect } from "./sandbox/SessionSandboxSelect";
-import { createExternalOpener, ExternalOpenerContext } from "./externalEditors/externalEditors";
+import { createExternalOpener, ExternalOpenerContext, failure } from "./externalEditors/externalEditors";
+import { MarkdownLinkFilesContext, type MarkdownLinkFiles } from "./MarkdownLinkMenu";
 import { sessionBookmarks, type Bookmark } from "./bookmarks/bookmarks";
 import { createBookmarksHub, type BookmarksHub } from "./bookmarks/bookmarksHub";
 import { createRevealRequests, type RevealOutcome, type RevealRequest, type RevealRequests } from "./bookmarks/revealRequests";
@@ -3095,6 +3096,28 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       platform: shellPlatform,
     };
   }, [messageLinkEpoch, markdownImageCache, mutation?.capability, shellPlatform]);
+  // The menu of a link: the host finds the file the link names, as it does to open it.
+  const markdownLinkFiles = useMemo<MarkdownLinkFiles | null>(() => {
+    if (!messageLinkEpoch || !markdownImages) return null;
+    const current = () => currentHostAvailable.current && currentHostEpoch.current === messageLinkEpoch;
+    return {
+      platform: markdownImages.platform,
+      reveal: markdownImages.reveal,
+      path: async (address, scope) => {
+        if (!current()) return null;
+        const reply = await markdownLinks.path(markdownImageRequest(messageLinkEpoch, address, scope));
+        return reply.status === "ok" ? reply.fullPath : null;
+      },
+      openExternal: (address, scope) => {
+        if (!current() || mutation?.capability.canMutate() !== true) return;
+        void markdownLinks.openExternal(markdownImageRequest(messageLinkEpoch, address, scope), { timeoutMilliseconds: 15_000 }).then(reply => reply.status, () => "failed").then(status => {
+          if (status === "ok" || status === "stale_epoch" || !current()) return;
+          const message = status === "not_found" ? "The file could not be found." : failure("editor", status);
+          showToast({ message: translate(shownLocale.current, message), intent: "danger", icon: "error", timeout: 8000 });
+        });
+      },
+    };
+  }, [messageLinkEpoch, markdownImages, mutation?.capability]);
   const localImageKey = JSON.stringify(["local-draft", status?.hostEpoch ?? null, projectId, selectedProject?.path ?? null]);
   const localImages = useLocalDraftImages(submissions.imageDrafts, localImageKey, () => {
     const generation = creationGeneration.current;
@@ -5451,7 +5474,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, wholeCatalog ?? snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
+  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><MarkdownLinkFilesContext.Provider value={markdownLinkFiles}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
       style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
     {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
@@ -6248,7 +6271,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
+  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
 }
 
 /** The search of Settings: the query, the counts of the pages while one is typed (null otherwise), and the results that take the place of the page. */
