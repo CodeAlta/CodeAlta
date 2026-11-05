@@ -99,9 +99,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         {
             if (TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
                     modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, modelProviderRegistry.Application,
-                    out var descriptor, out var createRuntime))
+                    out var descriptor, out var createRuntime, modelProviderRegistry.SecretIssued))
             {
-                TellSecrets(modelProviderRegistry, definition, stateRootPath);
                 modelProviderRegistry.RegisterOrReplace(descriptor, createRuntime);
                 descriptors.Add(descriptor);
             }
@@ -177,42 +176,16 @@ public static class ConfiguredModelProviderRegistryBuilder
         {
             if (!TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
                     modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, modelProviderRegistry.Application,
-                    out var descriptor, out var createRuntime))
+                    out var descriptor, out var createRuntime, modelProviderRegistry.SecretIssued))
             {
                 continue;
             }
 
-            TellSecrets(modelProviderRegistry, definition, stateRootPath);
             modelProviderRegistry.RegisterOrReplace(descriptor, createRuntime);
             descriptors.Add(descriptor);
         }
 
         return descriptors;
-    }
-
-    // Tells the registry (the masking of its host) each secret of the store a provider is given, its key and the variables of its
-    // CLI, before the provider gets them: they are masked from then on, whatever the store keeps of them later.
-    private static void TellSecrets(ModelProviderRegistry registry, CodeAltaProviderDocument definition, string stateRootPath)
-    {
-        if (registry.SecretIssued is not { } issued) return;
-        var resolver = SecretReferenceResolver.ForMachine(stateRootPath, issued);
-        try
-        {
-            if (NormalizeText(definition.ApiKey) is { } literal)
-            {
-                if (SecretReferences.TryParseLone(literal, out var reference)) resolver.TryGet(reference, out _);
-            }
-            else if (NormalizeText(definition.ApiKeySecret) is { } secret)
-            {
-                resolver.TryGet(new SecretReference(SecretReferenceKind.Secret, secret), out _);
-            }
-
-            foreach (var value in definition.Env?.Values ?? Enumerable.Empty<string>()) resolver.TryResolve(value, out _, out _);
-        }
-        catch (SecretReferenceException)
-        {
-            // What does not read was not given.
-        }
     }
 
     /// <summary>
@@ -277,7 +250,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         AgentProviderProcesses? providerProcesses,
         string? application,
         out ModelProviderDescriptor descriptor,
-        out Func<IModelProviderRuntime> createRuntime)
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued = null)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(codexSubscriptionConcurrencyLimiter);
@@ -286,30 +260,30 @@ public static class ConfiguredModelProviderRegistryBuilder
         switch (definition.ProviderType)
         {
             case "openai-chat":
-                return TryCreateOpenAIChatProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
+                return TryCreateOpenAIChatProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime, issued);
             case "openai-responses":
-                return TryCreateOpenAIResponsesProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
+                return TryCreateOpenAIResponsesProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime, issued);
             case "azure-openai":
-                return TryCreateAzureOpenAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+                return TryCreateAzureOpenAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime, issued);
             case "codex":
-                return TryCreateCodexSubscriptionProvider(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out descriptor, out createRuntime);
+                return TryCreateCodexSubscriptionProvider(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out descriptor, out createRuntime, issued);
             case "copilot":
-                return TryCreateCopilotDirectProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+                return TryCreateCopilotDirectProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime, issued);
             case "xai":
-                return TryCreateXaiProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
+                return TryCreateXaiProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime, issued);
             case "anthropic":
-                return TryCreateAnthropicProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
+                return TryCreateAnthropicProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime, issued);
             case "google-genai":
-                return TryCreateGoogleGenAIProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
+                return TryCreateGoogleGenAIProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime, issued);
             case "vertex-ai":
-                return TryCreateVertexAIProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
+                return TryCreateVertexAIProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime, issued);
             case "mistral":
             case "mistral-vibe":
-                return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
+                return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime, issued);
             case ClaudeCodeModelProviderRuntime.ProviderType:
-                return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, externalConversationHeaders, providerProcesses, out descriptor, out createRuntime);
+                return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, externalConversationHeaders, providerProcesses, out descriptor, out createRuntime, issued);
             case LlamaCppProviderType:
-                return TryCreateLlamaCppProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
+                return TryCreateLlamaCppProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime, issued);
             default:
                 descriptor = null!;
                 createRuntime = null!;
@@ -323,9 +297,10 @@ public static class ConfiguredModelProviderRegistryBuilder
         ModelsDevCatalogService? modelCatalog,
         string? application,
         out ModelProviderDescriptor descriptor,
-        out Func<IModelProviderRuntime> createRuntime)
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued = null)
     {
-        var apiKey = ResolveSecret(definition, stateRootPath);
+        var apiKey = ResolveSecret(definition, stateRootPath, issued);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             LogInfo(
@@ -397,9 +372,10 @@ public static class ConfiguredModelProviderRegistryBuilder
         ModelsDevCatalogService? modelCatalog,
         string? application,
         out ModelProviderDescriptor descriptor,
-        out Func<IModelProviderRuntime> createRuntime)
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued = null)
     {
-        var apiKey = ResolveSecret(definition, stateRootPath);
+        var apiKey = ResolveSecret(definition, stateRootPath, issued);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             LogInfo(
@@ -477,7 +453,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         ModelsDevCatalogService? modelCatalog,
         string? application,
         out ModelProviderDescriptor descriptor,
-        out Func<IModelProviderRuntime> createRuntime)
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued = null)
     {
         var responses = string.Equals(definition.Api, "responses", StringComparison.Ordinal);
         var transportKind = responses ? AgentTransportKind.OpenAIResponses : AgentTransportKind.OpenAIChatCompletions;
@@ -493,7 +470,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             ProviderKey = definition.ProviderKey,
             DisplayName = displayName,
             // The OpenAI client sends a key in any case: a server started without --api-key ignores it.
-            ApiKey = NormalizeText(ResolveSecret(definition, stateRootPath)) ?? LlamaCppNoApiKey,
+            ApiKey = NormalizeText(ResolveSecret(definition, stateRootPath, issued)) ?? LlamaCppNoApiKey,
             BaseUri = baseUri,
             NetworkTimeout = CreateNetworkTimeout(definition),
             IsDefault = true,
@@ -537,9 +514,10 @@ public static class ConfiguredModelProviderRegistryBuilder
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
-        out Func<IModelProviderRuntime> createRuntime)
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued = null)
     {
-        var apiKey = ResolveSecret(definition, stateRootPath);
+        var apiKey = ResolveSecret(definition, stateRootPath, issued);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             LogInfo(
@@ -599,7 +577,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         ModelsDevCatalogService? modelCatalog,
         CodexSubscriptionConcurrencyLimiter codexSubscriptionConcurrencyLimiter,
         out ModelProviderDescriptor descriptor,
-        out Func<IModelProviderRuntime> createRuntime)
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued = null)
     {
         var providerId = new ModelProviderId(definition.ProviderKey);
         var displayName = ResolveProviderDisplayName(definition);
@@ -667,7 +646,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
-        out Func<IModelProviderRuntime> createRuntime)
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued = null)
     {
         var authSource = NormalizeText(definition.AuthSource) ?? CopilotDirectAuthSources.GitHubDeviceFlow;
         var githubTokenEnv = NormalizeText(definition.GitHubTokenEnv);
@@ -750,7 +730,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         ModelsDevCatalogService? modelCatalog,
         string? application,
         out ModelProviderDescriptor descriptor,
-        out Func<IModelProviderRuntime> createRuntime)
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued = null)
     {
         var authSource = NormalizeText(definition.AuthSource) ?? XaiAuthSources.XaiBrowserOAuth;
         if (authSource != XaiAuthSources.XaiBrowserOAuth && authSource != XaiAuthSources.XaiDeviceFlow)
@@ -845,9 +826,10 @@ public static class ConfiguredModelProviderRegistryBuilder
         IAgentExternalConversationHeaderStore? externalConversationHeaders,
         AgentProviderProcesses? providerProcesses,
         out ModelProviderDescriptor descriptor,
-        out Func<IModelProviderRuntime> createRuntime)
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued = null)
     {
-        if (ResolveEnvironment(definition, stateRootPath) is not { } environmentVariables)
+        if (ResolveEnvironment(definition, stateRootPath, issued) is not { } environmentVariables)
         {
             descriptor = null!;
             createRuntime = null!;
@@ -895,9 +877,10 @@ public static class ConfiguredModelProviderRegistryBuilder
         ModelsDevCatalogService? modelCatalog,
         string? application,
         out ModelProviderDescriptor descriptor,
-        out Func<IModelProviderRuntime> createRuntime)
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued = null)
     {
-        var apiKey = ResolveSecret(definition, stateRootPath);
+        var apiKey = ResolveSecret(definition, stateRootPath, issued);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             LogInfo(
@@ -977,9 +960,10 @@ public static class ConfiguredModelProviderRegistryBuilder
         ModelsDevCatalogService? modelCatalog,
         string? application,
         out ModelProviderDescriptor descriptor,
-        out Func<IModelProviderRuntime> createRuntime)
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued = null)
     {
-        var apiKey = ResolveSecret(definition, stateRootPath);
+        var apiKey = ResolveSecret(definition, stateRootPath, issued);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             LogInfo(
@@ -1006,7 +990,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         ModelsDevCatalogService? modelCatalog,
         string? application,
         out ModelProviderDescriptor descriptor,
-        out Func<IModelProviderRuntime> createRuntime)
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued = null)
     {
         return TryCreateGoogleProvider(
             definition,
@@ -1086,12 +1071,13 @@ public static class ConfiguredModelProviderRegistryBuilder
         ModelsDevCatalogService? modelCatalog,
         string? application,
         out ModelProviderDescriptor descriptor,
-        out Func<IModelProviderRuntime> createRuntime)
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued = null)
     {
         // Mistral Vibe takes the key its sign-in stored, read for each request: a provider signed out is registered,
         // and signs in from its form.
         var vibe = string.Equals(definition.ProviderType, "mistral-vibe", StringComparison.Ordinal);
-        var apiKey = vibe ? null : ResolveSecret(definition, stateRootPath);
+        var apiKey = vibe ? null : ResolveSecret(definition, stateRootPath, issued);
         if (!vibe && string.IsNullOrWhiteSpace(apiKey))
         {
             LogInfo(
@@ -1196,7 +1182,9 @@ public static class ConfiguredModelProviderRegistryBuilder
     // The key of a provider: api_key as written (or the value of the one reference it is, ${secret:NAME}), then the secret
     // of this machine api_key_secret names, then the variable api_key_env names. A secret that is named but not set leaves
     // the provider out with a warning that names it: never an empty key, never a key of another source.
-    private static string? ResolveSecret(CodeAltaProviderDocument definition, string stateRootPath)
+    // The key read from the store is told to the masking of the host (issued) as the provider is given it, normalized, at the reading that
+    // gives it: never another reading, which a rotation between the two would make another value.
+    private static string? ResolveSecret(CodeAltaProviderDocument definition, string stateRootPath, Action<string>? issued)
     {
         var literal = NormalizeText(definition.ApiKey);
         try
@@ -1204,13 +1192,13 @@ public static class ConfiguredModelProviderRegistryBuilder
             if (!string.IsNullOrWhiteSpace(literal))
             {
                 return SecretReferences.TryParseLone(literal, out var reference)
-                    ? NormalizeText(SecretReferenceResolver.ForMachine(stateRootPath).Get(reference))
+                    ? Issued(NormalizeText(SecretReferenceResolver.ForMachine(stateRootPath).Get(reference)), reference.Kind == SecretReferenceKind.Secret ? issued : null)
                     : literal;
             }
 
             if (NormalizeText(definition.ApiKeySecret) is { } secret)
             {
-                return NormalizeText(SecretReferenceResolver.ForMachine(stateRootPath).Get(new SecretReference(SecretReferenceKind.Secret, secret)));
+                return Issued(NormalizeText(SecretReferenceResolver.ForMachine(stateRootPath).Get(new SecretReference(SecretReferenceKind.Secret, secret))), issued);
             }
         }
         catch (SecretReferenceException exception)
@@ -1230,11 +1218,19 @@ public static class ConfiguredModelProviderRegistryBuilder
 
     // The variables a provider starts its CLI with, their references (${secret:NAME}, ${var:NAME}, ${env:NAME}) resolved;
     // null with a warning that names what is not set.
-    private static Dictionary<string, string>? ResolveEnvironment(CodeAltaProviderDocument definition, string stateRootPath)
+    // A value given as read: the masking of the host is told it before the provider gets it.
+    private static string? Issued(string? value, Action<string>? issued)
+    {
+        if (value is not null) issued?.Invoke(value);
+        return value;
+    }
+
+    // Each secret a variable refers to is told to the masking of the host as it is read for it, before the CLI gets it.
+    private static Dictionary<string, string>? ResolveEnvironment(CodeAltaProviderDocument definition, string stateRootPath, Action<string>? issued)
     {
         var variables = new Dictionary<string, string>(StringComparer.Ordinal);
         if (definition.Env is not { Count: > 0 } written) return variables;
-        var resolver = SecretReferenceResolver.ForMachine(stateRootPath);
+        var resolver = SecretReferenceResolver.ForMachine(stateRootPath, issued);
         foreach (var (name, value) in written)
         {
             if (!resolver.TryResolve(value, out var resolved, out var problem))
