@@ -306,27 +306,10 @@ public sealed partial class FleetServerClient
     }
 
     /// <summary>
-    /// Approves a link this device asks for with the recovery key of its person: the key of the recovery key in the device
-    /// list, which the words make here, signs the digest of the link; the words never leave this device, as in a recovery.
-    /// </summary>
-    /// <param name="approval">The approval this device asked for (<see cref="RequestLinkApprovalAsync"/>).</param>
-    /// <param name="key">The recovery key, from the words the person kept.</param>
-    /// <param name="cancellationToken">Cancels the call.</param>
-    /// <returns>The approval, approved.</returns>
-    /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    /// <exception cref="InvalidOperationException">The link does not have the digest the server gives: nothing was signed.</exception>
-    /// <exception cref="FleetServerException">The server refused: not the recovery key of the person who links (<c>forbidden</c>), too many attempts, or an approval of another link.</exception>
-    /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public Task<SignInLinkApprovalDto> ApproveLinkWithRecoveryKeyAsync(SignInLinkApprovalDto approval, FleetRecoveryKey key, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(approval);
-        return ApproveLinkWithRecoveryKeyAsync(approval, key, approval.Method, cancellationToken);
-    }
-
-    /// <summary>
     /// Approves with the recovery key of its person the link of <paramref name="method"/> this device asked for: the
     /// approval must be of that method and of this device, and the key signs the digest this device computes of that link,
-    /// whatever digest the server gives. The words never leave this device.
+    /// whatever digest the server gives. The words never leave this device. There is no overload without the method: the
+    /// method the person chose is what the key signs, never the one the server answers.
     /// </summary>
     /// <param name="approval">The approval this device asked for (<see cref="RequestLinkApprovalAsync"/>).</param>
     /// <param name="key">The recovery key, from the words the person kept.</param>
