@@ -655,6 +655,25 @@ public sealed class ModelProviderInitializationServiceTests
     }
 
     [TestMethod]
+    public async Task GetModelsAsync_LeavesOutTheModelsItsRulesHide_AndKeepsThemApartAsync()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("filtered"), "Filtered", "test")
+        {
+            ModelOrder = ModelOrder.Name,
+            ModelVisibility = ModelVisibility.Parse(["regex:.*"], ["A-MODEL", "exact:z-model"]),
+        };
+        registry.RegisterOrReplace(descriptor, () => new TestRuntime(descriptor, CreateUnsortedModels()));
+        var service = new ModelProviderInitializationService(registry);
+
+        var models = await service.GetModelsAsync(descriptor.ProviderId, CancellationToken.None);
+
+        CollectionAssert.AreEqual(new[] { "a-model", "z-model" }, models.Select(static model => model.Id).ToArray());
+        var state = service.CurrentStates.Single(state => state.ProviderId == descriptor.ProviderId);
+        CollectionAssert.AreEqual(new[] { "b-model" }, state.HiddenModels.Select(static model => model.Id).ToArray());
+    }
+
+    [TestMethod]
     public async Task GetModelsAsync_DoesNotReturnCatalogForUnregisteredProviderAsync()
     {
         await using var registry = new ModelProviderRegistry();

@@ -1507,6 +1507,27 @@ dialog:has(> .app-window) .app-window-body :is(.reminder-editor, .reminder-recov
 .provider-usage h4 { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; font-weight: 650; }
 .provider-usage-spacer { flex: 1; }
 .provider-usage-note { margin: 0; color: var(--muted); font-size: 12.5px; }
+/* The models a provider hides: one line that says how many, the rules below it once opened. */
+.provider-model-visibility { margin: 2px 0 12px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.provider-model-visibility-toggle .bp6-button-text { display: flex; align-items: center; gap: 8px; }
+.provider-model-visibility-title { font-size: 13px; font-weight: 650; }
+.provider-model-visibility-body { display: grid; gap: 12px; padding: 6px 10px 8px 32px; }
+.provider-model-visibility-help { max-width: 80ch; margin: 0; color: var(--muted); font-size: 12.5px; }
+.provider-model-rules { display: grid; gap: 6px; justify-items: start; }
+.provider-model-rules-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.provider-model-rule { display: grid; grid-template-columns: minmax(150px, 210px) minmax(0, 1fr) auto; align-items: center; gap: 6px; width: 100%; max-width: 640px; }
+.provider-model-rule .bp6-html-select select { width: 100%; }
+.provider-model-visibility-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12.5px; }
+.provider-model-visibility-preview .bp6-tag { font-family: var(--code-font); }
+.provider-model-visibility-preview-label { margin-right: 4px; color: var(--muted); }
+.provider-model-visibility-problem { color: var(--red); overflow-wrap: anywhere; }
+/* Narrow, how a rule matches goes above what it matches. */
+.provider-model-visibility-body { container-type: inline-size; }
+@container (max-width: 460px) {
+  .provider-model-rule { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
+  .provider-model-rule > .bp6-html-select { grid-column: 1; grid-row: 1; }
+  .provider-model-rule > :not(.bp6-html-select) { grid-row: 2; }
+}
 .usage-card .context-usage-grid > div { background: var(--panel); }
 
 /* Session info window: field tables without the legacy inner padding, and a quiet provenance note. */

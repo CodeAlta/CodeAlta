@@ -251,6 +251,7 @@ public sealed class PluginModelProviderTypes
             DefaultContextSize = settings.DefaultContextSize,
             // A value a newer version of CodeAlta wrote is left to the type.
             ModelOrder = ModelOrdering.Resolve(settings.GetString("models_order"), settings.GetBoolean("sort_models"), contribution.ModelOrder),
+            ModelVisibility = ModelVisibility.ParseValid(settings.GetList("models_hide"), settings.GetList("models_show"), out _),
             PermissionModes = contribution.PermissionModes,
             DefaultPermissionMode = permissionMode is not null && contribution.PermissionModes.Contains(permissionMode, StringComparer.Ordinal) ? permissionMode : null,
         };

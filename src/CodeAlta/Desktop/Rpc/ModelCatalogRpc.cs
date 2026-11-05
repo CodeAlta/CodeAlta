@@ -20,6 +20,9 @@ internal sealed class ModelCatalogService(
 {
     // Every model a real provider reports (Azure OpenAI lists several hundred), far below the bridge's frame limit.
     internal const int MaximumModels = 2048;
+    private const int MaximumHiddenModels = 1024;
+    // ,"hidden":[] in the answer.
+    private const int HiddenPropertyBytes = 12;
     internal const int MaximumModelsResponseBytes = 2 * 1024 * 1024;
     private readonly object _probeGate = new();
     private readonly HashSet<Task> _probes = [];
@@ -179,11 +182,90 @@ internal sealed class ModelCatalogService(
                 bytes += nextBytes + (models.Count > 0 ? 1 : 0);
                 models.Add(projected);
             }
+
+            // The models its rules hide, by id and name, for the page of the provider to show what they hide: after the models it
+            // offers, in what is left of the same budget (the name of the property and its brackets included).
+            var hiddenModels = state.HiddenModels.Where(model => ValidId(model.Id)).ToArray();
+            var hidden = new List<ModelCatalogHiddenModel>(Math.Min(hiddenModels.Length, MaximumHiddenModels));
+            bytes += HiddenPropertyBytes;
+            foreach (var model in hiddenModels.Take(MaximumHiddenModels))
+            {
+                var entry = new ModelCatalogHiddenModel(Bound(model.Id, 256), Bound(model.DisplayName ?? model.Id, 128));
+                var nextBytes = JsonSerializer.SerializeToUtf8Bytes(entry, DesktopJsonContext.Default.ModelCatalogHiddenModel).Length;
+                if (bytes + nextBytes + (hidden.Count > 0 ? 1 : 0) > MaximumModelsResponseBytes) break;
+                bytes += nextBytes + (hidden.Count > 0 ? 1 : 0);
+                hidden.Add(entry);
+            }
+
             return new("ok", epoch, descriptor.ProviderId.Value, availability,
-                models, valid.Length > models.Count);
+                models, valid.Length > models.Count || hiddenModels.Length > hidden.Count) { Hidden = hidden.Count > 0 ? hidden : null };
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception) { return new("read_failed", epoch, descriptor.ProviderId.Value, "Unknown", [], false); }
+    }
+
+    // The most rules of each kind a preview reads, the longest rule, the models it names, and how long it matches.
+    private const int MaximumPreviewRules = 256;
+    private const int MaximumPreviewRuleLength = 1024;
+    private const int MaximumPreviewHidden = 200;
+    private static readonly TimeSpan PreviewTimeLimit = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// What rules of the page of a provider would hide among the models it reported, saved or not: matched here, as the provider
+    /// will match them (.NET regular expressions, each match bounded in time), never in the page. Reads only what the provider
+    /// already reported: it is never prepared for this.
+    /// </summary>
+    [NeoRpcMethod("visibility")]
+    public ModelCatalogVisibilityResponse Visibility(ModelCatalogVisibilityRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var denied = CheckEpoch(request.ExpectedEpoch);
+        if (denied is not null) return new(denied, epoch, 0, 0, [], false);
+        if (!ValidId(request.ProviderId) || request.Hide is { Count: > MaximumPreviewRules } || request.Show is { Count: > MaximumPreviewRules }
+            || (request.Hide ?? []).Concat(request.Show ?? []).Any(static rule => rule is null || rule.Length > MaximumPreviewRuleLength))
+            return new("invalid_request", epoch, 0, 0, [], false);
+        var state = initialization!.CurrentStates.FirstOrDefault(value => string.Equals(value.ProviderId.Value, request.ProviderId, StringComparison.OrdinalIgnoreCase));
+        if (state is null || state.Availability != ModelProviderAvailability.Ready) return new("unavailable", epoch, 0, 0, [], false);
+        ModelVisibility visibility;
+        try
+        {
+            visibility = ModelVisibility.Parse(request.Hide, request.Show);
+        }
+        catch (ArgumentException exception)
+        {
+            // The message of the rule, without the name of the parameter .NET appends to it.
+            var message = exception.ParamName is { } name ? exception.Message.Replace($" (Parameter '{name}')", "", StringComparison.Ordinal) : exception.Message;
+            return new("invalid", epoch, 0, 0, [], false) { Problem = Bound(message, 512) };
+        }
+
+        var models = state.Models.Concat(state.HiddenModels).Where(model => ValidId(model.Id)).ToArray();
+        var hidden = new List<ModelCatalogHiddenModel>();
+        var count = 0;
+        var complete = true;
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        // A regular expression that backtracks without end stops the preview, not the window: each match is bounded, the time is
+        // checked between two, and the count says when it is partial.
+        bool Matches(IReadOnlyList<ModelRule> rules, string id)
+        {
+            foreach (var rule in rules)
+            {
+                if (started.Elapsed > PreviewTimeLimit) { complete = false; return false; }
+                if (rule.Matches(id)) return true;
+            }
+
+            return false;
+        }
+
+        foreach (var model in models)
+        {
+            var hides = Matches(visibility.Hide, model.Id) && !Matches(visibility.Show, model.Id);
+            if (!complete) break;
+            if (!hides) continue;
+            count++;
+            if (hidden.Count < MaximumPreviewHidden) hidden.Add(new(Bound(model.Id, 256), Bound(model.DisplayName ?? model.Id, 128)));
+        }
+
+        return new("ok", epoch, models.Length, count, hidden, complete);
     }
 
     // Why a provider is not ready, as one of the codes the page has a text for: the message of the provider stays here.
@@ -371,10 +453,27 @@ internal sealed record ModelCatalogProbeResponse(string Status, string? Epoch, s
 internal sealed record ModelCatalogModelsRequest(string ExpectedEpoch, string ProviderId);
 internal sealed record ModelCatalogModelsResponse(string Status, string? Epoch, string? ProviderId, string Availability, IReadOnlyList<ModelCatalogModel> Models, bool Truncated)
 {
+    // The models the rules of the provider hide (models_hide, models_show); absent when they hide none.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ModelCatalogHiddenModel>? Hidden { get; init; }
+
     // Why the provider lists no model, as one of the codes of the probe; absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Reason { get; init; }
 }
+internal sealed record ModelCatalogVisibilityRequest(string ExpectedEpoch, string ProviderId, IReadOnlyList<string>? Hide, IReadOnlyList<string>? Show);
+/// <param name="Total">The models the provider reported.</param>
+/// <param name="HiddenCount">How many of them the rules hide.</param>
+/// <param name="Hidden">The first of those, by id and name.</param>
+/// <param name="Complete">False when the matching stopped before it read every model.</param>
+internal sealed record ModelCatalogVisibilityResponse(string Status, string? Epoch, int Total, int HiddenCount, IReadOnlyList<ModelCatalogHiddenModel> Hidden, bool Complete)
+{
+    // Why the rules do not read (`invalid`), as .NET says it; absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Problem { get; init; }
+}
+/// <summary>A model the rules of its provider hide: its id and its name.</summary>
+internal sealed record ModelCatalogHiddenModel(string Id, string Name);
 internal sealed record ModelCatalogModel(string Id, string Name, string? Description, IReadOnlyList<string> Efforts, string? DefaultEffort,
     int? ContextTokens, int? InputTokens, int? OutputTokens, bool? Reasoning, bool? Tools, bool? StructuredOutput, bool? ImageInput)
 {

@@ -22,6 +22,9 @@ internal sealed partial class GlobalConfigService
     private const string SortModelsKey = "sort_models";
     // The size of context every provider type has (see PluginProviderSettings.DefaultContextSize).
     private const string ContextSizeKey = "context_size";
+    // The rules that hide some models of a provider, and those that show some again (see ModelVisibility).
+    private const string ModelsHideKey = "models_hide";
+    private const string ModelsShowKey = "models_show";
 
     /// <summary>Gets the provider types of the running plugins, or <see langword="null"/> for a host without plugins.</summary>
     internal PluginModelProviderTypes? PluginProviderTypes { get; init; }
@@ -121,6 +124,8 @@ internal sealed partial class GlobalConfigService
                     Color = Bound(settings.GetString("color")),
                     PermissionMode = Bound(settings.PermissionMode),
                     ModelsOrder = ConfiguredModelsOrder(settings.GetString(ModelsOrderKey), settings.GetBoolean(SortModelsKey)),
+                    ModelsHide = ModelRules(settings.GetList(ModelsHideKey)),
+                    ModelsShow = ModelRules(settings.GetList(ModelsShowKey)),
                     ContextSize = ContextSizeContract.Of(settings.DefaultContextSize),
                     Plugin = new GlobalConfigPluginProviderValues(
                         Bound(contribution.Tag),
@@ -194,6 +199,8 @@ internal sealed partial class GlobalConfigService
             return new("invalid", null, "A provider field is too long.", null, null, 0);
         if (!TryReadModelsOrder(request.ModelsOrder, out var modelsOrder))
             return new("invalid", null, $"An order of the models is one of: {string.Join(", ", ModelOrdering.Values)}.", null, null, 0);
+        if (!TryReadModelRules(request.ModelsHide, request.ModelsShow, out var modelsHide, out var modelsShow, out var rulesProblem))
+            return new("invalid", null, rulesProblem, null, null, 0);
 
         return MutateExternal(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, store =>
         {
@@ -215,6 +222,8 @@ internal sealed partial class GlobalConfigService
             // The older sort_models gives way to the order the form names.
             Set(values, ModelsOrderKey, modelsOrder);
             values.Remove(SortModelsKey);
+            if (request.ModelsHide is not null) Set(values, ModelsHideKey, modelsHide?.Select(static rule => (object?)rule).ToArray());
+            if (request.ModelsShow is not null) Set(values, ModelsShowKey, modelsShow?.Select(static rule => (object?)rule).ToArray());
             Set(values, ContextSizeKey, request.ContextSize is > 0 and var size ? (long)size : null);
             foreach (var setting in contribution.Settings.Where(static setting => !setting.ReadOnly))
             {
@@ -681,6 +690,12 @@ internal sealed record GlobalConfigSavePluginProviderRequest(string? ExpectedEpo
 
     /// <summary>The order of the models (<c>provider</c>, <c>name</c>, <c>name_version</c>); blank for the order of its type.</summary>
     public string? ModelsOrder { get; init; }
+
+    /// <summary>The rules that hide some of its models (<c>models_hide</c>); empty for none, null to keep those of the file.</summary>
+    public IReadOnlyList<string>? ModelsHide { get; init; }
+
+    /// <summary>The rules that show a model again, whatever hides it (<c>models_show</c>); empty for none, null to keep those of the file.</summary>
+    public IReadOnlyList<string>? ModelsShow { get; init; }
 
     /// <summary>The size of context, in input tokens, of the sessions whose model has it (<c>context_size</c>); null for the size of their model.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

@@ -68,6 +68,9 @@ public sealed record ModelProviderDescriptor
     /// <summary>Gets the order the discovered models are listed in; the order of the provider by default.</summary>
     public ModelOrder ModelOrder { get; init; }
 
+    /// <summary>Gets which discovered models are offered (<c>models_hide</c> and <c>models_show</c>); every model by default.</summary>
+    public ModelVisibility ModelVisibility { get; init; } = ModelVisibility.All;
+
     /// <summary>
     /// Gets a value indicating whether discovered models are sorted for presentation; true sets <see cref="ModelOrder"/>
     /// to <see cref="Agent.ModelOrder.Name"/>.

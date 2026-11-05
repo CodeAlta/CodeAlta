@@ -6,6 +6,7 @@ import { ProviderAccount } from "./ProviderAccount";
 import { ProviderKeySecret } from "./secrets/ProviderKeySecret";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { ProviderUsagePanel } from "./UsageLimits";
+import { ProviderModelVisibility } from "./ProviderModelVisibility";
 import { hasSubscriptionUsage } from "./subscriptionUsage";
 import { providerDefault } from "./providerSignIn";
 import { ActivitySpinner } from "./ActivitySpinner";
@@ -14,7 +15,7 @@ import { providerBrand } from "./brands";
 import { Logo, ProviderIcon } from "./ProviderIcon";
 import { ProviderColorInput, ProviderIconPicker } from "./ProviderIconFields";
 import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
-import { isSignedOut, modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerProblem, providerStateProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
+import { isSignedOut, modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerRules, providerFormDirty, providerProblem, providerStateProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
 import { GuidedTour, type GuidedTourStep } from "./GuidedTour";
 import { providerTourSteps, providerTourStorageKey, startsProviderTour } from "./providerTour";
 import { SettingsFileLocations } from "./SettingsFileLocation";
@@ -252,11 +253,12 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
       void settle(() => plugins.savePluginProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, originalKey: original?.key ?? null, key, type: form.type,
         enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model), reasoningEffort: optional(form.reasoningEffort),
         values: pluginSettingValues(formPlugin, form.plugin), makeDefault: form.makeDefault, icon: optional(form.icon)?.toLowerCase() ?? null,
-        color: optional(form.color), permissionMode: optional(form.permissionMode), modelsOrder: optional(form.modelsOrder), contextSize: form.contextSize },
+        color: optional(form.color), permissionMode: optional(form.permissionMode), modelsOrder: optional(form.modelsOrder),
+        ...providerRules(form, original ? baseline : null), contextSize: form.contextSize },
         { timeoutMilliseconds: 60000 }), key, renamed(key));
       return;
     }
-    const wire = providerEdit(form);
+    const wire = providerEdit(form, original ? baseline : null);
     void settle(() => config.saveProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, originalKey: original?.key ?? null,
       provider: wire, makeDefault: form.makeDefault, applyProviders: true }, { timeoutMilliseconds: 60000 }), wire.key, renamed(wire.key));
   }
@@ -494,6 +496,10 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
               && <ProviderUsagePanel key={`${original.key}:usage`} epoch={epoch} providerKey={original.key} api={usage} />}
             <Checkbox className="provider-settings-wide" checked={form.makeDefault} disabled={busy || !form.enabled} label={t("Use as the default provider for new sessions")}
               onChange={event => edit({ makeDefault: event.currentTarget.checked })} />
+            {/* Few people need it: folded, last, under a line that says what it hides. */}
+            <ProviderModelVisibility key={original?.key ?? newProvider} epoch={epoch} revision={listing.revision}
+              providerId={modelProvider && availability.get(modelProvider.toLowerCase())?.availability === "Ready" ? modelProvider : null}
+              hide={form.modelsHide} show={form.modelsShow} disabled={busy} readModels={readModels} onChange={change => edit(change)} />
           </SectionCard>
           <SectionCard className="provider-settings-footer settings-split-footer">
             {problem && dirty && <span className="provider-settings-problem" role="alert">{t(problem)}</span>}

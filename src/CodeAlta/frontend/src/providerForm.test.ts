@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { GlobalConfigProvider } from "#neoastra";
-import { modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerProblem, providerStateProblem, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
+import { modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerRules, providerProblem, providerStateProblem, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
 
 const types = ["openai-chat", "anthropic", "codex"];
 const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled: true, displayName: "Local", effectiveName: "Local", model: "model-a",
@@ -12,12 +12,27 @@ const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled
 test("a form starts from the written values, never from the stored secret", () => {
   const form = providerForm(local, "local", types);
   assert.deepEqual(form, { key: "local", type: "openai-chat", enabled: true, displayName: "Local", model: "model-a", reasoningEffort: "",
-    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", contextSize: null, plugin: {} });
+    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", modelsHide: [], modelsShow: [], contextSize: null, plugin: {} });
   assert.equal(providerForm(local, "other", types).makeDefault, false);
   assert.deepEqual(providerForm(null, "local", types), { key: "", type: "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "",
-    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", contextSize: null, plugin: {} });
+    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", modelsHide: [], modelsShow: [], contextSize: null, plugin: {} });
   assert.equal(providerFormDirty(form, form), false);
   assert.equal(providerFormDirty({ ...form, model: "model-b" }, form), true);
+});
+
+test("the rules of the models are read as the file writes them, and a list left as it was is sent as null", () => {
+  const cursor: GlobalConfigProvider = { ...local, modelsHide: ["regex:(?i:^grok)", "exact:Composer"], modelsShow: ["gpt-5.4"] };
+  const form = providerForm(cursor, null, types);
+  assert.deepEqual(form.modelsHide, [{ match: "regex", pattern: "(?i:^grok)" }, { match: "exact", pattern: "Composer" }]);
+  assert.deepEqual(providerRules(form, form), { modelsHide: null, modelsShow: null }, "the file's own rules are kept, even one JavaScript cannot read");
+  assert.equal(validateProviderForm(form, [{ key: "local" }], "local"), null, "the host checks the rules on save");
+  const edited = { ...form, modelsShow: [...form.modelsShow, { match: "any-case" as const, pattern: " " }] };
+  assert.equal(providerFormDirty(edited, form), false, "an empty row changes nothing");
+  const changed = { ...form, modelsShow: [{ match: "regex" as const, pattern: "^claude-" }] };
+  assert.equal(providerFormDirty(changed, form), true);
+  assert.deepEqual(providerRules(changed, form), { modelsHide: null, modelsShow: ["regex:^claude-"] });
+  assert.deepEqual(providerEdit(changed, form).modelsShow, ["regex:^claude-"]);
+  assert.deepEqual(providerRules(form, null), { modelsHide: ["regex:(?i:^grok)", "exact:Composer"], modelsShow: ["gpt-5.4"] }, "a new provider sends its rules");
 });
 
 test("validation names the first problem and accepts a complete form", () => {
@@ -39,7 +54,7 @@ test("the wire edit sends blank fields as null and keeps an untouched secret", (
   const form = providerForm(local, "local", types);
   assert.deepEqual(providerEdit({ ...form, key: " Local ", model: "  " }), { key: "local", type: "openai-chat", enabled: true, displayName: "Local",
     model: null, reasoningEffort: null, apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: null, apiKey: null, clearApiKey: false, icon: null, color: null, anthropicApiKey: null,
-    permissionMode: null, configDir: null, environment: null, modelsOrder: null, contextSize: null });
+    permissionMode: null, configDir: null, environment: null, modelsOrder: null, modelsHide: [], modelsShow: [], contextSize: null });
   assert.equal(providerEdit({ ...form, apiKey: "new-secret" }).apiKey, "new-secret");
   const cleared = providerEdit({ ...form, apiKey: "ignored", clearApiKey: true });
   assert.equal(cleared.apiKey, null);

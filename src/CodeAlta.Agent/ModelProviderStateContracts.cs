@@ -62,9 +62,12 @@ public sealed record ModelProviderStateSnapshot
     public string? StatusMessage { get; init; }
 
     /// <summary>
-    /// Gets the model catalog returned by the provider probe.
+    /// Gets the model catalog returned by the provider probe, without the models its <see cref="ModelProviderDescriptor.ModelVisibility"/> hides.
     /// </summary>
     public IReadOnlyList<AgentModelInfo> Models { get; init; } = [];
+
+    /// <summary>Gets the models of the probe that <see cref="ModelProviderDescriptor.ModelVisibility"/> hides, which no list offers.</summary>
+    public IReadOnlyList<AgentModelInfo> HiddenModels { get; init; } = [];
 
     /// <summary>
     /// Gets the selected or suggested model identifier.

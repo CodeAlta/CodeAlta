@@ -177,6 +177,8 @@ internal static class CodeAltaConfigDocumentCopy
         ModelsIncludeRegex = provider.ModelsIncludeRegex,
         SortModels = provider.SortModels,
         ModelsOrder = provider.ModelsOrder,
+        ModelsHide = provider.ModelsHide is null ? null : [.. provider.ModelsHide],
+        ModelsShow = provider.ModelsShow is null ? null : [.. provider.ModelsShow],
         ExtraBody = Copy(provider.ExtraBody),
         Request = provider.Request is { } request
             ? new CodeAltaProviderRequestDocument

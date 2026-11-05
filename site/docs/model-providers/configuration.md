@@ -35,6 +35,8 @@ A type your version of CodeAlta does not know, one a newer version added, leaves
 | `models_include_regex` | A .NET regular expression: only the model ids it matches are shown, such as `^gemini-.*-pro`. |
 | `models_order` | The order of the models: `provider`, `name`, or `name_version` (by name, the newest version first). Missing means `provider`, except for ACP agents. |
 | `sort_models` | Older form of `models_order`: `true` is `name`, `false` is `provider`. `models_order` takes precedence. |
+| `models_hide` | Rules that hide models from the lists where a model is chosen, such as `["regex:.*"]`. See [Models of a provider](#models-of-a-provider). |
+| `models_show` | Rules that show a model again, whatever `models_hide` says, such as `["gpt-5.4", "regex:^claude-"]`. |
 | `profile` | [Compatibility profile](#compatibility-profile). |
 | `compaction` | [Compaction settings](#compaction-settings). |
 | `model_overrides` | [Model metadata overrides](#model-metadata-overrides). |
@@ -256,6 +258,15 @@ supports_tool_call = true
 - `models_dev_provider_id` names the models.dev provider that describes the models; without it, CodeAlta finds one (see [Models and reasoning](readme.md#models-and-reasoning)).
 - `models_include_regex` keeps only the models whose id it matches, such as `gpt-5|claude`.
 - `single_model_id` gives the one model of an endpoint that lists none.
+- `models_hide` and `models_show` hide some models from the lists where a model is chosen, as **Hidden models** in the form of the provider does. Each is a list of rules: `regex:<pattern>` (a .NET regular expression found anywhere in the id), `exact:<id>` (the id as written), or the id alone (whatever its case). A model is hidden when a rule of `models_hide` matches it and no rule of `models_show` does: hide everything, then show a few.
+
+  ```toml
+  [providers.cursor]
+  models_hide = ["regex:.*"]
+  models_show = ["gpt-5.4", "regex:^claude-.*-5$"]
+  ```
+
+  A session that already uses a hidden model keeps it. A rule that does not read stops the configuration from loading, with the provider and the rule named.
 - `models_order` lists them in the provider's order (`provider`), by name (`name`), or by name with the highest version first among the names that differ only by their numbers (`name_version`): `Claude Fable 5.1` before `Claude Fable 5`, `Gemini 4 Argon` before `Gemini 3.8 Flash`. The models of an [ACP agent](acp-agents.md) are in the `name_version` order unless you choose another one.
 
 ## Compaction settings

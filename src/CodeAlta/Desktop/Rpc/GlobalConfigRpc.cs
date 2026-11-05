@@ -482,6 +482,7 @@ internal sealed partial class GlobalConfigService
                             !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective))
                         { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey), PermissionMode = Bound(definition?.PermissionMode),
                           ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command), ModelsOrder = ConfiguredModelsOrder(definition?.ModelsOrder, definition?.SortModels),
+                          ModelsHide = ModelRules(definition?.ModelsHide), ModelsShow = ModelRules(definition?.ModelsShow),
                           ContextSize = ContextSizeContract.Of(definition?.ContextSize),
                           ApiKeySecret = Bound(definition?.ApiKeySecret),
                           ApiKeySecretSet = definition?.ApiKeySecret is { } secretName ? IsSecretSet(secretName) : null,
@@ -587,6 +588,8 @@ internal sealed partial class GlobalConfigService
             return new("invalid", null, $"An order of the models is one of: {string.Join(", ", ModelOrdering.Values)}.", null, null, 0);
         if (!TryReadEnvironment(edit.Environment, out var environment, out var environmentProblem))
             return new("invalid", null, environmentProblem, null, null, 0);
+        if (!TryReadModelRules(edit.ModelsHide, edit.ModelsShow, out var modelsHide, out var modelsShow, out var rulesProblem))
+            return new("invalid", null, rulesProblem, null, null, 0);
         return Mutate(request.ExpectedEpoch, request.ExpectedRevision, request.ApplyProviders, (store, definitions) =>
         {
             var original = request.OriginalKey?.Trim();
@@ -622,6 +625,9 @@ internal sealed partial class GlobalConfigService
             // The older sort_models gives way to the order the form names.
             definition.ModelsOrder = modelsOrder;
             definition.SortModels = null;
+            // Null keeps the rules the file has: a client that does not know them leaves them alone.
+            if (edit.ModelsHide is not null) definition.ModelsHide = modelsHide;
+            if (edit.ModelsShow is not null) definition.ModelsShow = modelsShow;
             // A null key keeps the stored secret; the form never receives it back.
             if (edit.ClearApiKey) definition.ApiKey = null;
             else if (!string.IsNullOrEmpty(edit.ApiKey)) definition.ApiKey = edit.ApiKey;
@@ -934,6 +940,42 @@ internal sealed partial class GlobalConfigService
         if (!ModelOrdering.TryParse(value, out var order)) return false;
         modelsOrder = ModelOrdering.Format(order);
         return true;
+    }
+
+    private const int MaximumModelRules = 256;
+    private const int MaximumModelRuleLength = 1024;
+
+    // The rules of the file, whole: a list the form changes is saved as it shows it, so it never shows less than the file has. One
+    // beyond the bounds of a save is refused then, and nothing is lost. The form sends null for a list it did not change.
+    private static IReadOnlyList<string>? ModelRules(IEnumerable<string>? rules)
+        => rules?.ToArray() is { Length: > 0 } listed ? listed : null;
+
+    // The rules of the form: trimmed, the empty ones left out, each one read as the configuration reads it.
+    private static bool TryReadModelRules(IReadOnlyList<string>? hide, IReadOnlyList<string>? show,
+        out List<string>? modelsHide, out List<string>? modelsShow, out string problem)
+    {
+        static List<string>? Clean(IReadOnlyList<string>? rules)
+            => rules?.Select(static rule => rule?.Trim()).Where(static rule => !string.IsNullOrEmpty(rule)).Select(static rule => rule!).ToList() is { Count: > 0 } clean ? clean : null;
+        modelsHide = Clean(hide);
+        modelsShow = Clean(show);
+        problem = string.Empty;
+        if ((modelsHide?.Count ?? 0) > MaximumModelRules || (modelsShow?.Count ?? 0) > MaximumModelRules
+            || (modelsHide ?? []).Concat(modelsShow ?? []).Any(static rule => rule.Length > MaximumModelRuleLength))
+        {
+            problem = $"A provider has at most {MaximumModelRules} rules of each kind for its models, each of at most {MaximumModelRuleLength} characters.";
+            return false;
+        }
+
+        try
+        {
+            ModelVisibility.Parse(modelsHide, modelsShow);
+            return true;
+        }
+        catch (ArgumentException exception)
+        {
+            problem = exception.ParamName is { } name ? exception.Message.Replace($" (Parameter '{name}')", "", StringComparison.Ordinal) : exception.Message;
+            return false;
+        }
     }
 
     private static bool TakesPermissionMode(string? type) => ConfiguredModelProviderRegistryBuilder.GetPermissionModes(type).Count > 0;
@@ -1289,6 +1331,14 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
     /// </summary>
     public string? ModelsOrder { get; init; }
 
+    /// <summary>The rules that hide some of its models (<c>models_hide</c>), as the file writes them; null for none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ModelsHide { get; init; }
+
+    /// <summary>The rules that show a model again, whatever hides it (<c>models_show</c>); null for none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ModelsShow { get; init; }
+
     /// <summary>
     /// The variables a <c>claude-code</c> provider starts its CLI with (<c>env</c>), as the file writes them; null for none.
     /// </summary>
@@ -1341,6 +1391,12 @@ internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool 
 
     /// <summary>The order of the models (<c>provider</c>, <c>name</c>, <c>name_version</c>); blank for the order of its type.</summary>
     public string? ModelsOrder { get; init; }
+
+    /// <summary>The rules that hide some of its models: <c>regex:</c>, <c>exact:</c> or an id of any case; empty for none, null to keep those of the file.</summary>
+    public IReadOnlyList<string>? ModelsHide { get; init; }
+
+    /// <summary>The rules that show a model again, whatever hides it; empty for none, null to keep those of the file.</summary>
+    public IReadOnlyList<string>? ModelsShow { get; init; }
 
     /// <summary>The size of context, in input tokens, of the sessions of the provider whose model has it; null for the size of their model.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

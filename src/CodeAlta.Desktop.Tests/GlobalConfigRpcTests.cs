@@ -122,6 +122,18 @@ command = "codex"
         Assert.IsTrue(Save(null).Status is "ok" or "apply_failed");
         Assert.IsNull(Listed().ContextSize, "Default removes the size");
         Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("context_size", StringComparison.Ordinal));
+
+        // The rules of its models: written beside its values, listed, and given to the provider it registers.
+        var rules = service.SavePluginProvider(new(Epoch, service.Providers(new(Epoch)).Revision, "codex-work", "codex-work", "fake-agent", true,
+            null, null, null, null, false) { ModelsHide = ["regex:^gpt-4"], ModelsShow = ["gpt-4.1"] });
+        Assert.IsTrue(rules.Status is "ok" or "apply_failed", rules.Message);
+        CollectionAssert.AreEqual(new[] { "regex:^gpt-4" }, Listed().ModelsHide!.ToArray());
+        CollectionAssert.AreEqual(new[] { "gpt-4.1" }, Listed().ModelsShow!.ToArray());
+        var visibility = fixture.Registry.ListProviders(includeDisabled: true).Single(static provider => provider.ProviderId.Value == "codex-work").ModelVisibility;
+        Assert.IsFalse(visibility.Shows("gpt-4o"));
+        Assert.IsTrue(visibility.Shows("GPT-4.1"));
+        Assert.AreEqual("invalid", service.SavePluginProvider(new(Epoch, service.Providers(new(Epoch)).Revision, "codex-work", "codex-work", "fake-agent", true,
+            null, null, null, null, false) { ModelsShow = ["regex:["] }).Status);
     }
 
     [TestMethod]
@@ -1120,6 +1132,39 @@ type = "fake-agent"
         Assert.AreEqual("ok", moved.Status, moved.Message);
         Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("permission_mode", StringComparison.Ordinal));
         Assert.IsNull(fixture.Service.Providers(new(Epoch)).Providers.Single(static provider => provider.Key == "claude").PermissionMode);
+    }
+
+    [TestMethod]
+    public async Task SaveProvider_WritesTheRulesOfTheModels_KeepsThemWhenNotSent_AndRefusesOneThatDoesNotRead()
+    {
+        await using var fixture = new Fixture(ProvidersConfig);
+        var listed = fixture.Service.Providers(new(Epoch));
+        var edit = new GlobalConfigProviderEdit("local", "openai-chat", true, "Local", "model-a", null, "http://127.0.0.1:9999/v1", null, null, false);
+
+        var refused = fixture.Service.SaveProvider(new(Epoch, listed.Revision, "local", edit with { ModelsHide = ["regex:("] }, false, false));
+        Assert.AreEqual("invalid", refused.Status);
+        StringAssert.Contains(refused.Message, "not a valid regular expression");
+
+        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, "local", edit with { ModelsHide = ["regex:.*", " "], ModelsShow = [" model-a "] }, false, false));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        var provider = fixture.Service.Providers(new(Epoch)).Providers.Single(static provider => provider.Key == "local");
+        CollectionAssert.AreEqual(new[] { "regex:.*" }, provider.ModelsHide!.ToArray());
+        CollectionAssert.AreEqual(new[] { "model-a" }, provider.ModelsShow!.ToArray());
+
+        // A long rule is listed whole, as it is saved back.
+        var longRule = "regex:^" + new string('a', 900);
+        var lengthy = fixture.Service.SaveProvider(new(Epoch, saved.Revision, "local", edit with { ModelsHide = [longRule] }, false, false));
+        Assert.AreEqual("ok", lengthy.Status, lengthy.Message);
+        Assert.AreEqual(longRule, fixture.Service.Providers(new(Epoch)).Providers.Single(static provider => provider.Key == "local").ModelsHide!.Single());
+        saved = lengthy;
+
+        // A client that does not send them leaves them as they are; an empty list removes them.
+        var kept = fixture.Service.SaveProvider(new(Epoch, saved.Revision, "local", edit, false, false));
+        Assert.AreEqual("ok", kept.Status, kept.Message);
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "models_hide");
+        var cleared = fixture.Service.SaveProvider(new(Epoch, kept.Revision, "local", edit with { ModelsHide = [], ModelsShow = [] }, false, false));
+        Assert.AreEqual("ok", cleared.Status, cleared.Message);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("models_", StringComparison.Ordinal));
     }
 
     [TestMethod]

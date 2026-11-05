@@ -75,6 +75,31 @@ public sealed class ModelCatalogRpcTests
     }
 
     [TestMethod]
+    public async Task TheRulesOfTheForm_AreMatchedOnTheHost_AmongEveryModelTheProviderReported()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new("cursor"), "Cursor") { ModelVisibility = ModelVisibility.Parse(["grok-4"], null) };
+        registry.RegisterOrReplace(descriptor, () => new LiteralRuntime(descriptor, () =>
+            [new AgentModelInfo("grok-4"), new AgentModelInfo("composer-1"), new AgentModelInfo("claude-opus-5"), new AgentModelInfo("gpt-5.4")]));
+        var service = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), "epoch");
+        Assert.AreEqual("unavailable", service.Visibility(new("epoch", "cursor", ["regex:.*"], null)).Status, "a provider is never prepared for a preview");
+
+        var listed = await service.Models(new("epoch", "cursor"), CancellationToken.None);
+        CollectionAssert.AreEqual(new[] { "grok-4" }, listed.Hidden!.Select(static model => model.Id).ToArray(), "the saved rules hide grok-4");
+
+        // The rules of the form, not saved yet: .NET reads them, also what JavaScript would not (an inline option, \A).
+        var preview = service.Visibility(new("epoch", "cursor", ["regex:.*"], ["regex:(?i:^COMPOSER)", @"regex:\Aclaude-"]));
+        Assert.AreEqual(("ok", 4, 2, true), (preview.Status, preview.Total, preview.HiddenCount, preview.Complete));
+        CollectionAssert.AreEquivalent(new[] { "grok-4", "gpt-5.4" }, preview.Hidden.Select(static model => model.Id).ToArray(), "the models hidden by the saved rules count too");
+
+        var invalid = service.Visibility(new("epoch", "cursor", ["regex:("], null));
+        Assert.AreEqual("invalid", invalid.Status);
+        StringAssert.Contains(invalid.Problem, "not a valid regular expression");
+        Assert.AreEqual("stale_epoch", service.Visibility(new("other", "cursor", null, null)).Status);
+        Assert.AreEqual("invalid_request", service.Visibility(new("epoch", "cursor", [new string('a', 1025)], null)).Status);
+    }
+
+    [TestMethod]
     public async Task ADeprecatedModelIsMarked_WithTheDateItRetires()
     {
         await using var registry = new ModelProviderRegistry();

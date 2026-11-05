@@ -2,6 +2,7 @@ import type { GlobalConfigProvider, GlobalConfigProviderEdit } from "#neoastra";
 import { brandColor } from "./brands";
 import type { MessageKey } from "./localization";
 import { validConfigDir } from "./claudeCli/claudeCli";
+import { formatModelRules, parseModelRule, type ModelRuleDraft } from "./modelVisibility";
 import { environmentEntries, environmentProblem, environmentText, pluginFieldValues, samePluginFieldValues, type PluginFieldValues } from "./pluginProviders/pluginProviderForm";
 
 /** Editable provider fields; empty strings mean "left to the provider's default". */
@@ -23,6 +24,8 @@ export type ProviderForm = Readonly<{
   environment: string;
   /** The order of the models (`provider`, `name`, `name_version`); blank for the order of its type. */
   modelsOrder: string;
+  /** The rules that hide some of its models (`models_hide`), and those that show some again (`models_show`). */
+  modelsHide: readonly ModelRuleDraft[]; modelsShow: readonly ModelRuleDraft[];
   /** The size of context, in input tokens, of the sessions whose model has it; null for the size of their model. */
   contextSize: number | null;
   /** For a provider whose type a plugin runs: the values of the settings of its type, by key. */
@@ -37,14 +40,18 @@ export function providerForm(provider: GlobalConfigProvider | null, defaultProvi
       clearApiKey: false, makeDefault: provider.key === defaultProvider, icon: provider.icon ?? "", color: provider.color ?? "",
       anthropicApiKey: provider.anthropicApiKey ?? "", permissionMode: provider.permissionMode ?? "",
       configDir: provider.configDir ?? "", environment: environmentText(provider.environment), modelsOrder: provider.modelsOrder ?? "",
+      modelsHide: (provider.modelsHide ?? []).map(parseModelRule), modelsShow: (provider.modelsShow ?? []).map(parseModelRule),
       contextSize: provider.contextSize ?? null, plugin: pluginFieldValues(provider) }
     : { key: "", type: types[0] ?? "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "", apiUrl: "", apiKeyEnv: "",
       apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "",
-      contextSize: null, plugin: {} };
+      modelsHide: [], modelsShow: [], contextSize: null, plugin: {} };
 }
 
 export function providerFormDirty(form: ProviderForm, baseline: ProviderForm): boolean {
-  return (Object.keys(form) as (keyof ProviderForm)[]).some(field => field === "plugin" ? !samePluginFieldValues(form.plugin, baseline.plugin) : form[field] !== baseline[field]);
+  return (Object.keys(form) as (keyof ProviderForm)[]).some(field => field === "plugin" ? !samePluginFieldValues(form.plugin, baseline.plugin)
+    // A row left empty changes nothing: it is not saved.
+    : field === "modelsHide" || field === "modelsShow" ? !sameRules(form[field], baseline[field])
+    : form[field] !== baseline[field]);
 }
 
 /** The first problem that prevents saving, or null. `originalKey` is null for a new provider. */
@@ -61,8 +68,21 @@ export function validateProviderForm(form: ProviderForm, providers: readonly Pic
   return null;
 }
 
+function sameRules(rules: readonly ModelRuleDraft[], baseline: readonly ModelRuleDraft[]): boolean {
+  return formatModelRules(rules).join("\n") === formatModelRules(baseline).join("\n");
+}
+
+/**
+ * The rules of the models that a save sends: null for a list left as it was read, which keeps the file's own exactly (the host
+ * checks each rule with .NET, which reads more than JavaScript does); the rules of the form otherwise, and for a new provider.
+ */
+export function providerRules(form: ProviderForm, baseline: ProviderForm | null): Readonly<{ modelsHide: string[] | null; modelsShow: string[] | null }> {
+  return { modelsHide: baseline && sameRules(form.modelsHide, baseline.modelsHide) ? null : formatModelRules(form.modelsHide),
+    modelsShow: baseline && sameRules(form.modelsShow, baseline.modelsShow) ? null : formatModelRules(form.modelsShow) };
+}
+
 /** The wire edit for a form: blank optional fields are sent as null, and an untouched secret is kept. */
-export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
+export function providerEdit(form: ProviderForm, baseline: ProviderForm | null = null): GlobalConfigProviderEdit {
   const optional = (value: string) => value.trim() ? value.trim() : null;
   // A provider that runs its own CLI takes none of the API fields: what another type left in the form is not sent.
   const cli = runsOwnCli(form.type);
@@ -75,7 +95,8 @@ export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
     // So is the folder of its account.
     configDir: cli ? optional(form.configDir) : null,
     // And the variables its CLI starts with: an empty list removes them.
-    environment: cli ? environmentEntries(form.environment) : null, modelsOrder: optional(form.modelsOrder), contextSize: form.contextSize };
+    environment: cli ? environmentEntries(form.environment) : null, modelsOrder: optional(form.modelsOrder),
+    ...providerRules(form, baseline), contextSize: form.contextSize };
 }
 
 /** The orders of the models of a provider, by their value in the configuration file. */

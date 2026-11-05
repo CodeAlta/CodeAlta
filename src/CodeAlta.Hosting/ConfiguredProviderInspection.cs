@@ -208,7 +208,8 @@ public static class ConfiguredProviderInspection
 
         await using var _ = runtime;
         var probe = await runtime.ProbeAsync(cancellationToken);
-        var models = ModelOrdering.Apply(probe.Models, ModelOrdering.Resolve(definition.ModelsOrder, definition.SortModels, ModelOrder.Provider));
+        var models = ConfiguredModelProviderRegistryBuilder.ModelVisibilityOf(definition)
+            .Apply(ModelOrdering.Apply(probe.Models, ModelOrdering.Resolve(definition.ModelsOrder, definition.SortModels, ModelOrder.Provider))).Shown;
         return new ProviderInspectionModelListResult(true, formatSuccess(models.Count), models);
     }
 

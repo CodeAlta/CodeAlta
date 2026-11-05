@@ -193,6 +193,23 @@ With [model tiers](../model-tiers.md), a session whose provider runs out of quot
 
 The models of a provider come from its API when it lists them. CodeAlta completes what it knows of each model from the models.dev catalog: it finds the models.dev provider with the same `api_url`, else the one named like the provider key, else the one of the provider type, and looks up a model it does not list under its vendor (`claude-` under Anthropic, `gpt-` under OpenAI...). The [configuration file](configuration.md#models-of-a-provider) can name the catalog entry, keep only some models, or correct their limits.
 
+### Hidden models
+
+A provider can list models you never use, such as the models of other vendors that an agent offers. **Hidden models**, at the end of the form of the provider in CodeAlta Desktop, keeps them out of the model pickers, the Models page and the tiers:
+
+- **Hide** lists the rules that hide models, **Show anyway** the rules that bring some back. A rule is a model id (whatever its case), an exact id, or a regular expression.
+- To offer only a few models, hide them all with the regular expression `.*` and show those few.
+- While the provider is ready, the section lists the models your rules hide, as you type them. **Save and apply** applies them.
+
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-provider-hidden-models.webp" alt="The Hidden models section of a Claude Code provider under its Usage section: one rule hides every model, three rules show opus, sonnet and the version 5 models again, and the seven models hidden are listed" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Every model hidden but a few, under the usage of the subscription.</figcaption>
+</figure>
+
+The rules are `models_hide` and `models_show` in the [configuration file](configuration.md#models-of-a-provider).
+
+### Model details
+
 The **Models** page of CodeAlta Desktop shows each model's limits, price per million tokens, inputs, knowledge cutoff and release date. For a subscription (Claude Code, Codex, Copilot, a coding plan), it shows the price of the model's vendor and names it.
 
 Reasoning effort is chosen per provider and model:

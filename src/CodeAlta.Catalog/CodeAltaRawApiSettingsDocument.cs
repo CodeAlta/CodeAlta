@@ -606,6 +606,17 @@ public sealed class CodeAltaProviderDocument
     public string? ModelsOrder { get; set; }
 
     /// <summary>
+    /// Gets or sets the rules that hide discovered models from the lists: <c>regex:&lt;pattern&gt;</c>, <c>exact:&lt;id&gt;</c>, or an id
+    /// matched whatever its case (<see cref="Agent.ModelVisibility"/>).
+    /// </summary>
+    [JsonPropertyName("models_hide")]
+    public List<string>? ModelsHide { get; set; }
+
+    /// <summary>Gets or sets the rules that show a model again, whatever <see cref="ModelsHide"/> says.</summary>
+    [JsonPropertyName("models_show")]
+    public List<string>? ModelsShow { get; set; }
+
+    /// <summary>
     /// Gets or sets provider-specific OpenAI-compatible request-body fields that should be added to outgoing requests.
     /// </summary>
     [JsonPropertyName("extra_body")]

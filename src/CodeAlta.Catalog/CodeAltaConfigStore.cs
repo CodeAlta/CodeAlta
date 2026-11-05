@@ -2398,6 +2398,8 @@ public sealed partial class CodeAltaConfigStore
         definition.SingleModelId = NormalizeModel(definition.SingleModelId);
         definition.ModelsIncludeRegex = NormalizeText(definition.ModelsIncludeRegex);
         definition.ModelsOrder = NormalizeText(definition.ModelsOrder)?.ToLowerInvariant();
+        definition.ModelsHide = NormalizeModelRules(definition.ModelsHide);
+        definition.ModelsShow = NormalizeModelRules(definition.ModelsShow);
         definition.ExtraBody = NormalizeExtraBody(definition.ExtraBody);
         definition.Request = NormalizeRequest(definition.Request);
         definition.Profile = NormalizeProfile(definition.Profile);
@@ -2553,6 +2555,25 @@ public sealed partial class CodeAltaConfigStore
             .Select(static value => value.Trim())
             .ToList();
         return normalized.Count == 0 ? null : normalized;
+    }
+
+    // The rules of a list of models, trimmed, the empty ones left out; null for none.
+    private static List<string>? NormalizeModelRules(List<string>? rules)
+    {
+        var normalized = rules?.Select(static rule => rule?.Trim()).Where(static rule => !string.IsNullOrEmpty(rule)).Select(static rule => rule!).ToList();
+        return normalized is { Count: > 0 } ? normalized : null;
+    }
+
+    private static void ValidateModelRules(CodeAltaProviderDocument definition)
+    {
+        try
+        {
+            ModelVisibility.Parse(definition.ModelsHide, definition.ModelsShow);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} models_hide and models_show must hold valid rules: {ex.Message}", ex);
+        }
     }
 
     private static void ValidateModelsIncludeRegex(CodeAltaProviderDocument definition)
@@ -2876,6 +2897,7 @@ public sealed partial class CodeAltaConfigStore
         }
 
         ValidateModelsIncludeRegex(definition);
+        ValidateModelRules(definition);
         if (definition.ModelsOrder is not null && !ModelOrdering.TryParse(definition.ModelsOrder, out _))
         {
             throw new InvalidOperationException($"providers.{definition.ProviderKey} models_order must be one of: {string.Join(", ", ModelOrdering.Values)}.");
@@ -3577,6 +3599,8 @@ public sealed partial class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.ModelsIncludeRegex) ||
                definition.SortModels is not null ||
                !string.IsNullOrWhiteSpace(definition.ModelsOrder) ||
+               definition.ModelsHide is { Count: > 0 } ||
+               definition.ModelsShow is { Count: > 0 } ||
                definition.ExtraBody is { Count: > 0 } ||
                definition.Request is not null ||
                definition.Profile is not null ||
@@ -3692,6 +3716,8 @@ public sealed partial class CodeAltaConfigStore
             ModelsIncludeRegex = definition.ModelsIncludeRegex,
             SortModels = definition.SortModels,
             ModelsOrder = definition.ModelsOrder,
+            ModelsHide = definition.ModelsHide is null ? null : [.. definition.ModelsHide],
+            ModelsShow = definition.ModelsShow is null ? null : [.. definition.ModelsShow],
             ExtraBody = CloneExtraBody(definition.ExtraBody),
             Request = CloneRequest(definition.Request),
             Profile = CloneProfile(definition.Profile),

@@ -404,7 +404,8 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
             var availability = probe.Availability is ModelProviderAvailability.Unknown or ModelProviderAvailability.Probing
                 ? ModelProviderAvailability.Ready
                 : probe.Availability;
-            var models = ModelOrdering.Apply(probe.Models ?? [], descriptor.ModelOrder);
+            // The models its configuration hides are kept apart: no list offers them, and the provider page shows what its rules hide.
+            var (models, hidden) = descriptor.ModelVisibility.Apply(ModelOrdering.Apply(probe.Models ?? [], descriptor.ModelOrder));
 
             PublishState(new ModelProviderStateSnapshot
             {
@@ -412,6 +413,7 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
                 Availability = availability,
                 StatusMessage = BuildStatusMessage(runtime.Descriptor, availability, probe.StatusMessage, models.Count),
                 Models = models,
+                HiddenModels = hidden,
                 SelectedModelId = string.IsNullOrWhiteSpace(probe.SelectedModelId)
                     ? runtime.Descriptor.DefaultModelId
                     : probe.SelectedModelId,

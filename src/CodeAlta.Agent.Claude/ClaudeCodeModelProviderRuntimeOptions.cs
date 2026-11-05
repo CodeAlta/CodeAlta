@@ -131,6 +131,9 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     /// <summary>Gets or initializes the order the models are listed in; the order of the CLI by default.</summary>
     public ModelOrder ModelOrder { get; init; }
 
+    /// <summary>Gets or initializes which of its models are offered; all of them by default.</summary>
+    public ModelVisibility ModelVisibility { get; init; } = ModelVisibility.All;
+
     /// <summary>
     /// Gets or initializes a value indicating whether the models are sorted by name in selectors; true sets
     /// <see cref="ModelOrder"/> to <see cref="Agent.ModelOrder.Name"/>.

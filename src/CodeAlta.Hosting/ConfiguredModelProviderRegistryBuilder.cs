@@ -860,6 +860,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             IsDefault = true,
             IsEnabled = definition.Enabled != false,
             ModelOrder = ModelOrdering.Resolve(definition.ModelsOrder, definition.SortModels, ModelOrder.Provider),
+            ModelVisibility = ModelVisibilityOf(definition),
             // The models of Claude Code are those of Anthropic: models.dev lists them under that provider.
             ModelCatalog = modelCatalog,
         };
@@ -1159,10 +1160,14 @@ public static class ConfiguredModelProviderRegistryBuilder
             IsEnabled = definition.Enabled != false,
             DefaultModelId = NormalizeText(definition.SingleModelId) ?? NormalizeText(definition.Model),
             ModelOrder = ModelOrdering.Resolve(definition.ModelsOrder, definition.SortModels, ModelOrder.Provider),
+            ModelVisibility = ModelVisibilityOf(definition),
             DefaultReasoningEffort = ParseReasoningEffort(definition.ReasoningEffort),
             DefaultContextSize = definition.ContextSize is > 0 ? definition.ContextSize : null,
         };
     }
+
+    // The store refuses a rule that does not read; one written by hand that does not is left out rather than stopping the provider.
+    internal static ModelVisibility ModelVisibilityOf(CodeAltaProviderDocument definition) => ModelVisibility.ParseValid(definition.ModelsHide, definition.ModelsShow, out _);
 
     private static AgentReasoningEffort? ParseReasoningEffort(string? value)
     {

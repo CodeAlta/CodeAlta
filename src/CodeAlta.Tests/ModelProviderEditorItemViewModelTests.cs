@@ -59,6 +59,22 @@ public sealed class ModelProviderEditorItemViewModelTests
     }
 
     [TestMethod]
+    public void ToDocument_KeepsTheRulesThatHideModels_WhichTheEditorDoesNotShow()
+    {
+        var item = ModelProviderEditorItemViewModel.FromDocument(new CodeAltaProviderDocument
+        {
+            ProviderKey = "cursor",
+            ProviderType = "openai-chat",
+            ModelsHide = ["regex:.*"],
+            ModelsShow = ["gpt-5.4"],
+        });
+
+        var document = item.ToDocument();
+        CollectionAssert.AreEqual(new[] { "regex:.*" }, document.ModelsHide);
+        CollectionAssert.AreEqual(new[] { "gpt-5.4" }, document.ModelsShow);
+    }
+
+    [TestMethod]
     public void ToDocument_KeepsTheIconAndTheColorOfTheProvider_WhichTheEditorDoesNotShow()
     {
         var item = ModelProviderEditorItemViewModel.FromDocument(new CodeAltaProviderDocument

@@ -416,6 +416,8 @@ internal sealed partial class ModelProviderEditorItemViewModel
             ModelsIncludeRegex = definition.ModelsIncludeRegex,
             SortModels = definition.SortModels,
             ModelsOrder = definition.ModelsOrder,
+            ModelsHide = definition.ModelsHide is null ? null : [.. definition.ModelsHide],
+            ModelsShow = definition.ModelsShow is null ? null : [.. definition.ModelsShow],
             ExtraBody = definition.ExtraBody,
             Profile = definition.Profile,
             Compaction = definition.Compaction,

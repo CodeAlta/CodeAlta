@@ -294,6 +294,34 @@ public sealed class CodeAltaConfigStoreRawApiTests
     }
 
     [TestMethod]
+    public void LoadGlobalProviderDefinitions_ReadsTheRulesOfTheModels_AndRefusesOneThatDoesNotRead()
+    {
+        using var temp = TempDirectory.Create();
+        var config = Path.Combine(temp.Path, "config.toml");
+        File.WriteAllText(config, """
+            [providers.cursor]
+            type = "openai-chat"
+            api_key_env = "CURSOR_API_KEY"
+            models_hide = ["regex:.*", " "]
+            models_show = [" exact:gpt-5.4 ", "regex:^claude-"]
+            """);
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+
+        var provider = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single(static provider => provider.ProviderKey == "cursor");
+        CollectionAssert.AreEqual(new[] { "regex:.*" }, provider.ModelsHide);
+        CollectionAssert.AreEqual(new[] { "exact:gpt-5.4", "regex:^claude-" }, provider.ModelsShow);
+
+        File.WriteAllText(config, """
+            [providers.cursor]
+            type = "openai-chat"
+            api_key_env = "CURSOR_API_KEY"
+            models_hide = ["regex:("]
+            """);
+        var ex = Assert.ThrowsExactly<InvalidDataException>(() => new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path }).LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(ex.InnerException?.Message, "providers.cursor models_hide and models_show must hold valid rules");
+    }
+
+    [TestMethod]
     public void LoadGlobalProviderDefinitions_InvalidNetworkTimeout_Throws()
     {
         using var temp = TempDirectory.Create();
