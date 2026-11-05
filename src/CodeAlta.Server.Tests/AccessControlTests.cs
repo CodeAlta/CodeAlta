@@ -456,6 +456,35 @@ public sealed class AccessControlTests
     }
 
     [TestMethod]
+    public async Task APersonGrantedToSeeAnAutomationOfAnother_ReadsItsRuns()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Build box");
+        var (setup, machine) = await server.SetUpWithNodeAsync(owner, node);
+        var (cy, cyId) = await AddPersonAsync(server, owner, setup, "Cy");
+        var (dan, _) = await AddPersonAsync(server, owner, setup, "Dan");
+        using var cyDevice = cy;
+        using var danDevice = dan;
+        var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, setup.Organization.Id, "nightly", 1, machine.Id, false,
+            true, ["hourly"], null, null, "{\"sealed\":\"for the machine\"}", owner.DeviceId, owner.PublicKey, server.Clock.Now));
+        var put = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/nightly",
+            new PutAutomationRequest(new FleetSignedAutomationVersion(text, owner.Sign(FleetAutomationVersionDocuments.GetSignedBytes(text)))));
+        Assert.AreEqual(HttpStatusCode.OK, put.Status, put.Body.ToString());
+        await server.GetService<CodeAlta.Server.Services.FleetAutomationService>().RecordRunsAsync((await server.GetService<ICoordinatorStore>().GetDeviceAsync(node.DeviceId))!,
+            new FleetAutomationRunFacts([new FleetAutomationRunFact("run-a", "nightly", 1, "schedule", "succeeded", server.Clock.Now, server.Clock.Now)]), CancellationToken.None);
+
+        // Alex's own automation, which no team owns: he lets Cy see it.
+        var granted = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, cyId, "automation.view", FleetScopeKinds.Resource, "automation:nightly"));
+        Assert.AreEqual(HttpStatusCode.Created, granted.Status, granted.Body.ToString());
+        var runs = await server.SendAsync(cy, HttpMethod.Get, "/api/v1/automations/nightly/runs");
+        Assert.AreEqual(HttpStatusCode.OK, runs.Status, runs.Body.ToString());
+        CollectionAssert.AreEqual(new[] { "run-a" }, runs.Read<AutomationRunListDto>().Runs.Select(static run => run.RunId).ToArray());
+        Assert.AreEqual(HttpStatusCode.NotFound, (await server.SendAsync(dan, HttpMethod.Get, "/api/v1/automations/nightly/runs")).Status, "nobody else does");
+    }
+
+    [TestMethod]
     public async Task AGrantOfASessionWithdrawnSince_DoesNotBreakTheGrantsOfAnybodyElse()
     {
         await using var server = await ServerFixture.StartAsync();
