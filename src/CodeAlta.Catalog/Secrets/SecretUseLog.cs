@@ -1,4 +1,5 @@
 using System.Text;
+using CodeAlta.Agent.Runtime;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -130,7 +131,7 @@ public sealed class SecretUseLog
                 foreach (var use in kept) text.Append(JsonSerializer.Serialize(use, SecretUseJsonContext.Default.SecretUse)).Append('\n');
                 var temporary = FilePath + ".tmp";
                 File.WriteAllText(temporary, text.ToString(), Encoding.UTF8);
-                File.Move(temporary, FilePath, overwrite: true);
+                StagedFileReplacement.MoveOverWithoutGap(temporary, FilePath);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {

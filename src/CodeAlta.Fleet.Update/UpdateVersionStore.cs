@@ -17,6 +17,9 @@ public sealed class UpdateVersionStore
     private const string LockFileName = "state.lock";
     private const string LauncherLockFileName = "launcher.lock";
     private static readonly TimeSpan LockPatience = TimeSpan.FromSeconds(15);
+    // How long a change tries again while a reader holds the state (the launcher reads it every few milliseconds while a
+    // version is on trial): far beyond the moment a read takes.
+    private static readonly TimeSpan HeldStatePatience = TimeSpan.FromSeconds(2);
 
     private readonly TimeProvider _time;
 
@@ -122,7 +125,7 @@ public sealed class UpdateVersionStore
     {
         ArgumentNullException.ThrowIfNull(change);
         using var gate = AcquireLock();
-        var before = Read();
+        var before = ReadForChange();
         var after = change(before);
         if (ReferenceEquals(before, after)) return before;
         var path = Path.Combine(Root, StateFileName);
@@ -130,7 +133,7 @@ public sealed class UpdateVersionStore
         try
         {
             File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(after, UpdateJsonContext.Default.UpdateState));
-            File.Move(staging, path, overwrite: true);
+            MoveOver(staging, path);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -556,6 +559,53 @@ public sealed class UpdateVersionStore
     /// <param name="version">The version.</param>
     /// <returns>Whether the text is that version.</returns>
     public static bool Same(string? text, UpdateVersion version) => UpdateVersion.TryParse(text, out var parsed) && parsed.Equals(version);
+
+    // The state a change starts from. A state that is briefly unreadable is read again rather than taken for the empty
+    // state, which the change would then write over the pointer and the trial; a corrupt one is the empty state, as for Read.
+    private UpdateState ReadForChange()
+    {
+        var path = Path.Combine(Root, StateFileName);
+        var started = DateTime.UtcNow;
+        for (var delay = 1; ; delay = Math.Min(delay * 2, 50))
+        {
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                return JsonSerializer.Deserialize(stream, UpdateJsonContext.Default.UpdateState) ?? new UpdateState();
+            }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException)
+            {
+                return new UpdateState();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                if (DateTime.UtcNow - started >= HeldStatePatience)
+                    throw new UpdateException(UpdateErrorCodes.StateUnavailable, $"{path} cannot be read: {exception.Message}", exception);
+                Thread.Sleep(delay);
+            }
+        }
+    }
+
+    // Moves the state written aside onto the state. Windows refuses a plain move onto a file a reader holds open, even one
+    // that shares its deletion: the move is tried again while a reader holds it. (The agent runtime's StagedFileReplacement
+    // does more, but this library references the protocol only.)
+    private static void MoveOver(string staging, string path)
+    {
+        var started = DateTime.UtcNow;
+        for (var delay = 1; ; delay = Math.Min(delay * 2, 50))
+        {
+            try
+            {
+                File.Move(staging, path, overwrite: true);
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                && File.Exists(path) && DateTime.UtcNow - started < HeldStatePatience)
+            {
+                Thread.Sleep(delay);
+            }
+        }
+    }
 
     private FileStream AcquireLock()
     {

@@ -68,6 +68,25 @@ internal static class StagedFileReplacement
     // renameWithPosixSemantics: false for a test, which then reaches what follows a rename that cannot replace the
     // file, as a file system filter that holds it causes.
     internal static void MoveOver(string stagedPath, string path, bool renameWithPosixSemantics)
+        => MoveOver(stagedPath, path, renameWithPosixSemantics, moveHeldFileAside: true);
+
+    /// <summary>
+    /// Moves <paramref name="stagedPath"/> onto <paramref name="path"/> as <see cref="MoveOver(string, string)"/> does, but never
+    /// moves the file out of the way: a reader finds the previous file or the new one at every moment. A file a filter holds
+    /// beyond the retries is left as it is, and the write fails.
+    /// </summary>
+    /// <param name="stagedPath">The file written aside, in the folder of <paramref name="path"/>.</param>
+    /// <param name="path">The file to replace, or to create when it does not exist.</param>
+    /// <exception cref="IOException">The file cannot be replaced.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the file is denied, or it stayed open beyond the retries on Windows.</exception>
+    /// <remarks>For a store whose readers take a missing file for an empty one: the secrets, the versions a machine took.</remarks>
+    internal static void MoveOverWithoutGap(string stagedPath, string path)
+        => MoveOver(stagedPath, path, OperatingSystem.IsWindows(), moveHeldFileAside: false);
+
+    internal static void MoveOverWithoutGap(string stagedPath, string path, bool renameWithPosixSemantics)
+        => MoveOver(stagedPath, path, renameWithPosixSemantics, moveHeldFileAside: false);
+
+    private static void MoveOver(string stagedPath, string path, bool renameWithPosixSemantics, bool moveHeldFileAside)
     {
         if (renameWithPosixSemantics && TryRenameWithPosixSemantics(stagedPath, path)) return;
         var started = Stopwatch.GetTimestamp();
@@ -81,7 +100,7 @@ internal static class StagedFileReplacement
             }
             catch (Exception ex) when (IsHeldElsewhere(ex, path, started))
             {
-                if (!replaceTried && ex is UnauthorizedAccessException)
+                if (moveHeldFileAside && !replaceTried && ex is UnauthorizedAccessException)
                 {
                     replaceTried = true;
                     if (TryReplaceHeldFile(stagedPath, path)) return;

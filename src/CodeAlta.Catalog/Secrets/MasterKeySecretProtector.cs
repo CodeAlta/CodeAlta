@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using CodeAlta.Agent.Runtime;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -151,7 +152,7 @@ public sealed class FileSecretKeyStore : ISecretKeyStore
         {
             var temporary = _path + ".tmp";
             LocalSecretStore.WritePrivateFile(temporary, Convert.ToHexString(key));
-            File.Move(temporary, _path, overwrite: true);
+            StagedFileReplacement.MoveOverWithoutGap(temporary, _path);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CodeAlta.Agent.Runtime;
 using System.Text.Json.Serialization;
 
 namespace CodeAlta.Catalog.Secrets;
@@ -116,7 +117,7 @@ public sealed partial class LocalSecretStore
             {
                 var temporary = CheckpointPath + ".tmp";
                 WritePrivateFile(temporary, JsonSerializer.Serialize(document, CheckpointJsonContext.Default.CheckpointDocument));
-                File.Move(temporary, CheckpointPath, overwrite: true);
+                StagedFileReplacement.MoveOverWithoutGap(temporary, CheckpointPath);
             }
 
             return unrecordedEnvironments.Count == 0 && unrecordedSecrets.Count == 0 ? FleetCheckpoint.Empty : new FleetCheckpoint(unrecordedEnvironments, unrecordedSecrets);

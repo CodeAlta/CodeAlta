@@ -28,6 +28,29 @@ public sealed class LocalSecretStoreTests
     }
 
     [TestMethod]
+    public async Task ASecret_IsSet_WhileAnotherProcessReadsTheStore()
+    {
+        using var root = new TempRoot();
+        var store = FileStore(root.Path);
+        store.SetSecret("API_KEY", Value, "a");
+
+        // The masker of a host reads the store while a secret rotates: Windows refuses a plain move onto a file a reader holds
+        // open, even one that shares its deletion.
+        var reader = new FileStream(Path.Combine(store.FolderPath, "store.json"), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        try
+        {
+            store.RotateSecret("API_KEY", "sk-rotated-value", "b");
+        }
+        finally
+        {
+            await reader.DisposeAsync();
+        }
+
+        Assert.IsTrue(store.TryGetSecret("API_KEY", out var value));
+        Assert.AreEqual("sk-rotated-value", value);
+    }
+
+    [TestMethod]
     public void AnotherStoreOnTheSameFolder_ReadsTheValueBack_AndFollowsItsChanges()
     {
         using var root = new TempRoot();

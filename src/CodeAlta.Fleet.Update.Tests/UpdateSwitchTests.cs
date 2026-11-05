@@ -41,6 +41,41 @@ public sealed class UpdateSwitchTests
     }
 
     [TestMethod]
+    public async Task AChangeIsWritten_WhileAReaderHoldsTheState()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp, V1);
+        store.Select(V1);
+        var path = Path.Combine(store.Root, "state.json");
+
+        // The launcher reads the state every few milliseconds while a version on trial confirms: Windows refuses a plain
+        // move onto a file a reader holds open, even one that shares its deletion.
+        var reader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        Task confirmed;
+        try
+        {
+            confirmed = Task.Run(() => store.Confirm(V1));
+            // The change has written its state aside: its replace runs against the file the reader holds, and is refused until
+            // the reader lets it go (without the retry, Confirm throws here).
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            while (Directory.GetFiles(store.Root, "state.json.*.tmp").Length == 0 && !confirmed.IsCompleted && DateTime.UtcNow < deadline) await Task.Delay(5);
+            await Task.Delay(50);
+            // Elsewhere a rename replaces a file that is open: the change is done already.
+            if (OperatingSystem.IsWindows()) Assert.IsFalse(confirmed.IsCompleted, "the replace waits while the reader holds the state");
+        }
+        finally
+        {
+            await reader.DisposeAsync();
+        }
+
+        await confirmed;
+
+        Assert.AreEqual("4.0.1", store.Read().Current);
+        Assert.IsNull(store.Read().Trial, "the version confirmed");
+        Assert.AreEqual(0, Directory.GetFiles(store.Root, "state.json.*.tmp").Length, "no staging file is left");
+    }
+
+    [TestMethod]
     public void ASelectedVersionIsOnTrialUntilItConfirms()
     {
         using var temp = new TempFolder();

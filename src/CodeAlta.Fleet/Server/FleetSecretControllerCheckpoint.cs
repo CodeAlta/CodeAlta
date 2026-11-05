@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CodeAlta.Agent.Runtime;
 using System.Text.Json.Serialization;
 
 namespace CodeAlta.Fleet.Server;
@@ -95,7 +96,9 @@ public sealed class FleetSecretControllerCheckpoint
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
             var staging = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(document, FleetSecretControllerJsonContext.Default.ControllerDocument));
-            File.Move(staging, _path, overwrite: true);
+            // A rename that replaces the file while another checkpoint reads it (a plain move is refused then), never leaving a
+            // moment without it: a missing file reads as nothing withdrawn.
+            StagedFileReplacement.MoveOverWithoutGap(staging, _path);
         }
     }
 

@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using CodeAlta.Agent.Runtime;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -483,7 +484,9 @@ public sealed partial class LocalSecretStore : ISecretLookup
             if (!change(document)) return false;
             var temporary = StorePath + ".tmp";
             WritePrivateFile(temporary, JsonSerializer.Serialize(document, SecretStoreJsonContext.Default.StoreDocument));
-            File.Move(temporary, StorePath, overwrite: true);
+            // A rename that replaces the file while a host reads it (its masker follows the store), never leaving a moment without
+            // it: a missing store reads as one without secrets.
+            StagedFileReplacement.MoveOverWithoutGap(temporary, StorePath);
             _snapshot = null;
             return true;
         }

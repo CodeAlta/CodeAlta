@@ -82,6 +82,34 @@ public sealed class StagedFileReplacementTests
     }
 
     [TestMethod]
+    public void WithoutAGap_AFileHeldBeyondTheRetries_StaysInPlace_AndTheWriteFails()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Elsewhere a rename replaces a file that is open.");
+        var root = Path.Combine(Path.GetTempPath(), "codealta-staged-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var path = Path.Combine(root, "store.json");
+            var staged = path + ".tmp";
+            File.WriteAllText(path, "before");
+            File.WriteAllText(staged, "after");
+
+            // A store whose readers take a missing file for an empty one (secrets, checkpoints) is never moved out of the way.
+            using (var reader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
+            {
+                Assert.Throws<UnauthorizedAccessException>(() => StagedFileReplacement.MoveOverWithoutGap(staged, path, renameWithPosixSemantics: false));
+                Assert.IsTrue(File.Exists(path), "the file was there all along");
+            }
+
+            Assert.AreEqual("before", File.ReadAllText(path));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task AFolderInThePlaceOfTheFile_IsRefusedAtOnce()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-staged-" + Guid.NewGuid().ToString("N"));
