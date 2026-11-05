@@ -12,7 +12,7 @@ const base: SessionUsageResponse = { status: "ok", hostEpoch: target.epoch, sess
     window: { currentTokens: "0", tokenLimit: "9223372036854775807", messageCount: null, label: null, totalContextEnvelope: null, maxOutputTokens: null },
     lastOperation: { inputTokens: null, outputTokens: "0", cacheReadTokens: null, cacheWriteTokens: null,
       cachedInputTokens: null, reasoningTokens: null, cost: "0.01", durationMs: null, model: null, reasoningEffort: null, initiator: null, label: null, costUnit: null },
-    rateLimits: null, sessionTotal: null, promptCacheExpiresAt: null } };
+    rateLimits: null, sessionTotal: null, promptCacheExpiresAt: null, signInExpiresAt: null } };
 
 test("usage validates exact bounded decimal strings, zero, unknown, flags and attachment replacement", () => {
   assert.equal(validateUsage(target, base)?.observation?.window?.currentTokens, "0");
@@ -22,6 +22,10 @@ test("usage validates exact bounded decimal strings, zero, unknown, flags and at
   // When the prompt cache expires, where the provider says it.
   assert.equal(validateUsage(target, { ...base, observation: { ...base.observation!, promptCacheExpiresAt: "2026-09-25T11:00:00.0000000+00:00" } })?.observation?.promptCacheExpiresAt,
     "2026-09-25T11:00:00.0000000+00:00");
+  // When the sign-in of the account ends, where the provider says it; anything but a time is refused.
+  assert.equal(validateUsage(target, { ...base, observation: { ...base.observation!, signInExpiresAt: "2026-11-24T03:01:53.1590000+00:00" } })?.observation?.signInExpiresAt,
+    "2026-11-24T03:01:53.1590000+00:00");
+  assert.equal(validateUsage(target, { ...base, observation: { ...base.observation!, signInExpiresAt: "soon" } }), null);
   // The estimate of a session whose provider reports no usage is an observation too.
   assert.equal(validateUsage(target, { ...base, observation: { ...base.observation!, source: "LocalEstimate" } })?.observation?.source, "LocalEstimate");
   assert.match(usageMessage("no_observation"), /No usage observation/);

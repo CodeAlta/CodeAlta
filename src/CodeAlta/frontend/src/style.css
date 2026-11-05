@@ -3254,6 +3254,8 @@ dialog.mcp-session-dialog:has(> .app-window) > .app-window > .app-window-body { 
 .prompt-cache-countdown { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; cursor: default; }
 .prompt-cache-countdown[data-state="ending"] { color: var(--yellow); }
 .prompt-cache-countdown[data-state="expired"] { color: var(--muted); font-style: italic; opacity: .8; }
+.sign-in-end { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px; color: var(--yellow); font-size: 12px; font-variant-numeric: tabular-nums; cursor: default; }
+.sign-in-end[data-state="ending"], .sign-in-end[data-state="ended"] { color: var(--red); }
 .sub-agents-chip.bp6-button { gap: 5px; height: 28px; min-height: 28px; padding: 0 8px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .sub-agents-chip .bp6-button-text { display: inline-flex; align-items: center; gap: 5px; color: var(--text); }
 .sub-agents-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
@@ -3325,6 +3327,9 @@ dialog.mcp-session-dialog:has(> .app-window) > .app-window > .app-window-body { 
 .prompt-surface[data-density="tiny"] .prompt-surface-end, .prompt-surface[data-density="tiny"] .prompt-surface-meters { gap: 0; }
 .ide-shell .prompt-surface[data-density="tiny"] .history-controls { gap: 4px; margin-left: 2px; }
 .prompt-surface[data-density="tiny"] .context-usage.bp6-button, .prompt-surface[data-density="tiny"] .prompt-cache-countdown { padding: 0 4px; }
+/* Where room is short the end of the sign-in keeps its warning alone; the time left is in its tooltip. */
+.prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .sign-in-end { padding: 0 2px; }
+.prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .sign-in-end > span { display: none; }
 .prompt-surface[data-density="tiny"] .prompt-cache-countdown svg { display: none; }
 .prompt-surface[data-density="tiny"] .composer-status-line[data-busy="false"] .composer-foreground-status:not([data-tone]) .composer-foreground-text { display: none; }
 

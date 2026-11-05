@@ -16,6 +16,10 @@ namespace CodeAlta.Agent;
 /// When the prompt cache the last request wrote or read is expected to expire; null when the provider's cache
 /// lifetime is not known or the last request used no cache.
 /// </param>
+/// <param name="SignInExpiresAt">
+/// When the stored sign-in of the account of the provider ends (the claude.ai sign-in of Claude Code), after which its
+/// turns fail until it is signed in again; null when the provider does not say it.
+/// </param>
 public sealed record AgentSessionUsage(
     AgentWindowUsageSnapshot? Window = null,
     AgentOperationUsageSnapshot? LastOperation = null,
@@ -24,7 +28,8 @@ public sealed record AgentSessionUsage(
     AgentUsageSource Source = AgentUsageSource.Unknown,
     DateTimeOffset UpdatedAt = default,
     AgentSessionUsageDetails? Details = null,
-    DateTimeOffset? PromptCacheExpiresAt = null)
+    DateTimeOffset? PromptCacheExpiresAt = null,
+    DateTimeOffset? SignInExpiresAt = null)
 {
     /// <summary>
     /// Gets the current number of tokens in the active input context when known.

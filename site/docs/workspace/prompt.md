@@ -40,7 +40,7 @@ Click the project or the branch for the **Workspace** popover: switch the branch
 ## Below the editor
 
 - **The Agent chip**, on the left: the agent prompt, the provider and model, the reasoning effort, a shield for the [permission mode](#permission-modes), and an eye when [review before commit](../reviews.md#review-before-commit) is on. Click it to change them (see [Agent and model](#agent-and-model)).
-- On the right: the sub-agents at work (click for the list), the context ring with the tokens used and the window size (click for [context usage](#context-usage)), the prompt cache timer, the **⋯** menu, Stop, the [microphone](../speech.md) and Send.
+- On the right: the sub-agents at work (click for the list), the context ring with the tokens used and the window size (click for [context usage](#context-usage)), the prompt cache timer, a warning when the sign-in of the provider ends soon, the **⋯** menu, Stop, the [microphone](../speech.md) and Send.
 
 The **⋯** menu holds **Session info** (a report of the session for troubleshooting or handoff), **Reminders**, [Remote Control](#remote-control), **Compact the conversation**, **Archive**, **Expand prompt editor**, **Insert equation**, **N active providers** and, while the session works, **Steer the running turn** and **Enqueue for the next turn**. A number or a dot on **⋯** says something inside needs you.
 
@@ -50,6 +50,8 @@ The **⋯** menu holds **Session info** (a report of the session for troubleshoo
 </figure>
 
 **Prompt cache.** For Claude Code, the Anthropic API, the Claude models of Copilot, the OpenAI API and Codex, a timer such as **37m** says how long the provider keeps the conversation in its cache: a message sent before then costs a fraction of the input price. It turns yellow in its last three minutes, then reads **expired**. Claude Code keeps the cache one hour, the Anthropic API and Copilot five minutes (one hour with that setting), the OpenAI API and Codex 30 minutes. See [Prompt caching](../model-providers/readme.md#prompt-caching).
+
+**Sign-in.** A claude.ai sign-in of Claude Code ends after some weeks, and the turns of the provider fail until you sign in again. In its last week a warning such as **⚠ 3d** follows the prompt cache timer, red in its last day and once it ended; its tooltip says when. With three days left, the session also says it once, with the command that signs the provider in again. An API key or a token has no such end, and nothing is shown.
 
 ## Agent and model
 
@@ -252,6 +254,7 @@ Open it with the context ring below the prompt, or `Ctrl+G Ctrl+U`. It shows the
 - **Last operation**: the tokens of the last request (cache reads, cache writes, other input, output, reasoning), with its cost in AI credits for Copilot. See [Prompt caching](../model-providers/readme.md#prompt-caching).
 - **Current session** (desktop): the same for the whole session, with the time and the cost; a fork counts from the fork. **Copy as Markdown** copies it.
 - **Subscription usage** (desktop; Codex, Copilot and Claude Code): the limits of your plan and when they reset. See [Usage of a subscription](../model-providers/readme.md#subscription-usage).
+- **Sign-in** (desktop; Claude Code signed in to claude.ai): when the [sign-in](#below-the-editor) ends.
 
 When the provider reports no token usage, as some [ACP agents](../model-providers/acp-agents.md#limitations) do, CodeAlta estimates the context from the conversation: the count starts with `~` and the window says **Estimated**.
 

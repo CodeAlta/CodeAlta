@@ -25,6 +25,31 @@ export function cacheCountdownTick(view: CacheCountdownView | null): number | nu
   return view.remainingMilliseconds <= cacheEndingMilliseconds ? 5_000 : 30_000;
 }
 
+/** How long before the end of the sign-in of a provider the prompt shows it. */
+export const signInNoticeMilliseconds = 7 * 24 * 3_600_000;
+
+/** How long before its end the sign-in is shown in the danger colour. */
+export const signInEndingMilliseconds = 24 * 3_600_000;
+
+/** What the prompt shows of the end of a sign-in: the time left ("3d", "20h", "40m"), "ending" in its last day, "ended" after. */
+export type SignInEndView = Readonly<{ state: "soon" | "ending" | "ended"; text: string; remainingMilliseconds: number }>;
+
+/**
+ * The end of a sign-in at `expiresAt` (an ISO time), seen at `now`: null when the time is not known, or when it is
+ * further than `notice`. The days and hours are rounded down and the minutes up, as the session notice says them.
+ */
+export function signInEnd(expiresAt: string | null | undefined, now: number, notice = signInNoticeMilliseconds): SignInEndView | null {
+  if (!expiresAt) return null;
+  const end = Date.parse(expiresAt);
+  if (!Number.isFinite(end)) return null;
+  const remaining = end - now;
+  if (remaining <= 0) return { state: "ended", text: "", remainingMilliseconds: 0 };
+  if (remaining > notice) return null;
+  const hours = remaining / 3_600_000;
+  const text = hours >= 48 ? `${Math.floor(hours / 24)}d` : hours >= 1 ? `${Math.floor(hours)}h` : `${Math.max(1, Math.ceil(remaining / 60_000))}m`;
+  return { state: remaining <= signInEndingMilliseconds ? "ending" : "soon", text, remainingMilliseconds: remaining };
+}
+
 /** The share of a ring of `radius` that `percent` fills, as the dash of its circle. */
 export function ringDash(percent: number | null, radius: number): string {
   const circumference = 2 * Math.PI * radius;

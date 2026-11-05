@@ -80,11 +80,12 @@ public readonly record struct SessionRuntimeUsageTotals(long TotalTokens, long I
 /// <param name="RateLimits">Only the rate limits in this event, if supplied.</param>
 /// <param name="SessionTotal">Only the provider's cumulative session totals in this event, if supplied.</param>
 /// <param name="PromptCacheExpiresAt">When the prompt cache of the last request is expected to expire, if known and nondefault.</param>
+/// <param name="SignInExpiresAt">When the stored sign-in of the account of the provider ends, if known and nondefault.</param>
 public sealed record SessionRuntimeUsageObservation(long Sequence, DateTimeOffset? SourceUpdatedAt,
     DateTimeOffset? EventTimestamp, AgentUsageScope Scope, AgentUsageSource Source,
     SessionRuntimeUsageWindow? Window, SessionRuntimeUsageOperation? LastOperation, bool HadInvalidValues,
     bool HadOmittedData, SessionRuntimeUsageRateLimits? RateLimits = null, SessionRuntimeUsageTotals? SessionTotal = null,
-    DateTimeOffset? PromptCacheExpiresAt = null)
+    DateTimeOffset? PromptCacheExpiresAt = null, DateTimeOffset? SignInExpiresAt = null)
 {
     /// <summary>Longest retained provider text (labels, model, plan); longer text is dropped, not truncated.</summary>
     public const int MaximumTextLength = 128;
@@ -144,7 +145,8 @@ public sealed record SessionRuntimeUsageObservation(long Sequence, DateTimeOffse
             omitted = true;
         return new(sequence, usage.UpdatedAt == default ? null : usage.UpdatedAt,
             update.Timestamp == default ? null : update.Timestamp, scope, source, window, operation, invalid, omitted,
-            rateLimits, total, usage.PromptCacheExpiresAt is { } expiresAt && expiresAt != default ? expiresAt : null);
+            rateLimits, total, usage.PromptCacheExpiresAt is { } expiresAt && expiresAt != default ? expiresAt : null,
+            usage.SignInExpiresAt is { } signInEnds && signInEnds != default ? signInEnds : null);
 
         long? positiveLimit(long? value)
         {

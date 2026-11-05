@@ -116,6 +116,18 @@ public sealed class SessionUsageRpcTests
     }
 
     [TestMethod]
+    public async Task TheEndOfTheSignIn_IsSerializedAsARoundTripTime_FromTheUsageOfTheProvider()
+    {
+        var update = new AgentSessionUpdateEvent(new ModelProviderId("claude-code"), "session", DateTimeOffset.UtcNow, null, AgentSessionUpdateKind.Info, null,
+            Usage: new AgentSessionUsage(Scope: AgentUsageScope.RateLimitOnly, Source: AgentUsageSource.ProviderUsage,
+                SignInExpiresAt: new DateTimeOffset(2026, 11, 24, 3, 1, 53, 159, TimeSpan.Zero)));
+        var usage = SessionRuntimeUsageObservation.FromEvent(1, update);
+        var service = new SessionUsageService((_, _, _, _, _) => Task.FromResult(new OwnedUsageReadResult("ok", Guid.NewGuid(), "session", 1, usage, 0)), Epoch);
+        var response = await service.ReadAsync(new(Epoch, "session", "global", null, null), default);
+        Assert.AreEqual("2026-11-24T03:01:53.1590000+00:00", response.Observation!.SignInExpiresAt);
+    }
+
+    [TestMethod]
     public async Task NoObservationTransitionsAndFaultsNeverImplyZero()
     {
         var service = new SessionUsageService((_, _, _, _, _) => Task.FromResult(new OwnedUsageReadResult("no_observation", Guid.NewGuid(), "session", 1, null, 0)), Epoch);

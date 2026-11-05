@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cacheCountdown, cacheCountdownTick, reasoningShown, ringDash, shortStatusText } from "./promptSurface";
+import { cacheCountdown, cacheCountdownTick, reasoningShown, ringDash, shortStatusText, signInEnd } from "./promptSurface";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { DraftUsage, surfaceDensity } from "./PromptSurfaceParts";
-import { mergeUsageObservation, persistedCacheExpiry } from "../contextUsage";
+import { DraftUsage, SignInEnd, surfaceDensity } from "./PromptSurfaceParts";
+import { mergeUsageObservation, persistedCacheExpiry, persistedSignInExpiry } from "../contextUsage";
 import type { SessionUsageObservation } from "#neoastra";
 
 const at = Date.parse("2026-10-15T10:00:00Z");
@@ -36,6 +36,40 @@ test("the expiry of the prompt cache is read from a saved usage record, and live
   // The host keeps it across events that are not requests; a request that used no cache says it is no longer known.
   assert.equal(mergeUsageObservation(written, { ...base, promptCacheExpiresAt: null } as SessionUsageObservation).promptCacheExpiresAt, null);
   assert.equal(mergeUsageObservation(written, { ...base, promptCacheExpiresAt: "2026-10-15T11:00:00Z" } as SessionUsageObservation).promptCacheExpiresAt, "2026-10-15T11:00:00Z");
+});
+
+test("the end of a sign-in shows in its last week, in days, hours or minutes, and in the danger colour in its last day", () => {
+  assert.equal(signInEnd(null, at), null);
+  assert.equal(signInEnd("not a time", at), null);
+  assert.equal(signInEnd("2026-10-24T10:00:00Z", at), null, "further than a week: nothing is shown");
+  assert.deepEqual(signInEnd("2026-10-18T13:00:00Z", at), { state: "soon", text: "3d", remainingMilliseconds: (3 * 24 + 3) * 3_600_000 });
+  assert.equal(signInEnd("2026-10-16T22:00:00Z", at)?.text, "36h");
+  assert.deepEqual(signInEnd("2026-10-15T15:30:00Z", at), { state: "ending", text: "5h", remainingMilliseconds: 5.5 * 3_600_000 });
+  assert.equal(signInEnd("2026-10-15T10:00:20Z", at)?.text, "1m");
+  assert.deepEqual(signInEnd("2026-10-15T09:00:00Z", at), { state: "ended", text: "", remainingMilliseconds: 0 });
+  // The usage window says it whenever it is known.
+  assert.equal(signInEnd("2026-11-14T10:00:00Z", at, Number.POSITIVE_INFINITY)?.text, "30d");
+});
+
+test("the end of the sign-in is read from a saved usage record, and kept across the events that do not say it", () => {
+  assert.equal(persistedSignInExpiry("**Context:** 1 / 2 tokens\r\n\n**Sign-in expires:** 2026-11-24T03:01:53.1590000+00:00\r\n"), "2026-11-24T03:01:53.1590000+00:00");
+  assert.equal(persistedSignInExpiry("**Sign-in expires:** soon"), null);
+  const base = { sequence: "1", scope: "Session", source: "LocalProviderUsage", sourceUpdatedAt: null, eventTimestamp: null, hadInvalidValues: false, hadOmittedData: false,
+    window: null, lastOperation: null, rateLimits: null, sessionTotal: null } as unknown as SessionUsageObservation;
+  const said = { ...base, signInExpiresAt: "2026-11-24T03:01:53Z" } as SessionUsageObservation;
+  assert.equal(mergeUsageObservation(said, { ...base, signInExpiresAt: null } as SessionUsageObservation).signInExpiresAt, "2026-11-24T03:01:53Z");
+  assert.equal(mergeUsageObservation(said, { ...base, signInExpiresAt: "2026-12-24T03:01:53Z" } as SessionUsageObservation).signInExpiresAt, "2026-12-24T03:01:53Z");
+});
+
+test("the prompt warns of the end of the sign-in in its last week only", () => {
+  const inDays = (days: number) => new Date(Date.now() + days * 24 * 3_600_000).toISOString();
+  assert.equal(renderToStaticMarkup(createElement(SignInEnd, { expiresAt: inDays(20), provider: "Claude Code" })), "");
+  assert.equal(renderToStaticMarkup(createElement(SignInEnd, { expiresAt: null, provider: "Claude Code" })), "");
+  const soon = renderToStaticMarkup(createElement(SignInEnd, { expiresAt: inDays(2.5), provider: "Claude Code" }));
+  assert.match(soon, /class="sign-in-end" data-state="soon"/);
+  assert.match(soon, /<span>2d<\/span>/);
+  assert.match(soon, /The sign-in of Claude Code ends in 2d/);
+  assert.match(renderToStaticMarkup(createElement(SignInEnd, { expiresAt: inDays(-1), provider: "Claude Code" })), /data-state="ended"/);
 });
 
 test("a session that has not started shows its context meter only where the window of its model is known", () => {

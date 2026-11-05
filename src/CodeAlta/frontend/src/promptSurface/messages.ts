@@ -21,6 +21,32 @@ export const promptSurfaceMessages = {
     "Der Prompt-Cache läuft in {time} ab (um {clock}). Eine Nachricht davor liest die Unterhaltung aus dem Cache, zu einem Bruchteil des Eingabepreises, und hält ihn länger.",
     "プロンプトキャッシュは {time} 後（{clock}）に期限切れになります。それまでに送るメッセージは会話をキャッシュから読み込み、入力料金の一部で済み、キャッシュも延長されます。",
     "提示缓存将在 {time} 后（{clock}）过期。在此之前发送的消息会从缓存读取对话，只需一小部分输入价格，并延长缓存时间。"],
+  // The end of the sign-in of the provider, after the prompt cache timer and in the usage window.
+  "The sign-in of {provider} ends in {time}, on {date}. Sign in again before then: once it ends, its turns fail until it is signed in again.": [
+    "El inicio de sesión de {provider} termina en {time}, el {date}. Vuelve a iniciar sesión antes: cuando termine, sus turnos fallarán hasta que se inicie sesión de nuevo.",
+    "La connexion de {provider} prend fin dans {time}, le {date}. Reconnectez-vous avant : une fois terminée, ses tours échouent jusqu'à une nouvelle connexion.",
+    "Die Anmeldung von {provider} endet in {time}, am {date}. Melde dich vorher erneut an: Danach schlagen seine Durchgänge fehl, bis wieder angemeldet ist.",
+    "{provider} のサインインは {time} 後（{date}）に終了します。それまでにサインインし直してください。終了すると、再びサインインするまでターンは失敗します。",
+    "{provider} 的登录将在 {time} 后（{date}）结束。请在此之前重新登录：结束后，其轮次会失败，直到重新登录。"],
+  "The sign-in of {provider} ended on {date}: its turns fail until it is signed in again.": [
+    "El inicio de sesión de {provider} terminó el {date}: sus turnos fallan hasta que se inicie sesión de nuevo.",
+    "La connexion de {provider} a pris fin le {date} : ses tours échouent jusqu'à une nouvelle connexion.",
+    "Die Anmeldung von {provider} endete am {date}: Seine Durchgänge schlagen fehl, bis wieder angemeldet ist.",
+    "{provider} のサインインは {date} に終了しました。再びサインインするまでターンは失敗します。",
+    "{provider} 的登录已于 {date} 结束：在重新登录之前，其轮次会失败。"],
+  "Sign-in": ["Inicio de sesión", "Connexion", "Anmeldung", "サインイン", "登录"],
+  "Ends on {date}. Sign in again before then: once it ends, the turns of this provider fail until it is signed in again.": [
+    "Termina el {date}. Vuelve a iniciar sesión antes: cuando termine, los turnos de este proveedor fallarán hasta que se inicie sesión de nuevo.",
+    "Prend fin le {date}. Reconnectez-vous avant : une fois terminée, les tours de ce fournisseur échouent jusqu'à une nouvelle connexion.",
+    "Endet am {date}. Melde dich vorher erneut an: Danach schlagen die Durchgänge dieses Anbieters fehl, bis wieder angemeldet ist.",
+    "{date} に終了します。それまでにサインインし直してください。終了すると、再びサインインするまでこのプロバイダーのターンは失敗します。",
+    "将于 {date} 结束。请在此之前重新登录：结束后，此提供方的轮次会失败，直到重新登录。"],
+  "Ended on {date}: the turns of this provider fail until it is signed in again.": [
+    "Terminó el {date}: los turnos de este proveedor fallan hasta que se inicie sesión de nuevo.",
+    "A pris fin le {date} : les tours de ce fournisseur échouent jusqu'à une nouvelle connexion.",
+    "Endete am {date}: Die Durchgänge dieses Anbieters schlagen fehl, bis wieder angemeldet ist.",
+    "{date} に終了しました。再びサインインするまでこのプロバイダーのターンは失敗します。",
+    "已于 {date} 结束：在重新登录之前，此提供方的轮次会失败。"],
   // The reasoning of a model whose provider lists all its efforts.
   "{model} has no reasoning effort": ["{model} no tiene esfuerzo de razonamiento", "{model} n'a pas d'effort de raisonnement", "{model} hat keinen Denkaufwand",
     "{model} には推論の強さがありません", "{model} 没有推理强度"],
