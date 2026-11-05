@@ -91,7 +91,7 @@ export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<
  * and the project of its scope, and they select nothing. So do the lines the window adds for a row (`menuEntries`: the
  * canvases about a session).
  */
-export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, deleteAsks = true, archiveAsks, spaces = false, onMore, onFewer, tree, drag, claudeCode, filtered = false }: {
+export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, openEntries, deleteAsks = true, archiveAsks, spaces = false, onMore, onFewer, tree, drag, claudeCode, filtered = false }: {
   /** The sessions listed, what stands for the sub-agents that are not, and the place of the Claude Code sessions started elsewhere. */
   entries: readonly SessionListEntry[];
   /** Whether the sidebar is filtered: a scope with no session found says nothing. */
@@ -117,6 +117,11 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   menuEntries?: (session: WorkspaceSession) => SessionMenuEntry[];
   /** What the menu of a row does with its session besides its own lines, listed before the line that deletes it. */
   actionEntries?: (session: WorkspaceSession) => SessionMenuEntry[];
+  /**
+   * What the menu of a row opens the work of its session in (the code editor on the folder it works in), before the
+   * lines that open its conversation elsewhere.
+   */
+  openEntries?: (session: WorkspaceSession) => SessionMenuEntry[];
   /** Whether deleting a session asks first, which its menu says. */
   deleteAsks?: boolean;
   /** Whether archiving a session asks first (it has child sessions), which its menu says. */
@@ -191,6 +196,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
             { key: "fork", label: t("Fork…"), icon: "branch", endNode: <KeyGesture gesture={sessionRowGesture("fork")} />, disabled: !allowed.fork, onSelect: () => onAction(session, "fork") },
             ...(providerHasRemoteControl(brands.get(session.providerKey?.toLowerCase() ?? "")?.type)
               ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !allowed["remote-control"], onSelect: () => onAction(session, "remote-control") }] : []),
+            ...(openEntries?.(session) ?? []),
             ...openElsewhereEntries(t, session, brands.get(session.providerKey?.toLowerCase() ?? "")?.type, allowed, action => onAction(session, action)),
             ...(actionEntries?.(session) ?? []),
             ...(global ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !allowed.move, onSelect: () => onAction(session, "move") }]),

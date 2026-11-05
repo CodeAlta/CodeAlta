@@ -13,7 +13,7 @@ CodeAlta Desktop has a code editor, a Changes tab and terminals for each project
 Each project has one code editor tab that holds its files and every file you open. Open it:
 
 - with the `</>` button of a project in the Explorer, `Ctrl+E` `Ctrl+E`, or `/editor`; on one file with `Ctrl+E` or `/edit`;
-- where a session works, with the editor button of the **Workspace** chip above the prompt (a [worktree](../worktrees.md) gets a tab of its own);
+- where a session works, with the editor button of the **Workspace** chip above the prompt or **Open the code editor** in the menu of the session in the Explorer (a [worktree](../worktrees.md) gets a tab of its own);
 - with **Edit in the code editor** beside a [plugin](../plugins/developers.md#build-and-reload) or a [settings file](settings.md#files-of-the-settings);
 - from a link to a file in a message. A file of no project opens on its folder, in an **Editor** tab without git status.
 

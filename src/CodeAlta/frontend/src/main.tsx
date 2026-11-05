@@ -4131,7 +4131,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
-      onAction={(session, action, focusPrompt) => openScopeSession(scope, session, action, focusPrompt)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionCloudEntries(session), ...sessionBookmarkEntries(session), ...sessionLineageEntries(session), ...sessionReviewEntries(session), ...sessionMachineEntries(session)]} deleteAsks={confirms.sessionDelete}
+      onAction={(session, action, focusPrompt) => openScopeSession(scope, session, action, focusPrompt)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionCloudEntries(session), ...sessionBookmarkEntries(session), ...sessionLineageEntries(session), ...sessionReviewEntries(session), ...sessionMachineEntries(session)]}
+      openEntries={sessionEditorEntries} deleteAsks={confirms.sessionDelete}
       archiveAsks={session => archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0}
       spaces={spacesState.available && spacesState.spaces.length > 1}
       drag={session => sessionDragSource(session, scope)}
@@ -4461,6 +4462,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const sessionMachineEntries = (session: WorkspaceSession): SessionMenuEntry[] => owned && pairedMachines.length > 0 && !session.archived && !inCloud(session)
     && session.scopeKind === "project" && (!!session.machineId || !!session.projectId)
     ? [{ key: "move-machine", label: t("Move to machine…"), icon: "remote" as const, onSelect: () => setMachineMove(session) }] : [];
+  // The code editor on the folder a session works in, as the code editor of its prompt opens it: its worktree while the
+  // folder is there, else the project. A session of a paired machine works in a folder of that machine.
+  const sessionEditorEntries = (session: WorkspaceSession): SessionMenuEntry[] => {
+    const project = owned && session.projectId && !session.archived && !session.machineId && !inCloud(session)
+      ? snapshot?.projects.find(value => value.id === session.projectId && !value.archived && !value.machineId) : undefined;
+    return project ? [{ key: "code-editor", label: t("Open the code editor"), icon: "code" as const,
+      onSelect: () => void openWorkEditorLatest.current(project, session.worktreeRoot && !session.worktreeMissing ? session.worktreeRoot : null) }] : [];
+  };
   const sessionReviewEntries = (session: WorkspaceSession): SessionMenuEntry[] => owned && session.projectId && !session.archived && !inCloud(session)
     ? [{ key: "review-changes", label: t("Review changes"), icon: "chat" as const, onSelect: () => reviewSessionChanges(session) }] : [];
   const sessionLineageEntries = (session: WorkspaceSession): SessionMenuEntry[] => {
