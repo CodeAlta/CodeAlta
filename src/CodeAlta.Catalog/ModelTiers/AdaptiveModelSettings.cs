@@ -14,6 +14,9 @@ namespace CodeAlta.Catalog.ModelTiers;
 /// <param name="Recheck">Whether a turn that changed code is asked once to check its change against the request.</param>
 public sealed record AdaptiveModelSettings(ModelTier Code, ModelTier Escalate, bool Recheck)
 {
+    /// <summary>Gets whether escalation prefers a ready model of the current provider before the tier order.</summary>
+    public bool PreferSameProvider { get; init; } = true;
+
     /// <summary>
     /// Gets the choices the evaluation of the trial found best (#273): the quick tier with a recheck, and the complex tier
     /// on trouble. They are also what a table that names nothing gives.
@@ -33,7 +36,7 @@ public sealed record AdaptiveModelSettings(ModelTier Code, ModelTier Escalate, b
     /// <summary>Gets the table as the configuration writes it.</summary>
     /// <returns>The table, every choice written.</returns>
     public CodeAltaModelAdaptiveDocument ToDocument()
-        => new() { Code = ModelTiers.NameOf(Code), Escalate = ModelTiers.NameOf(Escalate), Recheck = Recheck };
+        => new() { Code = ModelTiers.NameOf(Code), Escalate = ModelTiers.NameOf(Escalate), Recheck = Recheck, PreferSameProvider = PreferSameProvider };
 
     /// <summary>Reads the <c>[models.adaptive]</c> table; a choice it does not write takes its <see cref="Recommended"/> value.</summary>
     /// <param name="document">The table, or <see langword="null"/> when the file has none.</param>
@@ -44,7 +47,8 @@ public sealed record AdaptiveModelSettings(ModelTier Code, ModelTier Escalate, b
             : new AdaptiveModelSettings(
                 ModelTiers.Parse(document.Code) ?? Recommended.Code,
                 ModelTiers.Parse(document.Escalate) ?? Recommended.Escalate,
-                document.Recheck ?? Recommended.Recheck);
+                document.Recheck ?? Recommended.Recheck)
+            { PreferSameProvider = document.PreferSameProvider ?? Recommended.PreferSameProvider };
 
     // What is wrong with the table, each message naming the setting.
     internal static void Validate(List<string> errors, CodeAltaModelAdaptiveDocument? document)

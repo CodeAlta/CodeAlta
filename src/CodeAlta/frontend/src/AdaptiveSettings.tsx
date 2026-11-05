@@ -55,6 +55,8 @@ export function AdaptiveSettings({ epoch, state, api, store, onSaved }: {
       {tierSelect("adaptive-escalate", t("A turn in trouble continues on"), adaptive.escalate, escalate => void save({ ...adaptive, escalate }))}
       <Checkbox className="settings-checkbox" checked={adaptive.recheck} label={t("Recheck each change of code against the request")}
         onChange={event => void save({ ...adaptive, recheck: event.currentTarget.checked })} />
+      <Checkbox className="settings-checkbox" checked={adaptive.preferSameProvider} label={t("Prefer same-provider tier")}
+        onChange={event => void save({ ...adaptive, preferSameProvider: event.currentTarget.checked })} />
       {missing && <p role="status" className="adaptive-missing">{t("Add a model to the {tier} tier to use Adaptive.", { tier: t(tierLabels[missing]) })}</p>}
     </div>}
     {notice && <p role="alert" className="error-text">{notice}</p>}

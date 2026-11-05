@@ -26,10 +26,10 @@ export type TierState = Readonly<{
 }>;
 
 /** Adaptive, as Settings > Models sets it up: the tier of the turns, the tier a turn in trouble continues on, the recheck. */
-export type AdaptiveChoice = Readonly<{ code: TierName; escalate: TierName; recheck: boolean }>;
+export type AdaptiveChoice = Readonly<{ code: TierName; escalate: TierName; recheck: boolean; preferSameProvider: boolean }>;
 
 /** What the evaluation of #273 found best: the quick tier with a recheck of each change of code, the complex tier on trouble. */
-export const recommendedAdaptive: AdaptiveChoice = Object.freeze({ code: "quick", escalate: "complex", recheck: true });
+export const recommendedAdaptive: AdaptiveChoice = Object.freeze({ code: "quick", escalate: "complex", recheck: true, preferSameProvider: true });
 
 /** The name the composer and the model list give the choice of Adaptive, beside the tiers. */
 export const adaptiveTier = "adaptive";
@@ -80,9 +80,9 @@ export function readTierState(reply: Pick<GlobalConfigModelTiersResponse, "tiers
 
 // Adaptive as a reply gives it: null for a tier that is none, and never ready then.
 function readAdaptive(value: unknown, ready: unknown): Pick<TierState, "adaptive" | "adaptiveReady"> {
-  const read = value as Partial<Record<"code" | "escalate" | "recheck", unknown>> | null | undefined;
+  const read = value as Partial<Record<"code" | "escalate" | "recheck" | "preferSameProvider", unknown>> | null | undefined;
   const code = tierNames.find(name => name === read?.code), escalate = tierNames.find(name => name === read?.escalate);
-  const adaptive = code && escalate ? { code, escalate, recheck: read?.recheck !== false } : null;
+  const adaptive = code && escalate ? { code, escalate, recheck: read?.recheck !== false, preferSameProvider: read?.preferSameProvider !== false } : null;
   return { adaptive, adaptiveReady: !!adaptive && ready === true };
 }
 

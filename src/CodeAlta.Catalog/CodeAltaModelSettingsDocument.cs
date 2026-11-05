@@ -32,6 +32,10 @@ public sealed class CodeAltaModelAdaptiveDocument
     /// <summary>Gets or sets whether a turn that changed code is asked once to check its change against the request; true when absent.</summary>
     [JsonPropertyName("recheck")]
     public bool? Recheck { get; set; }
+
+    /// <summary>Gets or sets whether escalation prefers a model on the current provider; true when absent.</summary>
+    [JsonPropertyName("prefer_same_provider")]
+    public bool? PreferSameProvider { get; set; }
 }
 
 /// <summary>

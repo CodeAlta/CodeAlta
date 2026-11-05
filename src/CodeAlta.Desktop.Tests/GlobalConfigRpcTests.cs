@@ -564,8 +564,11 @@ type = "fake-agent"
         Assert.AreEqual(new AdaptiveSetting("quick", "complex", true), tiers.Adaptive, "Saving the tiers keeps Adaptive.");
         Assert.IsTrue(tiers.AdaptiveReady);
 
-        var changed = await service.SaveAdaptiveAsync(new(Epoch, new AdaptiveSetting("standard", "complex", false)), CancellationToken.None);
-        Assert.AreEqual(new AdaptiveSetting("standard", "complex", false), changed.Adaptive);
+        var changedChoice = new AdaptiveSetting("standard", "complex", false) { PreferSameProvider = false };
+        var changed = await service.SaveAdaptiveAsync(new(Epoch, changedChoice), CancellationToken.None);
+        Assert.AreEqual(changedChoice, changed.Adaptive);
+        Assert.AreEqual(changedChoice, ReadTiers(service, new(Epoch)).Adaptive);
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "prefer_same_provider = false");
         Assert.IsFalse(changed.AdaptiveReady, "The standard tier has no model.");
 
         Assert.AreEqual("invalid", (await service.SaveAdaptiveAsync(new(Epoch, new AdaptiveSetting("cheap", "complex", true)), CancellationToken.None)).Status);

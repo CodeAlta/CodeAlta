@@ -99,6 +99,70 @@ public sealed class AdaptiveTurnTests
     }
 
     [TestMethod]
+    public async Task Escalation_PrefersTheCurrentProvider_EvenWhenAnotherProviderComesFirst()
+    {
+        var config = Config.Replace("complex = [\"prov-a:model-c@high\"]",
+            "complex = [\"prov-b:model-b@high\", \"prov-a:model-c@high\"]", StringComparison.Ordinal);
+        await using var f = await Fixture.CreateAsync(config);
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId);
+        f.Provider.Scripts.Enqueue(static run => run.Test("npm test", "exit_code: 1"));
+
+        f.Send("fix the failing test");
+        await f.Provider.NextSendAsync();
+        var onCurrent = f.Provider.NextSendAsync();
+        var onOther = f.OtherProvider.NextSendAsync();
+        var escalation = await await Task.WhenAny(onCurrent, onOther);
+
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveEscalation, escalation.Provenance);
+        Assert.AreEqual("model-c", escalation.Options.Model);
+        Assert.AreEqual(2, f.Provider.SendCount, "The escalation stays on the current provider.");
+        Assert.AreEqual(0, f.OtherProvider.SendCount);
+        await f.SettleAsync();
+    }
+
+    [TestMethod]
+    public async Task Escalation_UsesAnotherProvider_WhenTheCurrentProviderHasNoTarget()
+    {
+        var config = Config.Replace("complex = [\"prov-a:model-c@high\"]",
+            "complex = [\"prov-b:model-b@high\"]", StringComparison.Ordinal);
+        await using var f = await Fixture.CreateAsync(config);
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId);
+        f.Provider.Scripts.Enqueue(static run => run.Test("npm test", "exit_code: 1"));
+
+        f.Send("fix the failing test");
+        await f.Provider.NextSendAsync();
+        var escalation = await f.OtherProvider.NextSendAsync();
+
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveEscalation, escalation.Provenance);
+        Assert.AreEqual("model-b", escalation.Options.Model);
+        await f.SettleAsync();
+        Assert.AreEqual("quick", (await f.StateAsync()).Tier);
+    }
+
+    [TestMethod]
+    public async Task Escalation_UsesTierOrder_WhenSameProviderPreferenceIsOff()
+    {
+        var config = Config.Replace("complex = [\"prov-a:model-c@high\"]",
+            "complex = [\"prov-b:model-b@high\", \"prov-a:model-c@high\"]", StringComparison.Ordinal)
+            + "\nprefer_same_provider = false\n";
+        await using var f = await Fixture.CreateAsync(config);
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId);
+        f.Provider.Scripts.Enqueue(static run => run.Test("npm test", "exit_code: 1"));
+
+        f.Send("fix the failing test");
+        await f.Provider.NextSendAsync();
+        var onCurrent = f.Provider.NextSendAsync();
+        var onOther = f.OtherProvider.NextSendAsync();
+        var escalation = await await Task.WhenAny(onCurrent, onOther);
+
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveEscalation, escalation.Provenance);
+        Assert.AreEqual("model-b", escalation.Options.Model);
+        Assert.AreEqual(1, f.Provider.SendCount);
+        Assert.AreEqual(1, f.OtherProvider.SendCount);
+        await f.SettleAsync();
+    }
+
+    [TestMethod]
     public async Task ATestRunWhoseOutputSaysItFailed_IsEscalated_ThoughAPipeHidItsExitCode()
     {
         // As Claude Code runs it: `npm test | grep`, no exit code in the output, the summary of the runner.
@@ -331,6 +395,7 @@ public sealed class AdaptiveTurnTests
         private Task _collector = Task.CompletedTask;
 
         internal ScriptedProvider Provider { get; } = new("prov-a", "model-a");
+        internal ScriptedProvider OtherProvider { get; } = new("prov-b", "model-b");
         internal CodeAltaHost Host { get; private set; } = null!;
         internal SessionViewJournalStore Journal { get; private set; } = null!;
         internal SessionViewDescriptor Session { get; private set; } = null!;
@@ -417,7 +482,11 @@ public sealed class AdaptiveTurnTests
                 StartPlugins = false,
                 OwnsLogging = false,
                 IsHeadless = true,
-                ConfigureModelProviders = registry => registry.RegisterOrReplace(Provider.Descriptor, Provider.CreateRuntime),
+                ConfigureModelProviders = registry =>
+                {
+                    registry.RegisterOrReplace(Provider.Descriptor, Provider.CreateRuntime);
+                    registry.RegisterOrReplace(OtherProvider.Descriptor, OtherProvider.CreateRuntime);
+                },
             }, CancellationToken.None);
             _collector = CollectAsync();
         }

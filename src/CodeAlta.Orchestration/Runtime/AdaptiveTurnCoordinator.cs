@@ -333,7 +333,8 @@ internal sealed partial class AdaptiveTurnCoordinator
 
     private async Task EscalateAsync(AdaptiveSessionNotice notice, AdaptiveModelSettings settings, string sign, string runId)
     {
-        var choice = Select(notice.Scope, settings.Escalate, onProvider: null);
+        var choice = (settings.PreferSameProvider ? Select(notice.Scope, settings.Escalate, onProvider: notice.ProviderKey) : null)
+            ?? Select(notice.Scope, settings.Escalate, onProvider: null);
         if (choice is null)
         {
             await WriteCardAsync(notice.SessionId, $"Adaptive did not continue the turn ({sign}): no model of the {ModelTiers.NameOf(settings.Escalate)} tier is ready.",

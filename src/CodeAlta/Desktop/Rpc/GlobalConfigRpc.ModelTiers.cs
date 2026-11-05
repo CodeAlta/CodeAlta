@@ -76,7 +76,7 @@ internal sealed partial class GlobalConfigService
         {
             if (CodeAlta.Catalog.ModelTiers.ModelTiers.Parse(chosen.Code) is not { } code || CodeAlta.Catalog.ModelTiers.ModelTiers.Parse(chosen.Escalate) is not { } escalate)
                 return new("invalid", [], null, "Adaptive names a tier that is not one: use complex, standard or quick.");
-            adaptive = new AdaptiveModelSettings(code, escalate, chosen.Recheck);
+            adaptive = new AdaptiveModelSettings(code, escalate, chosen.Recheck) { PreferSameProvider = chosen.PreferSameProvider };
         }
 
         lock (_gate)
@@ -271,7 +271,8 @@ internal sealed partial class GlobalConfigService
 
     private static AdaptiveSetting? ToItem(AdaptiveModelSettings? adaptive)
         => adaptive is null ? null
-            : new(CodeAlta.Catalog.ModelTiers.ModelTiers.NameOf(adaptive.Code), CodeAlta.Catalog.ModelTiers.ModelTiers.NameOf(adaptive.Escalate), adaptive.Recheck);
+            : new(CodeAlta.Catalog.ModelTiers.ModelTiers.NameOf(adaptive.Code), CodeAlta.Catalog.ModelTiers.ModelTiers.NameOf(adaptive.Escalate), adaptive.Recheck)
+                { PreferSameProvider = adaptive.PreferSameProvider };
 }
 
 /// <summary>Sets up Adaptive, or takes it out.</summary>
@@ -283,7 +284,11 @@ internal sealed record GlobalConfigSaveAdaptiveRequest(string ExpectedEpoch, Ada
 /// <param name="Code">The tier its turns run on: <c>complex</c>, <c>standard</c> or <c>quick</c>.</param>
 /// <param name="Escalate">The tier a turn that ends in visible trouble continues on.</param>
 /// <param name="Recheck">Whether a turn that changed code is asked once to check its change against the request.</param>
-internal sealed record AdaptiveSetting(string Code, string Escalate, bool Recheck);
+internal sealed record AdaptiveSetting(string Code, string Escalate, bool Recheck)
+{
+    /// <summary>Gets whether escalation prefers a model of the current provider.</summary>
+    public bool PreferSameProvider { get; init; } = true;
+}
 
 /// <summary>Asks for the tiers of models.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>

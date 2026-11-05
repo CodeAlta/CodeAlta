@@ -191,6 +191,13 @@ public sealed class ModelTierSettingsTests
             Assert.IsTrue(ModelTierScope.Of(loaded, null, SpaceAssignments.Empty).IsAdaptiveReady);
             Assert.IsFalse(ModelTierScope.Of(loaded with { Adaptive = null }, null, SpaceAssignments.Empty).IsAdaptiveReady);
 
+            var withoutPreference = loaded.Adaptive with { PreferSameProvider = false };
+            store.SaveGlobalModelSettings(loaded with { Adaptive = withoutPreference });
+            StringAssert.Contains(File.ReadAllText(store.ConfigPath), "prefer_same_provider = false");
+            Assert.AreEqual(withoutPreference, store.LoadGlobalModelSettings().Adaptive);
+            store.SaveGlobalModelSettings(store.LoadGlobalModelSettings());
+            Assert.AreEqual(withoutPreference, store.LoadGlobalModelSettings().Adaptive, "Saving again keeps the preference.");
+
             // Saving the tiers again keeps it; taking it out writes no table.
             store.SaveGlobalModelSettings(loaded with { Tiers = Read(complex: ["claude-code:opus@high"], standard: [], quick: ["claude-code:haiku@high"]) });
             Assert.AreEqual(AdaptiveModelSettings.Recommended, store.LoadGlobalModelSettings().Adaptive);
@@ -200,6 +207,8 @@ public sealed class ModelTierSettingsTests
 
         // A table that names nothing takes the recommended choices; a tier that is none fails the validation of the file.
         Assert.AreEqual(AdaptiveModelSettings.Recommended, ModelSettings.Read(new CodeAltaModelSettingsDocument { Adaptive = new() }).Adaptive);
+        Assert.IsTrue(AdaptiveModelSettings.Recommended.PreferSameProvider);
+        Assert.IsFalse(ModelSettings.Read(new CodeAltaModelSettingsDocument { Adaptive = new() { PreferSameProvider = false } }).Adaptive!.PreferSameProvider);
         Assert.AreEqual(new AdaptiveModelSettings(ModelTier.Standard, ModelTier.Complex, false),
             ModelSettings.Read(new CodeAltaModelSettingsDocument { Adaptive = new() { Code = "Standard", Recheck = false } }).Adaptive);
         var result = CodeAltaConfigStore.ValidateGlobalConfigContent("[models.adaptive]\ncode = \"cheap\"\n");

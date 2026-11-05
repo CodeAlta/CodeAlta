@@ -6,6 +6,25 @@ const rows = (scope: string, tier: string) =>
   `[...document.querySelectorAll('#${scope} section.model-tier[aria-label="${tier}"] .model-tier-target')].map(row => row.querySelector('.model-tier-model').title.split('\\n')[1] + ' ' + [...row.querySelectorAll('.model-tier-effort')].map(chip => chip.textContent).join(','))`;
 const item = (name: string) => `[...document.querySelectorAll('.model-tier-add .bp6-menu-item')].find(entry => entry.querySelector('.bp6-text-overflow-ellipsis')?.textContent === ${JSON.stringify(name)})`;
 
+test("Adaptive saves the same-provider preference, checked by default", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('#global .adaptive-settings .bp6-switch')`, "Adaptive settings");
+    await page.click('#global .adaptive-settings .bp6-switch');
+    await page.until(`tiersFixture.adaptiveSaved.length === 1 && document.querySelectorAll('#global .adaptive-fields .bp6-checkbox').length === 2`, "Adaptive set up");
+    assert.equal(await page.evaluate(`tiersFixture.adaptiveSaved[0].adaptive.preferSameProvider`), true);
+    assert.equal(await page.evaluate(`document.querySelectorAll('#global .adaptive-fields .bp6-checkbox input')[1].checked`), true);
+
+    await page.click('#global .adaptive-fields .bp6-checkbox', 1);
+    await page.until(`tiersFixture.adaptiveSaved.length === 2`, "preference turned off");
+    assert.equal(await page.evaluate(`tiersFixture.adaptiveSaved[1].adaptive.preferSameProvider`), false);
+    assert.equal(await page.evaluate(`tiersFixture.adaptiveSaved[1].adaptive.recheck`), true);
+    await page.click('#global .adaptive-fields .bp6-checkbox', 1);
+    await page.until(`tiersFixture.adaptiveSaved.length === 3`, "preference turned on");
+    assert.equal(await page.evaluate(`tiersFixture.adaptiveSaved[2].adaptive.preferSameProvider`), true);
+    assert.deepEqual(page.problems, []);
+  }, { entry: "../modelTierSettings.mount.tsx", fixture: "tiersFixture", rpcFixture: "../demo-api.ts", width: 1400, height: 900 });
+});
+
 test("a row of the tiers changes its model in its place, keeping the efforts the new model offers", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#space .model-tier-target')`, "the tiers of the space");

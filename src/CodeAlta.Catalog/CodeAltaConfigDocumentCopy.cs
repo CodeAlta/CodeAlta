@@ -85,7 +85,7 @@ internal static class CodeAltaConfigDocumentCopy
                         ? new CodeAltaModelFallbackDocument { Enabled = fallback.Enabled, On = Copy(fallback.On), Resume = fallback.Resume, MaxResumes = fallback.MaxResumes }
                         : null,
                     Adaptive = models.Adaptive is { } adaptive
-                        ? new CodeAltaModelAdaptiveDocument { Code = adaptive.Code, Escalate = adaptive.Escalate, Recheck = adaptive.Recheck }
+                        ? new CodeAltaModelAdaptiveDocument { Code = adaptive.Code, Escalate = adaptive.Escalate, Recheck = adaptive.Recheck, PreferSameProvider = adaptive.PreferSameProvider }
                         : null,
                 }
                 : null,

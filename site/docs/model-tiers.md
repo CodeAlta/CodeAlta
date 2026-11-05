@@ -49,13 +49,13 @@ The model chip below the prompt says **Adaptive** and the model of the next turn
   <figcaption class="small text-secondary mt-2">Settings > Models > Adaptive: the tier of the turns, the tier a turn in trouble continues on, and the recheck.</figcaption>
 </figure>
 
-Set it up in **Settings > Models**, in the **Adaptive** section under the tiers: turn on **Set up Adaptive**, then choose **Turns run on**, **A turn in trouble continues on**, and whether to **Recheck each change of code against the request**. The tiers it names need models; the section says when one has none, and how to choose the models.
+Set it up in **Settings > Models**, in the **Adaptive** section under the tiers: turn on **Set up Adaptive**, then choose **Turns run on**, **A turn in trouble continues on**, and whether to **Recheck each change of code against the request** and **Prefer same-provider tier**. The tiers it names need models; the section says when one has none, and how to choose the models.
 
 Then choose **Adaptive** in the model list of the **Agent** chip, after the tiers. While it is not set up, choosing it says so and offers **Open Settings**. Choosing a model or a tier yourself takes the session off Adaptive.
 
 - Whether a turn changed code is read from git: CodeAlta compares the files of the project before and after the turn, so a turn that only edits documentation or commits what was there is not rechecked. Without git, it goes by the files the tool calls say they changed, which not every provider reports.
 - Adaptive chooses the model of the turns you send. A prompt that comes from elsewhere (a reminder, a background job, another agent) runs on the model the session has.
-- The turns run on a model of the tier that the provider of the session has; an escalation can move the session to another provider, and it comes back after.
+- The turns run on a model of the tier that the provider of the session has. With **Prefer same-provider tier** on (the default), an escalation prefers a ready model of its tier on the current provider, even if another provider comes first; if there is none, it takes the first ready model of the tier. With it off, escalation takes the first ready model of the tier. Either can move the session to another provider. Afterward, the session returns to the turn tier, preferring its current provider there.
 
 Combinations tested in October 2026:
 
@@ -151,6 +151,7 @@ Adaptive is the `[models.adaptive]` table, for every space: it takes its models 
 code = "quick"       # the tier of the turns; quick by default
 escalate = "complex" # the tier a turn in trouble continues on; complex by default
 recheck = true       # recheck a turn that changed code; on by default
+prefer_same_provider = true # prefer the current provider on escalation; on by default
 ```
 
 ## CodeAlta TUI

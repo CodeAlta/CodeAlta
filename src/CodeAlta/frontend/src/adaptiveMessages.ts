@@ -27,6 +27,7 @@ export const adaptiveMessages = {
   "Turns run on": ["Los turnos usan", "Les tours utilisent", "Runden laufen auf", "ターンの階層", "各轮使用"],
   "A turn in trouble continues on": ["Un turno con problemas continúa en", "Un tour en difficulté continue sur", "Eine Runde mit Problemen läuft weiter auf", "問題のあるターンの続行先", "出问题的一轮继续使用"],
   "Recheck each change of code against the request": ["Revisar cada cambio de código frente a la petición", "Vérifier chaque modification du code par rapport à la demande", "Jede Codeänderung gegen die Anfrage prüfen", "コードの変更を毎回依頼内容と照らして確認する", "对照请求复查每次代码改动"],
+  "Prefer same-provider tier": ["Preferir el mismo proveedor en el nivel", "Préférer le même fournisseur dans le niveau", "Denselben Anbieter in der Stufe bevorzugen", "階層内で同じプロバイダーを優先する", "优先使用同一提供商的层级模型"],
   "Add a model to the {tier} tier to use Adaptive.": ["Añade un modelo al nivel {tier} para usar Adaptativo.", "Ajoutez un modèle au niveau {tier} pour utiliser Adaptatif.", "Fügen Sie der Stufe {tier} ein Modell hinzu, um Adaptiv zu verwenden.", "アダプティブを使うには {tier} 階層にモデルを追加してください。", "请向 {tier} 层级添加模型以使用自适应。"],
   "How to choose the models": ["Cómo elegir los modelos", "Comment choisir les modèles", "So wählen Sie die Modelle", "モデルの選び方", "如何选择模型"],
   "Turns: a fast, inexpensive model that writes good code once it rechecks it. Escalation: your strongest model; it runs only when a turn ends in trouble.": [

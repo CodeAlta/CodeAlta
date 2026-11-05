@@ -41,21 +41,22 @@ test("Adaptive is read with the tiers, ready only when the host says so, and off
   assert.deepEqual(composerAdaptiveEntry(state(), t), { ready: false, detail: "Not set up", title: null });
   // Set up on tiers that have models: the turns run on the quick tier, a turn in trouble goes to the complex one.
   const quick = { providerKey: "claude-code", modelId: "haiku", reasoning: "High", providerName: "Claude Code", modelName: "Haiku" };
-  const ready = readTierState(reply({ adaptive: { code: "quick", escalate: "complex", recheck: true }, adaptiveReady: true,
+  const ready = readTierState(reply({ adaptive: { code: "quick", escalate: "complex", recheck: true, preferSameProvider: true }, adaptiveReady: true,
     tiers: [...reply().tiers.slice(0, 2), { tier: "quick", targets: [{ providerKey: "claude-code", modelId: "haiku", reasoning: ["High"] }], choice: quick }] }))!;
-  assert.deepEqual(ready.adaptive, { code: "quick", escalate: "complex", recheck: true });
+  assert.deepEqual(ready.adaptive, { code: "quick", escalate: "complex", recheck: true, preferSameProvider: true });
   assert.equal(adaptiveChoice(ready)?.modelId, "haiku");
   assert.deepEqual(composerAdaptiveEntry(ready, t), { ready: true, detail: "Haiku · Recheck · GPT-6.1 on trouble", title: "Claude Code · Haiku · Recheck · GPT-6.1 on trouble" });
   // Set up, but the host says its tiers cannot give a model: it cannot be chosen.
-  const waiting = readTierState(reply({ adaptive: { code: "quick", escalate: "complex", recheck: false }, adaptiveReady: false }))!;
+  const waiting = readTierState(reply({ adaptive: { code: "quick", escalate: "complex", recheck: false, preferSameProvider: false }, adaptiveReady: false }))!;
+  assert.equal(waiting.adaptive?.preferSameProvider, false);
   assert.equal(waiting.adaptiveReady, false);
   assert.equal(adaptiveChoice(waiting), null);
   assert.equal(composerAdaptiveEntry(waiting, t).ready, false);
   // Set up and ready, while the provider of the tier of its turns does not answer yet: chosen, it says so.
-  const starting = readTierState(reply({ adaptive: { code: "quick", escalate: "complex", recheck: true }, adaptiveReady: true }))!;
+  const starting = readTierState(reply({ adaptive: { code: "quick", escalate: "complex", recheck: true, preferSameProvider: true }, adaptiveReady: true }))!;
   assert.deepEqual(composerAdaptiveEntry(starting, t), { ready: true, detail: "No model ready", title: null });
   // A tier that is none is not Adaptive.
-  assert.equal(readTierState(reply({ adaptive: { code: "cheap", escalate: "complex", recheck: true }, adaptiveReady: true }))!.adaptive, null);
+  assert.equal(readTierState(reply({ adaptive: { code: "cheap", escalate: "complex", recheck: true, preferSameProvider: true }, adaptiveReady: true }))!.adaptive, null);
 });
 
 test("the resume after a limit is read with its number of resumes in a row, the default for one the host would refuse", () => {

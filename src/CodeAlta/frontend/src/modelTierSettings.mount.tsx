@@ -3,7 +3,7 @@
 // `tiersFixture`.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { GlobalConfigModelTiersResponse, GlobalConfigSaveModelTiersRequest, ModelCatalogModel, ModelCatalogProvider, ModelTierList } from "#neoastra";
+import type { GlobalConfigModelTiersResponse, GlobalConfigSaveAdaptiveRequest, GlobalConfigSaveModelTiersRequest, ModelCatalogModel, ModelCatalogProvider, ModelTierList } from "#neoastra";
 import { createTierStore, readTierState } from "./modelTiers";
 import { ModelTierSettings } from "./ModelTierSettings";
 import { ShellLanguageContext } from "./shellLanguage";
@@ -34,9 +34,10 @@ const held = new Map<string, ModelTierList[]>([
   ["business", [list("complex", []), list("standard", []), list("quick", [["claude-code", "haiku", ["Low"]], ["codex", "gpt-6.1", ["Medium", "High"]]])]],
 ]);
 const fallbacks = new Map([["", { enabled: false, onQuota: true, onUnavailable: true, resume: false, maxResumes: 5 }], ["business", { enabled: false, onQuota: true, onUnavailable: true, resume: false, maxResumes: 5 }]]);
-const state = { saved: [] as GlobalConfigSaveModelTiersRequest[] };
+const state = { saved: [] as GlobalConfigSaveModelTiersRequest[], adaptiveSaved: [] as GlobalConfigSaveAdaptiveRequest[] };
+let adaptive: GlobalConfigSaveAdaptiveRequest["adaptive"] = null;
 const reply = (spaceId: string | null): GlobalConfigModelTiersResponse =>
-  ({ status: "ok", message: null, source: spaceId ? "space" : "global", spaceId, fallback: fallbacks.get(spaceId ?? "")!, tiers: held.get(spaceId ?? "")!, adaptive: null, adaptiveReady: false });
+  ({ status: "ok", message: null, source: spaceId ? "space" : "global", spaceId, fallback: fallbacks.get(spaceId ?? "")!, tiers: held.get(spaceId ?? "")!, adaptive, adaptiveReady: false });
 const store = createTierStore(async request => reply(request.spaceId));
 const api = {
   saveModelTiers: async (request: GlobalConfigSaveModelTiersRequest) => {
@@ -44,6 +45,11 @@ const api = {
     held.set(request.spaceId ?? "", [...request.tiers]);
     fallbacks.set(request.spaceId ?? "", request.fallback);
     return reply(request.spaceId);
+  },
+  saveAdaptive: async (request: GlobalConfigSaveAdaptiveRequest) => {
+    state.adaptiveSaved.push(request);
+    adaptive = request.adaptive;
+    return reply(null);
   },
 };
 store.set("epoch", readTierState(reply(null))!);
