@@ -28,8 +28,10 @@ never by the server.
   configuration file never holds a value again.
 - **Scopes**, the narrowest winning: the run's environment, then the project, the space, the person, the team, the
   organization. A machine's own store comes first for the work of its owner; the work of another person there (a
-  member of a team on a team machine) gets none of the owner's values, only those of the environment it was admitted
-  to; an organization's policy can require the managed value on its machines.
+  member of a team on a team machine), and a run nobody attends that is not positively the owner's (an automation of a
+  team or of the organization, or one another person gave), recorded before its session attaches, gets none of the
+  owner's values, only those of the environment it was admitted to; an organization's policy can require the managed
+  value on its machines.
 - **Write-only**: the desktop and the REST API set a secret, rotate it and delete it; they list its name, scope,
   version, who set it and when, and which machines hold it, never its value.
 
@@ -58,10 +60,15 @@ never by the server.
 - **The server nudges** the machines concerned when a value, an environment or an approval of theirs changes; a machine
   also reads its copies before each run, and drops those of a server that revoked it.
 - **No rollback**: a machine keeps, per organization and across restarts, the newest version it took of each environment
-  (with whether it was taken away) and of each value, and refuses an older one or another definition of the same
-  version, so that a server replaying what it held before loosens no rule and brings back no superseded value.
+  (with whether it was taken away) and of each value, and the version of each value it saw taken away (deleted, or
+  withdrawn from it), and refuses an older one, another definition of the same version, or a value taken away at that
+  version, so that a server replaying what it held before loosens no rule and brings back no superseded, deleted or
+  withdrawn value. An answer that names one twice gives its newest version; what the checkpoint cannot record (it is
+  full) is not taken, and an environment is used only once its version is recorded.
 - **Rotation reaches only the machines a controller gave the value to**: a controller device seals the next version for
-  the holders whose copy carries a grant a controller device signed, never for a holder the server lists by itself.
+  the holders whose copy carries a grant a controller device signed, never for a holder the server lists by itself. A
+  withdrawal seals the value again as its next version for the machines that keep it, so that the grant of the machine
+  withdrawn is of an older version, which no rotation takes.
 
 ## How a run gets them
 
@@ -72,8 +79,9 @@ never by the server.
   ([orchestration](orchestration.md#what-unattended-runs-support)).
 - **Masking**: a secret's value is replaced by `***` in tool outputs, journals, logs and telemetry before they are
   written; a value is never sent to the server, never published in facts, never moved with a session. A value taken
-  away (rotated, deleted, withdrawn, or of a link that is gone) is never given again but stays masked for 30 days: a
-  run that took it may still print it.
+  away (rotated, deleted, withdrawn, or of a link that is gone) is never given again but stays masked: the store keeps it
+  for 30 days (256 values at most), and each process masks every value it read for as long as it runs, since a run that
+  took it may still print it.
 - **Environments protect themselves**: an environment can require the approval of named people or teams before a run
   that uses it starts, limit it to machines with labels, to automations, or to branches. Its rules are signed by a
   controller device of its person, so that a server cannot drop one. The approval is a person's device signature, as
@@ -81,8 +89,12 @@ never by the server.
   machine chose, valid for a while; the machine verifies it against its anchored device list and takes it once. The
   nonce carries the machine's signature of what it asks (environment, version, run, automation), and the approver's
   device signs only a request that verifies and is the one the person reviewed, so a server can neither make up nor
-  change the run approved. The approval and a budget hold name the run, never its title. The
-  machine keeps the admission of the session it started, bound to the environment, the version of its rules and the
+  change the run approved. What the person reviews is named by the definition their device verified at the version the
+  machine asked, never by the name the server lists; an approver of another person verifies the signed definition the
+  server gives with the approval, which gives them neither its values nor its management. The approval and a budget
+  hold name the run, never its title. The values of an environment are its own, kept under the organization and the id
+  its signed definition names; a run names an environment by its name, and a name two environments share admits no run.
+  The machine keeps the admission of the session it started, bound to the environment, the version of its rules and the
   approval taken: a restart keeps it, and new rules end it.
 
 ## Logins are not secrets of the store
