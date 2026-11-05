@@ -58,7 +58,7 @@ export function MobileCanvas({ status, failure, actions }: { status: MobileStatu
     return <Callout key={item.key} className="mobile-problem" intent={item.intent} title={t(item.title, item.parameters)} data-problem={item.key}>
       {detail && <p>{detail}</p>}
       {(item.fix || item.retry || item.actions.length > 0) && <div className="mobile-problem-actions">
-        {item.actions.map(action => <Button key={action.action} size="small" intent={action.primary ? "primary" : "none"} onClick={() => void actions.act(action.action)}>{t(action.label)}</Button>)}
+        {item.actions.map(action => <Button key={action.action} size="small" intent={action.primary ? "primary" : "none"} onClick={() => void actions.act(action.action)}>{"label" in action ? t(action.label) : action.text}</Button>)}
         {item.fix && <Button size="small" intent="primary" icon={<AppIcon name="openExternal" size={14} />} onClick={() => actions.openLink(item.fix!.url)}>{t(item.fix.label)}</Button>}
         {item.retry && <Button size="small" icon={<AppIcon name="refresh" size={14} />} loading={retrying} onClick={() => void retry()}>{t("Try again")}</Button>}
       </div>}

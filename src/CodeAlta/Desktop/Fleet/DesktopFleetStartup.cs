@@ -37,9 +37,13 @@ internal sealed class DesktopFleetStartup
     /// <param name="machineName">The name of this computer.</param>
     /// <param name="version">The version of CodeAlta.</param>
     /// <param name="handler">The HTTP handler of the calls to servers, for tests; null for the usual one.</param>
+    /// <param name="privateNetworks">
+    /// The private networks of this computer, the first of which that finds it names it in the pairing links; null for Tailscale alone.
+    /// </param>
     /// <returns>The fleet.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    public static DesktopFleetStartup Create(CodeAltaHost host, SessionHostRegistry sessionHosts, string machineName, string version, HttpMessageHandler? handler = null)
+    public static DesktopFleetStartup Create(CodeAltaHost host, SessionHostRegistry sessionHosts, string machineName, string version, HttpMessageHandler? handler = null,
+        CodeAlta.Plugins.PrivateNetworks.PrivateNetworkRegistry? privateNetworks = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(sessionHosts);
@@ -60,12 +64,16 @@ internal sealed class DesktopFleetStartup
         servers.MachineSpaces = fleet.PublishedSpaces;
         servers.Changed += () => _ = fleet.SyncOrganizationMachinesAsync(servers.OrganizationMachines(), CancellationToken.None);
         // This computer as a machine of the person's other computers: it listens only once the person turned it on.
-        // On a Tailscale network, its links name it there first, so that a laptop away from home still reaches it.
+        // On a private network (Tailscale, or one a plugin brings), its links name it there first, so that a laptop away from home
+        // still reaches it.
         // Once the person lets them, the person's other devices of the organizations of its servers reach it through their
         // relays too: the work they start here follows the policies of those servers.
         var node = new DesktopNode(host, machineName, version, host.CatalogOptions.FleetRoot)
         {
-            FindTailnet = Mcp.DesktopTailnet.FindAsync,
+            FindTailnet = privateNetworks is null ? Mcp.DesktopTailnet.FindAsync : async token =>
+                await privateNetworks.FindThisComputerAsync(token).ConfigureAwait(false) is { } found
+                    ? new Mcp.DesktopTailnetNode(found.Presence.Name, found.Presence.Addresses, found.Network.DisplayName)
+                    : null,
             Policy = servers.Policy,
             Servers = () => [.. servers.Connections.Where(static connection => connection.Link.State != CodeAlta.Fleet.Server.FleetServerLinkStates.Revoked)
                 .Select(static connection => connection.Link.OrganizationName ?? connection.Link.Url)],

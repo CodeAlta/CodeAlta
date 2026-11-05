@@ -6,7 +6,7 @@ import { mobileView, qrPath, quietZone, readStatus, type MobileStatus } from "./
 
 const serving = (overrides: Partial<MobileStatus> = {}, provider: Partial<MobileStatus["provider"]> = {}): MobileStatus => ({
   server: "listening", port: 51234, serverDetail: null,
-  provider: { id: "tailscale", state: "serving", url: "https://pc.tail1.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, working: false, ...provider },
+  provider: { id: "tailscale", state: "serving", url: "https://pc.tail1.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, working: false, name: "Tailscale", actions: [], ...provider },
   connectUrl: "https://pc.tail1.ts.net:8443/#k=secret", address: "https://pc.tail1.ts.net:8443", qr: ["101", "010", "111"], ...overrides,
 });
 
@@ -162,4 +162,16 @@ test("Try again asks the provider again and gives the new status, and an action 
   assert.equal(acted.provider.state, "signing-in");
   fake.answer({ wrong: true });
   await assert.rejects(createMobileApi(fake.rpc).status(), /cannot read/);
+});
+test("a network a plugin brings, which the tab has no words for, shows its own line and the buttons of its state in its own words", () => {
+  const view = mobileView(serving({ connectUrl: null, address: null, qr: null }, {
+    id: "acme-vpn", name: "Acme VPN", state: "not-signed-in", url: null, detail: "Sign in to Acme first.",
+    actions: [{ action: "acme-login", label: "Sign in to Acme" }],
+  }));
+  assert.equal(view.problems.length, 1);
+  const problem = view.problems[0]!;
+  assert.equal(problem.detail, "Sign in to Acme first.");
+  assert.deepEqual(problem.actions, [{ action: "acme-login", text: "Sign in to Acme", primary: true }]);
+  assert.equal(readStatus({ ...serving(), provider: { ...serving().provider, actions: [{ action: "x", label: "y".repeat(81) }, { action: "ok", label: "Fine" }] } })?.provider.actions.length, 1,
+    "a label too long is left out");
 });

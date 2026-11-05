@@ -1,9 +1,11 @@
 using System.Diagnostics;
 
-namespace CodeAlta.Plugin.Mobile;
+using CodeAlta.Plugins.Abstractions;
+
+namespace CodeAlta.Plugins.PrivateNetworks;
 
 /// <summary>Runs the command lines the providers use (<c>tailscale</c>, <c>devtunnel</c>): found on the path or where their installers put them.</summary>
-internal static class MobileCommandLine
+internal static class PrivateNetworkCommandLine
 {
     /// <summary>The executable of a command line: on the path first, then in the folders its installers use.</summary>
     /// <param name="name">Its name, without the <c>.exe</c> of Windows.</param>
@@ -31,10 +33,10 @@ internal static class MobileCommandLine
     /// Runs a command without a window and waits for its end, <paramref name="patience"/> at most. Its output is read to the end whatever
     /// happens: a command that waits is stopped after a while, and what it printed still says why.
     /// </summary>
-    /// <returns>Its exit code and its output, its errors after it; -1 and <see cref="MobileCliResult.TimedOut"/> when it did not end in time.</returns>
+    /// <returns>Its exit code and its output, its errors after it; -1 and <see cref="CommandLineResult.TimedOut"/> when it did not end in time.</returns>
     /// <exception cref="InvalidOperationException">The command did not start.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    internal static async Task<MobileCliResult> RunAsync(string path, IReadOnlyList<string> args, TimeSpan patience, CancellationToken cancellationToken)
+    internal static async Task<CommandLineResult> RunAsync(string path, IReadOnlyList<string> args, TimeSpan patience, CancellationToken cancellationToken)
     {
         using var process = Process.Start(Info(path, args)) ?? throw new InvalidOperationException($"{Path.GetFileName(path)} did not start.");
         var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);

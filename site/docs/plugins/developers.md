@@ -175,6 +175,30 @@ The factories `Command`, `PluginUi`, `PluginTui`, `Prompt`, `AgentTool`, `Resour
 
 `OnAgentEventAsync` receives the events of every session, including a delta for each streamed fragment. A plugin that reads only finished content returns `false` from `ObservesContentDeltas` and is spared those calls. A plugin that does not override `OnAgentEventAsync` gets no events.
 
+### A private network
+
+A plugin brings a VPN or a tunnel that CodeAlta does not know, beside Tailscale and Dev Tunnels: its plugin class implements `IPrivateNetworkSource` and gives an `IPrivateNetworkProvider`. Its `Capabilities` say what it does:
+
+- `Presence`: `FindThisComputerAsync` gives the name and the addresses of this computer on the network. The pairing links of [Your Machines](../fleet/machines.md#pair-two-codealta-desktops) name it there first.
+- `Publish`: `CreatePublisher` publishes a page of this computer at an HTTPS address, such as the [phone page](mobile.md). The network is offered under **Phones connect through**, with its `DisplayName` and `Description`; the status it gives says what keeps the phones out, with a button for each of its `Actions` (a sign-in). `PublicPort` adds the port of the network to the settings.
+
+```csharp
+public sealed class AcmePlugin : PluginBase, IPrivateNetworkSource
+{
+    public IReadOnlyList<IPrivateNetworkProvider> PrivateNetworks { get; } = [new AcmeNetwork()];
+}
+
+sealed class AcmeNetwork : IPrivateNetworkProvider
+{
+    public string Id => "acme-vpn";
+    public string DisplayName => "Acme VPN";
+    public PrivateNetworkCapabilities Capabilities => PrivateNetworkCapabilities.Publish;
+    public IPrivateNetworkPublisher CreatePublisher(IPrivateNetworkHost host) => new AcmePublisher(host);
+}
+```
+
+The publisher keeps what it needs between starts with `host.ReadStateAsync` and `WriteStateAsync`, runs its background work with `host.Run`, and says a change with `host.ReportAsync`. A plugin reads the networks of this computer with `Services.PrivateNetworks`.
+
 ## Commands and dialogs
 
 ```csharp

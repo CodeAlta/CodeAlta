@@ -35,5 +35,9 @@
     <InternalsVisibleTo Include="CodeAlta.Plugins.Tests" />
     <InternalsVisibleTo Include="CodeAlta.Tests" />
     <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
+    <!-- The tests of the Mobile plugin drive the private networks with command lines of their own. -->
+    <InternalsVisibleTo Include="CodeAlta.Plugin.Mobile.Tests" />
+    <!-- CodeAlta Desktop: the MCP server finds this computer on its tailnet with the Tailscale network. -->
+    <InternalsVisibleTo Include="alta" />
   </ItemGroup>
 </Project>

@@ -24,6 +24,7 @@ export const mobileSettingsMessages = {
   "Not served through Dev Tunnels": ["No se sirve mediante Dev Tunnels", "Non servi via Dev Tunnels", "Nicht über Dev Tunnels bereitgestellt", "Dev Tunnels では提供されていません", "未通过 Dev Tunnels 提供"],
   "Port on this computer": ["Puerto en este equipo", "Port sur cet ordinateur", "Port auf diesem Computer", "このコンピューターのポート", "此计算机上的端口"],
   "Port on the tailnet": ["Puerto en la tailnet", "Port sur le tailnet", "Port im Tailnet", "tailnet のポート", "tailnet 上的端口"],
+  "Port on the network": ["Puerto en la red", "Port sur le réseau", "Port im Netzwerk", "ネットワークのポート", "网络上的端口"],
   "A port is a number from 1024 to 65535.": ["Un puerto es un número de 1024 a 65535.", "Un port est un nombre de 1024 à 65535.", "Ein Port ist eine Zahl von 1024 bis 65535.",
     "ポートは 1024 から 65535 までの数値です。", "端口是 1024 到 65535 之间的数字。"],
   "Address on the tailnet": ["Dirección en la tailnet", "Adresse sur le tailnet", "Adresse im Tailnet", "tailnet 上のアドレス", "tailnet 上的地址"],

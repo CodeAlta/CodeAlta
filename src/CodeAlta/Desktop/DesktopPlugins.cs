@@ -242,7 +242,7 @@ internal static class DesktopPlugins
 /// </remarks>
 internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPluginUi ui, DesktopCanvases? canvases = null, DesktopPluginIdentities? identities = null,
     IPluginAppFileService? appFiles = null, DesktopPluginAsks? asks = null, DesktopPluginPermissions? permissions = null,
-    PluginSettingsStore? settings = null) : IPluginServices
+    PluginSettingsStore? settings = null, IPluginPrivateNetworkService? privateNetworks = null) : IPluginServices
 {
     private readonly NoopPluginServices _inner = NoopPluginServices.Create();
     private readonly DesktopPluginUi _ui = ui ?? throw new ArgumentNullException(nameof(ui));
@@ -275,6 +275,9 @@ internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPlug
 
     // The files of the window's page, which a plugin serves to a browser of its own (the page of the phones).
     public IPluginAppFileService AppFiles { get; } = appFiles ?? NoopPluginAppFileService.Instance;
+
+    // The private networks of this computer and of the plugins, through which a plugin publishes a page (the page of the phones).
+    public IPluginPrivateNetworkService PrivateNetworks { get; } = privateNetworks ?? NoopPluginPrivateNetworkService.Instance;
 
     // The questions and the review requests of the sessions, once the host runs, which the page of the phones answers.
     public IPluginAskService Asks { get; } = (IPluginAskService?)asks ?? NoopPluginAskService.Instance;

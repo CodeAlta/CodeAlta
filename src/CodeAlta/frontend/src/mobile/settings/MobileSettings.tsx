@@ -24,6 +24,8 @@ type ProviderPage = Readonly<{
   /** Its name: a brand as it is, or words of the page. */
   name: string;
   help?: MessageKey;
+  /** The line of a network the page has no words for, in the words of the network. */
+  description?: string;
   address: MessageKey;
   unserved: MessageKey;
   apply: MessageKey;
@@ -41,7 +43,10 @@ const pages: Readonly<Record<string, ProviderPage>> = {
   },
 };
 
-const pageOf = (provider: string): ProviderPage => pages[provider] ?? { name: provider, address: "Address of the page", unserved: "Not served", apply: "Apply to publish the page." };
+const pageOf = (provider: string, networks: MobileSettingsView["providers"] = []): ProviderPage => pages[provider] ?? {
+  name: networks.find(network => network.id === provider)?.name ?? provider, description: networks.find(network => network.id === provider)?.description || undefined,
+  address: "Address of the page", unserved: "Not served", apply: "Apply to publish the page.",
+};
 
 /**
  * The settings page of the Mobile plugin, in Settings > Extensions > Mobile: the provider phones connect through and its fields, the port
@@ -69,7 +74,7 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
     : <div className="mobile-settings-loading" role="status" aria-busy="true"><ActivitySpinner size={18} label={t("Loading…")} /></div>;
 
   const fields = draft ?? draftOf(settings);
-  const provider = fields.provider, page = pageOf(provider), shown = fieldsOf(provider);
+  const provider = fields.provider, page = pageOf(provider, settings.providers), shown = fieldsOf(provider, settings.providers);
   const edit = (change: Partial<MobileSettingsDraft>) => setDraft({ ...fields, ...change });
   const changed = changedSettings(settings, fields);
   const portProblem = readPort(fields.port) === null, httpsProblem = shown.includes("httpsPort") && readPort(fields.httpsPort) === null;
@@ -98,23 +103,23 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
       aria-describedby={problem ? "mobile-settings-port-problem" : undefined} inputClassName="mobile-settings-port"
       onValueChange={(_value, text) => onEdit(text)} onKeyDown={enter} />;
   const portNotice = (portProblem || httpsProblem) && <p id="mobile-settings-port-problem" className="settings-field-help" role="alert">{t("A port is a number from 1024 to 65535.")}</p>;
-  const name = (id: string) => pageOf(id).name;
+  const name = (id: string) => pageOf(id, settings.providers).name;
   // The address card follows the provider chosen on the page; until it is applied, the address of the other provider is not this one.
   const applied = provider === settings.provider.id;
   return <div className="settings-grid mobile-settings">
     {notice && <Callout className="mobile-settings-notice" intent={notice.intent} compact role={notice.intent === "success" ? "status" : "alert"}>{notice.text}</Callout>}
     <Card className="appearance-settings" aria-labelledby="mobile-settings-ports">
       <h2 id="mobile-settings-ports">{t("Connection")}</h2>
-      <Field label={t("Phones connect through")} notice={page.help && <p className="settings-field-help">{t(page.help)}</p>}>
+      <Field label={t("Phones connect through")} notice={(page.help || page.description) && <p className="settings-field-help">{page.help ? t(page.help) : page.description}</p>}>
         <RadioGroup inline name="mobile-settings-mode" className="mobile-settings-mode" selectedValue={provider} disabled={busy}
           onChange={event => edit({ provider: event.currentTarget.value })}>
-          {settings.providers.map(id => <Radio key={id} value={id} label={name(id)} />)}
+          {settings.providers.map(network => <Radio key={network.id} value={network.id} label={name(network.id)} />)}
         </RadioGroup>
       </Field>
       <Field label={t("Port on this computer")} htmlFor="mobile-settings-port" notice={!shown.includes("httpsPort") && portNotice}>
         {portField("mobile-settings-port", fields.port, portProblem, text => edit({ port: text }))}
       </Field>
-      {shown.includes("httpsPort") && <Field label={t("Port on the tailnet")} htmlFor="mobile-settings-https-port" notice={portNotice}>
+      {shown.includes("httpsPort") && <Field label={t(provider === "tailscale" ? "Port on the tailnet" : "Port on the network")} htmlFor="mobile-settings-https-port" notice={portNotice}>
         {portField("mobile-settings-https-port", fields.httpsPort, httpsProblem, text => edit({ httpsPort: text }))}
       </Field>}
       <div className="mobile-settings-actions">

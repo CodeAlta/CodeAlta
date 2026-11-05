@@ -3,7 +3,7 @@ import test from "node:test";
 import { changedSettings, draftOf, fieldsOf, readMobileSettings, readPort, type MobileSettingsView } from "./model";
 
 const answer: MobileSettingsView = {
-  providers: ["tailscale", "devtunnel"], provider: { id: "tailscale", state: "serving", detail: "Tailscale serves it" }, port: 2584, httpsPort: 2584,
+  providers: [{ id: "tailscale", name: "Tailscale", description: "", publicPort: true }, { id: "devtunnel", name: "Dev Tunnels", description: "", publicPort: false }], provider: { id: "tailscale", state: "serving", detail: "Tailscale serves it" }, port: 2584, httpsPort: 2584,
   address: "https://desk.tail1234.ts.net:2584", server: "listening", serverDetail: null, error: null,
 };
 
@@ -11,7 +11,7 @@ test("the settings of the plugin are read for what they say, and anything else i
   assert.deepEqual(readMobileSettings(answer), answer);
   assert.deepEqual(readMobileSettings({ ...answer, address: null, serverDetail: "", error: "" }), { ...answer, address: null, serverDetail: null, error: null }, "an empty text is no text");
   assert.equal(readMobileSettings({ ...answer, address: "http://desk:2584" })?.address, null, "the address of the view is HTTPS");
-  assert.deepEqual(readMobileSettings({ ...answer, providers: undefined })?.providers, ["tailscale"], "without a list, the provider of now");
+  assert.deepEqual(readMobileSettings({ ...answer, providers: undefined })?.providers.map(network => network.id), ["tailscale"], "without a list, the provider of now");
   assert.equal(readMobileSettings({ ...answer, error: "The port on this computer must be a number from 1024 to 65535." })?.error, "The port on this computer must be a number from 1024 to 65535.");
   for (const bad of [null, "settings", { ...answer, port: 80 }, { ...answer, httpsPort: 70000 }, { ...answer, port: 2584.5 }, { ...answer, server: 3 }, { ...answer, provider: null },
     { ...answer, provider: { state: "serving", detail: "" } }]) {
@@ -31,4 +31,11 @@ test("a port is a whole number from 1024 to 65535, and Apply sends the fields of
     "Dev Tunnels has no port on the tailnet: it is neither checked nor sent");
   assert.equal(changedSettings({ ...answer, provider: { ...answer.provider, id: "devtunnel" } }, { ...fields, provider: "devtunnel" }), null);
   assert.deepEqual([fieldsOf("tailscale"), fieldsOf("devtunnel"), fieldsOf("pigeons")], [["httpsPort"], [], []]);
+});
+test("a network a plugin brings asks for the port of the network when the plugin says it takes one", () => {
+  const settings = readMobileSettings({ ...answer, providers: [...answer.providers, { id: "acme-vpn", name: "Acme VPN", description: "Your Acme VPN.", publicPort: true }, { id: "zt", name: "Zero", publicPort: false }] })!;
+  assert.deepEqual(settings.providers.map(network => network.name), ["Tailscale", "Dev Tunnels", "Acme VPN", "Zero"]);
+  assert.deepEqual(fieldsOf("acme-vpn", settings.providers), ["httpsPort"]);
+  assert.deepEqual(fieldsOf("zt", settings.providers), []);
+  assert.deepEqual(changedSettings(settings, { provider: "acme-vpn", port: "2584", httpsPort: "8443" }), { provider: "acme-vpn", port: 2584, httpsPort: 8443 });
 });

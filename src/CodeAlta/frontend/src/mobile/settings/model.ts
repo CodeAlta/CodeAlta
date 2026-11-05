@@ -8,16 +8,19 @@ export const minimumPort = 1024, maximumPort = 65535;
 /** A field of the settings some providers need, beside the port of this computer that all have. */
 export type MobileProviderField = "httpsPort";
 
-/** The fields of each provider. A provider the page does not know has the port of this computer alone. */
+/** The fields of each provider. A provider the page does not know has the port of the network when the plugin says it takes one. */
 const providerFields: Readonly<Record<string, readonly MobileProviderField[]>> = {
   tailscale: ["httpsPort"],
   devtunnel: [],
 };
 
+/** A private network phones can connect through, as the plugin offers it: Tailscale, Dev Tunnels, or one a plugin brings. */
+export type MobileNetwork = Readonly<{ id: string; name: string; description: string; publicPort: boolean }>;
+
 /** What the plugin says of its settings: the provider and its settings, the address while the view is served, and what keeps it from being served. */
 export type MobileSettingsView = Readonly<{
-  /** The providers the plugin offers, in their order. */
-  providers: readonly string[];
+  /** The networks the plugin offers, in their order. */
+  providers: readonly MobileNetwork[];
   /** The provider of now, and what it does. */
   provider: Readonly<{ id: string; state: string; detail: string }>;
   port: number;
@@ -48,10 +51,16 @@ export function readMobileSettings(value: unknown): MobileSettingsView | null {
   const provider = record.provider && typeof record.provider === "object" ? record.provider as Record<string, unknown> : null;
   const server = text(record.server, 64), id = text(provider?.id, 64), state = text(provider?.state, 64), detail = text(provider?.detail, 1000);
   if (!isPort(record.port) || !isPort(record.httpsPort) || !server || !id || !state || detail === null) return null;
-  const providers = Array.isArray(record.providers) ? record.providers.filter((item): item is string => typeof item === "string" && item.length > 0 && item.length <= 64) : [];
+  const providers: MobileNetwork[] = Array.isArray(record.providers) ? record.providers.flatMap(item => {
+    if (typeof item === "string") return item.length > 0 && item.length <= 64 ? [{ id: item, name: item, description: "", publicPort: item === "tailscale" }] : [];
+    if (!item || typeof item !== "object") return [];
+    const network = item as Record<string, unknown>;
+    const networkId = text(network.id, 64), name = text(network.name, 80);
+    return networkId && name ? [{ id: networkId, name, description: text(network.description, 300) ?? "", publicPort: network.publicPort === true }] : [];
+  }) : [];
   const address = text(record.address, 512);
   return {
-    providers: providers.length > 0 ? providers : [id], provider: { id, state, detail },
+    providers: providers.length > 0 ? providers : [{ id, name: id, description: "", publicPort: false }], provider: { id, state, detail },
     port: record.port, httpsPort: record.httpsPort,
     address: address && /^https:\/\//u.test(address) ? address : null, server, serverDetail: text(record.serverDetail, 600) || null,
     error: text(record.error, 600) || null,
@@ -71,9 +80,9 @@ export function draftOf(settings: MobileSettingsView): MobileSettingsDraft {
   return { provider: settings.provider.id, port: String(settings.port), httpsPort: String(settings.httpsPort) };
 }
 
-/** The fields of a provider. */
-export function fieldsOf(provider: string): readonly MobileProviderField[] {
-  return providerFields[provider] ?? [];
+/** The fields of a provider: those the page knows, or the port of the network for a network of a plugin that takes one. */
+export function fieldsOf(provider: string, networks: readonly MobileNetwork[] = []): readonly MobileProviderField[] {
+  return providerFields[provider] ?? (networks.find(network => network.id === provider)?.publicPort ? ["httpsPort"] : []);
 }
 
 /**
@@ -81,7 +90,7 @@ export function fieldsOf(provider: string): readonly MobileProviderField[] {
  * otherwise.
  */
 export function changedSettings(settings: MobileSettingsView, draft: MobileSettingsDraft): MobileSettingsChange | null {
-  const fields = fieldsOf(draft.provider);
+  const fields = fieldsOf(draft.provider, settings.providers);
   const port = readPort(draft.port);
   const httpsPort = fields.includes("httpsPort") ? readPort(draft.httpsPort) : settings.httpsPort;
   if (port === null || httpsPort === null) return null;

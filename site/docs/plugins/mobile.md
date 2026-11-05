@@ -66,6 +66,10 @@ When something keeps a phone from connecting, the Mobile tab says what it is and
   <figcaption class="small text-secondary mt-2">The background jobs of a session: their count above the prompt, the list, and the output of one.</figcaption>
 </figure>
 
+## Other private networks
+
+A plugin can bring another VPN or tunnel (see [A private network](developers.md#a-private-network)): it is offered under **Phones connect through** beside Tailscale and Dev Tunnels, with what it needs, and the Mobile tab shows its buttons, such as its sign-in. A choice of it stays when that plugin is off; Tailscale serves the page meanwhile, and **Try again** goes back to it once the plugin runs.
+
 ## Without Tailscale: Dev Tunnels
 
 A [Dev Tunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/overview) of Microsoft gives the phone page an HTTPS address, such as `https://bold-tree-x1y2-2584.euw.devtunnels.ms`, that only your GitHub account opens: nothing to install on the phone, and nothing to change on your router.

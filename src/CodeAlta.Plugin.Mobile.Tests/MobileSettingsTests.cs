@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Text.Json;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.PrivateNetworks;
 
 namespace CodeAlta.Plugin.Mobile.Tests;
 
@@ -14,7 +15,7 @@ public sealed class MobileSettingsTests
     [TestMethod]
     public void ThePlugin_DeclaresItsTab_AndItsSettingsPage()
     {
-        var canvases = new MobilePlugin(new FakeTailscaleCli()).GetCanvases().ToArray();
+        var canvases = MobileFakes.Plugin(new FakeTailscaleCli()).GetCanvases().ToArray();
 
         Assert.AreEqual(2, canvases.Length);
         var tab = canvases.Single(static canvas => canvas.Id == MobilePlugin.CanvasId);
@@ -304,7 +305,7 @@ public sealed class MobileSettingsTests
     /// <summary>The plugin of a window, attached to services of the tests and started on the ports a test gives.</summary>
     internal sealed class Fixture(FakeTailscaleCli cli, MemoryState? state = null, IPluginAskService? asks = null, MobilePlugin? plugin = null) : IAsyncDisposable
     {
-        internal MobilePlugin Plugin { get; } = plugin ?? new(cli);
+        internal MobilePlugin Plugin { get; } = plugin ?? MobileFakes.Plugin(cli);
 
         internal MemoryState State { get; } = state ?? new();
 

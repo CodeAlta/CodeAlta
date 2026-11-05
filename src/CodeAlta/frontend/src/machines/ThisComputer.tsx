@@ -72,7 +72,7 @@ export function ThisComputerBody({ view, busy, problem, onVisible, onReachable, 
     <Switch checked={view.visible} disabled={busy} label={t("Let my other computers pair with this one")} onChange={event => onVisible(event.currentTarget.checked)} />
     <p className="muted-text">{t("Another CodeAlta Desktop of yours pairs with this computer as with a machine: it sees, drives and starts its sessions while CodeAlta runs here, encrypted from end to end. Nothing is reachable until you turn it on.")}</p>
     {view.visible && view.listening && <div className="this-computer-reach muted-text">
-      {view.tailnet && <div><Tag minimal round intent="success" icon={<AppIcon name="remote" size={11} />}>Tailscale</Tag> {t("On your tailnet as {name}: reached away from home too.", { name: view.tailnet })}</div>}
+      {view.tailnet && <div><Tag minimal round intent="success" icon={<AppIcon name="remote" size={11} />}>{view.network ?? "Tailscale"}</Tag> {t("On your private network as {name}: reached away from home too.", { name: view.tailnet })}</div>}
       <div>{t("Reached at {addresses}", { addresses: view.addresses.join(", ") })}</div>
     </div>}
     {view.visible && !view.listening && <Callout compact intent="warning" role="alert">{t("This computer cannot listen for your other computers.")}

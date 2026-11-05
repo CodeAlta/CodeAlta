@@ -240,6 +240,8 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
 
         public IPluginAppFileService AppFiles => inner.AppFiles;
 
+        public IPluginPrivateNetworkService PrivateNetworks => inner.PrivateNetworks;
+
         // An agent runs these commands: through them it would answer what it asked the user.
         public IPluginAskService Asks => NoopPluginAskService.Instance;
 

@@ -77,7 +77,15 @@ Contribution areas, all virtual methods of `PluginBase`:
 
 | For agents | For the window |
 | --- | --- |
-| Agent tools (`AgentTool`), `alta` command roots (`GetAltaCommands`), static and dynamic prompt parts, final instruction processors, prompt-submit, before-run, tool-call, tool-result and run-end hooks, agent-event observers, model provider types (`GetModelProviders`), resource roots (skills), issue trackers (`IIssueTrackerSource`) | Commands with key bindings, status items and region content, dialogs, prompt pickers, buttons, canvases, landing cards, timeline cards (session-event projections), command-line options (terminal) |
+| Agent tools (`AgentTool`), `alta` command roots (`GetAltaCommands`), static and dynamic prompt parts, final instruction processors, prompt-submit, before-run, tool-call, tool-result and run-end hooks, agent-event observers, model provider types (`GetModelProviders`), resource roots (skills), issue trackers (`IIssueTrackerSource`), private networks (`IPrivateNetworkSource`) | Commands with key bindings, status items and region content, dialogs, prompt pickers, buttons, canvases, landing cards, timeline cards (session-event projections), command-line options (terminal) |
+
+**Private networks.** The ways the person's own devices reach this computer without opening it to the Internet are
+`IPrivateNetworkProvider`s: Tailscale and Dev Tunnels in `CodeAlta.Plugins/PrivateNetworks`, then those of the active
+plugins (`IPrivateNetworkSource`), in one `PrivateNetworkRegistry` of the desktop, which plugins read as
+`Services.PrivateNetworks`. A network says where this computer is on it (`Presence`: the fleet names it so in its pairing
+links) or publishes a page of the loopback address at an HTTPS address (`Publish`: the Mobile plugin). One id names one
+network, CodeAlta's first; a network that fails is passed over, never fatal. The publisher keeps its own state through its
+host, so the Mobile plugin knows no network by name.
 
 Two rules protect the host from a plugin:
 
@@ -321,7 +329,7 @@ be delayed by static references, native resources or untracked work: collectible
 | `acp` | `CodeAlta.Plugin.Acp` | all three | The provider type `acp`, see [providers](providers.md) |
 | `landing` | desktop project | desktop | The canvas of the landing page; the cards on it are other plugins' |
 | `search` | desktop project | desktop | The canvas and landing card of the search index |
-| `mobile` | `CodeAlta.Plugin.Mobile` | desktop, off by default | A local server published on the tailnet by Tailscale Serve, or through a Dev Tunnel of the user hosted by the `devtunnel` command line, that serves the sessions of its spaces to a phone, acting through `alta` (images by an id resolved from the records of their session, never a path from the phone), and answers their asks through `Services.Asks`. It keeps no usable secret on disk, only the SHA-256 of the pairing token and of each phone's key, so a program that reads its files cannot answer as the user |
+| `mobile` | `CodeAlta.Plugin.Mobile` | desktop, off by default | A local server published through a private network of `Services.PrivateNetworks` (Tailscale Serve on the tailnet, a Dev Tunnel of the user hosted by the `devtunnel` command line, or a network a plugin brings), that serves the sessions of its spaces to a phone, acting through `alta` (images by an id resolved from the records of their session, never a path from the phone), and answers their asks through `Services.Asks`. It keeps no usable secret on disk, only the SHA-256 of the pairing token and of each phone's key, so a program that reads its files cannot answer as the user |
 | `ui` | desktop project | desktop | On request, the tools that see and drive the window; not offered when the user reviews commands, since a session could then answer its own review |
 | `browser` | `CodeAlta.Plugin.Browser` | desktop, command line | On request, the tools of Chrome DevTools MCP over a real browser, with the same names as those of `ui`, so that a session has one set or the other; see [browser](browser.md) |
 

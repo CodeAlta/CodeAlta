@@ -20,6 +20,10 @@ export type MobileProviderStatus = Readonly<{
   fixUrl: string | null;
   /** Whether it is at a step that runs (publishing, a sign-in): a wait, no problem. */
   working: boolean;
+  /** The name of the network, for people. */
+  name: string;
+  /** The actions its state offers, with the words of the network: used for a network the tab has no words for. */
+  actions: readonly Readonly<{ action: string; label: string }>[];
 }>;
 
 /** The status of the Mobile plugin. */
@@ -49,11 +53,17 @@ export function readStatus(value: unknown): MobileStatus | null {
   const provider = value.provider;
   const id = text(provider.id), state = text(provider.state);
   if (!server || !id || !state) return null;
+  const actions = Array.isArray(provider.actions) ? provider.actions.flatMap(item => {
+    if (!isRecord(item)) return [];
+    const action = text(item.action), label = text(item.label);
+    return action && label && action.length <= 64 && label.length <= 80 ? [{ action, label }] : [];
+  }) : [];
   const rows = Array.isArray(value.qr) && value.qr.length > 0 && value.qr.every(row => typeof row === "string" && row.length === (value.qr as unknown[]).length && /^[01]+$/.test(row))
     ? value.qr as string[] : null;
   return {
     server, port: typeof value.port === "number" ? value.port : 0, serverDetail: text(value.serverDetail),
-    provider: { id, state, url: text(provider.url), detail: text(provider.detail) ?? "", fixUrl: text(provider.fixUrl), working: provider.working === true },
+    provider: { id, state, url: text(provider.url), detail: text(provider.detail) ?? "", fixUrl: text(provider.fixUrl), working: provider.working === true,
+      name: text(provider.name) ?? id, actions },
     connectUrl: text(value.connectUrl), address: text(value.address), qr: rows,
   };
 }
@@ -95,8 +105,8 @@ export type MobileText = "The phone page is starting." | "Tailscale is starting 
   | "The Dev Tunnels command line is not installed." | "Sign in to Dev Tunnels." | "The Dev Tunnel did not open." | "The Dev Tunnel is closed."
   | "Install Dev Tunnels" | "Sign in with GitHub" | "The phone page could not be published.";
 
-/** A button of a problem that runs an action of the provider (`mobile.act`). */
-export type MobileProviderAction = Readonly<{ action: string; label: MobileText; primary?: boolean }>;
+/** A button of a problem that runs an action of the provider (`mobile.act`): words of the tab, or the words of a network it does not know. */
+export type MobileProviderAction = Readonly<{ action: string; label: MobileText; primary?: boolean } | { action: string; text: string; primary?: boolean }>;
 
 /** Something that keeps a phone from connecting: what it is, why (the plugin's own words), and what fixes it. */
 export type MobileProblem = Readonly<{
@@ -197,7 +207,9 @@ export function mobileView(status: MobileStatus): MobileView {
       key: "provider", intent: problem.danger ? "danger" : "warning", title: problem.title,
       detail: problem.quiet ? null : provider.detail.trim() || null,
       fix: provider.fixUrl ? { label: problem.fix ?? "Open the page that fixes it", url: provider.fixUrl } : null,
-      retry: problem.retry ?? false, actions: problem.actions ?? [],
+      retry: problem.retry ?? false,
+      // A network the tab has no words for gives the buttons of its state with its own.
+      actions: problem.actions ?? (words ? [] : provider.actions.map((action, index) => ({ action: action.action, text: action.label, primary: index === 0 }))),
     });
   }
   const code = status.connectUrl && status.qr ? { ...qrPath(status.qr), address: status.address ?? status.connectUrl.replace(/#.*$/u, "") } : null;

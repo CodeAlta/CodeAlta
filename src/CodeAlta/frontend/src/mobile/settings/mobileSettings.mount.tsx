@@ -7,7 +7,7 @@ import { MobileSettings, type MobileSettingsApi } from "./MobileSettings";
 
 const root = createRoot(document.getElementById("root")!);
 const state = { calls: [] as string[], settings: {
-  providers: ["tailscale", "devtunnel"], provider: { id: "tailscale", state: "serving", detail: "Tailscale serves it" }, port: 2584, httpsPort: 2584,
+  providers: [{ id: "tailscale", name: "Tailscale", description: "", publicPort: true }, { id: "devtunnel", name: "Dev Tunnels", description: "", publicPort: false }], provider: { id: "tailscale", state: "serving", detail: "Tailscale serves it" }, port: 2584, httpsPort: 2584,
   address: "https://desk.tail1234.ts.net:2584", server: "listening", serverDetail: null, error: null,
 } as MobileSettingsView, refuse: null as string | null };
 const listeners = new Set<(settings: MobileSettingsView) => void>();
