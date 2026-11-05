@@ -306,6 +306,28 @@ public sealed class ChromiumToolsTests : BrowserToolsTests
     private protected override BrowserEngine Engine => BrowserEngine.Chromium;
 
     [TestMethod]
+    [DataRow(true, DisplayName = "Isolated")]
+    [DataRow(false, DisplayName = "Persistent")]
+    public async Task TheBrowserOfCodeAlta_StartsWithoutATabOfItsOwn_AndKeepsRunningWhenTheTabsOfASessionClose(bool isolated)
+    {
+        var connection = (CodeAlta.Browser.Drivers.Cdp.CdpBrowserConnection)Host.Connection;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using (var session = Host.NewSession(isolated: isolated))
+        {
+            await session.ContextAsync(timeout.Token);
+            Assert.AreEqual(1, session.Pages.Count);
+            // Every tab of the browser is the session's: no blank tab of the start, in a window of its own.
+            var targets = await connection.Connection.Browser.Target.GetTargetsAsync(cancellationToken: timeout.Token);
+            var pages = targets.TargetInfos.Where(static target => target.Type == "page").Select(static target => target.Url).ToArray();
+            Assert.AreEqual(1, pages.Length, string.Join(", ", pages));
+        }
+
+        // Without a tab left, the browser still runs, and opens the tabs of the next session.
+        await using var next = Host.NewSession(isolated: isolated);
+        StringAssert.Contains(await next.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/form")}}"}"""), "Successfully navigated to");
+    }
+
+    [TestMethod]
     public async Task PerformanceTraceAndHeapSnapshot()
     {
         await using var session = Host.NewSession();

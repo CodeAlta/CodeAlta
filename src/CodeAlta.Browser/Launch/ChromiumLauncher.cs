@@ -48,7 +48,10 @@ internal static class ChromiumLauncher
             arguments.Add("--proxy-bypass-list=<-loopback>");
         }
 
-        arguments.Add("about:blank");
+        // No window of its own, as Playwright starts it: each session opens its first tab in a window of its own (in a
+        // context of its own when isolated), so a blank window of the start would belong to nobody. The DevTools endpoint
+        // keeps the browser running while no window is open.
+        arguments.Add("--no-startup-window");
         return arguments;
     }
 
