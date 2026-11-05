@@ -120,7 +120,7 @@
 .editor-empty-keys kbd { flex: none; min-width: 104px; padding: 2px 7px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--panel); color: var(--text);
   font: 11.5px/1.5 var(--code-font); text-align: center; }
 .editor-empty-actions { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-.editor-markdown { overflow: auto; padding: 18px clamp(16px, 6%, 64px) 48px; }
+.editor-markdown { overflow: auto; padding: 18px clamp(16px, 6%, 64px) 48px; outline: none; }
 .editor-markdown > .markdown-content { max-width: 880px; margin-inline: auto; }
 
 /* A picture */
