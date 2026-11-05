@@ -423,6 +423,33 @@ public sealed class FleetSecretsTests
     }
 
     [TestMethod]
+    public async Task AValueOrAnEnvironmentTheCheckpointCannotRecord_IsNotTaken()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var organization = (await fleet.NodeListAsync()).OrganizationId!;
+        using var nodeRoot = new TempDirectory();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(nodeRoot.Path, new CodeAlta.Catalog.Secrets.MasterKeySecretProtector(
+            new CodeAlta.Catalog.Secrets.FileSecretKeyStore(Path.Combine(nodeRoot.Path, "secrets", "key"))));
+        // The checkpoint holds as many values and environments as it records.
+        var full = Enumerable.Range(0, 4096).Select(static index => $"old-{index}").ToArray();
+        store.AdvanceFleetCheckpoint(organization, new CodeAlta.Catalog.Secrets.FleetCheckpoint(
+            full.ToDictionary(static id => id, static _ => new CodeAlta.Catalog.Secrets.FleetEnvironmentCheckpoint(1, false, "digest"), StringComparer.Ordinal),
+            full.ToDictionary(static id => id, static _ => 1, StringComparer.Ordinal)));
+        await fleet.Manager.PutEnvironmentAsync("production", [], [], [], false, CancellationToken.None);
+        await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), "v1-value", false,
+            [fleet.NodeKey.DeviceId], CancellationToken.None);
+
+        var sync = new FleetSecretSync("link-1", new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey,
+            Path.Combine(fleet.Root.Path, "node-link", FleetOrganizationDevices.PinFileName)), null, store, null);
+        var result = await sync.SyncAsync(CancellationToken.None);
+
+        // Taken without a checkpoint, a server could make the machine take an older version later: neither is taken.
+        Assert.IsFalse(store.ListFleetCopies().Any(static copy => copy.Name == "TOKEN"), "a value whose version cannot be recorded is not kept");
+        Assert.IsFalse(sync.Environments.ContainsKey("production"), "an environment whose version cannot be recorded is not taken");
+        Assert.AreEqual(2, result.Refused.Count, string.Join("; ", result.Refused));
+    }
+
+    [TestMethod]
     public async Task AnApproval_SignsTheRunThePersonReviewed_NeverOneTheServerSubstitutesAtTheClick()
     {
         await using var fleet = await SecretsFixture.StartAsync();

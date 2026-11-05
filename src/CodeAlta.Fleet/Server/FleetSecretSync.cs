@@ -190,13 +190,12 @@ public sealed class FleetSecretSync
 
             takenEnvironments[definition.EnvironmentId] = new FleetEnvironmentCheckpoint(definition.Number, definition.Removed, digest);
             byId[definition.EnvironmentId] = definition;
-            if (!definition.Removed && (!verified.TryGetValue(definition.Name, out var known) || known.Number < definition.Number)) verified[definition.Name] = definition;
         }
 
-        Volatile.Write(ref _environments, verified.ToImmutable());
         var spaces = SpacesById();
         var projects = await ProjectsByKeyAsync(cancellationToken).ConfigureAwait(false);
         var values = new List<FleetSecretValue>(held.Secrets.Count);
+        var opened = new List<(FleetSecretDto Secret, string Value)>(held.Secrets.Count);
         // One copy of each value, its newest version: two copies of one version are a conflict, none of which is taken.
         var offered = new List<FleetSecretDto>(held.Secrets.Count);
         foreach (var group in held.Secrets.GroupBy(static secret => secret.Id, StringComparer.Ordinal))
@@ -227,13 +226,36 @@ public sealed class FleetSecretSync
             }
 
             takenSecrets[secret.Id] = Math.Max(secret.Version, takenSecrets.GetValueOrDefault(secret.Id));
-            // A value of a scope this machine does not know (a space it does not link, a project it does not have) is not kept.
+            opened.Add((secret, value));
+        }
+
+        // The checkpoint first: an environment and a value are taken only once their version is recorded, and one the checkpoint
+        // cannot record (it holds as many as it records) is not taken at all.
+        if (organization is not null && _store.AdvanceFleetCheckpoint(organization, new FleetCheckpoint(takenEnvironments, takenSecrets)) is { } unrecorded)
+        {
+            foreach (var id in unrecorded.Environments.Keys)
+            {
+                if (byId.Remove(id, out var definition)) refused.Add($"environment {definition.Name}: this machine records the versions of {LocalSecretStore.MaximumCheckpointEntries} environments already");
+            }
+
+            foreach (var (secret, _) in opened.Where(pair => unrecorded.Secrets.ContainsKey(pair.Secret.Id)))
+                refused.Add($"{secret.Name}: this machine records the versions of {LocalSecretStore.MaximumCheckpointEntries} values already");
+            opened.RemoveAll(pair => unrecorded.Secrets.ContainsKey(pair.Secret.Id));
+        }
+
+        foreach (var definition in byId.Values)
+        {
+            if (!definition.Removed && (!verified.TryGetValue(definition.Name, out var known) || known.Number < definition.Number)) verified[definition.Name] = definition;
+        }
+
+        Volatile.Write(ref _environments, verified.ToImmutable());
+        // A value of a scope this machine does not know (a space it does not link, a project it does not have) is not kept.
+        foreach (var (secret, value) in opened)
+        {
             foreach (var scopeId in LocalScopes(secret.Scope, spaces, projects, byId))
                 values.Add(new FleetSecretValue(_source, secret.Id, secret.Kind, secret.Name, LocalKind(secret.Scope.Kind), scopeId, secret.Version, secret.HostOnly, value));
         }
 
-        // The checkpoint first: a value is kept only once its version is recorded.
-        if (organization is not null) _store.AdvanceFleetCheckpoint(organization, new FleetCheckpoint(takenEnvironments, takenSecrets));
         _store.ReplaceFleetCopies(_source, values);
         return new FleetSecretSyncResult(values.Count, refused, false);
     }

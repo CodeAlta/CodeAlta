@@ -28,7 +28,8 @@ public sealed record FleetCheckpoint(IReadOnlyDictionary<string, FleetEnvironmen
 public sealed partial class LocalSecretStore
 {
     private const string CheckpointFileName = "fleet-checkpoints.json";
-    private const int MaximumCheckpointEntries = 4096;
+    /// <summary>The most environments, and the most values, the checkpoint of one organization records.</summary>
+    public const int MaximumCheckpointEntries = 4096;
 
     private string CheckpointPath => Path.Combine(FolderPath, CheckpointFileName);
 
@@ -49,15 +50,17 @@ public sealed partial class LocalSecretStore
 
     /// <summary>
     /// Records the versions this machine took from an organization now: each one newer than the one recorded replaces it;
-    /// one older is never recorded.
+    /// one older is never recorded. An environment or a value the checkpoint does not hold yet, once it holds
+    /// <see cref="MaximumCheckpointEntries"/> of them, is not recorded: it is given back, and must not be taken.
     /// </summary>
     /// <param name="organizationId">The organization.</param>
     /// <param name="taken">The versions taken.</param>
-    /// <returns>Whether the checkpoint changed.</returns>
+    /// <returns>The versions not recorded, which the machine must not take; empty when every one is recorded.</returns>
     /// <exception cref="ArgumentException"><paramref name="organizationId"/> is empty.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="taken"/> is null.</exception>
     /// <exception cref="InvalidDataException">The file of the checkpoints is damaged.</exception>
-    public bool AdvanceFleetCheckpoint(string organizationId, FleetCheckpoint taken)
+    /// <exception cref="IOException">The file of the checkpoints could not be written: nothing may be taken.</exception>
+    public FleetCheckpoint AdvanceFleetCheckpoint(string organizationId, FleetCheckpoint taken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(organizationId);
         ArgumentNullException.ThrowIfNull(taken);
@@ -67,10 +70,17 @@ public sealed partial class LocalSecretStore
             var document = LoadCheckpoints(CheckpointPath);
             if (!document.Organizations.TryGetValue(organizationId, out var organization)) document.Organizations[organizationId] = organization = new CheckpointOrganizationDocument();
             var changed = false;
+            var unrecordedEnvironments = new Dictionary<string, FleetEnvironmentCheckpoint>(StringComparer.Ordinal);
+            var unrecordedSecrets = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var (id, environment) in taken.Environments)
             {
                 if (organization.Environments.TryGetValue(id, out var known) && known.Number >= environment.Number) continue;
-                if (!organization.Environments.ContainsKey(id) && organization.Environments.Count >= MaximumCheckpointEntries) continue;
+                if (!organization.Environments.ContainsKey(id) && organization.Environments.Count >= MaximumCheckpointEntries)
+                {
+                    unrecordedEnvironments[id] = environment;
+                    continue;
+                }
+
                 organization.Environments[id] = new CheckpointEnvironmentDocument { Number = environment.Number, Removed = environment.Removed, Digest = environment.Digest };
                 changed = true;
             }
@@ -78,16 +88,24 @@ public sealed partial class LocalSecretStore
             foreach (var (id, version) in taken.Secrets)
             {
                 if (organization.Secrets.TryGetValue(id, out var known) && known >= version) continue;
-                if (!organization.Secrets.ContainsKey(id) && organization.Secrets.Count >= MaximumCheckpointEntries) continue;
+                if (!organization.Secrets.ContainsKey(id) && organization.Secrets.Count >= MaximumCheckpointEntries)
+                {
+                    unrecordedSecrets[id] = version;
+                    continue;
+                }
+
                 organization.Secrets[id] = version;
                 changed = true;
             }
 
-            if (!changed) return false;
-            var temporary = CheckpointPath + ".tmp";
-            WritePrivateFile(temporary, JsonSerializer.Serialize(document, CheckpointJsonContext.Default.CheckpointDocument));
-            File.Move(temporary, CheckpointPath, overwrite: true);
-            return true;
+            if (changed)
+            {
+                var temporary = CheckpointPath + ".tmp";
+                WritePrivateFile(temporary, JsonSerializer.Serialize(document, CheckpointJsonContext.Default.CheckpointDocument));
+                File.Move(temporary, CheckpointPath, overwrite: true);
+            }
+
+            return unrecordedEnvironments.Count == 0 && unrecordedSecrets.Count == 0 ? FleetCheckpoint.Empty : new FleetCheckpoint(unrecordedEnvironments, unrecordedSecrets);
         }
     }
 
