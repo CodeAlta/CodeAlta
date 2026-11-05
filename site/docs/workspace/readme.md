@@ -75,7 +75,9 @@ Press `Ctrl+P` to search and run any command. In CodeAlta Desktop, `Ctrl+P` or t
 - the **commands**, each with its slash command and its shortcut. A command that cannot run now is dimmed, and when the session in front knows why, the reason replaces its description;
 - the **skills** of the current project.
 
-`Tab` switches between **All**, **Sessions**, **Conversations**, **Projects**, **Files**, **Commands**, **Skills**, **Docs**, **Tools** and **Archived** (`Enter` restores an archived session). **Conversations**, **Docs** and **Tools** come from the [search index](../search.md). Start with `/` for a command or a skill.
+`Tab` switches between **All**, **Sessions**, **Conversations**, **Projects**, **Files**, **Commands**, **Skills**, **Docs**, **Tools** and **Archived** (`Enter` restores an archived session). **Conversations**, **Docs** and **Tools** come from the [search index](../search.md). Start with `/` for a command or a skill. A **?** beside a category means it has not been searched yet.
+
+`Ctrl+F` in a session [finds in that session](../search.md#find-in-a-session). `Ctrl+Shift+F` opens this search on **Sessions**.
 
 {{ alta_shot "alta-desktop-search.webp" "alta-command-palette.png" "Search listing sessions, projects and files that match, or the command palette of the TUI" "One search for sessions, projects, files and commands in the desktop app. The TUI has a command palette." }}
 
