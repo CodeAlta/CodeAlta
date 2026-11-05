@@ -63,6 +63,9 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
 
     private static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(60);
 
+    /// <summary>The proxies a server behind an address of its own trusts: the ones on its own loopback (<c>altaserver --trusted-proxy</c>).</summary>
+    internal const string LoopbackProxies = "127.0.0.1;::1";
+
     /// <summary>Runs the setup.</summary>
     /// <param name="request">The computer and the options.</param>
     /// <param name="reachable">Checks that the server answers at an address from this computer, with the pin of its own certificate if it has one: null when it does, otherwise what blocked it.</param>
@@ -190,7 +193,10 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
         if (dataRoot is not null) script.Append(" --data-root \"$ROOT\"");
         // The local network is HTTPS with the server's own certificate, or plain HTTP that the person chose: the server
         // refuses that one unless it is forced.
-        script.Append(" --urls ").Append(!onNetwork ? $"http://127.0.0.1:{port}" : encrypted ? $"https://0.0.0.0:{port} --own-certificate" : $"http://0.0.0.0:{port} --allow-insecure-http")
+        // Behind an address of its own, the server stays on its loopback, and what stands in front of it there (Tailscale
+        // Serve, Caddy) is trusted for the caller and the scheme it forwards: the passkey page is then at its https:// address.
+        script.Append(" --urls ").Append(!onNetwork ? $"http://127.0.0.1:{port} --trusted-proxy {SshNodeInstaller.Quote(LoopbackProxies)}"
+                : encrypted ? $"https://0.0.0.0:{port} --own-certificate" : $"http://0.0.0.0:{port} --allow-insecure-http")
             .Append(" 1>&2\n");
 
         script.Append("i=0\nwhile [ $i -lt ").Append((int)StartTimeout.TotalSeconds).Append(" ]; do\n");
