@@ -343,14 +343,16 @@ public sealed class FleetServerConnections : IAsyncDisposable
         {
             if (link.State == FleetServerLinkStates.Revoked || Volatile.Read(ref _running).ContainsKey(link.Id)) continue;
             if (!string.Equals(link.DeviceId, _options.Identity.DeviceId, StringComparison.Ordinal)) continue;
-            StartConnector(link);
+            // The spaces linked to the server are read before the links count as loaded: the budgets and policies of spaces need
+            // them from the start, also while the server is away and nothing is published.
+            await StartConnector(link).RefreshAsync(CancellationToken.None).ConfigureAwait(false);
             changed = true;
         }
 
         return changed;
     }
 
-    private void StartConnector(FleetServerLink link)
+    private LinkedSpaces StartConnector(FleetServerLink link)
     {
         var linked = new LinkedSpaces(link.Url, _options.Spaces);
         var source = _options.Source is null ? null : new LinkedSource(_options.Source, linked);
@@ -406,6 +408,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
         connector.DirectoryChanged += _ => Changed?.Invoke();
         ImmutableInterlocked.Update(ref _running, static (map, item) => map.SetItem(item.Id, item.Running), (Id: link.Id, Running: running));
         connector.Start();
+        return linked;
     }
 
     // What a server gave is taken away once its link is gone; a failure is logged, the link stays gone.
