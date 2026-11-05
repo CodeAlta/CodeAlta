@@ -171,6 +171,60 @@ public sealed class ControlConnectionTests
     }
 
     [TestMethod]
+    public async Task ARevokedMachineLeavesTheDirectoryOfItsWatchers()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var mac = new TestDevice("Mac mini");
+        var (setup, _) = await server.SetUpWithNodeAsync(owner, mac);
+        var events = Channel.CreateUnbounded<FleetDirectoryChange>();
+        var (desktop, _) = await server.ConnectAsync(owner, connection => connection.SetEventHandler((fleetEvent, _) =>
+        {
+            if (fleetEvent.Event == FleetServerMethods.DirectoryChanged) events.Writer.TryWrite(fleetEvent.Payload!.Value.Deserialize(FleetServerJsonContext.Default.FleetDirectoryChange)!);
+            return ValueTask.CompletedTask;
+        }));
+        await using var _1 = desktop;
+        await desktop.SendRequestAsync(FleetServerMethods.DirectoryWatch);
+        var (node, _) = await server.ConnectAsync(mac);
+        await using (node)
+        {
+            await node.SendRequestAsync(FleetServerMethods.InventoryPublish, JsonSerializer.SerializeToElement(
+                new FleetInventoryPublish(1, new FleetMachineInventory("Mac mini", "macos")), FleetServerJsonContext.Default.FleetInventoryPublish));
+            await NextAsync(events, FleetServerMethods.ChangeKinds.Machine);
+            await PublishAsync(node, 1, Fact("s1", 1, 1));
+            await NextAsync(events, FleetServerMethods.ChangeKinds.Session);
+        }
+
+        var remove = await server.NextEntryAsync(owner, FleetDeviceListOperations.Remove, mac.DeviceId, null, null, null, setup.Organization.Id);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{mac.DeviceId}/revoke", new DeviceListChangeRequest(remove))).Status);
+
+        // The watchers hear that it left, and a watch that starts later does not list it, its sessions or its presence.
+        Assert.AreEqual(mac.DeviceId, (await NextAsync(events, FleetServerMethods.ChangeKinds.MachineRemoved)).Id);
+        var snapshot = (await desktop.SendRequestAsync(FleetServerMethods.DirectoryWatch))!.Value.Deserialize(FleetServerJsonContext.Default.FleetDirectorySnapshot)!;
+        Assert.AreEqual(0, snapshot.Machines.Count(machine => machine.DeviceId == mac.DeviceId));
+        Assert.AreEqual(0, snapshot.Sessions.Count(session => session.MachineId == mac.DeviceId));
+        Assert.AreEqual(0, snapshot.Presence.Count(presence => presence.DeviceId == mac.DeviceId));
+    }
+
+    [TestMethod]
+    public void ARemovedMachineLeavesTheDirectoryViewWithItsSessionsAndPresence()
+    {
+        var machine = new FleetDirectoryMachine("mac", FleetDeviceKinds.Node, new FleetMachineInventory("Mac mini", "macos"), Created);
+        var view = CodeAlta.Fleet.Server.FleetDirectoryView.From(new FleetDirectorySnapshot([machine, machine with { DeviceId = "pc" }],
+            [new FleetDirectorySession("mac", Fact("s1", 1, 1)), new FleetDirectorySession("pc", Fact("s2", 1, 1))],
+            [new FleetPresence("mac", false, null, null, Created), new FleetPresence("pc", true, null, null, Created)]));
+
+        var removed = view.Apply(new FleetDirectoryChange(FleetServerMethods.ChangeKinds.MachineRemoved, "mac"));
+
+        CollectionAssert.AreEqual(new[] { "pc" }, removed.Machines.Keys.ToArray());
+        CollectionAssert.AreEqual(new[] { "s2" }, removed.Sessions.Keys.ToArray());
+        CollectionAssert.AreEqual(new[] { "pc" }, removed.Presence.Keys.ToArray());
+        // Its connection closes after it left: the offline presence that follows does not list it again.
+        var closed = removed.Apply(new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Presence, "mac", Presence: new FleetPresence("mac", false, null, null, Created)));
+        CollectionAssert.AreEqual(new[] { "pc" }, closed.Presence.Keys.ToArray());
+    }
+
+    [TestMethod]
     public async Task AMachineWithdrawsTheFactsOfItsOwnSessionsOnlyAuditedAndAnnounced()
     {
         await using var server = await ServerFixture.StartAsync();

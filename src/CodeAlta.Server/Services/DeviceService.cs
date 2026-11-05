@@ -78,6 +78,9 @@ public sealed class DeviceService
     /// <summary>Gets what is told, with its organization, that a device was approved or revoked: grants of sealed content are keyed again for it; null tells nobody.</summary>
     public Action<string>? DevicesChanged { get; init; }
 
+    /// <summary>Gets the watchers of the directory, told that a revoked machine left; null tells none (tests of the service alone).</summary>
+    public Control.DirectoryHub? Directory { get; init; }
+
     /// <summary>Gets the limits of the attempts in the name of a person (recovery); null for none.</summary>
     public AuthenticationRateLimiter? RateLimiter { get; init; }
 
@@ -327,6 +330,8 @@ public sealed class DeviceService
         // What it had in progress ends with it: a way to sign in its page was adding, a confirmation it held.
         SignInGrants?.ForgetDevice(revoked.Id);
         if (_relays is not null) await _relays.CloseDeviceAsync(revoked.Id).ConfigureAwait(false);
+        // The watchers forget it: a revoked machine is no machine of the organization, online or offline.
+        Directory?.Publish(revoked.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.MachineRemoved, revoked.Id));
         return revoked.ToDto(false);
     }
 

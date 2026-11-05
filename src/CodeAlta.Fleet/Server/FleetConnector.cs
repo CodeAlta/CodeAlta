@@ -1111,7 +1111,19 @@ public sealed record FleetDirectoryView(
                 if (Sessions.TryGetValue(session.Fact.SessionId, out var held) && !IsNewer(session.Fact, held.Fact)) return this;
                 return this with { Sessions = Sessions.SetItem(session.Fact.SessionId, session) };
             case FleetServerMethods.ChangeKinds.Presence when change.Presence is { } presence:
+                // A device the directory does not hold that goes offline says nothing new: a revoked machine, whose
+                // connection closes after it left, is not listed again by it.
+                if (!presence.Online && !Presence.ContainsKey(presence.DeviceId) && !Machines.ContainsKey(presence.DeviceId)) return this;
                 return this with { Presence = Presence.SetItem(presence.DeviceId, presence) };
+            case FleetServerMethods.ChangeKinds.MachineRemoved when Machines.ContainsKey(change.Id) || Presence.ContainsKey(change.Id)
+                || Sessions.Values.Any(session => session.MachineId == change.Id):
+                // A revoked machine leaves with what it published: nothing of it is listed as a machine any more.
+                return this with
+                {
+                    Machines = Machines.Remove(change.Id),
+                    Presence = Presence.Remove(change.Id),
+                    Sessions = Sessions.RemoveRange(Sessions.Where(pair => pair.Value.MachineId == change.Id).Select(static pair => pair.Key)),
+                };
             case FleetServerMethods.ChangeKinds.Update:
                 // The campaigns are read from the REST API: the change only says when to read them again.
                 return this with { UpdatesRevision = UpdatesRevision + 1 };
