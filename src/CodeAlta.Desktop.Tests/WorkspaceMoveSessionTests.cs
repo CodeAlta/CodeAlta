@@ -181,6 +181,53 @@ public sealed class WorkspaceMoveSessionTests
     }
 
     [TestMethod]
+    public async Task ProjectAssignedToAnotherSpace_TakesTheSessionsOfTheSpaceItLeaves_AndLeavesTheOthers()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-session-move-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var global = Path.Combine(root, "global"); var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home"); var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(Provider, () => new DraftRuntime()),
+            });
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business")).Succeeded);
+            Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Personal")).Succeeded);
+            var work = await host.Commands.CreateDraftSessionAsync(project, Provider, "Work", spaceId: "default");
+            var split = await host.Commands.CreateDraftSessionAsync(project, Provider, "Split", spaceId: "personal");
+            var spaces = new SpacesService(host.SpaceCatalog, new DesktopSpaceView(), host.RuntimeService.ListOverview,
+                () => ValueTask.FromResult<IReadOnlyList<string>>([]), Epoch) { MoveProjectSessions = host.Commands.MoveProjectSessionsAsync };
+            async Task<string?> SpaceOf(string id) => (await new WorkspaceService(global).SnapshotAsync(new(), CancellationToken.None)).Sessions.Single(value => value.Id == id).SpaceId;
+
+            // Spaces the sessions cannot move between change nothing, not even the spaces of the project.
+            Assert.AreEqual("invalid", (await spaces.AssignAsync(new(Epoch, project.Id, ["business"], [], "default", "default"), CancellationToken.None)).Status);
+            Assert.AreEqual("not_found", (await spaces.AssignAsync(new(Epoch, project.Id, ["business"], [], "default", "gone"), CancellationToken.None)).Status);
+            Assert.AreEqual(0, (await host.ProjectCatalog.LoadAsync()).Single(value => value.Id == project.Id).Spaces.Count);
+
+            // From the list onto a space: the sessions of the default space go with the project, a split survives.
+            var joined = await spaces.AssignAsync(new(Epoch, project.Id, ["business"], [], "default", "business"), CancellationToken.None);
+            Assert.AreEqual(("ok", 1, "ok", 0), (joined.Status, joined.MovedSessions, joined.SessionsStatus, joined.LeftSessions!.Count));
+            Assert.AreEqual("business", await SpaceOf(work.SessionId));
+            Assert.AreEqual("personal", await SpaceOf(split.SessionId));
+            var copy = JsonSerializer.Deserialize(JsonSerializer.Serialize(joined with { LeftSessions = [new("s", "Busy")] }, DesktopJsonContext.Default.SpaceChangeResponse),
+                DesktopJsonContext.Default.SpaceChangeResponse)!;
+            Assert.AreEqual(("Busy", 1), (copy.LeftSessions!.Single().Title, copy.MovedSessions));
+
+            // A plain assignment moves no session.
+            var plain = await spaces.AssignAsync(new(Epoch, project.Id, ["personal"], []), CancellationToken.None);
+            Assert.AreEqual(("ok", 0, (string?)null), (plain.Status, plain.MovedSessions, plain.SessionsStatus));
+            Assert.AreEqual("business", await SpaceOf(work.SessionId));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     public async Task MovedSessionWithRemoteControl_IsAttachedAgainInItsNewFolder_WithRemoteControlOn()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-session-move-" + Guid.NewGuid().ToString("N"));

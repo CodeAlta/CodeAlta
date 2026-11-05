@@ -182,7 +182,7 @@ test("the window shows one space at a time: its projects, its sessions and its o
       // An existing project joins the shown space through the same path as the header's plus action.
       await evaluate("projectFocusFixture.pick={status:'ok',path:'/fixture/other'};document.querySelector('.space-empty button').click()");
       assert.equal(await wait("!document.querySelector('.space-empty') && !!document.querySelector('#project-list button[data-scope=other]')"), true);
-      assert.deepEqual(await evaluate("spacesFixture.assigned.at(-1)"), { expectedEpoch: "12345678-1234-1234-1234-123456789abc", projectId: "other", join: ["work"], leave: [] });
+      assert.deepEqual(await evaluate("spacesFixture.assigned.at(-1)"), { expectedEpoch: "12345678-1234-1234-1234-123456789abc", projectId: "other", join: ["work"], leave: [], sessionsFrom: null, sessionsTo: null });
       assert.equal(await shown(), "Work");
       assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), false);
       assert.deepEqual(exceptions, []);
@@ -398,31 +398,33 @@ test("the window shows one space at a time: its projects, its sessions and its o
       };
       const assigned = async (count: number) => {
         assert.equal(await wait(`spacesFixture.assigned.length===${count}`), true, "The drop changed nothing.");
-        const request = await evaluate("spacesFixture.assigned.at(-1)") as { projectId: string; join: string[]; leave: string[] };
-        return { projectId: request.projectId, join: request.join, leave: request.leave };
+        const request = await evaluate("spacesFixture.assigned.at(-1)") as { projectId: string; join: string[]; leave: string[]; sessionsFrom: string | null; sessionsTo: string | null };
+        return { projectId: request.projectId, join: request.join, leave: request.leave, sessions: request.sessionsFrom === null ? null : `${request.sessionsFrom}>${request.sessionsTo}` };
       };
       const before = await evaluate("spacesFixture.assigned.length") as number;
 
       // From the list of every project onto a space: it joins it.
       assert.deepEqual(await drag(project(".space-pool", "Project"), card("Work")), { over: "work", ghost: "Project", near: true, copy: true });
-      assert.deepEqual(await assigned(before + 1), { projectId: "project", join: ["work"], leave: [] });
+      assert.deepEqual(await assigned(before + 1), { projectId: "project", join: ["work"], leave: [], sessions: "default>work" });
+      // Its sessions went with it, but one at work stayed: the page names it.
+      assert.equal(await wait("document.querySelector('.space-settings .bp6-callout')?.textContent?.includes('Busy session') ?? false"), true);
       assert.equal(await wait(`!!${project(".space-card[aria-label=Work]", "Project")}`), true);
       assert.equal(await evaluate("!!document.querySelector('.space-page')"), false, "A drag opens no page.");
 
       // From a space onto another: it moves.
       assert.deepEqual(await drag(project(".space-card[aria-label=Work]", "Project"), card("Home")), { over: "home", ghost: "Project", near: true, copy: false });
-      assert.deepEqual(await assigned(before + 2), { projectId: "project", join: ["home"], leave: ["work"] });
+      assert.deepEqual(await assigned(before + 2), { projectId: "project", join: ["home"], leave: ["work"], sessions: "work>home" });
       assert.equal(await wait(`!!${project(".space-card[aria-label=Home]", "Project")} && !${project(".space-card[aria-label=Work]", "Project")}`), true);
 
       // With Ctrl, it is in both.
       assert.deepEqual(await drag(project(".space-card[aria-label=Home]", "Project"), card("Work"), 2), { over: "work", ghost: "Project", near: true, copy: true });
-      assert.deepEqual(await assigned(before + 3), { projectId: "project", join: ["work"], leave: [] });
+      assert.deepEqual(await assigned(before + 3), { projectId: "project", join: ["work"], leave: [], sessions: null });
       assert.equal(await wait(`!!${project(".space-card[aria-label=Home]", "Project")} && !!${project(".space-card[aria-label=Work]", "Project")}`), true);
 
       // Back on the list of every project: it leaves the space it came from.
       assert.deepEqual(await drag(project(".space-card[aria-label=Work]", "Project"), "document.querySelector('.space-pool .space-projects')"),
         { over: "", ghost: "Project", near: true, copy: false });
-      assert.deepEqual(await assigned(before + 4), { projectId: "project", join: [], leave: ["work"] });
+      assert.deepEqual(await assigned(before + 4), { projectId: "project", join: [], leave: ["work"], sessions: "work>default" });
       assert.equal(await wait(`!${project(".space-card[aria-label=Work]", "Project")}`), true);
       assert.equal(await evaluate("!!document.querySelector('.space-page')"), false);
 

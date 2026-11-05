@@ -357,6 +357,85 @@ public sealed class SessionForkRewindTests
     }
 
     [TestMethod]
+    public async Task TheSessionsOfAProjectInASpace_MoveToAnotherSpace_ExceptTheOnesAtWork_AndThoseOfAnotherSpaceStay()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        await host.SpaceCatalog.CreateAsync("Business");
+        await host.SpaceCatalog.CreateAsync("Personal");
+        await host.SpaceCatalog.CreateAsync("Gone");
+        // Attached as the window attaches them, with the handlers of the host: a move leaves alone what another caller configured.
+        var permissions = host.RuntimeService.Permissions;
+        var options = new SessionExecutionOptions
+        {
+            ProviderId = provider.Descriptor.ProviderId, ProviderKey = provider.Descriptor.ProviderId.Value, WorkingDirectory = temp.ProjectRoot,
+            ProjectRoots = [temp.ProjectRoot], Model = "fake-model",
+            OnPermissionRequest = permissions.OwnedDefaultPermissionHandler, OnUserInputRequest = permissions.OwnedDefaultUserInputHandler,
+        };
+        var chatOptions = new SessionExecutionOptions
+        {
+            ProviderId = options.ProviderId, ProviderKey = options.ProviderKey, WorkingDirectory = temp.GlobalRoot, Model = options.Model,
+            OnPermissionRequest = options.OnPermissionRequest, OnUserInputRequest = options.OnUserInputRequest,
+        };
+        var project = host.CurrentProject;
+        var work = await host.RuntimeService.CreateProjectSessionAsync(project, options, "Work", null, null, null, "default", CancellationToken.None);
+        var started = await host.RuntimeService.CreateProjectSessionAsync(project, options, "Started", work.SessionId, null, null, "default", CancellationToken.None);
+        var parent = await host.RuntimeService.CreateProjectSessionAsync(project, options, "Parent", null, null, null, "default", CancellationToken.None);
+        var busy = await host.RuntimeService.CreateProjectSessionAsync(project, options, "Busy", parent.SessionId, null, null, "default", CancellationToken.None);
+        var orphan = await host.RuntimeService.CreateProjectSessionAsync(project, options, "Orphan", null, null, null, "gone", CancellationToken.None);
+        var split = await host.RuntimeService.CreateProjectSessionAsync(project, options, "Split", null, null, null, "personal", CancellationToken.None);
+        var chat = await host.RuntimeService.CreateGlobalSessionAsync(chatOptions, "Chat", null, null, "default", CancellationToken.None);
+        await host.SpaceCatalog.DeleteAsync("gone");
+        await host.SpaceCatalog.AssignAsync(project.Id, ["business"], null);
+
+        // A session at work stays, with the session that started it: they work together, in one space.
+        provider.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var running = host.RuntimeService.SendAsync(busy, options, new AgentSendOptions { Input = AgentInput.Text("busy") }, CancellationToken.None);
+        await provider.Started.Task.WaitAsync(TestDeadlines.Hang);
+        var moved = await host.Commands.MoveProjectSessionsAsync(project.Id, "default", "business");
+        provider.Hold.TrySetResult();
+        await running;
+        await WaitIdleAsync(host, busy);
+
+        Assert.AreEqual("ok", moved.Status, string.Join("; ", moved.Warnings));
+        CollectionAssert.AreEquivalent(new[] { work.SessionId, started.SessionId, orphan.SessionId }, moved.Moved.ToArray(),
+            "The sessions in the default space move, one whose space was deleted too.");
+        CollectionAssert.AreEquivalent(new[] { parent.SessionId, busy.SessionId }, moved.Skipped.ToArray());
+        Assert.AreEqual("Busy", moved.Titles[busy.SessionId], "The window names the sessions that stayed.");
+        Assert.AreEqual("business", (await ListedAsync(host, work.SessionId)).SpaceId);
+        Assert.AreEqual("business", (await ListedAsync(host, started.SessionId)).SpaceId);
+        Assert.AreEqual("default", (await ListedAsync(host, busy.SessionId)).SpaceId);
+        Assert.AreEqual("personal", (await ListedAsync(host, split.SessionId)).SpaceId, "A deliberate split survives.");
+        Assert.AreEqual("default", (await ListedAsync(host, chat.SessionId)).SpaceId, "A chat is not a session of the project.");
+
+        // From a space to another, only the sessions of the first one move; back to the default space likewise.
+        var again = await host.Commands.MoveProjectSessionsAsync(project.Id, "business", "personal");
+        CollectionAssert.AreEquivalent(new[] { work.SessionId, started.SessionId, orphan.SessionId }, again.Moved.ToArray());
+        Assert.AreEqual(0, again.Skipped.Count);
+        var back = await host.Commands.MoveProjectSessionsAsync(project.Id, "personal", "default");
+        CollectionAssert.AreEquivalent(new[] { work.SessionId, started.SessionId, orphan.SessionId, split.SessionId }, back.Moved.ToArray());
+        Assert.AreEqual("default", (await ListedAsync(host, split.SessionId)).SpaceId);
+        Assert.AreEqual(0, (await host.Commands.MoveProjectSessionsAsync(project.Id, "business", "personal")).Moved.Count);
+        Assert.ThrowsExactly<ArgumentException>(() => host.Commands.MoveProjectSessionsAsync(project.Id, "Not A Space", "personal"));
+        Assert.ThrowsExactly<ArgumentException>(() => host.Commands.MoveProjectSessionsAsync(" ", "default", "personal"));
+    }
+
+    [TestMethod]
+    public void ASessionWithoutASpace_IsInTheDefaultSpaceForAProjectMove_OnlyWhenTheProjectWasInNoOtherSpace()
+    {
+        SpaceDescriptor[] spaces = [SpaceDescriptor.CreateDefault(), new() { Id = "business", Name = "Business" }, new() { Id = "personal", Name = "Personal" }];
+        var joined = new ProjectDescriptor { Id = "p", Spaces = ["business"] };
+        var both = new ProjectDescriptor { Id = "p", Spaces = ["business", "personal"] };
+        Assert.IsTrue(SessionRuntimeService.IsInSpaceForProjectMove(null, joined, spaces, "default", "business"), "It was listed in the default space.");
+        Assert.IsFalse(SessionRuntimeService.IsInSpaceForProjectMove(null, both, spaces, "default", "business"), "It was listed in Personal.");
+        Assert.IsFalse(SessionRuntimeService.IsInSpaceForProjectMove(null, joined, spaces, "personal", "business"), "It follows the spaces of its project.");
+        Assert.IsTrue(SessionRuntimeService.IsInSpaceForProjectMove("deleted", both, spaces, "default", "business"), "A space that is gone reads as the default one.");
+        Assert.IsTrue(SessionRuntimeService.IsInSpaceForProjectMove("personal", both, spaces, "personal", "default"));
+        Assert.IsFalse(SessionRuntimeService.IsInSpaceForProjectMove("personal", both, spaces, "default", "business"));
+    }
+
+    [TestMethod]
     public async Task ASession_IsOfferedTheAgentPromptsAndSkillsOfItsOwnSpace()
     {
         using var temp = TempDirectory.Create();

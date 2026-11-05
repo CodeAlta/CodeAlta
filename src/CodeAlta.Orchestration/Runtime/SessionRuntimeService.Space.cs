@@ -12,6 +12,11 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="Warnings">What went wrong without stopping the move, in words.</param>
 public sealed record OwnedSessionSpaceMoveResult(string Status, IReadOnlyList<string> Moved, IReadOnlyList<string> Skipped, IReadOnlyList<string> Warnings)
 {
+    private static readonly IReadOnlyDictionary<string, string> NoTitles = System.Collections.Frozen.FrozenDictionary<string, string>.Empty;
+
+    /// <summary>Gets the titles of the sessions that moved or were left, by identifier (a move of the sessions of a project only).</summary>
+    public IReadOnlyDictionary<string, string> Titles { get; init; } = NoTitles;
+
     internal static OwnedSessionSpaceMoveResult Refused(string status) => new(status, [], [], []);
 }
 
@@ -26,6 +31,11 @@ public sealed partial class SessionRuntimeService
     // the default space all the same, since their space no longer exists.
     internal Task<OwnedSessionSpaceMoveResult> MoveOwnedSpaceChatsAsync(string fromSpaceId, string toSpaceId, Func<string, bool> ownerBusy)
         => AdmitAsync(() => MoveOwnedSpaceChatsBodyAsync(fromSpaceId, toSpaceId, ownerBusy), CancellationToken.None);
+
+    // The sessions of a project that are in one space go to another one, the sessions they started with them: what
+    // moving the project between spaces does with them. A session at work is left, with the sessions of its family.
+    internal Task<OwnedSessionSpaceMoveResult> MoveOwnedProjectSessionsAsync(string projectId, string fromSpaceId, string toSpaceId, Func<string, bool> ownerBusy)
+        => AdmitAsync(() => MoveOwnedProjectSessionsBodyAsync(projectId, fromSpaceId, toSpaceId, ownerBusy), CancellationToken.None);
 
     private async Task<OwnedSessionSpaceMoveResult> MoveOwnedSessionToSpaceBodyAsync(string sessionId, string spaceId, Func<string, bool> ownerBusy)
     {
@@ -68,6 +78,82 @@ public sealed partial class SessionRuntimeService
         }
 
         return new("ok", moved, skipped, warnings);
+    }
+
+    private async Task<OwnedSessionSpaceMoveResult> MoveOwnedProjectSessionsBodyAsync(string projectId, string fromSpaceId, string toSpaceId, Func<string, bool> ownerBusy)
+    {
+        var spaces = await _spaceCatalog.LoadAsync(CancellationToken.None).ConfigureAwait(false);
+        var project = (await _projectCatalog.LoadAsync(CancellationToken.None).ConfigureAwait(false))
+            .FirstOrDefault(value => string.Equals(value.Id, projectId, StringComparison.OrdinalIgnoreCase));
+        if (project is null) return OwnedSessionSpaceMoveResult.Refused("session_missing");
+        var all = await ListStoredSessionsAsync().ConfigureAwait(false);
+        var candidates = all.Where(session => session.Kind == SessionViewKind.ProjectSession
+                && string.Equals(session.ProjectRef, project.Id, StringComparison.OrdinalIgnoreCase)
+                && IsInSpaceForProjectMove(session.SpaceId, project, spaces, fromSpaceId, toSpaceId))
+            .ToDictionary(static session => session.SessionId, StringComparer.OrdinalIgnoreCase);
+        var moved = new List<string>();
+        var skipped = new List<string>();
+        var warnings = new List<string>();
+        var done = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // A family is a session whose parent does not move, with the sessions below it that move too: the same unit
+        // as a move to a space, so that a session and the sessions it started stay together.
+        foreach (var root in candidates.Values.Where(session => session.ParentSessionId is null || !candidates.ContainsKey(session.ParentSessionId))
+            .OrderBy(static session => session.CreatedAt).ToArray())
+        {
+            if (!done.Add(root.SessionId)) continue;
+            var members = new List<string> { root.SessionId };
+            for (var index = 0; index < members.Count; index++)
+            {
+                foreach (var child in candidates.Values)
+                {
+                    if (string.Equals(child.ParentSessionId, members[index], StringComparison.OrdinalIgnoreCase) && done.Add(child.SessionId)) members.Add(child.SessionId);
+                }
+            }
+
+            var refused = false;
+            foreach (var member in members)
+            {
+                if (RefuseIfHeldElsewhere(member) is not null || ownerBusy(member)
+                    || await GetActorForWork(member).QueryAsync(token => new ValueTask<string?>(MoveRefusalAsync(member, token)), CancellationToken.None)
+                        .ConfigureAwait(false) is not null)
+                {
+                    refused = true;
+                    break;
+                }
+            }
+
+            if (refused)
+            {
+                skipped.AddRange(members);
+                continue;
+            }
+
+            // The sessions it started first and the session last, as a move to a space.
+            for (var index = members.Count - 1; index >= 0; index--)
+            {
+                var status = await MoveOneSessionToSpaceGuardedAsync(members[index], toSpaceId, ownerBusy, moved, warnings).ConfigureAwait(false);
+                if (status != "ok") skipped.Add(members[index]);
+            }
+        }
+
+        var titles = moved.Concat(skipped).Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static id => id, id => candidates[id].Title, StringComparer.OrdinalIgnoreCase);
+        return new("ok", moved, skipped, warnings) { Titles = titles };
+    }
+
+    /// <summary>
+    /// Tells whether a session of a project is in a space for a move of the project out of it: a session that records
+    /// the space, the default one for a session that records a space that no longer exists. A session created before
+    /// sessions had a space is in the default space when the project was in no other space before it joined the target.
+    /// </summary>
+    internal static bool IsInSpaceForProjectMove(string? recordedSpaceId, ProjectDescriptor project, IReadOnlyList<SpaceDescriptor> spaces,
+        string fromSpaceId, string toSpaceId)
+    {
+        if (!string.IsNullOrWhiteSpace(recordedSpaceId)) return string.Equals(SpaceCatalog.ResolveSessionSpace(recordedSpaceId, null, spaces), fromSpaceId, StringComparison.Ordinal);
+        if (!string.Equals(fromSpaceId, SpaceDescriptor.DefaultId, StringComparison.Ordinal)) return false;
+        // It follows the spaces of its project: it is listed in the default space only while the project is in no other.
+        return !SpaceDescriptor.NormalizeIds(project.Spaces).Any(id => !string.Equals(id, toSpaceId, StringComparison.Ordinal)
+            && spaces.Any(space => string.Equals(space.Id, id, StringComparison.Ordinal)));
     }
 
     // The stored sessions as the lists read them, with what their journal says of their space.

@@ -26,7 +26,21 @@ export type SpacesState = Readonly<{
 }>;
 
 /** How a change ended: done, or refused with what the host said. */
-export type SpaceOutcome = Readonly<{ ok: boolean; status: string; message: string | null; space: Space | null }>;
+export type SpaceOutcome = Readonly<{ ok: boolean; status: string; message: string | null; space: Space | null;
+  /** What came of the sessions a change of the spaces of a project moved; absent for a change that moves none. */
+  sessions?: SessionsOutcome }>;
+
+/**
+ * The sessions of a project that go from one space to another once the project changed spaces: what a drag of the
+ * project between spaces asks.
+ */
+export type SessionsMove = Readonly<{ from: string; to: string }>;
+
+/**
+ * What came of the sessions of a project that were to move: how many did, the ones at work that stayed, and the
+ * status of the move (`ok`, or why none could move).
+ */
+export type SessionsOutcome = Readonly<{ moved: number; left: readonly Readonly<{ sessionId: string; title: string }>[]; status: string }>;
 
 const noActivity: ReadonlyMap<string, SpaceActivity> = new Map();
 const noSessions: readonly SpaceSessionActivity[] = Object.freeze([]);
@@ -143,7 +157,12 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
       const reply = await call(host);
       await list();
       const space = reply.space ? readSpaces([reply.space]).find(item => item.id === reply.space!.id) ?? null : null;
-      return { ok: reply.status === "ok", status: reply.status, message: reply.message ?? null, space };
+      const sessions = typeof reply.sessionsStatus === "string" ? {
+        moved: typeof reply.movedSessions === "number" ? reply.movedSessions : 0, status: reply.sessionsStatus,
+        left: (reply.leftSessions ?? []).filter(left => typeof left?.sessionId === "string")
+          .map(left => ({ sessionId: left.sessionId, title: typeof left.title === "string" ? left.title : "" })),
+      } : undefined;
+      return { ok: reply.status === "ok", status: reply.status, message: reply.message ?? null, space, ...(sessions ? { sessions } : {}) };
     } catch { return { ok: false, status: "failed", message: null, space: null }; }
   }
 
@@ -231,9 +250,13 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
       change(host => api.update({ expectedEpoch: host, id, name: edit.name ?? null, description: edit.description ?? null, icon: edit.icon ?? null, color: edit.color ?? null },
         { timeoutMilliseconds: 30_000 })),
     remove: (id: string) => change(host => api.delete({ expectedEpoch: host, id }, { timeoutMilliseconds: 30_000 })),
-    /** Makes a project join spaces and leave others, in one edit. */
-    assign: (projectId: string, join: readonly string[], leave: readonly string[] = []) =>
-      change(host => api.assign({ expectedEpoch: host, projectId, join, leave }, { timeoutMilliseconds: 30_000 })),
+    /**
+     * Makes a project join spaces and leave others, in one edit; with `sessions`, its sessions in one space then go to
+     * another one. Moving them can take a while: the call waits longer then.
+     */
+    assign: (projectId: string, join: readonly string[], leave: readonly string[] = [], sessions: SessionsMove | null = null) =>
+      change(host => api.assign({ expectedEpoch: host, projectId, join, leave, sessionsFrom: sessions?.from ?? null, sessionsTo: sessions?.to ?? null },
+        { timeoutMilliseconds: sessions ? 120_000 : 30_000 })),
     reorder: (ids: readonly string[]) => change(host => api.reorder({ expectedEpoch: host, ids }, { timeoutMilliseconds: 30_000 })),
     /** Assigns a resource to spaces; an empty list puts it in every space. */
     assignResource: (kind: SpaceResourceKind, key: string, spaces: readonly string[]) =>

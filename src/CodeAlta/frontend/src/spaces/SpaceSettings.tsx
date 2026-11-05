@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Button, InputGroup, Switch } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { brandColor } from "../brands";
+import type { MessageKey } from "../localization";
 import { SettingsPage } from "../SettingsPage";
 import { settingsFailure, type SettingsNotice } from "../settingsEditing";
 import { useShellLanguage } from "../shellLanguage";
@@ -12,21 +13,44 @@ import type { ResourcePage } from "./SpaceAvailable";
 import { SpacePage } from "./SpacePage";
 import { readResources, useResourceLists, type ReadResources } from "./spaceResources";
 import { spaceCardSummary, type SpacePageTarget } from "./spaceSummary";
+import { spaceMoveMessage } from "./sessionSpaceMove";
 import { SpaceActivityMarks, SpaceIcon } from "./SpaceViews";
-import type { Space, SpaceActivity } from "./spaces";
-import type { SpaceOutcome, SpacesHub } from "./spacesHub";
+import { defaultSpaceId, type Space, type SpaceActivity } from "./spaces";
+import type { SessionsMove, SessionsOutcome, SpaceOutcome, SpacesHub } from "./spacesHub";
 
 /**
  * What dropping a project does: on a space it joins it, and leaves the space it came from unless the drop is a
  * copy; on the list of every project it leaves the space it came from. Null for a drop that changes nothing.
+ * Its sessions in the space it leaves go with it (from the list, those of the default space), and those of any other
+ * space stay; a copy, which keeps it where it was, moves none.
  */
 export function dropChange(drag: ProjectDrag, target: string | null, members: (spaceId: string) => readonly string[], copy: boolean):
-  Readonly<{ join: readonly string[]; leave: readonly string[] }> | null {
-  if (target === null) return drag.from === null ? null : { join: [], leave: [drag.from] };
+  Readonly<{ join: readonly string[]; leave: readonly string[]; sessions: SessionsMove | null }> | null {
+  if (target === null) return drag.from === null ? null : { join: [], leave: [drag.from], sessions: { from: drag.from, to: defaultSpaceId } };
   if (target === drag.from) return null;
   const joins = !members(target).includes(drag.projectId);
   const leaves = drag.from !== null && !copy;
-  return joins || leaves ? { join: joins ? [target] : [], leave: leaves ? [drag.from!] : [] } : null;
+  return joins || leaves ? { join: joins ? [target] : [], leave: leaves ? [drag.from!] : [], sessions: copy ? null : { from: drag.from ?? defaultSpaceId, to: target } } : null;
+}
+
+/**
+ * What the page says of the sessions that a change of the spaces of a project moved: the ones at work that stayed
+ * (they move by Move to space… once they are idle), why none could move, or how many went. Null when none were to move.
+ */
+export function sessionsNotice(sessions: SessionsOutcome | undefined, t: (key: MessageKey) => string): SettingsNotice | null {
+  if (!sessions) return null;
+  if (sessions.left.length > 0) {
+    const count = sessions.left.length;
+    return { intent: "warning", values: { count }, detail: sessions.left.map(left => left.title || t("Untitled session")).join(", "),
+      key: count === 1 ? "1 session is at work and stayed in its space. Move it with Move to space… once it is idle."
+        : "{count} sessions are at work and stayed in their space. Move them with Move to space… once they are idle." };
+  }
+  if (sessions.status !== "ok")
+    return { intent: "warning", key: "The project changed space, but its sessions did not: move them with Move to space…", detail: t(spaceMoveMessage(sessions.status)) };
+  if (sessions.moved === 0) return null;
+  return { intent: "success", values: { count: sessions.moved },
+    key: sessions.moved === 1 ? "1 session moved with the project. Its next turn uses the providers, tools and identity of its new space."
+      : "{count} sessions moved with the project. Their next turn uses the providers, tools and identity of their new space." };
 }
 
 /** The order of the spaces once one moved by one place; null when it is already at that end. */
@@ -47,7 +71,8 @@ export function opensSpace(target: EventTarget | null, card: Element): boolean {
  * The page of Settings that organizes the spaces: the list of every project, which is the default space, and
  * a card for each other space with its name, its icon, what it is for and its projects. A project is dragged
  * onto a space to join it, from a space to another to move (with Ctrl, to be in both), and back to the list to
- * leave. A click on a space opens its page, where it is named, described, given its projects and set up.
+ * leave; its sessions in the space it leaves go with it (see `dropChange`). A click on a space opens its page, where
+ * it is named, described, given its projects and set up.
  */
 export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity, canEdit, showOthers, onShowOthers, onShow, onCreate, page, onPage, onOpenPage,
   read = readResources }: {
@@ -93,14 +118,14 @@ export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity,
     if (!alive.current) return outcome;
     setBusy(false);
     const failure = outcome.ok ? null : settingsFailure(outcome.status, outcome.message) ?? { key: "The operation did not complete." as const, intent: "danger" as const };
-    setNotice(failure ?? (said ? { key: "Saved.", intent: "success" } : null));
+    setNotice(failure ?? sessionsNotice(outcome.sessions, t) ?? (said ? { key: "Saved.", intent: "success" } : null));
     return outcome;
   }
 
   // A drop target is the identifier of a space, or the empty string for the list of every project.
   const drag = useProjectDrag((dragged, target, copy) => canEdit && !busy && !!dropChange(dragged, target || null, membersOf, copy), (dragged, target, copy) => {
     const change = canEdit && !busy ? dropChange(dragged, target || null, membersOf, copy) : null;
-    if (change) void run(() => hub.assign(dragged.projectId, change.join, change.leave));
+    if (change) void run(() => hub.assign(dragged.projectId, change.join, change.leave, change.sessions));
   });
   const dropTarget = (target: string | null) => ({ "data-space-drop": target ?? "", "data-over": drag.view?.over === (target ?? "") ? "true" : undefined });
   const dragSource = (project: SpaceProject, from: string | null) => drag.source(canEdit ? { projectId: project.id, from } : null, project.name);
@@ -165,7 +190,7 @@ export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity,
                 <span className="space-project-name">{project.name}</span>
                 <Button variant="minimal" size="small" className="space-project-remove" icon={<AppIcon name="close" size={13} />} disabled={!canEdit || busy}
                   aria-label={t("Remove {project} from {space}", { project: project.name, space: space.name })} title={t("Remove from this space")}
-                  onClick={() => void run(() => hub.assign(project.id, [], [space.id]))} />
+                  onClick={() => void run(() => hub.assign(project.id, [], [space.id], { from: space.id, to: defaultSpaceId }))} />
               </li>)}
               {members.length === 0 && <li className="space-projects-empty">{t("Drop projects here")}</li>}
             </ul>

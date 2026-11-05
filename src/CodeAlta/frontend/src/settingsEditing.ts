@@ -3,7 +3,9 @@ import type { MessageKey } from "./localization";
 
 /** Where a setting is stored: the user's global configuration or the selected project's. */
 export type SettingsScope = "Global" | "Project";
-export type SettingsNotice = Readonly<{ key: MessageKey; intent: "success" | "warning" | "danger"; detail?: string | null }>;
+export type SettingsNotice = Readonly<{ key: MessageKey; intent: "success" | "warning" | "danger"; detail?: string | null;
+  /** The values of the placeholders of its message. */
+  values?: Readonly<Record<string, string | number>> }>;
 
 /** The user-facing reason a settings read or write did not succeed; null when it did. */
 export function settingsFailure(status: string, message?: string | null): SettingsNotice | null {

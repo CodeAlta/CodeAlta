@@ -1076,6 +1076,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddStartPromptsService(new StartPromptsService(startPrompts, host.ProjectCatalog, epoch));
                     builder.AddSpacesService(new SpacesService(host.SpaceCatalog, spaceView, host.RuntimeService.ListOverview, SessionsWaitingAsync, epoch, id => host.Commands.MoveSpaceChatsAsync(id, CodeAlta.Catalog.SpaceDescriptor.DefaultId)) {
                         Fallbacks = () => host.Commands.LastFallbacks,
+                        MoveProjectSessions = host.Commands.MoveProjectSessionsAsync,
                         HeldElsewhere = () => host.ExternalSessions?.Held ?? [],
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
                         SessionResources = new DesktopSessionResources(host, roots.Home, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay, browser: browserHost)).ReadAsync,
