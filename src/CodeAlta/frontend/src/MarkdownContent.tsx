@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { showToast } from "./appToaster";
-import { diagramAppearance, diagrams } from "./diagrams";
+import { DiagramViewer, type ExpandedDiagram } from "./DiagramViewer";
+import { diagramAppearance, diagramColors, diagramPicture, diagrams } from "./diagrams";
 import { takeKeyContextMenu } from "./keyContextMenu";
 import { translate } from "./localization";
 import { MarkdownLinkMenu, type LinkMenu } from "./MarkdownLinkMenu";
-import { createMarkdownRenderer, equationCopy, followFootnote, localImageClass, markdownPending, toggleRenderedSource } from "./markdownBoundary";
+import { createMarkdownRenderer, equationCopy, expandableDiagram, followFootnote, localImageClass, markdownPending, toggleRenderedSource } from "./markdownBoundary";
 import { loadMath } from "./math";
 import type { MarkdownImage, MarkdownImages } from "./markdownImages";
 import { markdownHrefKind, markdownLinkActivation, maximumMarkdownHrefLength, tooLongMarkdownHref, type MarkdownLinkScope } from "./markdownLinks";
@@ -71,14 +72,17 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     important: translate(locale, "Important"), warning: translate(locale, "Warning"), caution: translate(locale, "Caution"), copy: translate(locale, "Copy"), pasteInTerminal: translate(locale, "Paste in terminal"),
     notDrawn: translate(locale, "Not drawn as a diagram:"), copyLatex: translate(locale, "Copy LaTeX"), copyMathMl: translate(locale, "Copy MathML"),
     footnotes: translate(locale, "Footnotes"), footnote: translate(locale, "Footnote"), backToReference: translate(locale, "Back to reference"),
-    source: translate(locale, "Source"), preview: translate(locale, "Preview"), showSource: translate(locale, "Show the source or the drawing") }), [locale]);
+    source: translate(locale, "Source"), preview: translate(locale, "Preview"), showSource: translate(locale, "Show the source or the drawing"),
+    expandDiagram: translate(locale, "Expand the diagram") }), [locale]);
+  // A drawn diagram opens in a window of its own, where it can be zoomed; not from a text whose links are inert (the preview of a folded row).
+  const expandableDiagrams = onOpenLink !== null;
   // Diagrams are drawn on the side, in the window's font, then found by the next render; they take the colors of the theme from the stylesheet.
   const appearance = useSyncExternalStore(subscribeAppearance, appearanceKey);
   const [drawn, setDrawn] = useState(0);
   const rendered = useMemo(() => {
     const pending = markdownPending();
-    return { html: render(source, timelineCodeBlocks, pending, { document: asDocument, sourceLines, webImages: !!webImages, terminalBlocks }), pending };
-  }, [render, source, timelineCodeBlocks, asDocument, sourceLines, !!webImages, terminalBlocks, appearance, drawn]);
+    return { html: render(source, timelineCodeBlocks, pending, { document: asDocument, sourceLines, webImages: !!webImages, terminalBlocks, expandableDiagrams }), pending };
+  }, [render, source, timelineCodeBlocks, asDocument, sourceLines, !!webImages, terminalBlocks, expandableDiagrams, appearance, drawn]);
   const html = rendered.html;
   useEffect(() => {
     const { diagrams: undrawn, math } = rendered.pending;
@@ -104,6 +108,7 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   const content = useRef<HTMLDivElement>(null);
   const drawnPictures = useRef(new WeakMap<HTMLImageElement, MarkdownImage>());
   const [viewing, setViewing] = useState<ViewedPicture | null>(null);
+  const [diagram, setDiagram] = useState<Readonly<{ diagram: ExpandedDiagram; origin: HTMLElement }> | null>(null);
   useLayoutEffect(() => {
     const element = content.current;
     const web = onOpenLink === null ? null : webImages;
@@ -127,10 +132,27 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     }
     return () => { current = false; };
   }, [codeMarkup, images, webImages, onOpenLink, scope]);
+  const focusAgain = (origin: HTMLElement | undefined) => {
+    if (origin) requestAnimationFrame(() => { if (origin.isConnected && !origin.closest("[inert], [hidden]")) origin.focus(); });
+  };
   function closeViewer() {
     const origin = viewing?.origin;
     setViewing(null);
-    if (origin) requestAnimationFrame(() => { if (origin.isConnected && !origin.closest("[inert], [hidden]")) origin.focus(); });
+    focusAgain(origin);
+  }
+  function closeDiagram() {
+    const origin = diagram?.origin;
+    setDiagram(null);
+    focusAgain(origin);
+  }
+  // The Expand button of a drawn diagram opens it in its window.
+  function expandDiagram(target: Element): boolean {
+    const found = expandableDiagrams ? expandableDiagram(target) : null;
+    if (!found) return false;
+    const { drawing, source } = found;
+    setDiagram({ diagram: { picture: diagramPicture(drawing), source, background: diagramColors(drawing).variables["--pele-bg"] ?? "" },
+      origin: target.closest<HTMLElement>("button") ?? drawing.parentElement! });
+    return true;
   }
 
   function scrollCode(event: KeyboardEvent<HTMLDivElement>) {
@@ -227,7 +249,7 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   return <><div className="markdown-content" ref={content} onClick={event => {
     const handled = event.defaultPrevented;
     activateLink(event);
-    if (!handled && event.target instanceof Element && (followFootnote(event.target) || toggleRenderedSource(event.target))) return;
+    if (!handled && event.target instanceof Element && (followFootnote(event.target) || expandDiagram(event.target) || toggleRenderedSource(event.target))) return;
     if (!handled && !pasteCode(event)) copyCode(event); // Our navigation suppression must not swallow Copy inside an anchor.
   }} onAuxClick={activateLink}
     onContextMenu={event => { if (!event.defaultPrevented && openLinkMenu(event.target, { x: event.clientX, y: event.clientY })) event.preventDefault(); }}
@@ -245,5 +267,6 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
       source={inlineImageSource(viewing.image.path, [viewing.image])} index={0} initialSize={viewing.size} onIndex={() => { /* One picture. */ }}
       onClose={closeViewer} file={viewing.web ? undefined : { path: viewing.image.path, platform: images?.platform ?? null,
         onReveal: images ? () => images.reveal(viewing.address, scope) : undefined }} />}
+    {diagram && <DiagramViewer diagram={diagram.diagram} onClose={closeDiagram} />}
   </>;
 }

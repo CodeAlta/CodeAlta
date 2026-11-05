@@ -21,11 +21,12 @@ export type MarkdownLabels = Readonly<Record<AlertKind, string> & {
   footnotes?: string; footnote?: string; backToReference?: string;
   /** What the button of a drawn block (a diagram, an equation) says: its source, or its drawing again, and what it does. */
   source?: string; preview?: string; showSource?: string;
+  /** What the button of a drawn diagram that opens it in a window of its own says it does. */ expandDiagram?: string;
 }>;
 const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", copy: "Copy", pasteInTerminal: "Paste in terminal",
   notDrawn: "Not drawn as a diagram:", copyLatex: "Copy LaTeX", copyMathMl: "Copy MathML",
   footnotes: "Footnotes", footnote: "Footnote", backToReference: "Back to reference",
-  source: "Source", preview: "Preview", showSource: "Show the source or the drawing" };
+  source: "Source", preview: "Preview", showSource: "Show the source or the drawing", expandDiagram: "Expand the diagram" };
 
 /**
  * Shows the source of a drawn block (a diagram, a displayed equation) in place of its drawing, or the drawing again,
@@ -43,6 +44,18 @@ export function toggleRenderedSource(target: Element): boolean {
   button.setAttribute("aria-pressed", String(showing));
   button.textContent = button.getAttribute(showing ? "data-preview-label" : "data-source-label");
   return true;
+}
+
+/**
+ * The drawing and the Mermaid text of the diagram whose Expand button holds the element, while it is shown; null otherwise.
+ */
+export function expandableDiagram(target: Element): Readonly<{ drawing: SVGSVGElement; source: string }> | null {
+  const button = target.closest<HTMLElement>("button.markdown-diagram-expand");
+  const block = button?.parentElement?.parentElement;
+  if (!button || !block?.classList.contains("markdown-rendered") || block.hasAttribute("data-source")) return null;
+  const drawing = block.querySelector<SVGSVGElement>(":scope > .markdown-diagram > svg");
+  const source = block.querySelector(":scope > pre > code")?.textContent?.replace(/\n$/, "");
+  return drawing && source !== undefined ? { drawing, source } : null;
 }
 
 /**
@@ -108,7 +121,9 @@ export type MarkdownRenderOptions = Readonly<{ document?: boolean; sourceLines?:
   /** Whether a code block of a shell has a button that pastes its commands in a terminal: where the window can open one. */
   terminalBlocks?: boolean;
   /** Whether the images of the web are links marked as pictures, as those of the disk: the text of a tracker, whose host reads its images. */
-  webImages?: boolean }>;
+  webImages?: boolean;
+  /** Whether a drawn diagram has a button that opens it in a window of its own (`expandableDiagram`): where the window can open one. */
+  expandableDiagrams?: boolean }>;
 
 /**
  * Instance-owned browser boundary; parser output must never bypass this sanitizer. Its diagrams are those drawn
@@ -184,7 +199,7 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
   // Fenced blocks are dressed after sanitization, from their text alone: the sanitizer keeps accepting no
   // authored class, style or SVG. A `mermaid` block that has been drawn becomes its diagram; one that has
   // not is reported in `undrawn` and stays a code block. A `math` block is drawn by `dressMath`. Any other known language is highlighted.
-  function dressFences(fragment: DocumentFragment, undrawn: string[] | undefined) {
+  function dressFences(fragment: DocumentFragment, undrawn: string[] | undefined, expandable: boolean) {
     for (const code of Array.from(fragment.querySelectorAll<HTMLElement>("pre > code[class^='language-']"))) {
       const pre = code.parentElement!;
       if (pre.children.length !== 1) continue;
@@ -199,6 +214,14 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
           figure.innerHTML = svg;
           pre.setAttribute("data-language", "mermaid");
           const block = renderedBlock(figure, pre);
+          if (expandable) {
+            const expand = view.document.createElement("button");
+            expand.type = "button";
+            expand.className = "markdown-diagram-expand";
+            expand.title = labels.expandDiagram ?? englishLabels.expandDiagram!;
+            expand.setAttribute("aria-label", expand.title);
+            block.querySelector(":scope > .markdown-block-tools")!.prepend(expand);
+          }
           pre.replaceWith(block);
           block.append(pre);
         } else {
@@ -524,7 +547,7 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
         fragment.prepend(block);
       }
       dressFileImages(fragment);
-      dressFences(fragment, pending?.diagrams);
+      dressFences(fragment, pending?.diagrams, options.expandableDiagrams === true);
       dressFootnotes(fragment);
       dressMath(fragment, pending);
       dressTasks(fragment);

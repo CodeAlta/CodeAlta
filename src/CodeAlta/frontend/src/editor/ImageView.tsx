@@ -19,7 +19,8 @@ export function fitImageZoom(width: number, height: number, viewWidth: number, v
 
 /**
  * A picture on a checkered background: fitted to the pane until it is zoomed, with its real size one click away.
- * Ctrl and the wheel zoom too. A drawing (SVG) fills the pane, whatever size it says it has. A picture (not a
+ * Ctrl and the wheel zoom too, and so do the keys + and -, 0 fitting it again; a zoomed picture larger than the pane
+ * is moved by dragging it. A drawing (SVG) fills the pane, whatever size it says it has. A picture (not a
  * drawing) is copied as PNG by its context menu, the button of its tools or Ctrl+C.
  */
 export function ImageView({ url, label, vector = false, onSize }: {
@@ -36,6 +37,7 @@ export function ImageView({ url, label, vector = false, onSize }: {
   const [failed, setFailed] = useState(false);
   const [copied, copy] = useImageCopy();
   const [menu, setMenu] = useState<ImageMenu | null>(null);
+  const drag = useRef<{ pointer: number; x: number; y: number; left: number; top: number } | null>(null);
   const copyable = !vector && !failed;
   const copyLabel = copied === "copied" ? t("Image copied") : copied === "failed" ? t("Copy failed") : t("Copy image");
   const report = useRef(onSize); report.current = onSize;
@@ -63,7 +65,28 @@ export function ImageView({ url, label, vector = false, onSize }: {
         if (copyable && (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "c" && !event.repeat) {
           event.preventDefault(); copy(url);
         }
-      }}>
+        // Without Ctrl, which zooms the window: + and - zoom the picture, 0 fits it again.
+        if (size && !failed && !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "+" || event.key === "=" || event.key === "-" || event.key === "0")) {
+          event.preventDefault();
+          if (event.key === "0") setZoom(null); else step(event.key === "-" ? -1 : 1);
+        }
+      }}
+      // A zoomed picture larger than the pane moves with the pointer that drags it.
+      onPointerDown={event => {
+        const node = event.currentTarget;
+        if (event.button !== 0 || zoom === null || node.scrollWidth <= node.clientWidth && node.scrollHeight <= node.clientHeight) return;
+        drag.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, left: node.scrollLeft, top: node.scrollTop };
+        node.setPointerCapture(event.pointerId);
+        node.setAttribute("data-dragging", "");
+      }}
+      onPointerMove={event => {
+        const moving = drag.current;
+        if (!moving || moving.pointer !== event.pointerId) return;
+        event.currentTarget.scrollLeft = moving.left - (event.clientX - moving.x);
+        event.currentTarget.scrollTop = moving.top - (event.clientY - moving.y);
+      }}
+      onPointerUp={event => { if (drag.current?.pointer === event.pointerId) { drag.current = null; event.currentTarget.removeAttribute("data-dragging"); } }}
+      onPointerCancel={event => { if (drag.current?.pointer === event.pointerId) { drag.current = null; event.currentTarget.removeAttribute("data-dragging"); } }}>
       {failed ? <p className="editor-image-failed"><AppIcon name="imageOff" size={28} />{t("This picture cannot be drawn.")}</p>
         : <img src={url} alt={label} draggable={false} data-pixels={!vector && shownZoom >= 3}
           style={zoom === null || !size ? undefined : { width: Math.max(1, Math.round(size.width * zoom)), height: Math.max(1, Math.round(size.height * zoom)) }}

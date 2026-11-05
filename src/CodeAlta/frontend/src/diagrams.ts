@@ -78,6 +78,55 @@ export function diagramAppearance(maxWidth?: number): DiagramAppearance {
   return { key: `${fontFamily}|${width ?? ""}`, fontFamily, maxWidth: width };
 }
 
+/** The colors of a drawn diagram as the page shows them: the `--pele-*` custom properties, resolved. */
+export type DiagramColors = Readonly<{ dark: boolean; variables: Readonly<Record<string, string>> }>;
+
+// The custom properties that color a diagram (see the `svg.pele` rule of the stylesheet).
+const diagramProperties = ["--pele-bg", "--pele-fg", "--pele-muted", "--pele-line", "--pele-surface", "--pele-surface-alt", "--pele-border",
+  "--pele-accent", "--pele-critical", ...Array.from({ length: 8 }, (_, index) => `--pele-series-${index + 1}`)];
+
+/** The colors a drawn diagram has in the page: what a picture or a page of its own needs, where the stylesheet of the page is not. */
+export function diagramColors(drawing: Element): DiagramColors {
+  const style = drawing.ownerDocument.defaultView!.getComputedStyle(drawing);
+  const variables = Object.fromEntries(diagramProperties.map(name => [name, style.getPropertyValue(name).trim()]).filter(([, value]) => value));
+  return { dark: drawing.ownerDocument.documentElement.dataset.theme !== "light", variables };
+}
+
+/**
+ * A drawn diagram as a picture (an `svg+xml` data address), in the colors it has in the page: a picture has no
+ * stylesheet, so its root carries the resolved `--pele-*` properties. It can be zoomed without being drawn again.
+ */
+export function diagramPicture(drawing: SVGSVGElement): string {
+  const copy = drawing.cloneNode(true) as SVGSVGElement;
+  for (const [name, value] of Object.entries(diagramColors(drawing).variables)) copy.style.setProperty(name, value);
+  // A diagram that says no size is shown at the size it has in the page, which is no smaller than its box.
+  if (!copy.getAttribute("width") || !copy.getAttribute("height")) {
+    const box = drawing.viewBox?.baseVal;
+    const width = box?.width || drawing.getBoundingClientRect().width, height = box?.height || drawing.getBoundingClientRect().height;
+    if (width > 0 && height > 0) { copy.setAttribute("width", String(width)); copy.setAttribute("height", String(height)); }
+  }
+  const text = new (drawing.ownerDocument.defaultView ?? window).XMLSerializer().serializeToString(copy);
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`;
+}
+
+/**
+ * A diagram as PNG, from its picture: `scale` times its size, so that it stays sharp where it is pasted, with a margin, on
+ * `background` (the color behind it in the page), so that its text reads on a page of another color.
+ */
+export async function diagramPng(picture: string, background: string, scale = 2, margin = 16): Promise<Blob> {
+  const image = new Image();
+  image.src = picture;
+  await image.decode();
+  const width = Math.max(1, Math.round((image.naturalWidth + 2 * margin) * scale)), height = Math.max(1, Math.round((image.naturalHeight + 2 * margin) * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("The diagram could not be drawn.");
+  if (background) { context.fillStyle = background; context.fillRect(0, 0, width, height); }
+  context.drawImage(image, margin * scale, margin * scale, image.naturalWidth * scale, image.naturalHeight * scale);
+  return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("The diagram could not be drawn.")), "image/png"));
+}
+
 let library: Promise<typeof import("pele/lazy")> | undefined;
 let sequence = 0;
 

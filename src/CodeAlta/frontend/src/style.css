@@ -2477,6 +2477,23 @@ svg.pele {
 .markdown-content .markdown-block-tools > button:not(.bp6-button):hover, .markdown-content .markdown-block-tools > button:not(.bp6-button):focus-visible { color: var(--text); background: color-mix(in srgb, var(--text) 12%, var(--panel-2)); }
 .markdown-content .markdown-block-tools > button:not(.bp6-button):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .markdown-content .markdown-block-tools > button.markdown-math-copy[data-copied] { color: var(--green, #3dcc91); }
+/* The Expand button of a drawn diagram opens it in a window of its own, where it is fitted to the window and zoomed. */
+.markdown-content .markdown-block-tools > button.markdown-diagram-expand { display: inline-flex; align-items: center; justify-content: center; width: 23px; padding: 3px 0; }
+.markdown-content .markdown-block-tools > button.markdown-diagram-expand::after { content: ""; width: 11px; height: 11px; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 3h6v6'/%3E%3Cpath d='M9 21H3v-6'/%3E%3Cpath d='M21 3l-7 7'/%3E%3Cpath d='M3 21l7-7'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 3h6v6'/%3E%3Cpath d='M9 21H3v-6'/%3E%3Cpath d='M21 3l-7 7'/%3E%3Cpath d='M3 21l7-7'/%3E%3C/svg%3E") center / contain no-repeat; }
+.markdown-rendered[data-source] > .markdown-block-tools > .markdown-diagram-expand { display: none; }
+dialog.diagram-viewer-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
+.diagram-viewer { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; }
+.diagram-viewer > .editor-image { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.diagram-viewer .editor-image-view { background: var(--panel-2); }
+.diagram-viewer .editor-image-view img { box-shadow: none; }
+/* Its source, beside it, in a read-only editor. */
+.diagram-viewer-source { flex: 0 0 min(44%, 640px); min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--panel); }
+.diagram-viewer-source > * { flex: 1 1 auto; min-height: 0; }
+.diagram-viewer-source > pre { margin: 0; padding: 12px 14px; overflow: auto; font: 12.5px/1.5 var(--code-font); white-space: pre; }
+.diagram-viewer-copy-image.copy-copied svg, .diagram-viewer-copy-source.copy-copied svg { color: var(--green); }
+.diagram-viewer-copy-image.copy-failed svg, .diagram-viewer-copy-source.copy-failed svg { color: var(--red); }
 /* Footnotes: a number that moves to its note (its title is the note), and the notes at the end of the text, smaller,
    each with a way back. Where a move arrives is lit for a moment. */
 .markdown-footnote { line-height: 0; }

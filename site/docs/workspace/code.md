@@ -76,7 +76,12 @@ Pictures open as pictures, and an SVG file as a drawing. A picture is copied to 
   <figcaption class="small text-secondary mt-2">An SVG file shown as a drawing. The buttons at the right of the tabs switch to its text.</figcaption>
 </figure>
 
-The Markdown page shows the front matter as a table, task lists as check boxes, GitHub alerts in color, highlighted code, `mermaid` diagrams, and [LaTeX formulas and footnotes](prompt.md#equations). A diagram or a displayed equation has a **Source** button under the pointer that shows its code, and **Preview** the drawing again.
+The Markdown page shows the front matter as a table, task lists as check boxes, GitHub alerts in color, highlighted code, `mermaid` diagrams, and [LaTeX formulas and footnotes](prompt.md#equations). A diagram or a displayed equation has a **Source** button under the pointer that shows its code, and **Preview** the drawing again. The expand button of a diagram opens it in a window nearly as large as CodeAlta's, fitted to it: zoom with the buttons, `Ctrl` and the wheel, or `+` and `-` (`0` fits it again), and drag a zoomed diagram to move it. The buttons of its title bar copy the diagram as a picture (PNG, on the color behind it) or its Mermaid text, and show that text beside it in a read-only editor. Diagrams in the timeline, plans and plugin dialogs have the same button.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-diagram-viewer.webp" alt="A flowchart of a plan opened from the Markdown page of the code editor in its own window, nearly as large as CodeAlta Desktop: the diagram fitted at 62% with its zoom buttons at the bottom, its Mermaid text in a read-only editor on the right, and the Copy image, Copy the source and Show the source buttons in the title bar" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A diagram of a plan in its window, with its source beside it; the title bar copies it as a picture or as text.</figcaption>
+</figure>
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-math-preview.webp" alt="The Markdown page of a file in the code editor of CodeAlta Desktop: formulas, Maxwell's equations, a chemical equation, a matrix equation shown as its LaTeX with Preview, LaTeX and MathML buttons, a formula that cannot be read in red, and two footnotes" loading="lazy">

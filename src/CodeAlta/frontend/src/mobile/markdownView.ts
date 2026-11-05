@@ -1,4 +1,4 @@
-import { diagramAppearance, diagrams } from "../diagrams";
+import { diagramAppearance, diagramColors, diagrams, type DiagramColors } from "../diagrams";
 import { createMarkdownRenderer, equationCopy, followFootnote, markdownPending, toggleRenderedSource } from "../markdownBoundary";
 import { loadMath } from "../math";
 import { el, iconSvg } from "./dom";
@@ -6,19 +6,7 @@ import { el, iconSvg } from "./dom";
 /** What the page asks of the server for a diagram page: `POST /api/diagrams`. */
 export type DiagramUpload = (body: Readonly<{ svg: string; background?: string; text?: string; dark?: boolean }>) => Promise<{ url?: string }>;
 
-/** The colors of a drawn diagram as the page shows them: the `--pele-*` custom properties, resolved. */
-export type DiagramColors = Readonly<{ dark: boolean; variables: Readonly<Record<string, string>> }>;
-
-// The custom properties that color a diagram (see the `svg.pele` rule of the stylesheet).
-const diagramProperties = ["--pele-bg", "--pele-fg", "--pele-muted", "--pele-line", "--pele-surface", "--pele-surface-alt", "--pele-border",
-  "--pele-accent", "--pele-critical", ...Array.from({ length: 8 }, (_, index) => `--pele-series-${index + 1}`)];
-
-/** The colors a drawn diagram has in the page: what its own page needs, where the stylesheet of the page is not. */
-export function diagramColors(drawing: Element): DiagramColors {
-  const style = drawing.ownerDocument.defaultView!.getComputedStyle(drawing);
-  const variables = Object.fromEntries(diagramProperties.map(name => [name, style.getPropertyValue(name).trim()]).filter(([, value]) => value));
-  return { dark: drawing.ownerDocument.documentElement.dataset.theme !== "light", variables };
-}
+export { diagramColors, type DiagramColors };
 
 /**
  * The SVG of a diagram as its own page shows it: its width becomes a value the page reads (`data-w` and `--w`), so the

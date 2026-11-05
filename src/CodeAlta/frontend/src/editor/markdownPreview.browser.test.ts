@@ -95,6 +95,47 @@ test("the Markdown preview of the code editor draws its mermaid blocks, with and
     await evaluate(`${toggle}.click()`);
     assert.deepEqual(await view(), [false, true, "Source", "false"]);
 
+    // Expand opens the diagram in a window of its own, as a picture in the colors of the page, fitted to the window;
+    // + zooms it, Escape closes the window and gives the keyboard back to the button. Source hides the button.
+    const expand = `${content}.querySelector('.markdown-rendered button.markdown-diagram-expand')`;
+    assert.equal(await evaluate(`${expand}.getAttribute('aria-label')`), "Expand the diagram");
+    await evaluate(`${toggle}.click()`);
+    assert.equal(await evaluate(`getComputedStyle(${expand}).display`), "none", "a diagram shown as its source is not expanded");
+    await evaluate(`${toggle}.click()`);
+    await evaluate(`${expand}.click()`);
+    const picture = "document.querySelector('dialog.diagram-viewer-dialog[open] .editor-image-view img')";
+    assert.equal(await wait(`${picture}?.complete && ${picture}.naturalWidth > 0`), true, "the diagram is drawn as a picture");
+    assert.deepEqual(await evaluate(`(() => { const image = ${picture}, src = decodeURIComponent(image.src), view = image.parentElement.getBoundingClientRect(), shown = image.getBoundingClientRect();
+      return [src.startsWith('data:image/svg+xml'), src.includes('--pele-fg') && src.includes('Build'), document.activeElement === image.parentElement,
+        view.width > innerWidth - 100, image.closest('.editor-image').dataset.fit]; })()`), [true, true, true, true, "true"]);
+    const zoom = "parseInt(document.querySelector('dialog.diagram-viewer-dialog .editor-image-zoom').textContent)";
+    const fitted = await evaluate<number>(zoom);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "+", code: "Equal", text: "+", windowsVirtualKeyCode: 187 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "+", code: "Equal", windowsVirtualKeyCode: 187 });
+    assert.equal(await wait(`${picture}.closest('.editor-image').dataset.fit === 'false' && ${zoom} > ${fitted}
+      && Math.abs(${picture}.getBoundingClientRect().width - ${picture}.naturalWidth * ${zoom} / 100) < 2`), true, "+ zooms in");
+    // Its title bar copies the diagram as PNG, twice its size with a margin, on the color behind it; and its Mermaid text,
+    // which it shows beside it (as text here: the window of the application gives its code editor).
+    const header = (name: string) => `document.querySelector('dialog.diagram-viewer-dialog .app-window-titlebar button.${name}')`;
+    await evaluate(`${header("diagram-viewer-copy-image")}.click()`);
+    assert.equal(await wait("previewClipboard.images.length === 1"), true, "the picture is copied");
+    const natural = await evaluate<{ width: number; height: number }>(`({ width: ${picture}.naturalWidth, height: ${picture}.naturalHeight })`);
+    const copied = await evaluate<{ type: string; width: number; height: number; corner: number[] }>("previewClipboard.images[0]");
+    assert.deepEqual([copied.type, copied.width, copied.height, copied.corner[3]], ["image/png", (natural.width + 32) * 2, (natural.height + 32) * 2, 255], JSON.stringify(copied));
+    assert.equal(await wait(`${header("diagram-viewer-copy-image")}.getAttribute('aria-label') === 'Image copied'`), true);
+    const mermaid = "flowchart LR\n  build[Build] --> test[Test]";
+    await evaluate(`${header("diagram-viewer-copy-source")}.click()`);
+    assert.equal(await wait("previewClipboard.text.length === 1"), true, "the source is copied");
+    assert.equal(await evaluate("previewClipboard.text[0]"), mermaid);
+    assert.equal(await evaluate("!!document.querySelector('.diagram-viewer-source')"), false);
+    await evaluate(`${header("diagram-viewer-source-toggle")}.click()`);
+    assert.equal(await wait("document.querySelector('.diagram-viewer-source pre')?.textContent === " + JSON.stringify(mermaid)), true, "the source is shown beside the diagram");
+    assert.equal(await evaluate(`${header("diagram-viewer-source-toggle")}.getAttribute('aria-pressed')`), "true");
+    await evaluate(`document.querySelector('dialog.diagram-viewer-dialog .editor-image-view').focus()`);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    assert.equal(await wait(`!document.querySelector('dialog.diagram-viewer-dialog') && document.activeElement === ${expand}`), true, "Escape closes the window");
+
     // A `;` ends a statement of a sequence diagram: the rest of the line is no statement, and Mermaid refuses the text.
     // The block stays code, labelled `mermaid`, with a note that says why; written `#59;`, the same text is drawn.
     const invalid = "```mermaid\nsequenceDiagram\n  H->>H: to screen units; hit-test every window\n```";
