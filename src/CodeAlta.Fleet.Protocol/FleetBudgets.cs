@@ -350,7 +350,8 @@ public static class FleetBudgetDocuments
     /// Verifies a budget for a machine, as <see cref="TryVerify(FleetSignedBudget?, FleetDeviceListState, string?, out FleetBudgetDefinition?, out string?)"/>
     /// does, with the owner of the machine the signed access document names once it was given to another person
     /// (<see cref="FleetAccessState.OwnerOfMachine"/>): the budgets of its new owner hold there, those of the person the device
-    /// list names no more. On a machine of a team, those of its maintainers hold (<see cref="FleetAccessState.HoldsValuesOf"/>).
+    /// list names no more. On a machine of a team, those of its maintainers hold; on a machine of the organization, those of its
+    /// owners and admins who sign (<see cref="FleetAccessState.HoldsValuesOf"/>).
     /// </summary>
     /// <param name="signed">The signed budget.</param>
     /// <param name="devices">The device list as the machine verified it.</param>

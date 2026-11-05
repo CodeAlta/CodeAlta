@@ -81,7 +81,8 @@ public static class FleetSecretSealing
     /// <summary>
     /// Gives the devices a value of a person goes to, as <see cref="Recipients(FleetDeviceListState, string, IEnumerable{string})"/>
     /// does, with the machines the signed access document gives that person (<see cref="FleetAccessState.PersonOf"/>) and the
-    /// machines of the teams they maintain (<see cref="FleetAccessState.HoldsValuesOf"/>), and without the machines it gives
+    /// machines of the teams they maintain and, for an owner or an admin who signs, those of the organization
+    /// (<see cref="FleetAccessState.HoldsValuesOf"/>), and without the machines it gives
     /// another person or a team they do not maintain.
     /// </summary>
     /// <param name="list">The device list as the signer verified it.</param>

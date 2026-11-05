@@ -493,7 +493,8 @@ public static class FleetKeyWrap
     // The signer vouches for the copy: a controller device of the verified list, of this device's person, for this list. The
     // person of a machine given to another person is the one the signed access document names, never the list's any more. A
     // machine of a team has no person of its own: it takes the keys of its maintainers and members, and the values of its
-    // maintainers only, as the document says, never those of the person the device list names by that alone.
+    // maintainers only, as the document says, never those of the person the device list names by that alone; a machine of the
+    // organization takes both from its owners and admins who sign only.
     private static void CheckGrant(JsonElement root, string keyId, FleetKeyGrant grant, string deviceId, FleetDeviceListState list, FleetAccessState? access)
     {
         if (!list.Members.TryGetValue(deviceId, out var member)) throw new InvalidDataException("This device is not a member of the device list it verified.");
@@ -507,12 +508,12 @@ public static class FleetKeyWrap
             throw new InvalidDataException("The wrapped key was not given by a controller device of the device list.");
         }
 
-        if (member.Kind == FleetDeviceKinds.Node && access?.TeamOf(deviceId) is not null)
+        if (FleetAccessState.IsSharedMachine(access, member))
         {
             if (signer.OwnerId is null || signer.OwnerId != grant.PersonId) throw new InvalidDataException("The wrapped key was given for another person.");
             var holds = FleetSecretSealing.IsValueScope(grant.SpaceId) ? FleetAccessState.HoldsValuesOf(access, member, grant.PersonId)
                 : FleetAccessState.HoldsKeysOf(access, member, grant.PersonId);
-            if (!holds) throw new InvalidDataException("The wrapped key was given by a person the team of this machine gives no such role.");
+            if (!holds) throw new InvalidDataException("The wrapped key was given by a person the access document gives no such role on this machine.");
         }
         // The first device names its person by the first entry it signs: until then, it gives keys to itself only.
         else if (signer.DeviceId != deviceId && (signer.OwnerId is null || signer.OwnerId != self.OwnerId))

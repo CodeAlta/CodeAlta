@@ -9,14 +9,16 @@ namespace CodeAlta.Server.Services;
 /// the person the device list names. The budgets, hooks, metadata keys, values and environments of a machine follow that person,
 /// as the machines do once the signed access document says so. A machine of a team has no person: the maintainers of the team
 /// manage it (its budgets, hooks, values and environments are theirs), its maintainers and members use it for their own sessions
-/// (their devices give it the keys of their spaces), and the person the device list names gets nothing of it by that alone.
+/// (their devices give it the keys of their spaces), and the person the device list names gets nothing of it by that alone. A
+/// machine of the organization has no person either: its owners and the admins who sign (<see cref="AccessPolicy.IsSigner"/>)
+/// manage it and use it for their own sessions, for its values and for its keys alike.
 /// </summary>
 internal static class MachineOwners
 {
     /// <summary>Gets the person a device answers to, from the owner records of its organization.</summary>
     /// <param name="snapshot">The access model of the organization of the device; null reads the device record alone.</param>
     /// <param name="device">The device.</param>
-    /// <returns>The person, or null for a device of no person, a machine of a team included.</returns>
+    /// <returns>The person, or null for a device of no person, a machine of a team or of the organization included.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="device"/> is null.</exception>
     public static string? PersonOf(AccessSnapshot? snapshot, DeviceRecord device)
     {
@@ -25,7 +27,7 @@ internal static class MachineOwners
         return snapshot?.Owner(FleetResourceKinds.Machine, device.Id) switch
         {
             { OwnerKind: FleetPrincipalKinds.Person } owner => owner.OwnerId,
-            { OwnerKind: FleetPrincipalKinds.Team } => null,
+            { OwnerKind: FleetPrincipalKinds.Team or FleetPrincipalKinds.Organization } => null,
             _ => device.OwnerPersonId,
         };
     }
@@ -40,14 +42,30 @@ internal static class MachineOwners
         return device.Kind == FleetDeviceKinds.Node && snapshot?.Owner(FleetResourceKinds.Machine, device.Id) is { OwnerKind: FleetPrincipalKinds.Team } owner ? owner.OwnerId : null;
     }
 
-    /// <summary>Gets whether a device takes the values, budgets, environments and hooks of a person: on a machine of a team, a maintainer of it; else its person.</summary>
+    /// <summary>Gets whether a machine is the organization's, by its owner record.</summary>
+    /// <param name="snapshot">The access model of the organization of the device; null for none.</param>
+    /// <param name="device">The device.</param>
+    /// <returns>Whether it is a machine of the organization.</returns>
+    public static bool IsOrganizationMachine(AccessSnapshot? snapshot, DeviceRecord device)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        return device.Kind == FleetDeviceKinds.Node && snapshot?.Owner(FleetResourceKinds.Machine, device.Id) is { OwnerKind: FleetPrincipalKinds.Organization };
+    }
+
+    /// <summary>
+    /// Gets whether a device takes the values, budgets, environments and hooks of a person: on a machine of a team, a maintainer of it;
+    /// on a machine of the organization, an owner or an admin who signs; else its person.
+    /// </summary>
     /// <param name="snapshot">The access model of the organization of the device; null reads the device record alone.</param>
     /// <param name="device">The device.</param>
     /// <param name="personId">The person.</param>
     /// <returns>Whether it takes them.</returns>
     public static bool HoldsValuesOf(AccessSnapshot? snapshot, DeviceRecord device, string? personId) => Holds(snapshot, device, personId, FleetTeamRoles.Maintainer);
 
-    /// <summary>Gets whether a device takes the metadata keys of a person: on a machine of a team, a maintainer or a member of it; else its person.</summary>
+    /// <summary>
+    /// Gets whether a device takes the metadata keys of a person: on a machine of a team, a maintainer or a member of it; on a machine
+    /// of the organization, an owner or an admin who signs; else its person.
+    /// </summary>
     /// <param name="snapshot">The access model of the organization of the device; null reads the device record alone.</param>
     /// <param name="device">The device.</param>
     /// <param name="personId">The person.</param>
@@ -63,13 +81,19 @@ internal static class MachineOwners
     public static async ValueTask<bool> HoldsValuesOfAsync(IAccessStore? access, DeviceRecord device, string? personId, CancellationToken cancellationToken)
         => HoldsValuesOf(await ReadAsync(access, device.OrganizationId, cancellationToken).ConfigureAwait(false), device, personId);
 
-    /// <summary>Gets the people whose values, budgets and environments a device takes: the maintainers of the team of a team machine, else its person.</summary>
+    /// <summary>
+    /// Gets the people whose values, budgets and environments a device takes: the maintainers of the team of a team machine, the
+    /// owners and admins who sign of a machine of the organization, else its person.
+    /// </summary>
     /// <param name="snapshot">The access model of the organization of the device; null reads the device record alone.</param>
     /// <param name="device">The device.</param>
     /// <returns>The people; none for a device of no person.</returns>
     public static IReadOnlyList<string> ValuePeopleOf(AccessSnapshot? snapshot, DeviceRecord device) => PeopleOf(snapshot, device, FleetTeamRoles.Maintainer);
 
-    /// <summary>Gets the people whose metadata keys a device takes: the maintainers and members of the team of a team machine, else its person.</summary>
+    /// <summary>
+    /// Gets the people whose metadata keys a device takes: the maintainers and members of the team of a team machine, the owners and
+    /// admins who sign of a machine of the organization, else its person.
+    /// </summary>
     /// <param name="snapshot">The access model of the organization of the device; null reads the device record alone.</param>
     /// <param name="device">The device.</param>
     /// <returns>The people; none for a device of no person.</returns>
@@ -95,12 +119,14 @@ internal static class MachineOwners
     public static async ValueTask<AccessSnapshot?> ReadAsync(IAccessStore? access, string organizationId, CancellationToken cancellationToken)
         => access is null ? null : await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false);
 
-    // A machine of a team holds what the roles of its living team give; any other device, its person's.
+    // A machine of a team holds what the roles of its living team give, a machine of the organization what its owners and admins
+    // who sign give (the same people for values and keys); any other device, its person's.
     private static bool Holds(AccessSnapshot? snapshot, DeviceRecord device, string? personId, string? role)
     {
         ArgumentNullException.ThrowIfNull(device);
         if (personId is null) return false;
         if (TeamOf(snapshot, device) is { } team) return snapshot!.TeamRole(team, personId) is { } held && (role is null || held == role);
+        if (IsOrganizationMachine(snapshot, device)) return AccessPolicy.IsSigner(snapshot!, personId);
         return PersonOf(snapshot, device) == personId;
     }
 
@@ -113,6 +139,8 @@ internal static class MachineOwners
                 .Select(static member => member.PersonId).Distinct(StringComparer.Ordinal)];
         }
 
+        if (IsOrganizationMachine(snapshot, device))
+            return [.. snapshot!.People.Where(person => AccessPolicy.IsSigner(snapshot, person.Id)).Select(static person => person.Id).Distinct(StringComparer.Ordinal)];
         return PersonOf(snapshot, device) is { } person ? [person] : [];
     }
 }

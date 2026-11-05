@@ -31,6 +31,8 @@ namespace CodeAlta.Fleet.Server;
 /// members give it, and seals each session with the key of the person who started it there
 /// (<see cref="CurrentFor(string?, string?)"/>), none of them with <see cref="Current"/>. A controller device wraps its keys to
 /// the machines of the teams its person is in, and makes a new epoch of a key such a machine holds once its person left the team.
+/// A machine of the organization is the same, with its owners and the admins who sign for its people: their devices wrap their
+/// keys to it, and make a new epoch of a key it holds once their person no longer signs.
 /// </para>
 /// <para>One caller of <see cref="RefreshAsync(IReadOnlyCollection{string}, CancellationToken)"/> at a time: the loop of a <see cref="FleetConnector"/>; the keys are read from any thread.</para>
 /// </remarks>
@@ -73,7 +75,7 @@ public sealed class FleetMetadataKeyring
     /// <summary>Gets every key this device opened: those that seal, older epochs and the keys of the person, which still open what they sealed.</summary>
     public IReadOnlyCollection<FleetMetadataKey> Held => Volatile.Read(ref _snapshot).Held.Values.ToArray();
 
-    /// <summary>Gets the key that seals the metadata of a space; on a machine of a team, none (<see cref="CurrentFor(string?, string?)"/>).</summary>
+    /// <summary>Gets the key that seals the metadata of a space; on a machine of a team or of the organization, none (<see cref="CurrentFor(string?, string?)"/>).</summary>
     /// <param name="space">The id of the space on this device; the default space when null.</param>
     /// <returns>The key, or null when the space has none that seals now.</returns>
     public FleetMetadataKey? CurrentFor(string? space) => Current.GetValueOrDefault(Normalize(space));
@@ -82,7 +84,8 @@ public sealed class FleetMetadataKeyring
     /// Gets the key that seals the metadata of a session of a person in a space (<c>doc/fleet/access-control.md</c>, team roles): on
     /// a machine of a team, which has no person of its own, the key of that space of the person who started the session there, a
     /// maintainer or a member of the team as the signed access document says, and none for a session without such a person (an
-    /// automation of the team, local work), never the key of another person; on any other device, the key of the space
+    /// automation of the team, local work), never the key of another person; on a machine of the organization the same, with its
+    /// owners and the admins who sign for its people; on any other device, the key of the space
     /// (<see cref="CurrentFor(string?)"/>), whoever started the session.
     /// </summary>
     /// <param name="space">The id of the space on this device; the default space when null.</param>
@@ -92,14 +95,14 @@ public sealed class FleetMetadataKeyring
     {
         var list = _devices.Current;
         var access = Access?.Invoke();
-        if (!IsTeamMachine(list, access, out var self)) return CurrentFor(space);
+        if (!IsSharedMachine(list, access, out var self)) return CurrentFor(space);
         return personId is not null && FleetAccessState.HoldsKeysOf(access, self, personId) && Volatile.Read(ref _snapshot).People.TryGetValue(personId, out var keys)
             && keys.TryGetValue(Normalize(space), out var key) && !IsStale(key, list!) ? key : null;
     }
 
     /// <summary>
     /// Gets every key that seals here, by the id of its space on this device: those of <see cref="Current"/>, and on a machine of a
-    /// team those of each of its maintainers and members (<see cref="CurrentFor(string?, string?)"/>). A space of a person is known
+    /// team or of the organization those of each of its people (<see cref="CurrentFor(string?, string?)"/>). A space of a person is known
     /// to the server by an opaque id of that person, so that the keys tell which space of this device a scope of the server is.
     /// </summary>
     public IReadOnlyList<KeyValuePair<string, FleetMetadataKey>> SealingKeys
@@ -108,7 +111,7 @@ public sealed class FleetMetadataKeyring
         {
             var list = _devices.Current;
             var access = Access?.Invoke();
-            if (!IsTeamMachine(list, access, out var self)) return [.. Current];
+            if (!IsSharedMachine(list, access, out var self)) return [.. Current];
             return [.. Volatile.Read(ref _snapshot).People.Where(person => FleetAccessState.HoldsKeysOf(access, self, person.Key))
                 .SelectMany(static person => person.Value).Where(pair => !IsStale(pair.Value, list!))];
         }
@@ -168,7 +171,8 @@ public sealed class FleetMetadataKeyring
         if (list.IsController(me))
         {
             // The devices of the person: its own, and the machines the signed access document gives them, never one it gives another person.
-            // The machines of a team its maintainers and members use are theirs to give keys to (FleetAccessState.HoldsKeysOf).
+            // The machines of a team its maintainers and members use, and those of the organization its owners and admins who sign
+            // use, are theirs to give keys to (FleetAccessState.HoldsKeysOf).
             var context = new Making(client, list, list.Members[me], [.. list.Members.Values.Where(member => member.DeviceId == me
                 || list.Members[me].OwnerId is { } owner && FleetAccessState.HoldsKeysOf(access, member, owner))], access);
             foreach (var space in known.Where(static space => space.Local is not null).ToArray())
@@ -196,9 +200,10 @@ public sealed class FleetMetadataKeyring
         var previous = Volatile.Read(ref _snapshot);
         var person = PersonOfSelf(list, access);
         var current = ImmutableDictionary.CreateBuilder<string, FleetMetadataKey>(StringComparer.Ordinal);
-        var team = IsTeamMachine(list, access, out var machine);
-        // A machine of a team seals with no key of its own: each session with the key of its person (CurrentFor(space, person)).
-        foreach (var local in team ? Enumerable.Empty<string>() : wanted)
+        var shared = IsSharedMachine(list, access, out var machine);
+        // A machine of a team or of the organization seals with no key of its own: each session with the key of its person
+        // (CurrentFor(space, person)).
+        foreach (var local in shared ? Enumerable.Empty<string>() : wanted)
         {
             // The first space made for this local space wins: the devices of the person converge on it.
             var space = known.Where(candidate => candidate.Local == local).OrderBy(static candidate => candidate.CreatedAt).ThenBy(static candidate => candidate.Id, StringComparer.Ordinal)
@@ -213,7 +218,7 @@ public sealed class FleetMetadataKeyring
 
         var all = previous.Held.ToBuilder();
         foreach (var (id, key) in opened) all[id] = key;
-        var people = team ? People(known, opened, wanted, list, access, machine!, previous) : Snapshot.Empty.People;
+        var people = shared ? People(known, opened, wanted, list, access, machine!, previous) : Snapshot.Empty.People;
         var snapshot = new Snapshot(current.ToImmutable(), all.ToImmutable()) { People = people };
         Volatile.Write(ref _snapshot, snapshot);
         return snapshot.Current;
@@ -243,7 +248,7 @@ public sealed class FleetMetadataKeyring
         return opened;
     }
 
-    // On a machine of a team, the keys that seal the sessions of each of its maintainers and members: per person, the first space
+    // On a machine of a team or of the organization, the keys that seal the sessions of each of its people: per person, the first space
     // made for each local space, its newest epoch this machine opened, never back to an older one, never a stale one.
     private static ImmutableDictionary<string, ImmutableDictionary<string, FleetMetadataKey>> People(List<KnownSpace> known, Dictionary<string, FleetMetadataKey> opened,
         HashSet<string> wanted, FleetDeviceListState list, FleetAccessState? access, FleetDeviceListMember machine, Snapshot previous)
@@ -317,14 +322,14 @@ public sealed class FleetMetadataKeyring
     }
 
     // The keys of the person made before spaces had keys open what they sealed: the person's new devices get them too; a machine of
-    // a team, which seals with the keys of spaces only, never.
+    // a team or of the organization, which seals with the keys of spaces only, never.
     private async Task WrapLegacyAsync(Making context, IReadOnlyList<MetadataKeyDto> rows, Dictionary<string, FleetMetadataKey> opened, CancellationToken cancellationToken)
     {
         foreach (var row in rows.Where(static row => row.Space is null))
         {
             if (!opened.TryGetValue(row.Id, out var key)) continue;
             var missing = context.Devices.Where(device => !row.WrappedTo.Contains(device.DeviceId)
-                && !(device.Kind == FleetDeviceKinds.Node && context.Access?.TeamOf(device.DeviceId) is not null)).ToArray();
+                && !FleetAccessState.IsSharedMachine(context.Access, device)).ToArray();
             if (missing.Length == 0) continue;
             await context.Client.AddMetadataKeyWrapsAsync(row.Id, [.. missing.Select(device => new MetadataKeyWrapDto(device.DeviceId, FleetKeyWrap.Wrap(key, device.Key, key.Grant!, _identity)))],
                 cancellationToken).ConfigureAwait(false);
@@ -373,7 +378,8 @@ public sealed class FleetMetadataKeyring
 
     // A machine of the list that holds the key, not removed, which is no more a device of the person of the key as the signed
     // access document says: given to another person, a machine of a team that gives the person no role (they left it, or never
-    // were in it): who uses it now reads what the key seals, so the person seals with a new epoch from now on.
+    // were in it), a machine of the organization for which the person no longer signs: who uses it now reads what the key seals,
+    // so the person seals with a new epoch from now on.
     private static bool GivenAway(Making context, MetadataKeyDto row)
         => context.Self.OwnerId is { } owner && row.WrappedTo.Any(device => context.List.Members.TryGetValue(device, out var member) && member.Kind == FleetDeviceKinds.Node
             && !context.List.Removed.Contains(device) && !FleetAccessState.HoldsKeysOf(context.Access, member, owner));
@@ -389,18 +395,19 @@ public sealed class FleetMetadataKeyring
     // A key seals for this device only when it is of the person of this device; before the list names one, any key.
     private static bool IsOfPerson(FleetMetadataKey key, string? person) => person is null || key.Grant?.PersonId == person;
 
-    // Whether this device is a machine of a team, as the signed access document says.
-    private bool IsTeamMachine(FleetDeviceListState? list, FleetAccessState? access, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out FleetDeviceListMember? self)
+    // Whether this device is a machine of a team or of the organization, as the signed access document says: it has no person of its own.
+    private bool IsSharedMachine(FleetDeviceListState? list, FleetAccessState? access, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out FleetDeviceListMember? self)
     {
         self = null;
-        return list is not null && list.Members.TryGetValue(_identity.DeviceId, out self) && self.Kind == FleetDeviceKinds.Node && access?.TeamOf(self.DeviceId) is not null;
+        return list is not null && list.Members.TryGetValue(_identity.DeviceId, out self) && FleetAccessState.IsSharedMachine(access, self);
     }
 
-    // The keys that seal by a list and the access document: the same dictionary when none is stale by them; none on a machine of a team.
+    // The keys that seal by a list and the access document: the same dictionary when none is stale by them; none on a machine of a
+    // team or of the organization.
     private ImmutableDictionary<string, FleetMetadataKey> Sealing(ImmutableDictionary<string, FleetMetadataKey> current, FleetDeviceListState? list, FleetAccessState? access)
     {
         if (list is null) return current;
-        if (IsTeamMachine(list, access, out _)) return current.IsEmpty ? current : current.Clear();
+        if (IsSharedMachine(list, access, out _)) return current.IsEmpty ? current : current.Clear();
         var person = PersonOfSelf(list, access);
         bool Drops(FleetMetadataKey key) => IsStale(key, list) || !IsOfPerson(key, person);
         return !current.Values.Any(Drops) ? current : current.RemoveRange([.. current.Where(pair => Drops(pair.Value)).Select(static pair => pair.Key)]);
@@ -411,7 +418,7 @@ public sealed class FleetMetadataKeyring
         public static Snapshot Empty { get; } = new(ImmutableDictionary.Create<string, FleetMetadataKey>(StringComparer.Ordinal),
             ImmutableDictionary.Create<string, FleetMetadataKey>(StringComparer.Ordinal));
 
-        // On a machine of a team, the keys that seal the sessions of each of its people, by person then by local space.
+        // On a machine of a team or of the organization, the keys that seal the sessions of each of its people, by person then by local space.
         public ImmutableDictionary<string, ImmutableDictionary<string, FleetMetadataKey>> People { get; init; } =
             ImmutableDictionary.Create<string, ImmutableDictionary<string, FleetMetadataKey>>(StringComparer.Ordinal);
     }

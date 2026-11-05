@@ -70,7 +70,7 @@ Another maintainer finds it in the **Automations** tab under **Automations of yo
 - It runs only while the team has a service identity turned on, once that change is signed (see [Sign what machines follow](#sign-what-machines-follow)).
 - A machine of a team runs automations with account credentials only: an API key or a gateway, never a personal plan such as a Claude, Codex or Copilot subscription.
 
-A machine given to the organization runs the automations of the organization only. They run as a service identity of the organization, with account credentials only.
+A machine given to the organization runs the automations of the organization only. They run as a service identity of the organization, with account credentials only. Its owners and admins manage it: only they set its budgets, its secrets and environments and its hooks, and each sees only their own sessions there; the person who enrolled it does not, unless they are an owner or an admin.
 
 ## Sign what machines follow
 
