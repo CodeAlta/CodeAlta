@@ -38,6 +38,7 @@ public sealed class FleetSecretSync
     private readonly LocalSecretStore _store;
     private readonly Func<CancellationToken, Task<IReadOnlyList<FleetSecretProject>>>? _projects;
     private ImmutableDictionary<string, FleetEnvironmentDefinition> _environments = ImmutableDictionary<string, FleetEnvironmentDefinition>.Empty;
+    private ImmutableHashSet<string> _ambiguous = ImmutableHashSet<string>.Empty;
 
     /// <summary>Initializes a new instance of the <see cref="FleetSecretSync"/> class.</summary>
     /// <param name="source">The id of the server link, which the values are kept under.</param>
@@ -113,8 +114,28 @@ public sealed class FleetSecretSync
         return await client.GetApprovalAsync(approvalId, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Gets the environments of the person as the last refresh verified them, by name; those taken away are not among them.</summary>
+    /// <summary>
+    /// Gets the environments of the person as the last refresh verified them, by name; those taken away are not among them,
+    /// nor a name two environments share (<see cref="AmbiguousEnvironments"/>): a run names an environment it may be admitted to,
+    /// never one of two.
+    /// </summary>
     public IReadOnlyDictionary<string, FleetEnvironmentDefinition> Environments => Volatile.Read(ref _environments);
+
+    /// <summary>Gets the names two environments the last refresh verified share: no run is admitted by them.</summary>
+    public IReadOnlyCollection<string> AmbiguousEnvironments => Volatile.Read(ref _ambiguous);
+
+    /// <summary>
+    /// Gives the scope the values of an environment are kept under on this machine: the organization and the id its signed
+    /// definition names, never its name, which another environment may have too.
+    /// </summary>
+    /// <param name="definition">The environment, as this machine verified it.</param>
+    /// <returns>The scope.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="definition"/> is null.</exception>
+    public static string ScopeOf(FleetEnvironmentDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        return definition.OrganizationId + "/" + definition.EnvironmentId;
+    }
 
     /// <summary>Reads the values of the server for this machine again, and keeps those that open.</summary>
     /// <param name="cancellationToken">Cancels the calls.</param>
@@ -257,11 +278,21 @@ public sealed class FleetSecretSync
             opened.RemoveAll(pair => unrecorded.Secrets.ContainsKey(pair.Secret.Id));
         }
 
-        foreach (var definition in byId.Values)
+        // By name, the environments not taken away; a name two of them share chooses neither.
+        var ambiguous = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
+        foreach (var group in byId.Values.Where(static definition => !definition.Removed).GroupBy(static definition => definition.Name, StringComparer.Ordinal))
         {
-            if (!definition.Removed && (!verified.TryGetValue(definition.Name, out var known) || known.Number < definition.Number)) verified[definition.Name] = definition;
+            if (group.Skip(1).Any())
+            {
+                ambiguous.Add(group.Key);
+                refused.Add($"environment {group.Key}: {group.Count()} environments have this name, a run names none of them");
+                continue;
+            }
+
+            verified[group.Key] = group.First();
         }
 
+        Volatile.Write(ref _ambiguous, ambiguous.ToImmutable());
         Volatile.Write(ref _environments, verified.ToImmutable());
         // A value of a scope this machine does not know (a space it does not link, a project it does not have) is not kept.
         foreach (var (secret, value) in opened)
@@ -297,6 +328,7 @@ public sealed class FleetSecretSync
     public void Forget()
     {
         Volatile.Write(ref _environments, ImmutableDictionary<string, FleetEnvironmentDefinition>.Empty);
+        Volatile.Write(ref _ambiguous, ImmutableHashSet<string>.Empty);
         _store.RemoveFleetCopies(_source);
     }
 
@@ -329,7 +361,7 @@ public sealed class FleetSecretSync
                 foreach (var project in projects[id]) yield return project;
                 break;
             case FleetSecretScopeKinds.Environment when scope.Id is { } id && environments.TryGetValue(id, out var environment) && !environment.Removed:
-                yield return environment.Name;
+                yield return ScopeOf(environment);
                 break;
         }
     }

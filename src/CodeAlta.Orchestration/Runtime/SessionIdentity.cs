@@ -126,7 +126,7 @@ public sealed class SessionIdentityResolver
             return SessionIdentity.Usual;
         }
 
-        return Of(space, profiles, new SecretScope(space.Id, string.IsNullOrWhiteSpace(projectId) ? null : projectId, sessionId is null ? null : Environments.Get(sessionId))
+        return Of(space, profiles, new SecretScope(space.Id, string.IsNullOrWhiteSpace(projectId) ? null : projectId, sessionId is null ? null : Environments.ScopeOf(sessionId))
         {
             RunId = sessionId,
             OwnerWork = sessionId is null || IsOwnerWork?.Invoke(sessionId) != false,

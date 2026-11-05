@@ -328,7 +328,7 @@ public sealed class FleetSecretsTests
         Assert.AreEqual("staging", sync.Environments.Single().Key);
         string Resolve(CodeAlta.Catalog.Secrets.SecretScope scope, string text = "${secret:TOKEN}")
             => CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForScope(nodeRoot.Path, scope, shell: true).Resolve(text);
-        Assert.AreEqual("staging-value", Resolve(new("default", "local-project", "staging")));
+        Assert.AreEqual("staging-value", Resolve(new("default", "local-project", FleetSecretSync.ScopeOf(sync.Environments["staging"]))));
         Assert.AreEqual("project-value", Resolve(new("default", "local-project", null)));
         Assert.AreEqual("space-value", Resolve(new("default", "another-project", null)));
         Assert.AreEqual("person-value", Resolve(new("home", null, null)));
@@ -406,6 +406,38 @@ public sealed class FleetSecretsTests
             Assert.IsFalse(store.ListFleetCopies().Any(static copy => copy.Name == "TOKEN" && copy.Version < 2), "a superseded value does not come back");
             Assert.IsTrue(result.Refused.Count >= 3, string.Join("; ", result.Refused));
         }
+    }
+
+    [TestMethod]
+    public async Task TwoEnvironmentsOfOneName_AreNeitherChosenByName_NorShareTheirValues()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var list = await fleet.NodeListAsync();
+        var person = list.Members[fleet.DesktopKey.DeviceId].OwnerId!;
+        var guarded = await fleet.Manager.PutEnvironmentAsync("production", [person], [], [], false, CancellationToken.None);
+        await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "DEPLOY_TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Environment, guarded.Id), "guarded-value", false,
+            [fleet.NodeKey.DeviceId], CancellationToken.None);
+
+        // Another environment of the same name, signed as genuinely, that requires no approval (another maintainer's, say).
+        var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        var open = new FleetEnvironmentDefinition(FleetEnvironmentDefinition.CurrentVersion, list.OrganizationId!, person, "open-environment", "production", 5, [], [], [], false,
+            fleet.DesktopKey.DeviceId, now);
+        var openDto = new FleetEnvironmentDto(open.EnvironmentId, open.Name, open.Number, fleet.DesktopKey.DeviceId, now, FleetServerClient.SignEnvironment(fleet.DesktopKey, open));
+        using var rewrite = new RewriteHandler { InnerHandler = new HttpClientHandler(), Environments = environments => environments with { Environments = [.. environments.Environments, openDto] } };
+        using var nodeRoot = new TempDirectory();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(nodeRoot.Path, new CodeAlta.Catalog.Secrets.MasterKeySecretProtector(
+            new CodeAlta.Catalog.Secrets.FileSecretKeyStore(Path.Combine(nodeRoot.Path, "secrets", "key"))));
+        var sync = new FleetSecretSync("link-1", new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey,
+            Path.Combine(fleet.Root.Path, "node-link", FleetOrganizationDevices.PinFileName), rewrite), null, store, null);
+        await sync.SyncAsync(CancellationToken.None);
+
+        // A run that names "production" could be admitted by the open one: the name chooses neither.
+        Assert.IsFalse(sync.Environments.ContainsKey("production"), "a name two environments share is not chosen");
+        // The values of an environment are its own, by the id its definition signs: never reached by another of the same name.
+        var copy = store.ListFleetCopies().Single(static copy => copy.Name == "DEPLOY_TOKEN");
+        Assert.AreNotEqual("production", copy.ScopeId);
+        Assert.IsFalse(CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForScope(nodeRoot.Path, new CodeAlta.Catalog.Secrets.SecretScope(null, null, "production"), shell: true)
+            .TryGet(new CodeAlta.Catalog.Secrets.SecretReference(CodeAlta.Catalog.Secrets.SecretReferenceKind.Secret, "DEPLOY_TOKEN"), out _));
     }
 
     [TestMethod]
