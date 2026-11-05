@@ -1231,6 +1231,9 @@ export function startMobile(window: Window & typeof globalThis) {
       ? `The ${tierLabel(tier.tier)} tier is not ready: ${tier.error || "it has no model"}.` : "");
   }
 
+  // The projects of the form are those the list keeps to, all of them without a filter. The one chosen is `preferred` (the
+  // project of the viewed session, or the one of the form), else the last one, while the list keeps to them; else the first
+  // one the filter keeps, or without a filter the default project.
   function updateNewProjects(preferred: string | null) {
     if (!projects) return;
     const filter = sessions.filter;
