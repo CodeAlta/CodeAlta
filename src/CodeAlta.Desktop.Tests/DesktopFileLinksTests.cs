@@ -323,6 +323,12 @@ public sealed class DesktopFileLinksTests
         var reply = await service.PathAsync(new(Epoch, "src/Program.cs#L3", "session"), default);
         Assert.AreEqual(("ok", file), (reply.Status, reply.FullPath));
         Assert.AreEqual(Path.Combine(fixture.ProjectPath, "src", "missing.cs"), (await service.PathAsync(new(Epoch, "src/missing.cs", "session"), default)).FullPath);
+        // A path from the root of the project, as a site writes it, is a file of the project while no such file of the disk is there.
+        Assert.AreEqual(Path.Combine(fixture.ProjectPath, "src", "missing.cs"), (await service.PathAsync(new(Epoch, "/src/missing.cs", "session"), default)).FullPath);
+        // An address names its file on the disk, whether or not the file is there: never one of the project.
+        var deleted = Path.Combine(fixture.Root, "elsewhere", "deleted.md");
+        Assert.AreEqual(("ok", deleted), Fields(await service.PathAsync(new(Epoch, new Uri(deleted).AbsoluteUri, "session"), default)));
+        Assert.AreEqual("not_found", await fixture.OpenAsync(new Uri(deleted).AbsoluteUri, session: "session"));
         Assert.AreEqual(("not_found", null), Fields(await service.PathAsync(new(Epoch, "src/Program.cs"), default)));
         Assert.AreEqual(("invalid_request", null), Fields(await service.PathAsync(new(Epoch, "mailto:someone@example.invalid", "session"), default)));
         Assert.AreEqual(("stale_epoch", null), Fields(await service.PathAsync(new("4b0a7c1e-52c9-4f0b-8a55-6d0c2f9e1b77", "src/Program.cs", "session"), default)));

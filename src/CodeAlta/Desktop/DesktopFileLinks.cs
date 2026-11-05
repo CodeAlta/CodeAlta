@@ -355,7 +355,7 @@ internal sealed class DesktopFileLinks
     {
         var sessionRoot = sessionId is { Length: > 0 and <= 128 } ? await _sessionFolder(sessionId, cancellationToken).ConfigureAwait(false) : null;
         var start = sessionRoot ?? await DocumentFolderAsync(projectId, directory, cancellationToken).ConfigureAwait(false);
-        return (Locate(link.Path, start), sessionRoot);
+        return (Locate(link.Path, link.IsAddress, start), sessionRoot);
     }
 
     // The folder a relative link of a document starts from: the one of the document, inside its project.
@@ -368,8 +368,8 @@ internal sealed class DesktopFileLinks
         return ProjectFilesService.Normalize(directory, out var inside) == "ok" ? Path.Combine(root, inside!.Replace('/', Path.DirectorySeparatorChar)) : null;
     }
 
-    // The full path a link names; null when it has none.
-    private string? Locate(string path, string? start)
+    // The full path a link names; null when it has none. An address names its file as it is.
+    private string? Locate(string path, bool isAddress, string? start)
     {
         try
         {
@@ -378,8 +378,8 @@ internal sealed class DesktopFileLinks
             if (Path.IsPathFullyQualified(path))
             {
                 var full = Path.GetFullPath(path);
-                // "/src/file" is also written for a file of the project, as a site writes a path from its root.
-                if (start is null || !path.StartsWith(Path.DirectorySeparatorChar) || Path.Exists(full)) return full;
+                // "/src/file" is also written for a file of the project, as a site writes a path from its root: never as an address.
+                if (isAddress || start is null || !path.StartsWith(Path.DirectorySeparatorChar) || Path.Exists(full)) return full;
             }
             else if (!path.StartsWith(Path.DirectorySeparatorChar) && Path.IsPathRooted(path))
             {
