@@ -831,7 +831,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
             yield break;
         }
 
-        await foreach (var update in client.CreateResponseStreamingAsync(fullOptions, cancellationToken).ConfigureAwait(false))
+        // The stream is the response itself: disposing it ends the request, also when the turn stops reading.
+        await using var updates = await client.CreateResponseStreamingAsync(fullOptions, cancellationToken).ConfigureAwait(false);
+        await foreach (var update in ((IAsyncEnumerable<StreamingResponseUpdate>)updates).ConfigureAwait(false))
         {
             yield return new CodexProtocolEvent(
                 CodexProtocolTransport.Http,
