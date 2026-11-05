@@ -357,6 +357,26 @@ public sealed class BudgetTests
     }
 
     [TestMethod]
+    public async Task ARunOfALinkedSpace_DoesNotWaitForItsKey_ForABudgetOfSpacesThatWasRemoved()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        var statePath = Path.Combine(fleet.Root.Path, "node-budgets.json");
+        var budget = await fleet.Manager.PutAsync(null, Settings(100) with { Name = "A space", ScopeKind = FleetBudgetScopeKinds.Space, ScopeId = "space-opaque-id",
+            Mode = FleetBudgetModes.Advisory, Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
+        // The node learns the budget, then its removal: what it keeps of it is the signed removal.
+        Assert.IsNull((await fleet.Gate(new FakeSpend(), statePath).AdmitAsync(new FleetBudgetRun("run-1", null, null, null), TestContext.CancellationToken)).Problem);
+        await fleet.Manager.RemoveAsync(budget.Id, CancellationToken.None);
+        Assert.IsNull((await fleet.Gate(new FakeSpend(), statePath).AdmitAsync(new FleetBudgetRun("run-2", null, null, null), TestContext.CancellationToken)).Problem);
+
+        // A run of a space linked to the server, whose key the server has none of: no budget of spaces holds, nothing to wait for.
+        var devices = new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey, null);
+        var link = new FleetBudgetLink("link", devices, new FleetMetadataKeyring(devices), statePath) { LinksSpace = static space => space == "default" };
+        var gate = new FleetBudgetGate(() => [link], new FakeSpend { Spent = 100 }) { HoldPoll = TimeSpan.FromMilliseconds(100), HoldWait = TimeSpan.FromSeconds(2) };
+        Assert.IsNull((await gate.AdmitAsync(new FleetBudgetRun("run-3", null, "default", null), TestContext.CancellationToken)).Problem,
+            "a budget taken away is no reason to wait for the key of a space");
+    }
+
+    [TestMethod]
     public async Task ABudget_StaysEnforced_WhenTheDeviceThatSignedItIsRemoved()
     {
         var root = new TempDirectory();

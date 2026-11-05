@@ -205,10 +205,10 @@ public sealed class FleetBudgetGate
         return continued.Count == 0 ? FleetBudgetAdmission.Admitted : new FleetBudgetAdmission(null, continued);
     }
 
-    // Whether a link keeps budgets of spaces or projects, which the key of the space of a run names it for.
+    // Whether a link keeps budgets of spaces or projects, which the key of the space of a run names it for: a removed one holds nothing.
     private static bool KeepsBudgetsOfSpaces(FleetBudgetLink link, LinkState state, FleetDeviceListState list, FleetAccessState? access)
         => state.Budgets().Any(kept => FleetBudgetDocuments.TryVerifyKept(kept.Signed, list, access, link.Devices.Identity.DeviceId, out var budget, out _)
-            && budget.ScopeKind is FleetBudgetScopeKinds.Space or FleetBudgetScopeKinds.Project);
+            && !budget.Removed && budget.ScopeKind is FleetBudgetScopeKinds.Space or FleetBudgetScopeKinds.Project);
 
     // Waits, as a run a budget holds, for the key of the space of a run: its scope once the key is read, null when it is not within the wait.
     private async Task<FleetBudgetRunScope?> WaitForSpaceKeyAsync(FleetBudgetLink link, FleetMetadataKeyring keys, FleetDeviceListState list, FleetAccessState? access,
