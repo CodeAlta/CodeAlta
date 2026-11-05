@@ -203,6 +203,22 @@ public sealed class RemoteSessionHostTests
     }
 
     [TestMethod]
+    public async Task DesktopFleet_APairingLinkOfAMachineReachedThroughItsServerOnly_IsNotPairedAlready()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        var registry = new SessionHostRegistry(new SessionHostRegistryTests.RecordingSessionHost(null));
+        var fleetRoot = Path.Combine(fixture.ViewerFleetRoot, "..", "desktop-fleet");
+        await using var fleet = new DesktopFleet(fleetRoot, registry.TakeMembership(), "desktop",
+            static (machine, identity) => new RemoteSessionHost(machine, cancellation => FleetNodeClient.ConnectAsync(machine, identity, cancellation), Quick));
+        await fleet.SyncOrganizationMachinesAsync([(fixture.NodeIdentity.DeviceId, "test-node")], token);
+        Assert.IsNotNull(fleet.Find(fixture.NodeIdentity.DeviceId), "The server lists the machine: this computer reaches it through its relay.");
+
+        Assert.IsTrue(fleet.TryPreview(fixture.CreatePairingLink(), out var preview, out _));
+        Assert.IsFalse(preview.AlreadyPaired, "A machine reached through its server only is not paired: pairing does not replace a pairing.");
+    }
+
+    [TestMethod]
     public async Task DesktopFleet_PairsFromALink_AddsTheHost_AndForgetsTheMachine()
     {
         var token = TestContext.CancellationToken;

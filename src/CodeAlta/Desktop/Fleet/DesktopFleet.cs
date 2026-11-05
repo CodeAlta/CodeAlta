@@ -167,8 +167,9 @@ internal sealed class DesktopFleet : IAsyncDisposable
     {
         preview = null;
         if (!PairingPayload.TryParse(link?.Trim(), DateTimeOffset.UtcNow, out var payload, out error)) return false;
+        // A machine reached through its server only has a host but no pairing to replace.
         preview = new FleetPairingPreview(payload.DeviceName, payload.DeviceId, payload.Fingerprint.ToShortWords(), payload.Addresses, payload.ExpiresAt,
-            Find(payload.DeviceId) is not null);
+            Find(payload.DeviceId) is { IsPaired: true });
         return true;
     }
 
