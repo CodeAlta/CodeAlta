@@ -14,7 +14,11 @@ public sealed record FleetSecretControllerState(int Version, string? KeyId, IRea
 /// version of each and the key of its copy, and the machines it withdrew, kept across restarts in the folder of the link. A server
 /// that answers an older record (correctly sealed, its holders' grants genuine) makes it seal nothing for a machine it withdrew.
 /// </summary>
-/// <remarks>One writer: the controller device of the link.</remarks>
+/// <remarks>
+/// Each request of a controller device may make its own checkpoint over the file of the link: a change reads the file, changes it
+/// and writes it back while it holds a lock of that file shared by every instance and process (a system mutex named after its path),
+/// so that none writes over the change of another.
+/// </remarks>
 public sealed class FleetSecretControllerCheckpoint
 {
     /// <summary>The name of the file in the folder of a link.</summary>
@@ -40,6 +44,7 @@ public sealed class FleetSecretControllerCheckpoint
     {
         lock (_gate)
         {
+            using var held = AcquireFileLock();
             return Load().Secrets.TryGetValue(secretId, out var entry)
                 ? new FleetSecretControllerState(entry.Version, entry.KeyId, new Dictionary<string, int>(entry.Withdrawn, StringComparer.Ordinal))
                 : null;
@@ -83,6 +88,7 @@ public sealed class FleetSecretControllerCheckpoint
     {
         lock (_gate)
         {
+            using var held = AcquireFileLock();
             var document = Load();
             if (!document.Secrets.TryGetValue(secretId, out var entry)) document.Secrets[secretId] = entry = new SecretEntry();
             if (!change(entry)) return;
@@ -90,6 +96,43 @@ public sealed class FleetSecretControllerCheckpoint
             var staging = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(document, FleetSecretControllerJsonContext.Default.ControllerDocument));
             File.Move(staging, _path, overwrite: true);
+        }
+    }
+
+    // The lock of the file, shared by every checkpoint over it in every process: taken and released on the same thread.
+    private IDisposable AcquireFileLock()
+    {
+        var full = Path.GetFullPath(_path);
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()) full = full.ToUpperInvariant();
+        var mutex = new Mutex(false, "CodeAlta.fleet-checkpoint." + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(full)), 0, 16));
+        try
+        {
+            if (!mutex.WaitOne(TimeSpan.FromSeconds(10)))
+                throw new IOException($"What this device keeps of the values it manages ('{_path}') is being written by another request.");
+        }
+        catch (AbandonedMutexException)
+        {
+            // Its writer ended without releasing it: held now all the same.
+        }
+        catch
+        {
+            mutex.Dispose();
+            throw;
+        }
+
+        return new HeldLock(mutex);
+    }
+
+    // Releases the lock of the file on the thread that took it.
+    private sealed class HeldLock(Mutex mutex) : IDisposable
+    {
+        private int _released;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) != 0) return;
+            mutex.ReleaseMutex();
+            mutex.Dispose();
         }
     }
 
