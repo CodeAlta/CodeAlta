@@ -371,9 +371,19 @@ internal sealed partial class AccessService
             || grant.CreatedByPersonId == person.Id).ToList();
         // The grants on a resource the caller answers for (its owner, a maintainer of the team that owns it): they confirm the
         // keys of its content and take the grants back, without managing the access of the organization.
+        // A resource that is gone since (a session made Private, withdrawn) answers for nothing: its grant is skipped, never the listing.
         foreach (var grant in snapshot.Grants.Where(grant => grant.ScopeKind == FleetScopeKinds.Resource && !visible.Contains(grant)))
         {
-            var target = await GrantTargetAsync(actor.OrganizationId, snapshot, grant.ScopeKind, grant.ScopeId, cancellationToken).ConfigureAwait(false);
+            AccessTarget target;
+            try
+            {
+                target = await GrantTargetAsync(actor.OrganizationId, snapshot, grant.ScopeKind, grant.ScopeId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (CoordinatorException)
+            {
+                continue;
+            }
+
             if (target.OwnerKind == FleetPrincipalKinds.Person ? target.OwnerId == person.Id
                 : target.OwnerKind == FleetPrincipalKinds.Team && target.OwnerId is { } owningTeam && snapshot.TeamRole(owningTeam, person.Id) == FleetTeamRoles.Maintainer)
                 visible.Add(grant);
@@ -412,6 +422,9 @@ internal sealed partial class AccessService
         if (request is null) throw Invalid("The grant needs a subject, a capability and a scope.");
         if (!FleetPrincipalKinds.CanBeGranted(request.SubjectKind)) throw Invalid("A grant is for a person, a team or a service identity.");
         if (!FleetCapabilities.IsKnown(request.Capability)) throw Invalid($"'{request.Capability}' is not a capability.");
+        if (!AccessPolicy.IsGrantable(request.Capability))
+            throw Invalid("Editing automations is not granted: machines take the versions of an automation from the owner of the machine and the maintainers of its team "
+                + "only. Make the person a maintainer of the team instead.");
         if (!FleetScopeKinds.IsKnown(request.ScopeKind)) throw Invalid("The scope is organization, team, project or resource.");
         var subjectKnown = request.SubjectKind switch
         {
@@ -535,7 +548,10 @@ internal sealed partial class AccessService
             var sessionId = scope["session:".Length..];
             // The person who started the session on its machine: on a machine of a team or of the organization, the copy holds only
             // when one of their devices gave it.
-            if (sessions.TryGetValue(sessionId, out var session)) listed.Add(new GrantKeyDto(grantId, sessionId, session.MachineId, sealedText, wrapped) { PersonId = session.PersonId });
+            if (sessions.TryGetValue(sessionId, out var session)) listed.Add(new GrantKeyDto(grantId, sessionId, session.MachineId, sealedText, wrapped)
+            {
+                PersonId = session.PersonId, PersonSignature = session.PersonSignature,
+            });
         }
 
         return new(listed);
@@ -604,7 +620,9 @@ internal sealed partial class AccessService
                 $"team:{team.Id}:{member.Role}"));
         }
 
-        foreach (var grant in snapshot.Grants.Where(grant => grant.Status == FleetGrantStatuses.Active && (grant.ExpiresAt is null || grant.ExpiresAt > now)))
+        // A grant that gives nothing (a kept grant of a capability no grant gives) is no line of who can do what.
+        foreach (var grant in snapshot.Grants.Where(grant => grant.Status == FleetGrantStatuses.Active && (grant.ExpiresAt is null || grant.ExpiresAt > now)
+            && AccessPolicy.IsGrantable(grant.Capability)))
             rows.Add(new(grant.SubjectKind, grant.SubjectId, SubjectName(snapshot, grant.SubjectKind, grant.SubjectId), grant.Capability, grant.ScopeKind, grant.ScopeId,
                 "grant:" + grant.Id));
         foreach (var owner in snapshot.Owners)

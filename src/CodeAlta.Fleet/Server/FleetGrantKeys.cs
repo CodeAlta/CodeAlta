@@ -115,12 +115,40 @@ public static class FleetGrantKeys
     /// <param name="identity">The key of this device.</param>
     /// <param name="list">The device list as this device verified it.</param>
     /// <param name="access">The access document as this device verified it; null for none.</param>
-    /// <param name="personId">The person who started the session on its machine (<see cref="Protocol.Api.GrantKeyDto.PersonId"/>); null for none, which a team machine or a machine of the organization refuses.</param>
+    /// <param name="personId">
+    /// The person who started the session on its machine (<see cref="Protocol.Api.GrantKeyDto.PersonId"/>); null for none. Without the
+    /// machine's signature of it, a team machine or a machine of the organization refuses the copy: see the overload that takes it.
+    /// </param>
     /// <returns>The metadata.</returns>
     /// <exception cref="ArgumentNullException">An argument but <paramref name="access"/> or <paramref name="personId"/> is null.</exception>
     /// <exception cref="InvalidDataException">The copy is not for this device, grant or session, is not signed by the owner of the session, or does not open.</exception>
     public static FleetSessionMetadata Open(string sealedText, string wrapped, string organizationId, string grantId, string sessionId, string machineId, DeviceIdentity identity,
         FleetDeviceListState list, FleetAccessState? access, string? personId)
+        => Open(sealedText, wrapped, organizationId, grantId, sessionId, machineId, identity, list, access, personId, null);
+
+    /// <summary>
+    /// Opens the metadata a grant gives this device, as
+    /// <see cref="Open(string, string, string, string, string, string, DeviceIdentity, FleetDeviceListState, FleetAccessState?, string?)"/> does; on a
+    /// machine of a team or of the organization, the person who started the session there is the one the machine signed it was
+    /// (<see cref="FleetSessionPersons"/>), verified with the key of the machine in the device list: what the server says alone, or
+    /// another person of the team who signs a copy for a session that is not theirs, opens nothing.
+    /// </summary>
+    /// <param name="sealedText">The sealed metadata.</param>
+    /// <param name="wrapped">The copy of its key for this device.</param>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="grantId">The grant.</param>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="machineId">The machine of the session, whose owner signs the copy.</param>
+    /// <param name="identity">The key of this device.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <param name="access">The access document as this device verified it; null for none.</param>
+    /// <param name="personId">The person who started the session on its machine (<see cref="Protocol.Api.GrantKeyDto.PersonId"/>); null for none.</param>
+    /// <param name="personSignature">The machine's signature of that (<see cref="Protocol.Api.GrantKeyDto.PersonSignature"/>); null for none, which a machine of a team or of the organization refuses.</param>
+    /// <returns>The metadata.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="access"/>, <paramref name="personId"/> or <paramref name="personSignature"/> is null.</exception>
+    /// <exception cref="InvalidDataException">The copy is not for this device, grant or session, is not signed by the owner of the session, or does not open.</exception>
+    public static FleetSessionMetadata Open(string sealedText, string wrapped, string organizationId, string grantId, string sessionId, string machineId, DeviceIdentity identity,
+        FleetDeviceListState list, FleetAccessState? access, string? personId, string? personSignature)
     {
         ArgumentNullException.ThrowIfNull(sealedText);
         ArgumentNullException.ThrowIfNull(wrapped);
@@ -129,6 +157,7 @@ public static class FleetGrantKeys
         var key = Unwrap(wrapped, organizationId, grantId, sessionId, identity, list, signer => list.Members.TryGetValue(machineId, out var machine)
             && (FleetAccessState.IsSharedMachine(access, machine)
                 ? personId is not null && signer.OwnerId == personId && FleetAccessState.HoldsKeysOf(access, machine, personId)
+                    && FleetSessionPersons.Verify(machine.Key, organizationId, machineId, sessionId, personId, personSignature)
                 : FleetAccessState.OwnerOfMachine(access, machineId, list) is { } owner && owner == signer.OwnerId), Grants);
         return key.TryOpen(sessionId, sealedText, out var metadata) && metadata is not null
             ? metadata

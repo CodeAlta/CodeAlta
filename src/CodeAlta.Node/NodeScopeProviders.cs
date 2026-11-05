@@ -77,14 +77,33 @@ internal sealed class NodeScopeProviders
         using var client = connector.Devices.CreateClient();
         var keys = await client.ListProviderKeysAsync(cancellationToken).ConfigureAwait(false);
         var list = connector.Devices.Current ?? await connector.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return Apply(linkId, Open(linkId, keys.Items, list, access));
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    // Opens the keys a server gives this machine. A version this machine never installed from the link opens only when the
+    // device that signed its copy is still a controller device of the list as this machine holds it now: a device removed since
+    // cannot give a new version, another endpoint, against the entry of the list it signed at. The version installed holds as
+    // it was given.
+    internal IReadOnlyList<(ScopeProviderDto Provider, string Key)> Open(string linkId, IReadOnlyList<ScopeProviderKeyDto> keys, FleetDeviceListState list, FleetAccessState access)
+    {
+        var installed = ReadApplied().GetValueOrDefault(linkId)?.Applied ?? new Dictionary<string, long>(StringComparer.Ordinal);
         var opened = new List<(ScopeProviderDto Provider, string Key)>();
-        foreach (var key in keys.Items)
+        foreach (var key in keys)
         {
             try
             {
-                // The copy is signed over the definition: what is installed below is what the maintainer sealed, not what the server says.
+                // The copy is signed over the definition: what is installed is what the maintainer sealed, not what the server says.
+                var known = installed.TryGetValue(key.Provider.Id, out var version) && version == key.Provider.Version;
                 opened.Add((key.Provider, FleetProviderKeys.Open(key.Sealed, key.Wrapped, list.OrganizationId ?? string.Empty, key.Provider.Id, key.Provider.Version,
-                    FleetProviderDefinition.Of(key.Provider), _identity, list, access)));
+                    FleetProviderDefinition.Of(key.Provider), _identity, list, access, signedNow: !known)));
             }
             catch (InvalidDataException exception)
             {
@@ -92,15 +111,7 @@ internal sealed class NodeScopeProviders
             }
         }
 
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            return Apply(linkId, opened);
-        }
-        finally
-        {
-            _gate.Release();
-        }
+        return opened;
     }
 
     // Writes the providers of a link: the keys in the protected store, the definitions in the configuration; those of the
@@ -114,7 +125,9 @@ internal sealed class NodeScopeProviders
         var before = new Dictionary<string, long>(link.Applied, StringComparer.Ordinal);
         var store = new CodeAltaConfigStore(_catalog);
         var definitions = store.LoadGlobalProviderDefinitions(includeDisabled: true).ToList();
-        var ours = applied.Values.SelectMany(static other => other.Applied.Keys).ToHashSet(StringComparer.Ordinal);
+        // An id is the one of the link that installed it first: another server, another organization, never replaces its
+        // definition or its key; it is free again once that link no longer gives it.
+        var others = applied.Where(pair => pair.Key != linkId).SelectMany(static pair => pair.Value.Applied.Keys).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var kept = new Dictionary<string, long>(StringComparer.Ordinal);
         var changed = new List<string>();
         foreach (var (provider, key) in opened)
@@ -133,8 +146,14 @@ internal sealed class NodeScopeProviders
                 continue;
             }
 
+            if (others.Contains(provider.Id))
+            {
+                if (LogManager.IsInitialized) _logger.Warn($"The provider {provider.Id} of {linkId} has the id of a provider another server gave this machine: it is not installed.");
+                continue;
+            }
+
             var existing = definitions.FirstOrDefault(definition => string.Equals(definition.ProviderKey, provider.Id, StringComparison.OrdinalIgnoreCase));
-            if (existing is not null && !ours.Contains(provider.Id)) continue;
+            if (existing is not null && !before.ContainsKey(provider.Id)) continue;
             if (Differs(existing, provider, key)) changed.Add(provider.Id);
             if (existing is not null) definitions.Remove(existing);
             _secrets.SetSecret(SecretName(provider.Id), key, "fleet");

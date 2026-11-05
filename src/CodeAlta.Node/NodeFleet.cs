@@ -449,12 +449,19 @@ internal sealed class NodeServers : IAsyncDisposable
             automations.DeviceId ??= identity.DeviceId;
             Fleet.Server.FleetConnector? ConnectorOf(string linkId) => connections.Find(linkId)?.Connector;
             automations.ServerDevices = linkId => ConnectorOf(linkId)?.Devices.Current;
+            // The tools the policy turns off for the work of the fleet the node API started, at every attachment of its sessions.
+            if (service is not null) automations.WorkToolsOff = service.PolicyToolsOffAsync;
             automations.ServerAccess = linkId => ConnectorOf(linkId)?.Access.Current;
             automations.ServerAccesses = () => connections.Connections.Select(static connection => connection.Connector?.Access.Current);
             automations.ServerClaim = (linkId, claim, token) => ConnectorOf(linkId) is { } connector
                 ? connector.ClaimAutomationAsync(claim, token)
                 : Task.FromResult<CodeAlta.Fleet.Protocol.FleetAutomationClaimResult?>(null);
             automations.ServerReport = (linkId, facts, token) => ConnectorOf(linkId) is { } connector ? connector.ReportAutomationRunsAsync(facts, token) : Task.FromResult(false);
+        }
+        else if (service is not null)
+        {
+            // A node that runs no automation: the work of the fleet of its node API keeps the tools the policy turns off.
+            node.Host.RuntimeService.ToolPatternGate = service.PolicyToolsOffAsync;
         }
 
         // The signed policies of the servers, as this node verified them and kept them: read at each request of the fleet.

@@ -14,6 +14,12 @@ public sealed record FleetNodeBudgetRun(string RunId, string? Title, string? Spa
 {
     /// <summary>Gets the nonce of the hold the run asks when a budget holds it; null for a new one. A send taken again after a restart asks the same hold.</summary>
     public string? Nonce { get; init; }
+
+    /// <summary>Gets the person who started the session here through the organization; null for none (<see cref="Server.FleetBudgetRun.PersonId"/>).</summary>
+    public string? PersonId { get; init; }
+
+    /// <summary>Gets the organization of <see cref="PersonId"/>.</summary>
+    public string? PersonOrganizationId { get; init; }
 }
 
 /// <summary>The statuses of a send that the budgets of the machine decided.</summary>
@@ -152,7 +158,10 @@ public sealed partial class FleetNodeService
         if (_budgetHolds.ContainsKey(runId)) return new FleetCommandResult(FleetBudgetCommandStatuses.Held, Code: FleetBudgetCommandStatuses.Held);
         var project = session.ProjectRef is { Length: > 0 } projectId ? await _host.ProjectCatalog.GetByIdAsync(projectId).ConfigureAwait(false) : null;
         var waits = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var run = new FleetNodeBudgetRun(runId, title ?? session.Title, session.SpaceId, project) { Nonce = held.Nonce };
+        var run = new FleetNodeBudgetRun(runId, title ?? session.Title, session.SpaceId, project)
+        {
+            Nonce = held.Nonce, PersonId = Principals.PersonOf(session.SessionId), PersonOrganizationId = Principals.OrganizationOf(session.SessionId),
+        };
         var admission = admit(run, () => waits.TrySetResult(), CancellationToken.None);
         if (await Task.WhenAny(admission, waits.Task).ConfigureAwait(false) == admission)
         {
@@ -243,7 +252,11 @@ public sealed partial class FleetNodeService
         if (_options.AdmitBudget is not { } admit) return null;
         var session = await _host.RuntimeService.TryGetRecoverableSessionAsync(queued.SessionId, cancellationToken).ConfigureAwait(false);
         var project = session?.ProjectRef is { Length: > 0 } projectId ? await _host.ProjectCatalog.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false) : null;
-        var decided = await admit(new FleetNodeBudgetRun(queued.QueueItemId, session?.Title, session?.SpaceId, project), static () => { }, cancellationToken).ConfigureAwait(false);
+        var run = new FleetNodeBudgetRun(queued.QueueItemId, session?.Title, session?.SpaceId, project)
+        {
+            PersonId = Principals.PersonOf(queued.SessionId), PersonOrganizationId = Principals.OrganizationOf(queued.SessionId),
+        };
+        var decided = await admit(run, static () => { }, cancellationToken).ConfigureAwait(false);
         // The work of the fleet waits on a stop, checked once its admission is decided: a person's own work at the machine goes on.
         var problem = decided.Problem
             ?? (Policy?.Halt is { } halt && Work.List().Any(item => item.SessionId == queued.SessionId) ? halt.Describe(_options.Name) : null);

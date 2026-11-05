@@ -367,7 +367,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             FleetNodeJsonContext.Default.FleetHistoryResult, HistoryAsync);
         On(caller, FleetNodeMethods.SessionsWatch, Access.View, FleetNodeJsonContext.Default.FleetWatchParams,
             FleetNodeJsonContext.Default.FleetWatchResult, WatchAsync);
-        On(caller, FleetNodeMethods.SessionsUnwatch, Access.View, FleetNodeJsonContext.Default.FleetUnwatchParams,
+        // A channel ends its own watches only, whatever its rights now: a reader whose grant gave the watch ends it too.
+        On(caller, FleetNodeMethods.SessionsUnwatch, Access.Anyone, FleetNodeJsonContext.Default.FleetUnwatchParams,
             FleetNodeJsonContext.Default.FleetEmpty, UnwatchAsync);
         On(caller, FleetNodeMethods.SessionsCreate, Access.Start, FleetNodeJsonContext.Default.FleetCreateSessionParams,
             FleetNodeJsonContext.Default.FleetCreateSessionResult, CreateSessionAsync);

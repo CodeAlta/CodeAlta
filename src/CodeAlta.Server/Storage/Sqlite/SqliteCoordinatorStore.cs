@@ -502,17 +502,17 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
 
                 Execute(connection, transaction,
                     "INSERT INTO sessions (id, organization_id, machine_id, epoch, version, state, created_at, updated_at, provider_type, model, turns, tool_calls, " +
-                    "input_tokens, output_tokens, sealed_metadata, received_at, person_id) VALUES ($id, $org, $machine, $epoch, $version, $state, $created, $updated, $provider, " +
-                    "$model, $turns, $tools, $input, $output, $sealed, $received, $person) " +
+                    "input_tokens, output_tokens, sealed_metadata, received_at, person_id, person_signature) VALUES ($id, $org, $machine, $epoch, $version, $state, $created, $updated, " +
+                    "$provider, $model, $turns, $tools, $input, $output, $sealed, $received, $person, $personSignature) " +
                     "ON CONFLICT (id) DO UPDATE SET machine_id = excluded.machine_id, epoch = excluded.epoch, version = excluded.version, state = excluded.state, " +
                     "created_at = excluded.created_at, updated_at = excluded.updated_at, provider_type = excluded.provider_type, model = excluded.model, " +
                     "turns = excluded.turns, tool_calls = excluded.tool_calls, input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens, " +
-                    "sealed_metadata = excluded.sealed_metadata, received_at = excluded.received_at, person_id = excluded.person_id " +
+                    "sealed_metadata = excluded.sealed_metadata, received_at = excluded.received_at, person_id = excluded.person_id, person_signature = excluded.person_signature " +
                     "WHERE excluded.epoch > sessions.epoch OR (excluded.epoch = sessions.epoch AND excluded.version > sessions.version)",
                     ("$id", fact.Id), ("$org", fact.OrganizationId), ("$machine", fact.MachineId), ("$epoch", fact.Epoch), ("$version", fact.Version),
                     ("$state", fact.State), ("$created", ToTime(fact.CreatedAt)), ("$updated", ToTime(fact.UpdatedAt)), ("$provider", fact.ProviderType),
                     ("$model", fact.Model), ("$turns", fact.Turns), ("$tools", fact.ToolCalls), ("$input", fact.InputTokens), ("$output", fact.OutputTokens),
-                    ("$sealed", fact.SealedMetadata), ("$received", ToTime(fact.ReceivedAt)), ("$person", fact.PersonId));
+                    ("$sealed", fact.SealedMetadata), ("$received", ToTime(fact.ReceivedAt)), ("$person", fact.PersonId), ("$personSignature", fact.PersonSignature));
                 outcomes.Add((fact, SessionFactOutcome.Applied));
             }
 
@@ -1219,7 +1219,8 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
     private const string DeviceOfRequestColumns = "SELECT d.id, d.organization_id, d.name, d.kind, d.public_key, d.fingerprint, d.owner_person_id, d.status, " +
         "d.enrolled_by_device_id, d.enrollment_token_id, d.created_at, d.approved_at, d.revoked_at, d.version, p.status";
     private const string SessionColumns =
-        "SELECT id, organization_id, machine_id, epoch, version, state, created_at, updated_at, provider_type, model, turns, tool_calls, input_tokens, output_tokens, sealed_metadata, received_at, person_id";
+        "SELECT id, organization_id, machine_id, epoch, version, state, created_at, updated_at, provider_type, model, turns, tool_calls, input_tokens, output_tokens, sealed_metadata, received_at, person_id, " +
+        "person_signature";
     private const string AuditColumns =
         "SELECT seq, recorded_at, actor_person_id, actor_device_id, action, target, result, source_address, request_id, details, previous_hash, hash";
 
@@ -1250,7 +1251,7 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
     private static SessionRecord ReadSession(SqliteDataReader reader)
         => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(3), reader.GetInt64(4), reader.GetString(5), FromTime(reader.GetInt64(6)),
             FromTime(reader.GetInt64(7)), GetNullableString(reader, 8), GetNullableString(reader, 9), reader.GetInt64(10), reader.GetInt64(11), reader.GetInt64(12),
-            reader.GetInt64(13), GetNullableString(reader, 14), FromTime(reader.GetInt64(15)), GetNullableString(reader, 16));
+            reader.GetInt64(13), GetNullableString(reader, 14), FromTime(reader.GetInt64(15)), GetNullableString(reader, 16)) { PersonSignature = GetNullableString(reader, 17) };
 
     private static AuditRecord ReadAudit(SqliteDataReader reader)
         => new(reader.GetInt64(0), FromTime(reader.GetInt64(1)),

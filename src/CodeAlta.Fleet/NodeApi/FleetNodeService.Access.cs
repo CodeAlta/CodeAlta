@@ -172,13 +172,35 @@ public sealed partial class FleetNodeService
     // reach it (not their session, not a device of the owner): it reads that session only, for this call.
     private (TrustedDevice Device, string SessionId)? ContentReader(FleetNodeCaller caller, JsonElement? parameters)
     {
-        if (caller.IsOwner || ContentGrants is not { } grants || parameters is not { ValueKind: JsonValueKind.Object } read
+        if (parameters is not { ValueKind: JsonValueKind.Object } read
             || !read.TryGetProperty("sessionId", out var named) || named.ValueKind != JsonValueKind.String || named.GetString() is not { Length: > 0 } sessionId)
             return null;
+        return ContentReader(caller, sessionId) is { } device ? (device, sessionId) : null;
+    }
+
+    private TrustedDevice? ContentReader(FleetNodeCaller caller, string sessionId)
+    {
+        if (caller.IsOwner || ContentGrants is not { } grants) return null;
         if (caller.Trust.IsRevoked(caller.Fingerprint) || _trusted.FindTrusted(caller.Fingerprint) is not null) return null;
         if (caller.Trust.FindTrusted(caller.Fingerprint) is not { PersonId: { } person, OwnSessionsOnly: true } device) return null;
         if (Principals.Owns(sessionId, person, device.OrganizationId) || !grants(device.OrganizationId, person, sessionId)) return null;
-        return (device with { Permissions = DevicePermissions.View }, sessionId);
+        return device with { Permissions = DevicePermissions.View };
+    }
+
+    // Whether the caller of a live read may still read the session, as at its start: a grant that expired or that a newer
+    // signed document took away, a pairing revoked or narrowed, ends what it reads live.
+    private bool MayStillRead(FleetNodeCaller caller, string sessionId)
+    {
+        if (ContentReader(caller, sessionId) is not null) return true;
+        try
+        {
+            RequireOwnSession(Authorize(caller, Access.View), new FleetSessionRef(sessionId));
+            return true;
+        }
+        catch (FleetException)
+        {
+            return false;
+        }
     }
 
     // A device that sees its own sessions only reaches a session its person started here; others are not shown to exist.

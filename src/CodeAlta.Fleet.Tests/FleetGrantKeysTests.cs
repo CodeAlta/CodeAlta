@@ -195,9 +195,10 @@ public sealed class FleetGrantKeysTests
         // Grants of a session of the machine: signed by a device of the person who started it there, never of another person.
         var metadata = new FleetSessionMetadata("Fix the parser");
         var (sealedByCy, cyWraps) = FleetGrantKeys.Seal("org", "g1", "s1", metadata, [PublicKey(devices.Laptop)], list.Sequence, devices.Cy);
-        Assert.AreEqual("Fix the parser", FleetGrantKeys.Open(sealedByCy, cyWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list, access, "p3").Title);
+        Assert.AreEqual("Fix the parser", FleetGrantKeys.Open(sealedByCy, cyWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list, access, "p3",
+            devices.StartedBy("s1", "p3")).Title);
         Assert.ThrowsExactly<InvalidDataException>(() => FleetGrantKeys.Open(sealedByCy, cyWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list,
-            access, "p2"), "a copy of another person than the one of the session");
+            access, "p2", devices.StartedBy("s1", "p2")), "a copy of another person than the one of the session");
         Assert.ThrowsExactly<InvalidDataException>(() => FleetGrantKeys.Open(sealedByCy, cyWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list,
             access), "a session of a team machine without its person");
         var (sealedByDesk, deskWraps) = FleetGrantKeys.Seal("org", "g1", "s1", metadata, [PublicKey(devices.Laptop)], list.Sequence, devices.Desk);
@@ -259,7 +260,8 @@ public sealed class FleetGrantKeysTests
         // Grants of a session of the machine: signed by a device of the signer who started it there, never of another person.
         var metadata = new FleetSessionMetadata("Fix the parser");
         var (sealedByCy, cyWraps) = FleetGrantKeys.Seal("org", "g1", "s1", metadata, [PublicKey(devices.Laptop)], list.Sequence, devices.Cy);
-        Assert.AreEqual("Fix the parser", FleetGrantKeys.Open(sealedByCy, cyWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list, access, "p3").Title);
+        Assert.AreEqual("Fix the parser", FleetGrantKeys.Open(sealedByCy, cyWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list, access, "p3",
+            devices.StartedBy("s1", "p3")).Title);
         Assert.ThrowsExactly<InvalidDataException>(() => FleetGrantKeys.Open(sealedByCy, cyWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list,
             access), "a session of a machine of the organization without its person");
         var (sealedByDesk, deskWraps) = FleetGrantKeys.Seal("org", "g1", "s1", metadata, [PublicKey(devices.Laptop)], list.Sequence, devices.Desk);
@@ -386,9 +388,40 @@ public sealed class FleetGrantKeysTests
             list, access), "the same definition, in another instance");
     }
 
+    [TestMethod]
+    public void ACopyOfASessionOfATeamMachine_HoldsForThePersonTheMachineSignedStartedIt_NeverForTheOneTheServerSays()
+    {
+        using var devices = new Devices();
+        var list = devices.List();
+        // A machine of team t1: Bea (p2) maintains it, Cy (p3) is a member. Bea started the session s1 there; Cy started s2.
+        var access = FleetAccessState.Empty with
+        {
+            Teams = System.Collections.Immutable.ImmutableDictionary.CreateRange([KeyValuePair.Create("t1", new FleetAccessTeam("t1", ["p2"], ["p3"], false))]),
+            Machines = System.Collections.Immutable.ImmutableDictionary.CreateRange([KeyValuePair.Create(devices.Node.DeviceId, "t1")]),
+        };
+        var (byBea, beaWraps) = FleetGrantKeys.Seal("org", "g1", "s1", new FleetSessionMetadata("Fix the parser"), [PublicKey(devices.Laptop)], list.Sequence, devices.Bea);
+        Assert.AreEqual("Fix the parser", FleetGrantKeys.Open(byBea, beaWraps.Single().Wrapped, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list, access, "p2",
+            devices.StartedBy("s1", "p2")).Title, "the machine signed that Bea started it");
+
+        // The coordinator, with Cy, says s1 is Cy's and relays a copy Cy signed for it, with what she wants its title to be.
+        var (byCy, cyWraps) = FleetGrantKeys.Seal("org", "g1", "s1", new FleetSessionMetadata("Nothing to see"), [PublicKey(devices.Laptop)], list.Sequence, devices.Cy);
+        var forged = cyWraps.Single().Wrapped;
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetGrantKeys.Open(byCy, forged, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list, access, "p3"),
+            "the person the server says, without the machine's word, is not who started the session");
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetGrantKeys.Open(byCy, forged, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list, access, "p3",
+            devices.StartedBy("s2", "p3")), "the machine's word for another session of hers");
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetGrantKeys.Open(byCy, forged, "org", "g1", "s1", devices.Node.DeviceId, devices.Laptop, list, access, "p3",
+            System.Buffers.Text.Base64Url.EncodeToString(devices.Cy.SignData(FleetSessionPersons.GetSignedBytes("org", devices.Node.DeviceId, "s1", "p3")))),
+            "her own word for it");
+    }
+
     // The founder's laptop, the desk of the owner of the session (p1), their node, Bea (p2) and Cy (p3).
     private sealed class Devices : IDisposable
     {
+        // The node's signature that a person started one of its sessions, as it publishes it.
+        public string StartedBy(string sessionId, string personId)
+            => System.Buffers.Text.Base64Url.EncodeToString(Node.SignData(FleetSessionPersons.GetSignedBytes("org", Node.DeviceId, sessionId, personId)));
+
         private readonly TestFolder _folder = new();
 
         public Devices()

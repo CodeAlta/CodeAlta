@@ -165,7 +165,11 @@ public sealed record SessionRecord(
     long OutputTokens,
     string? SealedMetadata,
     DateTimeOffset ReceivedAt,
-    string? PersonId = null);
+    string? PersonId = null)
+{
+    /// <summary>Gets the machine's signature that <see cref="PersonId"/> started the session there, which the server relays and never reads; null for none.</summary>
+    public string? PersonSignature { get; init; }
+}
 
 /// <summary>A metadata key of a space of a person: what the server knows of it, never the key itself.</summary>
 /// <param name="Id">The id of the key.</param>

@@ -45,13 +45,25 @@ public sealed class FleetOrganizationAccess
         Devices = devices;
         _pinPath = pinPath;
         _current = Kept();
+        _anchored = _current is null && HasAnchor();
     }
+
+    // Whether the pin holds a version this device verified that it cannot read back (Kept): the document is not "none".
+    private readonly bool _anchored;
 
     /// <summary>Gets the anchored device list of the link.</summary>
     public FleetOrganizationDevices Devices { get; }
 
     /// <summary>Gets the document as last verified; null before the first read, and <see cref="FleetAccessState.Empty"/> while the organization signed none.</summary>
     public FleetAccessState? Current => Volatile.Read(ref _current);
+
+    /// <summary>
+    /// Gets whether this device verified a version of the access document before that it cannot read back now (its pin was kept by
+    /// an older version without it, or was damaged), and no read verified the chain again since: <see cref="Current"/> is null, yet
+    /// the organization did sign a document, which may give the machine another owner, a team or the organization. What it decides
+    /// is unknown, never "no document": the trust of the organization lets nobody in until a read verifies it again.
+    /// </summary>
+    public bool IsUnavailable => _anchored && Volatile.Read(ref _current) is null;
 
     /// <summary>Gets the document at a version this device verified in this process, or null.</summary>
     /// <param name="number">The number of the version.</param>
@@ -207,6 +219,18 @@ public sealed class FleetOrganizationAccess
         catch (FleetAccessDocumentException)
         {
             return null;
+        }
+    }
+
+    private bool HasAnchor()
+    {
+        try
+        {
+            return ReadPin() is { Number: > 0 };
+        }
+        catch (FleetAccessDocumentException)
+        {
+            return true;
         }
     }
 

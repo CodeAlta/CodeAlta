@@ -368,6 +368,13 @@ public sealed record GrantKeyDto(string GrantId, string SessionId, string Machin
     /// organization, of that person when they are an owner or an admin who signs.
     /// </summary>
     public string? PersonId { get; init; }
+
+    /// <summary>
+    /// Gets the machine's signature that <see cref="PersonId"/> started the session there (<see cref="FleetSessionPersons"/>), as the
+    /// machine published it; null for none. On a machine of a team or of the organization, the copy holds only with it: the server
+    /// does not say whose session it is.
+    /// </summary>
+    public string? PersonSignature { get; init; }
 }
 
 /// <summary>A list of items of access control.</summary>

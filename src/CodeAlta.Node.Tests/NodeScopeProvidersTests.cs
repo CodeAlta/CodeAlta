@@ -127,6 +127,108 @@ public sealed class NodeScopeProvidersTests
     }
 
     [TestMethod]
+    public async Task AControllerDeviceRemovedSince_GivesNoNewVersion_AndTheVersionItGaveBeforeStays()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options(), token);
+        var catalog = node.Host.CatalogOptions;
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "laptop"));
+        using var identity = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        using var bea = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "bea"));
+        using var beaDesk = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "bea-desk"));
+        var store = new LocalSecretStore(Path.Combine(root.Root, "secrets"), new PlainProtector());
+        var config = new CodeAltaConfigStore(catalog);
+        var providers = new NodeScopeProviders(catalog, store, identity);
+
+        // Bea maintains the team of this machine, with two controller devices; her laptop is removed at the fifth entry.
+        var entries = new List<FleetSignedDeviceListEntry>();
+        void Add(string operation, DeviceIdentity device, string? kind, string? organization, string? owner, DeviceIdentity? by = null)
+        {
+            var payload = FleetDeviceListEntries.SerializePayload(new FleetDeviceListEntryPayload(1, organization, entries.Count + 1,
+                entries.Count == 0 ? null : FleetDeviceListEntries.Hash(entries[^1]), operation, device.DeviceId,
+                operation == FleetDeviceListOperations.Add ? Convert.ToBase64String(device.ExportSubjectPublicKeyInfo()) : null, kind, owner, (by ?? laptop).DeviceId,
+                new DateTimeOffset(2026, 11, 3, 9, 0, 0, TimeSpan.Zero)));
+            entries.Add(new FleetSignedDeviceListEntry(payload, System.Buffers.Text.Base64Url.EncodeToString((by ?? laptop).SignData(FleetDeviceListEntries.GetSignedBytes(payload)))));
+        }
+
+        Add(FleetDeviceListOperations.Add, laptop, FleetDeviceKinds.Controller, null, null);
+        Add(FleetDeviceListOperations.Add, identity, FleetDeviceKinds.Node, "org", "p1");
+        Add(FleetDeviceListOperations.Add, bea, FleetDeviceKinds.Controller, "org", "p2");
+        Add(FleetDeviceListOperations.Add, beaDesk, FleetDeviceKinds.Controller, "org", "p2", bea);
+        var before = FleetDeviceListVerifier.VerifyOrThrow(entries, "org");
+        Add(FleetDeviceListOperations.Remove, bea, null, "org", null);
+        var after = FleetDeviceListVerifier.VerifyOrThrow(entries, "org");
+        Assert.IsTrue(after.Removed.Contains(bea.DeviceId));
+        var access = FleetAccessState.Empty with
+        {
+            OrganizationId = "org", Teams = FleetAccessState.Empty.Teams.Add("infra", new FleetAccessTeam("infra", ["p2"], [], false, [])),
+            Machines = FleetAccessState.Empty.Machines.Add(identity.DeviceId, "infra"),
+        };
+        Assert.IsTrue(FleetDevicePublicKey.TryParse(Convert.ToBase64String(identity.ExportSubjectPublicKeyInfo()), out var machineKey));
+        ScopeProviderKeyDto Given(long version, string endpoint, string apiKey, DeviceIdentity signer)
+        {
+            var provider = new ScopeProviderDto("infra-gateway", FleetPrincipalKinds.Team, "infra", "Infra gateway", "openai-responses", endpoint, ["gpt-6.1"], version,
+                "p2", DateTimeOffset.UtcNow, [identity.DeviceId]);
+            var (sealedText, wraps) = Fleet.Server.FleetProviderKeys.Seal("org", provider.Id, version, Fleet.Server.FleetProviderDefinition.Of(provider), apiKey, [machineKey],
+                before.Sequence, signer);
+            return new ScopeProviderKeyDto(provider, sealedText, wraps.Single().Wrapped);
+        }
+
+        string? Endpoint() => config.LoadGlobalProviderDefinitions(includeDisabled: true).SingleOrDefault(static definition => definition.ProviderKey == "infra-gateway")?.ApiUrl;
+
+        // Version 2, from her laptop while it was in the list: installed, and it stays once the laptop is removed.
+        var second = Given(2, "https://gateway.example/v1", "sk-2", bea);
+        providers.Apply("link-1", providers.Open("link-1", [second], before, access));
+        Assert.AreEqual("https://gateway.example/v1", Endpoint());
+        Assert.AreEqual(1, providers.Open("link-1", [second], after, access).Count, "the version installed holds as it was given");
+
+        // The removed laptop signs version 3 against the entry it was in the list at, to another endpoint: refused.
+        Assert.AreEqual(0, providers.Open("link-1", [Given(3, "https://attacker.example/v1", "sk-3", bea)], after, access).Count,
+            "a device removed since gives no new version");
+
+        // Her other device gives it: taken.
+        var third = providers.Open("link-1", [Given(3, "https://gateway.example/v3", "sk-3", beaDesk)], after, access);
+        providers.Apply("link-1", third);
+        Assert.AreEqual("https://gateway.example/v3", Endpoint());
+    }
+
+    [TestMethod]
+    public async Task TwoServersGivingAProviderOfTheSameId_NeverReplaceEachOther()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options(), token);
+        var catalog = node.Host.CatalogOptions;
+        using var identity = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var store = new LocalSecretStore(Path.Combine(root.Root, "secrets"), new PlainProtector());
+        var config = new CodeAltaConfigStore(catalog);
+        var providers = new NodeScopeProviders(catalog, store, identity);
+        ScopeProviderDto Provider(string id, string endpoint) => new(id, FleetPrincipalKinds.Organization, "org", "Gateway", "openai-responses", endpoint, ["gpt-6.1"], 1,
+            "p2", DateTimeOffset.UtcNow, ["self"]);
+        (string? Endpoint, string? Key) Installed()
+        {
+            var definition = config.LoadGlobalProviderDefinitions(includeDisabled: true).SingleOrDefault(static definition => definition.ProviderKey == "gateway");
+            return (definition?.ApiUrl, store.TryGetSecret(NodeScopeProviders.SecretName("gateway"), out var key) ? key : null);
+        }
+
+        providers.Apply("link-1", [(Provider("gateway", "https://first.example/v1"), "sk-first")]);
+        // The second organization names its provider the same: the first one stays as its server gave it.
+        Assert.AreEqual(0, providers.Apply("link-2", [(Provider("gateway", "https://second.example/v1"), "sk-second")]).Count);
+        Assert.AreEqual(("https://first.example/v1", "sk-first"), Installed());
+        Assert.AreEqual(0, providers.Apply("link-2", [(Provider("Gateway", "https://second.example/v1"), "sk-second")]).Count, "nor in other letters");
+        Assert.AreEqual(("https://first.example/v1", "sk-first"), Installed());
+        // Taken away by the second server: the provider of the first one is not removed either.
+        Assert.AreEqual(0, providers.Apply("link-2", []).Count);
+        Assert.AreEqual(("https://first.example/v1", "sk-first"), Installed());
+
+        // Once the first server no longer gives it, the id is free.
+        providers.Apply("link-1", []);
+        CollectionAssert.AreEqual(new[] { "gateway" }, providers.Apply("link-2", [(Provider("gateway", "https://second.example/v1"), "sk-second")]).ToArray());
+        Assert.AreEqual(("https://second.example/v1", "sk-second"), Installed());
+    }
+
+    [TestMethod]
     public void TwoProvidersWhoseIdsReadAlike_NeverShareTheSecretOfTheirKey()
     {
         Assert.AreEqual("CODEALTA_PROVIDER_MY_GATEWAY", NodeScopeProviders.SecretName("my-gateway"), "an id of words joined by dashes reads in its name");

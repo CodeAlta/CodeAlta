@@ -124,10 +124,15 @@ public sealed class AccessControlTests
         var listed = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/sessions")).Read<ListResponse<SessionDto>>().Items;
         Assert.AreEqual("s1", listed.Single().Id, "the grantee sees the session whose content they were given");
         var teamGrant = await server.SendAsync(mia, HttpMethod.Post, "/api/v1/grants",
-            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "automation.edit", FleetScopeKinds.Team, team.Id));
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "automation.run", FleetScopeKinds.Team, team.Id));
         Assert.AreEqual(HttpStatusCode.Created, teamGrant.Status, "a maintainer grants on the team");
         Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(mia, HttpMethod.Post, "/api/v1/grants",
-            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "automation.edit", FleetScopeKinds.Organization))).Status, "not on the organization");
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "automation.run", FleetScopeKinds.Organization))).Status, "not on the organization");
+        // Editing automations is not granted: machines take versions from the maintainers of their team only.
+        var edit = await server.SendAsync(mia, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "automation.edit", FleetScopeKinds.Team, team.Id));
+        Assert.AreEqual(HttpStatusCode.BadRequest, edit.Status, edit.Body.ToString());
+        StringAssert.Contains(edit.Body.ToString(), "maintainer");
         var maxGrants = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grants")).Read<AccessListDto<GrantDto>>();
         Assert.AreEqual(2, maxGrants.Items.Count, "a person sees the grants made to them");
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(max, HttpMethod.Delete, $"/api/v1/grants/{pending.Id}")).Status, "and may give one back");
@@ -137,7 +142,7 @@ public sealed class AccessControlTests
         Assert.AreEqual(HttpStatusCode.OK, review.Status, review.Body.ToString());
         var rows = review.Read<AccessReviewDto>().Rows;
         Assert.IsTrue(rows.Any(row => row.PrincipalId == miaId && row.Source == $"team:{team.Id}:maintainer"));
-        Assert.IsTrue(rows.Any(row => row.PrincipalId == maxId && row.Capability == "automation.edit" && row.Source.StartsWith("grant:", StringComparison.Ordinal)));
+        Assert.IsTrue(rows.Any(row => row.PrincipalId == maxId && row.Capability == "automation.run" && row.Source.StartsWith("grant:", StringComparison.Ordinal)));
         Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Get, "/api/v1/access/review")).Status);
     }
 
@@ -453,6 +458,88 @@ public sealed class AccessControlTests
             "nobody else does");
         var keyed = await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/grants/{grant.Id}/keys", new ConfirmGrantKeysRequest("sealed", [new GrantKeyWrapDto(max.DeviceId, "wrapped")]));
         Assert.AreEqual(HttpStatusCode.OK, keyed.Status, keyed.Body.ToString());
+    }
+
+    [TestMethod]
+    public async Task TheMachinesWordOnWhoStartedASession_ReachesTheGranteeWithItsKeys()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Build box");
+        var (setup, _) = await server.SetUpWithNodeAsync(owner, node);
+        var (max, maxId) = await AddPersonAsync(server, owner, setup, "Max");
+        using var maxDevice = max;
+        var signature = node.Sign(FleetSessionPersons.GetSignedBytes(setup.Organization.Id, node.DeviceId, "s1", setup.Owner.Id));
+        var device = (await server.GetService<ICoordinatorStore>().GetDeviceAsync(node.DeviceId))!;
+        var cursors = await server.GetService<ICoordinatorStore>().GetPublicationCursorsAsync(node.DeviceId);
+        await server.GetService<CodeAlta.Server.Services.PublicationService>().PublishFactsAsync(device, new FleetFactsPublish(Math.Max(cursors.Facts, cursors.Inventory) + 1,
+            [new FleetSessionFact("s1", 1, 1, "idle", server.Clock.Now, server.Clock.Now, PersonId: setup.Owner.Id, PersonSignature: signature)]), CancellationToken.None);
+        var grant = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "session.view-content", FleetScopeKinds.Resource, "session:s1", Sealed: true))).Read<GrantDto>();
+        var keyed = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/grants/{grant.Id}/keys", new ConfirmGrantKeysRequest("sealed", [new GrantKeyWrapDto(max.DeviceId, "wrapped")]));
+        Assert.AreEqual(HttpStatusCode.OK, keyed.Status, keyed.Body.ToString());
+
+        var key = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grant-keys")).Read<AccessListDto<GrantKeyDto>>().Items.Single();
+        Assert.AreEqual((setup.Owner.Id, signature), (key.PersonId, key.PersonSignature), "relayed as the machine signed it, for the grantee to verify");
+    }
+
+    [TestMethod]
+    public async Task APersonGrantedToSeeAnAutomationOfAnother_ReadsItsRuns()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Build box");
+        var (setup, machine) = await server.SetUpWithNodeAsync(owner, node);
+        var (cy, cyId) = await AddPersonAsync(server, owner, setup, "Cy");
+        var (dan, _) = await AddPersonAsync(server, owner, setup, "Dan");
+        using var cyDevice = cy;
+        using var danDevice = dan;
+        var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, setup.Organization.Id, "nightly", 1, machine.Id, false,
+            true, ["hourly"], null, null, "{\"sealed\":\"for the machine\"}", owner.DeviceId, owner.PublicKey, server.Clock.Now));
+        var put = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/nightly",
+            new PutAutomationRequest(new FleetSignedAutomationVersion(text, owner.Sign(FleetAutomationVersionDocuments.GetSignedBytes(text)))));
+        Assert.AreEqual(HttpStatusCode.OK, put.Status, put.Body.ToString());
+        await server.GetService<CodeAlta.Server.Services.FleetAutomationService>().RecordRunsAsync((await server.GetService<ICoordinatorStore>().GetDeviceAsync(node.DeviceId))!,
+            new FleetAutomationRunFacts([new FleetAutomationRunFact("run-a", "nightly", 1, "schedule", "succeeded", server.Clock.Now, server.Clock.Now)]), CancellationToken.None);
+
+        // Alex's own automation, which no team owns: he lets Cy see it.
+        var granted = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, cyId, "automation.view", FleetScopeKinds.Resource, "automation:nightly"));
+        Assert.AreEqual(HttpStatusCode.Created, granted.Status, granted.Body.ToString());
+        var runs = await server.SendAsync(cy, HttpMethod.Get, "/api/v1/automations/nightly/runs");
+        Assert.AreEqual(HttpStatusCode.OK, runs.Status, runs.Body.ToString());
+        CollectionAssert.AreEqual(new[] { "run-a" }, runs.Read<AutomationRunListDto>().Runs.Select(static run => run.RunId).ToArray());
+        Assert.AreEqual(HttpStatusCode.NotFound, (await server.SendAsync(dan, HttpMethod.Get, "/api/v1/automations/nightly/runs")).Status, "nobody else does");
+    }
+
+    [TestMethod]
+    public async Task AGrantOfASessionWithdrawnSince_DoesNotBreakTheGrantsOfAnybodyElse()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Build box");
+        var (setup, _) = await server.SetUpWithNodeAsync(owner, node);
+        var (max, maxId) = await AddPersonAsync(server, owner, setup, "Max");
+        var (cy, cyId) = await AddPersonAsync(server, owner, setup, "Cy");
+        using var maxDevice = max;
+        using var cyDevice = cy;
+        await PublishSessionAsync(server, node, "s1");
+        var shared = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "session.view-content", FleetScopeKinds.Resource, "session:s1", Sealed: true));
+        Assert.AreEqual(HttpStatusCode.Created, shared.Status, shared.Body.ToString());
+        var cys = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, cyId, "audit.read", FleetScopeKinds.Organization, null));
+        Assert.AreEqual(HttpStatusCode.Created, cys.Status, cys.Body.ToString());
+
+        // The session becomes Private: its machine withdraws it, and its grant stays.
+        var machine = (await server.GetService<ICoordinatorStore>().GetDeviceAsync(node.DeviceId))!;
+        await server.GetService<CodeAlta.Server.Services.PublicationService>().WithdrawFactsAsync(machine, new FleetFactsWithdraw(["s1"]), CancellationToken.None);
+
+        // Cy, who answers for no session, still reads her own grants.
+        var listed = await server.SendAsync(cy, HttpMethod.Get, "/api/v1/grants");
+        Assert.AreEqual(HttpStatusCode.OK, listed.Status, listed.Body.ToString());
+        CollectionAssert.AreEqual(new[] { cys.Read<GrantDto>().Id }, listed.Read<AccessListDto<GrantDto>>().Items.Select(static grant => grant.Id).ToArray());
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grants")).Status, "and the grantee of the session reads hers");
     }
 
     [TestMethod]

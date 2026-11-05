@@ -56,11 +56,11 @@ altanode secrets delete-var GRAFANA_URL
 
 The value of a secret comes from the standard input or the prompt, never from an argument, which other processes of the machine can read. A node that runs uses a new value at its next use.
 
-From CodeAlta Desktop, a computer paired with the machine that manages it changes the same secrets and variables in the **Secrets** section of the page of the machine (see [Manage a machine from CodeAlta Desktop](fleet.md#manage-a-machine-from-codealta-desktop)). A computer that reaches the machine only through a CodeAlta Server never does.
+From CodeAlta Desktop, a computer paired with the machine that manages it changes the same secrets and variables in the **Secrets** section of the page of the machine (see [Manage a machine from CodeAlta Desktop](fleet/machines.md#manage-a-machine-from-codealta-desktop)). A computer that reaches the machine only through a CodeAlta Server never does.
 
 ## Secrets of your machines with a server
 
-With a [CodeAlta Server](fleet.md#connect-to-a-codealta-server), the computer that made it sets the secrets and variables of all your machines in one place: open **Settings > Fleet > Secrets and environments**.
+With a [CodeAlta Server](fleet/server.md), the computer that made it sets the secrets and variables of all your machines in one place: open **Settings > Fleet > Secrets and environments**.
 
 - **Add a value…** takes a secret or a variable, its name and value, where it applies, and the machines that get it.
 - **Where it applies**: **All my work**, a space linked to the server, a project, or an [environment](#environments). A run takes the value of the narrowest: its environment, then its project, its space, then all your work. A secret of the machine itself (**Settings > Secrets** on it, `altanode secrets`) comes first.
@@ -74,7 +74,7 @@ Your computer seals each value for the machines you choose and for your other co
 
 An environment is a set of values with rules, such as `production`. Under **Environments**, give it a name, the labels of the machines it runs on (none for all your machines) and the people who approve its runs (none for no approval). Then set values **Where it applies** is that environment.
 
-An automation uses an environment with `environment = "production"` in its table. Its run starts only on a machine with one of the labels, and, when the environment needs an approval, waits for it: **Runs that wait for you** lists it at the top of the page, under the name your computer verified, and **Approve…** confirms it beside its row; a person you name as approver finds it on their own page. An approval is for that run only. A name two environments share, such as two people's `production`, starts no run. Its session keeps the values of the environment when the machine restarts, until the rules of the environment change. The labels of a machine are set on its page in **Settings > Fleet > Machines**, or with `altanode labels` on it (see [Label your machines](fleet.md#label-your-machines)).
+An automation uses an environment with `environment = "production"` in its table. Its run starts only on a machine with one of the labels, and, when the environment needs an approval, waits for it: **Runs that wait for you** lists it at the top of the page, under the name your computer verified, and **Approve…** confirms it beside its row; a person you name as approver finds it on their own page. An approval is for that run only. A name two environments share, such as two people's `production`, starts no run. Its session keeps the values of the environment when the machine restarts, until the rules of the environment change. The labels of a machine are set on its page in **Settings > Fleet > Machines**, or with `altanode labels` on it (see [Label your machines](fleet/machines.md#label-your-machines)).
 
 ## Agents
 
