@@ -36,7 +36,8 @@ public sealed partial class FleetNodeService
     private readonly ConcurrentDictionary<string, byte> _budgetAdmitted = new(StringComparer.Ordinal);
 
     // The sends a budget holds, kept across restarts; created with the service.
-    private FleetHeldSends HeldSends => LazyInitializer.EnsureInitialized(ref _heldSends, () => new FleetHeldSends(Path.Combine(_host.CatalogOptions.FleetRoot, "held-sends.json")));
+    private FleetHeldSends HeldSends => LazyInitializer.EnsureInitialized(ref _heldSends, () => new FleetHeldSends(Path.Combine(_host.CatalogOptions.FleetRoot, "held-sends.json"),
+        new CodeAlta.Catalog.Secrets.LocalSecretStore(_host.CatalogOptions.GlobalRoot)));
 
     private FleetHeldSends? _heldSends;
 
@@ -113,7 +114,7 @@ public sealed partial class FleetNodeService
             // Kept before the answer says it waits: a send accepted is never lost with the process.
             HeldSends.Add(held);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or CodeAlta.Catalog.Secrets.SecretStoreUnavailableException)
         {
             _budgetHolds.TryRemove(runId, out _);
             LogInfo($"The prompt of the session {session.SessionId} that waits for its budget could not be kept: {exception.Message}");

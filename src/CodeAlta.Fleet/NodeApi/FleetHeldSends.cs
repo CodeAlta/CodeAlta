@@ -29,7 +29,8 @@ internal sealed record FleetHeldSend(string RunId, string SessionId, string Text
 /// <summary>
 /// The sends a budget holds (<c>doc/fleet/observability.md</c>, budgets and alerts), kept in the fleet folder of the node before
 /// the node answers that a send waits: a restart takes them again, and their sessions wait for a person meanwhile (they do not
-/// move). One writer: the node service.
+/// move). One writer: the node service. A prompt may hold the value of a secret a person pasted: its text and its title are kept
+/// protected as the secrets of the machine are (<see cref="CodeAlta.Catalog.Secrets.LocalSecretStore.ProtectText"/>), never in clear.
 /// </summary>
 internal sealed class FleetHeldSends
 {
@@ -37,10 +38,20 @@ internal sealed class FleetHeldSends
     internal const int MaximumKept = 512;
 
     private readonly string _path;
+    private readonly CodeAlta.Catalog.Secrets.LocalSecretStore _protection;
     private readonly Lock _gate = new();
     private ImmutableDictionary<string, FleetHeldSend>? _sends;
+    // The sends as the file keeps them, their text and title protected: each one is protected once, when it is added.
+    private ImmutableDictionary<string, FleetHeldSend> _written = ImmutableDictionary.Create<string, FleetHeldSend>(StringComparer.Ordinal);
 
-    public FleetHeldSends(string path) => _path = path;
+    /// <summary>Initializes a new instance of the <see cref="FleetHeldSends"/> class.</summary>
+    /// <param name="path">The file of the sends.</param>
+    /// <param name="protection">The store of the machine, whose protection the texts of the sends are kept with.</param>
+    public FleetHeldSends(string path, CodeAlta.Catalog.Secrets.LocalSecretStore protection)
+    {
+        _path = path;
+        _protection = protection;
+    }
 
     /// <summary>Gets the sessions whose send waits.</summary>
     public IReadOnlyCollection<string> SessionIds
@@ -59,6 +70,7 @@ internal sealed class FleetHeldSends
 
     /// <summary>Keeps a send that waits, written before the node says it waits.</summary>
     /// <exception cref="IOException">It could not be written.</exception>
+    /// <exception cref="CodeAlta.Catalog.Secrets.SecretStoreUnavailableException">The protected store of the machine cannot protect it.</exception>
     /// <exception cref="FleetHeldSendsFullException">The node holds <see cref="MaximumKept"/> sends already: none is evicted for it.</exception>
     public void Add(FleetHeldSend send)
     {
@@ -66,7 +78,8 @@ internal sealed class FleetHeldSends
         {
             var known = Load();
             if (!known.ContainsKey(send.HoldId) && known.Count >= MaximumKept) throw new FleetHeldSendsFullException(known.Count);
-            Save(known.SetItem(send.HoldId, send));
+            var written = send with { Text = _protection.ProtectText(send.Text), Title = send.Title is { } title ? _protection.ProtectText(title) : null };
+            Save(known.SetItem(send.HoldId, send), _written.SetItem(send.HoldId, written));
         }
     }
 
@@ -77,7 +90,7 @@ internal sealed class FleetHeldSends
         {
             var sends = Load();
             if (!sends.ContainsKey(holdId)) return;
-            try { Save(sends.Remove(holdId)); }
+            try { Save(sends.Remove(holdId), _written.Remove(holdId)); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 // Taken again at the next start, where its retry key makes it a replay of what was sent.
@@ -88,27 +101,46 @@ internal sealed class FleetHeldSends
     private ImmutableDictionary<string, FleetHeldSend> Load()
     {
         if (_sends is { } known) return known;
+        var sends = ImmutableDictionary.CreateBuilder<string, FleetHeldSend>(StringComparer.Ordinal);
+        var written = ImmutableDictionary.CreateBuilder<string, FleetHeldSend>(StringComparer.Ordinal);
         try
         {
-            var read = JsonSerializer.Deserialize(File.ReadAllBytes(_path), FleetHeldSendsJsonContext.Default.ListFleetHeldSend) ?? [];
-            known = read.Where(static send => send is { RunId.Length: > 0, SessionId.Length: > 0, Text.Length: > 0, Nonce.Length: > 0 })
-                .GroupBy(static send => send.HoldId, StringComparer.Ordinal).ToImmutableDictionary(static group => group.Key, static group => group.Last(), StringComparer.Ordinal);
+            var read = JsonSerializer.Deserialize(File.ReadAllBytes(_path), FleetHeldSendsJsonContext.Default.FleetHeldSendsDocument)?.Sends ?? [];
+            foreach (var send in read.Where(static send => send is { RunId.Length: > 0, SessionId.Length: > 0, Text.Length: > 0, Nonce.Length: > 0 }))
+            {
+                FleetHeldSend opened;
+                try
+                {
+                    opened = send with { Text = _protection.UnprotectText(send.Text), Title = send.Title is { } title ? _protection.UnprotectText(title) : null };
+                }
+                catch (Exception exception) when (exception is FormatException or InvalidDataException or CodeAlta.Catalog.Secrets.SecretStoreUnavailableException)
+                {
+                    // A send this machine cannot open (another key, a damaged entry) is not sent: what cannot be read cannot leak.
+                    continue;
+                }
+
+                sends[send.HoldId] = opened;
+                written[send.HoldId] = send;
+            }
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException)
         {
-            known = ImmutableDictionary.Create<string, FleetHeldSend>(StringComparer.Ordinal);
+            // None held; a file of an older format, which kept prompts in clear, is replaced at the next send held.
         }
 
-        return _sends = known;
+        _written = written.ToImmutable();
+        return _sends = sends.ToImmutable();
     }
 
-    private void Save(ImmutableDictionary<string, FleetHeldSend> sends)
+    private void Save(ImmutableDictionary<string, FleetHeldSend> sends, ImmutableDictionary<string, FleetHeldSend> written)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var staging = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(sends.Values.ToList(), FleetHeldSendsJsonContext.Default.ListFleetHeldSend));
+        File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(new FleetHeldSendsDocument { Sends = [.. written.Values] },
+            FleetHeldSendsJsonContext.Default.FleetHeldSendsDocument));
         File.Move(staging, _path, overwrite: true);
         _sends = sends;
+        _written = written;
     }
 }
 
@@ -121,5 +153,15 @@ internal sealed class FleetHeldSendsFullException : InvalidOperationException
     }
 }
 
-[JsonSerializable(typeof(List<FleetHeldSend>))]
+// The file of the sends: their text and title protected.
+internal sealed class FleetHeldSendsDocument
+{
+    [JsonPropertyName("format")]
+    public int Format { get; set; } = 2;
+
+    [JsonPropertyName("sends")]
+    public List<FleetHeldSend> Sends { get; set; } = [];
+}
+
+[JsonSerializable(typeof(FleetHeldSendsDocument))]
 internal sealed partial class FleetHeldSendsJsonContext : JsonSerializerContext;
