@@ -70,6 +70,15 @@ public sealed class FleetOrganizationPolicy
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<FleetPolicyState> RefreshAsync(CancellationToken cancellationToken)
     {
+        var (accepted, _, refusal) = await ReadAsync(cancellationToken).ConfigureAwait(false);
+        return refusal is null ? accepted : throw new FleetPolicyDocumentException(accepted.Number + 1, refusal);
+    }
+
+    // Reads and verifies the chain: the policy this device takes from it, the tip of the chain as it verified against the
+    // authority each version names (on which a controller signs the next one, which vouches for the versions before it), and
+    // why the versions after the policy taken are refused, or null.
+    private async Task<(FleetPolicyState Accepted, FleetPolicyState Tip, string? Refusal)> ReadAsync(CancellationToken cancellationToken)
+    {
         await _refresh.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -87,7 +96,7 @@ public sealed class FleetOrganizationPolicy
             if (_verifiedHere && held is { Number: > 0 })
             {
                 var after = await client.ListPolicyDocumentsAsync(held.Number, cancellationToken).ConfigureAwait(false);
-                if (after.Items.Count == 0) return held;
+                if (after.Items.Count == 0) return (held, held, null);
                 if (FleetPolicyDocuments.TryParse(after.Items[^1].Document.Payload, out var newest) && newest.DeviceListSequence > devices.Sequence)
                     devices = await Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
                 var extended = held;
@@ -100,7 +109,8 @@ public sealed class FleetOrganizationPolicy
                     taken.Add((item.Document, next));
                 }
 
-                return AcceptEndorsed(held, taken, devices);
+                var (endorsed, refused) = AcceptEndorsed(held, taken, devices);
+                return (endorsed, extended, refused);
             }
 
             var listed = await client.ListPolicyDocumentsAsync(0, cancellationToken).ConfigureAwait(false);
@@ -126,12 +136,36 @@ public sealed class FleetOrganizationPolicy
                     throw new FleetPolicyDocumentException(1, "it starts with another version than the one this device trusted for this server");
                 if (!string.Equals(FleetPolicyDocuments.Hash(listed.Items[(int)held.Number - 1].Document), held.LastHash, StringComparison.Ordinal))
                     throw new FleetPolicyDocumentException(held.Number, "it goes another way than the chain this device verified before");
+
+                // With a checkpoint, the versions after it are taken for the first time.
+                _verifiedHere = true;
+                var (endorsed, refused) = AcceptEndorsed(held, replayed.Skip((int)held.Number).ToList(), devices);
+                return (endorsed, state, refused);
             }
 
-            _verifiedHere = true;
-            // Without a checkpoint, the first read trusts the chain as it is (as the first read of the device list does); with
-            // one, the versions after it are taken for the first time.
-            return held is { Number: > 0 } ? AcceptEndorsed(held, replayed.Skip((int)held.Number).ToList(), devices) : Accept(held, state);
+            // Without one, the chain is taken up to its last version whose signer holds authority now, as for the versions after
+            // a checkpoint: a signer removed since cannot sign a version against their past authority for a device that reads
+            // the chain for the first time either. When versions after it are refused, the policy this device knows of is not the
+            // one the organization holds now: the work of the fleet stops, nothing is kept, and the chain is read again whole,
+            // until a controller who signs now signs a version after them.
+            var (first, refusal) = AcceptEndorsed(FleetPolicyState.Empty, replayed, devices, keep: false);
+            if (refusal is null)
+            {
+                _verifiedHere = true;
+                return (Accept(held, first), state, null);
+            }
+
+            _verifiedHere = false;
+            var stop = new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [], $"the newest versions of the policy of this server are refused ({refusal}): "
+                + "a controller who signs now must sign the policy again");
+            var halted = first with { Stop = stop };
+            if (held is null || held.Number != halted.Number || held.LastHash != halted.LastHash || held.Stop?.Reason != stop.Reason)
+            {
+                Volatile.Write(ref _current, halted);
+                Changed?.Invoke(halted);
+            }
+
+            return (halted, state, refusal);
         }
         finally
         {
@@ -157,11 +191,13 @@ public sealed class FleetOrganizationPolicy
     public async Task<FleetPolicyDraft> PrepareAsync(FleetPolicyRules rules, FleetPolicyStop? stop, Func<string, string?>? nameOf, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(rules);
-        var state = await RefreshAsync(cancellationToken).ConfigureAwait(false);
+        // After the tip of the chain, which a version of a signer who signs no more may hold: the controller who signs the next
+        // one vouches for it, and reads what changes from the policy this device applies.
+        var (state, tip, _) = await ReadAsync(cancellationToken).ConfigureAwait(false);
         var devices = Devices.Current ?? await Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
         var access = Access.Current ?? FleetAccessState.Empty;
-        var document = new FleetPolicyDocument(FleetPolicyDocument.CurrentVersion, devices.OrganizationId ?? access.OrganizationId ?? string.Empty, state.Number + 1, state.LastHash,
-            Math.Max(devices.Sequence, state.DeviceListSequence), Math.Max(access.Number, state.AccessNumber), rules, stop, Devices.Identity.DeviceId, DateTimeOffset.UtcNow);
+        var document = new FleetPolicyDocument(FleetPolicyDocument.CurrentVersion, devices.OrganizationId ?? access.OrganizationId ?? string.Empty, tip.Number + 1, tip.LastHash,
+            Math.Max(devices.Sequence, tip.DeviceListSequence), Math.Max(access.Number, tip.AccessNumber), rules, stop, Devices.Identity.DeviceId, DateTimeOffset.UtcNow);
         if (FleetPolicyDocuments.Validate(document) is { } problem) throw new ArgumentException($"The policy does not hold: {problem}.", nameof(rules));
         return new FleetPolicyDraft(document, FleetPolicyDocuments.Describe(state, document, nameOf ?? (static _ => null)));
     }
@@ -186,7 +222,9 @@ public sealed class FleetOrganizationPolicy
     // Versions taken for the first time stand only up to the last one whose signer holds authority now (the device list and the
     // access document as this device holds them now): a later signer who holds it vouches for the versions before it; after
     // it, a version a revoked signer made against their past authority is refused, and the policy stays as that last one left it.
-    private FleetPolicyState AcceptEndorsed(FleetPolicyState held, IReadOnlyList<(FleetSignedPolicyDocument Document, FleetPolicyState State)> taken, FleetDeviceListState devices)
+    // Without keep, the policy endorsed is only returned, for the caller to take or not.
+    private (FleetPolicyState Endorsed, string? Refusal) AcceptEndorsed(FleetPolicyState held, IReadOnlyList<(FleetSignedPolicyDocument Document, FleetPolicyState State)> taken,
+        FleetDeviceListState devices, bool keep = true)
     {
         var endorsed = held;
         string? refusal = null;
@@ -204,8 +242,7 @@ public sealed class FleetOrganizationPolicy
             }
         }
 
-        var accepted = Accept(held, endorsed);
-        return refusal is null ? accepted : throw new FleetPolicyDocumentException(endorsed.Number + 1, refusal);
+        return (keep ? Accept(held, endorsed) : endorsed, refusal);
     }
 
     private FleetPolicyState Accept(FleetPolicyState? held, FleetPolicyState state)
