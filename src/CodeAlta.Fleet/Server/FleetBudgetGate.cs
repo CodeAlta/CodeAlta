@@ -162,10 +162,12 @@ public sealed class FleetBudgetGate
                     // Budgets kept that this machine cannot verify now (its device list not read yet, the server away): the run waits
                     // for them, never runs as if none held it.
                     if (!state.Budgets().Any()) continue;
-                    if (await WaitForDevicesAsync(link, run, held, cancellationToken).ConfigureAwait(false) is not { } verified)
+                    if (await WaitForDevicesAsync(link, run, held, cancellationToken).ConfigureAwait(false) is null)
                         return new FleetBudgetAdmission("The budgets this machine keeps could not be verified: the run does not start.", continued);
-                    list = verified;
+                    // While the run waited, the links it passed may have verified other budgets: all decide again, as after a hold.
                     held = null;
+                    rescan = true;
+                    break;
                 }
 
                 var access = link.Access?.Current;
@@ -175,10 +177,13 @@ public sealed class FleetBudgetGate
                 if (scope.SpaceKey is null && link.Keys is not null && link.LinksSpace?.Invoke(run.SpaceId) == true && TakesSpaceKey(link, list, access, run)
                     && KeepsBudgetsOfSpaces(link, state, list, access))
                 {
-                    if (await WaitForSpaceKeyAsync(link, list, access, run, held, cancellationToken).ConfigureAwait(false) is not { } scoped)
+                    if (await WaitForSpaceKeyAsync(link, list, access, run, held, cancellationToken).ConfigureAwait(false) is null)
                         return new FleetBudgetAdmission("The key of the space of the run could not be read, which its budgets need: the run does not start.", continued);
-                    scope = scoped;
+                    // While the run waited, the links it passed may have verified other budgets: all decide again, as after a hold, and
+                    // this one with the key read.
                     held = null;
+                    rescan = true;
+                    break;
                 }
 
                 foreach (var kept in state.Budgets())
