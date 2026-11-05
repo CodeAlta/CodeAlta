@@ -152,7 +152,7 @@ public static class FleetSecretSealing
     }
 
     // The id of the key of a copy: every copy of one version is of the same key.
-    private static string? KeyIdOf(string? copy)
+    internal static string? KeyIdOf(string? copy)
     {
         if (copy is not { Length: > 0 and <= MaxCopyLength }) return null;
         try

@@ -146,6 +146,35 @@ public sealed class FleetSecretsTests
     }
 
     [TestMethod]
+    public async Task AMachineWithdrawn_IsNotGivenTheNextVersion_WhenTheServerAnswersTheWholeRecordOfBefore_AlsoAfterARestart()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        using var replay = new ListingReplayHandler { InnerHandler = new HttpClientHandler() };
+        var checkpoint = Path.Combine(fleet.Root.Path, "desktop-link", FleetSecretControllerCheckpoint.FileName);
+        FleetSecretsManager Controller() => new(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey,
+            Path.Combine(fleet.Root.Path, "desktop-link", FleetOrganizationDevices.PinFileName), replay)) { Checkpoint = new FleetSecretControllerCheckpoint(checkpoint) };
+        var controller = Controller();
+        var set = await controller.SetAsync(FleetSecretKinds.Secret, "GRAFANA_TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), Token, false,
+            [fleet.NodeKey.DeviceId, fleet.OtherKey.DeviceId], CancellationToken.None);
+
+        // The whole record of version 1 as the server answers it now: the copies of this device and of its holders, all genuine.
+        replay.Recording = true;
+        await controller.ListAsync(CancellationToken.None);
+        replay.Recording = false;
+        await controller.WithdrawAsync(set.Id, fleet.OtherKey.DeviceId, CancellationToken.None);
+
+        // The server answers that record again: the rotation seals nothing for the machine withdrawn, nor anything at all, also
+        // for this device once restarted.
+        replay.Replaying = true;
+        foreach (var rotating in new[] { controller, Controller() })
+        {
+            await Assert.ThrowsExactlyAsync<InvalidDataException>(() => rotating.RotateAsync(set.Id, "rotated-value", CancellationToken.None));
+            Assert.IsFalse(replay.Sealed.Any(body => body.Contains(fleet.OtherKey.DeviceId, StringComparison.Ordinal) && body.Contains("\"version\":2", StringComparison.Ordinal)),
+                "nothing of the next value is sealed for the machine withdrawn");
+        }
+    }
+
+    [TestMethod]
     public async Task AMachineAllowedLater_GetsItsCopy_WhenAControllerOfThePersonGivesIt()
     {
         await using var fleet = await SecretsFixture.StartAsync();
@@ -664,6 +693,30 @@ public sealed class FleetSecretsTests
             {
                 Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(swap(approval), FleetSecretsApiJsonContext.Default.FleetApprovalDto), Encoding.UTF8, "application/json"),
             };
+        }
+    }
+
+    // Answers the values of a person as the server answered them while it recorded, and keeps what a device seals and sends.
+    private sealed class ListingReplayHandler : DelegatingHandler
+    {
+        private string? _recorded;
+
+        public bool Recording { get; set; }
+
+        public bool Replaying { get; set; }
+
+        public System.Collections.Concurrent.ConcurrentQueue<string> Sealed { get; } = new();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Put && request.Content is not null) Sealed.Enqueue(await request.Content.ReadAsStringAsync(cancellationToken));
+            var listing = request.Method == HttpMethod.Get && path.EndsWith("/api/v1/secrets", StringComparison.Ordinal);
+            if (listing && Replaying && _recorded is { } body)
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+            var response = await base.SendAsync(request, cancellationToken);
+            if (listing && Recording) _recorded = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response;
         }
     }
 

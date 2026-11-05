@@ -46,6 +46,13 @@ public sealed class FleetSecretsManager
     /// </summary>
     public Func<FleetAccessState?>? Access { get; init; }
 
+    /// <summary>
+    /// Gets what this device keeps of the values it manages, across restarts: the newest version of each and the key of its copy,
+    /// and the machines it withdrew. A record the server answers older than that, or naming a withdrawn machine, seals nothing for
+    /// it. Null keeps nothing.
+    /// </summary>
+    public FleetSecretControllerCheckpoint? Checkpoint { get; init; }
+
     /// <summary>Lists the values of this device's person.</summary>
     /// <param name="cancellationToken">Cancels the calls.</param>
     /// <returns>The values.</returns>
@@ -87,14 +94,33 @@ public sealed class FleetSecretsManager
         using var client = Client();
         var held = (await client.ListSecretsAsync(cancellationToken).ConfigureAwait(false)).Secrets.FirstOrDefault(secret => secret.Kind == kind
             && string.Equals(secret.Name, name, StringComparison.OrdinalIgnoreCase) && secret.Scope.Kind == scope.Kind && secret.Scope.Id == scope.Id);
+        if (held is not null) RequireCurrent(held);
         var binding = held is null
             ? new FleetSecretBinding(FleetSecretSealing.NewId(), kind, name, scope.Kind, scope.Id, 1, hostOnly)
             : FleetSecretBinding.Of(held) with { Version = held.Version + 1, HostOnly = hostOnly, Name = name };
         var access = Access?.Invoke();
         var copies = FleetSecretSealing.Seal(value, binding, FleetSecretSealing.Recipients(list, access, person, machines), list, access, _devices.Identity);
-        return await client.PutSecretAsync(binding.SecretId, new SetFleetSecretRequest(kind, binding.Name, scope, binding.Version, hostOnly, copies), cancellationToken)
+        var stored = await client.PutSecretAsync(binding.SecretId, new SetFleetSecretRequest(kind, binding.Name, scope, binding.Version, hostOnly, copies), cancellationToken)
             .ConfigureAwait(false);
+        // The machines the person names are given the value again, a machine withdrawn before included.
+        foreach (var machine in machines) Checkpoint?.Regrant(stored.Id, machine);
+        Observed(stored);
+        return stored;
     }
+
+    // Refuses a value the server answers older than what this device saw of it (a version, or another key for the same version):
+    // its holders' grants may be genuine ones of before, of a machine this device withdrew since.
+    private void RequireCurrent(FleetSecretDto held)
+    {
+        if (Checkpoint?.Read(held.Id) is not { } seen) return;
+        if (held.Version < seen.Version || held.Version == seen.Version && seen.KeyId is not null && FleetSecretSealing.KeyIdOf(held.Copy) != seen.KeyId)
+            throw new InvalidDataException($"The server answers version {held.Version} of {held.Name}, older than version {seen.Version} this device set: nothing is sealed.");
+    }
+
+    // The machines this device withdrew a value from: none is given a version again unless this device gives it back.
+    private IReadOnlyCollection<string> WithdrawnFrom(string secretId) => Checkpoint?.Read(secretId)?.Withdrawn.Keys.ToArray() ?? [];
+
+    private void Observed(FleetSecretDto stored) => Checkpoint?.Observe(stored.Id, stored.Version, FleetSecretSealing.KeyIdOf(stored.Copy));
 
     /// <summary>
     /// Rotates a value: its next version, sealed for the machines that hold it now by a grant a controller device of the
@@ -118,12 +144,17 @@ public sealed class FleetSecretsManager
         var person = PersonOf(list);
         using var client = Client();
         var held = await FindAsync(client, id, cancellationToken).ConfigureAwait(false);
+        RequireCurrent(held);
         var binding = FleetSecretBinding.Of(held) with { Version = held.Version + 1 };
         var access = Access?.Invoke();
-        var granted = FleetSecretSealing.GrantedHolders(held, list, access).Intersect(held.Holders, StringComparer.Ordinal);
-        var copies = FleetSecretSealing.Seal(value, binding, FleetSecretSealing.Recipients(list, access, person, granted), list, access, _devices.Identity);
-        return await client.PutSecretAsync(id, new SetFleetSecretRequest(held.Kind, held.Name, held.Scope, binding.Version, held.HostOnly, copies), cancellationToken)
+        var withdrawn = WithdrawnFrom(id);
+        var granted = FleetSecretSealing.GrantedHolders(held, list, access).Intersect(held.Holders, StringComparer.Ordinal).Except(withdrawn, StringComparer.Ordinal);
+        var copies = FleetSecretSealing.Seal(value, binding, FleetSecretSealing.Recipients(list, access, person, granted)
+            .Where(member => !withdrawn.Contains(member.DeviceId, StringComparer.Ordinal)).ToArray(), list, access, _devices.Identity);
+        var stored = await client.PutSecretAsync(id, new SetFleetSecretRequest(held.Kind, held.Name, held.Scope, binding.Version, held.HostOnly, copies), cancellationToken)
             .ConfigureAwait(false);
+        Observed(stored);
+        return stored;
     }
 
     /// <summary>Deletes a value and every copy of it.</summary>
@@ -165,9 +196,13 @@ public sealed class FleetSecretsManager
             throw new ArgumentException("The machine is not a device of this person in the device list.", nameof(machineId));
         using var client = Client();
         var held = await FindAsync(client, id, cancellationToken).ConfigureAwait(false);
+        RequireCurrent(held);
         var own = held.Copy ?? throw new InvalidDataException("This device holds no copy of the value to give.");
         var copy = FleetSecretSealing.Regrant(own, FleetSecretBinding.Of(held), machine, _devices.Identity, list, access);
-        return await client.AddSecretCopiesAsync(id, new AddFleetSecretCopiesRequest(held.Version, [copy]), cancellationToken).ConfigureAwait(false);
+        var stored = await client.AddSecretCopiesAsync(id, new AddFleetSecretCopiesRequest(held.Version, [copy]), cancellationToken).ConfigureAwait(false);
+        Checkpoint?.Regrant(id, machineId);
+        Observed(stored);
+        return stored;
     }
 
     /// <summary>
@@ -192,17 +227,25 @@ public sealed class FleetSecretsManager
         var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
         var person = PersonOf(list);
         using var client = Client();
+        var current = await FindAsync(client, id, cancellationToken).ConfigureAwait(false);
+        RequireCurrent(current);
+        // Recorded before anything else: a rotation by this device never gives the machine the value again, whatever the server answers.
+        Checkpoint?.Withdraw(id, machineId, current.Version);
         await client.RemoveSecretCopyAsync(id, machineId, cancellationToken).ConfigureAwait(false);
         var held = await FindAsync(client, id, cancellationToken).ConfigureAwait(false);
+        RequireCurrent(held);
         var own = held.Copy ?? throw new InvalidDataException("This device holds no copy of the value to seal again.");
         var access = Access?.Invoke();
         var binding = FleetSecretBinding.Of(held);
         var kept = FleetSecretSealing.GrantedHolders(held, list, access).Intersect(held.Holders, StringComparer.Ordinal)
             .Where(holder => !string.Equals(holder, machineId, StringComparison.Ordinal));
+        var withdrawn = WithdrawnFrom(id);
         var copies = FleetSecretSealing.Reseal(own, binding, binding with { Version = held.Version + 1 }, FleetSecretSealing.Recipients(list, access, person, kept)
-            .Where(member => !string.Equals(member.DeviceId, machineId, StringComparison.Ordinal)).ToArray(), list, access, _devices.Identity);
-        return await client.PutSecretAsync(id, new SetFleetSecretRequest(held.Kind, held.Name, held.Scope, held.Version + 1, held.HostOnly, copies), cancellationToken)
+            .Where(member => !withdrawn.Contains(member.DeviceId, StringComparer.Ordinal)).ToArray(), list, access, _devices.Identity);
+        var stored = await client.PutSecretAsync(id, new SetFleetSecretRequest(held.Kind, held.Name, held.Scope, held.Version + 1, held.HostOnly, copies), cancellationToken)
             .ConfigureAwait(false);
+        Observed(stored);
+        return stored;
     }
 
     /// <summary>Reads a variable back from the copy sealed for this device; a secret is never read back.</summary>
