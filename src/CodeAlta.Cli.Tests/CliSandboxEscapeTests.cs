@@ -23,7 +23,9 @@ public sealed class CliSandboxEscapeTests
     public async Task NothingOutsideTheSandbox_IsReachedFromInside()
     {
         var backend = new MxcSandboxBackend();
-        if (backend.GetAvailability() is { IsAvailable: false } availability) Assert.Inconclusive(availability.Reason ?? "No sandbox on this computer.");
+        // The profile of the test is the workspace one, whose network goes to its hosts (slirp4netns on Linux).
+        if (backend.GetAvailability() is { } availability && (!availability.IsAvailable || !availability.Networks.Contains(SandboxNetwork.Hosts)))
+            Assert.Inconclusive(availability.Reason ?? "No sandbox with hosts on this computer.");
         var windows = OperatingSystem.IsWindows();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var root = Directory.CreateDirectory(Path.Combine(SandboxHostDiscovery.DefaultDataRoot(), "tests", "escape-" + Guid.NewGuid().ToString("N")[..8])).FullName;
