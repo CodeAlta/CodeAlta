@@ -107,6 +107,25 @@ public sealed class FleetHeldSendsTests
         Assert.AreEqual(0, sends.Blocked);
     }
 
+    [TestMethod]
+    public void CountingTheSendsThatDoNotOpen_OpensNone_SoThatTheReaderThatListsThemTakesThem()
+    {
+        using var folder = new TestFolder();
+        var path = Path.Combine(folder.Path, "held-sends.json");
+        var protector = new SwitchingProtector();
+        var global = Path.Combine(folder.Path, "global");
+        new FleetHeldSends(path, new CodeAlta.Catalog.Secrets.LocalSecretStore(global, protector)).Add(Held("send-blocked", DateTimeOffset.UtcNow));
+        protector.Available = false;
+        var sends = new FleetHeldSends(path, new CodeAlta.Catalog.Secrets.LocalSecretStore(global, protector));
+        Assert.AreEqual(0, sends.List().Count);
+
+        // The store comes back between the listing and the count: the count says it is still to be taken, the next listing gives it.
+        protector.Available = true;
+        Assert.AreEqual(1, sends.Blocked, "counting opens nothing: what opens is given by the next listing, to the reader that takes it");
+        Assert.AreEqual("send-blocked", sends.List().Single().RunId);
+        Assert.AreEqual(0, sends.Blocked);
+    }
+
     // A protection whose store goes away and comes back.
     private sealed class SwitchingProtector : CodeAlta.Catalog.Secrets.ISecretProtector
     {

@@ -55,7 +55,8 @@ internal sealed class FleetHeldSends
 
     /// <summary>
     /// Gets how many sends are held that this machine cannot open now (its protected store is away, or holds another key): they stay
-    /// in the file as they were written, their sessions wait, and each reading tries to open them again.
+    /// in the file as they were written, their sessions wait, and each listing tries to open them again. Counting them opens none:
+    /// one that opens now is given by the next listing, to the reader that takes it.
     /// </summary>
     public int Blocked
     {
@@ -63,7 +64,7 @@ internal sealed class FleetHeldSends
         {
             lock (_gate)
             {
-                var opened = Load();
+                var opened = _sends ?? Load();
                 return _written.Keys.Count(holdId => !opened.ContainsKey(holdId));
             }
         }
