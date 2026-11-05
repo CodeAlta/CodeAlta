@@ -111,6 +111,35 @@ public sealed class TeamMachineSessionsTests
             .Any(static variable => variable.Value == "owner-token-value"));
     }
 
+    [TestMethod]
+    public async Task TheSessionAnAgentOfAMembersMachineStartsHere_IsThatMembersWork_AndGetsNoneOfTheOwnersSecrets()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, null, null, appliesSpaceIdentities: true);
+        new CodeAlta.Catalog.Secrets.LocalSecretStore(fixture.Host.CatalogOptions.GlobalRoot).SetSecret("GRAFANA_TOKEN", "owner-token-value", "owner (tests)");
+        await fixture.Host.SpaceCatalog.UpdateSettingsAsync(CodeAlta.Catalog.SpaceDescriptor.DefaultId, settings => settings with
+        {
+            Identity = new CodeAlta.Catalog.SpaceIdentity(Cli: [new CodeAlta.Catalog.SpaceCliProfile("grafana", [new("GRAFANA_TOKEN", "${secret:GRAFANA_TOKEN}")])]),
+        }, token);
+        fixture.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo([CodeAlta.Catalog.SpaceDescriptor.DefaultId]));
+        using var maxKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "max"));
+        var trust = new TeamTrust();
+        trust.Members[maxKey.Fingerprint] = ("max", maxKey.DeviceId);
+        await using var max = await ConnectAsync(fixture, trust, maxKey, token);
+
+        // An agent of a session on Max's laptop starts a sub-agent on this machine: its parent is on his laptop, not here.
+        var limits = new FleetAgentLimits([], CodeAlta.Orchestration.Runtime.SessionPermissionModes.Bypass, null, true, 1);
+        var signed = FleetAgentSigning.Sign(maxKey, new FleetAgentRequest(FleetAgentRequest.CurrentVersion, FleetAgentRequestKinds.Start, fixture.NodeIdentity.DeviceId, "", "",
+            DateTimeOffset.UtcNow, "", "parent-on-max-laptop", "max-laptop", CodeAlta.Catalog.SpaceDescriptor.DefaultId, null, null, FleetAgentRequestDocuments.HashText("Hello"), limits));
+        var created = await max.CreateSessionAsync(new FleetCreateSessionParams(SpaceId: CodeAlta.Catalog.SpaceDescriptor.DefaultId, Prompt: "Hello") { Agent = signed },
+            "start-agent", token);
+
+        Assert.AreEqual("max", fixture.Service.PersonOfSession(created.SessionId), "the session is Max's work");
+        var identity = await fixture.Host.RuntimeService.GetSessionIdentityAsync(created.SessionId, token);
+        Assert.IsFalse(identity.Environment.Variables.Any(static variable => variable.Value.Contains("owner-token-value", StringComparison.Ordinal)),
+            "the session an agent of a member's machine starts never gets the owner's secrets");
+    }
+
     private static async Task<FleetNodeClient> ConnectAsync(FleetNodeFixture fixture, IDeviceTrustPolicy trust, DeviceIdentity identity, CancellationToken token)
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
