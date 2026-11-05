@@ -214,6 +214,21 @@ internal sealed class AutomationRunner : IAutomationRunner
     // The guards of the runs that work now, by run: their sessions and the sessions these start are checked by the same one.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, AutomationRunGuard> _live = new(StringComparer.Ordinal);
 
+    // The sessions whose approvals a guard taken from their automation watches now (GuardOf), while they work.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _watched = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Gets or sets the clock the approvals of the runs time out by.</summary>
+    internal TimeProvider Time { get; set; } = TimeProvider.System;
+
+    /// <summary>Gets or sets how often the approvals of the commands and edits of a guarded session are looked at.</summary>
+    internal TimeSpan WatchInterval { get; set; } = ApprovalWatch;
+
+    /// <summary>
+    /// Gets or sets what stops the turn of a session whose approval waited too long, once its run's first turn ended (or
+    /// after a restart); null aborts the active work of the session.
+    /// </summary>
+    internal Func<string, Task>? AbortSession { get; set; }
+
     // The guard a session takes from the automation that created it (its lineage gives it to the sessions it starts): the one
     // of its run while the run works, else one of the automation as it is now; a try stays a try. An automation no longer
     // known, or a run no longer known, gives a guard that allows nothing by itself: what its sessions call waits for a person.
@@ -225,8 +240,58 @@ internal sealed class AutomationRunner : IAutomationRunner
         if (entry is not null && entry.Definition.Autonomy is null) return null;
         entry ??= new AutomationEntry(new AutomationDefinition(automationId, "an automation that is no longer here"), new AutomationSource(string.Empty, null, null), null, null, null);
         var autonomy = dryRun is null || entry.Definition.Autonomy is null ? new AutomationAutonomy() : entry.Definition.Autonomy;
-        return new AutomationRunGuard(entry with { Definition = entry.Definition with { Autonomy = autonomy } }, Breaker,
-            (session, request, token) => _host.RuntimeService.Permissions.RequestForSessionAsync(session, request, token), TimeProvider.System, dryRun == true);
+        var guard = new AutomationRunGuard(entry with { Definition = entry.Definition with { Autonomy = autonomy } }, Breaker,
+            (session, request, token) => _host.RuntimeService.Permissions.RequestForSessionAsync(session, request, token), Time, dryRun == true);
+        // Its later turns are supervised as its first one was: an approval that waits too long stops the turn that waits, and
+        // the approvals of its commands and edits are watched while the session that calls works.
+        if (autonomy.ApprovalTimeout is not null && autonomy.OnTimeout == AutomationAutonomy.StopOnTimeout)
+        {
+            guard.StoppedIn += (session, why) => _ = AbortQuietlyAsync(session);
+            guard.Calling = session => Supervise(session, guard, autonomy);
+        }
+
+        return guard;
+    }
+
+    // Watches the approvals of a session a guard taken from its automation checks, once at a time, until it no longer works.
+    private void Supervise(string sessionId, AutomationRunGuard guard, AutomationAutonomy autonomy)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || !_watched.TryAdd(sessionId, 0)) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await WatchApprovalsAsync(sessionId, guard, autonomy, () => IdleAsync(sessionId), why => guard.Stop(sessionId, why), CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // A watch that fails ends; the next call of the session starts another.
+            }
+            finally
+            {
+                // What it saw waiting is no longer watched: a stopped turn waits for nothing.
+                guard.NoteWaiting(false);
+                _watched.TryRemove(sessionId, out _);
+            }
+        });
+    }
+
+    private async Task<bool> IdleAsync(string sessionId)
+    {
+        var session = await _host.RuntimeService.TryGetRecoverableSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+        return session is null || !await _host.RuntimeService.HasActiveRunAsync(session, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private async Task AbortQuietlyAsync(string sessionId)
+    {
+        try
+        {
+            await (AbortSession ?? (id => _host.RuntimeService.AbortAsync(id, CancellationToken.None)))(sessionId).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is ObjectDisposedException or InvalidOperationException or ArgumentException or OperationCanceledException)
+        {
+            // Nothing works in it any more.
+        }
     }
 
     /// <inheritdoc />
@@ -382,7 +447,7 @@ internal sealed class AutomationRunner : IAutomationRunner
                     return new(sessionId, "This automation decides what its runs do without a person: it runs in a permission mode that asks for commands and edits, not one that allows everything.", null);
                 // A call waits for a person on the card of the session that makes it: the run's own, or a session it started.
                 guard = new AutomationRunGuard(entry, Breaker, (session, request, token) => _host.RuntimeService.Permissions.RequestForSessionAsync(session, request, token),
-                    TimeProvider.System, dryRun);
+                    Time, dryRun);
                 _live[runId] = guard;
                 _host.ToolGuards.Set(sessionId, guard);
             }
@@ -435,31 +500,7 @@ internal sealed class AutomationRunner : IAutomationRunner
     {
         guard.Stopped += _ => _host.Commands.AdmitAbort(new OwnedAbortRequest("automation-stop:" + runId, receipt.OperationId), CancellationToken.None);
         using var stop = new CancellationTokenSource();
-        var watch = Task.Run(async () =>
-        {
-            DateTimeOffset? since = null;
-            while (!stop.IsCancellationRequested)
-            {
-                try { await Task.Delay(ApprovalWatch, stop.Token).ConfigureAwait(false); }
-                catch (OperationCanceledException) { return; }
-                SessionOwnedPermissionPage page;
-                try { page = await _host.RuntimeService.Permissions.ListOwnedCommandsAsync(sessionId, stop.Token).ConfigureAwait(false); }
-                catch (Exception exception) when (exception is OperationCanceledException or ObjectDisposedException or ArgumentException) { return; }
-                var waiting = page.Entries.Count > 0;
-                guard.NoteWaiting(waiting);
-                since = waiting ? since ?? DateTimeOffset.UtcNow : null;
-                if (since is not { } start || guard.TakenOver || autonomy.ApprovalTimeout is not { } minutes || autonomy.OnTimeout != AutomationAutonomy.StopOnTimeout
-                    || DateTimeOffset.UtcNow - start < TimeSpan.FromMinutes(minutes)) continue;
-                foreach (var entry in page.Entries)
-                {
-                    try { await _host.RuntimeService.Permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.Deny, CancellationToken.None).ConfigureAwait(false); }
-                    catch (Exception exception) when (exception is OperationCanceledException or ObjectDisposedException) { }
-                }
-
-                guard.Stop($"No one answered an approval of the run within {minutes} minutes: the run stopped.");
-                return;
-            }
-        });
+        var watch = Task.Run(() => WatchApprovalsAsync(sessionId, guard, autonomy, null, guard.Stop, stop.Token));
         try
         {
             return await observed.ConfigureAwait(false);
@@ -473,6 +514,37 @@ internal sealed class AutomationRunner : IAutomationRunner
             // The session keeps a guard of its automation from its origin (GuardOf): its later turns are checked too.
             _host.ToolGuards.Remove(sessionId, guard);
             _live.TryRemove(new KeyValuePair<string, AutomationRunGuard>(runId, guard));
+        }
+    }
+
+    // Looks at the approvals of the commands and edits of a guarded session: they count as waiting too, and one that waits longer
+    // than the automation says is denied and stops the run (unless a person took it over). Ends once it stopped the run, when
+    // cancelled, or when the session waits for nothing and `idle` says it no longer works.
+    private async Task WatchApprovalsAsync(string sessionId, AutomationRunGuard guard, AutomationAutonomy autonomy, Func<Task<bool>>? idle, Action<string> stopRun,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset? since = null;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try { await Task.Delay(WatchInterval, cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+            SessionOwnedPermissionPage page;
+            try { page = await _host.RuntimeService.Permissions.ListOwnedCommandsAsync(sessionId, cancellationToken).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is OperationCanceledException or ObjectDisposedException or ArgumentException) { return; }
+            var waiting = page.Entries.Count > 0;
+            guard.NoteWaiting(waiting);
+            if (!waiting && idle is not null && await idle().ConfigureAwait(false)) return;
+            since = waiting ? since ?? Time.GetUtcNow() : null;
+            if (since is not { } start || guard.TakenOver || autonomy.ApprovalTimeout is not { } minutes || autonomy.OnTimeout != AutomationAutonomy.StopOnTimeout
+                || Time.GetUtcNow() - start < TimeSpan.FromMinutes(minutes)) continue;
+            foreach (var entry in page.Entries)
+            {
+                try { await _host.RuntimeService.Permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.Deny, CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception exception) when (exception is OperationCanceledException or ObjectDisposedException) { }
+            }
+
+            stopRun($"No one answered an approval of the run within {minutes} minutes: the run stopped.");
+            return;
         }
     }
 

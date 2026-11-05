@@ -228,8 +228,11 @@ public sealed class AutomationRunGuardTests
         var asker = new Asker { Held = new(TaskCreationOptions.RunContinuationsAsynchronously) };
         var guard = new AutomationRunGuard(Entry(new AutomationAutonomy { ApprovalTimeout = 30 }), new AutomationCallBreaker(), asker.AskAsync, clock, dryRun: false);
         var stopped = new List<string>();
+        var stoppedIn = new List<string>();
         var waiting = new List<bool>();
         guard.Stopped += stopped.Add;
+        // The session whose turn waited is told, at each stop: a guard that outlives a turn stops each turn that waits too long.
+        guard.StoppedIn += (session, _) => stoppedIn.Add(session);
         guard.WaitingChanged += waiting.Add;
 
         var held = guard.BeforeToolCallAsync(Call("k8s_scale"), default).AsTask();
@@ -238,6 +241,7 @@ public sealed class AutomationRunGuardTests
         var decision = await held.WaitAsync(TimeSpan.FromSeconds(10));
         StringAssert.Contains(decision.BlockMessage, "within 30 minutes: the run stopped");
         Assert.AreEqual(1, stopped.Count);
+        CollectionAssert.AreEqual(new[] { "s1" }, stoppedIn);
         CollectionAssert.AreEqual(new[] { true, false }, waiting);
 
         // Taken over, the next approval waits for that person as long as they take.
@@ -383,7 +387,7 @@ public sealed class AutomationRunGuardTests
     }
 
     /// <summary>A clock whose timers fire when a test moves it.</summary>
-    private sealed class TimerClock(DateTimeOffset start) : TimeProvider
+    internal sealed class TimerClock(DateTimeOffset start) : TimeProvider
     {
         private readonly Lock _gate = new();
         private readonly List<Timer> _timers = [];
