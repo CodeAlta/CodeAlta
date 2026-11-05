@@ -1162,6 +1162,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
                     {
                         GuidePage = (file, anchor) => documentation.FindPage(file) is { } page && documentationView.Show(page, anchor),
+                        ExternalEditors = externalEditors,
                     }));
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch, changesView));
                     // The window of the worktrees also names the sessions that record each checkout, and opens the code editor on one.

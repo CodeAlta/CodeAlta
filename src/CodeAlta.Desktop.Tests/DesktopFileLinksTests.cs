@@ -314,6 +314,64 @@ public sealed class DesktopFileLinksTests
     }
 
     [TestMethod]
+    public async Task TheFullPathOfALink_IsGiven_WhetherOrNotTheFileIsThere()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var file = fixture.Write(fixture.ProjectPath, "src/Program.cs", "text");
+        var service = new MarkdownLinksService(Epoch, _ => true, fixture.Links);
+
+        var reply = await service.PathAsync(new(Epoch, "src/Program.cs#L3", "session"), default);
+        Assert.AreEqual(("ok", file), (reply.Status, reply.FullPath));
+        Assert.AreEqual(Path.Combine(fixture.ProjectPath, "src", "missing.cs"), (await service.PathAsync(new(Epoch, "src/missing.cs", "session"), default)).FullPath);
+        Assert.AreEqual(("not_found", null), Fields(await service.PathAsync(new(Epoch, "src/Program.cs"), default)));
+        Assert.AreEqual(("invalid_request", null), Fields(await service.PathAsync(new(Epoch, "mailto:someone@example.invalid", "session"), default)));
+        Assert.AreEqual(("stale_epoch", null), Fields(await service.PathAsync(new("4b0a7c1e-52c9-4f0b-8a55-6d0c2f9e1b77", "src/Program.cs", "session"), default)));
+        Assert.AreEqual(("invalid_request", null), Fields(await new MarkdownLinksService(Epoch, _ => true).PathAsync(new(Epoch, "src/Program.cs", "session"), default)));
+
+        static (string, string?) Fields(MarkdownLinkPathResponse response) => (response.Status, response.FullPath);
+    }
+
+    [TestMethod]
+    public async Task TheFileOfALink_OpensInTheExternalEditor_InTheFolderThatHoldsIt()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var inProject = fixture.Write(fixture.ProjectPath, "src/Program.cs", "text");
+        var worktree = Path.Combine(fixture.Root, "worktree");
+        var inWorktree = fixture.Write(worktree, "a.cs", "text");
+        var alone = fixture.Write(fixture.Root, "elsewhere/notes.txt", "text");
+        fixture.SessionFolders["worktree-session"] = worktree;
+        var editor = fixture.Write(fixture.Root, "editor.exe", "");
+        var started = new List<string>();
+        var service = new MarkdownLinksService(Epoch, _ => true, new DesktopFileLinks(fixture.Projects, new DiskFolders(), new DesktopEditorView(),
+            (sessionId, _) => ValueTask.FromResult(fixture.SessionFolders.GetValueOrDefault(sessionId)), fixture.Files.RootAsync, _ => true, fixture.Root)
+        {
+            ExternalEditors = new ExternalEditors(() => new ExternalEditorChoice(ExternalEditors.CustomId, editor, "{folder} {file}:{line}"), ExternalEditorEnvironment.Current(),
+                start => { started.Add(string.Join('|', start.ArgumentList)); return true; }),
+        });
+
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, "src/Program.cs#L42", "session"), default)).Status);
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, "a.cs", "worktree-session"), default)).Status);
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, inProject, "worktree-session"), default)).Status);
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, alone), default)).Status);
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, "src", "session"), default)).Status);
+        CollectionAssert.AreEqual(new[]
+        {
+            $"{fixture.ProjectPath}|{inProject}:42",
+            $"{worktree}|{inWorktree}:1",
+            $"{fixture.ProjectPath}|{inProject}:1",
+            $"{Path.GetDirectoryName(alone)}|{alone}:1",
+            $"{Path.Combine(fixture.ProjectPath, "src")}",
+        }, started);
+
+        started.Clear();
+        Assert.AreEqual("not_found", (await service.OpenExternalAsync(new(Epoch, "src/missing.cs", "session"), default)).Status);
+        Assert.AreEqual("invalid_request", (await service.OpenExternalAsync(new(Epoch, "mailto:someone@example.invalid", "session"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await service.OpenExternalAsync(new("4b0a7c1e-52c9-4f0b-8a55-6d0c2f9e1b77", "src/Program.cs", "session"), default)).Status);
+        Assert.AreEqual(0, started.Count);
+        Assert.AreEqual("unavailable", (await new MarkdownLinksService(Epoch, _ => true, fixture.Links).OpenExternalAsync(new(Epoch, "src/Program.cs", "session"), default)).Status);
+    }
+
+    [TestMethod]
     public void AFolderOfTheDisk_KeepsItsId_AndTheOldestIsForgotten()
     {
         var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "CodeAlta-disk-folders-" + Guid.NewGuid().ToString("N"))).FullName;

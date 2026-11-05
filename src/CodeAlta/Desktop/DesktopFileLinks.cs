@@ -314,6 +314,41 @@ internal sealed class DesktopFileLinks
     /// <summary>Shows a file in the file manager of the system; false when it could not. Tests replace it.</summary>
     internal Func<string, bool> Reveal { get; init; } = DesktopFileReveal.Show;
 
+    /// <summary>The editors of the machine that <see cref="OpenExternalAsync"/> opens in; null where there are none.</summary>
+    internal ExternalEditors? ExternalEditors { get; init; }
+
+    /// <summary>The full path that a link names, whether or not the file is there; null when it names none.</summary>
+    /// <param name="link">The link.</param>
+    /// <param name="sessionId">The session whose message has the link: a relative path starts from its folder.</param>
+    /// <param name="projectId">Without a session, the project or the folder whose document has the link.</param>
+    /// <param name="directory">The folder of that document inside the project, with forward slashes; null for the folder of the project.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <exception cref="OperationCanceledException">The request was canceled.</exception>
+    internal async Task<string?> FullPathAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+        => (await ResolveAsync(link, sessionId, projectId, directory, cancellationToken).ConfigureAwait(false)).Full;
+
+    /// <summary>
+    /// Opens what a link names in the external editor: a folder as it is, and a file at its line in the folder the session
+    /// works in when it holds the file, else in its project, else in its own folder.
+    /// </summary>
+    /// <param name="link">The link.</param>
+    /// <param name="sessionId">The session whose message has the link: a relative path starts from its folder.</param>
+    /// <param name="projectId">Without a session, the project or the folder whose document has the link.</param>
+    /// <param name="directory">The folder of that document inside the project, with forward slashes; null for the folder of the project.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns><c>ok</c>, <c>not_found</c>, <c>unavailable</c> without editors, or an answer of <see cref="CodeAlta.Desktop.ExternalEditors.OpenAsync"/>.</returns>
+    /// <exception cref="OperationCanceledException">The request was canceled.</exception>
+    internal async Task<string> OpenExternalAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+    {
+        if (ExternalEditors is null) return "unavailable";
+        var (full, sessionRoot) = await ResolveAsync(link, sessionId, projectId, directory, cancellationToken).ConfigureAwait(false);
+        if (full is null || !Path.Exists(full)) return "not_found";
+        if (Directory.Exists(full)) return await ExternalEditors.OpenAsync(full, null, null, null, cancellationToken).ConfigureAwait(false);
+        var folder = sessionRoot is not null && Path.IsPathFullyQualified(sessionRoot) && GitWorktreeService.IsWithin(full, sessionRoot) ? sessionRoot
+            : (await ProjectOfAsync(full, cancellationToken).ConfigureAwait(false))?.Root ?? Path.GetDirectoryName(full);
+        return folder is null ? "not_found" : await ExternalEditors.OpenAsync(folder, full, link.Line, link.Column, cancellationToken).ConfigureAwait(false);
+    }
+
     // The full path a link names, and the folder of its session: a relative path starts from that folder, or from
     // the folder of its document without a session.
     private async Task<(string? Full, string? SessionRoot)> ResolveAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)

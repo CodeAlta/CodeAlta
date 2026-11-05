@@ -1152,6 +1152,7 @@ export const messages = dictionary({
   "Copy image": ["Copiar imagen", "Copier l’image", "Bild kopieren", "画像をコピー", "复制图片"],
   "Image copied": ["Imagen copiada", "Image copiée", "Bild kopiert", "画像をコピーしました", "图片已复制"],
   "Image options": ["Opciones de imagen", "Options de l’image", "Bildoptionen", "画像のオプション", "图片选项"],
+  "Link options": ["Opciones del enlace", "Options du lien", "Link-Optionen", "リンクのオプション", "链接选项"],
   "Working folder": ["Carpeta de trabajo", "Dossier de travail", "Arbeitsordner", "作業フォルダー", "工作文件夹"],
   "Branch {branch}": ["Rama {branch}", "Branche {branch}", "Branch {branch}", "ブランチ {branch}", "分支 {branch}"],
   "Detached at {branch}": ["Separado en {branch}", "Détaché sur {branch}", "Losgelöst bei {branch}", "{branch} でデタッチ", "分离于 {branch}"],

@@ -100,6 +100,36 @@ internal sealed class MarkdownLinksService
         catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); }
     }
 
+    /// <summary>The full path of the file that a link of the Markdown names, for the window to copy it; the file may not be there.</summary>
+    /// <remarks>The answer is <c>ok</c> with the path, or <c>not_found</c>, <c>failed</c>, <c>invalid_request</c> or <c>stale_epoch</c> with no path.</remarks>
+    /// <exception cref="OperationCanceledException">The request was canceled.</exception>
+    [NeoRpcMethod("path")]
+    public async Task<MarkdownLinkPathResponse> PathAsync(MarkdownLinkRequest request, CancellationToken cancellationToken)
+    {
+        MarkdownLinkPathResponse Reply(string status, string? path = null) => new(status, _epoch, path);
+        if (Validate(request) is { } refused) return Reply(refused);
+        if (_files is null || !DesktopFileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
+        cancellationToken.ThrowIfCancellationRequested();
+        try { return await _files.FullPathAsync(link, request.SessionId, request.ProjectId, request.Directory, cancellationToken).ConfigureAwait(false) is { } full ? Reply("ok", full) : Reply("not_found"); }
+        catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); }
+    }
+
+    /// <summary>Opens the file that a link of the Markdown names in the external editor of the machine, at the line it names.</summary>
+    /// <remarks>
+    /// The answer is <c>ok</c>, <c>not_found</c>, <c>no_editor</c>, <c>refused</c>, <c>failed</c>, <c>unavailable</c>, <c>invalid_request</c> or <c>stale_epoch</c>.
+    /// </remarks>
+    /// <exception cref="OperationCanceledException">The request was canceled before anything was opened.</exception>
+    [NeoRpcMethod("openExternal")]
+    public async Task<MarkdownLinkResponse> OpenExternalAsync(MarkdownLinkRequest request, CancellationToken cancellationToken)
+    {
+        MarkdownLinkResponse Reply(string status) => new(status, _epoch);
+        if (Validate(request) is { } refused) return Reply(refused);
+        if (_files is null || !DesktopFileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
+        cancellationToken.ThrowIfCancellationRequested();
+        try { return Reply(await _files.OpenExternalAsync(link, request.SessionId, request.ProjectId, request.Directory, cancellationToken).ConfigureAwait(false)); }
+        catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); }
+    }
+
     // Why a request is not answered, or null when it names the epoch of this host.
     private string? Validate(MarkdownLinkRequest? request)
     {
@@ -139,3 +169,5 @@ internal sealed record MarkdownLinkRequest(string ExpectedHostEpoch, string Addr
 internal sealed record MarkdownLinkResponse(string Status, string HostEpoch);
 /// <summary>A picture that a link names: its media type, its content in base64 and the full path of its file, only for <c>ok</c>.</summary>
 internal sealed record MarkdownImageResponse(string Status, string HostEpoch, string? MediaType, string? Base64, string? FullPath);
+/// <summary>The full path of the file that a link names, only for <c>ok</c>.</summary>
+internal sealed record MarkdownLinkPathResponse(string Status, string HostEpoch, string? FullPath);

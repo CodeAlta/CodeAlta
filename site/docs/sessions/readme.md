@@ -48,6 +48,8 @@ In CodeAlta Desktop, the links of your messages and of the agent's answers work:
 
 Click a link, or press `Enter` on it after moving to it with `Tab`. Ctrl-click (Cmd-click on macOS), Shift-click and middle click work too. A link of more than 2,048 characters, such as a prefilled GitHub link that carries a whole text, does not open: CodeAlta says so and offers to copy its address, which you can paste in your browser. Agents are asked to write file names as such links. The same links work in session notes, issues, pull requests, work items and the Markdown preview of the code editor.
 
+Right-click a link, or press the menu key on it, for its menu. A web link has **Open** and **Copy link**. A link to a file has **Open**, **Copy path**, **Reveal in File Explorer** (**Reveal in Finder** on macOS) and **Open in** your [external editor](../workspace/code.md#external-editor), at the line it names.
+
 ## Session titles
 
 A title you give stays: set it when you create the session, or with **Rename** in its menu.
