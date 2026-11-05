@@ -278,6 +278,24 @@ test("mounted production Notes and proposal overlays cooperate without replacing
       value = await choose("Automatic");
       assert.deepEqual(value.window, free, "Automatic gives Notes back their own place");
     });
+    await t.test("the side chosen in one pane is the one of every mounted pane of the window", async () => {
+      await reset({ width: 1080, notes: "## Docking\n\n- [ ] Put the proposals below.", proposals: true, second: true });
+      const sides = "[...document.querySelectorAll('.work-cards')].map(cards => cards.dataset.side ?? null)";
+      await wait(`JSON.stringify(${sides}) === '["left","left"]'`);
+      const choose = async (label: string) => {
+        await click('[aria-label="Place the proposals"]');
+        await wait("!!document.querySelector('.bp6-menu')");
+        await evaluate(`[...document.querySelectorAll('.bp6-menu-item')].find(item => item.textContent === ${JSON.stringify(label)}).click()`);
+        await wait("!document.querySelector('.bp6-menu')");
+      };
+      // Chosen in the first pane, the side is the one of the second, which stays mounted.
+      await choose("Below Notes");
+      await wait(`JSON.stringify(${sides}) === '["below","below"]'`);
+      assert.equal(await evaluate("overlays.dock()"), "below");
+      await choose("Automatic");
+      await wait(`JSON.stringify(${sides}) === '["left","left"]'`);
+      assert.equal(await evaluate("overlays.dock()"), null);
+    });
     await t.test("hiding Notes removes the window and its tab and keeps the loaded notes", async () => {
       for (const notes of ["", "Keep these notes while hidden"]) {
         const before = await reset({ width: 1080, notes });

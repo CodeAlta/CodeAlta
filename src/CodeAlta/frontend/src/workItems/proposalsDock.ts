@@ -33,6 +33,38 @@ export function saveDockSide(side: DockSide | null, storage: Pick<Storage, "setI
   } catch { /* The choice still applies until the window closes. */ }
 }
 
+/**
+ * The side of Notes chosen for the proposals of every session pane of a window: what one pane chooses, the
+ * others show at once, the mounted ones included.
+ */
+export type DockPreference = Readonly<{
+  /** The side chosen, or null for automatic. */
+  get: () => DockSide | null;
+  /** Chooses a side, or automatic (null), and keeps it for the next time the window opens. */
+  set: (side: DockSide | null) => void;
+  /** Calls `listener` when the side changes; the function returned stops it. */
+  subscribe: (listener: () => void) => () => void;
+}>;
+
+/** The preference of a window, as {@link loadDockSide} reads it; the window creates one and gives it to its panes. */
+export function createDockPreference(storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | undefined = globalThis.localStorage): DockPreference {
+  let side = loadDockSide(storage);
+  const listeners = new Set<() => void>();
+  return Object.freeze({
+    get: () => side,
+    set(next: DockSide | null) {
+      if (next === side) return;
+      side = next;
+      saveDockSide(next, storage);
+      for (const listener of [...listeners]) listener();
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  });
+}
+
 /** The band along one edge of the pane that Notes keep clear of, so that the cards have room on the chosen side. */
 export type NotesKeepOut = { side: DockSide; size: number };
 

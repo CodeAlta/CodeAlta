@@ -207,6 +207,7 @@ import type { ReviewScope, ReviewTarget } from "./review/reviewsHub";
 import { reviewSessions, sessionCheckout } from "./review/reviewSessions";
 import { WorkItemsPanel, type WorkItemsFocus } from "./workItems/WorkItemsPanel";
 import { WorkItemCards } from "./workItems/WorkItemCards";
+import { createDockPreference } from "./workItems/proposalsDock";
 import { WorkItemsBadge } from "./workItems/WorkItemsBadge";
 import { WorkItemSettings } from "./workItems/WorkItemSettings";
 import type { RunModelsLoader, RunProvider } from "./workItems/runsWith";
@@ -945,6 +946,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [sessionPaneOwners] = useState(() => new Map<string, ReturnType<typeof createSessionPaneOwners>>());
   // Unlike the owners above, it outlives the panes that a switch of space mounts again.
   const [overlayMemory] = useState(createSessionOverlayMemory);
+  // The side of Notes the proposals sit on, the same in every session pane of the window.
+  const [proposalsDock] = useState(() => createDockPreference());
   // The fork and the rewind of sessions: one change at a time, and which pane shows the window that asks for it.
   const [sessionBranch] = useState(() => createSessionBranch(workspaceApi.forkSession, workspaceApi.rewindSession));
   const branchActions = useRef<Pick<SessionBranchHost, "fork" | "rewind">>({ fork: async () => ({ kind: "error", code: "unconfigured" }), rewind: async () => ({ kind: "error", code: "unconfigured" }) });
@@ -5872,7 +5875,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   return { name: origin.name, summary: origin.summary, onOpen: owned && origin.id ? () => openAutomations(origin.id) : undefined };
                 })() : undefined}
                 workCards={owned && workState.settings.notify ? <WorkItemCards hub={workHub} items={sessionCards(work, row.id)} preferredStart={workState.settings.start} busy={workBusy}
-                  memory={overlayMemory.proposals(row.id)} onStart={(item, start) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath })}
+                  memory={overlayMemory.proposals(row.id)} dockPreference={proposalsDock} onStart={(item, start) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath })}
                   onOpenList={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} /> : undefined}
                 onRunActivity={(running, background) => { runtimeObservations.setLive(tab, running, background); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
                 active={tab.sessionId === sessionId} notesHidden={!notesVisible} notesMemory={overlayMemory.notes(row.id)} onActivate={() => { if (visible && (sessionId !== tab.sessionId || fileTabs.active)) selectSessionTab(tab, "preview"); }}

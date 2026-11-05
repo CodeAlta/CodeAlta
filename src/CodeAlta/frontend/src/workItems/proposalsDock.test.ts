@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dockTargetAt, dockTargets, loadDockSide, notesKeepOut, placeProposals, saveDockSide } from "./proposalsDock";
+import { createDockPreference, dockTargetAt, dockTargets, loadDockSide, notesKeepOut, placeProposals, saveDockSide } from "./proposalsDock";
 
 const pane = { width: 1000, height: 600 };
 const card = { width: 380, height: 250 };
@@ -48,6 +48,31 @@ test("the chosen side is kept in the storage of the window, automatic by default
   assert.equal(loadDockSide(storage), null, "An unknown value reads as automatic");
   assert.equal(loadDockSide({ getItem: () => { throw Error("denied"); } }), null);
   assert.doesNotThrow(() => saveDockSide("above", { setItem: () => { throw Error("full"); }, removeItem: () => {} }));
+});
+
+test("the side chosen in one pane is the one of every pane of the window, and is kept for the next time", () => {
+  const values = new Map<string, string>([["codealta.desktop.proposals-dock.v1", "above"]]);
+  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); } };
+  const preference = createDockPreference(storage);
+  assert.equal(preference.get(), "above", "The side kept the last time");
+  // Two panes, each told when the side changes.
+  const seen: string[] = [];
+  const first = preference.subscribe(() => seen.push(`first:${preference.get()}`));
+  preference.subscribe(() => seen.push(`second:${preference.get()}`));
+  preference.set("below");
+  assert.deepEqual(seen, ["first:below", "second:below"]);
+  assert.equal(values.get("codealta.desktop.proposals-dock.v1"), "below");
+  preference.set("below");
+  assert.equal(seen.length, 2, "The same side changes nothing");
+  first();
+  preference.set(null);
+  assert.deepEqual(seen, ["first:below", "second:below", "second:null"], "A pane that unmounts is no longer told");
+  assert.equal(values.size, 0, "Automatic is not stored");
+  // A storage that cannot write leaves the side to the window.
+  const full = createDockPreference({ getItem: () => null, setItem: () => { throw Error("full"); }, removeItem: () => { } });
+  full.set("left");
+  assert.equal(full.get(), "left");
 });
 
 test("automatic tries the left of Notes first, then the other sides", () => {

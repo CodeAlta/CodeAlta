@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { Button, Menu, MenuItem, PopoverNext, Tag } from "@blueprintjs/core";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -10,7 +10,7 @@ import { startChoices, startDetail, startIcon, startLabel, taskCategoryIcon, tas
   type WorkItem, type WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
 import { notesSurface, useWorkCardsPlacement } from "./useWorkCardsPlacement";
-import { dockSides, dockTargetAt, dockTargets, loadDockSide, saveDockSide, type DockSide, type PaneRect } from "./proposalsDock";
+import { dockSides, dockTargetAt, dockTargets, type DockPreference, type DockSide, type PaneRect } from "./proposalsDock";
 import type { MessageKey } from "../localization";
 import type { ProposalsOverlayMemory } from "../sessionOverlayMemory";
 
@@ -73,7 +73,7 @@ export function WorkItemTags({ item, projectName }: { item: WorkItem; projectNam
  * few lines, opens its full text, and is decided there: started (in a new worktree, in this session, in a new
  * session), kept for later, or dismissed. A task the session started itself says so, until the user puts it away.
  */
-export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false, memory, onStart, onOpenList }: {
+export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false, memory, dockPreference, onStart, onOpenList }: {
   hub: WorkItemsHub;
   /** The items this session shows, in the order of the cards. */
   items: readonly WorkItem[];
@@ -84,6 +84,8 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   hidden?: boolean;
   /** What the cards of this session remember when the pane is mounted again (a switch of space). */
   memory?: ProposalsOverlayMemory;
+  /** The side of Notes the user chose for the cards, owned by the window: the same for every pane. */
+  dockPreference: DockPreference;
   onStart: (item: WorkItem, start: WorkStart) => void;
   /** Opens the Work items tab on an item. */
   onOpenList: (item: WorkItem) => void;
@@ -97,8 +99,8 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   const [detail, setDetail] = useState(false);
   const [cards, setCards] = useState<HTMLElement | null>(null);
   // The side of Notes the user chose for the cards, for the whole window; null leaves it to the room around Notes.
-  const [dock, setDock] = useState<DockSide | null>(() => loadDockSide());
-  const chooseDock = (side: DockSide | null) => { setDock(side); saveDockSide(side); };
+  const dock = useSyncExternalStore(dockPreference.subscribe, dockPreference.get, dockPreference.get);
+  const chooseDock = dockPreference.set;
   useWorkCardsPlacement(cards, collapsed, dock);
   // Dragging the chip or the header of the card shows a cross of targets around Notes; dropping on one docks the cards there.
   const [guide, setGuide] = useState<{ targets: Record<DockSide, PaneRect>; over: DockSide | null } | null>(null);

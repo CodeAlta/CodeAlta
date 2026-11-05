@@ -19,7 +19,7 @@ While an agent works, it can find something that is not part of what you asked: 
 - **Details** opens the full description;
 - with several proposals, the arrows go from one to the next.
 
-The cards are docked to Notes and move with them when you drag Notes. To choose the side, drag the header of a card (or its chip) onto one of the arrows that appear around Notes, or use the **Place the proposals** button in the header of the card: **Left of Notes**, **Right of Notes**, **Above Notes**, **Below Notes**, or **Automatic**, which puts the cards on the left and on another side when there is no room. Notes make room for the side you chose, without changing their own place. Cards you put away stay away, also when you come back from another space, until the session proposes something new.
+The cards are docked to Notes and move with them when you drag Notes. To choose the side, drag the header of a card (or its chip) onto one of the arrows that appear around Notes, or use the **Place the proposals** button in the header of the card: **Left of Notes**, **Right of Notes**, **Above Notes**, **Below Notes**, or **Automatic**, which puts the cards on the left and on another side when there is no room. Notes make room for the side you chose, without changing their own place. The side you choose is the one of every session of the window. Cards you put away stay away, also when you come back from another space, until the session proposes something new.
 
 You decide on each card:
 

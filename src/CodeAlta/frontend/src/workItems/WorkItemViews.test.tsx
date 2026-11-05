@@ -9,6 +9,7 @@ import { WorkItemCards } from "./WorkItemCards";
 import { WorkItemsBadge } from "./WorkItemsBadge";
 import { WorkItemSettings } from "./WorkItemSettings";
 import { WorkItemsPanel } from "./WorkItemsPanel";
+import { createDockPreference } from "./proposalsDock";
 import { defaultWorkSettings, workItems } from "./workItems";
 import type { WorkItemsHub, WorkItemsState } from "./workItemsHub";
 
@@ -29,7 +30,7 @@ const items = workItems(state().projects, new Set(["s1", "s2"]));
 
 test("a session shows one proposal at a time, with how many there are and every way to decide", () => {
   const cards = items.filter(item => item.stage === "todo");
-  const html = render(createElement(WorkItemCards, { hub: hub(state()), items: cards, preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never }));
+  const html = render(createElement(WorkItemCards, { hub: hub(state()), dockPreference: createDockPreference(), items: cards, preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never }));
   assert.match(html, /<aside class="work-cards" aria-label="Proposed work items">/);
   assert.match(html, /class="work-card" data-kind="plan"/, "the plan comes first");
   assert.ok(html.includes("Plan ready") && html.includes("Title of plan") && html.includes("Summary of plan"));
@@ -39,17 +40,17 @@ test("a session shows one proposal at a time, with how many there are and every 
   assert.deepEqual(starts, ["Start in a new worktree", "Start in a new session", "Do it in this session"]);
   assert.ok(html.includes("Later") && !html.includes(">Dismiss<"));
 
-  const task = render(createElement(WorkItemCards, { hub: hub(state()), items: cards.filter(item => item.kind === "task"), preferredStart: "here", busy: new Set<string>(), onStart: never, onOpenList: never }));
+  const task = render(createElement(WorkItemCards, { hub: hub(state()), dockPreference: createDockPreference(), items: cards.filter(item => item.kind === "task"), preferredStart: "here", busy: new Set<string>(), onStart: never, onOpenList: never }));
   assert.ok(task.includes("Proposed task") && task.includes("Problem") && task.includes("Dismiss") && !task.includes("1 of 1"));
   assert.match(task, /class="bp6-button bp6-intent-primary work-start-primary"[^>]*>.*?Do it in this session/s, "the way of starting the user prefers is the first button");
 
-  assert.equal(render(createElement(WorkItemCards, { hub: hub(state()), items: [], preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never })), "");
-  assert.equal(render(createElement(WorkItemCards, { hub: hub(state()), items: cards, preferredStart: "worktree", busy: new Set<string>(), hidden: true, onStart: never, onOpenList: never })), "");
+  assert.equal(render(createElement(WorkItemCards, { hub: hub(state()), dockPreference: createDockPreference(), items: [], preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never })), "");
+  assert.equal(render(createElement(WorkItemCards, { hub: hub(state()), dockPreference: createDockPreference(), items: cards, preferredStart: "worktree", busy: new Set<string>(), hidden: true, onStart: never, onOpenList: never })), "");
 });
 
 test("a task the session started itself says so, with nothing left to decide but putting its card away", () => {
   const started = workItems([{ projectId: "p", truncated: false, plans: [], tasks: [row("mine", "task", "pending", { runner: "s1" })] }], new Set(["s1"]));
-  const html = render(createElement(WorkItemCards, { hub: hub(state()), items: started, preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never }));
+  const html = render(createElement(WorkItemCards, { hub: hub(state()), dockPreference: createDockPreference(), items: started, preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never }));
   assert.ok(html.includes("Task in progress") && html.includes("This session is working on this task."), html);
   assert.match(html, /title="Put the card away\. The task stays in Work items\."[^>]*>.*?OK/s);
   for (const gone of ["Proposed task", "Start in a new worktree", "Do it in this session", ">Later<", ">Dismiss<"]) assert.equal(html.includes(gone), false, gone);
