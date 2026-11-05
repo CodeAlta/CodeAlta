@@ -14,6 +14,8 @@ import { MarkdownPreviewBox } from "./MarkdownPreviewBox";
 import { SessionTabMenu, type SessionMenuEntry } from "../SessionTabMenu";
 import { useShellLanguage } from "../shellLanguage";
 import { ExternalEditorIcon, useExternalOpener } from "../externalEditors/externalEditors";
+import type { Worktree } from "../worktrees/worktrees";
+import { EditorWorktrees } from "./EditorWorktrees";
 import { canSaveDocument, documentChecked, documentConflictDismissed, documentEdited, documentImageRead, documentName, documentNamed, documentPreview, documentRead, documentSaved,
   documentSaveUnknown, documentSaving, documentStatus, documentTooLarge, formatFileSize, isUntitledPath, newDocument, newUntitledDocument, nextUntitledPath,
   type EditorDocument } from "./editorDocuments";
@@ -72,7 +74,7 @@ const unread = { status: "read_failed", content: null, revision: null, readOnly:
  * edit, and is never replaced without a choice when it does. Pictures are shown, SVG and Markdown as a drawing
  * or a page as well as text.
  */
-export function ProjectEditor({ tab, projectName, epoch, visible, active, platform, editors, request, onActivate, onPickFile, review = null, api = projectFiles, git = projectGit }: {
+export function ProjectEditor({ tab, projectName, epoch, visible, active, platform, editors, request, onActivate, onPickFile, onOpenWorktree, review = null, api = projectFiles, git = projectGit }: {
   tab: FileTab;
   /** The name of the project while it is still open; undefined once it is gone. */
   projectName: string | undefined;
@@ -90,6 +92,8 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   onActivate: () => void;
   /** Opens the file picker of this project. */
   onPickFile?: () => void;
+  /** Opens the code editor of a worktree of the project's repository, in its own tab; absent where the tab is not a project's. */
+  onOpenWorktree?: (worktree: Worktree) => void;
   /** The files take comments, for a review sent to a session; null where they do not. */
   review?: EditorReview | null;
   api?: EditorApi; git?: Pick<typeof projectGit, "changes">;
@@ -828,6 +832,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
             <EditorRootPath path={tab.projectPath} />
           </span>
           <span className="editor-side-actions">
+            {onOpenWorktree && epoch && <EditorWorktrees epoch={epoch} projectId={tab.projectId} projectName={projectName ?? tab.projectPath} visible={visible} onOpen={onOpenWorktree} />}
             {!readOnlyFolder && <Button variant="minimal" size="small" icon={<AppIcon name="newFile" size={15} />} aria-label={t("New file")} title={t("New file")} disabled={!epoch} onClick={() => createHere(false)} />}
             {!readOnlyFolder && <Button variant="minimal" size="small" icon={<AppIcon name="newFolder" size={15} />} aria-label={t("New folder")} title={t("New folder")} disabled={!epoch} onClick={() => createHere(true)} />}
             <Button variant="minimal" size="small" icon={<AppIcon name="collapseAll" size={15} />} aria-label={t("Collapse all folders")} title={t("Collapse all folders")}

@@ -6204,6 +6204,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               : <ProjectEditor key={fileTabKey(tab)} tab={tab} editors={fileEditors} request={editorRequests.get(tab.projectId)}
               projectName={tab.name ?? snapshot?.projects.find(project => project.id === tab.projectId)?.name} platform={shellPreferences?.platform ?? "windows"}
               epoch={!status ? undefined : owned ? status.hostEpoch : null} onPickFile={isFolderTab(tab) ? undefined : openFilePicker}
+              onOpenWorktree={owned && !isFolderTab(tab) && !snapshot?.projects.find(project => project.id === tab.projectId)?.archived ? worktree => void openWorkEditorLatest.current({ id: tab.projectId, path: tab.projectPath }, worktree.path) : undefined}
               visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={activateShown(tab, visible)}
               // The files of a project take comments, sent to one of its sessions; a folder that is not a project's, none.
               review={owned && !isFolderTab(tab) && snapshot?.projects.some(project => project.id === tab.projectId)
