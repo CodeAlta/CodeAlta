@@ -350,10 +350,108 @@ public sealed class BudgetTests
 
         // The node starts: its keys are not read yet (its connector reads them later) when a run of that space asks to start.
         var devices = new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey, null);
-        var link = new FleetBudgetLink("link", devices, new FleetMetadataKeyring(devices), null) { LinksSpace = static space => space == "default" };
+        var keys = new FleetMetadataKeyring(devices);
+        // What reads the keys of the link (its connector), asked by the run.
+        var link = new FleetBudgetLink("link", devices, keys, null) { LinksSpace = static space => space == "default", ReadKeys = token => keys.RefreshAsync(["default"], token) };
         var gate = new FleetBudgetGate(() => [link], new FakeSpend { Spent = 100 }) { HoldPoll = TimeSpan.FromMilliseconds(100) };
         var admission = await gate.AdmitAsync(new FleetBudgetRun("run-1", null, "default", null), TestContext.CancellationToken);
         StringAssert.Contains(admission.Problem, "is reached", "the run is the space's: its budget holds it, not the absence of a key read");
+    }
+
+    [TestMethod]
+    public async Task ARunThatWaitsForTheKeyOfItsSpace_AsksTheReaderOfTheKeys_AndKeepsTheKeysOfTheOtherSpaces()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        // The desktop makes the key of the space "work" and gives it to the node; the space "default" has none yet.
+        var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey,
+            Path.Combine(fleet.Root.Path, "desktop-link", FleetOrganizationDevices.PinFileName)));
+        var workKey = (await desktopKeys.RefreshAsync("work", CancellationToken.None))!;
+        await fleet.Manager.PutAsync(null, Settings(100) with { Name = "Work", ScopeKind = FleetBudgetScopeKinds.Space, ScopeId = workKey.Grant!.SpaceId,
+            Mode = FleetBudgetModes.Advisory, Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
+        var devices = new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey, null);
+        var keys = new FleetMetadataKeyring(devices);
+        string[] linked = ["default", "work"];
+        await keys.RefreshAsync(linked, CancellationToken.None);
+        Assert.IsNotNull(keys.CurrentFor("work"));
+        Assert.IsNull(keys.CurrentFor("default"));
+
+        // A run of "default" waits for its key and asks the one that reads the keys of the link, which reads them for every space it
+        // links; the desktop made that key meanwhile.
+        var asked = 0;
+        var link = new FleetBudgetLink("link", devices, keys, null)
+        {
+            LinksSpace = space => linked.Contains(space),
+            ReadKeys = async token =>
+            {
+                if (Interlocked.Increment(ref asked) == 1) await desktopKeys.RefreshAsync(linked, token);
+                await keys.RefreshAsync(linked, token);
+            },
+        };
+        var gate = new FleetBudgetGate(() => [link], new FakeSpend { Spent = 100 }) { HoldPoll = TimeSpan.FromMilliseconds(100), HoldWait = TimeSpan.FromSeconds(3) };
+        var admission = await gate.AdmitAsync(new FleetBudgetRun("run-1", null, "default", null), TestContext.CancellationToken);
+        Assert.IsNull(admission.Problem, "the key of its space read, the budget of another space does not hold it");
+        Assert.IsGreaterThanOrEqualTo(1, asked, "the run asked the reader of the keys");
+        Assert.IsNotNull(keys.CurrentFor("work"), "the keys of the other spaces are kept");
+        Assert.IsNotNull(keys.CurrentFor("default"));
+    }
+
+    [TestMethod]
+    public async Task ARunThatWaitedForTheKeyOfItsSpace_DecidesAgainByEveryLink_BeforeItStarts()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        // A budget of a space is kept: a run of a linked space waits for its key on the second link.
+        await fleet.Manager.PutAsync(null, Settings(100) with { Name = "A space", ScopeKind = FleetBudgetScopeKinds.Space, ScopeId = "space-opaque-id",
+            Mode = FleetBudgetModes.Advisory, Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
+        var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey,
+            Path.Combine(fleet.Root.Path, "desktop-link", FleetOrganizationDevices.PinFileName)));
+        var first = new FleetBudgetLink("first", new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.OtherKey, null), null, null);
+        var devices = new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey, null);
+        var keys = new FleetMetadataKeyring(devices);
+        FleetBudgetGate? gate = null;
+        string? meanwhile = "not asked";
+        var second = new FleetBudgetLink("second", devices, keys, null)
+        {
+            LinksSpace = static space => space == "default",
+            ReadKeys = async token =>
+            {
+                if (meanwhile == "not asked")
+                {
+                    // While the run waits for the key, the first link verifies a newer budget that stops its runs (another run reads it).
+                    await fleet.Manager.PutAsync(null, Settings(100) with { Name = "First machine", ScopeKind = FleetBudgetScopeKinds.Machine, ScopeId = fleet.OtherKey.DeviceId,
+                        Mode = FleetBudgetModes.Advisory, Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
+                    meanwhile = (await gate!.AdmitAsync(new FleetBudgetRun("run-other", null, "elsewhere", null), token)).Problem;
+                    // Then the key of the space comes.
+                    await desktopKeys.RefreshAsync("default", token);
+                }
+
+                await keys.RefreshAsync(["default"], token);
+            },
+        };
+        gate = new FleetBudgetGate(() => [first, second], new FakeSpend { Spent = 100 }) { HoldPoll = TimeSpan.FromMilliseconds(100), HoldWait = TimeSpan.FromSeconds(5) };
+
+        var admission = await gate.AdmitAsync(new FleetBudgetRun("run-1", null, "default", null), TestContext.CancellationToken);
+        StringAssert.Contains(meanwhile, "'First machine' is reached", "the first link verified the newer budget while the run waited");
+        StringAssert.Contains(admission.Problem, "'First machine' is reached", "the run decides again by every link once the key came, not only by the ones after it");
+    }
+
+    [TestMethod]
+    public async Task ARunOfALinkedSpace_DoesNotWaitForItsKey_ForABudgetOfSpacesThatWasRemoved()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        var statePath = Path.Combine(fleet.Root.Path, "node-budgets.json");
+        var budget = await fleet.Manager.PutAsync(null, Settings(100) with { Name = "A space", ScopeKind = FleetBudgetScopeKinds.Space, ScopeId = "space-opaque-id",
+            Mode = FleetBudgetModes.Advisory, Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
+        // The node learns the budget, then its removal: what it keeps of it is the signed removal.
+        Assert.IsNull((await fleet.Gate(new FakeSpend(), statePath).AdmitAsync(new FleetBudgetRun("run-1", null, null, null), TestContext.CancellationToken)).Problem);
+        await fleet.Manager.RemoveAsync(budget.Id, CancellationToken.None);
+        Assert.IsNull((await fleet.Gate(new FakeSpend(), statePath).AdmitAsync(new FleetBudgetRun("run-2", null, null, null), TestContext.CancellationToken)).Problem);
+
+        // A run of a space linked to the server, whose key the server has none of: no budget of spaces holds, nothing to wait for.
+        var devices = new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey, null);
+        var link = new FleetBudgetLink("link", devices, new FleetMetadataKeyring(devices), statePath) { LinksSpace = static space => space == "default" };
+        var gate = new FleetBudgetGate(() => [link], new FakeSpend { Spent = 100 }) { HoldPoll = TimeSpan.FromMilliseconds(100), HoldWait = TimeSpan.FromSeconds(2) };
+        Assert.IsNull((await gate.AdmitAsync(new FleetBudgetRun("run-3", null, "default", null), TestContext.CancellationToken)).Problem,
+            "a budget taken away is no reason to wait for the key of a space");
     }
 
     [TestMethod]

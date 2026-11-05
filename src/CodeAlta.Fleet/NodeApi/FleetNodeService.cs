@@ -46,6 +46,9 @@ public sealed class FleetNodeServiceOptions
     /// <summary>Gets the clock of the offers.</summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
 
+    // What protects the held sends in the place of the store of the machine, for tests (a store that goes away); null for that store.
+    internal CodeAlta.Catalog.Secrets.LocalSecretStore? HeldSendsProtection { get; init; }
+
     /// <summary>Gets what stops the node gracefully when its owner asks (<c>control.stop</c>); null when the owner cannot stop it this way.</summary>
     public Action? RequestStop { get; init; }
 

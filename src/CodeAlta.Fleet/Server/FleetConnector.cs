@@ -229,6 +229,8 @@ public sealed partial class FleetConnector : IAsyncDisposable
     private int _activeSessions;
     // When the metadata key was last read, in UTC ticks; 0 to read it at the next publication.
     private long _keysReadAt;
+    // Completed once a read of the keys ends, then replaced: what RefreshKeysAsync waits for.
+    private TaskCompletionSource _keysRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>Initializes a new instance of the <see cref="FleetConnector"/> class; <see cref="Start"/> connects.</summary>
     /// <param name="options">The server, the device and what to publish.</param>
@@ -309,6 +311,20 @@ public sealed partial class FleetConnector : IAsyncDisposable
     {
         Volatile.Write(ref _keysReadAt, 0);
         Nudge();
+    }
+
+    /// <summary>
+    /// Asks the connector to read the metadata keys again now, for every space it links, and waits for that read: the connector is the
+    /// one that reads its keyring (<see cref="MetadataKeys"/>), so what needs a key asks it here rather than reading the keys itself.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the wait; the read goes on.</param>
+    /// <returns>A task that completes once the connector read the keys, or tried and failed; never while it is not connected.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    public Task RefreshKeysAsync(CancellationToken cancellationToken)
+    {
+        var read = Volatile.Read(ref _keysRead).Task;
+        RefreshKeys();
+        return read.WaitAsync(cancellationToken);
     }
 
     /// <summary>
@@ -926,6 +942,8 @@ public sealed partial class FleetConnector : IAsyncDisposable
         var due = lacking ? TimeSpan.FromSeconds(30) : _options.KeyRefreshInterval;
         if (now.UtcTicks - Volatile.Read(ref _keysReadAt) < due.Ticks) return;
         Volatile.Write(ref _keysReadAt, now.UtcTicks);
+        // Taken before the read: what asked for a read before it started is told once it ends.
+        var asked = Interlocked.Exchange(ref _keysRead, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
         try
         {
             await keys.RefreshAsync(spaces, stop).ConfigureAwait(false);
@@ -934,6 +952,10 @@ public sealed partial class FleetConnector : IAsyncDisposable
             or HttpRequestException or System.Security.Cryptography.CryptographicException or TaskCanceledException)
         {
             if (LogManager.IsInitialized) _logger.Warn($"The metadata keys of {FleetServerAddress.Format(_options.ServerAddress)} could not be read: {exception.Message}");
+        }
+        finally
+        {
+            asked.TrySetResult();
         }
     }
 

@@ -285,6 +285,54 @@ public sealed class OrganizationMachineTests
             CancellationToken.None)).Problem, "the same id in another organization is another person");
     }
 
+    [TestMethod]
+    public async Task AnUnattendedRunOfATeamMachine_InALinkedSpace_NeverWaitsForAKeyOfAPersonsSpace()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var root = new TempDirectory();
+        using var alexKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "alex"));
+        using var nodeKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "node"));
+        using var alex = new FleetServerClient(server.BaseAddress, alexKey);
+        var setup = await alex.SetUpAsync(server.SetupCode, "Alex", "Desktop", "Acme", CancellationToken.None);
+        var enrollment = await alex.CreateEnrollmentTokenAsync(null, "build-box", CancellationToken.None);
+        using (var node = new FleetServerClient(server.BaseAddress, nodeKey)) await node.EnrollAsync(enrollment.Token, "Build box", CancellationToken.None);
+        await alex.ApproveAsync(nodeKey.DeviceId, FleetDeviceKinds.Node, CancellationToken.None);
+        var alexDevices = new FleetOrganizationDevices(server.BaseAddress, alexKey);
+        var alexAccess = new FleetOrganizationAccess(alexDevices);
+        var alexKeys = new FleetMetadataKeyring(alexDevices) { Access = () => alexAccess.Current };
+        var work = (await alexKeys.RefreshAsync("work", CancellationToken.None))!;
+
+        // The machine becomes a team's, as its owner signs it.
+        var team = await alex.CreateTeamAsync("Infra");
+        var transfer = await alex.OfferTransferAsync(new OfferTransferRequest(FleetResourceKinds.Machine, nodeKey.DeviceId, FleetPrincipalKinds.Team, team.Id));
+        await alex.DecideTransferAsync(transfer.Id, "accept");
+        await alexAccess.SignAsync((await alexAccess.PrepareAsync(CancellationToken.None))!, CancellationToken.None);
+        var nodeDevices = new FleetOrganizationDevices(server.BaseAddress, nodeKey);
+        var nodeAccess = new FleetOrganizationAccess(nodeDevices);
+        await nodeAccess.RefreshAsync(CancellationToken.None);
+        Assert.IsTrue(nodeAccess.Current?.IsSharedMachine(nodeKey.DeviceId) == true);
+        var nodeKeys = new FleetMetadataKeyring(nodeDevices) { Access = () => nodeAccess.Current };
+
+        // A budget of a space is kept there, reached; the space "work" is linked to the server, and no key of it was read on the machine.
+        await new FleetBudgetsManager(alexDevices).PutAsync(null, new FleetBudgetSettings("Work", FleetBudgetScopeKinds.Space, work.Grant!.SpaceId, FleetBudgetMeasures.Tokens, 100,
+            FleetBudgetPeriods.Month, "UTC", FleetBudgetModes.Advisory, FleetBudgetReachedActions.Stop), CancellationToken.None);
+        var asked = 0;
+        var link = new FleetBudgetLink("link", nodeDevices, nodeKeys, null)
+        {
+            Access = nodeAccess, LinksSpace = static space => space == "work",
+            ReadKeys = token => { Interlocked.Increment(ref asked); return nodeKeys.RefreshAsync(["work"], token); },
+        };
+        var gate = new FleetBudgetGate(() => [link], new Spent(100)) { HoldPoll = TimeSpan.FromMilliseconds(100), HoldWait = TimeSpan.FromSeconds(3) };
+
+        // Work of the team (an automation, local work), of no person: no key of a person's space ever seals it, and none is waited for.
+        Assert.IsNull((await gate.AdmitAsync(new FleetBudgetRun("run-1", null, "work", null), CancellationToken.None)).Problem,
+            "unattended work of a team machine is not held for a key it can never have");
+        // Nor the work of a person of another organization, who is no person of this one.
+        Assert.IsNull((await gate.AdmitAsync(new FleetBudgetRun("run-2", null, "work", null) { PersonId = setup.Owner.Id, PersonOrganizationId = "another-organization" },
+            CancellationToken.None)).Problem);
+        Assert.AreEqual(0, asked, "no key is asked for work that takes none");
+    }
+
     private sealed class Spent(long spent) : IFleetBudgetSpend
     {
         public ValueTask<long> SpentAsync(FleetBudgetLink link, FleetBudgetDefinition budget, FleetBudgetPeriod period, CancellationToken cancellationToken) => ValueTask.FromResult(spent);
