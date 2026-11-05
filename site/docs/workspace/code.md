@@ -33,6 +33,7 @@ The **Files** pane (`Ctrl+B` shows or hides it) lists the project without what `
 - Click a file to preview it; double-click it, or edit it, to keep its tab.
 - **New file** and **New folder** are at the top. `F2` renames, and `Delete` moves to the Recycle Bin or the Trash.
 - Drag a file or folder onto a folder to move it.
+- **Open a worktree in the editor**, beside the name of the project, lists the [worktrees](../worktrees.md) of its repository with their branch. Choosing one opens its files in a tab of its own, named by the worktree, or shows that tab when it is already open: the files and the unsaved edits of each checkout stay in their own tab. The button is shown only when the repository has more than one checkout, and only on the tab of the project.
 - The menus of a file, a tab and the editor have **Reveal in File Explorer** (**Reveal in Finder** on macOS) and **Open in** your [external editor](#external-editor).
 
 ## Editing
