@@ -131,6 +131,78 @@ public sealed class DirectoryVisibilityTests
         }
     }
 
+    [TestMethod]
+    public async Task ARevokeWhoseRequestIsCancelledOnceItCommitted_StillRemovesTheMachineAndItsSessions()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        var (owner, box, max, _, organizationId) = await SessionOnlyViewerAsync(server);
+        var ownerEvents = new ConcurrentQueue<FleetDirectoryChange>();
+        var maxEvents = new ConcurrentQueue<FleetDirectoryChange>();
+        var (ownerConnection, _) = await WatchAsync(server, owner, ownerEvents);
+        var (maxConnection, _) = await WatchAsync(server, max, maxEvents);
+        await using (ownerConnection)
+        await using (maxConnection)
+        {
+            await ownerConnection.SendRequestAsync(FleetServerMethods.DirectoryWatch, null);
+            await maxConnection.SendRequestAsync(FleetServerMethods.DirectoryWatch, null);
+            // The caller goes away once the revoke committed: its request is cancelled before the watchers are told.
+            using var request = new CancellationTokenSource();
+            var store = server.GetService<ICoordinatorStore>();
+            var devices = new DeviceService(InterceptedStore.Over(store, before: (method, _) => { if (method == nameof(ICoordinatorStore.ListSessionsAsync)) request.Cancel(); }),
+                server.GetService<CodeAlta.Server.Identity.RequestAuthenticator>(), server.GetService<Control.PresenceRegistry>(), server.Clock)
+            {
+                Directory = server.GetService<Control.DirectoryHub>(),
+            };
+            var actor = (await store.GetDeviceAsync(owner.DeviceId))!;
+            var remove = await server.NextEntryAsync(owner, FleetDeviceListOperations.Remove, box.DeviceId, null, null, null, organizationId);
+            try
+            {
+                await devices.RevokeAsync(actor, box.DeviceId, new DeviceListChangeRequest(remove), new RequestOrigin(IPAddress.Loopback, "test"), request.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // The request ended: what it committed stays committed.
+            }
+
+            Assert.AreEqual(DeviceStatuses.Revoked, (await store.GetDeviceAsync(box.DeviceId))!.Status);
+            await WaitForAsync(() => ownerEvents.Any(change => change.Kind == FleetServerMethods.ChangeKinds.MachineRemoved && change.Id == box.DeviceId));
+            await WaitForAsync(() => maxEvents.Any(static change => change.Kind == FleetServerMethods.ChangeKinds.SessionRemoved && change.Id == "s-max"));
+        }
+    }
+
+    // Alex owns a team machine where Max started a session, then Max left the team: he sees the session, not the machine.
+    private static async Task<(TestDevice Owner, TestDevice Box, TestDevice Max, string MaxId, string OrganizationId)> SessionOnlyViewerAsync(ServerFixture server)
+    {
+        var owner = new TestDevice("Alex desktop");
+        var home = new TestDevice("Alex node");
+        var box = new TestDevice("Build box");
+        var (setup, _) = await server.SetUpWithNodeAsync(owner, home);
+        await ApproveNodeAsync(server, owner, box, setup.Owner.Id, setup.Organization.Id);
+        var (max, maxId) = await AccessControlTests.AddPersonAsync(server, owner, setup, "Max");
+        var team = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/teams", new CreateTeamRequest("Infra"))).Read<TeamDto>();
+        await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{team.Id}/members/{maxId}", new SetTeamMemberRequest(FleetTeamRoles.Member));
+        var offer = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers",
+            new OfferTransferRequest(FleetResourceKinds.Machine, box.DeviceId, FleetPrincipalKinds.Team, team.Id))).Read<TransferDto>();
+        await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/transfers/{offer.Id}/accept");
+        await PublishAsync(server, box, "s-max", maxId);
+        await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/teams/{team.Id}/members/{maxId}");
+        return (owner, box, max, maxId, setup.Organization.Id);
+    }
+
+    private static Task<(FleetConnection Connection, FleetWelcome Welcome)> WatchAsync(ServerFixture server, TestDevice device, ConcurrentQueue<FleetDirectoryChange> events)
+        => server.ConnectAsync(device, connection => connection.SetEventHandler((fleetEvent, _) =>
+        {
+            if (fleetEvent.Event == FleetServerMethods.DirectoryChanged && fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetDirectoryChange) is { } change)
+                events.Enqueue(change);
+            return ValueTask.CompletedTask;
+        }));
+
+    private static async Task RevokeAsync(ServerFixture server, TestDevice owner, TestDevice machine, string organizationId)
+    {
+        var remove = await server.NextEntryAsync(owner, FleetDeviceListOperations.Remove, machine.DeviceId, null, null, null, organizationId);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{machine.DeviceId}/revoke", new DeviceListChangeRequest(remove))).Status);
+    }
+
     private static string Ids(params string[] ids) => string.Join(",", ids.Order(StringComparer.Ordinal));
 
     private static async Task<string> MachinesAsync(ServerFixture server, TestDevice device)
