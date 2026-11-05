@@ -81,6 +81,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.machineCaller", "A session of another machine is started by an agent, as the child of its session: call this from a session.", CommandPath);
         if (NormalizeOptionalText(options.ParentSessionId) is { } named && !string.Equals(named, parentId, StringComparison.OrdinalIgnoreCase))
             return UsageError(context, "usage.machineParent", "A session of another machine is the child of the calling session only.", CommandPath);
+        if (await RefuseGuardedCallerAsync(context, "starts no session on another machine").ConfigureAwait(false) is { } guarded) return guarded;
 
         string? prompt = null;
         if (options.UseStdin || !string.IsNullOrWhiteSpace(options.Message))
@@ -229,6 +230,8 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static int MachineRefusal(AltaCommandContext context, string? code, string? message, string? machine)
     {
+        // Refused here, before any machine was asked: the calling session is guarded.
+        if (code == "guarded") return PermissionDenied(context, "guard.otherSession", message ?? "This session is guarded: it starts and prompts nothing on another machine.");
         var (exitCode, errorCode) = code switch
         {
             "machine_not_found" or "session_missing" or "project_missing" or "space_missing" or "unavailable" => (AltaExitCodes.NotFound, "machine.notFound"),

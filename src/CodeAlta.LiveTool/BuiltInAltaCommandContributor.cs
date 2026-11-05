@@ -5344,6 +5344,18 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             + "what it is handed would be done there without that check. Start a session of your own (`alta session create`), which keeps it, or ask the user.");
     }
 
+    // A session whose tool calls a guard checks hands nothing to another machine (a session it starts there, or one it moves
+    // there): that machine runs it with its own tools, which no guard of the run checks. Null when the caller is not guarded.
+    private static async Task<int?> RefuseGuardedCallerAsync(AltaCommandContext context, string what)
+    {
+        if (!string.Equals(context.Caller.Kind, "agent", StringComparison.OrdinalIgnoreCase) || NormalizeOptionalText(context.Caller.SourceSessionId) is not { } callerId
+            || context.Services.Get<SessionRuntimeService>() is not { ToolGuards: { } guards }
+            || await guards.FindAsync(callerId, context.CancellationToken).ConfigureAwait(false) is null)
+            return null;
+        return PermissionDenied(context, "guard.otherSession",
+            $"This session runs for an automation that decides what it does without a person: it {what}, since another machine would do the work without that check. Ask the user.");
+    }
+
     // Whether a session was created by another, or descends from it through its parents.
     private static async Task<bool> IsOwnSessionAsync(AltaCommandContext context, SessionViewDescriptor session, string creatorId)
         => string.Equals(NormalizeOptionalText(session.CreatedBy?.SourceSessionId), creatorId, StringComparison.OrdinalIgnoreCase)

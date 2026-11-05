@@ -200,12 +200,49 @@ public sealed class AltaSessionSelectionTests
         }
 
         Assert.AreEqual(0, provider.Turns.Count, "the user's session was handed nothing");
+        // Nor to another machine: a session it starts there, or one it moves there, runs out of reach of the guard.
+        var moves = new RecordingMoves();
+        var fleetCommands = DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()), machineMoves: moves);
+        foreach (var args in new[]
+                 {
+                     new[] { "session", "move", "--machine", "mac-mini" }, ["session", "move", child.SessionId, "--machine", "mac-mini"],
+                     ["session", "create", "--machine", "mac-mini", "--message", "deploy"],
+                 })
+        {
+            var refused = await fleetCommands.InvokeAsync(args, caller: agent);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, refused.ExitCode, string.Join(' ', args) + ": " + refused.Transcript);
+            StringAssert.Contains(refused.Transcript, "guard.otherSession", string.Join(' ', args));
+        }
+
+        Assert.AreEqual(0, moves.Calls, "nothing was moved");
         // A session of its own run takes it; a session no guard checks hands work as before.
         var toChild = await commands.InvokeAsync(["session", "queue", child.SessionId, "--message", "look"], caller: agent);
         Assert.AreEqual(AltaExitCodes.Success, toChild.ExitCode, toChild.Transcript);
         var plain = new AltaCallerIdentity { Kind = "agent", SourceSessionId = other.SessionId, SourceProjectId = host.CurrentProject.Id };
         var fromPlain = await commands.InvokeAsync(["reminder", "create", "--session", child.SessionId, "--duration", "60", "--content", "later"], caller: plain);
         Assert.AreEqual(AltaExitCodes.Success, fromPlain.ExitCode, fromPlain.Transcript);
+        var plainMove = await fleetCommands.InvokeAsync(["session", "move", "--machine", "mac-mini"], caller: plain);
+        Assert.AreEqual(AltaExitCodes.Success, plainMove.ExitCode, plainMove.Transcript);
+        Assert.AreEqual(1, moves.Calls);
+    }
+
+    private sealed class RecordingMoves : IAltaSessionMachineMoves
+    {
+        public int Calls { get; private set; }
+
+        public IReadOnlyList<AltaMoveMachine> ListMachines() => [new("", "pc", true, "online"), new("m1", "mac-mini", false, "online")];
+
+        public Task<AltaSessionMoveResult> MoveAsync(string sessionId, string machine, bool cloneRepository, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(new AltaSessionMoveResult("finished", null, null, machine, "/work/x", []));
+        }
+
+        public AltaSessionMoveResult Schedule(string sessionId, string machine, bool cloneRepository)
+        {
+            Calls++;
+            return new AltaSessionMoveResult("scheduled", null, null, machine, null, []);
+        }
     }
 
     [TestMethod]

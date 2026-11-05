@@ -108,6 +108,34 @@ public sealed class RemoteChildSessionsTests
         Assert.AreEqual(("test-node", parent.SessionId), (report!.MachineName, report.ParentSessionId));
     }
 
+    // A session whose tool calls a guard checks (the run of an automation with autonomy) starts nothing on another machine,
+    // by either way: that machine would do the work with its own tools, which no guard of the run checks.
+    [TestMethod]
+    public async Task AGuardedSession_StartsNoSessionOnAnotherMachine_ByTheCommandOrByAScript()
+    {
+        var token = TestContext.CancellationToken;
+        await using var two = await TwoHosts.StartAsync(token);
+        var runner = new CodeAlta.Automations.AutomationRunner(two.Desktop);
+        Assert.IsNotNull(runner);
+        var run =await two.Desktop.Commands.CreateDraftSessionAsync(null, two.Desktop.ModelProviderRegistry.ListProviders().Single(static provider => provider.IsEnabled), "Run",
+            new AltaActorProvenance
+            {
+                Kind = AltaActorProvenance.AutomationKind, AutomationId = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d79", CorrelationId = "run-1", CreatedAt = DateTimeOffset.UtcNow,
+            }, null, null, null, null, null, null);
+        Assert.IsNotNull(await two.Desktop.ToolGuards.FindAsync(run.SessionId, token), "the session of the run is guarded");
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        two.Node.Provider.Turns.Enqueue((_, _) => Task.FromResult(ScriptedFleetProvider.Answer("Deployed.")));
+
+        var refused = await two.Children.CreateAsync(Request(run.SessionId, "Deploy."), token);
+        Assert.AreEqual(("refused", "guarded"),(refused.Status, refused.Code), refused.Message);
+        var agents = new CodeModeAgents(two.Desktop);
+        await using var _ = agents;
+        var fromScript = await agents.RunAsync(run.SessionId, new CodeModeAgentRequest("Deploy.") { RunId = "run-1", Machine = "test-node", Timeout = Patience }, token);
+        Assert.IsFalse(fromScript.Succeeded);
+        StringAssert.Contains(fromScript.Failure, "without a person");
+        Assert.AreEqual(0, two.Node.Service.AgentSessions.Children.Count, "Nothing reached the machine.");
+    }
+
     [TestMethod]
     public async Task AScriptStartsAnAgentOnAnotherMachine_AndGetsItsAnswer()
     {
