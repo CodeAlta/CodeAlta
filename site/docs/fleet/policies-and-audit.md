@@ -4,7 +4,7 @@ title: Policies and Audit
 
 # Policies and Audit
 
-A [CodeAlta Server](fleet.md#connect-to-a-codealta-server) keeps the rules of your organization for the work of the fleet, the kill switch that stops it, and an audit log of who did what. In CodeAlta Desktop, open **Settings** > **Fleet** > **Policies** and **Settings** > **Fleet** > **Audit**.
+A [CodeAlta Server](server.md) keeps the rules of your organization for the work of the fleet, the kill switch that stops it, and an audit log of who did what. In CodeAlta Desktop, open **Settings** > **Fleet** > **Policies** and **Settings** > **Fleet** > **Audit**.
 
 ## The kill switch
 
