@@ -545,7 +545,10 @@ internal sealed partial class AccessService
             var sessionId = scope["session:".Length..];
             // The person who started the session on its machine: on a machine of a team or of the organization, the copy holds only
             // when one of their devices gave it.
-            if (sessions.TryGetValue(sessionId, out var session)) listed.Add(new GrantKeyDto(grantId, sessionId, session.MachineId, sealedText, wrapped) { PersonId = session.PersonId });
+            if (sessions.TryGetValue(sessionId, out var session)) listed.Add(new GrantKeyDto(grantId, sessionId, session.MachineId, sealedText, wrapped)
+            {
+                PersonId = session.PersonId, PersonSignature = session.PersonSignature,
+            });
         }
 
         return new(listed);

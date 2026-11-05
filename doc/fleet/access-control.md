@@ -201,7 +201,10 @@ In a Private space, access to sealed data is a key operation, not only a flag:
   (a session's replica key, a snapshot's key, a channel's key), never a key that opens more
   ([keys](security-and-privacy.md#keys)); revoking it starts a new key epoch for what they held. In 4.0 a grant of a
   session's content wraps the key of its title only, and the grantee reads its conversation live through the machine that
-  holds it, which checks the grant in the signed access document (its `readers`); replicas of a session come later;
+  holds it, which checks the grant in the signed access document (its `readers`); replicas of a session come later. On a
+  machine of a team or of the organization the copy comes from a device of the person who started the session there, which
+  the machine signs with the facts of the session: the grantee's device verifies that signature with the key of the machine,
+  never the server's word, so that no other person of the team gives the title of a session that is not theirs;
 - the server cannot do either: a device that holds the keys does it (the console, when an authorized person approves);
   a grant made while no such device is online stays **pending** and says so.
 

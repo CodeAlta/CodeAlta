@@ -58,9 +58,9 @@ public sealed class FleetGrantKeyring
         {
             try
             {
-                // On a team machine, the copy is given by the person who started the session there.
+                // On a team machine, the copy is given by the person who started the session there, as the machine signed it.
                 opened[key.SessionId] = FleetGrantKeys.Open(key.Sealed, key.Wrapped, list.OrganizationId ?? string.Empty, key.GrantId, key.SessionId, key.MachineId, _devices.Identity, list,
-                    access, key.PersonId);
+                    access, key.PersonId, key.PersonSignature);
             }
             catch (InvalidDataException)
             {

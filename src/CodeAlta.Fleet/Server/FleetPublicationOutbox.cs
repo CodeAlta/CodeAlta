@@ -82,6 +82,15 @@ internal sealed class FleetPublicationOutbox
     /// bytes of a seal, so a new key (another space, a new epoch) seals it again.
     /// </summary>
     public IReadOnlyList<FleetSessionFact> Pending(IReadOnlyList<FleetLocalSession> sessions, int limit, Func<FleetLocalSession, FleetMetadataKey?>? keyOf = null)
+        => Pending(sessions, limit, keyOf, null);
+
+    /// <summary>
+    /// Records the sessions to publish and gives the facts the server does not hold yet, as
+    /// <see cref="Pending(IReadOnlyList{FleetLocalSession}, int, Func{FleetLocalSession, FleetMetadataKey?}?)"/> does, each with the
+    /// signature of this machine that its person started it here (<see cref="FleetSessionPersons"/>), made when its facts are sent.
+    /// </summary>
+    public IReadOnlyList<FleetSessionFact> Pending(IReadOnlyList<FleetLocalSession> sessions, int limit, Func<FleetLocalSession, FleetMetadataKey?>? keyOf,
+        Func<FleetLocalSession, string?>? personSignatureOf)
     {
         var pending = new List<(FleetSessionFact Fact, DateTimeOffset UpdatedAt)>();
         var changed = false;
@@ -91,7 +100,10 @@ internal sealed class FleetPublicationOutbox
                 session.Counts, PersonId: session.PersonId);
             var key = keyOf?.Invoke(session);
             var title = key is null ? null : session.Title;
-            var hash = Hash(fact, title is null ? null : $"{key!.Id}\n{title}");
+            // A version follows whether its person is signed, never the random bytes of the signature: facts kept before it was are sent again once.
+            var signs = personSignatureOf is not null && session.PersonId is not null;
+            var sealedPart = title is null ? null : $"{key!.Id}\n{title}";
+            var hash = Hash(fact, signs ? sealedPart + "\nperson-signed" : sealedPart);
             if (!_state.Sessions.TryGetValue(session.SessionId, out var kept))
             {
                 _state.Sessions[session.SessionId] = kept = new FleetOutboxSession { Epoch = session.Epoch };
@@ -115,8 +127,11 @@ internal sealed class FleetPublicationOutbox
 
             if (kept.Version > kept.AckedVersion)
             {
-                pending.Add((fact with { Version = kept.Version, SealedMetadata = title is null ? null : key!.Seal(session.SessionId, new FleetSessionMetadata(title)) },
-                    session.UpdatedAt));
+                pending.Add((fact with
+                {
+                    Version = kept.Version, SealedMetadata = title is null ? null : key!.Seal(session.SessionId, new FleetSessionMetadata(title)),
+                    PersonSignature = signs ? personSignatureOf!(session) : null,
+                }, session.UpdatedAt));
             }
         }
 

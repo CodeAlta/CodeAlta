@@ -456,6 +456,29 @@ public sealed class AccessControlTests
     }
 
     [TestMethod]
+    public async Task TheMachinesWordOnWhoStartedASession_ReachesTheGranteeWithItsKeys()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Build box");
+        var (setup, _) = await server.SetUpWithNodeAsync(owner, node);
+        var (max, maxId) = await AddPersonAsync(server, owner, setup, "Max");
+        using var maxDevice = max;
+        var signature = node.Sign(FleetSessionPersons.GetSignedBytes(setup.Organization.Id, node.DeviceId, "s1", setup.Owner.Id));
+        var device = (await server.GetService<ICoordinatorStore>().GetDeviceAsync(node.DeviceId))!;
+        var cursors = await server.GetService<ICoordinatorStore>().GetPublicationCursorsAsync(node.DeviceId);
+        await server.GetService<CodeAlta.Server.Services.PublicationService>().PublishFactsAsync(device, new FleetFactsPublish(Math.Max(cursors.Facts, cursors.Inventory) + 1,
+            [new FleetSessionFact("s1", 1, 1, "idle", server.Clock.Now, server.Clock.Now, PersonId: setup.Owner.Id, PersonSignature: signature)]), CancellationToken.None);
+        var grant = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "session.view-content", FleetScopeKinds.Resource, "session:s1", Sealed: true))).Read<GrantDto>();
+        var keyed = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/grants/{grant.Id}/keys", new ConfirmGrantKeysRequest("sealed", [new GrantKeyWrapDto(max.DeviceId, "wrapped")]));
+        Assert.AreEqual(HttpStatusCode.OK, keyed.Status, keyed.Body.ToString());
+
+        var key = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grant-keys")).Read<AccessListDto<GrantKeyDto>>().Items.Single();
+        Assert.AreEqual((setup.Owner.Id, signature), (key.PersonId, key.PersonSignature), "relayed as the machine signed it, for the grantee to verify");
+    }
+
+    [TestMethod]
     public async Task APersonGrantedToSeeAnAutomationOfAnother_ReadsItsRuns()
     {
         await using var server = await ServerFixture.StartAsync();
