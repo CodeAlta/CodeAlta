@@ -978,6 +978,40 @@ public sealed class SignInTests
     }
 
     [TestMethod]
+    public async Task ACompanyAccountCountsAsAWayInOnlyOnceItSignedInUnderTheCompanySettingsAsTheyAreNow()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var other = await FakeOidcProvider.StartAsync(clientSecret: "other-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var key = new SoftwareAuthenticator();
+        await server.SetUpAsync(owner);
+        // The owner has a passkey and a company account, and no recovery key.
+        await RegisterPasskeyAsync(server, owner, key, server.BaseAddress.GetLeftPart(UriPartial.Authority));
+        await ConfigureCompanyAsync(server, owner, provider, false);
+        var (link, back) = await StartAsync(server, owner, FleetSignInMethods.Company, FleetSignInPurposes.Link, await ConfirmAsync(server, owner, key));
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, owner, link, back)).Status);
+        var passkey = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items
+            .Single(static login => login.Method == FleetSignInMethods.Passkey);
+
+        // The company moves to another provider: the account of the one before signs in there no more, so the passkey stays
+        // the owner's last way in.
+        server.Clock.Advance(TimeSpan.FromSeconds(30));
+        await ConfigureCompanyAsync(server, owner, other, false);
+        var refused = await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{passkey.Id}");
+        Assert.AreEqual((HttpStatusCode.Conflict, SignInErrorCodes.LastWayIn), Answer(refused), refused.Body.ToString());
+
+        // Back on the first provider, the account counts again only once it signed in under these settings.
+        server.Clock.Advance(TimeSpan.FromSeconds(30));
+        await ConfigureCompanyAsync(server, owner, provider, false);
+        Assert.AreEqual(SignInErrorCodes.LastWayIn, (await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{passkey.Id}")).Code, "not signed in since");
+        server.Clock.Advance(TimeSpan.FromSeconds(30));
+        await ConfirmWithAsync(server, owner, FleetSignInMethods.Company);
+        var removed = await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{passkey.Id}");
+        Assert.AreEqual(HttpStatusCode.OK, removed.Status, removed.Body.ToString());
+    }
+
+    [TestMethod]
     public async Task APasskeyIsAddedOnlyAtTheSignedCompletion_AndARevokedDeviceAddsNone()
     {
         await using var server = await ServerFixture.StartAsync();
