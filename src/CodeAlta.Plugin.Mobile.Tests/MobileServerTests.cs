@@ -533,6 +533,19 @@ public sealed class MobileServerTests
         Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/a/linked-images/8/0")).StatusCode, "Another record than the answer asked for.");
     }
 
+    [TestMethod]
+    public void LinkedImages_NeverNameAnotherComputer()
+    {
+        // Only parsed, never opened: opening one is what would send the credentials of the user to that computer. FileLinkTests
+        // has every form of such a path; these show that a picture goes through that rule.
+        foreach (var target in (string[])["//server/share/a.png", @"\\server\share\a.png", @"\??\UNC\server\share\a.png", "%5C%5Cserver%5Cshare%5Ca.png", "file://server/share/a.png"])
+        {
+            Assert.IsEmpty(MobileTimeline.LinkedImages($"![a](<{target}>)"), target);
+            Assert.IsEmpty(MobileTimeline.LinkedImages($"![a]({target})"), target);
+            Assert.IsNull(MobileImages.Locate(target, Path.GetFullPath("/start")), target);
+        }
+    }
+
     private sealed class TempFolder : IDisposable
     {
         internal string Path { get; } = Directory.CreateTempSubdirectory("mobile-images-").FullName;

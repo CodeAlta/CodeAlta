@@ -1,123 +1,8 @@
-using System.Globalization;
-using System.Text.RegularExpressions;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Worktrees;
 using CodeAlta.Desktop.Rpc;
 
 namespace CodeAlta.Desktop;
-
-/// <summary>A link to a file of the disk, as the text of a message or of a document writes its target.</summary>
-/// <remarks>
-/// <para>
-/// The target is a path, relative to the folder the link is read in or full, or a <c>file:</c> address. A place
-/// in the file follows it: <c>#L10</c>, <c>#L10C5</c> and <c>#L10-L20</c> as a fragment, or <c>:10</c>,
-/// <c>:10:5</c> and <c>:10-20</c> after the path. A range goes to its start.
-/// </para>
-/// <para>
-/// Reading a target never touches the disk. A target that names another computer (a UNC path, a device path, a
-/// <c>file:</c> address with a host) is no link to a file: looking at such a path would already send the
-/// credentials of the user to that computer. Neither is a target with another scheme.
-/// </para>
-/// </remarks>
-/// <param name="Path">The path, with the separators of the system: full, relative, or starting with <c>~</c> for the home folder.</param>
-/// <param name="Line">The 1-based line to go to; null for none.</param>
-/// <param name="Column">The 1-based column on that line; null for none.</param>
-/// <param name="IsAddress">Whether the target was written as a <c>file:</c> address.</param>
-internal readonly partial record struct DesktopFileLink(string Path, int? Line, int? Column, bool IsAddress)
-{
-    /// <summary>The longest target that is read.</summary>
-    internal const int MaximumLength = 2048;
-
-    /// <summary>
-    /// The fragment of the target when it names no place in the file: the heading of a document, as a link of
-    /// Markdown writes it (<c>#getting-started</c>). Null for none.
-    /// </summary>
-    internal string? Anchor { get; init; }
-
-    /// <summary>Reads the target of a link; false for anything that is not a link to a file of this computer.</summary>
-    internal static bool TryParse(string? target, out DesktopFileLink link)
-    {
-        link = default;
-        if (target is not { Length: > 0 and <= MaximumLength } || target != target.Trim() || target.Any(char.IsControl)) return false;
-        return target.StartsWith("file:", StringComparison.OrdinalIgnoreCase) ? TryParseAddress(target, out link) : TryParsePath(target, out link);
-    }
-
-    private static bool TryParseAddress(string target, out DesktopFileLink link)
-    {
-        link = default;
-        if (!Uri.TryCreate(target, UriKind.Absolute, out var uri) || !uri.IsFile || uri.IsUnc) return false;
-        if (uri.Host.Length > 0 && !string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)) return false;
-        var path = uri.LocalPath;
-        if (path.Any(char.IsControl) || !System.IO.Path.IsPathFullyQualified(path) || NamesAnotherComputer(path)) return false;
-        var (line, column) = uri.Fragment.Length > 1 ? Place(uri.Fragment.AsSpan(1)) : (null, null);
-        var anchor = line is null && uri.Fragment.Length > 1 ? HeadingAnchor(Uri.UnescapeDataString(uri.Fragment[1..])) : null;
-        if (line is null) (path, line, column) = PlaceAfter(path);
-        link = new(path.Replace('/', System.IO.Path.DirectorySeparatorChar), line, column, IsAddress: true) { Anchor = anchor };
-        return true;
-    }
-
-    private static bool TryParsePath(string target, out DesktopFileLink link)
-    {
-        link = default;
-        var fragment = target.IndexOf('#');
-        // Markdown writes a space, a backslash and a letter outside ASCII of a target as an escape.
-        var path = Uri.UnescapeDataString(fragment < 0 ? target : target[..fragment]).Replace('\\', '/');
-        if (path.Length == 0 || path.Any(char.IsControl) || NamesAnotherComputer(path)) return false;
-        var (line, column) = fragment >= 0 ? Place(target.AsSpan(fragment + 1)) : (null, null);
-        var anchor = line is null && fragment >= 0 ? HeadingAnchor(target[(fragment + 1)..]) : null;
-        if (line is null) (path, line, column) = PlaceAfter(path);
-        // "/C:/folder/file", as an address without its scheme writes a path of Windows.
-        if (OperatingSystem.IsWindows() && path.Length >= 3 && path[0] == '/' && char.IsAsciiLetter(path[1]) && path[2] == ':') path = path[1..];
-        var colon = path.IndexOf(':');
-        if (colon >= 0)
-        {
-            // A drive is the one colon of a path; any other is a scheme, or a stream of a file.
-            var drive = OperatingSystem.IsWindows() && colon == 1 && char.IsAsciiLetter(path[0]) && (path.Length == 2 || path[2] == '/')
-                && path.IndexOf(':', 2) < 0;
-            var name = !OperatingSystem.IsWindows() && path.AsSpan(0, colon).Contains('/');
-            if (!drive && !name) return false;
-        }
-
-        if (path.Length == 0) return false;
-        link = new(path.Replace('/', System.IO.Path.DirectorySeparatorChar), line, column, IsAddress: false) { Anchor = anchor };
-        return true;
-    }
-
-    // The address of a heading: letters, digits, dashes and underscores. Anything else names no heading.
-    private static string? HeadingAnchor(string fragment) => HeadingName().IsMatch(fragment) ? fragment : null;
-
-    // "//server/share", "//?/C:/" and "//./device": the first names another computer, the others leave the rules of a path.
-    private static bool NamesAnotherComputer(string path) => path.Length >= 2 && path[0] is '/' or '\\' && path[1] is '/' or '\\';
-
-    // The place a fragment names: "L10", "L10C5", "L10-L20", or the same without the letter.
-    private static (int? Line, int? Column) Place(ReadOnlySpan<char> fragment)
-        => FragmentPlace().Match(fragment.ToString()) is { Success: true } match ? Numbers(match) : (null, null);
-
-    // The place written after a path: ":10", ":10:5", ":10-20".
-    private static (string Path, int? Line, int? Column) PlaceAfter(string path)
-    {
-        if (PathPlace().Match(path) is not { Success: true } match || match.Index == 0) return (path, null, null);
-        var (line, column) = Numbers(match);
-        return (path[..match.Index], line, column);
-    }
-
-    private static (int? Line, int? Column) Numbers(Match match)
-    {
-        var line = int.Parse(match.Groups[1].ValueSpan, NumberStyles.None, CultureInfo.InvariantCulture);
-        if (line < 1) return (null, null);
-        int? column = match.Groups[2].Success ? int.Parse(match.Groups[2].ValueSpan, NumberStyles.None, CultureInfo.InvariantCulture) : null;
-        return (line, column is < 1 ? null : column);
-    }
-
-    [GeneratedRegex(@"^L?(\d{1,7})(?:[C:](\d{1,7}))?(?:-L?\d{1,7}(?:[C:]\d{1,7})?)?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex FragmentPlace();
-
-    [GeneratedRegex(@":(\d{1,7})(?::(\d{1,7}))?(?:-\d{1,7}(?::\d{1,7})?)?$", RegexOptions.CultureInvariant)]
-    private static partial Regex PathPlace();
-
-    [GeneratedRegex(@"^[\p{L}\p{N}_-]{1,200}$", RegexOptions.CultureInvariant)]
-    private static partial Regex HeadingName();
-}
 
 /// <summary>A picture that a link names, read for the window to draw it.</summary>
 /// <param name="Status"><c>ok</c>, <c>not_found</c>, <c>not_image</c>, <c>too_large</c> or <c>failed</c>.</param>
@@ -204,17 +89,17 @@ internal sealed class DesktopFileLinks
     /// <param name="directory">The folder of that document inside the project, with forward slashes; null for the folder of the project.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <exception cref="OperationCanceledException">The request was canceled.</exception>
-    internal Task<string> OpenAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+    internal Task<string> OpenAsync(FileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
         => OpenAsync(link, sessionId, projectId, directory, null, cancellationToken);
 
-    /// <inheritdoc cref="OpenAsync(DesktopFileLink, string?, string?, string?, CancellationToken)"/>
+    /// <inheritdoc cref="OpenAsync(FileLink, string?, string?, string?, CancellationToken)"/>
     /// <param name="link">The link.</param>
     /// <param name="sessionId">The session whose message has the link: a relative path starts from its folder.</param>
     /// <param name="projectId">Without a session, the project or the folder whose document has the link.</param>
     /// <param name="directory">The folder of that document inside the project, with forward slashes; null for the folder of the project.</param>
     /// <param name="originLabel">The label of the view of the window where the link was followed: a code editor that no window shows opens there.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
-    internal async Task<string> OpenAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, string? originLabel, CancellationToken cancellationToken)
+    internal async Task<string> OpenAsync(FileLink link, string? sessionId, string? projectId, string? directory, string? originLabel, CancellationToken cancellationToken)
     {
         var (full, sessionRoot) = await ResolveAsync(link, sessionId, projectId, directory, cancellationToken).ConfigureAwait(false);
         if (full is null) return "not_found";
@@ -267,7 +152,7 @@ internal sealed class DesktopFileLinks
     /// <param name="directory">The folder of that document inside the project, with forward slashes; null for the folder of the project.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <exception cref="OperationCanceledException">The request was canceled.</exception>
-    internal async Task<DesktopLinkedImage> ReadImageAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+    internal async Task<DesktopLinkedImage> ReadImageAsync(FileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
     {
         var (full, _) = await ResolveAsync(link, sessionId, projectId, directory, cancellationToken).ConfigureAwait(false);
         if (full is null) return new("not_found");
@@ -303,7 +188,7 @@ internal sealed class DesktopFileLinks
     /// <param name="directory">The folder of that document inside the project, with forward slashes; null for the folder of the project.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <exception cref="OperationCanceledException">The request was canceled.</exception>
-    internal async Task<string> RevealAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+    internal async Task<string> RevealAsync(FileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
     {
         var (full, _) = await ResolveAsync(link, sessionId, projectId, directory, cancellationToken).ConfigureAwait(false);
         if (full is null || !Path.Exists(full)) return "not_found";
@@ -324,7 +209,7 @@ internal sealed class DesktopFileLinks
     /// <param name="directory">The folder of that document inside the project, with forward slashes; null for the folder of the project.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <exception cref="OperationCanceledException">The request was canceled.</exception>
-    internal async Task<string?> FullPathAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+    internal async Task<string?> FullPathAsync(FileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
         => (await ResolveAsync(link, sessionId, projectId, directory, cancellationToken).ConfigureAwait(false)).Full;
 
     /// <summary>
@@ -338,7 +223,7 @@ internal sealed class DesktopFileLinks
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns><c>ok</c>, <c>not_found</c>, <c>unavailable</c> without editors, or an answer of <see cref="CodeAlta.Desktop.ExternalEditors.OpenAsync"/>.</returns>
     /// <exception cref="OperationCanceledException">The request was canceled.</exception>
-    internal async Task<string> OpenExternalAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+    internal async Task<string> OpenExternalAsync(FileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
     {
         if (ExternalEditors is null) return "unavailable";
         var (full, sessionRoot) = await ResolveAsync(link, sessionId, projectId, directory, cancellationToken).ConfigureAwait(false);
@@ -351,11 +236,11 @@ internal sealed class DesktopFileLinks
 
     // The full path a link names, and the folder of its session: a relative path starts from that folder, or from
     // the folder of its document without a session.
-    private async Task<(string? Full, string? SessionRoot)> ResolveAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+    private async Task<(string? Full, string? SessionRoot)> ResolveAsync(FileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
     {
         var sessionRoot = sessionId is { Length: > 0 and <= 128 } ? await _sessionFolder(sessionId, cancellationToken).ConfigureAwait(false) : null;
         var start = sessionRoot ?? await DocumentFolderAsync(projectId, directory, cancellationToken).ConfigureAwait(false);
-        return (Locate(link.Path, link.IsAddress, start), sessionRoot);
+        return (link.Locate(start, _home), sessionRoot);
     }
 
     // The folder a relative link of a document starts from: the one of the document, inside its project.
@@ -366,33 +251,6 @@ internal sealed class DesktopFileLinks
         if (status != "ok" || root is null) return null;
         if (string.IsNullOrEmpty(directory)) return root;
         return ProjectFilesService.Normalize(directory, out var inside) == "ok" ? Path.Combine(root, inside!.Replace('/', Path.DirectorySeparatorChar)) : null;
-    }
-
-    // The full path a link names; null when it has none. An address names its file as it is.
-    private string? Locate(string path, bool isAddress, string? start)
-    {
-        try
-        {
-            if (path == "~" || path.StartsWith("~" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                return _home.Length == 0 ? null : Path.GetFullPath(Path.Combine(_home, path.Length > 2 ? path[2..] : string.Empty));
-            if (Path.IsPathFullyQualified(path))
-            {
-                var full = Path.GetFullPath(path);
-                // "/src/file" is also written for a file of the project, as a site writes a path from its root: never as an address.
-                if (isAddress || start is null || !path.StartsWith(Path.DirectorySeparatorChar) || Path.Exists(full)) return full;
-            }
-            else if (!path.StartsWith(Path.DirectorySeparatorChar) && Path.IsPathRooted(path))
-            {
-                return null; // "C:file": a path that depends on the current folder of a drive.
-            }
-
-            return start is null || !Path.IsPathFullyQualified(start) ? null
-                : Path.GetFullPath(Path.Combine(start, path.TrimStart(Path.DirectorySeparatorChar)));
-        }
-        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return null;
-        }
     }
 
     private Task<(string Id, string Root)?> ProjectOfAsync(string full, CancellationToken cancellationToken) => ProjectOfAsync(_projects, full, cancellationToken);

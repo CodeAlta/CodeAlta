@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security;
+using CodeAlta.Catalog;
 using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Plugin.Mobile;
@@ -55,22 +56,9 @@ internal sealed class MobileImages(IPluginAltaService alta, MobileSessions sessi
         return Locate(images[index].Target, folder) is { } path ? await ReadFileAsync(path, cancellationToken).ConfigureAwait(false) : null;
     }
 
-    /// <summary>The full path a link names: a <c>file:</c> address, an absolute path, or a path relative to the folder of the session.</summary>
+    /// <summary>The full path a picture names: a <c>file:</c> address, an absolute path, or a path relative to the folder of the session; never one of the home folder.</summary>
     internal static string? Locate(string target, string? folder)
-    {
-        try
-        {
-            if (target.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
-                return Uri.TryCreate(target, UriKind.Absolute, out var uri) && uri.IsFile ? uri.LocalPath : null;
-            if (target.StartsWith('~')) return null;
-            if (Path.IsPathFullyQualified(target)) return Path.GetFullPath(target);
-            return folder is not null && Path.IsPathFullyQualified(folder) ? Path.GetFullPath(Path.Combine(folder, target)) : null;
-        }
-        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return null;
-        }
-    }
+        => FileLink.TryParse(target, out var link) ? link.Locate(folder, home: "") : null;
 
     /// <summary>Reads a picture of the disk: named as a picture, at most <see cref="MaximumBytes"/>, and a picture by its content.</summary>
     internal static async Task<MobileImage?> ReadFileAsync(string path, CancellationToken cancellationToken)

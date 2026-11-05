@@ -11,92 +11,6 @@ public sealed class DesktopFileLinksTests
     private static readonly char Separator = Path.DirectorySeparatorChar;
 
     [TestMethod]
-    [DataRow("src/Program.cs", "src/Program.cs", null, null)]
-    [DataRow("src/Program.cs#L42", "src/Program.cs", 42, null)]
-    [DataRow("src/Program.cs#L42C7", "src/Program.cs", 42, 7)]
-    [DataRow("src/Program.cs#L42-L50", "src/Program.cs", 42, null)]
-    [DataRow("src/Program.cs#42", "src/Program.cs", 42, null)]
-    [DataRow("src/Program.cs#heading", "src/Program.cs", null, null)]
-    [DataRow("src/Program.cs:42", "src/Program.cs", 42, null)]
-    [DataRow("src/Program.cs:42:7", "src/Program.cs", 42, 7)]
-    [DataRow("src/Program.cs:42-50", "src/Program.cs", 42, null)]
-    [DataRow("src/Program.cs:0", "src/Program.cs", null, null)]
-    [DataRow("README.md:3", "README.md", 3, null)]
-    [DataRow("src%5CProgram.cs", "src/Program.cs", null, null)]
-    [DataRow("my%20notes/a%20b.md", "my notes/a b.md", null, null)]
-    [DataRow("caf%C3%A9.md", "café.md", null, null)]
-    [DataRow("../other/a.cs", "../other/a.cs", null, null)]
-    [DataRow("/src/Program.cs#L3", "/src/Program.cs", 3, null)]
-    [DataRow("~/.alta/config.toml", "~/.alta/config.toml", null, null)]
-    public void ATarget_IsReadAsAPathAndThePlaceInTheFile(string target, string path, int? line, int? column)
-    {
-        Assert.IsTrue(DesktopFileLink.TryParse(target, out var link), target);
-        Assert.AreEqual(path.Replace('/', Separator), link.Path);
-        Assert.AreEqual(line, link.Line);
-        Assert.AreEqual(column, link.Column);
-        Assert.IsFalse(link.IsAddress);
-    }
-
-    [TestMethod]
-    public void ATarget_NamesADriveOrAnAddressOfAFile_AsTheSystemWritesThem()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            foreach (var target in new[] { "C:/code/a.cs:12", "C:%5Ccode%5Ca.cs:12", "/C:/code/a.cs#L12", "c:/code/a.cs#L12" })
-            {
-                Assert.IsTrue(DesktopFileLink.TryParse(target, out var link), target);
-                Assert.AreEqual(@"C:\code\a.cs", link.Path, ignoreCase: true);
-                Assert.AreEqual(12, link.Line);
-            }
-
-            Assert.IsTrue(DesktopFileLink.TryParse("file:///C:/code/my%20report.html#L4", out var address));
-            Assert.AreEqual(@"C:\code\my report.html", address.Path);
-            Assert.IsTrue(address.IsAddress);
-            Assert.AreEqual(4, address.Line);
-            // A stream of a file, and a path that depends on the current folder of a drive.
-            Assert.IsFalse(DesktopFileLink.TryParse("C:/code/a.cs:stream", out _));
-            Assert.IsFalse(DesktopFileLink.TryParse("C:a.cs", out _));
-            Assert.IsFalse(DesktopFileLink.TryParse("file:///code/a.cs", out _));
-        }
-        else
-        {
-            Assert.IsTrue(DesktopFileLink.TryParse("file:///home/me/my%20report.html", out var address));
-            Assert.AreEqual("/home/me/my report.html", address.Path);
-            Assert.IsTrue(address.IsAddress);
-            Assert.IsTrue(DesktopFileLink.TryParse("notes/a:b.md", out var named));
-            Assert.AreEqual("notes/a:b.md", named.Path);
-        }
-    }
-
-    [TestMethod]
-    [DataRow(null)]
-    [DataRow("")]
-    [DataRow("#L10")]
-    [DataRow(" src/a.cs")]
-    [DataRow("src/a.cs\n")]
-    [DataRow("src/a%0A.cs")]
-    [DataRow("//server/share/a.cs")]
-    [DataRow("%5C%5Cserver%5Cshare%5Ca.cs")]
-    [DataRow("//?/C:/code/a.cs")]
-    [DataRow("//./pipe/a")]
-    [DataRow("file://server/share/a.cs")]
-    [DataRow("file:////server/share/a.cs")]
-    [DataRow("mailto:someone@example.invalid")]
-    [DataRow("javascript:alert(1)")]
-    [DataRow("vscode://file/C:/code/a.cs")]
-    [DataRow("app://codealta/index.html")]
-    [DataRow("https://user:secret@example.invalid/")]
-    public void ATarget_ThatIsNoFileOfThisComputer_IsNotRead(string? target)
-        => Assert.IsFalse(DesktopFileLink.TryParse(target, out _), target);
-
-    [TestMethod]
-    public void ATarget_LongerThanTheLimit_IsNotRead()
-    {
-        Assert.IsTrue(DesktopFileLink.TryParse(new string('a', DesktopFileLink.MaximumLength), out _));
-        Assert.IsFalse(DesktopFileLink.TryParse(new string('a', DesktopFileLink.MaximumLength + 1), out _));
-    }
-
-    [TestMethod]
     public async Task ARelativeLinkOfASession_OpensTheFileInTheEditorOfItsProject()
     {
         using var fixture = await Fixture.CreateAsync();
@@ -444,7 +358,7 @@ public sealed class DesktopFileLinksTests
 
         public async Task<string> OpenAsync(string target, string? session = null, string? project = null, string? directory = null)
         {
-            Assert.IsTrue(DesktopFileLink.TryParse(target, out var link), target);
+            Assert.IsTrue(FileLink.TryParse(target, out var link), target);
             return await Links.OpenAsync(link, session, project, directory, default);
         }
 

@@ -342,7 +342,7 @@ public sealed class DocumentationRpcTests
 
         async Task<string> OpenAsync(string target)
         {
-            Assert.IsTrue(DesktopFileLink.TryParse(target, out var link), target);
+            Assert.IsTrue(FileLink.TryParse(target, out var link), target);
             return await links.OpenAsync(link, null, null, null, default);
         }
 
@@ -378,7 +378,7 @@ public sealed class DocumentationRpcTests
     [DataRow("docs/sessions.md#a\"]", null)]
     public void TheFragmentOfALink_NamesAHeading_WhenItIsNoPlaceInTheFile(string target, string? anchor)
     {
-        Assert.IsTrue(DesktopFileLink.TryParse(target, out var link), target);
+        Assert.IsTrue(FileLink.TryParse(target, out var link), target);
         Assert.AreEqual(anchor, link.Anchor);
     }
 

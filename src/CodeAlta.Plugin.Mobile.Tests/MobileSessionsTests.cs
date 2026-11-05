@@ -751,13 +751,17 @@ public sealed class MobileSessionsTests
     [TestMethod]
     public void LinkedImages_AreThePicturesOfTheDiskOutsideCode()
     {
+        var (full, address) = OperatingSystem.IsWindows() ? (@"C:\shots\h.png", "file:///C:/shots/i.png") : ("/shots/h.png", "file:///shots/i.png");
         var text = "![a](one.png) `![b](two.png)` ![c](<with space.png> \"title\") ![d](https://example.com/x.png) ![e](data:image/png;base64,AA==)\n"
-            + "    ![f](indented.png)\n~~~\n![g](fenced.png)\n~~~\n![h](C:\\shots\\h.png) ![i](file:///tmp/i.png) ![j](my%20shot.png)";
+            + $"    ![f](indented.png)\n~~~\n![g](fenced.png)\n~~~\n![h]({full}) ![i]({address}) ![j](my%20shot.png)";
 
-        CollectionAssert.AreEqual(new[] { ("a", "one.png"), ("c", "with space.png"), ("h", @"C:\shots\h.png"), ("i", "file:///tmp/i.png"), ("j", "my shot.png") },
+        CollectionAssert.AreEqual(new[] { ("a", "one.png"), ("c", "with space.png"), ("h", full), ("i", address), ("j", "my%20shot.png") },
             MobileTimeline.LinkedImages(text).ToArray());
-        Assert.IsNull(MobileImages.Locate("~/x.png", "/tmp"), "A path of the shell is not resolved.");
+        var folder = Path.GetFullPath("/start");
+        Assert.IsNull(MobileImages.Locate("~/x.png", folder), "A path of the shell is not resolved.");
         Assert.IsNull(MobileImages.Locate("x.png", null), "A relative path needs the folder of the session.");
+        Assert.AreEqual(Path.Combine(folder, "my shot.png"), MobileImages.Locate("my%20shot.png", folder));
+        Assert.AreEqual(Path.Combine(folder, "a%20b.png"), MobileImages.Locate("a%2520b.png", folder), "A target is decoded once: this file has a % in its name.");
     }
 
     private static JsonObject Event(int sequence, string kind, string text, string? activity = null)
