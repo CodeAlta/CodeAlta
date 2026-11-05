@@ -4,7 +4,7 @@ title: People and Access
 
 # People and Access
 
-A [CodeAlta Server](fleet.md#connect-to-a-codealta-server) knows the people of your household or company, what each may do, and who owns each machine and automation. In CodeAlta Desktop, open **Settings** > **Fleet** > **People and access**.
+A [CodeAlta Server](server.md) knows the people of your household or company, what each may do, and who owns each machine and automation. In CodeAlta Desktop, open **Settings** > **Fleet** > **People and access**.
 
 At home, the page shows your people and your machines: everything is yours, and the people you invite see what you share with them. Teams, grants and service identities appear when your organization uses them, or with **Show teams, grants and service identities**.
 
@@ -13,7 +13,7 @@ At home, the page shows your people and your machines: everything is yours, and 
 1. Click **Invite a person…**, give their name and a role (**Member** by default), and click **Invite**.
 2. Give them the code and the address of the server, each with **Copy**. The code works once, for three days.
 3. On their computer, they open **Settings** > **Fleet** > **Server**, click **Join an organization…**, give the address and choose **Use an enrollment code instead**.
-4. Their computer shows six words. Approve it on yours when it shows the same words (see [what waits for you](fleet.md#add-machines-and-computers)).
+4. Their computer shows six words. Approve it on yours when it shows the same words (see [what waits for you](server.md#add-machines-and-computers)).
 
 Until then they are listed as **Invited**. People who sign in with your company's sign-in join without an invitation, as members.
 
@@ -27,7 +27,7 @@ Until then they are listed as **Invited**. People who sign in with your company'
 | **Auditor** | Reads the audit log, statistics and who can do what; changes nothing |
 | **Guest** | Only what is shared with them |
 
-Change a role with the menu on the row of the person. With your company's sign-in, **Roles from groups** can give them instead, by the id of each group (see [Fleet](fleet.md)). No role reads what others did not share: an owner or an admin sees that a session exists and what it costs, never what it says. The organization always keeps an owner.
+Change a role with the menu on the row of the person. With your company's sign-in, **Roles from groups** can give them instead, by the id of each group (see [Fleet](readme.md)). No role reads what others did not share: an owner or an admin sees that a session exists and what it costs, never what it says. The organization always keeps an owner.
 
 ## Teams and team machines
 

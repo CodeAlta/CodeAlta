@@ -63,7 +63,7 @@ Two profiles come with CodeAlta:
 - **Local ports**: ports of this computer it may reach, such as a local database.
 - **MCP servers**: the servers a sandboxed session may use. Others are not offered to it.
 - **Run outside**: **Ask me**, or **Never**.
-- **Other machines**: **Allow** or **Never**: whether its agents start or drive sessions on the other machines of your [fleet](../fleet.md).
+- **Other machines**: **Allow** or **Never**: whether its agents start or drive sessions on the other machines of your [fleet](../fleet/readme.md).
 
 In `~/.alta/config.toml`:
 

@@ -78,8 +78,8 @@ sub_sessions = false
 | Jira version | When a version of a Jira project is released. |
 | Jira query | When an issue starts to match a JQL query, or changes while it matches. |
 | Slack | When the app is mentioned in a channel, or when a message is posted there. |
-| incident.io | When incident.io declares or updates an incident ([a hook of a server](fleet.md#receive-events-of-other-tools)). |
-| Webhook | When another tool pushes a signed event ([a hook of a server](fleet.md#receive-events-of-other-tools)). |
+| incident.io | When incident.io declares or updates an incident ([a hook of a server](fleet/operations.md#receive-events-of-other-tools)). |
+| Webhook | When another tool pushes a signed event ([a hook of a server](fleet/operations.md#receive-events-of-other-tools)). |
 
 An automation can have several triggers. Times are read on the clock of your computer.
 
@@ -113,7 +113,7 @@ These triggers read another tool with an account of yours: no project is needed.
 - Keep their tokens in [Settings > Secrets](secrets.md) and type the name of the secret in the trigger: the configuration holds `${secret:NAME}`, never the token. A token written in the file is refused.
 - **Set up** under the trigger says what to create in the tool. **Test the connection** checks the tokens; **Show a sample event** reads the latest event and shows the prompt the session would get; **Try it on this event** runs the saved automation once on it.
 - Turn on **Write the answer back where the event came from** to post the last answer of the session as a comment on the Jira issue, a reply in the Slack thread or an item on the incident's timeline. A try keeps the answer on its run instead.
-- Jira is looked at every five minutes, with the API token of an account (`id.atlassian.com`). Slack is reached over Socket Mode: the app needs an app-level token and a bot token, and nothing connects to your computer. A Slack trigger on every message leaves alone what people write in a thread it answered; turn on **Also start on people's replies in the threads it answered** to follow them too. incident.io and webhooks push their events to a [hook of a server](fleet.md#receive-events-of-other-tools), for a machine of that server.
+- Jira is looked at every five minutes, with the API token of an account (`id.atlassian.com`). Slack is reached over Socket Mode: the app needs an app-level token and a bot token, and nothing connects to your computer. A Slack trigger on every message leaves alone what people write in a thread it answered; turn on **Also start on people's replies in the threads it answered** to follow them too. incident.io and webhooks push their events to a [hook of a server](fleet/operations.md#receive-events-of-other-tools), for a machine of that server.
 - What the event says reaches the session as someone else's text: the title, the message or the incident, read again from its tool, and for a webhook only the fields you list.
 
 ```toml
@@ -147,7 +147,7 @@ In the configuration file, a tool it calls by itself can say more than its name:
 autonomy = { allowed_tools = ["k8s_get_deployment", { name = "k8s_restart_pod", hash = "sha256:…", version = "1.4.2", bounds = { namespace = ["shop"], replicas = { min = 1, max = 5 } }, preconditions = [{ tool = "k8s_get_deployment", arguments = ["namespace", "name"], expect = "available" }] }] }
 ```
 
-The approvals go to the owner of the automation: you, or on a [server](fleet.md#run-your-automations-on-it) the team that owns it and the people granted to approve it. There, a run that waits comes to them as a message too. Choose **The person on call of its team** (`approvers = "oncall"`) to ask only who of the team is [on call](people-and-access.md#teams-and-team-machines) now. To read who is on call from incident.io, PagerDuty or Opsgenie instead, add to its autonomy in the file `oncall = { source = "pagerduty", schedule = "<schedule id>", token = "${secret:NAME}" }` (`source` is `incident_io`, `pagerduty` or `opsgenie`, with `region = "eu"` for Opsgenie in Europe). The machine reads the schedule with that secret when a run starts. The person it names is asked if they answer the approvals of the automation; otherwise the rotation of the team is.
+The approvals go to the owner of the automation: you, or on a [server](fleet/sessions.md#run-your-automations-on-it) the team that owns it and the people granted to approve it. There, a run that waits comes to them as a message too. Choose **The person on call of its team** (`approvers = "oncall"`) to ask only who of the team is [on call](fleet/people-and-access.md#teams-and-team-machines) now. To read who is on call from incident.io, PagerDuty or Opsgenie instead, add to its autonomy in the file `oncall = { source = "pagerduty", schedule = "<schedule id>", token = "${secret:NAME}" }` (`source` is `incident_io`, `pagerduty` or `opsgenie`, with `region = "eu"` for Opsgenie in Europe). The machine reads the schedule with that secret when a run starts. The person it names is asked if they answer the approvals of the automation; otherwise the rotation of the team is.
 
 ## Follow the runs
 
@@ -162,7 +162,7 @@ The approvals go to the owner of the automation: you, or on a [server](fleet.md#
 
 ## Good to know
 
-- Automations run while CodeAlta Desktop is open, also when it [stays in the notification area](desktop-and-tui.md#runs-in-the-background). One set to run on a paired machine (**Runs on**) runs there while this computer is closed: see [Run your automations on it](fleet.md#run-your-automations-on-it). On a machine of a team or of the organization, **Publish to** gives it to them: see [Automations of a team](people-and-access.md#automations-of-a-team).
+- Automations run while CodeAlta Desktop is open, also when it [stays in the notification area](desktop-and-tui.md#runs-in-the-background). One set to run on a paired machine (**Runs on**) runs there while this computer is closed: see [Run your automations on it](fleet/sessions.md#run-your-automations-on-it). On a machine of a team or of the organization, **Publish to** gives it to them: see [Automations of a team](fleet/people-and-access.md#automations-of-a-team).
 - What was due while CodeAlta was closed is skipped. Turn on **Catch up on what was missed while CodeAlta was closed** in an automation to run it at the next start.
 - An automation is stored in **My configuration** (`~/.alta/config.toml`) or in **The project** (`.alta/config.toml` of its folder), which you can commit to share it with your team.
 - An automation that came with a project, written by someone else, waits until you read its prompt and click **Allow**. It asks again when its prompt, triggers or what its sessions run with change, including the command of a trigger.

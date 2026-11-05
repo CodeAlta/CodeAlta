@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 760" width="1600" height="760" role="img" aria-labelledby="title desc">
+  <title id="title">The three ways to use CodeAlta, each optional</title>
+  <desc id="desc">One computer with CodeAlta Desktop needs nothing else. Pairing another computer that runs CodeAlta Node lists its sessions beside yours, over a direct encrypted connection, with no server. With CodeAlta Server, your computers and machines connect to one server for people, sign-in, automations and budgets; the server runs no agent and reads no conversation.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0f1f"/>
+      <stop offset="1" stop-color="#150c33"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00d1ff"/>
+      <stop offset=".55" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#a855f7"/>
+    </linearGradient>
+    <linearGradient id="link" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1600" y2="0">
+      <stop offset="0" stop-color="#00d1ff"/>
+      <stop offset="1" stop-color="#a855f7"/>
+    </linearGradient>
+    <radialGradient id="glow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#4f46e5" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#4f46e5" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+
+    <!-- A laptop with three sessions on its screen: 200 x 132 -->
+    <symbol id="laptop" viewBox="0 0 200 132">
+      <rect x="20" y="2" width="160" height="104" rx="10" fill="#0f1530" stroke="url(#edge)" stroke-width="3"/>
+      <circle cx="40" cy="28" r="5" fill="#2dd4bf"/>
+      <rect x="52" y="23" width="108" height="10" rx="5" fill="#26305e"/>
+      <circle cx="40" cy="54" r="5" fill="#00d1ff"/>
+      <rect x="52" y="49" width="86" height="10" rx="5" fill="#26305e"/>
+      <circle cx="40" cy="80" r="5" fill="#a855f7"/>
+      <rect x="52" y="75" width="98" height="10" rx="5" fill="#26305e"/>
+      <path d="M2 112 H198 L186 128 H14 Z" fill="#1c2347" stroke="#3b4380" stroke-width="2" stroke-linejoin="round"/>
+    </symbol>
+
+    <!-- An always-on machine running CodeAlta Node: 180 x 92 -->
+    <symbol id="node" viewBox="0 0 180 92">
+      <rect x="3" y="3" width="174" height="74" rx="18" fill="#121937" stroke="url(#edge)" stroke-width="3"/>
+      <circle cx="30" cy="40" r="9" fill="#2dd4bf" filter="url(#soft)"/>
+      <circle cx="30" cy="40" r="6" fill="#2dd4bf"/>
+      <rect x="54" y="30" width="96" height="7" rx="3.5" fill="#26305e"/>
+      <rect x="54" y="45" width="70" height="7" rx="3.5" fill="#26305e"/>
+      <rect x="40" y="80" width="100" height="8" rx="4" fill="#1c2347"/>
+    </symbol>
+
+    <!-- CodeAlta Server: 150 x 176 -->
+    <symbol id="server" viewBox="0 0 150 176">
+      <g fill="#121937" stroke="url(#edge)" stroke-width="3">
+        <rect x="3" y="3" width="144" height="50" rx="12"/>
+        <rect x="3" y="63" width="144" height="50" rx="12"/>
+        <rect x="3" y="123" width="144" height="50" rx="12"/>
+      </g>
+      <g fill="#00d1ff">
+        <circle cx="26" cy="28" r="6"/>
+        <circle cx="26" cy="88" r="6"/>
+        <circle cx="26" cy="148" r="6"/>
+      </g>
+      <g fill="#26305e">
+        <rect x="46" y="24" width="80" height="8" rx="4"/>
+        <rect x="46" y="84" width="64" height="8" rx="4"/>
+        <rect x="46" y="144" width="72" height="8" rx="4"/>
+      </g>
+    </symbol>
+
+    <!-- An end-to-end encrypted link: a lock in a badge, 40 x 40 -->
+    <symbol id="lock" viewBox="0 0 40 40">
+      <circle cx="20" cy="20" r="18" fill="#1b0b4a" stroke="#00d1ff" stroke-width="2"/>
+      <path d="M14 18 V15 a6 6 0 0 1 12 0 V18" fill="none" stroke="#e6e9f5" stroke-width="2.4" stroke-linecap="round"/>
+      <rect x="12" y="18" width="16" height="12" rx="3" fill="#e6e9f5"/>
+    </symbol>
+  </defs>
+
+  <rect width="1600" height="760" rx="28" fill="url(#bg)"/>
+  <ellipse cx="800" cy="330" rx="760" ry="300" fill="url(#glow)"/>
+
+  <g font-family="Segoe UI, Inter, system-ui, -apple-system, sans-serif">
+    <!-- 1. One computer -->
+    <g transform="translate(40 40)">
+      <rect width="480" height="680" rx="22" fill="#ffffff" fill-opacity=".035" stroke="#ffffff" stroke-opacity=".10" stroke-width="1.5"/>
+      <circle cx="56" cy="62" r="24" fill="url(#edge)"/>
+      <text x="56" y="72" font-size="28" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+      <text x="96" y="62" font-size="38" font-weight="700" fill="#f2f4ff">One computer</text>
+      <text x="96" y="102" font-size="28" fill="#8f99bd">CodeAlta Desktop</text>
+      <use href="#laptop" x="110" y="200" width="260" height="172"/>
+      <text x="240" y="420" font-size="26" fill="#b4c0ff" text-anchor="middle">Your sessions</text>
+      <g font-size="28" fill="#c9cfe6">
+        <text x="40" y="548">Nothing to set up.</text>
+        <text x="40" y="590">Your sessions and keys</text>
+        <text x="40" y="632">stay on this computer.</text>
+      </g>
+    </g>
+
+    <!-- 2. Your machines -->
+    <g transform="translate(560 40)">
+      <rect width="480" height="680" rx="22" fill="#ffffff" fill-opacity=".035" stroke="#ffffff" stroke-opacity=".10" stroke-width="1.5"/>
+      <circle cx="56" cy="62" r="24" fill="url(#edge)"/>
+      <text x="56" y="72" font-size="28" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+      <text x="96" y="62" font-size="38" font-weight="700" fill="#f2f4ff">Your machines</text>
+      <text x="96" y="102" font-size="28" fill="#8f99bd">+ CodeAlta Node</text>
+      <text x="240" y="220" font-size="26" fill="#7fe7ff" text-anchor="middle">direct, encrypted end to end</text>
+      <use href="#laptop" x="30" y="250" width="190" height="125"/>
+      <use href="#node" x="282" y="266" width="170" height="87"/>
+      <path d="M222 304 H280" stroke="url(#link)" stroke-width="4" stroke-linecap="round"/>
+      <use href="#lock" x="231" y="284" width="40" height="40"/>
+      <text x="125" y="420" font-size="26" fill="#b4c0ff" text-anchor="middle">Your desktop</text>
+      <text x="367" y="420" font-size="26" fill="#b4c0ff" text-anchor="middle">Mac mini</text>
+      <g font-size="28" fill="#c9cfe6">
+        <text x="40" y="548">Pair another computer once.</text>
+        <text x="40" y="590">Its sessions show with yours.</text>
+        <text x="40" y="632">No server, no account.</text>
+      </g>
+    </g>
+
+    <!-- 3. A server for you or your organization -->
+    <g transform="translate(1080 40)">
+      <rect width="480" height="680" rx="22" fill="#ffffff" fill-opacity=".035" stroke="#ffffff" stroke-opacity=".10" stroke-width="1.5"/>
+      <circle cx="56" cy="62" r="24" fill="url(#edge)"/>
+      <text x="56" y="72" font-size="28" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+      <text x="96" y="62" font-size="38" font-weight="700" fill="#f2f4ff">Your organization</text>
+      <text x="96" y="102" font-size="28" fill="#8f99bd">+ CodeAlta Server</text>
+      <!-- Every device keeps one outbound connection to the server -->
+      <g stroke="#4f46e5" stroke-width="3" stroke-linecap="round" fill="none" opacity=".9">
+        <path d="M110 372 L196 262"/>
+        <path d="M370 372 L284 262"/>
+        <path d="M114 220 L190 220"/>
+        <path d="M358 220 L290 220"/>
+      </g>
+      <use href="#server" x="190" y="146" width="100" height="117"/>
+      <text x="240" y="296" font-size="26" fill="#b4c0ff" text-anchor="middle">Server</text>
+      <use href="#node" x="16" y="180" width="100" height="51"/>
+      <use href="#node" x="356" y="180" width="100" height="51"/>
+      <g font-size="22" fill="#b4c0ff" text-anchor="middle">
+        <text x="66" y="262">Cloud</text>
+        <text x="66" y="288">machine</text>
+        <text x="406" y="262">Team</text>
+        <text x="406" y="288">machine</text>
+      </g>
+      <use href="#laptop" x="40" y="366" width="140" height="92"/>
+      <use href="#laptop" x="300" y="366" width="140" height="92"/>
+      <text x="110" y="492" font-size="26" fill="#b4c0ff" text-anchor="middle">Alex</text>
+      <text x="370" y="492" font-size="26" fill="#b4c0ff" text-anchor="middle">Bea</text>
+      <g font-size="28" fill="#c9cfe6">
+        <text x="40" y="548">People, sign-in, automations.</text>
+        <text x="40" y="590">It runs no agent and</text>
+        <text x="40" y="632">reads no conversation.</text>
+      </g>
+    </g>
+
+    <!-- Each step is optional and builds on the one before -->
+    <g fill="none" stroke="url(#link)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M528 380 L548 380 M540 370 L550 380 L540 390"/>
+      <path d="M1048 380 L1068 380 M1060 370 L1070 380 L1060 390"/>
+    </g>
+  </g>
+</svg>
