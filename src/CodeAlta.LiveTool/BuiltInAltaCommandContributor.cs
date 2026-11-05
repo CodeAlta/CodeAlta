@@ -5334,8 +5334,17 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         static bool IsRun(AltaActorProvenance createdBy) => createdBy.Kind == AltaActorProvenance.AutomationKind && !string.IsNullOrEmpty(createdBy.AutomationId);
         var caller = await runtime.TryGetRecoverableSessionAsync(callerId, context.CancellationToken).ConfigureAwait(false);
         var target = await runtime.TryGetRecoverableSessionAsync(targetSessionId.Trim(), context.CancellationToken).ConfigureAwait(false);
-        var callerRun = caller is null ? null : await runtime.FindLineageCreatorAsync(caller, IsRun, context.CancellationToken).ConfigureAwait(false);
-        var targetRun = target is null ? null : await runtime.FindLineageCreatorAsync(target, IsRun, context.CancellationToken).ConfigureAwait(false);
+        AltaActorProvenance? callerRun = null, targetRun = null;
+        try
+        {
+            callerRun = caller is null ? null : await runtime.FindLineageCreatorAsync(caller, IsRun, context.CancellationToken).ConfigureAwait(false);
+            targetRun = target is null ? null : await runtime.FindLineageCreatorAsync(target, IsRun, context.CancellationToken).ConfigureAwait(false);
+        }
+        catch (SessionLineageException)
+        {
+            // A lineage that cannot be followed tells no run: the work is refused.
+        }
+
         if (callerRun is not null && targetRun is not null && string.Equals(callerRun.AutomationId, targetRun.AutomationId, StringComparison.Ordinal)
             && string.Equals(callerRun.CorrelationId, targetRun.CorrelationId, StringComparison.Ordinal))
             return null;

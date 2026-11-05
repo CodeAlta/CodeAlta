@@ -26,8 +26,11 @@ namespace CodeAlta.Orchestration.Runtime;
 /// </remarks>
 public sealed class SessionToolGuards
 {
-    // The most sessions up a lineage that are looked at: a cycle of links, or a deeper one, ends there.
-    private const int MaximumDepth = 32;
+    /// <summary>
+    /// The most sessions up a lineage that are followed. A lineage deeper, or with a cycle of links, cannot be told to come
+    /// from no guarded run: its sessions are taken to be guarded, and refused everything (<see cref="SessionLineageException"/>).
+    /// </summary>
+    public const int MaximumLineageDepth = 256;
     private readonly ConcurrentDictionary<string, AgentToolInterceptor> _guards = new(StringComparer.Ordinal);
     private readonly List<Func<string, CodeAlta.Catalog.AltaActorProvenance, AgentToolInterceptor?>> _origins = [];
     private readonly Lock _gate = new();
@@ -71,16 +74,30 @@ public sealed class SessionToolGuards
         CancellationToken cancellationToken)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { sessionId };
-        for (var depth = 0; depth < MaximumDepth; depth++)
+        for (var depth = 0; depth < MaximumLineageDepth; depth++)
         {
             if (OriginOf(sessionId, createdBy) is { } origin) return origin;
-            if (string.IsNullOrWhiteSpace(parentSessionId) || !seen.Add(parentSessionId)) return null;
+            if (string.IsNullOrWhiteSpace(parentSessionId)) return null;
+            // A cycle of links: where the lineage starts cannot be told.
+            if (!seen.Add(parentSessionId)) return Unestablished.Instance;
             if (Find(parentSessionId) is { } given) return given;
+            // A parent this machine does not have (one of another machine, or deleted) ends the lineage: it gives no guard.
             if (ReadSession is not { } read || await read(parentSessionId, cancellationToken).ConfigureAwait(false) is not { } parent) return null;
             (sessionId, createdBy, parentSessionId) = (parent.SessionId, parent.CreatedBy, parent.ParentSessionId ?? parent.CreatedBy?.SourceSessionId);
         }
 
-        return null;
+        // Deeper than what is followed: the run it may come from is beyond, and its guard with it.
+        return Unestablished.Instance;
+    }
+
+    // The guard of a session whose lineage cannot be followed to its start: it may come from a guarded run, so nothing it calls
+    // is made without a person.
+    private sealed class Unestablished : AgentToolInterceptor
+    {
+        public static Unestablished Instance { get; } = new();
+
+        public override ValueTask<AgentToolCallDecision> BeforeToolCallAsync(AgentToolHookCall call, CancellationToken cancellationToken)
+            => ValueTask.FromResult(AgentToolCallDecision.Block(SessionLineageException.Explanation));
     }
 
     /// <summary>Gives a session a guard, in place of the one it had.</summary>
