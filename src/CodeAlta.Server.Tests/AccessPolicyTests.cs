@@ -145,6 +145,25 @@ public sealed class AccessPolicyTests
     }
 
     [TestMethod]
+    public void WhoIsGrantedToRunAnAutomation_IsARunner_AnAdminToo()
+    {
+        var access = Snapshot(
+            people: [Person("owner", FleetOrganizationRoles.Owner), Person("admin", FleetOrganizationRoles.Admin), Person("cy", FleetOrganizationRoles.Member),
+                Person("old", FleetOrganizationRoles.Admin) with { Status = FleetPersonStatuses.Suspended }],
+            teams: [Team("infra")],
+            grants: [Grant("g1", FleetPrincipalKinds.Person, "admin", "automation.run", FleetScopeKinds.Resource, "automation:a1", expires: Now.AddDays(2)),
+                Grant("g2", FleetPrincipalKinds.Person, "cy", "automation.run", FleetScopeKinds.Team, "infra"),
+                Grant("g3", FleetPrincipalKinds.Person, "old", "automation.run", FleetScopeKinds.Resource, "automation:a1"),
+                Grant("g4", FleetPrincipalKinds.Person, "owner", "automation.run", FleetScopeKinds.Resource, "automation:other")]);
+        var automation = AccessTarget.Resource(FleetResourceKinds.Automation, "a1", FleetPrincipalKinds.Team, "infra");
+
+        // The admin maintains no team: her role does not make her a runner on the machines, her grant does.
+        CollectionAssert.AreEqual(new (string, DateTimeOffset?)[] { ("admin", Now.AddDays(2)), ("cy", null) }, AccessPolicy.RunnersWithEnds(access, automation, Now).ToArray(),
+            "a grant to an admin counts as any other; a suspended person and a grant on another automation do not");
+        CollectionAssert.AreEqual(new (string, DateTimeOffset?)[] { ("cy", null) }, AccessPolicy.RunnersWithEnds(access, automation, Now.AddDays(3)).ToArray(), "once it ended, it does not");
+    }
+
+    [TestMethod]
     public void TheOnCallOfARotation_IsTheTurnOfTheTime_SkippingWhoLeftTheTeamOrIsSuspended()
     {
         var access = Snapshot(

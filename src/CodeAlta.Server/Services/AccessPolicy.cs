@@ -234,9 +234,9 @@ internal static class AccessPolicy
             DateTimeOffset? end = null;
             foreach (var grant in granted)
             {
-                if (Decide(snapshot with { Grants = [grant] }, person.Id, "automation.run", automation, now) is not { Allowed: true } decision
-                    || !decision.Source.StartsWith("grant:", StringComparison.Ordinal))
-                    continue;
+                // The grant itself decides, its subject and its scope: what else the person holds (the role of an admin, who is
+                // no runner on the machines of a team by it) never hides it.
+                if (!IsSubject(snapshot, grant, person.Id) || !Covers(grant, automation, content: false)) continue;
                 end = !holds ? grant.ExpiresAt : end is null || grant.ExpiresAt is null ? null : grant.ExpiresAt > end ? grant.ExpiresAt : end;
                 holds = true;
             }
