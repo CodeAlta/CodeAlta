@@ -15,6 +15,14 @@ public sealed class DesktopNodeTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
+    public void ItsPort_IsNeitherTheOneOfANodeNorTheOneOfAServer_OfTheSameComputer()
+    {
+        // A desktop that runs CodeAlta Server or CodeAlta Node beside it (Create my server… > On this computer) still listens.
+        int[] taken = [CodeAlta.Fleet.Channels.FleetChannelProtocol.DefaultPort, CodeAlta.Server.Hosting.ServerPaths.DefaultPort];
+        CollectionAssert.DoesNotContain(taken, DesktopNode.DefaultPort);
+    }
+
+    [TestMethod]
     public async Task ADesktopNeverMadeVisible_MakesNoKeyAndListensNowhere()
     {
         var token = TestContext.CancellationToken;

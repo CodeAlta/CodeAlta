@@ -173,7 +173,7 @@ labels, its local policy).
 
 A desktop is a node of the person's other computers while it runs, once they let it be (**Let my other computers pair
 with this one**, off by default): it serves the same node API as `altanode` over its own runtime, on a port of its own
-(2586, so that a node of the same machine keeps 2585), with the same key it pairs with its machines and its own list of
+(2587, so that a node and a server of the same machine keep 2585 and 2586), with the same key it pairs with its machines and its own list of
 paired devices. Another desktop pairs with it from a link, exactly as with a node. Until it is turned on, it listens
 nowhere and makes no key (S1). On a Tailscale network its links name it on the tailnet first, so that a laptop away
 from home reaches it. When it exits, it is offline. A machine that must stay reachable runs `altanode`, and the desktop

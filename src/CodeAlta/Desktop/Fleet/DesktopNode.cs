@@ -21,7 +21,7 @@ internal sealed record DesktopNodePairing(string Link, string Words, DateTimeOff
 /// <summary>
 /// This computer as a machine of the person's other computers (<c>doc/fleet/node.md</c>, Desktop and TUI as nodes): while the
 /// person lets them pair with it, CodeAlta Desktop serves the node API over its own runtime, as <c>altanode</c> does, on a
-/// port of its own (<see cref="DefaultPort"/>, so that a node of the same machine keeps 2585). Another CodeAlta Desktop pairs
+/// port of its own (<see cref="DefaultPort"/>, so that a node and a server of the same machine keep 2585 and 2586). Another CodeAlta Desktop pairs
 /// with it from a link made here, exactly as with a node: it then sees, drives and starts its sessions, and moves sessions
 /// here when this computer lets it. On a computer of a Tailscale network, its name and address there come first in its links:
 /// a laptop away from home reaches it through the tailnet.
@@ -40,8 +40,11 @@ internal sealed record DesktopNodePairing(string Link, string Words, DateTimeOff
 /// </remarks>
 internal sealed class DesktopNode : IAsyncDisposable
 {
-    /// <summary>The port a desktop listens on by default: the one after the port of a node.</summary>
-    public const int DefaultPort = FleetChannelProtocol.DefaultPort + 1;
+    /// <summary>
+    /// The port a desktop listens on by default: beside those of a node (2585) and of CodeAlta Server (2586), so that a desktop that
+    /// runs either on the same computer still listens.
+    /// </summary>
+    public const int DefaultPort = FleetChannelProtocol.DefaultPort + 2;
 
     /// <summary>How long a pairing link made here stays usable.</summary>
     public static readonly TimeSpan LinkLifetime = TimeSpan.FromMinutes(10);

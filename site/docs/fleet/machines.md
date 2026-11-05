@@ -40,7 +40,7 @@ The link works once and expires after 10 minutes. The first computer is then lis
 - **While CodeAlta runs.** A desktop is reached while CodeAlta Desktop runs there; once you quit it, the other computers see it **Offline**. A computer that must stay reachable runs [CodeAlta Node](#install-codealta-node-by-hand).
 - **Away from home.** On a computer of a [Tailscale](https://tailscale.com) network, the link names it on the tailnet first, so your laptop reaches it from anywhere. **This computer** shows that name. Without Tailscale, the link names its addresses on your local network.
 - **What each computer may do.** **Computers paired with this one** lists them, with a switch per permission: **View**, **Drive** and **Start** are on after pairing. Turn on **Move** to let a computer move its sessions here (see [Move a session](sessions.md#move-a-session)). **Revoke** refuses a computer at once; pairing again trusts it again.
-- **Off by default.** Until you turn it on, this computer listens on no network and makes no key. It listens on port 2586 of its networks (2585 stays free for a node of the same computer); the first time, Windows or macOS may ask whether CodeAlta may accept connections: allow it. Turning it off stops listening; the paired computers stay listed, and reach it again once you turn it back on.
+- **Off by default.** Until you turn it on, this computer listens on no network and makes no key. It listens on port 2587 of its networks (2585 and 2586 stay free for a node and a server of the same computer); the first time, Windows or macOS may ask whether CodeAlta may accept connections: allow it. Turning it off stops listening; the paired computers stay listed, and reach it again once you turn it back on.
 
 ### Over SSH
 

@@ -36,7 +36,7 @@ test("a machine added through the server is one of the person's machines: listed
 });
 
 const thisComputer = (change: Partial<ThisComputerView> = {}): ThisComputerView => ({ status: "ok", visible: false, listening: false, name: "DESKTOP-ALEX", words: null,
-  port: 2586, addresses: [], tailnet: null, problem: null, devices: [], reachable: false, servers: [], ...change });
+  port: 2587, addresses: [], tailnet: null, problem: null, devices: [], reachable: false, servers: [], ...change });
 const renderThisComputer = (view: ThisComputerView) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
   createElement(ThisComputerBody, { view, busy: false, onVisible: never, onReachable: never, onPair: never, onPermission: never, onRevoke: never })));
 
@@ -46,7 +46,7 @@ test("this computer is reachable by nobody until the person lets their other com
   assert.ok(!off.includes(english("Pair another computer…")), "no link while nothing listens");
 
   const on = renderThisComputer(thisComputer({ visible: true, listening: true, words: "apple river stone cloud amber tiger", tailnet: "desk.tail1234.ts.net",
-    addresses: ["desk.tail1234.ts.net:2586", "192.168.1.5:2586"],
+    addresses: ["desk.tail1234.ts.net:2587", "192.168.1.5:2587"],
     devices: [{ id: "d1", name: "macbook", fingerprint: "ABCD EFGH IJKL", permissions: ["view", "drive", "start"], pairedAt: "2026-11-05T10:00:00Z", revokedAt: null,
       channels: 0, isThisComputer: false }] }));
   assert.ok(on.includes(english("Pair another computer…")), on);
@@ -55,9 +55,9 @@ test("this computer is reachable by nobody until the person lets their other com
   assert.ok(on.includes(`aria-label="${english("Move")} — macbook"`), "the person lets a paired computer move sessions here");
   assert.ok(!on.includes(`${english("Manage")} — macbook`), "no other computer manages a desktop");
 
-  const blocked = renderThisComputer(thisComputer({ visible: true, listening: false, problem: "Port 2586 cannot be opened" }));
+  const blocked = renderThisComputer(thisComputer({ visible: true, listening: false, problem: "Port 2587 cannot be opened" }));
   assert.ok(blocked.includes(english("This computer cannot listen for your other computers.")), blocked);
-  assert.ok(blocked.includes("Port 2586 cannot be opened"));
+  assert.ok(blocked.includes("Port 2587 cannot be opened"));
 });
 
 test("a computer linked to a server is reached through it only once the person lets their other computers do so, without pairing", () => {
