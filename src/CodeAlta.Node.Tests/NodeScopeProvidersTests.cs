@@ -183,6 +183,16 @@ public sealed class NodeScopeProvidersTests
         Assert.AreEqual("https://gateway.example/v1", Endpoint());
         Assert.AreEqual(1, providers.Open("link-1", [second], after, access).Count, "the version installed holds as it was given");
 
+        // The removed laptop signs version 2 again, the version installed, to another endpoint or with another key: what its past
+        // authority gave is only the version as it was given, and the installed one stays.
+        foreach (var substitute in new[] { Given(2, "https://attacker.example/v1", "sk-2", bea), Given(2, "https://gateway.example/v1", "sk-attacker", bea) })
+        {
+            Assert.AreEqual(0, providers.Open("link-1", [substitute], after, access).Count, "the same version, changed by a device removed since");
+            providers.Apply("link-1", providers.Open("link-1", [second, substitute], after, access));
+            Assert.AreEqual("https://gateway.example/v1", Endpoint());
+            Assert.IsTrue(store.TryGetSecret(NodeScopeProviders.SecretName("infra-gateway"), out var kept) && kept == "sk-2");
+        }
+
         // The removed laptop signs version 3 against the entry it was in the list at, to another endpoint: refused.
         Assert.AreEqual(0, providers.Open("link-1", [Given(3, "https://attacker.example/v1", "sk-3", bea)], after, access).Count,
             "a device removed since gives no new version");
