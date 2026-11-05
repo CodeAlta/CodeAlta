@@ -41,4 +41,35 @@ export const spaceSettingsMessages = {
     "リソース、新しいセッション、モデル階層、ツール。ID は含みません。",
     "其资源、新会话、模型层级和工具。不含其身份。"],
   "Suggestions": ["Sugerencias", "Suggestions", "Vorschläge", "候補", "建议"],
+  // What a drag of a project between spaces did with its sessions.
+  "1 session moved with the project. Its next turn uses the providers, tools and identity of its new space.": [
+    "1 sesión se movió con el proyecto. Su siguiente turno usa los proveedores, las herramientas y la identidad de su nuevo espacio.",
+    "1 session a suivi le projet. Son prochain tour utilise les fournisseurs, les outils et l'identité de son nouvel espace.",
+    "1 Sitzung wurde mit dem Projekt verschoben. Ihr nächster Durchlauf nutzt die Anbieter, Werkzeuge und die Identität ihres neuen Bereichs.",
+    "1 件のセッションがプロジェクトと一緒に移動しました。次のターンから新しいスペースのプロバイダー、ツール、ID を使います。",
+    "1 个会话已随项目移动。它的下一轮将使用新空间的提供方、工具和身份。"],
+  "{count} sessions moved with the project. Their next turn uses the providers, tools and identity of their new space.": [
+    "{count} sesiones se movieron con el proyecto. Su siguiente turno usa los proveedores, las herramientas y la identidad de su nuevo espacio.",
+    "{count} sessions ont suivi le projet. Leur prochain tour utilise les fournisseurs, les outils et l'identité de leur nouvel espace.",
+    "{count} Sitzungen wurden mit dem Projekt verschoben. Ihr nächster Durchlauf nutzt die Anbieter, Werkzeuge und die Identität ihres neuen Bereichs.",
+    "{count} 件のセッションがプロジェクトと一緒に移動しました。次のターンから新しいスペースのプロバイダー、ツール、ID を使います。",
+    "{count} 个会话已随项目移动。它们的下一轮将使用新空间的提供方、工具和身份。"],
+  "1 session is at work and stayed in its space. Move it with Move to space… once it is idle.": [
+    "1 sesión está trabajando y se quedó en su espacio. Muévela con Mover a un espacio… cuando esté inactiva.",
+    "1 session est au travail et est restée dans son espace. Déplacez-la avec Déplacer vers un espace… une fois qu'elle est inactive.",
+    "1 Sitzung arbeitet und ist in ihrem Bereich geblieben. Verschieben Sie sie mit In Bereich verschieben…, sobald sie untätig ist.",
+    "1 件のセッションは作業中のため元のスペースに残りました。アイドルになったら「スペースへ移動…」で移動してください。",
+    "1 个会话正在工作，留在了原空间。待其空闲后，用“移到空间…”移动它。"],
+  "{count} sessions are at work and stayed in their space. Move them with Move to space… once they are idle.": [
+    "{count} sesiones están trabajando y se quedaron en su espacio. Muévelas con Mover a un espacio… cuando estén inactivas.",
+    "{count} sessions sont au travail et sont restées dans leur espace. Déplacez-les avec Déplacer vers un espace… une fois qu'elles sont inactives.",
+    "{count} Sitzungen arbeiten und sind in ihrem Bereich geblieben. Verschieben Sie sie mit In Bereich verschieben…, sobald sie untätig sind.",
+    "{count} 件のセッションは作業中のため元のスペースに残りました。アイドルになったら「スペースへ移動…」で移動してください。",
+    "{count} 个会话正在工作，留在了原空间。待其空闲后，用“移到空间…”移动它们。"],
+  "The project changed space, but its sessions did not: move them with Move to space…": [
+    "El proyecto cambió de espacio, pero sus sesiones no: muévelas con Mover a un espacio…",
+    "Le projet a changé d'espace, mais pas ses sessions : déplacez-les avec Déplacer vers un espace…",
+    "Das Projekt hat den Bereich gewechselt, seine Sitzungen nicht: Verschieben Sie sie mit In Bereich verschieben…",
+    "プロジェクトはスペースを移りましたが、セッションは移りませんでした。「スペースへ移動…」で移動してください。",
+    "项目已更换空间，但其会话没有：请用“移到空间…”移动它们。"],
 } as const;

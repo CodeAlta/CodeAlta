@@ -1092,6 +1092,32 @@ public sealed class ClaudeCodeTurnExecutorTests
         Assert.IsTrue(tools.Where(static tool => tool.GetProperty("name").GetString() is "first_tool" or "second_tool").All(static tool => !tool.TryGetProperty("_meta", out _)));
     }
 
+    // Claude Code merges the choice at the root of an MCP tool schema only behind a gate of its own
+    // (tengu_mcp_normalize_root_combinators) and otherwise skips the tool: "its input schema uses top-level anyOf, which
+    // the Anthropic API does not accept". CodeAlta lists the tool merged, so the CLI has it either way.
+    [TestMethod]
+    public async Task AToolWithAChoiceAtTheRootOfItsSchema_IsListedMerged()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        JsonElement listed = default;
+        cli.OnUserMessage = async (process, user) =>
+        {
+            await process.McpAsync("initialize", new JsonObject { ["protocolVersion"] = "2025-11-25" });
+            listed = (await process.McpAsync("tools/list")).GetProperty("result").GetProperty("tools").Clone();
+            process.EmitTextTurn("msg_1", "ok", user);
+        };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        using var schema = JsonDocument.Parse(AgentToolRootChoicesTests.ChoiceSchema);
+        var tool = new AgentToolDefinition(
+            new AgentToolSpec("mcp__tracker__findIssue", "Finds an issue.", schema.RootElement.Clone()),
+            static (_, _) => Task.FromResult(new AgentToolResult(true, [])));
+
+        await ExecuteAsync(executor, CreateRequest([User("one")]) with { Tools = [Tool("alta"), tool] });
+
+        var findIssue = listed.EnumerateArray().Single(static item => item.GetProperty("name").GetString() == "mcp__tracker__findIssue");
+        AgentToolRootChoicesTests.AssertMergedChoice(findIssue.GetProperty("inputSchema"));
+    }
+
     [TestMethod]
     public async Task ToolsOfTheFirstRequest_AreTheOnesTheCliListsWhenItStarts()
     {

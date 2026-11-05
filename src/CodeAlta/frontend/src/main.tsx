@@ -24,7 +24,8 @@ import { RunningExitDialog } from "./RunningExitDialog";
 import { NewSessionPopover } from "./NewSessionPopover";
 import { SessionStartProgress, type SessionStartStep } from "./SessionStartProgress";
 import { CloseWindowDialog } from "./CloseWindowDialog";
-import { closeBehavior, entryAddedGuide, entryAddedNotice, type CloseBehavior } from "./desktopShell";
+import { closeBehavior, entryAddedGuide, entryAddedNotice, turnAlertMode, type CloseBehavior, type TurnAlertMode } from "./desktopShell";
+import { deliverHostDrop, readHostDrop } from "./hostDrops";
 import { EntryAddedDialog } from "./EntryAddedDialog";
 import { showToast } from "./appToaster";
 import { findWithPatience } from "./sessionLookup";
@@ -79,7 +80,7 @@ import { changeKeyKept } from "./changes/projectChanges";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ReadOnlyComposer } from "./ReadOnlyComposer";
 import { useLocalDraftImages } from "./useLocalDraftImages";
-import { imageLimits } from "./promptImages";
+import { attachmentLimits, imageLimits } from "./promptImages";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
 import { ProvidersPanel } from "./ProvidersPanel";
 import { AgentPromptSettings } from "./AgentPromptSettings";
@@ -112,6 +113,7 @@ import { createComposerQueue } from "./composerQueue";
 import { AskPanel, type AskMode } from "./AskPanel";
 import { askWireRequest, createAskActions } from "./sessionAsks";
 import { SessionNotesOverlay } from "./SessionNotesOverlay";
+import { createSessionOverlayMemory, type NotesOverlayMemory } from "./sessionOverlayMemory";
 import { RunningSessionBadge } from "./RuntimeObservation";
 import { createNotesReader } from "./sessionNotes";
 import { createUserInputReviewer } from "./sessionUserInput";
@@ -165,7 +167,7 @@ import { sessionHierarchy } from "./sessionHierarchy";
 import type { SessionMenuEntry } from "./SessionTabMenu";
 import { plainTitle } from "./sessionTitle";
 import { KeyGesture } from "./KeyGesture";
-import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionRowShortcut, sessionActionAccess, sessionMoveAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
+import { isSessionContextKey, isSessionDeleteKey, isSessionRowKeyTarget, restoreSessionMenuFocus, sessionRowGesture, sessionRowShortcut, sessionActionAccess, sessionMoveAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { providerHasRemoteControl, type RemoteControlOpenRequest } from "./remoteControl";
 import { copyResumeCommand, isOpenElsewhereAction, openElsewhereCommandAction, openSessionInVsCode, opensElsewhere, runSessionInTerminal,
   readClaudeCodeConversation, type OpenElsewhereAction } from "./claudeCodeOpen/claudeCodeOpen";
@@ -206,6 +208,7 @@ import type { ReviewScope, ReviewTarget } from "./review/reviewsHub";
 import { reviewSessions, sessionCheckout } from "./review/reviewSessions";
 import { WorkItemsPanel, type WorkItemsFocus } from "./workItems/WorkItemsPanel";
 import { WorkItemCards } from "./workItems/WorkItemCards";
+import { createDockPreference } from "./workItems/proposalsDock";
 import { WorkItemsBadge } from "./workItems/WorkItemsBadge";
 import { WorkItemSettings } from "./workItems/WorkItemSettings";
 import type { RunModelsLoader, RunProvider } from "./workItems/runsWith";
@@ -439,7 +442,8 @@ import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
 import { changedSessionOptions, sessionContextSize, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { SandboxSettings } from "./sandbox/SandboxSettings";
 import { SessionSandboxSelect } from "./sandbox/SessionSandboxSelect";
-import { createExternalOpener, ExternalOpenerContext } from "./externalEditors/externalEditors";
+import { createExternalOpener, ExternalOpenerContext, failure } from "./externalEditors/externalEditors";
+import { MarkdownLinkFilesContext, type MarkdownLinkFiles } from "./MarkdownLinkMenu";
 import { sessionBookmarks, type Bookmark } from "./bookmarks/bookmarks";
 import { createBookmarksHub, type BookmarksHub } from "./bookmarks/bookmarksHub";
 import { createRevealRequests, type RevealOutcome, type RevealRequest, type RevealRequests } from "./bookmarks/revealRequests";
@@ -972,6 +976,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     request => sessionAsks.answer(askWireRequest(request), { timeoutMilliseconds: 8000 }),
     request => sessionAsks.cancel(askWireRequest(request), { timeoutMilliseconds: 8000 })));
   const [sessionPaneOwners] = useState(() => new Map<string, ReturnType<typeof createSessionPaneOwners>>());
+  // Unlike the owners above, it outlives the panes that a switch of space mounts again.
+  const [overlayMemory] = useState(createSessionOverlayMemory);
+  // The side of Notes the proposals sit on, the same in every session pane of the window.
+  const [proposalsDock] = useState(() => createDockPreference());
   // The fork and the rewind of sessions: one change at a time, and which pane shows the window that asks for it.
   const [sessionBranch] = useState(() => createSessionBranch(workspaceApi.forkSession, workspaceApi.rewindSession));
   const branchActions = useRef<Pick<SessionBranchHost, "fork" | "rewind">>({ fork: async () => ({ kind: "error", code: "unconfigured" }), rewind: async () => ({ kind: "error", code: "unconfigured" }) });
@@ -2184,6 +2192,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const requestImmediateExit = useRef(() => quitApplication(true));
   // A project that a start of alta added (`alta .`): the window reads the catalog again and selects it.
   const showHostProject = useRef(async (_projectId: string, _spaceId: string | null) => {});
+  // The session whose notification the user opened (a session that is done or waits for them).
+  const showHostSession = useRef((_sessionId: string) => {});
   const nativeCloseTab = useRef<() => void>(() => {});
   requestExit.current = exitApplication;
   async function saveAllAndExit(unsaved: FileTab[]) {
@@ -2344,6 +2354,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           // An application that drives CodeAlta through its MCP server creates sessions without the window asking.
           else if (notice.kind === "sessions-changed") readSessionList.current();
           else if (notice.kind === "show-project" && notice.projectId) void showHostProject.current(notice.projectId, notice.spaceId ?? null);
+          else if (notice.kind === "show-session" && notice.sessionId) showHostSession.current(notice.sessionId);
           // The user chose another external editor, in this window or another one.
           else if (notice.kind === "external-editor") void externalOpener.reload();
           // The width changed: the user's setting, or the width of one session (an alta command, or a drag that released it).
@@ -2351,6 +2362,21 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             if (notice.sessionId) setSessionWidths(current => withSessionWidth(current, notice.sessionId!, notice.sessionWidth));
             else if (validSessionWidth(notice.sessionWidth)) setSessionWidthValue(notice.sessionWidth);
           }
+          // Files or folders dropped from the file manager, which the host took (Linux, Windows): they go to the prompt under the point.
+          else if (notice.kind === "files-dropped") {
+            const drop = readHostDrop(notice.drop);
+            if (drop) void deliverHostDrop(drop, desktopShell.readDroppedFile).then(({ problems }) => {
+              for (const problem of problems) showToast({ intent: "warning", icon: "warning-sign", timeout: 8000, message: problem.reason === "too_large"
+                ? translate(shownLocale.current, "Could not attach {name}: a file of 1 byte to {size} MB is required.", { name: problem.name, size: attachmentLimits.fileBytes / 1024 / 1024 })
+                : problem.reason === "over_total"
+                  ? translate(shownLocale.current, "Could not attach {name}: the attachments of a prompt are limited to {size} MB in all.", { name: problem.name, size: attachmentLimits.totalBytes / 1024 / 1024 })
+                  : translate(shownLocale.current, "Could not read the dropped file {name}.", { name: problem.name }) });
+            });
+          }
+          // The file dialog a file input asked for could not be shown: the button would otherwise do nothing.
+          else if (notice.kind === "dialog-problem" && notice.dialog === "files" && (notice.problem === "unavailable" || notice.problem === "failed"))
+            showToast({ intent: "warning", icon: "warning-sign", timeout: 8000, message: translate(shownLocale.current, notice.problem === "unavailable"
+              ? "No file dialog is available on this desktop: drop the files on the prompt or paste them instead." : "The file dialog could not be shown.") }, "file-dialog-problem");
           // A plugin was built again, started or stopped while the application runs.
           else if (notice.kind === "plugins-changed") { setPluginRevision(value => value + 1); window.dispatchEvent(new Event(pluginsChangedEvent)); }
         }
@@ -2370,6 +2396,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   function setReconnectRemoteControl(reconnect: boolean) {
     setShellPreferences(current => current && { ...current, reconnectRemoteControl: reconnect });
     void desktopShell.setReconnectRemoteControl({ reconnect }, { timeoutMilliseconds: 8_000 })
+      .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The setting shows what was asked. */ });
+  }
+  function setTurnAlerts(turnAlerts: TurnAlertMode) {
+    setShellPreferences(current => current && { ...current, turnAlerts });
+    void desktopShell.setTurnAlerts({ turnAlerts }, { timeoutMilliseconds: 8_000 })
       .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The setting shows what was asked. */ });
   }
   function setKeepAwake(keepAwake: boolean) {
@@ -2758,6 +2789,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       return session !== undefined;
     }, () => creationAlive.current);
   }
+  showHostSession.current = id => void openAutomationSession(id);
   // The bookmarks: the sessions and the messages the user marked to find them again. This window lists them and is told
   // when they change. It does not follow them itself: the tab, the rail of a timeline and the mark of a row do.
   const bookmarkActions = useRef<Pick<SessionBookmarkHost, "toggleMessage" | "go" | "unshown">>({ toggleMessage: () => { }, go: () => { }, unshown: () => { } });
@@ -3160,6 +3192,28 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       platform: shellPlatform,
     };
   }, [messageLinkEpoch, markdownImageCache, mutation?.capability, shellPlatform]);
+  // The menu of a link: the host finds the file the link names, as it does to open it.
+  const markdownLinkFiles = useMemo<MarkdownLinkFiles | null>(() => {
+    if (!messageLinkEpoch || !markdownImages) return null;
+    const current = () => currentHostAvailable.current && currentHostEpoch.current === messageLinkEpoch;
+    return {
+      platform: markdownImages.platform,
+      reveal: markdownImages.reveal,
+      path: async (address, scope) => {
+        if (!current()) return null;
+        const reply = await markdownLinks.path(markdownImageRequest(messageLinkEpoch, address, scope));
+        return reply.status === "ok" ? reply.fullPath : null;
+      },
+      openExternal: (address, scope) => {
+        if (!current() || mutation?.capability.canMutate() !== true) return;
+        void markdownLinks.openExternal(markdownImageRequest(messageLinkEpoch, address, scope), { timeoutMilliseconds: 15_000 }).then(reply => reply.status, () => "failed").then(status => {
+          if (status === "ok" || status === "stale_epoch" || !current()) return;
+          const message = status === "not_found" ? "The file could not be found." : failure("editor", status);
+          showToast({ message: translate(shownLocale.current, message), intent: "danger", icon: "error", timeout: 8000 });
+        });
+      },
+    };
+  }, [messageLinkEpoch, markdownImages, mutation?.capability]);
   const localImageKey = JSON.stringify(["local-draft", status?.hostEpoch ?? null, projectId, selectedProject?.path ?? null]);
   const localImages = useLocalDraftImages(submissions.imageDrafts, localImageKey, () => {
     const generation = creationGeneration.current;
@@ -3444,6 +3498,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "send": case "abort": case "clearQueue": case "compact":
         return ownedSession && composerCommandBlock(command, composerControlState(composerControl(command)), t) === null;
       case "fork": case "rewind": return ownedSession && currentProjectWritable();
+      // The selected session, as its menu archives it, under the same locks.
+      case "archiveSession": return ownedSession && !!selectedSession && !selectedSession.archived && !sessionArchiveBusy && selectedSessionAccess(selectedSession).archive;
       case "reviewChanges": return ownedSession && !!selectedSession?.projectId;
       case "expandPrompt": case "insertEquation": case "focusPrompt": return view === "workspace" && !fileTabs.active;
       // The composer in front attaches, when it can (an editable session or a new-session draft).
@@ -3609,6 +3665,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "nextPrompt": composerCommand(command); break;
       case "steer": break;
       case "fork": case "rewind": openSessionBranch(command); break;
+      // Its question, when it has child sessions, is asked beside the ⋯ of its composer, which is in front.
+      case "archiveSession": if (selectedSession) { const row = selectedSession; protectNavigation([row.id], () => beginSessionArchive(row, "composer")); } break;
       case "reviewChanges": if (selectedSession) reviewSessionChanges(selectedSession); break;
       // The remaining commands share their implementation with the older shortcut actions of the same name.
       default: runShortcut(command as ShortcutAction);
@@ -3677,6 +3735,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (!commandChord.current && event.key === "Tab" && target?.closest("[data-file-tab-keys]")) return;
       // A list that renames its own rows (the files of the code editor) keeps F2.
       if (!commandChord.current && event.key === "F2" && target?.closest("[data-rename-keys]")) return;
+      // The row of a session forks and archives its own session with the keys of Fork Session and Archive Session.
+      if (!commandChord.current && isSessionRowKeyTarget(target) && sessionRowShortcut(event, false)) return;
       // A rendered page (the Documentation tab, a Markdown preview, a plan under review) finds in itself with Ctrl+F,
       // which searches the sessions everywhere else.
       if (!commandChord.current && findKeyKept(event, target)) return;
@@ -4253,7 +4313,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     beginSessionDelete(row);
   }
 
-  // F2, F and A on the row of a session do what **Rename**, **Fork** and **Archive** of its menu do.
+  // F2 and the keys of Fork Session and Archive Session on the row of a session do what **Rename**, **Fork** and
+  // **Archive** of its menu do.
   function runSessionRowShortcut(action: "rename" | "fork" | "archive", row: WorkspaceSession) {
     protectNavigation([row.id], () => {
       if (snapshot?.sessions.filter(session => session.id === row.id).length !== 1 || currentSnapshot.current !== snapshot
@@ -5574,7 +5635,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, wholeCatalog ?? snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
+  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><MarkdownLinkFilesContext.Provider value={markdownLinkFiles}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
       style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
     {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
@@ -5807,7 +5868,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
                 mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
                 renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
-              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id} data-family-id={session.id} data-rename-keys {...sessionDragSource(session, projectId)}
+              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id} data-family-id={session.id} data-rename-keys data-session-keys {...sessionDragSource(session, projectId)}
                 onContextMenu={event => {
                   const target = event.target as HTMLElement;
                   if (target.closest("input, textarea, select, [contenteditable='true'], .session-actions-menu")) return;
@@ -5817,8 +5878,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 onKeyDown={event => {
                   const editing = !!(event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']");
                   const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
-                  // Delete, Backspace, F2, F and A on a row do what the same entries of its menu do; the row keeps F2 from
-                  // Rename Project (data-rename-keys), as the lists of files and terminals do.
+                  // Delete, Backspace, F2 and the keys of Fork Session and Archive Session on a row do what the same entries
+                  // of its menu do, for its session; the row keeps F2 from Rename Project (data-rename-keys), as the lists of
+                  // files and terminals do, and the other keys from their commands (data-session-keys).
                   if (isSessionDeleteKey(event, composing) && event.target === event.currentTarget.firstElementChild) {
                     event.preventDefault(); event.stopPropagation();
                     deleteSessionFromRow(session);
@@ -5858,7 +5920,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 items={[
                   { key: "open", label: t("Open session"), icon: "open", onSelect: () => runSessionMenuAction("open", session, menu) },
                   { key: "rename", label: t("Rename…"), icon: "edit", endNode: <KeyGesture gesture="F2" />, disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
-                  { key: "fork", label: t("Fork…"), icon: "branch", endNode: <KeyGesture gesture="F" />, disabled: !access.fork, onSelect: () => runSessionMenuAction("fork", session, menu) },
+                  { key: "fork", label: t("Fork…"), icon: "branch", endNode: <KeyGesture gesture={sessionRowGesture("fork")} />, disabled: !access.fork, onSelect: () => runSessionMenuAction("fork", session, menu) },
                   ...(providerHasRemoteControl(providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type)
                     ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
                   ...openElsewhereEntries(t, session, providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type, access, action => runSessionMenuAction(action, session, menu)),
@@ -5870,7 +5932,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
                   ...(spacesState.available && spacesState.spaces.length > 1
                     ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !access.space, onSelect: () => runSessionMenuAction("space", session, menu) }] : []),
-                  { key: "archive", label: archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0 ? t("Archive…") : t("Archive"), icon: "archive", endNode: <KeyGesture gesture="A" />,
+                  { key: "archive", label: archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0 ? t("Archive…") : t("Archive"), icon: "archive", endNode: <KeyGesture gesture={sessionRowGesture("archive")} />,
                     disabled: !access.archive || sessionArchiveBusy, onSelect: () => runSessionMenuAction("archive", session, menu) },
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", endNode: <KeyGesture gesture="Delete" />, danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
@@ -5960,10 +6022,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   return { name: origin.name, summary: origin.summary, onOpen: owned && origin.id ? () => openAutomations(origin.id) : undefined };
                 })() : undefined}
                 workCards={owned && workState.settings.notify ? <WorkItemCards hub={workHub} items={sessionCards(work, row.id)} preferredStart={workState.settings.start} busy={workBusy}
-                  onStart={(item, start) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath })}
+                  memory={overlayMemory.proposals(row.id)} dockPreference={proposalsDock} onStart={(item, start) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath })}
                   onOpenList={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} /> : undefined}
                 onRunActivity={(running, background) => { runtimeObservations.setLive(tab, running, background); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
-                active={tab.sessionId === sessionId} notesHidden={!notesVisible} onActivate={() => { if (visible && (sessionId !== tab.sessionId || fileTabs.active)) selectSessionTab(tab, "preview"); }}
+                active={tab.sessionId === sessionId} notesHidden={!notesVisible} notesMemory={overlayMemory.notes(row.id)} onActivate={() => { if (visible && (sessionId !== tab.sessionId || fileTabs.active)) selectSessionTab(tab, "preview"); }}
                 infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
                 infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
                   && admitted() && currentView.current === "workspace" && !settingsVisible.current && currentHostEpoch.current === status?.hostEpoch }}
@@ -6161,6 +6223,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         remoteControl={owned && shellPreferences ? { reconnect: shellPreferences.reconnectRemoteControl === true, set: setReconnectRemoteControl } : null}
         closing={shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null}
         keepAwake={owned && typeof shellPreferences?.keepAwake === "boolean" ? { on: shellPreferences.keepAwake, set: setKeepAwake } : null}
+        turnAlerts={owned && typeof shellPreferences?.turnAlerts === "string" ? { mode: turnAlertMode(shellPreferences.turnAlerts), platform: shellPreferences.platform, set: setTurnAlerts } : null}
         externalEditor={owned ? { api: externalEditorSettings, onChanged: externalOpener.accept } : null} />
       : settingsSection === "permissions" ? <PermissionSettings confirms={{ ...confirms, set: setConfirm }} tools={owned && status?.hostEpoch ? { epoch: status.hostEpoch, api: globalConfig } : null}
         permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions,
@@ -6404,7 +6467,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
+  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
 }
 
 /** The search of Settings: the query, the counts of the pages while one is typed (null otherwise), and the results that take the place of the page. */
@@ -6610,7 +6673,7 @@ function promptBackComposer(sessionId: string): PromptBackComposer {
 // The run of a session whose prompt was last given back to its composer: a prompt is given back once, whatever reads the window again.
 const unsentPromptKey = (sessionId: string) => `codealta.desktop.unsentPrompt.${sessionId}`;
 
-function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, onOpenDocumentation, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, heldReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, automation, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null, heldElsewhere = null }: {
+function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, onOpenDocumentation, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, heldReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, notesMemory, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, automation, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null, heldElsewhere = null }: {
   canAdmit: () => boolean;
   /**
    * The process that holds the session when another one does (the command line, another instance), with the length of
@@ -6653,6 +6716,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null,
   automation?: AutomationOrigin;
   /** The work items the session proposes, shown over the top right corner of its timeline. */
   workCards?: ReactNode;
+  /** What the Notes overlay of the session remembers when the pane is mounted again. */
+  notesMemory?: NotesOverlayMemory;
   /** Active reminders of this session as last reported by the host; null while unknown. */
   activeReminderCount?: number | null;
   notesReader: ReturnType<typeof createNotesReader>;
@@ -6972,7 +7037,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null,
         : null}
         </div>
         <SessionNotesOverlay observing={observing} sessionId={session.id} epoch={ownedSession ? status?.hostEpoch : undefined} capability={mutation?.capability}
-          fallbackMarkdown={historyNotes} hidden={notesHidden} reader={notesReader} />
+          fallbackMarkdown={historyNotes} hidden={notesHidden} reader={notesReader} memory={notesMemory} />
         {workCards}
         {bookmarks && bookmarkMarks && <BookmarkRail sessionId={session.id} hub={bookmarks.hub} marks={bookmarkMarks} scroll={timeline.elementRef} onGo={bookmarks.go} step={bookmarkStep} />}
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{t(newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible")}</button>}

@@ -1008,6 +1008,12 @@
   fr: "Choisissez une suggestion ou saisissez le nom complet du projet."
   ja: "候補を選ぶか、完全なプロジェクト名を入力。"
   zh: "选择建议项或输入完整项目名称。"
+"Claude":
+  de: "Claude"
+  es: "Claude"
+  fr: "Claude"
+  ja: "Claude"
+  zh: "Claude"
 "Clean":
   de: "Bereinigen"
   es: "Limpiar"

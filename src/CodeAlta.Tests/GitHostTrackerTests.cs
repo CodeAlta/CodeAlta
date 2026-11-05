@@ -162,6 +162,59 @@ public sealed class GitHostTrackerTests
     }
 
     [TestMethod]
+    public async Task AzureDevOps_GivesEachWorkItemTheColorOfItsState_ReadOncePerType()
+    {
+        var handler = new Handler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/org/proj/_apis/wit/wiql" => """{"workItems":[{"id":1},{"id":2},{"id":3}]}""",
+            "/org/proj/_apis/wit/workitems" => """
+                {"value":[{"id":1,"fields":{"System.Title":"A","System.State":"Active","System.WorkItemType":"Bug","System.TeamProject":"proj"}},
+                          {"id":2,"fields":{"System.Title":"B","System.State":"On Hold","System.WorkItemType":"Bug","System.TeamProject":"proj"}},
+                          {"id":3,"fields":{"System.Title":"C","System.State":"Ready","System.WorkItemType":"User Story","System.TeamProject":"proj"}}]}
+                """,
+            "/org/proj/_apis/wit/workitemtypes/Bug/states" => """{"value":[{"name":"Active","color":"007acc","category":"InProgress"},{"name":"On Hold","color":"cc293d"}]}""",
+            "/org/proj/_apis/wit/workitems/1" => """{"id":1,"fields":{"System.Title":"A","System.State":"Active","System.WorkItemType":"Bug","System.TeamProject":"proj"}}""",
+            _ => null,
+        });
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+
+        var items = await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10), default);
+        CollectionAssert.AreEqual(new[] { "007acc", "cc293d", null }, items.Items.Select(static item => item.StateColor).ToArray(),
+            "Each state has the color of its type; a type whose states cannot be read has none.");
+        Assert.AreEqual(1, handler.Requests.Count(static request => request.StartsWith("/org/proj/_apis/wit/workitemtypes/Bug/states", StringComparison.Ordinal)), "The states of a type are read once.");
+        StringAssert.Contains(string.Join(' ', handler.Requests), "/workitemtypes/User%20Story/states", "The name of a type is escaped.");
+
+        var detail = await tracker.ReadAsync(TrackedItemKind.Issue, "1", default);
+        Assert.AreEqual("007acc", detail!.Item.StateColor, "A work item read alone has the color of its state too.");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_ReadsTheTextOfABug_FromItsReproStepsAndAcceptanceCriteria()
+    {
+        var handler = new Handler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/org/proj/_apis/wit/workitems/64" => """
+                {"id":64,"fields":{"System.Title":"Badge missing","System.State":"Active","System.WorkItemType":"Bug","System.TeamProject":"proj",
+                  "Microsoft.VSTS.TCM.ReproSteps":"<div>Open a mutation.</div>","Microsoft.VSTS.TCM.SystemInfo":" ","Microsoft.VSTS.Common.AcceptanceCriteria":"<div>The badge stays.</div>"}}
+                """,
+            "/org/proj/_apis/wit/workitems/65" => """
+                {"id":65,"fields":{"System.Title":"Export","System.State":"New","System.WorkItemType":"User Story","System.TeamProject":"proj","System.Description":"<div>As a user.</div>",
+                  "Microsoft.VSTS.Common.AcceptanceCriteria":"<div>It exports.</div>"}}
+                """,
+            _ => null,
+        });
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+
+        var bug = await tracker.ReadAsync(TrackedItemKind.Issue, "64", default);
+        Assert.AreEqual("<h2>Repro Steps</h2>\n<div>Open a mutation.</div>\n<h2>Acceptance Criteria</h2>\n<div>The badge stays.</div>", bug!.Body,
+            "A bug has no description: its text is in Repro Steps and Acceptance Criteria, each under its name; an empty one is left out.");
+        Assert.IsFalse(handler.Requests[0].Contains("fields=", StringComparison.Ordinal), "A field the organization does not have would refuse the whole read: all the fields are read.");
+
+        var story = await tracker.ReadAsync(TrackedItemKind.Issue, "65", default);
+        Assert.AreEqual("<div>As a user.</div>\n<h2>Acceptance Criteria</h2>\n<div>It exports.</div>", story!.Body, "The description is shown as it is, without a heading, before the other texts.");
+    }
+
+    [TestMethod]
     public async Task AzureDevOps_PullRequests_WaitingForMyReview_AreFoundThroughNestedGroups()
     {
         var hosts = new List<string>();

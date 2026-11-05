@@ -1,5 +1,6 @@
-import { Card, HTMLSelect, Switch } from "@blueprintjs/core";
-import { globalConfig } from "#neoastra";
+import { useEffect, useState } from "react";
+import { Card, HTMLSelect, InputGroup, Switch, TextArea } from "@blueprintjs/core";
+import { globalConfig, type GlobalConfigSaveAttributionSettingsRequest } from "#neoastra";
 import { SettingsField as Field } from "./SettingsField";
 import { SettingsFileLocations } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
@@ -10,14 +11,15 @@ import { useShellLanguage } from "./shellLanguage";
 /**
  * Settings page for the sessions: how a session nobody named is titled, whether the model suggests the next prompt,
  * whether the user reviews the changes of the sessions before an agent commits them, whether agents name CodeAlta as
- * a co-author of their commits, and whether the sessions share a single tab. The title, the suggestion, the review and
- * the co-author choices are saved at once, in the configuration file of the user; a session takes them with its next
+ * a co-author of their commits and say that what they write elsewhere comes from CodeAlta (with the texts the user
+ * writes for both), and whether the sessions share a single tab. The title, the suggestion, the review and the
+ * attribution choices are saved at once, in the configuration file of the user; a session takes them with its next
  * prompt (the review at once for its commits), unless it has a choice of its own. The single tab is a preference of
  * the window, which keeps it.
  */
 export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesApi, tabs }: {
   epoch: string | null;
-  api?: Pick<typeof globalConfig, "sessionTitles" | "saveSessionTitles" | "reviewSettings" | "saveReviewSettings" | "commitSettings" | "saveCommitSettings"
+  api?: Pick<typeof globalConfig, "sessionTitles" | "saveSessionTitles" | "reviewSettings" | "saveReviewSettings" | "attributionSettings" | "saveAttributionSettings"
     | "promptSuggestionSettings" | "savePromptSuggestionSettings">;
   /** Whether the sessions share a single tab, and what changes it; absent where the window has no tabs to set. */
   tabs?: { single: boolean; setSingle: (value: boolean) => void };
@@ -28,18 +30,23 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
 }) {
   const { t } = useShellLanguage();
   const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor(async options => {
-    // The choices are in the configuration file of the user; the suggestion, the review and the commit ones are null
-    // where the host has none.
-    const [titles, suggestions, review, commits] = await Promise.all([api.sessionTitles({ expectedEpoch: epoch }, options),
+    // The choices are in the configuration file of the user; the suggestion, the review and the attribution ones are
+    // null where the host has none.
+    const [titles, suggestions, review, attribution] = await Promise.all([api.sessionTitles({ expectedEpoch: epoch }, options),
       api.promptSuggestionSettings({ expectedEpoch: epoch }, options).catch(() => null),
       api.reviewSettings({ expectedEpoch: epoch }, options).catch(() => null),
-      api.commitSettings({ expectedEpoch: epoch }, options).catch(() => null)]);
+      api.attributionSettings({ expectedEpoch: epoch }, options).catch(() => null)]);
     return { ...titles, promptSuggestions: suggestions?.status === "ok" ? suggestions.enabled : null,
-      beforeCommit: review?.status === "ok" ? review.beforeCommit : null, coAuthor: commits?.status === "ok" ? commits.coAuthor : null };
+      beforeCommit: review?.status === "ok" ? review.beforeCommit : null, attribution: attribution?.status === "ok" ? attribution : null };
   }, `${epoch}`);
   // The choice is kept in the configuration file of the user: the page says where that file is.
   const files = useSettingsFiles({ page: "config", epoch, projectId: null, revision: listing, onOpened: onOpenFile, setNotice, api: filesApi });
   const choice = sessionTitleChoice(listing?.mode);
+  // Saves one attribution choice; the others stay as the file has them.
+  const saveAttribution = (change: Partial<Omit<GlobalConfigSaveAttributionSettingsRequest, "expectedEpoch">>) =>
+    void mutate(() => api.saveAttributionSettings({ expectedEpoch: epoch, coAuthor: null, coAuthorTrailer: null, externalWriting: null, externalWritingInstruction: null, ...change },
+      { timeoutMilliseconds: 30_000 }), "Saved.");
+  const attribution = listing?.attribution ?? null;
 
   return <SettingsPage className="session-settings" label={t("Sessions")} group="Agent & models" title="Sessions"
     description="How CodeAlta titles your sessions, reviews their changes and shows them in tabs." notice={notice} loading={loading} busy={busy} onReload={reload}>
@@ -82,15 +89,31 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
             }} />
         </Field>
       </Card>}
-      {listing && listing.coAuthor !== null && <Card className="appearance-settings" aria-labelledby="settings-session-commits-title">
+      {attribution && <Card className="appearance-settings" aria-labelledby="settings-session-commits-title">
         <h2 id="settings-session-commits-title">{t("Commits")}</h2>
         <Field setting="commits.co_author" label={t("Add CodeAlta as co-author")} htmlFor="settings-commit-co-author"
           notice={<p className="settings-field-help">{t("Agents end the message of each commit with a Co-authored-by line for CodeAlta, beside the lines their provider adds.")}</p>}>
-          <Switch id="settings-commit-co-author" className="settings-checkbox" checked={listing.coAuthor} disabled={busy}
-            onChange={event => {
-              const coAuthor = event.currentTarget.checked;
-              void mutate(() => api.saveCommitSettings({ expectedEpoch: epoch, coAuthor }, { timeoutMilliseconds: 30_000 }), "Saved.");
-            }} />
+          <Switch id="settings-commit-co-author" className="settings-checkbox" checked={attribution.coAuthor} disabled={busy}
+            onChange={event => saveAttribution({ coAuthor: event.currentTarget.checked })} />
+        </Field>
+        <Field setting="commits.co_author_trailer" label={t("Co-author line")} htmlFor="settings-commit-co-author-trailer"
+          notice={<p className="settings-field-help">{t("The trailer agents add, such as Co-authored-by: Name <email>. Empty for the one of CodeAlta.")}</p>}>
+          <AttributionText id="settings-commit-co-author-trailer" value={attribution.coAuthorTrailer} defaultValue={attribution.defaultCoAuthorTrailer}
+            maxLength={200} disabled={busy || !attribution.coAuthor} onSave={coAuthorTrailer => saveAttribution({ coAuthorTrailer })} />
+        </Field>
+      </Card>}
+      {attribution && <Card className="appearance-settings" aria-labelledby="settings-session-external-writing-title">
+        <h2 id="settings-session-external-writing-title">{t("Comments and messages")}</h2>
+        <Field setting="external_writing.attribution" label={t("Say that CodeAlta wrote it")} htmlFor="settings-external-writing-attribution"
+          notice={<p className="settings-field-help">{t("When an agent writes a pull request comment, an issue, a chat message or an email for you, it ends the text with a line saying that it comes from CodeAlta.")}</p>}>
+          <Switch id="settings-external-writing-attribution" className="settings-checkbox" checked={attribution.externalWriting} disabled={busy}
+            onChange={event => saveAttribution({ externalWriting: event.currentTarget.checked })} />
+        </Field>
+        <Field setting="external_writing.instruction" label={t("Instruction to agents")} htmlFor="settings-external-writing-instruction"
+          notice={<p className="settings-field-help">{t("What agents are told about that line, on one line. Empty for the one of CodeAlta.")}</p>}>
+          <AttributionText id="settings-external-writing-instruction" multiline value={attribution.externalWritingInstruction}
+            defaultValue={attribution.defaultExternalWritingInstruction} maxLength={1000} disabled={busy || !attribution.externalWriting}
+            onSave={externalWritingInstruction => saveAttribution({ externalWritingInstruction })} />
         </Field>
       </Card>}
       {tabs && <Card className="appearance-settings" aria-labelledby="settings-session-tabs-title">
@@ -102,4 +125,24 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
       </Card>}</div>
     </>}
   </SettingsPage>;
+}
+
+
+/**
+ * A text of the user that takes the place of the one of CodeAlta: empty while it is that one, which the field shows
+ * as its placeholder. It is saved on Enter or when the field loses the focus, if it changed; an empty field is the
+ * text of CodeAlta. It stays on one line, even where it wraps.
+ */
+export function AttributionText({ id, value, defaultValue, maxLength, disabled, multiline, onSave }: {
+  id: string; value: string; defaultValue: string; maxLength: number; disabled: boolean; multiline?: boolean; onSave: (text: string) => void;
+}) {
+  const shown = value === defaultValue ? "" : value;
+  const [draft, setDraft] = useState(shown);
+  useEffect(() => setDraft(shown), [shown]);
+  const save = () => { const text = draft.replace(/\s+/g, " ").trim(); if (text !== shown) onSave(text); };
+  const common = { id, value: draft, placeholder: defaultValue, maxLength, disabled, onBlur: save,
+    onKeyDown: (event: { key: string; preventDefault: () => void }) => { if (event.key === "Enter") { event.preventDefault(); save(); } } };
+  return multiline
+    ? <TextArea {...common} fill autoResize rows={3} onChange={event => setDraft(event.currentTarget.value)} />
+    : <InputGroup {...common} fill onValueChange={setDraft} />;
 }

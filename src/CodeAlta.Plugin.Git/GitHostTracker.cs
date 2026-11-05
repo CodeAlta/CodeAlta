@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
@@ -433,6 +434,16 @@ internal sealed partial class AzureDevOpsApi : GitHostApi
     private const string Closed = "'Closed', 'Done', 'Removed', 'Completed'";
     private const string Fields = "System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.CreatedBy,System.CreatedDate,System.ChangedDate,System.Tags,System.CommentCount,System.TeamProject,Microsoft.VSTS.Common.Priority";
 
+    // The long texts of a work item, in the order its form shows them: a bug has no description, its text is in Repro Steps.
+    // The description is the text itself, without a heading.
+    private static readonly (string Field, string? Label)[] TextFields =
+    [
+        ("System.Description", null),
+        ("Microsoft.VSTS.TCM.ReproSteps", "Repro Steps"),
+        ("Microsoft.VSTS.TCM.SystemInfo", "System Info"),
+        ("Microsoft.VSTS.Common.AcceptanceCriteria", "Acceptance Criteria"),
+    ];
+
     public static AzureDevOpsApi Instance { get; } = new();
 
     public override string WebUrl(GitRepositoryReference repository) => $"{Project(repository)}/_git/{Escape(repository.Name)}";
@@ -473,7 +484,7 @@ internal sealed partial class AzureDevOpsApi : GitHostApi
         if (items is null) return [];
         var read = Items(items.RootElement, "value").Select(element => ReadWorkItem(element, repository)).OfType<TrackedItem>().ToDictionary(static item => item.Id);
         // The fields come in the order of the service; the query gave the order that was asked.
-        return [.. ids.Select(id => read.GetValueOrDefault(id.ToString(CultureInfo.InvariantCulture))).OfType<TrackedItem>()];
+        return await WithStateColorsAsync(query, [.. ids.Select(id => read.GetValueOrDefault(id.ToString(CultureInfo.InvariantCulture))).OfType<TrackedItem>()], cancellationToken).ConfigureAwait(false);
     }
 
     public override async Task<TrackedItemDetail?> ReadAsync(GitIssueQuery query, TrackedItemKind kind, int number, CancellationToken cancellationToken)
@@ -481,9 +492,11 @@ internal sealed partial class AzureDevOpsApi : GitHostApi
         if (kind == TrackedItemKind.PullRequest) return await ReadPullAsync(query, number, cancellationToken).ConfigureAwait(false);
         var repository = query.Repository;
         var comments = new List<TrackedComment>();
-        var itemUrl = FormattableString.Invariant($"{Project(repository)}/_apis/wit/workitems/{number}?fields={Fields},System.Description&api-version={ApiVersion}");
+        // All the fields, whatever texts its type has: asking for a field the organization does not have refuses the whole read.
+        var itemUrl = FormattableString.Invariant($"{Project(repository)}/_apis/wit/workitems/{number}?api-version={ApiVersion}");
         using var item = await GetAnswerAsync(query, itemUrl, cancellationToken).ConfigureAwait(false);
-        if (item is null || ReadWorkItem(item.RootElement, repository) is not { } work) return null;
+        if (item is null || ReadWorkItem(item.RootElement, repository) is not { } read) return null;
+        var work = (await WithStateColorsAsync(query, [read], cancellationToken).ConfigureAwait(false))[0];
         using var listed = await GetAnswerAsync(query, FormattableString.Invariant($"{Project(repository)}/_apis/wit/workItems/{number}/comments?$top={GitHostTracker.MaximumComments}&order=asc&api-version=7.1-preview.4"), cancellationToken, report: false).ConfigureAwait(false);
         if (listed is not null)
         {
@@ -492,8 +505,13 @@ internal sealed partial class AzureDevOpsApi : GitHostApi
                 .OrderBy(static comment => comment.CreatedAt));
         }
 
-        return new(work, Text(item.RootElement, "fields", "System.Description") ?? string.Empty, comments) { MoreComments = (work.CommentCount ?? 0) > comments.Count };
+        return new(work, WorkItemText(item.RootElement), comments) { MoreComments = (work.CommentCount ?? 0) > comments.Count };
     }
+
+    // The text of a work item, as HTML: its description as it is, the other texts each under its name, as its form shows them.
+    private static string WorkItemText(JsonElement item)
+        => string.Join('\n', TextFields.Select(field => (field.Label, Html: Text(item, "fields", field.Field))).Where(static text => !string.IsNullOrWhiteSpace(text.Html))
+            .Select(static text => text.Label is null ? text.Html : $"<h2>{text.Label}</h2>\n{text.Html}"));
 
     private static async Task<JsonDocument?> GetAnswerAsync(GitIssueQuery query, string url, CancellationToken cancellationToken, bool report = true)
     {
@@ -515,6 +533,39 @@ internal sealed partial class AzureDevOpsApi : GitHostApi
            string.Equals(response.Content.Headers.ContentType?.MediaType, "application/json", StringComparison.OrdinalIgnoreCase);
 
     private static HttpStatusCode RefusalOf(HttpResponseMessage response) => response.IsSuccessStatusCode ? HttpStatusCode.Unauthorized : response.StatusCode;
+
+    // The items with the color the process gives their state, as the boards show it; the states of each type are read once.
+    private static async Task<IReadOnlyList<TrackedItem>> WithStateColorsAsync(GitIssueQuery query, IReadOnlyList<TrackedItem> items, CancellationToken cancellationToken)
+    {
+        var types = items.Select(static item => item.Type).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (types.Length == 0) return items;
+        var colors = new IReadOnlyDictionary<string, string>?[types.Length];
+        await Parallel.ForEachAsync(Enumerable.Range(0, types.Length), new ParallelOptions { MaxDegreeOfParallelism = ParallelTypeReads, CancellationToken = cancellationToken },
+            async (index, token) => colors[index] = await StateColorsAsync(query, types[index], token).ConfigureAwait(false)).ConfigureAwait(false);
+        return [.. items.Select(item =>
+        {
+            var index = item.Type is null ? -1 : Array.FindIndex(types, type => string.Equals(type, item.Type, StringComparison.OrdinalIgnoreCase));
+            return index >= 0 && item.StateText is { } state && colors[index]?.GetValueOrDefault(state) is { } color ? item with { StateColor = color } : item;
+        })];
+    }
+
+    // The color of each state of a type, by its name; null when the states could not be read: the items are shown without.
+    private static Task<IReadOnlyDictionary<string, string>?> StateColorsAsync(GitIssueQuery query, string type, CancellationToken cancellationToken)
+    {
+        var url = FormattableString.Invariant($"{Project(query.Repository)}/_apis/wit/workitemtypes/{Escape(type)}/states?api-version={ApiVersion}");
+        return CachedAsync<IReadOnlyDictionary<string, string>>(query, url, cancellationToken, async () =>
+        {
+            using var document = await GetAnswerAsync(query, url, cancellationToken, report: false).ConfigureAwait(false);
+            if (document is null) return null;
+            var colors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var state in Items(document.RootElement, "value"))
+            {
+                if (Text(state, "name") is { } name && Text(state, "color") is { Length: 6 } color && color.All(char.IsAsciiHexDigit)) colors.TryAdd(name, color.ToLowerInvariant());
+            }
+
+            return colors.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+        });
+    }
 
     private static TrackedItem? ReadWorkItem(JsonElement element, GitRepositoryReference repository)
     {

@@ -3,7 +3,8 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, NonIdealState, PopoverNext, SegmentedControl, Switch, Tag } from "@blueprintjs/core";
 import { projectFiles, skills, type SkillsDetailResponse, type SkillsEntry, type SkillsFolder, type SkillsMcpContentResponse, type SkillsMcpEntry, type SkillsMcpListResponse,
   type SkillsMcpServer } from "#neoastra";
-import type { FolderPick } from "./folderPicker";
+import { folderPickNotice, type FolderPick } from "./folderPicker";
+import { showToast } from "./appToaster";
 import { foldersOf, skillFolderNotice, skillFolderScopes, skillFolderStateLabel, type SkillFolderScope } from "./skillFolders";
 import { AppIcon } from "./AppIcon";
 import { formatFileSize } from "./editor/editorDocuments";
@@ -176,7 +177,10 @@ export function SkillFolderList({ folders, space, project, showSpace, disabled, 
   async function browse() {
     if (!pickFolder || !draft) return;
     const picked = await pickFolder(draft.path.trim() || null);
-    if (picked.status === "ok") setDraft(current => current && { ...current, path: picked.path });
+    if (picked.status === "ok") { setDraft(current => current && { ...current, path: picked.path }); return; }
+    // A desktop without a folder dialog, or a dialog that failed, is never silent: the path can still be typed.
+    const notice = folderPickNotice(picked, "type");
+    if (notice) showToast({ message: t(notice), intent: "warning", icon: "warning-sign", timeout: 8000 });
   }
   async function add() {
     if (!draft || !draft.path.trim() || disabled) return;

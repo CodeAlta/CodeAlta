@@ -207,7 +207,8 @@ Prompts are files under `prompts/` roots with precedence built-in (`content/prom
 < project (`<project>/.alta/prompts/`): `system/<id>.system-prompt.md` for invariant host behavior and
 `agents/<id>.prompt.md` for selectable agent prompts. A later file replaces an earlier one with the same id, or extends
 it with `mode: append`; an agent prompt can `inherit:` others (depth-first, at most 16). GitHub Copilot custom agents
-(`.github/agents/*.agent.md`) are read-only agent prompts below the built-in ones.
+(`.github/agents/*.agent.md`) and Claude Code subagents (`.claude/agents/**/*.md`), of the project and of the user, are
+read-only agent prompts below the built-in ones.
 
 `SystemPromptBuilder` composes the system message and the developer instructions: system prompt, agent prompt body,
 runtime context (date, platform, space, model tiers, commit trailer), tool guidance, skills, and project context

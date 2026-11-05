@@ -1,8 +1,10 @@
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { createExternalOpener, ExternalOpenerContext } from "./externalEditors/externalEditors";
 import { MarkdownContent, MarkdownImagesContext, MarkdownLinkScopeContext } from "./MarkdownContent";
 import type { MarkdownImage, MarkdownImages } from "./markdownImages";
+import { MarkdownLinkFilesContext } from "./MarkdownLinkMenu";
 import { sourceBlocks } from "./markdownSourceLines";
 import { MessageLinksContext, TimelineMessage } from "./TimelineMessage";
 import type { TimelineItem } from "./timeline";
@@ -11,7 +13,7 @@ import MarkdownIt from "markdown-it";
 // Literal fixtures only; no application host, clipboard or bridge.
 const root = createRoot(document.getElementById("app")!);
 const state = { phase: "ready", executed: 0, opens: [] as string[], copies: [] as string[],
-  external: [] as string[], pictures: [] as string[], reveals: [] as string[], sourceLines: false,
+  external: [] as string[], pictures: [] as string[], reveals: [] as string[], linkFiles: [] as string[], sourceLines: false,
   policies: [] as { directive: string; uri: string; phase: string }[], parses: 0, parsedBases: [] as string[] };
 window.open = ((url?: string | URL) => { state.opens.push(String(url)); return null; }) as typeof window.open;
 Object.defineProperty(navigator, "clipboard", { value: { writeText: async (text: string) => { state.copies.push(text); } } });
@@ -116,6 +118,33 @@ Object.assign(window, { markdownFixture: { state, cases, render, snapshot,
       createElement(MarkdownImagesContext.Provider, { value: pictures() }, createElement(MarkdownLinkScopeContext.Provider, { value: { sessionId: "s1" } },
         createElement(TimelineMessage, { item: item(source), canInspect: () => true }))))));
   },
+  // A message whose window knows an external editor and does what the menu of a link asks; the host is a list.
+  renderLinkMenu(source: string) {
+    const opener = createExternalOpener({ failed: () => { }, openFolder: async () => "ok", openEntry: async () => "ok", openWorktree: async () => "ok",
+      list: async () => ({ status: "ok", platform: "windows", editors: [], current: { id: "vscode", name: "Visual Studio Code", program: "code" }, chosen: null, customProgram: null, customArguments: null }) });
+    const files = { platform: "windows",
+      path: async (address: string, scope: { sessionId?: string } | null) => { state.linkFiles.push(`path ${address}@${scope?.sessionId ?? ""}`); return address === "src/gone.cs" ? null : "C:\\work\\src\\Program.cs"; },
+      reveal: (address: string, scope: { sessionId?: string } | null) => { state.linkFiles.push(`reveal ${address}@${scope?.sessionId ?? ""}`); },
+      openExternal: (address: string, scope: { sessionId?: string } | null) => { state.linkFiles.push(`editor ${address}@${scope?.sessionId ?? ""}`); } };
+    flushSync(() => root.render(createElement(MessageLinksContext.Provider, { value: address => state.external.push(address) },
+      createElement(ExternalOpenerContext.Provider, { value: opener }, createElement(MarkdownLinkFilesContext.Provider, { value: files },
+        createElement(MarkdownLinkScopeContext.Provider, { value: { sessionId: "s1" } }, createElement(TimelineMessage, { item: item(source), canInspect: () => true })))))));
+  },
+  // The context menu of a link, asked for at the link: the lines it shows; a line is chosen by what it says.
+  async linkMenu(selector: string) {
+    const link = document.querySelector(`.markdown-content ${selector}`)!, rect = link.getBoundingClientRect();
+    const asked = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: rect.x + 2, clientY: rect.y + 2 });
+    flushSync(() => link.dispatchEvent(asked));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    return { prevented: asked.defaultPrevented, items: Array.from(document.querySelectorAll(".session-tab-popup [role=menuitem]"), item => item.textContent) };
+  },
+  async chooseLinkMenu(label: string) {
+    Array.from(document.querySelectorAll<HTMLElement>(".session-tab-popup [role=menuitem]")).find(item => item.textContent === label)!.click();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    return document.querySelectorAll(".session-tab-popup").length;
+  },
+  selectLink(selector: string) { getSelection()!.selectAllChildren(document.querySelector(`.markdown-content ${selector}`)!); },
+  clearSelection() { getSelection()!.removeAllRanges(); },
   pictureRect() { return document.querySelector(".markdown-content img.markdown-local-image[src]")?.getBoundingClientRect().toJSON() ?? null; },
   viewer() {
     const dialog = document.querySelector<HTMLDialogElement>("dialog.timeline-image-dialog");

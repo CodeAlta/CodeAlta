@@ -40,12 +40,42 @@ internal enum DesktopCloseAction
 /// <c>close-tab</c> (the native menu asks the page to close its focused tab, not the window),
 /// <c>entry-added</c> (the application was just added to the desktop's applications),
 /// <c>sessions-changed</c> (something outside the window may have created or changed sessions),
-/// <c>external-editor</c> (the user chose another external editor) and <c>show-project</c> (a start of <c>alta</c> added
-/// the project <c>ProjectId</c>, with <c>SpaceId</c> a space it joined: the page selects it).
+/// <c>external-editor</c> (the user chose another external editor), <c>show-project</c> (a start of <c>alta</c> added
+/// the project <c>ProjectId</c>, with <c>SpaceId</c> a space it joined: the page selects it), <c>show-session</c> (the
+/// user opened the notification of the session <c>SessionId</c>: the page opens it), <c>files-dropped</c> (files or
+/// folders were dropped on the window, <c>Drop</c>: the page attaches them to the prompt under the point) and
+/// <c>dialog-problem</c> (the <c>Dialog</c> the page asked for, <c>files</c>, could not be shown: <c>Problem</c> is
+/// <c>unavailable</c> where the desktop has none, or <c>failed</c>).
 /// </summary>
 internal sealed record DesktopShellEvent(string Kind, int RunningSessions, int BusyTerminals = 0, int SessionWidth = 0, string? SessionId = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? ProjectId = null,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? SpaceId = null);
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? SpaceId = null)
+{
+    /// <summary>The files and folders of a <c>files-dropped</c> notice.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public DesktopShellDrop? Drop { get; init; }
+
+    /// <summary>The dialog of a <c>dialog-problem</c> notice: <c>files</c>.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Dialog { get; init; }
+
+    /// <summary>What went wrong with the dialog of a <c>dialog-problem</c> notice: <c>unavailable</c> or <c>failed</c>.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Problem { get; init; }
+}
+
+/// <summary>What was dropped on a window from the file manager, for the page of that window.</summary>
+/// <param name="X">Where, in CSS pixels from the left of the page.</param>
+/// <param name="Y">Where, in CSS pixels from the top of the page.</param>
+/// <param name="Folders">The full paths of the dropped folders.</param>
+/// <param name="Files">The dropped files, which the page reads with <c>readDroppedFile</c>.</param>
+internal sealed record DesktopShellDrop(int X, int Y, string[] Folders, DesktopShellDroppedFile[] Files);
+
+/// <summary>A dropped file, by an id: the page never has its path.</summary>
+/// <param name="Id">What the page reads it with, once.</param>
+/// <param name="Name">Its name, without its folder.</param>
+/// <param name="Size">Its size in bytes when it was dropped; <see cref="int.MaxValue"/> for a larger file.</param>
+internal sealed record DesktopShellDroppedFile(string Id, string Name, int Size);
 
 /// <summary>
 /// How the application lives beyond its window: an icon in the notification area (the menu bar on macOS, the
@@ -76,8 +106,8 @@ internal sealed class DesktopShell
     private bool _exiting;
     private bool _exitPending;
     private bool _entryAdded;
-    // The project a start of alta added before any page watched (see ShowProject).
-    private DesktopShellEvent? _pendingProject;
+    // The project or the session to show that came before any page watched (see ShowProject and ShowSession).
+    private DesktopShellEvent? _pendingShow;
     private int _pickingFolder;
 
     /// <param name="window">The main window.</param>
@@ -216,12 +246,26 @@ internal sealed class DesktopShell
     internal void ShowProject(string projectId, string? spaceId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
-        var notice = new DesktopShellEvent("show-project", 0, ProjectId: projectId, SpaceId: spaceId);
+        ShowInMainPage(new DesktopShellEvent("show-project", 0, ProjectId: projectId, SpaceId: spaceId));
+    }
+
+    /// <summary>
+    /// Shows the window and tells the page to open a session (<c>show-session</c>): the user opened its notification. While
+    /// no page watches (the application starts), the notice waits for the first one.
+    /// </summary>
+    internal void ShowSession(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ShowInMainPage(new DesktopShellEvent("show-session", 0, SessionId: sessionId));
+    }
+
+    private void ShowInMainPage(DesktopShellEvent notice)
+    {
         bool watched;
         lock (_gate)
         {
             watched = _watchers.Any(static entry => entry.Label == Windows.DesktopWindows.MainLabel);
-            _pendingProject = watched ? null : notice;
+            _pendingShow = watched ? null : notice;
         }
 
         if (watched) PublishTo(Windows.DesktopWindows.MainLabel, notice);
@@ -496,6 +540,27 @@ internal sealed class DesktopShell
         _writer.Write();
     }
 
+    /// <summary>
+    /// The user's setting: what tells the user that a session is done or waits for them while CodeAlta is in the
+    /// background. A notification and the mark of the application unless the user chose otherwise; it applies at once.
+    /// </summary>
+    internal DesktopTurnAlertMode TurnAlerts { get { lock (_gate) return _preferences.TurnAlerts; } }
+
+    /// <summary>Changes that setting and keeps it.</summary>
+    /// <param name="value">What tells the user.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="value"/> is not a mode.</exception>
+    internal void SetTurnAlerts(DesktopTurnAlertMode value)
+    {
+        if (!Enum.IsDefined(value)) throw new ArgumentOutOfRangeException(nameof(value));
+        DesktopPreferences? preferences = null;
+        lock (_gate)
+        {
+            if (_preferences.TurnAlerts != value) preferences = _preferences = _preferences with { TurnAlerts = value };
+        }
+
+        if (preferences is not null) _writer.Write();
+    }
+
     /// <summary>The user's setting: the editor folders and files are opened in beside the code editor of CodeAlta.</summary>
     internal ExternalEditorChoice ExternalEditor { get { lock (_gate) return _preferences.ExternalEditor; } }
 
@@ -700,7 +765,7 @@ internal sealed class DesktopShell
         lock (_gate)
         {
             _watchers.Add(entry);
-            if (label == Windows.DesktopWindows.MainLabel) (pending, _pendingProject) = (_pendingProject, null);
+            if (label == Windows.DesktopWindows.MainLabel) (pending, _pendingShow) = (_pendingShow, null);
         }
 
         if (pending is not null) watcher(pending);
@@ -799,6 +864,26 @@ internal sealed class DesktopShell
         lock (_gate) watchers = [.. _watchers.Select(static entry => entry.Watcher)];
         foreach (var watcher in watchers) watcher(value);
     }
+
+    /// <summary>Tells the page of a window that files or folders were dropped on it; a window without a page loses them.</summary>
+    /// <param name="label">The label of the view they were dropped on.</param>
+    /// <param name="drop">What was dropped.</param>
+    internal void NotifyDrop(string label, DesktopShellDrop drop)
+    {
+        ArgumentNullException.ThrowIfNull(drop);
+        Action<DesktopShellEvent>[] watchers;
+        // The point is of that window: never another one.
+        lock (_gate) watchers = [.. _watchers.Where(entry => entry.Label == label).Select(static entry => entry.Watcher)];
+        var notice = new DesktopShellEvent("files-dropped", 0) { Drop = drop };
+        foreach (var watcher in watchers) watcher(notice);
+    }
+
+    /// <summary>Tells the page of a window that the dialog it asked for could not be shown.</summary>
+    /// <param name="label">The label of the view of the window.</param>
+    /// <param name="dialog">The dialog: <c>files</c>.</param>
+    /// <param name="problem"><c>unavailable</c> where the desktop has none, or <c>failed</c>.</param>
+    internal void NotifyDialogProblem(string label, string dialog, string problem)
+        => PublishTo(label, new DesktopShellEvent("dialog-problem", 0) { Dialog = dialog, Problem = problem });
 
     // To the pages of one window, or to those of the main one when that window has none.
     private void PublishTo(string label, DesktopShellEvent value)

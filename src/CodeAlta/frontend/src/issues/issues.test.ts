@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { IssueSource, WorkspaceProject } from "#neoastra";
+import type { IssueRow, IssueSource, WorkspaceProject } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { allPartsLabel, issueFilters, issueIcon, issueReference, issueStateLabel, issueTone, kindLabel, labelColors, sameList, shownPart, signInCommand, sourceKinds, voteIcon, voteLabel } from "./issues";
-import { IssuesPanel, type IssuesApi } from "./IssuesPanel";
+import { AssigneeNames, IssuesPanel, StateTag, type IssuesApi } from "./IssuesPanel";
 
 test("a pull request can be merged, an issue cannot: each kind has its own lists", () => {
   assert.deepEqual(issueFilters("issue"), ["open", "closed", "all"]);
@@ -29,9 +29,35 @@ test("an item is named by its number or by its key, and drawn by what it is and 
   assert.equal(issueIcon({ kind: "issue", state: "open" }), "issueOpen");
   assert.equal(issueIcon({ kind: "issue", state: "closed" }), "issueClosed");
   assert.equal(issueIcon({ kind: "pull_request", state: "merged" }), "pullRequest");
+  assert.deepEqual(["Bug", "User Story", "Product Backlog Item", "Task", "Feature", "Epic", "incident"].map(type => issueIcon({ kind: "issue", state: "open", type })),
+    ["issueBug", "issueStory", "issueStory", "issueTask", "issueFeature", "issueEpic", "issueBug"], "a work item is drawn by its type, its state by its color");
+  assert.equal(issueIcon({ kind: "issue", state: "closed", type: "Test Case" }), "issueClosed", "a type without a picture of its own is drawn by its state");
   assert.deepEqual((["open", "draft", "merged", "closed"] as const).map(state => issueTone({ kind: "pull_request", state })), ["open", "draft", "done", "closed"]);
   assert.equal(issueTone({ kind: "issue", state: "closed" }), "done", "an issue that is closed is done; a pull request that is closed was not merged");
   assert.deepEqual(["open", "draft", "merged", "closed"].map(state => issueStateLabel({ state })), ["Open", "Draft", "Merged", "Closed"]);
+});
+
+test("the people an issue is assigned to are named in its row, and the tooltip says they are its assignees", () => {
+  const render = (names: string[], locale: "en" | "de") => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => undefined } },
+    createElement(AssigneeNames, { names })));
+  const one = render(["Ana Lopez"], "en");
+  assert.match(one, /title="Assigned to Ana Lopez"/);
+  assert.match(one, />Ana Lopez</);
+  const three = render(["Ana", "Bo", "Cy"], "de");
+  assert.match(three, /title="Zugewiesen an Ana, Bo, Cy"/, "the tooltip names them all");
+  assert.match(three, />Ana, Bo<\/span><span>\+1</, "the row names two and counts the others");
+  assert.equal(render([], "en"), "", "an issue assigned to nobody shows nothing");
+});
+
+test("a state is written in the color its tracker gives it, and otherwise in the color of its tone", () => {
+  const row = { kind: "issue", state: "open", stateText: "Ready" } as IssueRow;
+  const render = (stateColor: string | null) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: () => undefined } },
+    createElement(StateTag, { item: { ...row, stateColor } })));
+  const colored = render("86cdde");
+  assert.match(colored, /--issue-state-color:#86cdde/);
+  assert.match(colored, /data-colored="true"/);
+  assert.doesNotMatch(colored, /background/, "the tag tints its background from the color of its text");
+  for (const color of [null, "red", "86cdde;x"]) assert.doesNotMatch(render(color), /--issue-state-color|data-colored/, `${color} is not a color of a tracker`);
 });
 
 test("a label keeps its color with a text that can be read on it", () => {

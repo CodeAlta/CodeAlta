@@ -94,6 +94,16 @@ public sealed record SystemPromptContentRoots(
     /// profile is named.
     /// </summary>
     public string? CopilotUserAgentsRoot { get; init; }
+
+    /// <summary>
+    /// Gets the folder of the subagents Claude Code keeps in the project (<c>.claude/agents</c>), when a project is named.
+    /// </summary>
+    public string? ClaudeProjectAgentsRoot { get; init; }
+
+    /// <summary>
+    /// Gets the folder of the subagents Claude Code keeps for the user (<c>~/.claude/agents</c>), when a profile is named.
+    /// </summary>
+    public string? ClaudeUserAgentsRoot { get; init; }
 }
 
 /// <summary>
@@ -121,6 +131,7 @@ public sealed class FileSystemPromptContentLocator : ISystemPromptContentLocator
         var userProfile = NormalizeOptionalRoot(context.UserProfileRoot) ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var userCodeAltaRoot = NormalizeOptionalRoot(context.UserCodeAltaRoot) ?? Path.Combine(userProfile, ".alta");
         var projectRoot = NormalizeOptionalRoot(context.ProjectRoot);
+        var namedProfile = NormalizeOptionalRoot(context.UserProfileRoot);
 
         return new SystemPromptContentRoots(
             ShippedPromptRoot: Path.Combine(appBaseDirectory, "content", "prompts"),
@@ -130,8 +141,10 @@ public sealed class FileSystemPromptContentLocator : ISystemPromptContentLocator
             ProjectPromptResourcesTrusted: context.ProjectPromptResourcesTrusted)
         {
             CopilotProjectAgentsRoot = projectRoot is null ? null : Path.Combine(projectRoot, ".github", "agents"),
+            ClaudeProjectAgentsRoot = projectRoot is null ? null : Path.Combine(projectRoot, ".claude", "agents"),
             // The profile the caller names: a caller that names none is given no file of the real one.
-            CopilotUserAgentsRoot = NormalizeOptionalRoot(context.UserProfileRoot) is { } named ? Path.Combine(named, ".copilot", "agents") : null,
+            CopilotUserAgentsRoot = namedProfile is null ? null : Path.Combine(namedProfile, ".copilot", "agents"),
+            ClaudeUserAgentsRoot = namedProfile is null ? null : Path.Combine(namedProfile, ".claude", "agents"),
         };
     }
 

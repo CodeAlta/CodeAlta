@@ -52,7 +52,7 @@ The Explorer lists the projects of the space the window shows. **Chats**, at the
 - The `…` button or a right-click (`Ctrl`+click on macOS) opens the menu of a project or a session.
 - The `+` button adds a folder as a project (see [Open a project](#open-a-project)).
 
-On the row of a session, `F2` renames it, `F` forks it, `A` archives it, and `Delete` or `Backspace` deletes it, as **Rename…**, **Fork…**, **Archive** and **Delete…** of its menu do.
+On the row of a session, `F2` renames it and `Delete` or `Backspace` deletes it, as **Rename…** and **Delete…** of its menu do. `Ctrl`+`Shift`+`B` forks a session and `Ctrl`+`Shift`+`A` archives it, as **Fork…** and **Archive** do: the session of the row that has the keyboard, or from anywhere else, the prompt included, the selected session.
 
 The menu of a session also has:
 
@@ -246,3 +246,14 @@ Closing the main window asks whether CodeAlta keeps running or exits. **Keep run
 </figure>
 
 While CodeAlta Desktop runs, your computer does not go to sleep on its own, so sessions, automations and reminders keep going; the display still turns off and the lid still sleeps. Turn off **Keep computer awake when CodeAlta is running** in **Settings > General > Startup and closing** to change that. On Linux this needs `systemd-inhibit`.
+
+### Done or waiting
+
+When a session finishes its work, or waits for your answer or approval, while you are in another application, CodeAlta tells you:
+
+- A notification of the system, with the title of the session. Click it to open the session.
+- On macOS, the Dock icon bounces and shows the number of such sessions.
+- On Windows, the taskbar button shows that number and flashes until you come back.
+- On Linux, the docks that show badges (KDE Plasma, Ubuntu Dock, Plank, Latte, not stock GNOME) show that number on the CodeAlta icon.
+
+The badge and the notifications go once you are back in CodeAlta. A session is done when nothing goes on for it any more, its background jobs included; a sub-agent's end is told to the session that created it, not to you, but its questions are. **Settings > General > Notifications > When a session is done or waits for you** chooses the notification and the mark, the mark alone, or nothing. On macOS the notification needs CodeAlta started as an application (from the Applications folder, Launchpad, Spotlight or the Dock); started with `alta` in a terminal, it has the Dock badge alone.

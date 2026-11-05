@@ -26,16 +26,18 @@ public sealed class CodeModeQuestions(CodeAltaHost host) : ICodeModeQuestions
             return Unavailable("Nobody can be asked here: ask() waits for an answer in a session of CodeAlta Desktop. Give the value as an argument of the script instead.");
         }
 
-        var session = await _host.RuntimeService.TryGetResumableSessionAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
-        if (session?.CreatedBy?.Kind == AltaActorProvenance.AutomationKind)
-        {
-            return Unavailable("An automation runs with nobody to answer: ask() is not available in its scripts. Give the value as an argument of the script instead.");
-        }
-
         if (_host.RuntimeService.Permissions.SessionReviewTarget?.Invoke(request.SessionId) is not { } target
             || _host.CodeModeRuns.Find(request.SessionId, request.RunId) is not { Running: true } run)
         {
             return Unavailable("The session of the script is not open: its question cannot be shown.");
+        }
+
+        // The turn is taken before anything is awaited: questions asked at once come to the user in the order they were asked.
+        using var turn = await _host.CodeModeRuns.ReserveUserTurnAsync(run, cancellationToken).ConfigureAwait(false);
+        var session = await _host.RuntimeService.TryGetResumableSessionAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
+        if (session?.CreatedBy?.Kind == AltaActorProvenance.AutomationKind)
+        {
+            return Unavailable("An automation runs with nobody to answer: ask() is not available in its scripts. Give the value as an argument of the script instead.");
         }
 
         var choices = request.Choices;
@@ -48,7 +50,7 @@ public sealed class CodeModeQuestions(CodeAltaHost host) : ICodeModeQuestions
             Freeform = choices.Count == 0 ? new AltaAskFreeform { Placeholder = request.Default is null ? null : Shorten(request.Default, 500) } : null,
         };
         var origin = new OwnedAskHandle(Guid.NewGuid(), target.RuntimeId, target.Attachment.Ordinal, target.ProviderId.Value, request.SessionId, request.RunId, "", 0);
-        using var turn = await _host.CodeModeRuns.WaitForUserAsync(run, "question", request.StepId, Shorten(request.Question, 300), cancellationToken).ConfigureAwait(false);
+        turn.Start("question", request.StepId, Shorten(request.Question, 300));
         IReadOnlyList<AltaAskAnswer>? answers;
         try
         {

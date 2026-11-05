@@ -175,13 +175,53 @@ internal sealed class SpacesService
         }
     }
 
-    /// <summary>Makes a project join spaces and leave others, in one edit of its file.</summary>
+    /// <summary>The most sessions left behind that an answer names.</summary>
+    internal const int MaximumLeftSessions = 32;
+
+    /// <summary>
+    /// Makes a project join spaces and leave others, in one edit of its file. With <c>sessionsFrom</c> and
+    /// <c>sessionsTo</c>, its sessions in the first space then go to the second one, as a drag of the project between
+    /// spaces asks: <c>movedSessions</c> says how many did, <c>leftSessions</c> names the ones at work that stayed,
+    /// and <c>sessionsStatus</c> is the status of that move when none of them could move at all.
+    /// </summary>
     [NeoRpcMethod("assign")]
-    public Task<SpaceChangeResponse> AssignAsync(SpaceAssignRequest request, CancellationToken cancellationToken)
+    public async Task<SpaceChangeResponse> AssignAsync(SpaceAssignRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return ChangeAsync(request.ExpectedEpoch, () => _catalog!.AssignAsync(request.ProjectId ?? string.Empty, request.Join, request.Leave, cancellationToken));
+        var projectId = request.ProjectId ?? string.Empty;
+        var moves = request.SessionsFrom is not null || request.SessionsTo is not null;
+        var assigned = await ChangeAsync(request.ExpectedEpoch, async () =>
+        {
+            // The sessions are checked before the project changes: a request that cannot move them changes nothing.
+            if (moves && (!SpaceDescriptor.IsValidId(request.SessionsFrom) || !SpaceDescriptor.IsValidId(request.SessionsTo)
+                || string.Equals(request.SessionsFrom, request.SessionsTo, StringComparison.Ordinal)))
+                return new SpaceChange(SpaceChangeStatus.Invalid, Message: "The spaces the sessions move between are not valid.");
+            if (moves && await _catalog!.GetAsync(request.SessionsTo!, cancellationToken).ConfigureAwait(false) is null)
+                return new SpaceChange(SpaceChangeStatus.NotFound, Message: $"No space has the id '{request.SessionsTo}'.");
+            return await _catalog!.AssignAsync(projectId, request.Join, request.Leave, cancellationToken).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+        if (assigned.Status != "ok" || !moves) return assigned;
+        if (MoveProjectSessions is not { } move) return assigned with { SessionsStatus = "unconfigured" };
+        try
+        {
+            // The project changed spaces: its sessions follow it even when the page stops waiting.
+            var moved = await move(projectId, request.SessionsFrom!, request.SessionsTo!).ConfigureAwait(false);
+            var left = moved.Skipped.Take(MaximumLeftSessions)
+                .Select(id => new SpaceLeftSession(id, Cut(moved.Titles.TryGetValue(id, out var title) ? title : string.Empty, 256))).ToArray();
+            return assigned with { MovedSessions = moved.Moved.Count, LeftSessions = left, SessionsStatus = moved.Status };
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Some journals may already have been rewritten: the lists say where each session is.
+            return assigned with { SessionsStatus = "move_unconfirmed" };
+        }
     }
+
+    /// <summary>
+    /// Gets what gives the sessions of a project in one space another space (the project, the space they leave, the
+    /// space they go to); null where nothing moves them.
+    /// </summary>
+    internal Func<string, string, string, Task<OwnedSessionSpaceMoveResult>>? MoveProjectSessions { get; init; }
 
     /// <summary>Puts the spaces in the order given.</summary>
     [NeoRpcMethod("reorder")]
@@ -659,8 +699,15 @@ internal sealed record SpaceUpdateRequest(string ExpectedEpoch, string? Id, stri
 /// <summary>Names a space to delete.</summary>
 internal sealed record SpaceDeleteRequest(string ExpectedEpoch, string? Id);
 
-/// <summary>Names the spaces a project joins and leaves.</summary>
-internal sealed record SpaceAssignRequest(string ExpectedEpoch, string? ProjectId, IReadOnlyList<string>? Join, IReadOnlyList<string>? Leave);
+/// <summary>Names the spaces a project joins and leaves, and the spaces its sessions move between.</summary>
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="ProjectId">The project.</param>
+/// <param name="Join">The spaces it joins.</param>
+/// <param name="Leave">The spaces it leaves.</param>
+/// <param name="SessionsFrom">The space whose sessions of the project move once it changed spaces; null when none move.</param>
+/// <param name="SessionsTo">The space they move to; null when none move.</param>
+internal sealed record SpaceAssignRequest(string ExpectedEpoch, string? ProjectId, IReadOnlyList<string>? Join, IReadOnlyList<string>? Leave,
+    string? SessionsFrom = null, string? SessionsTo = null);
 
 /// <summary>The identifiers of the spaces, first to last.</summary>
 internal sealed record SpaceReorderRequest(string ExpectedEpoch, IReadOnlyList<string>? Ids);
@@ -675,8 +722,18 @@ internal sealed record SpaceShownRequest(string ExpectedEpoch, string? Id);
 /// <param name="Status">How the change ended.</param>
 /// <param name="Message">What was wrong, for a change that was not made.</param>
 /// <param name="Space">The space after the change, without its projects; null when the change names none.</param>
-/// <param name="MovedSessions">For a deletion, how many chats of the space went to the default space.</param>
-internal sealed record SpaceChangeResponse(string Status, string? Message, SpaceItem? Space, int MovedSessions = 0);
+/// <param name="MovedSessions">For a deletion, how many chats of the space went to the default space; for an assignment
+/// that moves sessions, how many sessions of the project changed space.</param>
+/// <param name="LeftSessions">For an assignment that moves sessions, the ones at work that stayed where they were.</param>
+/// <param name="SessionsStatus">For an assignment that moves sessions, <c>ok</c>, or why none could move (see
+/// <see cref="WorkspaceMoveToSpaceResponse"/>); null when none were to move.</param>
+internal sealed record SpaceChangeResponse(string Status, string? Message, SpaceItem? Space, int MovedSessions = 0,
+    IReadOnlyList<SpaceLeftSession>? LeftSessions = null, string? SessionsStatus = null);
+
+/// <summary>A session that stayed in its space when its project moved, because it was at work.</summary>
+/// <param name="SessionId">The session.</param>
+/// <param name="Title">Its title; empty when its journal names none.</param>
+internal sealed record SpaceLeftSession(string SessionId, string Title);
 
 /// <summary>The sessions a page has a tab of.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>

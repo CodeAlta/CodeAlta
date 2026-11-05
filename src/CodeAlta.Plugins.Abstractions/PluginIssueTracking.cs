@@ -58,6 +58,9 @@ public sealed record TrackedItem(TrackedItemKind Kind, string Id, string Title, 
     /// <summary>Gets the state as the tracker names it (<c>In Progress</c>, <c>Resolved</c>), when it says more than <see cref="State"/>.</summary>
     public string? StateText { get; init; }
 
+    /// <summary>Gets the color the tracker gives the state, as six hexadecimal digits without <c>#</c>, when it gives one.</summary>
+    public string? StateColor { get; init; }
+
     /// <summary>Gets the type of the item as the tracker names it (<c>Bug</c>, <c>Story</c>), when it has types.</summary>
     public string? Type { get; init; }
 

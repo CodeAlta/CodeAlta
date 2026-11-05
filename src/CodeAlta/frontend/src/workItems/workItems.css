@@ -43,7 +43,17 @@
 .work-card[data-kind="plan"]::before { background: linear-gradient(90deg, #f5c04f, #f0883e); }
 @keyframes work-card-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .work-card { animation: none; } }
-.work-card > header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 4px; min-height: 24px; }
+.work-card > header { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, auto); align-items: center; gap: 4px; min-height: 24px; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.work-cards-chip { touch-action: none; user-select: none; -webkit-user-select: none; }
+.session-timeline-area:has(> .work-dock-guide) { user-select: none; -webkit-user-select: none; cursor: grabbing; }
+.work-cards[data-dragging] > * { opacity: .7; cursor: grabbing; }
+/* While the cards are dragged: a cross of targets around Notes, one for each side the cards can dock to. */
+.work-dock-guide { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+.work-dock-target, .work-dock-center { position: absolute; display: grid; place-items: center; box-sizing: border-box; border-radius: 6px; }
+.work-dock-target { border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line-strong)); color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--panel)); box-shadow: var(--shadow); }
+.work-dock-target[data-current] { border-style: dashed; }
+.work-dock-target[data-over] { color: var(--panel); background: var(--accent); border-color: var(--accent); }
+.work-dock-center { width: 32px; height: 32px; color: var(--muted); border: 1px solid var(--line-strong); background: var(--panel-2); }
 .work-card-kind { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .work-pager { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .work-card h3 { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.35; color: var(--text); overflow-wrap: anywhere; }

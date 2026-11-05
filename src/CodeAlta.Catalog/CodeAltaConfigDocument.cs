@@ -75,6 +75,13 @@ public sealed class CodeAltaConfigDocument
     [JsonPropertyName("commits")]
     public CodeAltaCommitSettingsDocument? Commits { get; set; }
 
+    /// <summary>
+    /// Gets or sets what agents are told about the texts they write in an external system (a pull request comment,
+    /// an issue, chat, email). Read from the user's file only.
+    /// </summary>
+    [JsonPropertyName("external_writing")]
+    public CodeAltaExternalWritingSettingsDocument? ExternalWriting { get; set; }
+
     /// <summary>Gets or sets the choices for speech to prompt. Read from the user's file only.</summary>
     [JsonPropertyName("speech")]
     public CodeAltaSpeechSettingsDocument? Speech { get; set; }
@@ -238,6 +245,28 @@ public sealed class CodeAltaCommitSettingsDocument
     /// </summary>
     [JsonPropertyName("co_author")]
     public bool? CoAuthor { get; set; }
+
+    /// <summary>
+    /// Gets or sets the trailer that ends the message of a commit, one line such as <c>Co-authored-by: Name &lt;email&gt;</c>;
+    /// the one of CodeAlta when absent.
+    /// </summary>
+    [JsonPropertyName("co_author_trailer")]
+    public string? CoAuthorTrailer { get; set; }
+}
+
+/// <summary>Represents what agents are told about the texts they write in an external system on the user's behalf.</summary>
+public sealed class CodeAltaExternalWritingSettingsDocument
+{
+    /// <summary>
+    /// Gets or sets whether agents are told to say that such a text comes from CodeAlta, with <see cref="Instruction"/>;
+    /// true when absent.
+    /// </summary>
+    [JsonPropertyName("attribution")]
+    public bool? Attribution { get; set; }
+
+    /// <summary>Gets or sets the instruction agents are told, on one line; the one of CodeAlta when absent.</summary>
+    [JsonPropertyName("instruction")]
+    public string? Instruction { get; set; }
 }
 
 /// <summary>

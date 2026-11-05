@@ -14,11 +14,12 @@ namespace CodeAlta.Orchestration.Runtime.SystemPrompts;
 /// </summary>
 public sealed class SystemPromptBuilder
 {
-    /// <summary>The trailer that names CodeAlta as a co-author of a commit of its agents.</summary>
-    public const string CoAuthorTrailer = "Co-authored-by: CodeAlta <noreply@codealta.io>";
+    /// <summary>The trailer that names CodeAlta as a co-author of a commit of its agents, unless the user writes another.</summary>
+    public const string CoAuthorTrailer = AttributionSettings.DefaultCoAuthorTrailer;
 
     // The line of the Runtime Context that asks for the trailer, beside those the harness of a provider asks for.
-    internal const string CoAuthorLine = $"- Commit messages: end the message of every git commit you create with the trailer `{CoAuthorTrailer}`, in its last paragraph with the other trailers. Add it beside the co-author or attribution lines your own tools ask for, never in place of them.";
+    internal static string CoAuthorLine(string trailer)
+        => $"- Commit messages: end the message of every git commit you create with the trailer `{trailer}`, in its last paragraph with the other trailers. Add it beside the co-author or attribution lines your own tools ask for, never in place of them.";
 
     private const string DefaultName = "default";
     private const int MaximumSpaceDescriptionLength = 300;
@@ -447,7 +448,7 @@ public sealed class SystemPromptBuilder
     {
         var candidates = EnumerateExistingRoots(roots)
             .Select(root => LoadResource(root, folder, suffix, name, diagnostics, resourceKind))
-            .Concat(resourceKind == SystemPromptResourceKind.AgentPrompt ? CopilotAgents(roots, name) : [])
+            .Concat(resourceKind == SystemPromptResourceKind.AgentPrompt ? ExternalAgents(roots, name) : [])
             .Where(static resource => resource is not null)
             .Cast<PromptResource>()
             .OrderBy(static resource => resource.Precedence)
@@ -478,13 +479,13 @@ public sealed class SystemPromptBuilder
         return new ResourceResolution(selected, body, applied, skipped);
     }
 
-    // The custom agents of GitHub Copilot with this id (`.github/agents`, `~/.copilot/agents`), below every prompt of
-    // CodeAlta: the text of the file is the agent prompt.
-    private static IEnumerable<PromptResource?> CopilotAgents(SystemPromptContentRoots roots, string name)
+    // The agents of GitHub Copilot (`.github/agents`, `~/.copilot/agents`) and Claude Code (`.claude/agents`,
+    // `~/.claude/agents`) with this id, below every prompt of CodeAlta: the text of the file is the agent prompt.
+    private static IEnumerable<PromptResource?> ExternalAgents(SystemPromptContentRoots roots, string name)
     {
-        foreach (var (kind, precedence, folder) in CopilotAgentFiles.Folders(roots))
+        foreach (var (kind, precedence, folder) in ExternalAgentFiles.Folders(roots))
         {
-            if (CopilotAgentFiles.Read(folder, name) is { } agent)
+            if (ExternalAgentFiles.Read(kind, folder, name) is { } agent)
             {
                 yield return new PromptResource(ToPromptSourceLabel(kind), precedence, agent.Path, agent.Body, agent.Description, agent.Name, null,
                     PartialSystemPromptPartOptions.Empty, HashText(agent.Body), PromptCompositionMode.Replace);
@@ -749,10 +750,11 @@ public sealed class SystemPromptBuilder
             lines.Add(signOff);
         }
 
-        // CodeAlta is named as a co-author of the commits of its agents, as the harness of a provider names itself.
+        // CodeAlta is named as a co-author of the commits of its agents, as the harness of a provider names itself,
+        // with the trailer the user wrote, if any.
         if (request.CommitCoAuthor)
         {
-            lines.Add(CoAuthorLine);
+            lines.Add(CoAuthorLine(string.IsNullOrWhiteSpace(request.CommitCoAuthorTrailer) ? CoAuthorTrailer : request.CommitCoAuthorTrailer.Trim()));
         }
 
         // The models the user prefers for each kind of work: an agent asks for a tier instead of naming a model.
@@ -845,7 +847,13 @@ public sealed class SystemPromptBuilder
         var builder = new StringBuilder();
         builder.AppendLine("Tool schemas and handlers are supplied separately by the host. Use only tools that are actually available in the current runtime.");
         builder.AppendLine("Treat tool results as evidence, do not fabricate tool output, and respect host permission or approval prompts before acting.");
-        builder.AppendLine("When you write in an external system on the user's behalf (a pull request comment or review, an issue, a reply in an issue tracker, chat or email), end the text with a short italic line saying that it comes from CodeAlta, so readers do not take it for the user's own words, for example `_This review was written by [CodeAlta](https://codealta.io), an AI coding agent._` or `_This issue was created by [CodeAlta](https://codealta.io), an AI coding agent._`; this does not apply to commit messages.");
+        // What the agent writes elsewhere for the user says that it comes from CodeAlta, as the user words it, unless
+        // the user turned it off.
+        if (!string.IsNullOrWhiteSpace(request.ExternalWritingInstruction))
+        {
+            builder.AppendLine(request.ExternalWritingInstruction.Trim());
+        }
+
         if (request.Tools.Count > 0)
         {
             builder.Append("Available host tool count: ").Append(request.Tools.Count.ToString(CultureInfo.InvariantCulture)).AppendLine(".");
@@ -1361,6 +1369,8 @@ public sealed class SystemPromptBuilder
             AgentPromptSourceKind.Project => "project",
             AgentPromptSourceKind.CopilotUser => "copilot-user",
             AgentPromptSourceKind.CopilotProject => "copilot-project",
+            AgentPromptSourceKind.ClaudeUser => "claude-user",
+            AgentPromptSourceKind.ClaudeProject => "claude-project",
             _ => sourceKind.ToString(),
         };
 
@@ -1599,6 +1609,19 @@ public sealed class SystemPromptBuildRequest
     /// setting <c>[commits] co_author</c> of the user says; the Runtime Context then asks for it.
     /// </summary>
     public bool CommitCoAuthor { get; init; }
+
+    /// <summary>
+    /// Gets the trailer that ends the message of the commits of the agent while <see cref="CommitCoAuthor"/> is on, as
+    /// the setting <c>[commits] co_author_trailer</c> of the user says; null or empty for <see cref="SystemPromptBuilder.CoAuthorTrailer"/>.
+    /// </summary>
+    public string? CommitCoAuthorTrailer { get; init; }
+
+    /// <summary>
+    /// Gets what the agent is told about the texts it writes in an external system on the user's behalf (a pull request
+    /// comment, an issue, chat, email), as the <c>[external_writing]</c> settings of the user say; null or empty when the
+    /// user turned it off, and the instruction of CodeAlta unless set.
+    /// </summary>
+    public string? ExternalWritingInstruction { get; init; } = AttributionSettings.DefaultExternalWritingInstruction;
 
     /// <summary>
     /// Gets the built-in tools the session does without, from the settings of the user and of its space; the agent

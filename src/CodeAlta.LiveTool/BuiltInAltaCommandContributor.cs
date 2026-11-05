@@ -6361,6 +6361,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             AgentPromptSourceKind.Project => "project",
             AgentPromptSourceKind.CopilotUser => "copilot-user",
             AgentPromptSourceKind.CopilotProject => "copilot-project",
+            AgentPromptSourceKind.ClaudeUser => "claude-user",
+            AgentPromptSourceKind.ClaudeProject => "claude-project",
             _ => sourceKind.ToString(),
         };
 
@@ -6374,6 +6376,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             AgentPromptSourceKind.UserGlobal => "global",
             AgentPromptSourceKind.Project => "project",
             AgentPromptSourceKind.CopilotUser or AgentPromptSourceKind.CopilotProject => "copilot",
+            AgentPromptSourceKind.ClaudeUser or AgentPromptSourceKind.ClaudeProject => "claude",
             _ => sourceKind.ToString().ToLowerInvariant(),
         };
 

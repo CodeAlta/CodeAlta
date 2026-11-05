@@ -77,6 +77,12 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
     internal bool McpTailnet { get; init; }
 
     /// <summary>
+    /// What tells the user that a session is done or waits for them while CodeAlta is in the background: a notification
+    /// and the mark of the application unless the user chose otherwise.
+    /// </summary>
+    internal DesktopTurnAlertMode TurnAlerts { get; init; } = DesktopTurnAlertMode.All;
+
+    /// <summary>
     /// The preferences CodeAlta starts with: without the reconnect setting, the sessions that had Remote Control on
     /// are off now, and are forgotten, so that the setting turned on later turns on again only those that are on
     /// when CodeAlta exits next.
@@ -159,14 +165,17 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
                 : ExternalEditorChoice.None;
             // The server listens on this computer alone unless the file says otherwise.
             var tailnet = root.TryGetProperty("mcpTailnet", out var onTailnet) && onTailnet.ValueKind == JsonValueKind.True;
+            // A notification and the mark unless the file names another choice.
+            var alerts = root.TryGetProperty("turnAlerts", out var alerted) && alerted.ValueKind == JsonValueKind.String && TryParseTurnAlerts(alerted.GetString(), out var mode)
+                ? mode : DesktopTurnAlertMode.All;
             if (root.TryGetProperty("onClose", out var value) && value.ValueKind == JsonValueKind.String && TryParse(value.GetString(), out var behavior))
-                return new(behavior, server, width, zoom, review, inherit, reconnect, awake) { RemoteControlSessions = remote, ExternalEditor = editor, McpTailnet = tailnet };
+                return new(behavior, server, width, zoom, review, inherit, reconnect, awake) { RemoteControlSessions = remote, ExternalEditor = editor, McpTailnet = tailnet, TurnAlerts = alerts };
             // Written before the question existed, by the switch of the settings: the user had chosen.
             return root.TryGetProperty("closeToTray", out var tray) && tray.ValueKind is JsonValueKind.True or JsonValueKind.False
                 ? new(tray.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width, zoom, review, inherit, reconnect, awake)
-                    { RemoteControlSessions = remote, ExternalEditor = editor, McpTailnet = tailnet }
+                    { RemoteControlSessions = remote, ExternalEditor = editor, McpTailnet = tailnet, TurnAlerts = alerts }
                 : Default with { McpServer = server, SessionWidth = width, Zoom = zoom, ReviewPermissions = review, InheritPermissions = inherit,
-                    ReconnectRemoteControl = reconnect, KeepAwake = awake, RemoteControlSessions = remote, ExternalEditor = editor, McpTailnet = tailnet };
+                    ReconnectRemoteControl = reconnect, KeepAwake = awake, RemoteControlSessions = remote, ExternalEditor = editor, McpTailnet = tailnet, TurnAlerts = alerts };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
         {
@@ -191,6 +200,7 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
                 + (ReviewPermissions ? ",\"reviewPermissions\":true" : "") + (InheritPermissions ? ",\"inheritPermissions\":true" : "")
                 + (ReconnectRemoteControl ? ",\"reconnectRemoteControl\":true" : "")
                 + (KeepAwake ? "" : ",\"keepAwake\":false")
+                + (TurnAlerts == DesktopTurnAlertMode.All ? "" : ",\"turnAlerts\":\"" + Name(TurnAlerts) + "\"")
                 + (RemoteControlSessions.IsDefaultOrEmpty ? "" : ",\"remoteControlSessions\":" + JsonSerializer.Serialize(RemoteControlSessions.ToArray(), DesktopPreferencesJson.Default.StringArray))
                 + (ExternalEditor.Id is not { } editor ? "" : ",\"externalEditor\":{\"id\":" + Quoted(editor)
                     + (ExternalEditor.Program is { } program ? ",\"program\":" + Quoted(program) : "")
@@ -220,6 +230,26 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
         DesktopCloseBehavior.Exit => "exit",
         _ => "ask",
     };
+
+    /// <summary>The name of a mode of the alerts in the file and for the page: <c>all</c>, <c>mark</c> or <c>off</c>.</summary>
+    internal static string Name(DesktopTurnAlertMode mode) => mode switch
+    {
+        DesktopTurnAlertMode.Mark => "mark",
+        DesktopTurnAlertMode.Off => "off",
+        _ => "all",
+    };
+
+    /// <summary>The mode of the alerts that <paramref name="name"/> names; false for anything else.</summary>
+    internal static bool TryParseTurnAlerts(string? name, out DesktopTurnAlertMode mode)
+    {
+        mode = name switch
+        {
+            "mark" => DesktopTurnAlertMode.Mark,
+            "off" => DesktopTurnAlertMode.Off,
+            _ => DesktopTurnAlertMode.All,
+        };
+        return name is "all" or "mark" or "off";
+    }
 
     /// <summary>The behavior that <paramref name="name"/> names; false for anything else.</summary>
     internal static bool TryParse(string? name, out DesktopCloseBehavior behavior)

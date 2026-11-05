@@ -21,8 +21,9 @@ export type ToolRow = Readonly<{ type: "tool"; key: string; title: string; phase
 export type ToolImage = Readonly<{ key: string; title: string; id: string }>;
 /**
  * The work between two messages, folded into one line that opens on its rows. The images its tools gave the model and the
- * runs of the scripts its calls ran (Code Mode's `exec`) show under that line, folded or not; the calls a script made are
- * the script's, listed on the card of its run, not rows of their own.
+ * runs of the scripts its calls ran (Code Mode's `exec`) that ran steps, started sessions or presented something show under
+ * that line, folded or not; a run that only made calls is in the place of its call, and folds with it. The calls a script
+ * made are the script's, listed on the card of its run, not rows of their own.
  */
 export type ActivityBlock = Readonly<{ kind: "activity"; key: string; rows: readonly (ThoughtRow | ToolRow)[]; images?: readonly ToolImage[]; workflows?: readonly WorkflowRun[] }>;
 /** A run of a script whose call the timeline does not hold: a card of its own. */

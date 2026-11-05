@@ -1,6 +1,7 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { Button, Callout, HTMLSelect, InputGroup, Menu, MenuItem, PopoverNext, SegmentedControl, Tab, Tabs, Tag } from "@blueprintjs/core";
-import type { issues as issuesService, IssueFilterField, IssueFiltersResponse, IssueReadResponse, IssueReviewer, IssueRow, IssueSource, WorkspaceProject } from "#neoastra";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Button, Callout, Checkbox, HTMLSelect, InputGroup, Menu, MenuItem, PopoverNext, SegmentedControl, Tab, Tabs, Tag } from "@blueprintjs/core";
+import { settingsFiles } from "#neoastra";
+import type { issues as issuesService, IssueFilterField, IssueFiltersResponse, IssueReadResponse, IssueReviewer, IssueRow, IssueSource, IssueBranchSchemeRow, WorkspaceProject } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { BrandIcon } from "../BrandIcon";
@@ -21,16 +22,18 @@ import type { WorkStart } from "../workItems/workItems";
 import { allPartsLabel, choosePick, filterValueText, forgetPick, issueFilterLabel, joinValues, listedFilters, pickKey, readPicks, splitValues, trackerText, writePicks, issueFilters, issueIcon, issueKey, issueReference, issueStateLabel, issueTone, kindLabel, labelColors, sameList, shownPart, signInCommand, sourceKinds,
   voteIcon, voteLabel, type IssueFilter, type IssueKind, type IssueListKey } from "./issues";
 import { viewKey, viewSourceLabel, viewSources } from "./issueFilterSettings";
+import { BranchSchemeWindow, type BranchSchemeFilesApi } from "./BranchSchemeEditor";
+import { defaultBranchScheme, isBranchName, readOwnBranch, suggestBranchName, writeOwnBranch } from "./issueBranch";
 import { IssueViewsWindow, type IssueViewsApi } from "./IssueViewsWindow";
 import { MultiChoice } from "./MultiChoice";
 
 const noProviders: readonly RunProvider[] = [];
 
 /** The part of the host the tab uses; a test gives its own. */
-export type IssuesApi = Pick<typeof issuesService, "sources" | "list" | "read" | "start" | "openLink"> & Partial<Pick<typeof issuesService, "filters" | "fields" | "views" | "saveView" | "renameView" | "removeView" | "selectView" | "image">>;
+export type IssuesApi = Pick<typeof issuesService, "sources" | "list" | "read" | "start" | "openLink"> & Partial<Pick<typeof issuesService, "filters" | "fields" | "views" | "saveView" | "renameView" | "removeView" | "selectView" | "image" | "branchScheme" | "saveBranchScheme">>;
 
 type Listing = Readonly<{ key: IssueListKey; loading: boolean; items: readonly IssueRow[]; more: boolean; problem: string | null; needsSignIn: boolean; readAt: string | null }>;
-type Sources = Readonly<{ projectId: string; loading: boolean; sources: readonly IssueSource[] }>;
+type Sources = Readonly<{ projectId: string; loading: boolean; sources: readonly IssueSource[]; branch?: IssueBranchSchemeRow | null }>;
 type Detail = Readonly<{ key: string; loading: boolean; value: IssueReadResponse | null }>;
 /**
  * The filters of the current view of a tracker of a project, for the values chosen in the tab (`asked`): the last reply
@@ -50,8 +53,11 @@ const failedFilters: IssueFiltersResponse = { status: "failed", filters: [], sel
  * project of a project that names several) when the user chooses it; an item is read on the right, opened in a
  * window or on the web, and a session can be started on it.
  */
-export function IssuesPanel({ api, epoch, projects, projectId, visible, preferredStart, onActivate, onOpenSession, onStarted, onNotice, providers = noProviders, sessionSettings = null }: {
+export function IssuesPanel({ api, epoch, projects, projectId, visible, preferredStart, onActivate, onOpenSession, onStarted, onNotice, providers = noProviders, sessionSettings = null,
+  filesApi = settingsFiles }: {
   api: IssuesApi;
+  /** Opens the file of the scheme of the branches in the code editor. */
+  filesApi?: BranchSchemeFilesApi | null;
   /** The enabled providers a new session can run with; none leaves out the Agent chip, and the host takes the defaults. */
   providers?: readonly RunProvider[];
   /** The catalogs of the form of the Agent chip of a new session of a project. */
@@ -123,7 +129,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
     const controller = new AbortController();
     setSources(current => current?.projectId === project.id ? { ...current, loading: true } : { projectId: project.id, loading: true, sources: [] });
     void api.sources({ expectedEpoch: epoch, projectId: project.id }, { signal: controller.signal }).then(
-      reply => { if (!controller.signal.aborted) setSources({ projectId: project.id, loading: false, sources: reply.status === "ok" ? reply.sources : [] }); },
+      reply => { if (!controller.signal.aborted) setSources({ projectId: project.id, loading: false, sources: reply.status === "ok" ? reply.sources : [], branch: reply.status === "ok" ? reply.branch : null }); },
       () => { if (!controller.signal.aborted) setSources({ projectId: project.id, loading: false, sources: [] }); });
     return () => controller.abort();
   }, [api, epoch, available, visible, project?.id, revision]);
@@ -312,20 +318,44 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   // What the user looks at when a start ends: its session is opened only when it is still that item.
   const shownKey = useRef<string | null>(null);
   shownKey.current = visible ? currentKey : null;
+  // The branch the user wrote for the new worktree of an issue, by item: the proposed one until they change it.
+  const [branchEdits, setBranchEdits] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [schemeOpen, setSchemeOpen] = useState(false);
+  // One object for one api: the form reads the scheme again when it changes, and would lose what the user wrote.
+  const schemeApi = useMemo(() => api.branchScheme && api.saveBranchScheme ? { branchScheme: api.branchScheme, saveBranchScheme: api.saveBranchScheme } : null, [api]);
+  // How the project names its branches (the [branch] table of its issues.toml files), read with its trackers.
+  const branchScheme = sources?.projectId === project?.id && sources?.branch ? sources.branch : null;
+  const proposedBranch = (item: IssueRow) => suggestBranchName(item, branchScheme ?? defaultBranchScheme);
+  const branchOf = (item: IssueRow, key: string | null) => (key !== null ? branchEdits.get(key) : undefined) ?? proposedBranch(item);
+  // Whether the work starts on a branch of its own: as the user chose it the last time in this project, else on when the
+  // project has a scheme of its own. Off, a worktree gets an alta/ branch and the folder of the project stays on its branch.
+  const [ownBranchChoices, setOwnBranchChoices] = useState<Readonly<Record<string, boolean>>>({});
+  const ownBranch = !!project && (ownBranchChoices[project.id] ?? readOwnBranch(project.id) ?? branchScheme?.configured ?? false);
+  const chooseOwnBranch = (value: boolean) => {
+    if (!project) return;
+    writeOwnBranch(project.id, value);
+    setOwnBranchChoices(choices => ({ ...choices, [project.id]: value }));
+  };
   const start = async (item: IssueRow, way: WorkStart) => {
     if (!available || !wanted) return;
     const key = `${wanted.projectId}\n${wanted.service}\n${issueKey(item)}`;
+    // A pull request is reviewed on a branch of CodeAlta; an issue is worked on in the branch the field names, when it is on:
+    // the branch of the new worktree, or the one the folder of the project moves to.
+    const branch = ownBranch && item.kind === "issue" ? branchOf(item, key).trim() : null;
+    if (branch !== null && !isBranchName(branch)) { onNotice(t("Git does not accept this name for a branch.")); return; }
     if (startingNow.current.has(key)) return;
     startingNow.current.add(key);
     setStarting(value => new Set(value).add(key));
     try {
       const reply = await api.start({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: item.kind, id: item.id, worktree: way === "worktree", sessionId: null,
-        ...startRequest(runSettings, runChoices.shown) }, { timeoutMilliseconds: 600_000 });
+        ...startRequest(runSettings, runChoices.shown), branch }, { timeoutMilliseconds: 600_000 });
       if (reply.sessionId) {
         if (shownKey.current === key || !onStarted) { setExpanded(false); onOpenSession(reply.sessionId, wanted.projectId); }
         else onStarted(reply.sessionId, wanted.projectId, `${issueReference(item)} ${item.title}`);
       }
       if (reply.status !== "ok") { const known = startRefusal(reply.reason); onNotice(known ? t(known) : reply.message ?? t("The work did not start.")); }
+      // The work started, with something to know: a branch that stays when its worktree is removed, submodules not checked out.
+      else if (reply.warning) onNotice(reply.warning);
     } catch { onNotice(t("The work did not start.")); }
     finally { startingNow.current.delete(key); setStarting(value => { const next = new Set(value); next.delete(key); return next; }); }
   };
@@ -338,11 +368,28 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const command = source ? signInCommand(source.service) : null;
   const read = detail?.key === currentKey ? detail : null;
   const body = current && <IssueBody item={read?.value?.item ?? current} read={read} service={source?.service ?? null} images={trackerImages} />;
-  const runsWith = runChoices.provider && <div className="work-runs-with" role="group" aria-label={t("Runs with")}>
-    <span className="work-runs-with-label">{t("Runs with")}</span>
-    <SessionSettingsChip id="issue" providers={providers} choices={runChoices} value={runSettings} onChange={setRunSettings} />
+  // The choice of a branch of its own sits with what the session runs with: the field of its name shows only when it is on.
+  const branchToggle = current?.kind === "issue" && <Checkbox className="issue-branch-toggle" checked={ownBranch} onChange={event => chooseOwnBranch(event.currentTarget.checked)}
+    label={t("Own branch")} title={t("On: the work starts on a new branch of this name, in a new worktree or in the folder of the project. Off: a new worktree gets an alta/ branch, and the folder of the project stays on its branch.")} />;
+  const runsWith = (runChoices.provider || branchToggle) && <div className="work-runs-with" role="group" aria-label={t("Runs with")}>
+    {runChoices.provider && <>
+      <span className="work-runs-with-label">{t("Runs with")}</span>
+      <SessionSettingsChip id="issue" providers={providers} choices={runChoices} value={runSettings} onChange={setRunSettings} />
+    </>}
+    {branchToggle}
   </div>;
-  const actions = current && <IssueActions item={current} service={source?.name ?? ""} preferredStart={preferredStart} starting={starting.has(startingKey(current) ?? "")} runsWith={runsWith}
+  const currentStartKey = current ? startingKey(current) : null;
+  // The form of the scheme, next to the field: the user writes it there, for them or for the team, and sees the name it gives.
+  const schemeButton = schemeApi && available && project && current
+    && <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={14} />} aria-label={t("Branch name scheme")} title={t("Branch name scheme")} active={schemeOpen}
+      aria-haspopup="dialog" onClick={() => setSchemeOpen(true)} />;
+  const schemeWindow = schemeOpen && schemeApi && available && project && current && <BranchSchemeWindow projectName={project.name} onClose={() => setSchemeOpen(false)}
+    api={schemeApi} files={filesApi} epoch={epoch} projectId={project.id} item={current}
+    onSaved={scheme => setSources(value => value && value.projectId === project.id ? { ...value, branch: scheme } : value)} onOpenedFile={() => setSchemeOpen(false)} />;
+  const branchField = current && current.kind === "issue" && currentStartKey && ownBranch && <BranchField value={branchOf(current, currentStartKey)} proposed={proposedBranch(current)}
+    problem={branchScheme?.problem ?? null} settings={schemeButton}
+    onChange={value => setBranchEdits(edits => new Map(edits).set(currentStartKey, value))} />;
+  const actions = current && <IssueActions item={current} service={source?.name ?? ""} preferredStart={preferredStart} starting={starting.has(startingKey(current) ?? "")} runsWith={runsWith} branch={branchField}
     onStart={way => void start(current, way)}
     onOpen={() => openLink(current.url)} onCopy={() => void navigator.clipboard?.writeText(current.url).catch(() => { })} />;
   return <div className="work-page issues-page" onPointerDown={onActivate}>
@@ -425,18 +472,24 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
               const updated = sessionTime(item.updatedAt ?? item.createdAt, locale);
               return <button type="button" key={key} role="option" aria-selected={on} className="work-row issue-row-item" data-selected={on || undefined} data-tone={issueTone(item)}
                 onClick={() => setSelected(key)} onDoubleClick={() => { setSelected(key); setExpanded(true); }}>
-                <span className="work-row-glyph issue-glyph"><AppIcon name={issueIcon(item)} size={16} /></span>
+                <span className="work-row-glyph issue-glyph" data-icon={issueIcon(item)}><AppIcon name={issueIcon(item)} size={16} /></span>
                 <span className="work-row-text"><strong>{item.title}</strong>
                   <small className="issue-row-line"><span className="issue-row-facts"><span className="issue-ref">{issueReference(item)}</span>{item.place && <> · <span className="issue-place">{item.place}</span></>}
                     {item.type && <> · {item.type}</>}{item.author && <> · {item.author}</>}
+                    {!!item.comments && <> · <span className="issue-comments" title={t("{count} comments", { count: item.comments })}><AppIcon name="chat" size={12} />{item.comments}</span></>}
                     {updated.label && <> · <time dateTime={updated.dateTime} title={updated.title}>{updated.label}</time></>}</span>
                     {item.reviewers.filter(reviewer => reviewer.mine).slice(0, 2).map(reviewer => <ReviewerChip key={`r:${reviewer.name}`} reviewer={reviewer} />)}
                     {item.labels.slice(0, 3).map(label => <IssueLabelChip key={label.name} name={label.name} color={label.color} />)}
                     {item.labels.length > 3 && <span className="issue-more">+{item.labels.length - 3}</span>}</small></span>
-                <span className="work-row-meta">
-                  {starting.has(startingKey(item) ?? "") && <span className="work-row-starting"><ActivitySpinner size={11} />{t("Starting…")}</span>}
-                  {!!item.comments && <span className="issue-comments" title={t("{count} comments", { count: item.comments })}><AppIcon name="chat" size={12} />{item.comments}</span>}
-                  {(item.stateText || item.state !== shownFilter) && <Tag minimal round className="issue-state" data-tone={issueTone(item)}>{item.stateText ?? t(issueStateLabel(item))}</Tag>}
+                {/* Two lines beside the two of the title: the state above, the comments and the people below. */}
+                <span className="work-row-meta issue-row-meta">
+                  <span className="issue-row-meta-line">
+                    {starting.has(startingKey(item) ?? "") && <span className="work-row-starting"><ActivitySpinner size={11} />{t("Starting…")}</span>}
+                    {(item.stateText || item.state !== shownFilter) && <StateTag item={item} />}
+                  </span>
+                  <span className="issue-row-meta-line">
+                    {item.kind === "issue" && <AssigneeNames names={item.assignees} />}
+                  </span>
                 </span>
               </button>;
             })}
@@ -458,6 +511,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
         </div>
       </>}
     {/* The window stays while the tab reads its filters again after a change made in it, even when that read fails. */}
+    {schemeWindow}
     {viewsOpen && viewsApi && available && project && source && <IssueViewsWindow api={viewsApi} epoch={epoch} project={project} source={source} kind={shownKind} onClose={() => setViewsOpen(false)}
       onChanged={views => views ? setViewChanges(value => value + 1) : setRevision(value => value + 1)} onOpenedFile={() => setViewsOpen(false)} />}
     {expanded && current && source && <AppWindow storageKey="codealta.desktop.issue-window.v1" title={`${issueReference(current)} ${current.title}`} titleId={windowTitle} className="work-item-window issue-window"
@@ -492,6 +546,28 @@ function ReadAge({ readAt, now, busy, label, onRefresh }: { readAt: string; now:
   </span>;
 }
 
+/** The state of an item, in the color its tracker gives it (Azure DevOps), otherwise in the color of its tone. */
+export function StateTag({ item }: { item: IssueRow }) {
+  const { t } = useShellLanguage();
+  // The color of the tracker is the color of the text; the tag tints its background with it, as the icons of the rows.
+  const color = item.stateColor && /^[0-9a-f]{6}$/i.test(item.stateColor) ? `#${item.stateColor}` : null;
+  return <Tag minimal round className="issue-state" data-tone={issueTone(item)} data-colored={color ? true : undefined}
+    style={color ? { "--issue-state-color": color } as CSSProperties : undefined}>{item.stateText ?? t(issueStateLabel(item))}</Tag>;
+}
+
+/**
+ * The people an issue is assigned to, by their names; the tooltip says that they are its assignees, not who opened it.
+ * A pull request is left out: its people are reviewers, which the row already shows.
+ */
+export function AssigneeNames({ names }: { names: readonly string[] }) {
+  const { t } = useShellLanguage();
+  if (names.length === 0) return null;
+  const label = t("Assigned to {name}", { name: names.join(", ") });
+  return <span className="issue-assignees" title={label} aria-label={label}>
+    <AppIcon name="user" size={11} /><span className="issue-assignees-names">{names.slice(0, 2).join(", ")}</span>{names.length > 2 && <span>+{names.length - 2}</span>}
+  </span>;
+}
+
 function IssueLabelChip({ name, color }: { name: string; color: string | null }) {
   const colors = labelColors(color);
   return <span className="issue-label" style={colors ?? undefined} data-plain={!colors || undefined} title={name}>{name}</span>;
@@ -503,7 +579,7 @@ function IssueHeading({ item, service, busy, action }: { item: IssueRow; service
   const created = sessionTime(item.createdAt, locale), updated = sessionTime(item.updatedAt, locale);
   return <header className="issue-heading">
     <div className="work-detail-kind"><AppIcon name={issueIcon(item)} size={14} />{t(kindLabel(item.kind as IssueKind, service, false))}
-      <Tag minimal round className="issue-state" data-tone={issueTone(item)}>{item.stateText ?? t(issueStateLabel(item))}</Tag>
+      <StateTag item={item} />
       {item.type && <Tag minimal round>{item.type}</Tag>}{item.priority && <Tag minimal round>{item.priority}</Tag>}
       {busy && <ActivitySpinner size={13} />}<span className="work-detail-spacer" />{action}</div>
     <h3><span className="issue-ref">{issueReference(item)}</span> {item.title}</h3>
@@ -523,10 +599,12 @@ function IssueHeading({ item, service, busy, action }: { item: IssueRow; service
   </header>;
 }
 
-function IssueActions({ item, service, preferredStart, starting, runsWith, onStart, onOpen, onCopy }: {
+function IssueActions({ item, service, preferredStart, starting, runsWith, branch, onStart, onOpen, onCopy }: {
   item: IssueRow; service: string; preferredStart: string; starting: boolean;
   /** The Agent chip of the session started on the item. */
   runsWith?: ReactNode;
+  /** The field of the branch of a new worktree started on an issue. */
+  branch?: ReactNode;
   onStart: (way: WorkStart) => void; onOpen: () => void; onCopy: () => void;
 }) {
   const { t } = useShellLanguage();
@@ -537,6 +615,7 @@ function IssueActions({ item, service, preferredStart, starting, runsWith, onSta
   return <>
     {item.place && <p className="issue-elsewhere">{t("This pull request is of {place}, not of the repository of this project: open it on {service}.", { place: item.place, service })}</p>}
     {startable && runsWith}
+    {startable && branch}
     {startable && <WorkStartButtons preferred={preferredStart === "session" ? "session" : "worktree"} here={false} disabled={starting} onStart={onStart} />}
     <div className="work-detail-buttons">
       <Button size="small" icon={<AppIcon name="openExternal" size={14} />} onClick={onOpen}>{t("Open on {service}", { service })}</Button>
@@ -544,6 +623,34 @@ function IssueActions({ item, service, preferredStart, starting, runsWith, onSta
       {starting && <ActivitySpinner size={13} />}
     </div>
   </>;
+}
+
+/**
+ * The new branch the work on an issue starts on, shown while **Own branch** is on: the branch of a new worktree, or the one
+ * the folder of the project moves to. CodeAlta proposes it from the type, the number and the title of the issue, and the
+ * user changes it before the start.
+ */
+function BranchField({ value, proposed, problem, settings, onChange }: {
+  value: string; proposed: string; problem: string | null;
+  /** The button of the form of the scheme. */
+  settings?: ReactNode;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useShellLanguage();
+  const valid = isBranchName(value.trim());
+  // What is wrong in the files of the scheme is said where its name is proposed; the user can still write a name.
+  const hint = problem ? `${t("The branch scheme of the project has a problem:")} ${problem}` : null;
+  return <><div className="work-runs-with issue-branch" role="group" aria-label={t("Branch of the work")}>
+    <span className="work-runs-with-label">{t("Branch")}</span>
+    <InputGroup size="small" className="issue-branch-input" value={value} spellCheck={false} intent={!valid ? "danger" : hint ? "warning" : "none"}
+      leftIcon={<AppIcon name="branch" size={13} className="bp6-icon" />} aria-label={t("Branch of the work")} aria-invalid={!valid || undefined}
+      title={hint ?? t(valid ? "The branch of the work. CodeAlta proposes it from the type, the number and the title of the issue." : "Git does not accept this name for a branch.")}
+      onChange={event => onChange(event.target.value)}
+      rightElement={value !== proposed ? <Button variant="minimal" size="small" icon={<AppIcon name="reset" size={13} />} aria-label={t("Back to the proposed name")}
+        title={t("Back to the proposed name")} onClick={() => onChange(proposed)} /> : undefined} />
+    {settings}
+  </div>
+  {hint && <p className="issue-branch-problem" role="note">{hint}</p>}</>;
 }
 
 /** The description of an item and its comments, as their authors wrote them. */

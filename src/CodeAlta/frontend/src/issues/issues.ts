@@ -34,8 +34,21 @@ export function issueReference(item: Pick<IssueRow, "id">): string {
 
 export function issueKey(item: Pick<IssueRow, "kind" | "id">): string { return `${item.kind}\n${item.id}`; }
 
-export function issueIcon(item: Pick<IssueRow, "kind" | "state">): IconName {
-  return item.kind === "pull_request" ? "pullRequest" : item.state === "closed" ? "issueClosed" : "issueOpen";
+export function issueIcon(item: Pick<IssueRow, "kind" | "state"> & { type?: string | null }): IconName {
+  if (item.kind === "pull_request") return "pullRequest";
+  return typeIcon(item.type) ?? (item.state === "closed" ? "issueClosed" : "issueOpen");
+}
+
+// The types of work items that have a picture of their own, as Azure DevOps, GitLab and GitHub name them; their color tells their state.
+function typeIcon(type: string | null | undefined): IconName | null {
+  switch (type?.trim().toLowerCase()) {
+    case "bug": case "defect": case "incident": return "issueBug";
+    case "user story": case "story": case "product backlog item": case "requirement": return "issueStory";
+    case "task": return "issueTask";
+    case "feature": return "issueFeature";
+    case "epic": return "issueEpic";
+    default: return null;
+  }
 }
 
 /** The tone of a state: open is what is alive, merged and done are what ended well, closed is what ended otherwise. */

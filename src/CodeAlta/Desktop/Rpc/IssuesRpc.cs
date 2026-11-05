@@ -1,8 +1,10 @@
 using System.Globalization;
 using System.Text;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Issues;
 using CodeAlta.Catalog.StartPrompts;
 using CodeAlta.Catalog.WorkItems;
+using CodeAlta.Catalog.Worktrees;
 using CodeAlta.Desktop.WorkItems;
 using CodeAlta.Plugins.Abstractions;
 using NeoAstra.Rpc;
@@ -92,7 +94,7 @@ internal sealed partial class IssuesService
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, []);
         if (await ResolveAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found", []);
         var trackers = await TrackersAsync(project, cancellationToken).ConfigureAwait(false);
-        return new("ok", [.. trackers.Select(Source).OfType<IssueSource>()]);
+        return new("ok", [.. trackers.Select(Source).OfType<IssueSource>()], Branch(IssueBranchSchemes.Read(project.ProjectPath)));
     }
 
     /// <summary>Lists the issues or the pull requests of a tracker of a project, the most recently updated first.</summary>
@@ -204,7 +206,8 @@ internal sealed partial class IssuesService
             || request.ProviderId is not null && !Name(request.ProviderId) || request.ModelId is not null && (request.ProviderId is null || !Name(request.ModelId))
             || request.ReasoningEffort is not null && (request.ModelId is null || !Name(request.ReasoningEffort))
             || request.PermissionMode is not null && !Name(request.PermissionMode) || request.Sandbox is not null && !Name(request.Sandbox)
-            || request.AgentPromptId is not null && !Name(request.AgentPromptId)) return new("invalid_request");
+            || request.AgentPromptId is not null && !Name(request.AgentPromptId)
+            || request.Branch is not null && !GitWorktreeService.IsReferenceName(request.Branch)) return new("invalid_request");
         if (_starter is null) return new("unavailable");
         if (await ResolveAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found");
         if ((await TrackersAsync(project, cancellationToken).ConfigureAwait(false)).FirstOrDefault(candidate => candidate.Service == request.Service) is not { } tracker)
@@ -224,12 +227,14 @@ internal sealed partial class IssuesService
         var asked = request.ProviderId is null ? null : new WorkItemSelection(request.ProviderId, request.ModelId, request.ReasoningEffort);
         var settings = SessionStartSettings.Of(request.AgentPromptId, request.PermissionMode, request.ReviewBeforeCommit, request.Sandbox, SessionOptionsChoice.Record(request.Options));
         var model = asked is null && settings is null ? null : settings?.Apply(new SessionStartModel(asked)) ?? new SessionStartModel(asked);
+        // The branch the user named for the work: the one of the new worktree, or the one the folder of the project moves to.
+        if (request.Branch is { } branch) model = (model ?? new SessionStartModel()) with { Branch = branch };
         // The instruction of a review is the user's or the project's when one is written; what the item is follows it.
         var review = kind == TrackedItemKind.PullRequest ? StartPrompts?.Text(StartPromptCatalog.PullRequestReviewId, project.ProjectPath) : null;
         var started = await _starter.StartAsync(project, IssuePrompts.SessionTitle(row),
             _ => IssuePrompts.For(tracker.DisplayName, GitIssuesService.Clean(tracker.Location, MaximumTitle), row, detail.Body, review),
             request.Worktree, request.SessionId, "issue", model).ConfigureAwait(false);
-        return new(started.Problem is null ? "ok" : "refused", started.SessionId, started.Problem, started.Reason);
+        return new(started.Problem is null ? "ok" : "refused", started.SessionId, started.Problem, started.Reason, started.Warning);
     }
 
     /// <summary>
@@ -309,6 +314,9 @@ internal sealed partial class IssuesService
         return trackers;
     }
 
+    private static IssueBranchSchemeRow Branch(IssueBranchSchemeReading reading)
+        => new(reading.Scheme.Template, reading.Scheme.TitleLength, [.. reading.Scheme.Types.Select(static type => new IssueBranchTypeRow(type.Name, type.Value))], reading.Problem, reading.Configured);
+
     private static string KindName(TrackedItemKind kind) => kind == TrackedItemKind.PullRequest ? "pull requests" : "issues";
 
     // A failure the tab shows is in the log, with the exception the page is not given.
@@ -345,6 +353,7 @@ internal sealed partial class IssuesService
         {
             Place = Nullable(item.Place),
             Match = Nullable(item.Match),
+            StateColor = Color(item.StateColor),
             Reviewers = [.. item.Reviewers.Take(MaximumLabels).Select(static reviewer => new IssueReviewer(GitIssuesService.Clean(reviewer.Name, MaximumName), Vote(reviewer.Vote))
                 {
                     Group = reviewer.IsGroup ? true : null, Required = reviewer.Required ? true : null, Mine = reviewer.Mine ? true : null,
@@ -464,7 +473,26 @@ internal sealed record IssueSourcesRequest(string ExpectedEpoch, string ProjectI
 /// The trackers of a project. Status is <c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c> or <c>not_found</c>
 /// (no such project, or its folder is missing).
 /// </summary>
-internal sealed record IssueSourcesResponse(string Status, IReadOnlyList<IssueSource> Sources);
+/// <param name="Status">How the reading ended.</param>
+/// <param name="Sources">The trackers.</param>
+/// <param name="Branch">How the branch of a new worktree started on an issue of the project is named; null when the project was not read.</param>
+internal sealed record IssueSourcesResponse(string Status, IReadOnlyList<IssueSource> Sources, IssueBranchSchemeRow? Branch = null);
+
+/// <summary>
+/// How the branch of a new worktree started on an issue is named, from the <c>[branch]</c> table of <c>.alta/issues.toml</c>
+/// and <c>.alta/local/issues.toml</c> (see <see cref="IssueBranchSchemes"/>).
+/// </summary>
+/// <param name="Template">The template, such as <c>{type}/{id}-{title}</c>.</param>
+/// <param name="TitleLength">The longest <c>{title}</c> is, cut at a whole word.</param>
+/// <param name="Types">What <c>{type}</c> is for a type or a label of an item, in the order they are tried; <c>*</c> for the others.</param>
+/// <param name="Problem">What is wrong in the files, with their path; null when nothing is.</param>
+/// <param name="Configured">Whether a file of the project has a <c>[branch]</c> table: the Issues tab then names a branch of its own by default.</param>
+internal sealed record IssueBranchSchemeRow(string Template, int TitleLength, IReadOnlyList<IssueBranchTypeRow> Types, string? Problem, bool Configured = false);
+
+/// <summary>A type or a label of an item, and what <c>{type}</c> is for it.</summary>
+/// <param name="Name">The type or the label, such as <c>Bug</c>; <c>*</c> for the others.</param>
+/// <param name="Value">The text of <c>{type}</c>, such as <c>fix</c>.</param>
+internal sealed record IssueBranchTypeRow(string Name, string Value);
 
 /// <summary>One tracker of a project.</summary>
 /// <param name="Service"><c>github</c>, <c>gitlab</c>, <c>azure_devops</c>, <c>bitbucket</c>, <c>jira</c> or what a plugin names.</param>
@@ -519,6 +547,9 @@ internal sealed record IssueListResponse(string Status, IReadOnlyList<IssueRow> 
 internal sealed record IssueRow(string Kind, string Id, string Title, string Url, string State, string? StateText, string? Type, string? Priority, string? Author,
     IReadOnlyList<string> Assignees, IReadOnlyList<IssueLabel> Labels, DateTimeOffset? CreatedAt, DateTimeOffset? UpdatedAt, int? Comments, string? SourceBranch, string? TargetBranch)
 {
+    /// <summary>Gets the color the tracker gives its state, as six hexadecimal digits without <c>#</c>; null when it gives none.</summary>
+    public string? StateColor { get; init; }
+
     /// <summary>Gets where the item is kept when not in the repository of the project (<c>project/repository</c>): no session is started on it here.</summary>
     public string? Place { get; init; }
 
@@ -585,15 +616,24 @@ internal sealed record IssueComment(string? Author, DateTimeOffset? CreatedAt, s
 /// <param name="ReviewBeforeCommit">Whether the user reviews the changes of the session before a commit; null follows the setting.</param>
 /// <param name="Sandbox">The sandbox of the session, a profile or <c>off</c>; null for what the settings give.</param>
 /// <param name="Options">The options of the session, such as whether it can start sessions of its own; null for the defaults.</param>
+/// <param name="Branch">
+/// The branch the work is done on, such as <c>feature/123-export</c>: the new branch of the new worktree, or the new branch the folder of
+/// the project moves to; null for an <c>alta/</c> branch named by CodeAlta, or the branch the folder of the project is on.
+/// </param>
 internal sealed record IssueStartRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Id, bool Worktree, string? SessionId,
     string? ProviderId = null, string? ModelId = null, string? ReasoningEffort = null, string? AgentPromptId = null, string? PermissionMode = null,
-    bool? ReviewBeforeCommit = null, string? Sandbox = null, SessionOptionsChoice? Options = null);
+    bool? ReviewBeforeCommit = null, string? Sandbox = null, SessionOptionsChoice? Options = null, string? Branch = null);
 
 /// <summary>
 /// The start of a session. Status is <c>ok</c>, <c>refused</c> (with a message, and a reason code when the page
 /// has a text for it), <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid_request</c>, <c>not_found</c> or <c>no_tracker</c>.
 /// </summary>
-internal sealed record IssueStartResponse(string Status, string? SessionId = null, string? Message = null, string? Reason = null);
+/// <param name="Status">How the start ended.</param>
+/// <param name="SessionId">The session that was created; null when none was.</param>
+/// <param name="Message">Why the work did not start.</param>
+/// <param name="Reason">A short code for the page when the problem is one it has a text for.</param>
+/// <param name="Warning">What went wrong without stopping the start, such as a worktree whose branch could not be marked; null when nothing did.</param>
+internal sealed record IssueStartResponse(string Status, string? SessionId = null, string? Message = null, string? Reason = null, string? Warning = null);
 
 /// <summary>Asks for an image an item of a tracker shows.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>

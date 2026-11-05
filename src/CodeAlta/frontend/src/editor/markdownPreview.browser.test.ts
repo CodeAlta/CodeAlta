@@ -106,6 +106,35 @@ test("the Markdown preview of the code editor draws its mermaid blocks, with and
     assert.deepEqual(await shown(), ["PRE", "P.markdown-diagram-refused", "DIV.markdown-rendered"]);
     assert.equal(await evaluate(`${content}.querySelector('pre').getAttribute('data-language')`), "mermaid");
     assert.match(await evaluate<string>(`${content}.querySelector('.markdown-diagram-refused').textContent`), /^Not drawn as a diagram: Parse error on line \d+$/);
+
+    // A press in the page gives it the keyboard, and the keys move in it.
+    await evaluate("previewFixture.clear()");
+    await evaluate(`previewFixture.render(${JSON.stringify(`# Long\n\n${"A line.\n\n".repeat(200)}`)}, false)`);
+    const box = "document.querySelector('.editor-markdown')";
+    await evaluate(`${box}.style.height = '200px'`);
+    const rect = await evaluate<{ x: number; y: number }>(`${box}.getBoundingClientRect().toJSON()`);
+    for (const type of ["mousePressed", "mouseReleased"]) await command("Input.dispatchMouseEvent", { type, button: "left", clickCount: 1, x: rect.x + 40, y: rect.y + 100 });
+    assert.equal(await evaluate(`document.activeElement === ${box}`), true, "The page has the keyboard");
+    const top = () => evaluate<number>(`${box}.scrollTop`);
+    const press = async (key: string, code: number) => {
+      await command("Input.dispatchKeyEvent", { type: "rawKeyDown", key, code: key, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
+      await command("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
+    };
+    const settled = async () => { let last = -1, now = await top(); while (now !== last) { await new Promise(resolve => setTimeout(resolve, 150)); last = now; now = await top(); } return now; };
+    await press("PageDown", 34);
+    const paged = await settled();
+    assert.ok(paged > 100, `Page Down moves a page: ${paged}`);
+    await press("ArrowDown", 40);
+    const below = await settled();
+    assert.ok(below > paged, `Arrow Down moves a line: ${below} after ${paged}`);
+    await press("ArrowUp", 38);
+    assert.ok(await settled() < below, "Arrow Up moves back");
+    await press("PageUp", 33);
+    assert.ok(await settled() < paged, "Page Up moves back a page");
+    await press("End", 35);
+    assert.ok(await settled() > paged * 5, "End goes to the end");
+    await press("Home", 36);
+    assert.equal(await settled(), 0, "Home goes to the start");
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();

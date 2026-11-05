@@ -5,7 +5,7 @@ import { IssuesPanel, type IssuesApi } from "./IssuesPanel";
 
 // The Issues tab over a host the test plays: a repository on GitHub whose work is in three Jira projects, and a
 // project that has one Jira project only.
-const item = (id: string, title: string, values: Partial<IssueRow> = {}): IssueRow => ({ kind: "issue", id, title, url: `https://example.atlassian.net/browse/${id}`, state: "open", stateText: "To Do",
+const item = (id: string, title: string, values: Partial<IssueRow> = {}): IssueRow => ({ kind: "issue", id, title, url: `https://example.atlassian.net/browse/${id}`, state: "open", stateText: "To Do", stateColor: null,
   type: "Task", priority: null, author: "Ana", assignees: [], labels: [], createdAt: null, updatedAt: null, comments: null, sourceBranch: null, targetBranch: null, place: null, match: null, reviewers: [], ...values });
 const jira: IssueRow[] = [
   item("PLAT-7", "The build cache is not shared between agents", { type: "Story", stateText: "In Progress", labels: [{ name: "build", color: null }] }),

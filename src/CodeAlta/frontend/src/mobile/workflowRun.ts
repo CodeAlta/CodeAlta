@@ -56,6 +56,20 @@ export const isWorkflowEvent = (event: Pick<TimelineEvent, "kind">): boolean => 
 
 const ended = (state: WorkflowState) => state === "completed" || state === "failed" || state === "canceled" || state === "interrupted";
 
+/**
+ * Whether a run has a card of its own under the line of its activity, as the desktop's workflow block: it ran steps,
+ * started sessions or presented something to the user. A run that only made calls is a step of its activity: its card
+ * is in the place of its call, and folds with it.
+ */
+export const hasRunBlock = (run: WorkflowRun): boolean => run.steps.length > 0 || run.sessions.length > 0 || run.presented.length > 0;
+
+/**
+ * The runs an activity shows under its line: those with a card of their own, folded or not; folded, also those that
+ * still go on (what the turn does now, or waits for). The others are in the activity, in the place of their call.
+ */
+export const runsUnderLine = (runs: readonly WorkflowRun[], open: boolean): WorkflowRun[] =>
+  runs.filter(run => hasRunBlock(run) || (!open && !ended(run.state)));
+
 /** The state a record names: `cancelled` and `stopped` are canceled; an unknown end is a failure. */
 export function workflowState(status: string | null | undefined, fallback: WorkflowState = "completed"): WorkflowState {
   switch ((status ?? "").toLowerCase()) {

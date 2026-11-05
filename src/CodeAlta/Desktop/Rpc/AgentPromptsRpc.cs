@@ -12,8 +12,8 @@ namespace CodeAlta.Desktop.Rpc;
 /// <remarks>
 /// A prompt is addressed by kind, scope and file id, never by a path. Saving an existing prompt and
 /// deleting one require the revision that was read, so a file changed elsewhere is reported as a conflict.
-/// The custom agents of GitHub Copilot (<c>.github/agents</c>, <c>~/.copilot/agents</c>) are listed and read as
-/// agent prompts of their own scopes, and never written.
+/// The custom agents of GitHub Copilot (<c>.github/agents</c>, <c>~/.copilot/agents</c>) and the subagents of Claude Code
+/// (<c>.claude/agents</c>, <c>~/.claude/agents</c>) are listed and read as agent prompts of their own scopes, and never written.
 /// </remarks>
 [NeoRpcService("agentPrompts", Version = 1)]
 internal sealed class AgentPromptsService
@@ -80,7 +80,7 @@ internal sealed class AgentPromptsService
             string? ShadowedBy(string? path) => path is not null && sources.TryGetValue(path, out var kind) ? Scope(kind) : null;
             var rows = agents.Select(prompt => new AgentPromptEntry(prompt.PromptName, Bound(prompt.DisplayName, MaximumNameLength)!,
                     Bound(prompt.Description, MaximumDescriptionLength), nameof(PromptResourceKind.Agent), Scope(prompt.SourceKind),
-                    prompt.IsBuiltIn || prompt.IsCopilot, prompt.IsShadowed, ShadowedBy(prompt.ShadowedByPath), Bound(prompt.SystemPromptName, MaximumIdLength),
+                    prompt.IsBuiltIn || prompt.IsExternal, prompt.IsShadowed, ShadowedBy(prompt.ShadowedByPath), Bound(prompt.SystemPromptName, MaximumIdLength),
                     prompt.Mode == PromptCompositionMode.Append)
                 {
                     Inherits = prompt.Inherits,
@@ -106,7 +106,7 @@ internal sealed class AgentPromptsService
         ArgumentNullException.ThrowIfNull(request);
         if (_projects is null) return new("unavailable", null, null);
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null, null);
-        if (CopilotKind(request.Scope) is { } copilot) return await ReadCopilotAgentAsync(request, copilot, cancellationToken).ConfigureAwait(false);
+        if (ExternalKind(request.Scope) is { } external) return await ReadExternalAgentAsync(request, external, cancellationToken).ConfigureAwait(false);
         if (Identify(request.Kind, request.Scope, request.Id, out var identity) is { } refusal) return new("invalid", null, refusal);
         var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Status != "ok") return new(project.Status, null, null);
@@ -153,7 +153,7 @@ internal sealed class AgentPromptsService
         ArgumentNullException.ThrowIfNull(request);
         if (_projects is null) return new("unavailable", null, null);
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null, null);
-        if (CopilotKind(request.Scope) is not null) return new("read_only", null, null);
+        if (ExternalKind(request.Scope) is not null) return new("read_only", null, null);
         if (Identify(request.Kind, request.Scope, request.Id, out var identity) is { } refusal) return new("invalid", null, refusal);
         if (identity.Scope == PromptResourceScope.BuiltIn) return new("read_only", null, null);
         if (request.Body is null) return new("invalid", null, "A prompt body is required.");
@@ -219,7 +219,7 @@ internal sealed class AgentPromptsService
         ArgumentNullException.ThrowIfNull(request);
         if (_projects is null) return new("unavailable", null, null);
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null, null);
-        if (CopilotKind(request.Scope) is not null) return new("read_only", null, null);
+        if (ExternalKind(request.Scope) is not null) return new("read_only", null, null);
         if (Identify(request.Kind, request.Scope, request.Id, out var identity) is { } refusal) return new("invalid", null, refusal);
         if (identity.Scope == PromptResourceScope.BuiltIn) return new("read_only", null, null);
         var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
@@ -295,8 +295,8 @@ internal sealed class AgentPromptsService
         return trimmed.Length > PromptFileFormat.MaximumInherits || trimmed.Any(static id => !ValidId(id)) ? null : trimmed;
     }
 
-    // A custom agent of GitHub Copilot, as the listing names it: its text is the prompt, and it is never written.
-    private async Task<AgentPromptReadResponse> ReadCopilotAgentAsync(AgentPromptReadRequest request, AgentPromptSourceKind kind, CancellationToken cancellationToken)
+    // An agent of GitHub Copilot or Claude Code, as the listing names it: its text is the prompt, and it is never written.
+    private async Task<AgentPromptReadResponse> ReadExternalAgentAsync(AgentPromptReadRequest request, AgentPromptSourceKind kind, CancellationToken cancellationToken)
     {
         if (!string.Equals(request.Kind, nameof(PromptResourceKind.Agent), StringComparison.OrdinalIgnoreCase) || !ValidId(request.Id))
             return new("invalid", null, "A prompt id uses letters, digits, '.', '_' or '-' (at most 128).");
@@ -317,7 +317,7 @@ internal sealed class AgentPromptsService
         }
     }
 
-    /// <summary>The folders the prompts are read from: the shipped ones, those of the user, of a project, and of GitHub Copilot.</summary>
+    /// <summary>The folders the prompts are read from: the shipped ones, those of the user, of a project, and of GitHub Copilot and Claude Code.</summary>
     /// <param name="projectRoot">The folder of the project whose prompts are listed too, or null.</param>
     internal SystemPromptContentRoots Roots(string? projectRoot) => _catalog.ResolveRoots(Query(projectRoot));
 
@@ -342,6 +342,8 @@ internal sealed class AgentPromptsService
             AgentPromptSourceKind.Project => roots.ProjectPromptRoot,
             AgentPromptSourceKind.CopilotUser => roots.CopilotUserAgentsRoot,
             AgentPromptSourceKind.CopilotProject => roots.CopilotProjectAgentsRoot,
+            AgentPromptSourceKind.ClaudeUser => roots.ClaudeUserAgentsRoot,
+            AgentPromptSourceKind.ClaudeProject => roots.ClaudeProjectAgentsRoot,
             AgentPromptSourceKind.BuiltIn => roots.ShippedPromptRoot,
             _ => null,
         };
@@ -352,7 +354,7 @@ internal sealed class AgentPromptsService
     {
         AppBaseDirectory = _applicationRoot,
         UserCodeAltaRoot = _projects!.Options.GlobalRoot,
-        // The profile is only where the agents of GitHub Copilot of the user are: without one, a folder that has none.
+        // The profile is only where the agents of GitHub Copilot and Claude Code of the user are: without one, a folder that has none.
         UserProfileRoot = _userProfileRoot ?? _projects.Options.GlobalRoot,
         ProjectRoot = projectRoot,
         ProjectPromptResourcesTrusted = projectRoot is not null,
@@ -405,18 +407,28 @@ internal sealed class AgentPromptsService
     /// <summary>The scope of the agents of GitHub Copilot of a project (<c>.github/agents</c>).</summary>
     internal const string CopilotProjectScope = "CopilotProject";
 
+    /// <summary>The scope of the subagents of Claude Code of the user (<c>~/.claude/agents</c>).</summary>
+    internal const string ClaudeGlobalScope = "ClaudeGlobal";
+
+    /// <summary>The scope of the subagents of Claude Code of a project (<c>.claude/agents</c>).</summary>
+    internal const string ClaudeProjectScope = "ClaudeProject";
+
     private static string Scope(AgentPromptSourceKind kind) => kind switch
     {
         AgentPromptSourceKind.UserGlobal => nameof(PromptResourceScope.Global),
         AgentPromptSourceKind.Project => nameof(PromptResourceScope.Project),
         AgentPromptSourceKind.CopilotUser => CopilotGlobalScope,
         AgentPromptSourceKind.CopilotProject => CopilotProjectScope,
+        AgentPromptSourceKind.ClaudeUser => ClaudeGlobalScope,
+        AgentPromptSourceKind.ClaudeProject => ClaudeProjectScope,
         _ => nameof(PromptResourceScope.BuiltIn),
     };
 
-    private static AgentPromptSourceKind? CopilotKind(string? scope)
+    private static AgentPromptSourceKind? ExternalKind(string? scope)
         => string.Equals(scope, CopilotGlobalScope, StringComparison.OrdinalIgnoreCase) ? AgentPromptSourceKind.CopilotUser
             : string.Equals(scope, CopilotProjectScope, StringComparison.OrdinalIgnoreCase) ? AgentPromptSourceKind.CopilotProject
+            : string.Equals(scope, ClaudeGlobalScope, StringComparison.OrdinalIgnoreCase) ? AgentPromptSourceKind.ClaudeUser
+            : string.Equals(scope, ClaudeProjectScope, StringComparison.OrdinalIgnoreCase) ? AgentPromptSourceKind.ClaudeProject
             : null;
 
     private static bool Line(string? value, int maximum) => value is null || (value.Length <= maximum && !value.Any(char.IsControl));
@@ -439,7 +451,8 @@ internal sealed record AgentPromptsListResponse(string Status, string? ProjectId
 
 /// <summary>
 /// One prompt file: kind is <c>Agent</c> or <c>System</c>, scope is <c>BuiltIn</c>, <c>Global</c> or <c>Project</c>, or
-/// <c>CopilotGlobal</c> or <c>CopilotProject</c> for a custom agent of GitHub Copilot, which is read-only.
+/// <c>CopilotGlobal</c> or <c>CopilotProject</c> for a custom agent of GitHub Copilot, <c>ClaudeGlobal</c> or <c>ClaudeProject</c>
+/// for a subagent of Claude Code, which are read-only.
 /// </summary>
 internal sealed record AgentPromptEntry(string Id, string Name, string? Description, string Kind, string Scope, bool ReadOnly,
     bool Shadowed, string? ShadowedByScope, string? SystemPromptId, bool Append)

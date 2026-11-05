@@ -7,7 +7,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// <summary>
 /// The page's side of how the application lives beyond its window: what closing the window does and the
 /// question the page asks about it, an explicit exit, the question the page asks before an exit that would stop
-/// running sessions, and the operating system's folder dialog.
+/// running sessions, the operating system's folder dialog, and the files dropped on a window where the host gets them.
 /// </summary>
 [NeoRpcService("desktopShell", Version = 1)]
 internal sealed class DesktopShellService
@@ -93,6 +93,19 @@ internal sealed class DesktopShellService
     {
         ArgumentNullException.ThrowIfNull(request);
         _shell?.SetKeepAwake(request.KeepAwake);
+        return Current();
+    }
+
+    /// <summary>
+    /// Changes the user's setting for the alerts: what tells the user that a session is done or waits for them while
+    /// CodeAlta is in the background (<c>all</c>, <c>mark</c> or <c>off</c>). It applies at once; a name that is not one
+    /// changes nothing.
+    /// </summary>
+    [NeoRpcMethod("setTurnAlerts")]
+    public DesktopShellPreferences SetTurnAlerts(DesktopShellTurnAlertsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (DesktopPreferences.TryParseTurnAlerts(request.TurnAlerts, out var mode)) _shell?.SetTurnAlerts(mode);
         return Current();
     }
 
@@ -184,6 +197,22 @@ internal sealed class DesktopShellService
             };
     }
 
+    /// <summary>
+    /// Reads, once, a file dropped on the window that a <c>files-dropped</c> notice of <see cref="Watch"/> named: its
+    /// name, its media type and its content, as a file input gives them to the page. <c>not_found</c> for an id that is
+    /// not, or no longer, one of a drop; <c>too_large</c> for a file larger than an attachment; <c>failed</c> for a file
+    /// that cannot be read; <c>unavailable</c> without a shell.
+    /// </summary>
+    [NeoRpcMethod("readDroppedFile")]
+    public async Task<DesktopShellDroppedFileResponse> ReadDroppedFileAsync(DesktopShellReadDroppedFileRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return _shell is null || Drops is null ? new("unavailable", null, null, null) : await Drops.ReadAsync(request.Id, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The files dropped on the windows; null where the host gets no drop.</summary>
+    internal DesktopFileDrops? Drops { get; init; }
+
     // The title the page asks for, as one bounded line; the default when it gives none.
     internal static string Title(string? value)
     {
@@ -227,7 +256,7 @@ internal sealed class DesktopShellService
         : new("ok", DesktopPreferences.Name(_shell.OnClose), _shell.CanHide, Platform, _shell.EntryAdded, _shell.SessionWidth,
             [.. _shell.SessionWidths().Select(static pair => new DesktopShellSessionWidth(pair.Key, pair.Value))], _shell.TrayAvailable, _shell.Zoom,
             _shell.ReviewPermissions, _shell.InheritPermissions)
-        { ReconnectRemoteControl = _shell.ReconnectRemoteControl ? true : null, KeepAwake = _shell.KeepAwake };
+        { ReconnectRemoteControl = _shell.ReconnectRemoteControl ? true : null, KeepAwake = _shell.KeepAwake, TurnAlerts = DesktopPreferences.Name(_shell.TurnAlerts) };
 
     private static string Platform => OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
 }
@@ -251,6 +280,15 @@ internal sealed record DesktopShellPickFolderRequest(string? Title, string? Init
 /// </param>
 /// <param name="Path">The full path of the chosen folder; null unless <c>ok</c>.</param>
 internal sealed record DesktopShellPickFolderResponse(string Status, string? Path);
+
+/// <param name="Id">The id of a dropped file, from a <c>files-dropped</c> notice.</param>
+internal sealed record DesktopShellReadDroppedFileRequest(string? Id);
+
+/// <param name="Status"><c>ok</c>, <c>not_found</c>, <c>too_large</c>, <c>failed</c> or <c>unavailable</c>.</param>
+/// <param name="Name">The name of the file, without its folder; null when the id names no file.</param>
+/// <param name="MediaType">Its media type, from its content; null unless <c>ok</c>.</param>
+/// <param name="Base64">Its content; null unless <c>ok</c>.</param>
+internal sealed record DesktopShellDroppedFileResponse(string Status, string? Name, string? MediaType, string? Base64);
 
 /// <param name="Confirmed">The user already agreed to stop the running sessions.</param>
 internal sealed record DesktopShellExitRequest(bool Confirmed);
@@ -297,6 +335,13 @@ internal sealed record DesktopShellPreferences(string Status, string OnClose, bo
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public bool? KeepAwake { get; init; }
+
+    /// <summary>
+    /// The user's setting: what tells the user that a session is done or waits for them while CodeAlta is in the
+    /// background, <c>all</c>, <c>mark</c> or <c>off</c>; absent without a shell.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? TurnAlerts { get; init; }
 }
 
 /// <summary>Asks to review the commands and the file changes of the sessions, or to approve them automatically.</summary>
@@ -314,6 +359,10 @@ internal sealed record DesktopShellReconnectRemoteControlRequest(bool Reconnect)
 /// <summary>Asks to keep the computer from going to idle sleep while CodeAlta runs, or to let it sleep.</summary>
 /// <param name="KeepAwake">Whether the computer is kept awake.</param>
 internal sealed record DesktopShellKeepAwakeRequest(bool KeepAwake);
+
+/// <summary>Asks to change what tells the user that a session is done or waits for them while CodeAlta is in the background.</summary>
+/// <param name="TurnAlerts"><c>all</c> (a notification and the mark of the application), <c>mark</c> (the mark alone) or <c>off</c>.</param>
+internal sealed record DesktopShellTurnAlertsRequest(string? TurnAlerts);
 
 /// <summary>The width one session is shown with instead of the user's setting.</summary>
 internal sealed record DesktopShellSessionWidth(string SessionId, int Percent);

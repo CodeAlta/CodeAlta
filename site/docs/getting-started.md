@@ -154,6 +154,8 @@ In the desktop app, the paperclip button of the prompt bar opens a menu (in the 
 - **Add folder…** (`Ctrl+Alt+F` or `/attach_folder`) opens the folder dialog in the session's folder. A folder of the project reaches the agent as with `@`; any other folder, by its full path.
 - **Add issues…** (`Ctrl+Alt+I` or `/attach_issues`) opens the issue picker: check issues with a click, their box or `Shift+Enter`, then **Attach** (or `Enter`). **Cancel** (or `Esc`) drops them.
 
+On Windows and Linux, files and folders dropped anywhere on a session go to its prompt, and each folder is added as with **Add folder…**. On a desktop with no file or folder dialog (a Linux desktop without the desktop portal or `zenity`), a notice says so: drop or paste the files instead.
+
 Each attachment appears above the prompt; click a file or an image to preview, rename or remove it. When the prompt is sent, the links of folders and issues are added at the end of its text, and CodeAlta keeps a copy of each file with the session, so editing or deleting the original later changes nothing. The model gets each file in a form it reads:
 
 | File | What the model gets |
@@ -245,7 +247,8 @@ Both apps use the same shortcuts and slash commands unless noted.
 | Abort the running turn | `F8` or `/abort` |
 | [Dictate a prompt](speech.md) (desktop) | `F9` |
 | Compact idle session | `Ctrl+F11` or `/compact` |
-| [Fork a session, or rewind it](sessions/readme.md#fork-and-rewind) to an earlier turn (desktop) | `/fork`, `/rewind` |
+| [Fork a session, or rewind it](sessions/readme.md#fork-and-rewind) to an earlier turn (desktop) | `Ctrl+Shift+B` or `/fork`, `/rewind` |
+| [Archive the selected session](sessions/readme.md#archive-a-session) (desktop) | `Ctrl+Shift+A` or `/archive` |
 | Clear prompt queue | `F10` |
 | Previous/next user or assistant message | `F3` / `F4` |
 | Switch tabs | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+Shift+Tab` / `Ctrl+Tab` and `Ctrl+PageUp` / `Ctrl+PageDown` in the desktop app) |

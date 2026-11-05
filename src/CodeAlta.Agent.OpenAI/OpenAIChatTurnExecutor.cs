@@ -320,13 +320,11 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             ref options.Patch,
             OpenAIModelRequestOverrides.MergeExtraBody(provider.ExtraBody, modelRequest));
 
-        var supportsStrictTools = request.Provider.Profile?.SupportsStrictTools ?? provider.Profile?.SupportsStrictTools ?? true;
+        var allowStrictTools = request.Provider.Profile?.SupportsStrictTools ?? provider.Profile?.SupportsStrictTools ?? false;
         var supportsTypeUnions = request.Provider.Profile?.SupportsToolSchemaTypeUnions ?? provider.Profile?.SupportsToolSchemaTypeUnions ?? true;
         foreach (var tool in request.Tools)
         {
-            var inputSchema = supportsStrictTools
-                ? AgentToolBridge.CreateOpenAIStrictInputSchema(tool.Spec.InputSchema)
-                : tool.Spec.InputSchema;
+            var inputSchema = AgentToolBridge.CreateOpenAIInputSchema(tool.Spec.InputSchema, allowStrictTools, out var strict);
             if (!supportsTypeUnions)
             {
                 inputSchema = AgentToolBridge.CreateInputSchemaWithoutTypeUnions(inputSchema);
@@ -337,7 +335,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                     AgentToolBridge.GetRegisteredToolName(tool.Spec.Name),
                     tool.Spec.Description,
                     BinaryData.FromString(inputSchema.GetRawText()),
-                    functionSchemaIsStrict: supportsStrictTools ? true : null));
+                    functionSchemaIsStrict: strict ? true : null));
         }
 
         return options;

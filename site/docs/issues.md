@@ -31,7 +31,9 @@ Open it with **Issues** in the title bar (in its **…** menu when the window is
 - Choose the project, then **Issues** or **Pull requests**. The list has the projects of the window's [space](spaces.md).
 - **Open**, **Closed**, **Merged** and **All** are separate lists, most recently updated first.
 - Type words or a number to filter.
-- Select an item to read its description and comments. Double-click it, or use the expand button, for a larger window.
+- The icon of an item tells its type when the service gives one (a bug, a user story, a task, a feature, an epic), and its color tells whether it is open or done; a bug is always red. The tag of its state has the color Azure DevOps gives that state.
+- The people an issue is assigned to are named at the right of its row, below its state; their tooltip says that they are its assignees.
+- Select an item to read its description and comments; for an Azure DevOps bug, its repro steps, system info and acceptance criteria. Double-click it, or use the expand button, for a larger window.
 - What the tab read is kept 5 minutes: going back to a list or an item shows it at once. *Read 3 min ago* says how old it is; the refresh beside it reads it again, and **Reload** in the header reads everything again.
 - The images of descriptions and comments are shown (Azure DevOps for now), read with the same sign-in. An image that cannot be read stays a link with its name; click a shown image to see it larger.
 
@@ -191,6 +193,40 @@ An open item has two buttons:
 The session gets the item's title, link and description. For a pull request it is asked to review, not merge; you can change what it is asked in its [start prompt](prompts.md#start-prompts).
 
 **Runs with**, above the buttons, is the [Agent chip](workspace/prompt.md#agent-and-model) of the new session. With **Use the defaults** on, it takes the [default provider](model-providers/readme.md) and your settings; turn it off to choose the agent prompt, the model, the permission mode, review before commit and the sandbox. **More options** turns [sub-sessions](sessions/delegation.md#sessions-without-sub-sessions) off for the new session.
+
+### Branch name
+
+For an issue, tick **Own branch**, next to **Runs with**, to start the work on a new branch. A **Branch** field then shows the name CodeAlta proposes, such as `feature/12345-export-the-list-as-csv`; change it before you start, or click the reset button to get the proposal back.
+
+- **Start in a new worktree** creates the worktree on that branch. When the worktree is removed, the branch goes with it unless it holds commits of its own, as the `alta/` branches do (see [Worktrees](worktrees.md)).
+- **Start in a new session** moves the project folder to that branch first; changes that are not committed go along. It is refused while a session works in the project folder.
+- A name git refuses is shown in red, and a branch that already exists, also in another case, is refused.
+- Untick **Own branch** for a worktree on an `alta/` branch, or a session that stays on the branch of the project folder. The box keeps your choice for each project; until you choose, it is ticked when the project has a scheme in its files.
+
+The settings button next to the field opens **Branch name scheme**, which sets how the name is proposed:
+
+- **For me** or **For the team**: the file it writes, as for the views. Your scheme wins over the team's.
+- **Template**, with buttons that insert `{type}`, `{id}` and `{title}`, and **Longest title**.
+- A table of types or labels and the text of `{type}` for each; **All others** for the rest. **Add a type** adds a row, and the arrows move one: the first row that matches the type of the item, else one of its labels, wins. The table is hidden while the template has no `{type}`.
+- **Preview** shows the name for the item you are on. **Save** writes the scheme; **Remove from this file** takes it out, and the team's scheme or the default applies again; **Open file** opens the file in the code editor.
+
+The form writes the `[branch]` table of the same files as the views; you can also write it by hand. Your file wins over the team's, key by key; `[branch.types]` is taken whole. Click **Reload** after a change made by hand.
+
+```toml
+# <project>/.alta/issues.toml: the convention of the team
+[branch]
+template = "{type}/{id}-{title}"   # {type}, {id} and {title}
+title_length = 40                  # the longest {title}, cut at a whole word
+
+[branch.types]                     # the type or a label of the item -> {type}
+Bug = "fix"
+"*" = "feature"                    # every other item
+```
+
+- `{id}` is the number or key of the item, `{title}` its title in lower case, letters and digits only, joined with `-`.
+- Types and labels are compared without case, in the order of the rows: the first row that matches the type wins, else the first that matches a label. Without `*`, other items are `feature`.
+- Without a `[branch]` table, the proposal is `{type}/{id}-{title}` with bugs as `fix` and the rest as `feature`.
+- A mistake in the table, such as an unknown placeholder, is shown under the field with its file.
 
 You can start several items at once: each shows **Starting…** while its worktree is made. A ready session opens if you are still on that item; otherwise a notification offers it with **Show**.
 

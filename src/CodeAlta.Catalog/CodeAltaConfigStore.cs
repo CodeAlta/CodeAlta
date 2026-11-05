@@ -1452,31 +1452,75 @@ public sealed partial class CodeAltaConfigStore
     /// user's configuration file (<c>[commits] co_author</c>).
     /// </summary>
     /// <returns>The choice; true when the file says nothing or cannot be read.</returns>
-    public bool LoadGlobalCommitCoAuthor()
-    {
-        try
-        {
-            return ReadSharedGlobalDocument().Commits?.CoAuthor != false;
-        }
-        catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
-        {
-            return true;
-        }
-    }
+    public bool LoadGlobalCommitCoAuthor() => LoadGlobalAttributionSettings().CoAuthor;
 
     /// <summary>
-    /// Persists whether agents end the message of their commits with the <c>Co-authored-by</c> line of CodeAlta. The
-    /// default (true) is not written.
+    /// Persists whether agents end the message of their commits with the <c>Co-authored-by</c> line of CodeAlta; the
+    /// trailer the user wrote stays. The default (true) is not written.
     /// </summary>
     /// <param name="coAuthor">The choice.</param>
     /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
     public void SaveGlobalCommitCoAuthor(bool coAuthor)
+        => UpdateGlobal(() => SaveGlobalAttributionSettings(LoadGlobalAttributionSettings() with { CoAuthor = coAuthor }));
+
+    /// <summary>
+    /// Reads how agents say that CodeAlta took part in what they write, from the user's configuration file: the
+    /// trailer of their commits (<c>[commits]</c>) and the instruction about the texts they write in an external system
+    /// (<c>[external_writing]</c>).
+    /// </summary>
+    /// <returns>
+    /// The choices; <see cref="AttributionSettings.Default"/> when the file says nothing or cannot be read, and the
+    /// text of CodeAlta in the place of one that is not valid.
+    /// </returns>
+    public AttributionSettings LoadGlobalAttributionSettings()
     {
+        CodeAltaConfigDocument document;
+        try
+        {
+            document = ReadSharedGlobalDocument();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
+        {
+            return AttributionSettings.Default;
+        }
+
+        // A text written by hand that is not valid does not turn a choice the file makes back.
+        var trailer = AttributionSettings.Normalize(document.Commits?.CoAuthorTrailer);
+        var instruction = AttributionSettings.Normalize(document.ExternalWriting?.Instruction);
+        return new AttributionSettings(
+            document.Commits?.CoAuthor != false,
+            AttributionSettings.GetCoAuthorTrailerError(trailer) is null ? trailer! : AttributionSettings.DefaultCoAuthorTrailer,
+            document.ExternalWriting?.Attribution != false,
+            AttributionSettings.GetExternalWritingInstructionError(instruction) is null ? instruction! : AttributionSettings.DefaultExternalWritingInstruction);
+    }
+
+    /// <summary>
+    /// Persists how agents say that CodeAlta took part in what they write. The defaults are not written: a switch
+    /// that is on, a text that is empty or the one of CodeAlta.
+    /// </summary>
+    /// <param name="settings">The choices; an empty text is the one of CodeAlta.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="settings"/> is null.</exception>
+    /// <exception cref="ArgumentException">The trailer or the instruction is not valid; the message says why.</exception>
+    /// <exception cref="InvalidDataException">The existing configuration is invalid.</exception>
+    /// <exception cref="IOException">The configuration cannot be read or written.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
+    public void SaveGlobalAttributionSettings(AttributionSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var trailer = AttributionSettings.Normalize(settings.CoAuthorTrailer) ?? AttributionSettings.DefaultCoAuthorTrailer;
+        var instruction = AttributionSettings.Normalize(settings.ExternalWritingInstruction) ?? AttributionSettings.DefaultExternalWritingInstruction;
+        if ((AttributionSettings.GetCoAuthorTrailerError(trailer) ?? AttributionSettings.GetExternalWritingInstructionError(instruction)) is { } error)
+        {
+            throw new ArgumentException(error, nameof(settings));
+        }
+
         ThrowIfReadOnly();
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
-        document.Commits = coAuthor ? null : new CodeAltaCommitSettingsDocument { CoAuthor = false };
+        document.Commits = new CodeAltaCommitSettingsDocument { CoAuthor = settings.CoAuthor ? null : false, CoAuthorTrailer = trailer };
+        document.ExternalWriting = new CodeAltaExternalWritingSettingsDocument { Attribution = settings.ExternalWriting ? null : false, Instruction = instruction };
         Save(_options.ConfigPath, document);
     }
 
@@ -1846,6 +1890,7 @@ public sealed partial class CodeAltaConfigStore
         _ = Speech.SpeechSettings.Read(document.Speech);
         _ = Search.SearchSettings.Read(document.Search);
         _ = ModelTiers.ModelSettings.Read(document.Models);
+        _ = AttributionSettings.Read(document.Commits, document.ExternalWriting);
         var definitions = (document.Providers ?? new Dictionary<string, CodeAltaProviderDocument>(StringComparer.OrdinalIgnoreCase))
             .Values
             .Select(CloneProviderDefinition)
@@ -2212,10 +2257,22 @@ public sealed partial class CodeAltaConfigStore
             document.Review = null;
         }
 
-        if (document.Commits is { CoAuthor: not false })
+        if (document.Commits is { } commits)
         {
             // The default is to add the line of CodeAlta: the absence of the section.
-            document.Commits = null;
+            if (commits.CoAuthor is not false) commits.CoAuthor = null;
+            commits.CoAuthorTrailer = AttributionSettings.Normalize(commits.CoAuthorTrailer) is { } trailer
+                && !string.Equals(trailer, AttributionSettings.DefaultCoAuthorTrailer, StringComparison.Ordinal) ? trailer : null;
+            if (commits is { CoAuthor: null, CoAuthorTrailer: null }) document.Commits = null;
+        }
+
+        if (document.ExternalWriting is { } external)
+        {
+            // The default is to tell agents the instruction of CodeAlta: the absence of the section.
+            if (external.Attribution is not false) external.Attribution = null;
+            external.Instruction = AttributionSettings.Normalize(external.Instruction) is { } instruction
+                && !string.Equals(instruction, AttributionSettings.DefaultExternalWritingInstruction, StringComparison.Ordinal) ? instruction : null;
+            if (external is { Attribution: null, Instruction: null }) document.ExternalWriting = null;
         }
 
         if (document.Storage is { } storage)

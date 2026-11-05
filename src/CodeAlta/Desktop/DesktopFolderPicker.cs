@@ -1,6 +1,7 @@
 using NeoAstra;
 using NeoAstra.Desktop;
 using NeoAstra.Desktop.Dialogs;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop;
 
@@ -44,9 +45,15 @@ internal static class DesktopFolderPicker
     {
         ArgumentNullException.ThrowIfNull(window);
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
-        return dialogs is null
+        var pick = dialogs is null
             ? new(DesktopFolderPickStatus.Unavailable)
             : await ShowNeoAstraDialogAsync(window, dialogs, title, ExistingDirectory(initialDirectory), cancellationToken).ConfigureAwait(false);
+        // The page tells the user; the log keeps why for a report.
+        if (pick.Status is DesktopFolderPickStatus.Unavailable or DesktopFolderPickStatus.Failed && LogManager.IsInitialized)
+            LogManager.GetLogger("CodeAlta.Desktop").Warn(pick.Status == DesktopFolderPickStatus.Unavailable
+                ? "No folder dialog is available on this desktop: the folder was not asked for."
+                : "The folder dialog could not be shown, or did not return an existing folder.");
+        return pick;
     }
 
     /// <summary>Keeps a path only when it names an existing folder by its full path.</summary>

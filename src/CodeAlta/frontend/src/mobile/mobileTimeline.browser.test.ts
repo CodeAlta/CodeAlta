@@ -308,6 +308,15 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.wf-card .wf-step')].map(s => s.dataset.state)"), ["completed", "waiting", "pending"]);
     // A script that declares no step says the call it is at, and once it ended, how many calls it made; open, it lists them.
     assert.equal(await evaluate("document.querySelector('.wf-card[data-run=run-c3] .wf-sub').textContent"), '▸ grep "ttl" src');
+    // Folded, a script that only made calls folds with its activity once it ended; one that goes on stays under the line (#323).
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.activity > .act-extras .wf-card')].map(card => card.dataset.run)"), ["run-b2", "run-c3"]);
+    assert.equal(await evaluate("document.querySelector('.wf-card[data-run=run-c4]')"), null, "the ended script folds with its activity");
+    await click(".activity .act-toggle");
+    await waitFor(`document.querySelector(".activity > .act-body .wf-card[data-run=run-c4]")`, "the ended script in the place of its call");
+    // Open, such a script is in the place of its call; a run with steps keeps its card under the line, and its call is a row.
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.activity > .act-body > *')].map(e => e.dataset.run ?? e.querySelector('strong')?.textContent)"),
+      ["exec", "run-c3", "run-c4"]);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.activity > .act-extras .wf-card')].map(card => card.dataset.run)"), ["run-b2"]);
     assert.match(await evaluate<string>("document.querySelector('.wf-card[data-run=run-c4] .wf-sub').textContent"), /^Done · 2s · 1 call$/);
     await click(".wf-card[data-run=run-c3] .wf-head");
     await waitFor(`document.querySelectorAll(".wf-card[data-run=run-c3] .wf-call").length === 2`, "the calls of the script");
@@ -317,6 +326,11 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     await click(".wf-card[data-run=run-c4] .wf-head");
     await waitFor(`document.querySelector(".wf-card[data-run=run-c4] .wf-call")`, "the call of the ended script");
     assert.equal(await evaluate("document.querySelector('.wf-card[data-run=run-c4] .wf-call').dataset.state"), "failed");
+    await shot("t2-open-script-calls.png");
+    await click(".activity .act-toggle");
+    await waitFor(`!document.querySelector(".activity > .act-body")`, "the activity folded again");
+    assert.equal(await evaluate("document.querySelector('.wf-card[data-run=run-c4]')"), null, "folded again, the ended script is gone with its activity");
+    assert.equal(await evaluate("document.querySelector('.wf-card[data-run=run-c3]').getAttribute('data-state')"), "running", "the script that goes on stays");
     await evaluate(`document.querySelector('.wf-card[data-run=run-c3]').scrollIntoView({ block: "center" })`);
     await shot("t2-script-calls.png");
     await noOverflow("t2");

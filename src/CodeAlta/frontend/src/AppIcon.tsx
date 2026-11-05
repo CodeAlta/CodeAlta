@@ -153,6 +153,9 @@ import {
   PictureInPicture2,
   Workflow,
   Cloud,
+  ClipboardCheck,
+  Trophy,
+  Crown,
 } from "lucide-react";
 
 const icons = {
@@ -232,6 +235,11 @@ const icons = {
   history: History,
   issueOpen: CircleDot,
   issueClosed: CircleCheck,
+  issueBug: Bug,
+  issueStory: BookOpen,
+  issueTask: ClipboardCheck,
+  issueFeature: Trophy,
+  issueEpic: Crown,
   database: Database,
   fileGeneric: File,
   attach: Paperclip,

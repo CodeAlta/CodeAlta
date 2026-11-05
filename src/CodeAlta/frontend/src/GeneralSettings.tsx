@@ -1,5 +1,5 @@
 import { Card, HTMLSelect, Switch } from "@blueprintjs/core";
-import { closeBehavior, closeBehaviorLabel, closeBehaviors, keepRunningPlace, type CloseBehavior } from "./desktopShell";
+import { closeBehavior, closeBehaviorLabel, closeBehaviors, keepRunningPlace, turnAlertChoices, turnAlertHelp, turnAlertLabel, turnAlertMode, type CloseBehavior, type TurnAlertMode } from "./desktopShell";
 import { LandingSettings } from "./landing/LandingSettings";
 import { locales, languageNames, preferenceNotice } from "./localization";
 import { SettingsField as Field } from "./SettingsField";
@@ -8,13 +8,15 @@ import type { ExternalEditorsResponse } from "#neoastra";
 import { ExternalEditorSettings, type ExternalEditorSettingsApi } from "./externalEditors/ExternalEditorSettings";
 
 /** Window behavior preferences; their existing stores and shell callbacks remain owned by the window. */
-export function GeneralSettings({ remoteControl, closing, keepAwake, externalEditor }: {
+export function GeneralSettings({ remoteControl, closing, keepAwake, turnAlerts, externalEditor }: {
   /** Whether the sessions that had Remote Control on have it turned on again when CodeAlta starts. */
   remoteControl?: { reconnect: boolean; set: (value: boolean) => void } | null;
   /** What closing the window does; absent where the application cannot stay anywhere without it. */
   closing?: { behavior: CloseBehavior; platform: string; trayIcon?: boolean; set: (value: CloseBehavior) => void } | null;
   /** Whether the computer is kept from going to idle sleep while CodeAlta runs; absent where the window has no host to ask. */
   keepAwake?: { on: boolean; set: (value: boolean) => void } | null;
+  /** What tells the user that a session is done or waits for them while CodeAlta is in the background; absent where the window has no host to ask. */
+  turnAlerts?: { mode: TurnAlertMode; platform: string; set: (value: TurnAlertMode) => void } | null;
   /** The editor folders are opened in beside the code editor; absent where the window has no host to ask. */
   externalEditor?: { api: ExternalEditorSettingsApi; onChanged?: (reply: ExternalEditorsResponse) => void } | null;
 }) {
@@ -57,6 +59,16 @@ export function GeneralSettings({ remoteControl, closing, keepAwake, externalEdi
           <Switch id="settings-keep-awake" className="settings-checkbox" checked={keepAwake.on}
             onChange={event => keepAwake.set(event.currentTarget.checked)} />
         </Field>}
+      </Card>}
+      {turnAlerts && <Card className="appearance-settings" aria-labelledby="settings-notifications-title">
+        <h2 id="settings-notifications-title">{t("Notifications")}</h2>
+        <Field setting="general.turn_alerts" label={t("When a session is done or waits for you")} htmlFor="settings-turn-alerts"
+          notice={<p className="settings-field-help">{t(turnAlertHelp(turnAlerts.mode, turnAlerts.platform))}</p>}>
+          <HTMLSelect id="settings-turn-alerts" value={turnAlerts.mode} onChange={event => turnAlerts.set(turnAlertMode(event.target.value))}>
+            {[...new Set([...turnAlertChoices(turnAlerts.platform), turnAlerts.mode])].map(mode =>
+              <option key={mode} value={mode}>{t(turnAlertLabel(mode, turnAlerts.platform))}</option>)}
+          </HTMLSelect>
+        </Field>
       </Card>}
       {externalEditor && <ExternalEditorSettings api={externalEditor.api} onChanged={externalEditor.onChanged} />}
     </div>

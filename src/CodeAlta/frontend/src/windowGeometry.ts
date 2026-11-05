@@ -2,19 +2,36 @@
 export type WindowGeometry = Readonly<{ x: number; y: number; width: number; height: number }>;
 export type WindowSize = Readonly<{ width: number; height: number }>;
 
-/** Keeps a window inside its bounds, shrinking it only when the bounds are smaller than the window. */
-export function clampWindowGeometry(value: WindowGeometry, bounds: WindowSize, minimum: WindowSize): WindowGeometry {
-  const width = Math.round(Math.min(Math.max(value.width, Math.min(minimum.width, bounds.width)), Math.max(bounds.width, 1)));
-  const height = Math.round(Math.min(Math.max(value.height, Math.min(minimum.height, bounds.height)), Math.max(bounds.height, 1)));
-  return { width, height,
-    x: Math.round(Math.min(Math.max(value.x, 0), Math.max(bounds.width - width, 0))),
-    y: Math.round(Math.min(Math.max(value.y, 0), Math.max(bounds.height - height, 0))) };
+/**
+ * A window opens at most this share of its bounds wide and high, whatever its preferred size: on a small screen
+ * the window behind stays in sight around it.
+ */
+export const openingShare = 0.9;
+
+// The band at the top of the bounds a window keeps out of, the native title bar, unless the window would then not
+// have its minimum height: the window must stay reachable.
+function bandOf(bounds: WindowSize, minimum: WindowSize, top: number): number {
+  return Math.max(0, Math.min(top, bounds.height - minimum.height));
 }
 
-/** A window of the preferred size centered in its bounds. */
-export function centeredWindowGeometry(bounds: WindowSize, preferred: WindowSize, minimum: WindowSize): WindowGeometry {
-  return clampWindowGeometry({ width: preferred.width, height: preferred.height,
-    x: (bounds.width - preferred.width) / 2, y: (bounds.height - preferred.height) / 2 }, bounds, minimum);
+/**
+ * Keeps a window inside its bounds and below `top`, the height of a native title bar whose controls are drawn over
+ * the page, shrinking it only when the bounds are smaller than the window.
+ */
+export function clampWindowGeometry(value: WindowGeometry, bounds: WindowSize, minimum: WindowSize, top = 0): WindowGeometry {
+  const band = bandOf(bounds, minimum, top), free = bounds.height - band;
+  const width = Math.round(Math.min(Math.max(value.width, Math.min(minimum.width, bounds.width)), Math.max(bounds.width, 1)));
+  const height = Math.round(Math.min(Math.max(value.height, Math.min(minimum.height, free)), Math.max(free, 1)));
+  return { width, height,
+    x: Math.round(Math.min(Math.max(value.x, 0), Math.max(bounds.width - width, 0))),
+    y: Math.round(Math.min(Math.max(value.y, band), band + Math.max(free - height, 0))) };
+}
+
+/** A window of the preferred size, at most `openingShare` of its bounds, centered in them below `top`. */
+export function centeredWindowGeometry(bounds: WindowSize, preferred: WindowSize, minimum: WindowSize, top = 0): WindowGeometry {
+  const band = bandOf(bounds, minimum, top), free = bounds.height - band;
+  const width = Math.min(preferred.width, bounds.width * openingShare), height = Math.min(preferred.height, free * openingShare);
+  return clampWindowGeometry({ width, height, x: (bounds.width - width) / 2, y: band + (free - height) / 2 }, bounds, minimum, top);
 }
 
 /** Reads a stored geometry; anything malformed or non-finite is refused. */

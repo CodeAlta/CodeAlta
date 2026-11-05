@@ -1,8 +1,8 @@
 /* The Issues tab. It has the frame of the Work items tab (header, toolbar, lists as tabs, a list and a reader),
    with the colors people know from the services: green for what is open, purple for what is merged or done,
    red for a pull request closed without a merge, gray for a draft. */
-.issues-page { --issue-open: #2da44e; --issue-done: #8957e5; --issue-closed: #cf222e; --issue-draft: var(--muted); }
-:root:not([data-theme="light"]) .issues-page { --issue-open: #3fb950; --issue-done: #a371f7; --issue-closed: #f85149; }
+.issues-page { --issue-open: #2da44e; --issue-done: #8957e5; --issue-closed: #cf222e; --issue-bug: #cf222e; --issue-draft: var(--muted); }
+:root:not([data-theme="light"]) .issues-page { --issue-open: #3fb950; --issue-done: #a371f7; --issue-closed: #f85149; --issue-bug: #f85149; }
 .issues-emblem { background: linear-gradient(135deg, #3fb950, #2f81f7); }
 .issues-toolbar { display: flex; flex-wrap: wrap; align-items: center; }
 .issues-toolbar > .bp6-input-group { flex: 0 1 300px; min-width: 200px; }
@@ -76,8 +76,14 @@
 .issue-row-item[data-tone="open"] .issue-glyph, .issue-state[data-tone="open"] { color: var(--issue-open); }
 .issue-row-item[data-tone="done"] .issue-glyph, .issue-state[data-tone="done"] { color: var(--issue-done); }
 .issue-row-item[data-tone="closed"] .issue-glyph, .issue-state[data-tone="closed"] { color: var(--issue-closed); }
+/* A bug is red, as the trackers draw it, whatever its state: the tag of its state tells it. */
+.issue-row-item[data-tone] .issue-glyph[data-icon="issueBug"] { color: var(--issue-bug); }
 .issue-row-item[data-tone="draft"] .issue-glyph, .issue-state[data-tone="draft"] { color: var(--issue-draft); }
-.issue-state.bp6-tag { background: color-mix(in srgb, currentColor 14%, transparent); font-weight: 600; }
+/* Above the gray Blueprint gives a minimal tag, in both themes: the tag is tinted with the color of its text. */
+.issue-state.bp6-tag.bp6-minimal.bp6-round:not([class*="bp6-intent-"]) { background: color-mix(in srgb, currentColor 14%, transparent); font-weight: 600; }
+/* The color the tracker gives a state, kept readable: not too light on a light page, not too dark on a dark one. */
+.issue-state.bp6-tag.bp6-minimal[data-colored] { color: var(--issue-state-color); color: oklch(from var(--issue-state-color) min(l, 0.52) c h); }
+:root:not([data-theme="light"]) .issue-state.bp6-tag.bp6-minimal[data-colored] { color: var(--issue-state-color); color: oklch(from var(--issue-state-color) max(l, 0.78) c h); }
 .issue-ref { color: var(--muted); font-family: var(--bp-typography-family-mono); font-size: .92em; font-weight: 500; }
 .issue-row-item .issue-row-line { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 2px; }
 .issue-row-facts { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -85,7 +91,15 @@
 .issue-label { flex: 0 0 auto; min-width: 0; max-width: 150px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .issue-label[data-plain] { border: 1px solid var(--line-strong); color: var(--muted); font-weight: 500; }
 .issue-more { color: var(--muted); font-size: 11px; }
-.issue-comments { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+/* The two lines fit in the height of the title and its line of facts: the row is no higher than with one. */
+.issue-row-meta { flex-direction: column; align-items: flex-end; gap: 2px; }
+.issue-row-meta-line { display: inline-flex; align-items: center; gap: 6px; min-height: 16px; }
+.issue-row-meta-line:empty { display: none; }
+.issue-row-meta .issue-state.bp6-tag { min-height: 18px; height: 18px; padding: 0 7px; line-height: 18px; font-size: 11.5px; }
+.issue-assignees { display: inline-flex; align-items: center; gap: 3px; min-width: 0; max-width: 180px; color: var(--muted); font-size: 11.5px; cursor: default; }
+.issue-assignees > svg { flex: none; }
+.issue-assignees-names { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.issue-comments { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; vertical-align: bottom; }
 
 .issue-heading { display: grid; gap: 8px; min-width: 0; padding: 14px 4px 12px 20px; }
 .issue-heading h3 { margin: 0; font-size: 18px; font-weight: 650; line-height: 1.3; color: var(--text); overflow-wrap: anywhere; }
@@ -107,6 +121,32 @@
 .issue-place { font-family: var(--bp-typography-family-mono); font-size: .92em; }
 .issue-elsewhere { margin: 0; color: var(--muted); font-size: 12px; }
 .issue-detail .work-detail-actions { gap: 10px; }
+/* The branch of a new worktree: wide enough for a whole name, and no wider than the line. */
+.issue-branch { flex-wrap: nowrap; }
+.issue-branch .issue-branch-input { flex: 1 1 auto; min-width: 0; max-width: 560px; }
+.work-runs-with .issue-branch-toggle { margin: 0 0 0 10px; white-space: nowrap; font-size: 12px; color: var(--muted); }
+.issue-branch .issue-branch-input input { font-family: var(--bp-typography-family-mono); font-size: 12px; }
+/* The form of the scheme of the branches, in the popover of the button next to the field. */
+.branch-scheme { display: grid; align-content: start; gap: 10px; min-height: 0; min-width: 0; height: 100%; overflow-y: auto; margin: 0; border: 0; padding: 16px 20px; }
+.branch-scheme-head { display: flex; align-items: center; gap: 8px; }
+.branch-scheme-note, .branch-scheme-loading { margin: 0; color: var(--muted); font-size: 12px; }
+.branch-scheme-field { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12px; }
+.branch-scheme-field input, .branch-scheme-types input { font-family: var(--bp-typography-family-mono); font-size: 12px; }
+.branch-scheme-length .bp6-input-group { max-width: 90px; }
+.branch-scheme-placeholders { display: flex; gap: 6px; margin-left: 118px; }
+.branch-scheme-types { width: 100%; border-collapse: collapse; font-size: 12px; }
+.branch-scheme-types th { text-align: left; font-weight: 500; color: var(--muted); padding: 2px 4px; }
+.branch-scheme-types td { padding: 2px 4px; }
+.branch-scheme-types td:last-child, .branch-scheme-types th:last-child { width: 84px; }
+.branch-scheme-row-actions { white-space: nowrap; }
+.branch-scheme-others td:first-child { color: var(--muted); font-style: italic; }
+.branch-scheme-add { justify-self: start; }
+.branch-scheme-preview { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.branch-scheme-preview code { font-size: 12px; }
+.branch-scheme-problem { color: var(--bp-intent-danger-text, var(--muted)); }
+.branch-scheme-callout { font-size: 12px; overflow-wrap: anywhere; }
+.branch-scheme-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.issue-branch-problem { margin: -4px 0 0; color: var(--bp-intent-warning-text, var(--muted)); font-size: 12px; overflow-wrap: anywhere; }
 
 .issue-text { display: grid; gap: 4px; min-width: 0; }
 .issue-nothing { margin: 0; color: var(--muted); font-style: italic; font-size: 13px; }

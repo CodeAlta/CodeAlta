@@ -606,8 +606,8 @@ public sealed class IssueViewStore
 
     private static string KeyOf(string id) => id.StartsWith(FieldPrefix, StringComparison.Ordinal) && id.AsSpan(FieldPrefix.Length).Contains('.') ? id[FieldPrefix.Length..] : id;
 
-    // Edits a file of views under the lock of the file; the user's folder is kept out of git.
-    private static void Edit(IssueViewSource source, string projectRoot, Func<string, string> edit)
+    // Edits a file of the Issues tab (its views, its [branch] table) under the lock of the file; the user's folder is kept out of git.
+    internal static void Edit(IssueViewSource source, string projectRoot, Func<string, string> edit)
     {
         var path = Locate(source, projectRoot);
         var folder = System.IO.Path.GetDirectoryName(path)!;
@@ -621,7 +621,7 @@ public sealed class IssueViewStore
         }
         catch (Exception exception) when (exception is TomlException or InvalidOperationException or FormatException)
         {
-            throw new InvalidDataException($"The views of '{path}' would not be valid TOML.", exception);
+            throw new InvalidDataException($"'{path}' would not be valid TOML.", exception);
         }
 
         Directory.CreateDirectory(folder);
