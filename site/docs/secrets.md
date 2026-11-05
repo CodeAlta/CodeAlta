@@ -60,7 +60,7 @@ From CodeAlta Desktop, a computer paired with the machine that manages it change
 
 ## Secrets of your machines with a server
 
-With a [CodeAlta Server](fleet/server.md), the computer that made it sets the secrets and variables of all your machines in one place: open **Settings > Fleet > Secrets and environments**.
+With a [CodeAlta Server](fleet/server.md), the computer that made it sets the secrets and variables of all your machines in one place: open **Settings > Fleet > Secrets and environments**. Without a server, that page sends you to **Settings > Secrets**, where the values of this computer are.
 
 - **Add a value…** takes a secret or a variable, its name and value, where it applies, and the machines that get it.
 - **Where it applies**: **All my work**, a space linked to the server, a project, or an [environment](#environments). A run takes the value of the narrowest: its environment, then its project, its space, then all your work. A secret of the machine itself (**Settings > Secrets** on it, `altanode secrets`) comes first.

@@ -5,6 +5,7 @@ import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { ConfirmPopover } from "../ConfirmPopover";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../SettingsPage";
+import { settingsNavigation } from "../settingsNavigation";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { isSecretName, referenceOf, secretNameProblem } from "../secrets/secrets";
@@ -31,9 +32,20 @@ export function FleetSecretsSettings({ epoch, api = fleetServer }: { epoch: stri
   return <SettingsPage className="fleet-secrets-settings" label={t("Secrets and environments")} group="Fleet" title="Secrets and environments"
     description="Named values of your machines, sealed on this computer for the machines that use them." notice={notice} loading={loading} busy={busy} onReload={reload}>
     {!listing ? <SettingsUnavailable loading={loading} icon="secret" title="Servers unavailable" />
-      : servers.length === 0 ? <NonIdealState className="fleet-secrets-empty" icon={<AppIcon name="server" size={36} />} title={t("Not linked to a server.")} />
+      : servers.length === 0 ? <NoServerSecrets />
       : servers.map(server => <ServerSecrets key={server.id} server={server} epoch={epoch ?? ""} api={api} titled={servers.length > 1} />)}
   </SettingsPage>;
+}
+
+/**
+ * The page without a server. The values of this computer itself are on Settings > Secrets, which needs no fleet: this page,
+ * whose title is close to it, says where they are.
+ */
+export function NoServerSecrets({ openSecrets = () => settingsNavigation.open("secrets") }: { openSecrets?: () => void }) {
+  const { t } = useShellLanguage();
+  return <NonIdealState className="fleet-secrets-empty" icon={<AppIcon name="server" size={36} />} title={t("Not linked to a server.")}
+    description={t("The secrets and variables of this computer are in Settings > Secrets.")}
+    action={<Button icon={<AppIcon name="secret" size={15} />} onClick={openSecrets}>{t("Secrets")}</Button>} />;
 }
 
 /** The values, environments and approvals of one server. */

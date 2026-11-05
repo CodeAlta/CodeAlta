@@ -66,4 +66,10 @@ export const fleetSecretMessages = {
     "{name} 将其标签发布到其服务器；环境只在带有其某个标签的机器上运行。"],
   "No label.": ["Sin etiquetas.", "Aucune étiquette.", "Keine Labels.", "ラベルはありません。", "没有标签。"],
   "New labels": ["Etiquetas nuevas", "Nouvelles étiquettes", "Neue Labels", "新しいラベル", "新标签"],
+  "The secrets and variables of this computer are in Settings > Secrets.": [
+    "Los secretos y las variables de este equipo están en Configuración > Secretos.",
+    "Les secrets et les variables de cet ordinateur sont dans Paramètres > Secrets.",
+    "Die Geheimnisse und Variablen dieses Computers sind unter Einstellungen > Geheimnisse.",
+    "このコンピューターのシークレットと変数は 設定 > シークレット にあります。",
+    "本计算机的机密和变量位于“设置 > 机密”中。"],
 } satisfies Record<string, Row>;
