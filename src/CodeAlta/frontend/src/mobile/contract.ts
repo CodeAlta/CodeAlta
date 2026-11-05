@@ -299,6 +299,9 @@ export type ToolOutputPlace = Readonly<{ offset?: number; before?: number }>;
 /** A page of the output of a tool call, from its character `outputOffset` (`GET /api/sessions/<id>/tools/<activity id>/output`). */
 export type ToolOutputPage = Readonly<{ output?: string | null; outputOffset?: number; outputLength?: number; error: string | null }>;
 
+/** A page of a file that a message links, with its full path and, on the page around them, where in the file the lines the link names are (`GET /api/sessions/<id>/file`). */
+export type LinkedFilePage = ToolOutputPage & Readonly<{ path?: string | null; markStart?: number; markEnd?: number }>;
+
 /** A question of an ask: answered with one of its choices, with text, or both. */
 export type AskQuestion = Readonly<{
   title: string;

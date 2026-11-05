@@ -11,7 +11,7 @@ import { activityLine, el, icon, iconSvg, type IconName } from "./dom";
 import { createDrafts, newSessionDraft } from "./drafts";
 import { installedApp, setUpInstall } from "./install";
 import { createLiveStream, type LinkState } from "./liveStream";
-import { createMarkdownView } from "./markdownView";
+import { createMarkdownView, linkedFileName, linksMarkdown } from "./markdownView";
 import {
   choiceLabel, choiceRequest, entryName, findModel, forgetMode, groupVariants, initialChoice, lastProjectKey, modelsOf, orderModels, pickEffort, pickModel, preferencesKey,
   providerName, providers, rememberChoice, tierChoice, tierLabel, tierReady, tierText, variantLabels, type Choice, type ProjectPreferences,
@@ -26,7 +26,7 @@ import { topLevelCount } from "./sessionTree";
 import { createSheet } from "./sheet";
 import { ago, pageSize, readSizes, createSessionStore, type SessionView } from "./sessionStore";
 import {
-  activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, prependEvents, stillPending, withDays, withQueue, type DayBlock, type PendingPrompt, type TimelineBlock,
+  activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, prependEvents, stillPending, subjectPath, withDays, withQueue, type DayBlock, type PendingPrompt, type TimelineBlock,
 } from "./timeline";
 import { createImageViewer } from "./imageViewer";
 import { createOutputViewer } from "./outputViewer";
@@ -333,13 +333,50 @@ export function startMobile(window: Window & typeof globalThis) {
   const removedFromQueue = new Set<string>();
   let pendingSeq = 0;
   let working: HTMLLIElement | null = null;
-  markdown.handle(timeline);
+  const outputViewer = createOutputViewer({ window });
+
+  // A Markdown file, drawn again as more of it is read; a diagram or a formula that comes later draws the text as it is then.
+  function drawnMarkdown() {
+    let target: HTMLElement | null = null, shown = "";
+    const fill = () => { if (target) markdown.fill(target, shown, fill); };
+    return {
+      prepare: (element: HTMLElement) => markdown.handle(element, text => showToast(text)),
+      draw: (element: HTMLElement, text: string) => { target = element; shown = text; fill(); },
+    };
+  }
+
+  // A file a message links, a page at a time. Its title is the name the link gives, then the path the server found.
+  function openLinkedFile(href: string, seq: number) {
+    const id = detail.id;
+    if (!id) return;
+    const name = document.createElement("strong");
+    name.textContent = "File";
+    const subject = document.createElement("span");
+    subject.className = "tool-subject";
+    subject.textContent = linkedFileName(href);
+    outputViewer.open([name, subject], async place => {
+      const page = await api.linkedFile(id, seq, href, place);
+      const path = page.path ? subjectPath(page.path) : null;
+      if (path) {
+        const folders = document.createElement("span"), file = document.createElement("span");
+        folders.className = "tool-path-folders";
+        folders.textContent = path.folders;
+        file.className = "tool-path-file";
+        file.textContent = path.file;
+        subject.classList.add("tool-path");
+        subject.replaceChildren(folders, file);
+      }
+      return page;
+    }, false, { label: `File ${linkedFileName(href)}`, drawn: linksMarkdown(href) ? drawnMarkdown() : undefined });
+  }
+
+  markdown.handle(timeline, text => showToast(text), openLinkedFile);
   const blocksView = createTimelineView({
     document, fill: (element, text, redraw) => markdown.fill(element, text, redraw), session: () => detail.id,
     sessionTitle: id => sessions.view(id)?.title ?? null,
     openSession: id => { window.location.hash = `#/session/${encodeURIComponent(id)}`; },
     viewer: createImageViewer({ window }),
-    outputViewer: createOutputViewer({ window }),
+    outputViewer,
     readTool: (activityId, seq) => {
       if (!detail.id) return Promise.reject(new Error("No session is open."));
       return api.tool(detail.id, activityId, seq === undefined ? undefined : Math.max(0, seq - 1));

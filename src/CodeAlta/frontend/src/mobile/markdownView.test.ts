@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDiagramPages, diagramPageSvg, linkTarget } from "./markdownView";
+import { createDiagramPages, diagramPageSvg, linkedFileName, linksMarkdown, linkTarget } from "./markdownView";
 
 const look = { dark: true, variables: { "--pele-bg": "#2f343c", "--pele-fg": "#f6f7f9" } };
 
@@ -35,10 +35,28 @@ test("a page that could not be made is asked for again at the next open", async 
   assert.equal(attempts, 2);
 });
 
-test("a link of a message opens a page of the web; a link to a file of the computer does nothing on the phone", () => {
+test("a link of a message opens a page of the web or reads a file of the computer", () => {
   assert.equal(linkTarget("https://example.com/a"), "web");
   assert.equal(linkTarget("mailto:me@example.com"), "web");
-  assert.equal(linkTarget("src/Program.cs#L3"), "none");
-  assert.equal(linkTarget("C:/code/a.md"), "none");
+  assert.equal(linkTarget("src/Program.cs#L3"), "file");
+  assert.equal(linkTarget("C:/code/a.md"), "file");
+  assert.equal(linkTarget("C:%5Ccode%5Ca%20b.md"), "file");
+  assert.equal(linkTarget("file:///tmp/a.txt"), "file");
+  assert.equal(linkTarget("//server/share/a.txt"), "none", "a file of another computer");
+  assert.equal(linkTarget("#heading"), "none");
   assert.equal(linkTarget(null), "none");
+});
+
+test("a Markdown file is drawn, unless its link goes to a line of its source", () => {
+  assert.equal(linksMarkdown("docs/a.md"), true);
+  assert.equal(linksMarkdown("C:%5Cdocs%5CA.MD#getting-started"), true);
+  assert.equal(linksMarkdown("docs/a.md#L12"), false);
+  assert.equal(linksMarkdown("docs/a.md:12"), false);
+  assert.equal(linksMarkdown("src/a.cs"), false);
+});
+
+test("a linked file is named by the end of its path", () => {
+  assert.equal(linkedFileName("C:%5Ccode%5Ca%20b.md#L2"), "a b.md");
+  assert.equal(linkedFileName("src/a.cs"), "a.cs");
+  assert.equal(linkedFileName("a%zz.md"), "a%zz.md");
 });
