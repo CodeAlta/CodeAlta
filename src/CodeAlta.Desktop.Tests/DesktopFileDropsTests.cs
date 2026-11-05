@@ -133,6 +133,43 @@ public sealed class DesktopFileDropsTests
         }
     }
 
+    // A file that grows after its length was read (a log being written) is read to its end: never a prefix that looks
+    // whole, and never more than an attachment.
+    [TestMethod]
+    public async Task DroppedFile_ThatGrowsWhileItIsRead_IsReadToItsEnd_OrRefusedPastAnAttachment()
+    {
+        var root = Folder();
+        try
+        {
+            var log = Path.Combine(root, "build.log");
+            await File.WriteAllTextAsync(log, "hello");
+            var grown = "hello, then the rest of the log"u8.ToArray();
+            var content = grown;
+            var drops = new DesktopFileDrops(open: _ => new GrowingStream(content, observedLength: 5));
+
+            var drop = drops.Take(0, 0, [log])!;
+            Assert.AreEqual(
+                new DesktopShellDroppedFileResponse("ok", "build.log", "text/plain", Convert.ToBase64String(grown)),
+                await drops.ReadAsync(drop.Files[0].Id, CancellationToken.None));
+
+            content = new byte[DesktopFileDrops.MaximumFileBytes + 1];
+            drop = drops.Take(0, 0, [log])!;
+            Assert.AreEqual(
+                new DesktopShellDroppedFileResponse("too_large", "build.log", null, null),
+                await drops.ReadAsync(drop.Files[0].Id, CancellationToken.None));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // A file whose length, read when it is opened, is shorter than what it holds once read: it grew in between.
+    private sealed class GrowingStream(byte[] content, long observedLength) : MemoryStream(content, writable: false)
+    {
+        public override long Length => observedLength;
+    }
+
     [TestMethod]
     public async Task DroppedFiles_ExpireAndAreBounded()
     {

@@ -30,10 +30,19 @@ internal sealed class DesktopFileDrops
     private readonly Dictionary<string, (string Path, string Name, DateTimeOffset Expires, long Sequence)> _files = new(StringComparer.Ordinal);
     private long _sequence;
     private readonly TimeProvider _time;
+    private readonly Func<string, Stream> _open;
 
     /// <summary>Creates the dropped files of the application.</summary>
     /// <param name="time">The clock of their lifetime; the system clock by default.</param>
-    internal DesktopFileDrops(TimeProvider? time = null) => _time = time ?? TimeProvider.System;
+    /// <param name="open">Opens a dropped file to read it; the file system by default.</param>
+    internal DesktopFileDrops(TimeProvider? time = null, Func<string, Stream>? open = null)
+    {
+        _time = time ?? TimeProvider.System;
+        _open = open ?? OpenFile;
+    }
+
+    private static Stream OpenFile(string path)
+        => new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 81920, useAsync: true);
 
     /// <summary>Whether the page of a view gets the files dropped on it by itself: on macOS only.</summary>
     internal static bool PageGetsDrops => OperatingSystem.IsMacOS();
@@ -142,13 +151,23 @@ internal sealed class DesktopFileDrops
         }
         try
         {
-            await using var stream = new FileStream(file.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 81920, useAsync: true);
+            await using var stream = _open(file.Path);
             if (stream.Length > MaximumFileBytes) return new("too_large", file.Name, null, null);
-            // The file may grow while it is read: one byte more than an attachment is enough to tell.
+            // The file may grow after its length was read: it is read to its end, never past one byte more than an
+            // attachment, which is enough to refuse it, so that a prefix of it is never taken for the whole.
             var buffer = new byte[Math.Min(stream.Length, MaximumFileBytes) + 1];
             var read = 0;
-            while (read < buffer.Length && await stream.ReadAsync(buffer.AsMemory(read), cancellationToken).ConfigureAwait(false) is var count and > 0) read += count;
-            if (read > MaximumFileBytes) return new("too_large", file.Name, null, null);
+            while (true)
+            {
+                if (read == buffer.Length)
+                {
+                    if (read > MaximumFileBytes) return new("too_large", file.Name, null, null);
+                    Array.Resize(ref buffer, (int)Math.Min(Math.Max(buffer.Length * 2L, 81920), MaximumFileBytes + 1L));
+                }
+                var count = await stream.ReadAsync(buffer.AsMemory(read), cancellationToken).ConfigureAwait(false);
+                if (count == 0) break;
+                read += count;
+            }
             var content = buffer.AsSpan(0, read);
             return new("ok", file.Name, AgentAttachedFiles.FindMediaType(content, file.Name), Convert.ToBase64String(content));
         }
