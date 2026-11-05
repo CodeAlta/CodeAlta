@@ -45,8 +45,9 @@ Exposure is progressive, so a session pays in context only for the servers it us
    The activation is journaled (`AgentRunTools.KeepLoaded`, `local.toolLoad`) and restored at every run, also after a
    restart.
 3. Each tool that passes policy (`enabled`, `allowed_tools`, `disabled_tools`) is an agent tool named
-   `mcp__<server>__<tool>`, sanitized with a stable hash suffix on collision. Its MCP `inputSchema` is passed through
-   when CodeAlta's strict tool schema can express it, else as an `arguments_json` string.
+   `mcp__<server>__<tool>`, sanitized with a stable hash suffix on collision. Its MCP `inputSchema` (and
+   `outputSchema`) is passed through as it is: a provider that cannot take part of a schema rewrites it when it builds
+   its request, never the plugin for every provider.
 
 **Deferred tools.** A provider that supports tool search (see [providers](providers.md)) is offered the tools of every
 enabled server of the space, not only activated ones: deferred, grouped by server, from the tool-list cache, without

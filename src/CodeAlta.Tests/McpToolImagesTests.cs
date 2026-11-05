@@ -26,7 +26,7 @@ public sealed partial class McpRuntimeServiceTests
             Plugin = CreatePluginDescriptor(), Services = NoopPluginServices.Create(), ProjectPath = project.Path, SessionId = "one",
         });
         var rich = before!.AdditionalTools.Single(tool => tool.Spec.Name == "mcp__tiny__rich");
-        using var arguments = JsonDocument.Parse("""{"arguments_json":"{}"}""");
+        using var arguments = JsonDocument.Parse("""{}""");
 
         var result = await rich.Handler(new AgentToolInvocation(new ModelProviderId("test"), "one", "call", rich.Spec.Name, arguments.RootElement.Clone()), CancellationToken.None);
 

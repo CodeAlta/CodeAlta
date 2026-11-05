@@ -267,8 +267,10 @@ public sealed partial class McpRuntimeServiceTests
         Assert.AreEqual(before, other);
     }
 
+    // A schema that OpenAI strict mode cannot express (an open map, a required name without its property) is sent as
+    // it is: no provider refuses it, OpenAI sends it non-strict, and the model fills the real arguments.
     [TestMethod]
-    public async Task PluginBeforeAgentRun_WrapsIncompatibleMcpToolSchemaArgumentsJson()
+    public async Task PluginBeforeAgentRun_SendsTheSchemaOfAnMcpToolAsItIs()
     {
         using var project = TempDirectory.Create();
         WriteTinyServerConfig(
@@ -310,14 +312,14 @@ public sealed partial class McpRuntimeServiceTests
         var tool = before.AdditionalTools.Single();
         Assert.AreEqual("mcp__atlassian__editJiraIssue", tool.Spec.Name);
         var schema = tool.Spec.InputSchema;
-        var properties = schema.GetProperty("properties");
-        Assert.IsTrue(properties.TryGetProperty("arguments_json", out var argumentsJsonSchema));
-        Assert.AreEqual("string", argumentsJsonSchema.GetProperty("type").GetString());
-        Assert.IsFalse(properties.TryGetProperty("fields", out _));
-        StringAssert.Contains(argumentsJsonSchema.GetProperty("description").GetString(), "Original MCP input schema");
+        Assert.IsFalse(schema.TryGetProperty("properties", out _), schema.GetRawText());
+        Assert.AreEqual("fields", schema.GetProperty("required").EnumerateArray().Single().GetString());
+        var map = schema.GetProperty("additionalProperties");
+        Assert.AreEqual("object", map.GetProperty("type").GetString());
+        Assert.AreEqual(JsonValueKind.True, map.GetProperty("additionalProperties").ValueKind);
 
         using var arguments = JsonDocument.Parse("""
-            { "arguments_json": "{\"fields\":{\"summary\":\"Updated\"}}" }
+            { "fields": { "summary": "Updated" } }
             """);
         var result = await tool.Handler(
             new AgentToolInvocation(new ModelProviderId("test"), "session", "call", tool.Spec.Name, arguments.RootElement.Clone()),
@@ -327,22 +329,12 @@ public sealed partial class McpRuntimeServiceTests
         StringAssert.Contains(text, "jira:");
         StringAssert.Contains(text, "\"fields\":{\"summary\":\"Updated\"}");
 
-        using var invalidArguments = JsonDocument.Parse("""{ "arguments_json": "not json" }""");
+        using var invalidArguments = JsonDocument.Parse("""[ "not", "an", "object" ]""");
         var invalidResult = await tool.Handler(
             new AgentToolInvocation(new ModelProviderId("test"), "session", "call", tool.Spec.Name, invalidArguments.RootElement.Clone()),
             CancellationToken.None);
         Assert.IsFalse(invalidResult.Success);
-        StringAssert.Contains(invalidResult.Error, "valid JSON");
-    }
-
-    [TestMethod]
-    public void McpPlugin_RequiresArgumentsJsonWrapper_ForImplicitDynamicObjectSchema()
-    {
-        using var openObject = JsonDocument.Parse("""{ "type": "object" }""");
-        using var closedObject = JsonDocument.Parse("""{ "type": "object", "properties": {}, "additionalProperties": false }""");
-
-        Assert.IsTrue(McpPlugin.RequiresArgumentsJsonWrapper(openObject.RootElement));
-        Assert.IsFalse(McpPlugin.RequiresArgumentsJsonWrapper(closedObject.RootElement));
+        StringAssert.Contains(invalidResult.Error, "must be a JSON object");
     }
 
     [TestMethod]

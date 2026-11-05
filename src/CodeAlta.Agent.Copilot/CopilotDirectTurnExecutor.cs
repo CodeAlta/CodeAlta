@@ -152,7 +152,7 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         CancellationToken cancellationToken)
     {
         var profile = _provider.Profile ?? CreateOpenAIChatProfile(request.ModelInfo);
-        if (profile.SupportsToolSchemaTypeUnions && IsGeminiModel(request))
+        if (profile.SupportsToolSchemaTypeUnions && IsModelOfFamily(request, "gemini"))
         {
             // Copilot refuses a Gemini request whose tool schema gives a value several types, such as the path of grep
             // (["string", "array"]): HTTP 400 invalid_request_body. The schema of Gemini has a single type.
@@ -175,10 +175,10 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
             SupportsReasoningEffort = modelInfo?.SupportedReasoningEfforts is { Count: > 0 },
         };
 
-    private static bool IsGeminiModel(AgentTurnRequest request)
-        => (request.ModelId ?? request.ModelInfo?.Id)?.StartsWith("gemini", StringComparison.OrdinalIgnoreCase) == true ||
-           request.ModelInfo?.Capabilities?.TryGetValue("family", out var family) == true &&
-           family?.ToString()?.StartsWith("gemini", StringComparison.OrdinalIgnoreCase) == true;
+    private static bool IsModelOfFamily(AgentTurnRequest request, string family)
+        => (request.ModelId ?? request.ModelInfo?.Id)?.StartsWith(family, StringComparison.OrdinalIgnoreCase) == true ||
+           request.ModelInfo?.Capabilities?.TryGetValue("family", out var modelFamily) == true &&
+           modelFamily?.ToString()?.StartsWith(family, StringComparison.OrdinalIgnoreCase) == true;
 
     private async Task<AgentTurnResponse> ExecuteOpenAIResponsesAsync(
         AgentTurnRequest request,
@@ -335,7 +335,8 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
             BaseUri = credential.BaseUri,
             Profile = profile,
         };
-        return request with { Provider = provider };
+        // Every endpoint of Copilot refuses the same parts of a tool schema.
+        return request with { Provider = provider, Tools = CopilotToolSchemas.Normalize(request.Tools, IsModelOfFamily(request, "gpt-4")) };
     }
 
     private static bool ShouldRefreshCredential(Exception exception)
