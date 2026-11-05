@@ -125,7 +125,8 @@ public sealed class IssueBranchSchemeTests
 
         IssueBranchSchemes.Save(IssueViewSource.Team, project.Root, new("{type}/{id}-{title}", 25, [new("Bug", "fix"), new("User Story", "story"), new("*", "feature")]));
 
-        var text = File.ReadAllText(Path.Combine(project.Root, ".alta", "issues.toml"));
+        // The save keeps the line endings of the file, which are those of this source file's checkout (CRLF with autocrlf).
+        var text = File.ReadAllText(Path.Combine(project.Root, ".alta", "issues.toml")).ReplaceLineEndings("\n");
         StringAssert.Contains(text, "[azure_devops.views.Bugs.type]\nvalue = \"Bug\"");
         Assert.IsFalse(text.Contains("old/{id}", StringComparison.Ordinal) || text.Contains("Epic", StringComparison.Ordinal), text);
         var reading = IssueBranchSchemes.Read(project.Root);
