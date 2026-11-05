@@ -343,6 +343,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         DesktopKeepAwake? keepAwake = null;
         DesktopExitSignals? exitSignals = null;
         DesktopUiWatchdog? uiWatchdog = null;
+        // The files dropped on the windows where the page does not get them.
+        var fileDrops = new DesktopFileDrops();
+        IDisposable? fileDropsLifetime = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null, instanceLifetime = null;
         IAsyncDisposable? uiLifetime = null;
         IAsyncDisposable? sessionTaskbarProgress = null;
@@ -609,6 +612,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // other desktops do not wait for their entry.
             await chrome.ApplyWindowIconAsync(window, OperatingSystem.IsMacOS() && (await entry).IconChanged);
             shell.Dialogs = chrome.Services.Dialogs;
+            // Where NeoAstra takes the files dropped from the file manager away from the page, the page is told of them.
+            fileDropsLifetime = fileDrops.Follow(chrome.Services.DragDrop, shell.NotifyDrop, DesktopFileDrops.PageGetsDrops,
+                label => OperatingSystem.IsWindows() && application.TryGetView(label, out var dropped) && dropped?.Window is { } owner ? owner.ScaleFactor : 1,
+                () => shell.Zoom / 100d);
             await shell.StartTrayAsync(chrome.Services, options.Developer);
             await shell.StartApplicationMenuAsync(chrome.Services, options.Developer);
             instanceLifetime = await AcquireInstanceAsync(application, options);
@@ -633,7 +640,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             view.ProcessFailed += (_, _) => retention?.ProtectionRpc.InvalidatePage();
             view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
             // The files attached to a prompt are chosen with the dialog of the system.
-            view.FileChooserRequested = request => DesktopFileChooser.ChooseAsync(window, shell.Dialogs, request);
+            view.FileChooserRequested = request => DesktopFileChooser.ChooseAsync(window, shell.Dialogs, request,
+                problem => shell.NotifyDialogProblem(Windows.DesktopWindows.MainLabel, "files", problem));
             // The page records the microphone for speech to prompt, and only while that is turned on.
             view.PermissionRequested = request => ValueTask.FromResult(DecidePermission(request, speech?.IsMicrophoneAllowed() == true));
             // The start-up screen first, then the window: it appears with the logo on its theme, never empty.
@@ -993,7 +1001,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         RememberAppearance = RememberAppearance, ProviderSetup = NeedsProviderSetup(configStore), Closing = closing,
                     });
-                    builder.AddDesktopShellService(new DesktopShellService(shell) { ForceExitHost = () => ForceExit(closing) });
+                    builder.AddDesktopShellService(new DesktopShellService(shell) { ForceExitHost = () => ForceExit(closing), Drops = fileDrops });
                     // The windows: which one a page is, the tabs it holds, the tabs it moves or drags to another one.
                     builder.AddWindowsService(new WindowsService(windows, () => application.GetWindowCapability(NeoWindowCapability.Placement).IsSupported));
                     builder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot!));
@@ -1244,7 +1252,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                             DesktopWindowFocus.Follow(secondary, secondaryView, application.Dispatcher);
                             secondaryView.NavigationRequested = request => ValueTask.FromResult(DecideNavigation(request));
                             secondaryView.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
-                            secondaryView.FileChooserRequested = request => DesktopFileChooser.ChooseAsync(secondary, shell.Dialogs, request);
+                            secondaryView.FileChooserRequested = request => DesktopFileChooser.ChooseAsync(secondary, shell.Dialogs, request,
+                                problem => shell.NotifyDialogProblem(secondaryView.ViewLabel ?? Windows.DesktopWindows.MainLabel, "files", problem));
                             secondaryView.PermissionRequested = request => ValueTask.FromResult(DecidePermission(request, speech?.IsMicrophoneAllowed() == true));
                         }
                         windows.Attach(new Windows.DesktopWindowServices(environment, chrome, rpc, () => appearances.Latest, () => shell.Zoom / 100d, ConfigureSecondaryView));
@@ -1321,6 +1330,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         keepAwake?.Dispose();
         exitSignals?.Dispose();
         uiWatchdog?.Dispose();
+        fileDropsLifetime?.Dispose();
         // The secondary windows are kept for the next start, then closed without asking their pages: their views and
         // bindings end before the RPC host does.
         if (desktopWindows is not null) await desktopWindows.SaveAndCloseForExitAsync();

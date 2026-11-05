@@ -173,6 +173,8 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(DesktopShellRevealEntryResponse))]
 [JsonSerializable(typeof(DesktopShellPickFolderRequest))]
 [JsonSerializable(typeof(DesktopShellPickFolderResponse))]
+[JsonSerializable(typeof(DesktopShellReadDroppedFileRequest))]
+[JsonSerializable(typeof(DesktopShellDroppedFileResponse))]
 [JsonSerializable(typeof(DesktopShellPreferences))]
 [JsonSerializable(typeof(DesktopShellEvent))]
 [JsonSerializable(typeof(ExternalEditorsListRequest))]

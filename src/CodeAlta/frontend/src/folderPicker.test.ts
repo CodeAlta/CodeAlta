@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { folderPickTimeoutMilliseconds, pickFolder, sameFolder } from "./folderPicker";
+import { folderPickNotice, folderPickTimeoutMilliseconds, folderTitle, pickFolder, sameFolder } from "./folderPicker";
 
 test("a folder pick returns the chosen folder and asks with the title and the trimmed start folder", async () => {
   const requests: unknown[] = [];
@@ -20,6 +20,23 @@ test("a folder pick that chose nothing reports why, and anything else is a faile
     { status: "ok", path: "C:\\a\0b" }, { status: "ok", path: "x".repeat(4097) }, { status: "later", path: "C:\\a" }])
     assert.deepEqual(await pickFolder(async () => reply, "Title", null), { status: "failed" });
   assert.deepEqual(await pickFolder(async () => { throw new Error("closed"); }, "Title", null), { status: "failed" });
+});
+
+test("a folder pick without a dialog on this desktop, or whose dialog failed, is never silent", () => {
+  assert.equal(folderPickNotice({ status: "unavailable" }), "No folder dialog is available on this desktop: drop the folder on the prompt instead.");
+  assert.equal(folderPickNotice({ status: "failed" }), "The folder dialog could not be shown.");
+  // Beside a field, the path can be typed instead.
+  assert.equal(folderPickNotice({ status: "unavailable" }, "type"), "No folder dialog is available on this desktop: type the path of the folder instead.");
+  assert.equal(folderPickNotice({ status: "failed" }, "type"), "The folder dialog could not be shown.");
+  // The user closed the dialog, or another one is open: there is nothing to say.
+  for (const status of ["canceled", "busy"] as const) assert.equal(folderPickNotice({ status }), null);
+  assert.equal(folderPickNotice({ status: "ok", path: "/home/me" }), null);
+});
+
+test("a folder is attached under its name, a root under its path", () => {
+  assert.equal(folderTitle("C:\\code\\App\\"), "App");
+  assert.equal(folderTitle("/home/me/docs"), "docs");
+  assert.equal(folderTitle("/"), "/");
 });
 
 test("two paths name the same folder whatever their case and trailing separator", () => {

@@ -7,7 +7,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// <summary>
 /// The page's side of how the application lives beyond its window: what closing the window does and the
 /// question the page asks about it, an explicit exit, the question the page asks before an exit that would stop
-/// running sessions, and the operating system's folder dialog.
+/// running sessions, the operating system's folder dialog, and the files dropped on a window where the host gets them.
 /// </summary>
 [NeoRpcService("desktopShell", Version = 1)]
 internal sealed class DesktopShellService
@@ -197,6 +197,22 @@ internal sealed class DesktopShellService
             };
     }
 
+    /// <summary>
+    /// Reads, once, a file dropped on the window that a <c>files-dropped</c> notice of <see cref="Watch"/> named: its
+    /// name, its media type and its content, as a file input gives them to the page. <c>not_found</c> for an id that is
+    /// not, or no longer, one of a drop; <c>too_large</c> for a file larger than an attachment; <c>failed</c> for a file
+    /// that cannot be read; <c>unavailable</c> without a shell.
+    /// </summary>
+    [NeoRpcMethod("readDroppedFile")]
+    public async Task<DesktopShellDroppedFileResponse> ReadDroppedFileAsync(DesktopShellReadDroppedFileRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return _shell is null || Drops is null ? new("unavailable", null, null, null) : await Drops.ReadAsync(request.Id, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The files dropped on the windows; null where the host gets no drop.</summary>
+    internal DesktopFileDrops? Drops { get; init; }
+
     // The title the page asks for, as one bounded line; the default when it gives none.
     internal static string Title(string? value)
     {
@@ -264,6 +280,15 @@ internal sealed record DesktopShellPickFolderRequest(string? Title, string? Init
 /// </param>
 /// <param name="Path">The full path of the chosen folder; null unless <c>ok</c>.</param>
 internal sealed record DesktopShellPickFolderResponse(string Status, string? Path);
+
+/// <param name="Id">The id of a dropped file, from a <c>files-dropped</c> notice.</param>
+internal sealed record DesktopShellReadDroppedFileRequest(string? Id);
+
+/// <param name="Status"><c>ok</c>, <c>not_found</c>, <c>too_large</c>, <c>failed</c> or <c>unavailable</c>.</param>
+/// <param name="Name">The name of the file, without its folder; null when the id names no file.</param>
+/// <param name="MediaType">Its media type, from its content; null unless <c>ok</c>.</param>
+/// <param name="Base64">Its content; null unless <c>ok</c>.</param>
+internal sealed record DesktopShellDroppedFileResponse(string Status, string? Name, string? MediaType, string? Base64);
 
 /// <param name="Confirmed">The user already agreed to stop the running sessions.</param>
 internal sealed record DesktopShellExitRequest(bool Confirmed);

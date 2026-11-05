@@ -154,6 +154,8 @@ In the desktop app, the paperclip button of the prompt bar opens a menu (in the 
 - **Add folder…** (`Ctrl+Alt+F` or `/attach_folder`) opens the folder dialog in the session's folder. A folder of the project reaches the agent as with `@`; any other folder, by its full path.
 - **Add issues…** (`Ctrl+Alt+I` or `/attach_issues`) opens the issue picker: check issues with a click, their box or `Shift+Enter`, then **Attach** (or `Enter`). **Cancel** (or `Esc`) drops them.
 
+On Windows and Linux, files and folders dropped anywhere on a session go to its prompt, and each folder is added as with **Add folder…**. On a desktop with no file or folder dialog (a Linux desktop without the desktop portal or `zenity`), a notice says so: drop or paste the files instead.
+
 Each attachment appears above the prompt; click a file or an image to preview, rename or remove it. When the prompt is sent, the links of folders and issues are added at the end of its text, and CodeAlta keeps a copy of each file with the session, so editing or deleting the original later changes nothing. The model gets each file in a form it reads:
 
 | File | What the model gets |

@@ -25,6 +25,7 @@ import { NewSessionPopover } from "./NewSessionPopover";
 import { SessionStartProgress, type SessionStartStep } from "./SessionStartProgress";
 import { CloseWindowDialog } from "./CloseWindowDialog";
 import { closeBehavior, entryAddedGuide, entryAddedNotice, turnAlertMode, type CloseBehavior, type TurnAlertMode } from "./desktopShell";
+import { deliverHostDrop, readHostDrop } from "./hostDrops";
 import { EntryAddedDialog } from "./EntryAddedDialog";
 import { showToast } from "./appToaster";
 import { availableUpdate, installedNotice, runtimeNotification, updateCheckInterval, updateToAnnounce, updateNotification, UpdateToaster, type AvailableUpdate } from "./UpdateNotice";
@@ -78,7 +79,7 @@ import { changeKeyKept } from "./changes/projectChanges";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { ReadOnlyComposer } from "./ReadOnlyComposer";
 import { useLocalDraftImages } from "./useLocalDraftImages";
-import { imageLimits } from "./promptImages";
+import { attachmentLimits, imageLimits } from "./promptImages";
 import { ModelCatalogPanel } from "./ModelCatalogPanel";
 import { ProvidersPanel } from "./ProvidersPanel";
 import { AgentPromptSettings } from "./AgentPromptSettings";
@@ -2312,6 +2313,19 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             if (notice.sessionId) setSessionWidths(current => withSessionWidth(current, notice.sessionId!, notice.sessionWidth));
             else if (validSessionWidth(notice.sessionWidth)) setSessionWidthValue(notice.sessionWidth);
           }
+          // Files or folders dropped from the file manager, which the host took (Linux, Windows): they go to the prompt under the point.
+          else if (notice.kind === "files-dropped") {
+            const drop = readHostDrop(notice.drop);
+            if (drop) void deliverHostDrop(drop, desktopShell.readDroppedFile).then(({ problems }) => {
+              for (const problem of problems) showToast({ intent: "warning", icon: "warning-sign", timeout: 8000, message: problem.reason === "too_large"
+                ? translate(shownLocale.current, "Could not attach {name}: a file of 1 byte to {size} MB is required.", { name: problem.name, size: attachmentLimits.fileBytes / 1024 / 1024 })
+                : translate(shownLocale.current, "Could not read the dropped file {name}.", { name: problem.name }) });
+            });
+          }
+          // The file dialog a file input asked for could not be shown: the button would otherwise do nothing.
+          else if (notice.kind === "dialog-problem" && notice.dialog === "files" && (notice.problem === "unavailable" || notice.problem === "failed"))
+            showToast({ intent: "warning", icon: "warning-sign", timeout: 8000, message: translate(shownLocale.current, notice.problem === "unavailable"
+              ? "No file dialog is available on this desktop: drop the files on the prompt or paste them instead." : "The file dialog could not be shown.") }, "file-dialog-problem");
           // A plugin was built again, started or stopped while the application runs.
           else if (notice.kind === "plugins-changed") { setPluginRevision(value => value + 1); window.dispatchEvent(new Event(pluginsChangedEvent)); }
         }

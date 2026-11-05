@@ -12,6 +12,7 @@ import { createRuntimeStateReader } from "./runtimeState";
 import { createDraftIndicators } from "./promptDraft";
 import { createNextSendSelectionStore } from "./nextSendSelection";
 import { askPluginComposer } from "./pluginUi";
+import { deliverHostDrop } from "./hostDrops";
 import type { SessionAbortRunRequest, SessionAdmission, SessionCompactRequest, SessionReceiptView, SessionRuntimeBackgroundTaskResponse, SessionRuntimeStateResponse,
   SessionSendRequest, SessionSteerRequest } from "#neoastra";
 
@@ -105,6 +106,15 @@ const fixture = {
    * (`hidden`), as the pane that sends the queued prompts of a session without a tab, or shown again.
    */
   unmount() { app.render(null); },
+  /**
+   * The host took a drop of the file manager at a point of the page (Linux, Windows): a folder, and a file whose content
+   * it gives once. The answer says whether a composer was there.
+   */
+  hostDrop(x: number, y: number) {
+    const id = "0123456789abcdef0123456789abcdef";
+    return deliverHostDrop({ x, y, folders: ["/home/me/docs"], files: [{ id, name: "notes.txt", size: 5 }] },
+      async request => request.id === id ? { status: "ok", name: "notes.txt", mediaType: "text/plain", base64: btoa("hello") } : { status: "not_found" });
+  },
   mount(hidden = false) { app.render(shell(hidden)); },
 };
 Object.assign(window, { fixture });

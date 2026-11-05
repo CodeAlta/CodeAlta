@@ -40,12 +40,41 @@ internal enum DesktopCloseAction
 /// <c>entry-added</c> (the application was just added to the desktop's applications),
 /// <c>sessions-changed</c> (something outside the window may have created or changed sessions),
 /// <c>external-editor</c> (the user chose another external editor), <c>show-project</c> (a start of <c>alta</c> added
-/// the project <c>ProjectId</c>, with <c>SpaceId</c> a space it joined: the page selects it) and <c>show-session</c> (the
-/// user opened the notification of the session <c>SessionId</c>: the page opens it).
+/// the project <c>ProjectId</c>, with <c>SpaceId</c> a space it joined: the page selects it), <c>show-session</c> (the
+/// user opened the notification of the session <c>SessionId</c>: the page opens it), <c>files-dropped</c> (files or
+/// folders were dropped on the window, <c>Drop</c>: the page attaches them to the prompt under the point) and
+/// <c>dialog-problem</c> (the <c>Dialog</c> the page asked for, <c>files</c>, could not be shown: <c>Problem</c> is
+/// <c>unavailable</c> where the desktop has none, or <c>failed</c>).
 /// </summary>
 internal sealed record DesktopShellEvent(string Kind, int RunningSessions, int BusyTerminals = 0, int SessionWidth = 0, string? SessionId = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? ProjectId = null,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? SpaceId = null);
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? SpaceId = null)
+{
+    /// <summary>The files and folders of a <c>files-dropped</c> notice.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public DesktopShellDrop? Drop { get; init; }
+
+    /// <summary>The dialog of a <c>dialog-problem</c> notice: <c>files</c>.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Dialog { get; init; }
+
+    /// <summary>What went wrong with the dialog of a <c>dialog-problem</c> notice: <c>unavailable</c> or <c>failed</c>.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Problem { get; init; }
+}
+
+/// <summary>What was dropped on a window from the file manager, for the page of that window.</summary>
+/// <param name="X">Where, in CSS pixels from the left of the page.</param>
+/// <param name="Y">Where, in CSS pixels from the top of the page.</param>
+/// <param name="Folders">The full paths of the dropped folders.</param>
+/// <param name="Files">The dropped files, which the page reads with <c>readDroppedFile</c>.</param>
+internal sealed record DesktopShellDrop(int X, int Y, string[] Folders, DesktopShellDroppedFile[] Files);
+
+/// <summary>A dropped file, by an id: the page never has its path.</summary>
+/// <param name="Id">What the page reads it with, once.</param>
+/// <param name="Name">Its name, without its folder.</param>
+/// <param name="Size">Its size in bytes when it was dropped; <see cref="int.MaxValue"/> for a larger file.</param>
+internal sealed record DesktopShellDroppedFile(string Id, string Name, int Size);
 
 /// <summary>
 /// How the application lives beyond its window: an icon in the notification area (the menu bar on macOS, the
@@ -799,6 +828,26 @@ internal sealed class DesktopShell
         lock (_gate) watchers = [.. _watchers.Select(static entry => entry.Watcher)];
         foreach (var watcher in watchers) watcher(value);
     }
+
+    /// <summary>Tells the page of a window that files or folders were dropped on it; a window without a page loses them.</summary>
+    /// <param name="label">The label of the view they were dropped on.</param>
+    /// <param name="drop">What was dropped.</param>
+    internal void NotifyDrop(string label, DesktopShellDrop drop)
+    {
+        ArgumentNullException.ThrowIfNull(drop);
+        Action<DesktopShellEvent>[] watchers;
+        // The point is of that window: never another one.
+        lock (_gate) watchers = [.. _watchers.Where(entry => entry.Label == label).Select(static entry => entry.Watcher)];
+        var notice = new DesktopShellEvent("files-dropped", 0) { Drop = drop };
+        foreach (var watcher in watchers) watcher(notice);
+    }
+
+    /// <summary>Tells the page of a window that the dialog it asked for could not be shown.</summary>
+    /// <param name="label">The label of the view of the window.</param>
+    /// <param name="dialog">The dialog: <c>files</c>.</param>
+    /// <param name="problem"><c>unavailable</c> where the desktop has none, or <c>failed</c>.</param>
+    internal void NotifyDialogProblem(string label, string dialog, string problem)
+        => PublishTo(label, new DesktopShellEvent("dialog-problem", 0) { Dialog = dialog, Problem = problem });
 
     // To the pages of one window, or to those of the main one when that window has none.
     private void PublishTo(string label, DesktopShellEvent value)

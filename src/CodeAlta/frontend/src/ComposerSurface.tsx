@@ -1,7 +1,8 @@
-import { useContext, useState, type ComponentProps, type DragEvent, type ReactNode } from "react";
+import { useContext, useEffect, useRef, useState, type ComponentProps, type DragEvent, type ReactNode } from "react";
 import { Button, ButtonGroup, Menu, MenuItem, PopoverNext } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { ComposerChrome } from "./composerChrome";
+import { hostDropEvent, type HostDropDetail } from "./hostDrops";
 import { PromptEditor } from "./PromptEditor";
 import { MoreMenu } from "./promptSurface/MoreMenu";
 import { SurfaceDensityContext, useMeasuredDensity } from "./promptSurface/PromptSurfaceParts";
@@ -23,10 +24,15 @@ export type ComposerMore = Readonly<{ items: ReactNode; attention?: ComponentPro
 // (the MCP servers). Below: the Agent chip, the meters (sub-agents, context, prompt cache), the `⋯` menu and the
 // actions. The surface measures its own width (a split pane is narrower than the window): labels shorten, then
 // become icons, and at last the meters fold into the `⋯` menu, in that order.
-export function ComposerSurface({ status, busy = false, children, className, editor, expandedEditor, notice, options, subAgents, meters, more, onDropFiles }: {
+export function ComposerSurface({ status, busy = false, children, className, editor, expandedEditor, notice, options, subAgents, meters, more, onDropFiles, onDropFolders }: {
   status: ReactNode; busy?: boolean; children: ReactNode; className?: string;
   /** Takes the files dropped on the composer, from the file manager of the system; null where nothing can be attached. */
   onDropFiles?: ((files: File[], origin: HTMLElement) => void) | null;
+  /**
+   * Takes the folders dropped on the composer, by their path, as Add folder… does: only where the host gets the drop
+   * (Linux, Windows), the page never having the path of what it gets dropped. Null where nothing can be attached.
+   */
+  onDropFolders?: ((paths: string[]) => void) | null;
   editor: ComponentProps<typeof PromptEditor>; expandedEditor?: ReactNode; notice?: ReactNode; options?: ReactNode;
   /** The sub-agents at work, right of the Agent chip; folded into the `⋯` menu where there is no room. */
   subAgents?: ReactNode;
@@ -41,6 +47,19 @@ export function ComposerSurface({ status, busy = false, children, className, edi
   // Only files from outside the page: a drag inside the page (a tab, a file of the Explorer) carries no file. They are
   // taken before the editor sees them (capture), or it would also insert their paths (`text/uri-list`) as text.
   const dropping = (event: DragEvent<HTMLElement>, value: boolean) => { if (value) event.currentTarget.dataset.dropping = "true"; else delete event.currentTarget.dataset.dropping; };
+  // Where the host takes the drops of the file manager (Linux, Windows), it reads them and sends them here
+  // (`deliverHostDrop`). The folders first: adding a link is an edit, which would end a read of files started before it.
+  const hostDrop = useRef({ onDropFiles, onDropFolders }); hostDrop.current = { onDropFiles, onDropFolders };
+  useEffect(() => {
+    if (!element) return;
+    const take = (event: Event) => {
+      const { files, folders } = (event as CustomEvent<HostDropDetail>).detail;
+      if (folders.length) hostDrop.current.onDropFolders?.(folders);
+      if (files.length) hostDrop.current.onDropFiles?.(files, element);
+    };
+    element.addEventListener(hostDropEvent, take);
+    return () => element.removeEventListener(hostDropEvent, take);
+  }, [element]);
   return <SurfaceDensityContext.Provider value={density}><section ref={setElement} className={`owned-session prompt-surface${className ? ` ${className}` : ""}`}
     data-density={density} aria-label={t("Message composer")}
     onDragOverCapture={onDropFiles ? event => {

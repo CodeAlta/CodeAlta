@@ -2,7 +2,7 @@ import { Button, HTMLSelect } from "@blueprintjs/core";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { createPortal } from "react-dom";
 import { AttachMenu, AttachMenuItems, PromptImageAttachments } from "./PromptImageAttachments";
-import { pickFolder } from "./folderPicker";
+import { folderPickNotice, folderTitle, pickFolder } from "./folderPicker";
 import { folderLink } from "./projectReferences";
 import { insertIssueReferences } from "./issueReferences";
 import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
@@ -1388,11 +1388,17 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   }
   // A folder of the session's folder is a project reference, as with `@`; a chat has no project to resolve one in.
   const folderRoot = referenceScope ? sessionFolder ?? referenceScope.projectPath : null;
+  const addFolders = (paths: readonly string[]) => addLinks(paths.flatMap(path => {
+    const link = folderLink(path, folderRoot);
+    return link ? [linkAttachment("folder", folderTitle(path), link)] : [];
+  }));
   async function addFolder() {
     if (pending || invalidEpoch || !capability.canMutate()) return;
     const pick = await pickFolder(desktopShell.pickFolder, t("Add a folder to the prompt"), sessionFolder ?? referenceScope?.projectPath ?? null);
-    const link = pick.status === "ok" ? folderLink(pick.path, folderRoot) : null;
-    if (pick.status === "ok" && link) addLinks([linkAttachment("folder", pick.path.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) || pick.path, link)]);
+    if (pick.status === "ok") { addFolders([pick.path]); return; }
+    // A desktop without a folder dialog, or a dialog that failed, is never silent.
+    const notice = folderPickNotice(pick);
+    if (notice) showToast({ message: t(notice), intent: "warning", icon: "warning-sign", timeout: 8000 });
   }
   const attachIssues = (issues: readonly { number: number; url: string; title: string }[]) => addLinks(issues.flatMap(issue => {
     const link = insertIssueReferences("", 0, 0, [issue])?.text;
@@ -1470,6 +1476,7 @@ ${value}` : value);
         navigator.platform.startsWith("Mac"))) { event.preventDefault(); event.stopPropagation(); }
       } }}
     onDropFiles={!pending && !invalidEpoch ? (files, origin) => void attachFiles(files, origin, false) : null}
+    onDropFolders={!pending && !invalidEpoch ? addFolders : null}
     options={<><AttachMenu id={`attach-files-${sessionId}`} disabled={!!pending || invalidEpoch} {...attachActions} />
       <ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy} openRequest={selectionOpenRequest} notice={spaceProblem}
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",

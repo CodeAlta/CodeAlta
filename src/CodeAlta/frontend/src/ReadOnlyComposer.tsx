@@ -9,7 +9,8 @@ import { AppIcon } from "./AppIcon";
 import { ComposerSurface } from "./ComposerSurface";
 import { AttachMenu, AttachMenuItems } from "./PromptImageAttachments";
 import { desktopShell } from "#neoastra";
-import { pickFolder } from "./folderPicker";
+import { folderPickNotice, folderTitle, pickFolder } from "./folderPicker";
+import { showToast } from "./appToaster";
 import { folderLink } from "./projectReferences";
 import { insertIssueReferences } from "./issueReferences";
 import { linkAttachment } from "./promptImages";
@@ -62,11 +63,17 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   const referenceScope = useContext(ProjectReferenceContext);
   const [issueRequest, setIssueRequest] = useState(0);
   // As the composer of a session: a folder of the project is a project reference, any other a link to its full path.
+  const addFolders = (paths: readonly string[]) => localImages?.addLinks(paths.flatMap(path => {
+    const link = folderLink(path, referenceScope ? folder : null);
+    return link ? [linkAttachment("folder", folderTitle(path), link)] : [];
+  }));
   async function addFolder() {
     if (!localDraft || localDraft.busy || !localImages) return;
     const pick = await pickFolder(desktopShell.pickFolder, t("Add a folder to the prompt"), folder);
-    const link = pick.status === "ok" ? folderLink(pick.path, referenceScope ? folder : null) : null;
-    if (pick.status === "ok" && link) localImages.addLinks([linkAttachment("folder", pick.path.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) || pick.path, link)]);
+    if (pick.status === "ok") { addFolders([pick.path]); return; }
+    // A desktop without a folder dialog, or a dialog that failed, is never silent.
+    const notice = folderPickNotice(pick);
+    if (notice) showToast({ message: t(notice), intent: "warning", icon: "warning-sign", timeout: 8000 });
   }
   const attachIssues = (issues: readonly { number: number; url: string; title: string }[]) => localImages?.addLinks(issues.flatMap(issue => {
     const link = insertIssueReferences("", 0, 0, [issue])?.text;
@@ -87,6 +94,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     notice={<>{localDraft?.notice}{!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}</>}
     options={localDraft && localImages ? <><AttachMenu id={`attach-files-${sessionId}`} disabled={localDraft.busy} onFiles={localImages.attach} {...attachActions} />{localDraft.options}</> : localDraft?.options}
     onDropFiles={localDraft && localImages && !localDraft.busy ? localImages.attach : null}
+    onDropFolders={localDraft && localImages && !localDraft.busy ? addFolders : null}
     meters={localDraft?.surface && <DraftUsage contextTokens={localDraft.surface.contextTokens} />}
     more={{ items: <>
       {localDraft && localImages && <AttachMenuItems inputId={`attach-files-${sessionId}`} disabled={localDraft.busy} {...attachActions} />}

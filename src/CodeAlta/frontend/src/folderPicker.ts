@@ -28,6 +28,24 @@ export async function pickFolder(invoke: Invoke, title: string, initialDirectory
   }
 }
 
+/**
+ * What the user is told of a folder pick that showed no dialog: the desktop has none (`unavailable`), or it could not be
+ * shown (`failed`). Null for a pick the user ended, or while another folder dialog is open. `instead` is what the user
+ * can do without a dialog: drop the folder on the prompt, or type its path in the field beside the button.
+ */
+export function folderPickNotice(pick: FolderPick, instead: "drop" | "type" = "drop"): FolderPickNotice | null {
+  return pick.status === "unavailable" ? instead === "drop" ? "No folder dialog is available on this desktop: drop the folder on the prompt instead."
+      : "No folder dialog is available on this desktop: type the path of the folder instead."
+    : pick.status === "failed" ? "The folder dialog could not be shown." : null;
+}
+type FolderPickNotice = "No folder dialog is available on this desktop: drop the folder on the prompt instead."
+  | "No folder dialog is available on this desktop: type the path of the folder instead." | "The folder dialog could not be shown.";
+
+/** The title of the attachment of a folder: its name, or its path for a root. */
+export function folderTitle(path: string): string {
+  return path.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) || path;
+}
+
 /** Tells whether two paths name the same folder: a trailing separator and the letter case do not count. */
 export function sameFolder(first: string, second: string): boolean {
   const name = (path: string) => path.trim().replace(/[\\/]+$/u, "").toLowerCase();

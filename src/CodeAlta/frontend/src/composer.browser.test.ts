@@ -26,8 +26,9 @@ const scenarios = [
   { name: "composer sets the options of the model of the session", mac: false, permission: false, outside: false, removed: false, options: true },
   { name: "composer compacts only an attached idle session, says why not otherwise, and shows a failed compaction", mac: false, permission: false, outside: false, removed: false, options: false, compaction: true },
   { name: "a prompt the shell queued in a busy session is sent after its pane left and came back", mac: false, permission: false, outside: false, removed: false, options: false, remount: true },
+  { name: "files and a folder that the host took from a drop are attached to the composer under the point", mac: false, permission: false, outside: false, removed: false, options: false, hostDrop: true },
 ];
-for (const { name, mac, permission, outside, removed, options, compaction = false, remount = false } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
+for (const { name, mac, permission, outside, removed, options, compaction = false, remount = false, hostDrop = false } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -115,6 +116,24 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait(`!!document.querySelector('#session-prompt') && ${idle}`), true, exceptions.join("\n"));
+
+    if (hostDrop) {
+      // Where NeoAstra takes a drop of the file manager away from the page (Linux, Windows), the host tells the page:
+      // the folder becomes a link as with Add folder…, the file is read once and attached as from a drop of the page.
+      const tiles = "JSON.stringify([...document.querySelectorAll('.prompt-image-thumbnail')].map(tile=>tile.getAttribute('aria-label')))";
+      // A change of the choices of the session ends the attachments in flight, for a drop of the page as for this one:
+      // the drop comes once the composer has read them (twice as it opens) and settled.
+      assert.equal(await wait("window.fixtureChoiceReads>=2"), true);
+      await evaluate("new Promise(resolve=>setTimeout(()=>resolve(true),500))");
+      assert.deepEqual(JSON.parse(await evaluate(`(async()=>{const box=document.querySelector('.prompt-surface').getBoundingClientRect();
+        return JSON.stringify(await fixture.hostDrop(box.left+box.width/2, box.top+box.height/2));})()`)), { delivered: true, problems: [] });
+      assert.equal(await wait(`${tiles}==='["docs","notes.txt"]'`), true, await evaluate(tiles));
+      assert.equal(await evaluate("document.querySelector('.prompt-image-thumbnail[aria-label=\"docs\"]').title"), "[docs](</home/me/docs>)");
+      // Outside the window there is nothing under the point.
+      assert.deepEqual(JSON.parse(await evaluate("(async()=>JSON.stringify(await fixture.hostDrop(-50,-50)))()")), { delivered: false, problems: [] });
+      assert.deepEqual(exceptions, []);
+      return;
+    }
 
     if (outside) {
       // The status line says why nothing is sent, with the name of the provider; the form to choose another provider
