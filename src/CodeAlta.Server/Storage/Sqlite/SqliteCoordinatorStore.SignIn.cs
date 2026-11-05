@@ -181,7 +181,8 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
         if (passkey is not null && rule.KeepBreakGlassPasskey && otherPasskeys == 0) return LoginRemovalOutcome.BreakGlassPasskey;
         if (!rule.KeepOwnersLastWayIn) return LoginRemovalOutcome.Removed;
         var usable = QueryList(connection, transaction, LoginColumns + " WHERE person_id = $person", ReadLogin, ("$person", personId))
-            .Count(other => rule.UsableMethods.Contains(other.Method) && !(login is not null && other.Issuer == login.Issuer && other.Subject == login.Subject))
+            .Count(other => rule.UsableMethods.Contains(other.Method) && !(login is not null && other.Issuer == login.Issuer && other.Subject == login.Subject)
+                && (other.Method != CodeAlta.Fleet.Protocol.Api.FleetSignInMethods.Company || rule.CompanyValidSince is not { } since || (other.LastSignInAt ?? other.CreatedAt) >= since))
             + (rule.UsableMethods.Contains(CodeAlta.Fleet.Protocol.Api.FleetSignInMethods.Passkey) ? otherPasskeys : 0);
         if (usable > 0) return LoginRemovalOutcome.Removed;
         var recoveryKeys = QuerySingle(connection, transaction,

@@ -236,10 +236,12 @@ public sealed class SignInService : IDisposable
             if (!enabled.Contains(FleetSignInMethods.Passkey)) enabled = [.. enabled, FleetSignInMethods.Passkey];
         }
 
-        var document = new SignInSettingsDocument(enabled, company, request.RequireSso, request.RequireSso ? breakGlass : null);
+        var secretChanged = !string.Equals(secret, held.Secret, StringComparison.Ordinal);
+        var document = new SignInSettingsDocument(enabled, company, request.RequireSso, request.RequireSso ? breakGlass : null,
+            ChangesCompanyAdmission(held.Document.Company, company, secretChanged) ? _time.GetUtcNow() : held.Document.CompanyChangedAt);
         // Changing the company sign-in is a dangerous action: the owner signed in again from this device a few minutes ago.
         // The confirmation is taken last, so that a change refused for another reason does not use it up.
-        if (ChangesCompanySignIn(held.Document, document, !string.Equals(secret, held.Secret, StringComparison.Ordinal)) && !IsConfirmed(request, actor, owner))
+        if (ChangesCompanySignIn(held.Document, document, secretChanged) && !IsConfirmed(request, actor, owner))
         {
             throw CoordinatorException.Forbidden(SignInErrorCodes.ConfirmationRequired,
                 "Changing the company sign-in needs you to sign in again, or to approve it on another of your devices.", "confirm");
@@ -484,8 +486,8 @@ public sealed class SignInService : IDisposable
     // A new way to sign in becomes a factor of its own (a later confirmation, a new device): the device key alone, which a
     // thief may hold, does not add one. Another approved controller device of the person approves this very link; or a
     // person who has a way in proves it again first, from this device; or a person who has none links their first one soon
-    // after the device joined, when its key was just proved by the setup code or by another device. Returns whether the
-    // link is of the first way in, which its completion checks again.
+    // after the device joined, when its key was just proved by the setup code, a sign-in or the recovery key. Returns
+    // whether the link is of the first way in, which its completion checks again.
     private async Task<bool> RequireLinkAuthorityAsync(DeviceRecord actor, string method, string? confirmation, string? approvalId, RequestOrigin origin,
         CancellationToken cancellationToken)
     {
@@ -508,7 +510,9 @@ public sealed class SignInService : IDisposable
                 "Adding a way to sign in needs you to sign in again with one you have, from this device.", cancellationToken).ConfigureAwait(false);
         }
 
-        if (actor.ApprovedAt is { } approved && _time.GetUtcNow() - approved <= _options.FirstWayInWindow) return true;
+        // A device that joined with an enrollment token, which another device key made, opens no window of its own: that key
+        // would otherwise renew it at will.
+        if (await DeviceService.IsInFirstWayInWindowAsync(_store, actor, _time.GetUtcNow(), _options.FirstWayInWindow, cancellationToken).ConfigureAwait(false)) return true;
         throw await RefuseStartAsync(origin, actor, SignInErrorCodes.FirstWayInExpired,
             "A first way to sign in is linked soon after this device joined the server: link it from a device of yours that just joined.", cancellationToken).ConfigureAwait(false);
     }
@@ -730,8 +734,10 @@ public sealed class SignInService : IDisposable
         for (var tries = 0; tries < 3 && outcome == LoginRemovalOutcome.SettingsChanged; tries++)
         {
             var settings = await ReadSettingsAsync(person.OrganizationId, cancellationToken).ConfigureAwait(false);
+            // A company account counts once it signed in under the company's settings as they are now: one of a provider or of
+            // accounts let in before may sign in no more. Settings kept before the change was recorded count from their last change.
             var rule = new WayInRemoval(settings.Version, UsableMethods(settings.Document, person.Id), person.Role == PersonRoles.Owner,
-                settings.Document.RequireSso && settings.Document.BreakGlassPersonId == person.Id);
+                settings.Document.RequireSso && settings.Document.BreakGlassPersonId == person.Id, settings.Document.CompanyChangedAt ?? settings.UpdatedAt);
             outcome = login is not null
                 ? await _signIn.RemoveLoginAsync(login, rule, audit, cancellationToken).ConfigureAwait(false)
                 : await _signIn.RemovePasskeyAsync(passkey!, rule, audit, cancellationToken).ConfigureAwait(false);
@@ -1208,6 +1214,12 @@ public sealed class SignInService : IDisposable
         => new(approval.Id, approval.ApprovedBy is null ? "pending" : "approved", approval.RequesterDeviceId, approval.RequesterName, approval.Change, approval.Digest,
             approval.ExpiresAt, approval.ApprovedBy);
 
+    // What may stop a company account from signing in: another provider, client or secret, or other accounts let in.
+    private static bool ChangesCompanyAdmission(CompanyDocument? before, CompanyDocument? after, bool secretChanged)
+        => after is not null && (before is null || secretChanged || before.Issuer != after.Issuer || before.ClientId != after.ClientId
+            || !(before.AllowedDomains ?? []).SequenceEqual(after.AllowedDomains ?? [], StringComparer.Ordinal)
+            || !(before.AllowedTenants ?? []).SequenceEqual(after.AllowedTenants ?? [], StringComparer.Ordinal));
+
     // What makes a change one of the company sign-in: its provider, its secret, who it lets in, the roles its groups
     // give, whether it is on or required, and the break-glass owner. The other methods are turned on and off without a confirmation.
     private static bool ChangesCompanySignIn(SignInSettingsDocument before, SignInSettingsDocument after, bool secretChanged)
@@ -1292,7 +1304,11 @@ public sealed class SignInService : IDisposable
 /// <param name="Company">The company's provider, or null.</param>
 /// <param name="RequireSso">Whether company sign-in is required.</param>
 /// <param name="BreakGlassPersonId">The owner who keeps a passkey while it is.</param>
-internal sealed record SignInSettingsDocument(string[] Enabled, CompanyDocument? Company, bool RequireSso, string? BreakGlassPersonId);
+/// <param name="CompanyChangedAt">
+/// When the company's provider, client or the accounts it lets in last changed: a company account that has not signed in
+/// since is not known to sign in now. Null in settings kept before it was recorded.
+/// </param>
+internal sealed record SignInSettingsDocument(string[] Enabled, CompanyDocument? Company, bool RequireSso, string? BreakGlassPersonId, DateTimeOffset? CompanyChangedAt = null);
 
 /// <summary>The company's provider, as the store keeps it.</summary>
 /// <param name="Issuer">The issuer.</param>

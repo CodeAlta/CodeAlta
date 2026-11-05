@@ -131,7 +131,11 @@ public sealed record EnrollResponse(DeviceDto Device);
 /// <summary>The body of <c>POST /api/v1/devices/{id}/approve</c> and <c>/revoke</c>.</summary>
 /// <param name="DeviceListEntry">The entry that adds (approve) or removes (revoke) the device, signed by the calling controller device;
 /// a pending device is refused without one.</param>
-public sealed record DeviceListChangeRequest(FleetSignedDeviceListEntry? DeviceListEntry);
+/// <param name="Confirmation">
+/// For the approval of a controller device that joined with an enrollment token, the confirmation that the person of the
+/// calling device signed in again from it (<c>purpose</c> <c>confirm</c> of a sign-in); null otherwise.
+/// </param>
+public sealed record DeviceListChangeRequest(FleetSignedDeviceListEntry? DeviceListEntry, string? Confirmation = null);
 
 /// <summary>An entry of the device list.</summary>
 /// <param name="Sequence">Its position.</param>
@@ -234,7 +238,11 @@ public sealed record CreateMetadataKeyRequest(string Id, int Epoch, IReadOnlyLis
 /// <param name="PublicKey">The public key the recovery key derives: the base64 of its SubjectPublicKeyInfo.</param>
 /// <param name="DeviceListEntry">The entry that adds it, of kind <see cref="FleetDeviceKinds.Recovery"/>, signed by the calling device.</param>
 /// <param name="SealedAnchor">The organization and the hash of the first entry of the list, sealed with the recovery key.</param>
-public sealed record CreateRecoveryKeyRequest(string PublicKey, FleetSignedDeviceListEntry DeviceListEntry, string SealedAnchor);
+/// <param name="Confirmation">
+/// The confirmation that the person of the calling device signed in again from it, which a person with a way to sign in
+/// needs; null otherwise.
+/// </param>
+public sealed record CreateRecoveryKeyRequest(string PublicKey, FleetSignedDeviceListEntry DeviceListEntry, string SealedAnchor, string? Confirmation = null);
 
 /// <summary>What the server keeps of a recovery key for itself: the anchor it sealed, read by the recovery key only.</summary>
 /// <param name="DeviceId">The device id of the recovery key in the list.</param>

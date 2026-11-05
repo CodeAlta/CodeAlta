@@ -82,6 +82,12 @@ public sealed class DeviceService
     public AuthenticationRateLimiter? RateLimiter { get; init; }
 
     /// <summary>
+    /// Gets how long after it joined independently (the setup code, a sign-in, the recovery key) a controller device of a
+    /// person with no way to sign in admits another controller device or a recovery key with its key alone.
+    /// </summary>
+    public TimeSpan FirstWayInWindow { get; init; } = TimeSpan.FromHours(1);
+
+    /// <summary>
     /// Gets what tells whether a controller device may revoke a device of another person (<c>doc/fleet/access-control.md</c>):
     /// an owner or admin, or a maintainer for a team machine. Null lets a controller revoke only the devices of its own person.
     /// </summary>
@@ -250,6 +256,11 @@ public sealed class DeviceService
         var expectedOwner = firstOfPerson ? device.OwnerPersonId : actor.OwnerPersonId;
         DeviceListChain.Require(payload.OwnerId is not null && payload.OwnerId == expectedOwner,
             firstOfPerson ? "give the device to the person who signed in on it" : "give the device to the person of the signing device");
+        // A controller device that joined with an enrollment token of its person brings no proof of them: the token is made
+        // by a device key, which a thief may hold. One that signed in brought it already; the owner who approves the first
+        // device of another person vouches for that person, who gets no factor of the owner's.
+        if (device.Kind == FleetDeviceKinds.Controller && device.EnrollmentTokenId is not null && !firstOfPerson)
+            await RequireStepUpAsync(actor, request?.Confirmation, cancellationToken).ConfigureAwait(false);
 
         var audit = origin.Audit("device.approve", actor, device.Id, details: $"{{\"seq\":{payload.Sequence}}}");
         var (outcome, approved) = await _store.AppendDeviceListEntryAsync(record, DeviceStatuses.Pending, DeviceStatuses.Approved, payload.OwnerId, audit, cancellationToken)
@@ -298,6 +309,10 @@ public sealed class DeviceService
 
                 var (payload, record) = await ReadEntryAsync(actor, request?.DeviceListEntry, cancellationToken).ConfigureAwait(false);
                 DeviceListChain.Require(payload.Operation == FleetDeviceListOperations.Remove && payload.DeviceId == device.Id, "remove the device");
+                // The person's recovery key leaves only for the new one that replaces it, with the same step up, which the new
+                // one then takes: a stolen device key alone neither removes it nor loses it on the way.
+                if (device.Kind == FleetDeviceKinds.Recovery && device.OwnerPersonId == actor.OwnerPersonId)
+                    await RequireStepUpAsync(actor, request?.Confirmation, cancellationToken, take: false).ConfigureAwait(false);
                 var audit = origin.Audit("device.revoke", actor, device.Id, details: $"{{\"seq\":{payload.Sequence}}}");
                 var (outcome, changed) = await _store.AppendDeviceListEntryAsync(record, DeviceStatuses.Approved, DeviceStatuses.Revoked, null, audit, cancellationToken)
                     .ConfigureAwait(false);
@@ -343,6 +358,8 @@ public sealed class DeviceService
         var (payload, record) = await ReadEntryAsync(actor, request.DeviceListEntry, cancellationToken).ConfigureAwait(false);
         DeviceListChain.Require(payload.Operation == FleetDeviceListOperations.Add && payload.DeviceId == key.DeviceId && payload.PublicKey == key.Text, "add the recovery key and its key");
         DeviceListChain.Require(payload.Kind == FleetDeviceKinds.Recovery && payload.OwnerId == actor.OwnerPersonId, "add it as the recovery key of the person of the signing device");
+        // A recovery key approves links and recovers devices: a new one is a factor, which the device key alone does not make.
+        await RequireStepUpAsync(actor, request.Confirmation, cancellationToken).ConfigureAwait(false);
         var now = _time.GetUtcNow();
         var device = new DeviceRecord(key.DeviceId, actor.OrganizationId, "Recovery key", FleetDeviceKinds.Recovery, key.Text, key.Fingerprint, actor.OwnerPersonId,
             DeviceStatuses.Approved, actor.Id, null, now, now, null, 1);
@@ -450,6 +467,53 @@ public sealed class DeviceService
         var recovery = actor.Kind == FleetDeviceKinds.Recovery ? await _store.GetRecoveryKeyAsync(actor.Id, cancellationToken).ConfigureAwait(false) : null;
         if (recovery is null) throw CoordinatorException.NotFound(CoordinatorErrorCodes.RecoveryKeyNotFound, "The calling device is not a recovery key of this server.");
         return new RecoveryAnchorDto(actor.Id, recovery.SealedAnchor);
+    }
+
+    // A new key that signs for its person (a controller device, a recovery key) is admitted with a step up: the device key
+    // alone, which a thief may hold, makes no second factor that would then approve what the first one asks. A person with
+    // a way to sign in signs in again with it from the acting device; a person with none admits it soon after the acting
+    // device joined independently, when the device could link a first way in by itself anyway. Taken last: a request
+    // refused for another reason does not use the confirmation up.
+    private async Task RequireStepUpAsync(DeviceRecord actor, string? confirmation, CancellationToken cancellationToken, bool take = true)
+    {
+        if (actor.OwnerPersonId is not { } person || SignInGrants is not { } grants || SignInStore is not { } signIn)
+            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A controller device of a person adds a computer or a recovery key.");
+        string code, message;
+        if ((await signIn.ListLoginsAsync(person, cancellationToken).ConfigureAwait(false)).Count > 0 || (await signIn.ListPasskeysAsync(person, cancellationToken).ConfigureAwait(false)).Count > 0)
+        {
+            if ((take ? grants.TakeConfirmation(confirmation, actor.Id) : grants.FindConfirmation(confirmation, actor.Id)) is { } confirmed && confirmed.PersonId == person
+                && confirmed.OrganizationId == actor.OrganizationId) return;
+            (code, message) = (Identity.SignIn.SignInErrorCodes.ConfirmationRequired, "Adding a computer or a recovery key needs you to sign in again with a way you have, from this device.");
+        }
+        else
+        {
+            if (await IsInFirstWayInWindowAsync(_store, actor, _time.GetUtcNow(), FirstWayInWindow, cancellationToken).ConfigureAwait(false)) return;
+            (code, message) = (Identity.SignIn.SignInErrorCodes.FirstWayInExpired,
+                "Adding a computer or a recovery key needs a way to sign in, to sign in again with: link one first.");
+        }
+
+        // The endpoint audits the refusal.
+        throw CoordinatorException.Forbidden(code, message);
+    }
+
+    /// <summary>
+    /// Gets whether a controller device stands where its key alone may give its person a first factor: it joined a short
+    /// while ago independently of the keys of its own person (the setup code, a sign-in, the recovery key, the invitation
+    /// of another person; not an enrollment token a device of its person made, whose key would otherwise renew the window at will).
+    /// </summary>
+    /// <param name="store">The store, to read the device that made its enrollment token.</param>
+    /// <param name="device">The device.</param>
+    /// <param name="now">The time now.</param>
+    /// <param name="window">How long after it joined.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>Whether it does.</returns>
+    internal static async Task<bool> IsInFirstWayInWindowAsync(ICoordinatorStore store, DeviceRecord device, DateTimeOffset now, TimeSpan window,
+        CancellationToken cancellationToken)
+    {
+        if (device.ApprovedAt is not { } approved || now - approved > window) return false;
+        if (device.EnrollmentTokenId is null) return true;
+        var enroller = device.EnrolledByDeviceId is { } id ? await store.GetDeviceAsync(id, cancellationToken).ConfigureAwait(false) : null;
+        return enroller is not null && enroller.OwnerPersonId != device.OwnerPersonId;
     }
 
     // The owner who set the server up signs people in: their controller device, already bound to their person in the

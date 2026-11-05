@@ -107,8 +107,65 @@ public sealed class SshServerInstallerTests
         var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
             new SshServerSetupRequest { Target = new SshTarget("me", "box", null), Address = new Uri("https://fleet.example.com") }, (_, _, _) => Task.FromResult<ReachProblem?>(new("No route to host")),
             (_, _, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
-        StringAssert.Contains(ssh.Scripts[2], "\"$TOOLS/altaserver\" install --urls http://127.0.0.1:2586 1>&2\n", "the default data root: the service of ~/.altaserver");
+        StringAssert.Contains(ssh.Scripts[2], "\"$TOOLS/altaserver\" install --urls http://127.0.0.1:2586 --trusted-proxy '127.0.0.1;::1' 1>&2\n",
+            "the default data root: the service of ~/.altaserver, which trusts the proxy on its loopback");
         Assert.AreEqual("server_proxy_unreachable", failure.Code, "what stands in front of the server does not answer");
+    }
+
+    [TestMethod]
+    public async Task BehindAnAddressOfItsOwn_ThePasskeyPageIsAtTheHttpsAddressTheProxyOnItsLoopbackServes()
+    {
+        var token = TestContext.CancellationToken;
+        var ssh = new SshNodeInstallerTests.ScriptedSsh();
+        ssh.Answers.Enqueue(new SshResult(0, Ubuntu, ""));
+        ssh.Answers.Enqueue(new SshResult(0, "", ""));
+        ssh.Answers.Enqueue(new SshResult(0, "", ""));
+        await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
+            new SshServerSetupRequest { Target = new SshTarget("me", "box", null), Address = new Uri("https://fleet.example.com") }, (_, _, _) => Task.FromResult<ReachProblem?>(new("stop here")),
+            (_, _, _, _, _) => Task.FromResult("x"), static _ => { }, token));
+
+        // The server runs with what the installation gave altaserver: its proxies, as altaserver reads them.
+        var given = System.Text.RegularExpressions.Regex.Match(ssh.Scripts[2], "--trusted-proxy '([^']*)'");
+        Assert.IsTrue(given.Success, ssh.Scripts[2]);
+        var root = Directory.CreateTempSubdirectory("codealta-proxy-install-").FullName;
+        try
+        {
+            async Task<string> PasskeyPageAsync(IReadOnlyList<string> proxies, string name)
+            {
+                await using var server = await CodeAlta.Server.Hosting.CoordinatorServer.StartAsync(new CodeAlta.Server.Hosting.CoordinatorServerOptions
+                {
+                    DataRoot = Path.Combine(root, name), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null, TrustedProxies = proxies,
+                }, token);
+                var address = server.Addresses.First(static uri => uri.Scheme == "http");
+                using var ownerKey = CodeAlta.Fleet.Identity.DeviceIdentity.LoadOrCreate(Path.Combine(root, name + "-owner"));
+                using (var owner = new CodeAlta.Fleet.Server.FleetServerClient(address, ownerKey)) await owner.SetUpAsync(server.SetupCode!.Code, "Alex", "Desktop", null, token);
+                // A new computer reaches the server through the proxy, which ended TLS and says so.
+                using var key = CodeAlta.Fleet.Identity.DeviceIdentity.LoadOrCreate(Path.Combine(root, name + "-laptop"));
+                using var client = new CodeAlta.Fleet.Server.FleetServerClient(address, key, new ForwardedProto(), null, null);
+                return (await client.StartSignInAsync(CodeAlta.Fleet.Protocol.Api.FleetSignInMethods.Passkey, "http://127.0.0.1:53682/callback",
+                    CodeAlta.Fleet.Protocol.Api.FleetSignInPurposes.Enroll, token)).AuthorizationUrl;
+            }
+
+            StringAssert.StartsWith(await PasskeyPageAsync(given.Groups[1].Value.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), "installed"),
+                "https://", "the scheme the proxy on the loopback forwards");
+            StringAssert.StartsWith(await PasskeyPageAsync([], "untrusted"), "http://", "without the trust the installation gives, the page would be at http://");
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    // What Tailscale Serve or Caddy on the server's machine adds once it ended TLS.
+    private sealed class ForwardedProto() : DelegatingHandler(new SocketsHttpHandler())
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            request.Headers.TryAddWithoutValidation("X-Forwarded-Proto", "https");
+            return base.SendAsync(request, cancellationToken);
+        }
     }
 
     [TestMethod]

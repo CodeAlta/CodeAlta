@@ -100,16 +100,20 @@ internal sealed partial class FleetServerService
 
     /// <summary>Makes the recovery key of this computer's person at a server: its words, shown once; one made before stops working.</summary>
     [NeoRpcMethod("createRecoveryKey")]
-    public async Task<FleetRecoveryKeyResult> CreateRecoveryKeyAsync(FleetServerLinkRequest request, CancellationToken cancellationToken)
+    public async Task<FleetRecoveryKeyResult> CreateRecoveryKeyAsync(FleetRecoveryKeyRequest request, CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
-        if (!FleetServerLinkStore.IsValidId(request!.LinkId)) return new("invalid_request", null, null);
+        if (!FleetServerLinkStore.IsValidId(request!.LinkId) || request.ConfirmWith is not null && !FleetSignInMethods.IsKnown(request.ConfirmWith)) return new("invalid_request", null, null);
         try
         {
-            var words = await _servers!.CreateRecoveryKeyAsync(request.LinkId, cancellationToken).ConfigureAwait(false);
+            // A person with a way to sign in signs in again with it first (the server answered sign_in.confirmation_required).
+            var confirmation = request.ConfirmWith is { } method ? await _servers!.ConfirmSignInAsync(request.LinkId, method, request.Handle, cancellationToken).ConfigureAwait(false) : null;
+            var words = await _servers!.CreateRecoveryKeyAsync(request.LinkId, confirmation, cancellationToken).ConfigureAwait(false);
             ChangedLocally?.Invoke();
             return new("ok", words, null);
         }
+        catch (DesktopSignInException exception) { return new(exception.Code, null, exception.Message); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return new("sign_in.cancelled", null, null); }
         catch (Exception exception) when (Failure(exception) is { } failure)
         {
             return new(failure.Status, null, failure.Message);
@@ -192,9 +196,16 @@ internal sealed partial class FleetServerService
     /// </summary>
     [NeoRpcMethod("approve")]
     public Task<FleetServerDeviceResult> ApproveAsync(FleetServerDeviceRequest request, CancellationToken cancellationToken)
-        => request is not null && (request.Words is { Length: > 256 } || !FleetDeviceKinds.IsKnown(request.Kind))
+        => request is not null && (request.Words is { Length: > 256 } || !FleetDeviceKinds.IsKnown(request.Kind)
+                || request.ConfirmWith is not null && !FleetSignInMethods.IsKnown(request.ConfirmWith))
             ? Task.FromResult(new FleetServerDeviceResult("invalid_request", null, null))
-            : ChangeDeviceAsync(request!, (link, device) => _servers!.ApproveAsync(link, device, request!.Kind!, request.Words, cancellationToken));
+            : ChangeDeviceAsync(request!, async (link, device) =>
+            {
+                // A computer that joined with an enrollment code of the person: once they have a way to sign in, they sign in
+                // again with it first (the server answered sign_in.confirmation_required).
+                var confirmation = request!.ConfirmWith is { } method ? await _servers!.ConfirmSignInAsync(link, method, request.Handle, cancellationToken).ConfigureAwait(false) : null;
+                return await _servers!.ApproveAsync(link, device, request.Kind!, request.Words, confirmation, cancellationToken).ConfigureAwait(false);
+            });
 
     /// <summary>Revokes a device, or refuses a pending one.</summary>
     [NeoRpcMethod("revoke")]
@@ -655,6 +666,7 @@ internal sealed partial class FleetServerService
             ChangedLocally?.Invoke();
             return new("ok", DeviceView(device), null);
         }
+        catch (DesktopSignInException exception) { return new(exception.Code, null, exception.Message); }
         catch (Exception exception) when (Failure(exception) is { } failure)
         {
             return new(failure.Status, null, failure.Message);
@@ -761,6 +773,13 @@ internal sealed record FleetServerRecoverRequest(string ExpectedEpoch, string Ur
 /// <param name="Message">What the failure said.</param>
 internal sealed record FleetRecoveryKeyResult(string Status, string? Words, string? Message);
 
+/// <summary>A recovery key to make for this computer's person at a server.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="LinkId">The id of the link.</param>
+/// <param name="ConfirmWith">The method the person signs in again with first (the server answered <c>sign_in.confirmation_required</c>); null for none.</param>
+/// <param name="Handle">The handle of <c>startSignInCode</c> with the purpose <c>confirm</c>, for GitHub; null otherwise.</param>
+internal sealed record FleetRecoveryKeyRequest(string ExpectedEpoch, string LinkId, string? ConfirmWith = null, string? Handle = null);
+
 /// <summary>A request about one link.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
 /// <param name="LinkId">The id of the link.</param>
@@ -813,7 +832,10 @@ internal sealed record FleetServerDevicesResult(string Status, FleetDeviceView[]
 /// <param name="DeviceId">The device.</param>
 /// <param name="Words">For an approval, the words of its key the person compared with the device's screen; null when none were.</param>
 /// <param name="Kind">For an approval, the class the person approves it as, as the page showed it: <c>controller</c> or <c>node</c>; needed.</param>
-internal sealed record FleetServerDeviceRequest(string ExpectedEpoch, string LinkId, string DeviceId, string? Words = null, string? Kind = null);
+/// <param name="ConfirmWith">For an approval, the method the person signs in again with first (the server answered <c>sign_in.confirmation_required</c>); null for none.</param>
+/// <param name="Handle">The handle of <c>startSignInCode</c> with the purpose <c>confirm</c>, for GitHub; null otherwise.</param>
+internal sealed record FleetServerDeviceRequest(string ExpectedEpoch, string LinkId, string DeviceId, string? Words = null, string? Kind = null, string? ConfirmWith = null,
+    string? Handle = null);
 
 /// <summary>The outcome of an approval or a revocation.</summary>
 /// <param name="Status"><c>ok</c>, the code of the server's refusal, <c>unreachable</c>, <c>not_found</c>, <c>invalid_request</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>

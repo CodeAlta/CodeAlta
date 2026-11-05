@@ -206,3 +206,23 @@ test("A device that waits comes as a toast with its words, and the Fleet button 
       "the approval names the words and the class the toast showed: the host signs the key of those words only, as that class");
   }, options);
 });
+
+test("A computer that joined with an enrollment code is approved once the person signed in again with a way they have", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-approval-toast')`, "the toast of the machine");
+    await page.evaluate(`window.serverFixture.addLaptop()`);
+    await page.until(`[...document.querySelectorAll('.fleet-approval-toast strong')].some(item => item.textContent === 'Laptop asks to join Home.')`, "the toast of the laptop");
+    await page.evaluate(`[...document.querySelectorAll('.fleet-approval-toast')].find(item => item.textContent.includes('Laptop asks')).querySelector('.bp6-button').click()`);
+    // The server asked for a sign-in again: the toast offers the ways the person has, and the laptop still waits.
+    await page.until(`document.querySelector('.fleet-approval-confirm')?.textContent.includes('Approving Laptop needs you to sign in again with a way you have.')`, "the sign-in again");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-approvals-button').getAttribute('aria-label')`), "Fleet: 2 devices wait for your approval");
+    await page.until(`(() => { const toast = document.querySelector('.fleet-approval-confirm')?.closest('.bp6-toast');
+      return !!toast && !toast.classList.contains('bp6-toast-enter-active') && [...toast.querySelectorAll('.bp6-button')].some(button => button.textContent === 'Continue with Passkey'); })()`,
+      "the ways to sign in again");
+    await page.clickText(".fleet-approval-confirm .bp6-button", "Continue with Passkey");
+    await page.until(`!document.querySelector('.fleet-approval-confirm')`, "the approval");
+    assert.deepEqual((await calls(page)).filter(call => call.approve === "laptop"), [
+      { approve: "laptop", words: "acid acorn actor agent alarm album", kind: "controller" },
+      { approve: "laptop", words: "acid acorn actor agent alarm album", kind: "controller", confirmWith: "passkey" }], "approved again with the way chosen");
+  }, options);
+});

@@ -401,7 +401,12 @@ internal sealed partial class DesktopFleetServers
             var asked = await client.RequestLinkApprovalAsync(method, cancellationToken).ConfigureAwait(false);
             try
             {
-                await client.ApproveLinkWithRecoveryKeyAsync(asked, key, cancellationToken).ConfigureAwait(false);
+                // The key signs the link of the method the person chose from this computer, whatever approval the server answered.
+                await client.ApproveLinkWithRecoveryKeyAsync(asked, key, method, cancellationToken).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException exception)
+            {
+                throw new FleetRecoveryException("The server answered another link than the one you asked for: nothing was signed.", exception);
             }
             catch (FleetServerException exception) when (exception.Status is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized)
             {
@@ -412,22 +417,30 @@ internal sealed partial class DesktopFleetServers
         }
     }
 
-    /// <summary>Lists the links of ways to sign in that other computers of this computer's person ask it to approve.</summary>
+    /// <summary>
+    /// Lists the links of ways to sign in that other computers of this computer's person ask it to approve, each with the
+    /// digest this computer computed of what it shows (its method and the computer that links), never the server's.
+    /// </summary>
     /// <param name="linkId">The link.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The links that wait, of the person's other computers.</returns>
     /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<IReadOnlyList<SignInLinkApprovalDto>> ListLinkApprovalsAsync(string linkId, CancellationToken cancellationToken)
     {
         using var client = Client(linkId);
-        return [.. (await client.ListLinkApprovalsAsync(cancellationToken).ConfigureAwait(false)).Where(approval => approval.RequesterDeviceId != client.DeviceId && approval.Status == "pending")];
+        var waiting = (await client.ListLinkApprovalsAsync(cancellationToken).ConfigureAwait(false)).Where(approval => approval.RequesterDeviceId != client.DeviceId && approval.Status == "pending");
+        var shown = new List<SignInLinkApprovalDto>();
+        foreach (var approval in waiting) shown.Add(approval with { Digest = await client.LinkDigestAsync(approval, cancellationToken).ConfigureAwait(false) });
+        return shown;
     }
 
     /// <summary>
     /// Approves from this computer a link another computer of its person asks for: exactly the link its page showed, named
-    /// by its digest; a server that answers another link then gets nothing signed.
+    /// by the digest this computer computed of it (<see cref="ListLinkApprovalsAsync"/>); a server that answers another link
+    /// then, whatever digest it gives, gets nothing signed.
     /// </summary>
     /// <param name="linkId">The link.</param>
     /// <param name="approvalId">The approval.</param>
@@ -445,9 +458,8 @@ internal sealed partial class DesktopFleetServers
         using var client = Client(linkId);
         var approval = (await client.ListLinkApprovalsAsync(cancellationToken).ConfigureAwait(false)).FirstOrDefault(approval => approval.Id == approvalId)
             ?? throw new KeyNotFoundException("No link waits for this approval.");
-        if (!string.Equals(approval.Digest, shownDigest, StringComparison.Ordinal))
-            throw new InvalidOperationException("The link the server holds now is not the one shown: nothing was signed.");
-        await client.ApproveLinkAsync(approval, cancellationToken).ConfigureAwait(false);
+        // The client computes the digest of the link the server holds now and signs it only when it is the one shown.
+        await client.ApproveLinkAsync(approval, shownDigest, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Reads the sign-in settings of the organization of a server; an owner's computer only.</summary>

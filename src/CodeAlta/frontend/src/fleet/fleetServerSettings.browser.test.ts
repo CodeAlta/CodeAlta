@@ -181,6 +181,18 @@ test("the owner makes a recovery key, sees its words once with Copy, and closes 
     await page.clickText(".fleet-server-recovery .bp6-button", "New recovery key…");
     await page.until(`document.querySelector('.fleet-server-confirm .bp6-intent-danger')`, "the confirmation");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-server-confirm p').textContent`), "Make a new recovery key?");
+
+    // A person with ways to sign in signs in again with one of them first: the key of this computer alone makes none.
+    await page.evaluate(`window.fleetFixture.logins()`);
+    await page.clickText(".fleet-server-confirm .bp6-button", "Make a new one");
+    await page.until(`document.querySelector('.fleet-server-recovery .fleet-sign-in-confirm')?.textContent.includes('Making a recovery key needs you to sign in again with a way you have.')`,
+      "the sign-in again");
+    await page.until(`[...document.querySelectorAll('.fleet-server-recovery .fleet-sign-in-confirm-methods .bp6-button')].some(button => button.textContent === 'Continue with Microsoft')`,
+      "the ways the person has");
+    await page.clickText(".fleet-server-recovery .fleet-sign-in-confirm-methods .bp6-button", "Continue with Microsoft");
+    await page.until(`document.querySelector('.fleet-recovery-dialog')`, "the words of the new one");
+    assert.deepEqual((await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call)).filter(call => call.recoveryKey),
+      [{ recoveryKey: "made" }, { recoveryKey: "made", confirmWith: "microsoft" }]);
     assert.deepEqual(page.problems, []);
   }, options);
 });
