@@ -64,12 +64,12 @@ public sealed class PublicationService
         var now = _time.GetUtcNow();
         var machine = new MachineRecord(device.Id, device.OrganizationId, JsonSerializer.Serialize(kept, FleetServerJsonContext.Default.FleetMachineInventory),
             publication.Sequence, now);
-        var result = await _store.PublishInventoryAsync(machine, cancellationToken).ConfigureAwait(false);
+        // A node renamed (altanode run --name) is listed by its new name in the devices too, as on the canvas: the name of its newest inventory.
+        var name = device.Kind == FleetDeviceKinds.Node && kept.Name.Trim() is { Length: > 0 and <= SetupService.MaxNameLength } trimmed && !trimmed.Any(char.IsControl)
+            ? trimmed : null;
+        var result = await _store.PublishInventoryAsync(machine, name, cancellationToken).ConfigureAwait(false);
         if (result.Applied)
         {
-            // A node renamed (altanode run --name) is listed by its new name in the devices too, as on the canvas.
-            if (device.Kind == FleetDeviceKinds.Node && kept.Name.Trim() is { Length: > 0 and <= SetupService.MaxNameLength } name && !name.Any(char.IsControl))
-                await _store.RenameNodeAsync(device.Id, name, cancellationToken).ConfigureAwait(false);
             _directory.Publish(device.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Machine, device.Id,
                 Machine: new FleetDirectoryMachine(device.Id, device.Kind, kept, now)));
         }
