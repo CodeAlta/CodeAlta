@@ -158,11 +158,9 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         options.Host.Identities.IsOwnerWork = sessionId => !Principals.IsAttributed(sessionId);
         // A session such a session starts on this machine is the work of the same person or run, and so are those it starts.
         // One that cannot be recorded is refused: its identity is not resolved, and it does not attach.
-        options.Host.Identities.InheritWork = (sessionId, parentSessionId) =>
-        {
-            Principals.Inherit(sessionId, parentSessionId);
-            KeepPrincipalsBounded();
-        };
+        options.Host.Identities.InheritWork = (sessionId, parentSessionId) => Principals.Inherit(sessionId, parentSessionId);
+        // A session deleted is gone for sure: whose work it was is forgotten then, never because it is not found now.
+        options.Host.RuntimeService.SessionDeleted += ForgetPrincipalOfDeleted;
         if (options.AdmitBudget is not null)
         {
             // A session whose send a budget holds waits for a person (it does not move); the sends held when the node stopped are
@@ -311,6 +309,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         if (ReferenceEquals(_host.RuntimeService.RemoteParents, _agents)) _host.RuntimeService.RemoteParents = null;
         if (_queuedRunGate is not null && ReferenceEquals(_host.RuntimeService.QueuedRunGate, _queuedRunGate)) _host.RuntimeService.QueuedRunGate = null;
         if (_heldSessions is not null && ReferenceEquals(_host.HeldSends, _heldSessions)) _host.HeldSends = null;
+        _host.RuntimeService.SessionDeleted -= ForgetPrincipalOfDeleted;
         foreach (var caller in _callers.Values)
         {
             try { await caller.Connection.CloseAsync("node_stopping").ConfigureAwait(false); }
