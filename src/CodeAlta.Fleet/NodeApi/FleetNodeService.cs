@@ -156,6 +156,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         // A session another person started here (a member of a team), or a run nobody attends that is not the owner's (an automation
         // of a team or of the organization), resolves none of the owner's secrets.
         options.Host.Identities.IsOwnerWork = sessionId => !Principals.IsAttributed(sessionId);
+        // A session such a session starts on this machine is the work of the same person or run, and so are those it starts.
+        options.Host.Identities.InheritWork = (sessionId, parentSessionId) => Principals.Inherit(sessionId, parentSessionId);
         if (options.AdmitBudget is not null)
         {
             // A session whose send a budget holds waits for a person (it does not move); the sends held when the node stopped are

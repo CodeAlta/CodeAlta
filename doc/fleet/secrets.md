@@ -29,8 +29,8 @@ never by the server.
 - **Scopes**, the narrowest winning: the run's environment, then the project, the space, the person, the team, the
   organization. A machine's own store comes first for the work of its owner; the work of another person there (a
   member of a team on a team machine), and a run nobody attends that is not positively the owner's (an automation of a
-  team or of the organization, or one another person gave), recorded before its session attaches, gets none of the
-  owner's values, only those of the environment it was admitted to; an organization's policy can require the managed
+  team or of the organization, or one another person gave), recorded before its session attaches, and every session
+  such a session starts there (its principal is inherited when it attaches), gets none of the owner's values, only those of the environment it was admitted to; an organization's policy can require the managed
   value on its machines.
 - **Write-only**: the desktop and the REST API set a secret, rotate it and delete it; they list its name, scope,
   version, who set it and when, and which machines hold it, never its value.

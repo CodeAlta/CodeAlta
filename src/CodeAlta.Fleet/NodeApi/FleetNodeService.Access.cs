@@ -287,6 +287,23 @@ internal sealed class FleetSessionPrincipals
         }
     }
 
+    // A session another session started: the work of the same person, or the same run nobody attends, as that session; nothing for a
+    // session of the owner. A file that cannot be written leaves it unrecorded: the session is still not the owner's work while
+    // its parent is not, and it is recorded at its next resolution.
+    public void Inherit(string sessionId, string parentSessionId)
+    {
+        lock (_gate)
+        {
+            if (_items.Any(item => item.SessionId == sessionId) || _items.FirstOrDefault(item => item.SessionId == parentSessionId) is not { } parent) return;
+            _items.Add(parent with { SessionId = sessionId });
+            try { Save(); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                _items.RemoveAt(_items.Count - 1);
+            }
+        }
+    }
+
     // Under the gate.
     private void Save()
     {

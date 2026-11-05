@@ -164,6 +164,8 @@ public sealed partial class FleetNodeService
             CreatedAt = _options.TimeProvider.GetUtcNow(),
         };
 
+        // Whose work it is is known before it attaches: the session of an agent of a member's machine is that member's, not the owner's.
+        RecordPrincipal(call.Device, sessionId);
         // The tools it does without are known before it attaches, and kept with its lineage across restarts of the node.
         _host.RuntimeService.SetDisabledToolPatterns(sessionId, toolsOff.Count > 0 ? toolsOff : null);
         SessionViewDescriptor session;
