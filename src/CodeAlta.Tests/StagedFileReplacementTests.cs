@@ -65,13 +65,42 @@ public sealed class StagedFileReplacementTests
             File.SetAttributes(path, FileAttributes.ReadOnly);
             try
             {
+                var started = System.Diagnostics.Stopwatch.StartNew();
                 Assert.ThrowsExactly<UnauthorizedAccessException>(() => StagedFileReplacement.MoveOver(staged, path, renameWithPosixSemantics: false));
+                Assert.IsLessThan(TimeSpan.FromSeconds(1), started.Elapsed, "A read-only file is refused at once: no reader lets it go.");
                 Assert.AreEqual("after", File.ReadAllText(path));
             }
             finally
             {
                 File.SetAttributes(path, FileAttributes.Normal);
             }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task AFolderInThePlaceOfTheFile_IsRefusedAtOnce()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-staged-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var path = Path.Combine(root, "records.json");
+            var staged = path + ".tmp";
+            Directory.CreateDirectory(path);
+            File.WriteAllText(staged, "after");
+
+            // Nothing holds it for a moment: waiting would only delay the refusal the writer reports.
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            var sync = Assert.Throws<Exception>(() => StagedFileReplacement.MoveOver(staged, path, renameWithPosixSemantics: false));
+            var async = await Assert.ThrowsAsync<Exception>(async () => await StagedFileReplacement.MoveOverAsync(staged, path));
+            Assert.IsInstanceOfType(sync, typeof(IOException).IsInstanceOfType(sync) ? typeof(IOException) : typeof(UnauthorizedAccessException));
+            Assert.IsInstanceOfType(async, typeof(IOException).IsInstanceOfType(async) ? typeof(IOException) : typeof(UnauthorizedAccessException));
+            Assert.IsLessThan(TimeSpan.FromSeconds(1), started.Elapsed);
+            Assert.IsTrue(Directory.Exists(path));
         }
         finally
         {

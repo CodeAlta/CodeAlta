@@ -43,7 +43,7 @@ internal static class StagedFileReplacement
                 File.Move(stagedPath, path, overwrite: true);
                 return;
             }
-            catch (Exception ex) when (IsHeldElsewhere(ex, started))
+            catch (Exception ex) when (IsHeldElsewhere(ex, path, started))
             {
                 if (!replaceTried && ex is UnauthorizedAccessException)
                 {
@@ -79,7 +79,7 @@ internal static class StagedFileReplacement
                 File.Move(stagedPath, path, overwrite: true);
                 return;
             }
-            catch (Exception ex) when (IsHeldElsewhere(ex, started))
+            catch (Exception ex) when (IsHeldElsewhere(ex, path, started))
             {
                 if (!replaceTried && ex is UnauthorizedAccessException)
                 {
@@ -108,11 +108,26 @@ internal static class StagedFileReplacement
         }
     }
 
-    // Access denied for a file open elsewhere, or a sharing violation (32), within the time the move is tried again.
-    private static bool IsHeldElsewhere(Exception ex, long started)
+    // Access denied for a file open elsewhere, or a sharing violation (32), within the time the move is tried again. A folder in
+    // the place of the file, or a read-only file, is denied for good: no reader lets it go, and it is refused at once.
+    private static bool IsHeldElsewhere(Exception ex, string path, long started)
         => OperatingSystem.IsWindows()
             && (ex is UnauthorizedAccessException || ex is IOException && (ex.HResult & 0xffff) == 32)
-            && Stopwatch.GetElapsedTime(started) < RetryLimit;
+            && Stopwatch.GetElapsedTime(started) < RetryLimit
+            && !IsDeniedForGood(path);
+
+    private static bool IsDeniedForGood(string path)
+    {
+        try
+        {
+            return Directory.Exists(path) || File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReadOnly) != 0;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Its attributes do not read: it may be held, and is tried again.
+            return false;
+        }
+    }
 
     // FileRenameInfoEx with FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS (Windows 10 1809 and
     // later, on NTFS): false where it is not supported or fails, for the plain move to try and to report what fails.

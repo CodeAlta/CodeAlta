@@ -69,7 +69,9 @@ internal static class FleetFiles
 
             if (overwrite)
             {
-                File.Move(stagingPath, path, overwrite: true);
+                // On Windows a file just written may be held a moment by a scanner or a reader: the replace waits for it rather
+                // than fail the write.
+                CodeAlta.Agent.Runtime.StagedFileReplacement.MoveOver(stagingPath, path);
                 return true;
             }
 
