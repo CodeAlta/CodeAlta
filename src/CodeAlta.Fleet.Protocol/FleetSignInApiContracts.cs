@@ -90,9 +90,15 @@ public sealed record SignInMethodsResponse(string? Organization, IReadOnlyList<S
 /// <param name="Purpose">Why (<see cref="FleetSignInPurposes"/>); <see cref="FleetSignInPurposes.Enroll"/> when absent.</param>
 /// <param name="Confirmation">
 /// For a link: the confirmation of a sign-in of the person with a way in they already have (<see cref="FleetSignInPurposes.Confirm"/>),
-/// from the same device, used once. A link needs it unless it is the person's first way in, linked soon after the device joined.
+/// from the same device, used once. A link needs it, or <paramref name="ApprovalId"/>, unless it is the person's first way in,
+/// linked soon after the device joined.
 /// </param>
-public sealed record StartSignInRequest(string Method, string PublicKey, string? RedirectUri, string? Purpose = null, string? Confirmation = null);
+/// <param name="ApprovalId">
+/// For a link, instead of <paramref name="Confirmation"/>: an approval of this link (its method, from this device) that another
+/// approved controller device of the person signed (<c>POST /api/v1/sign-in/link-approvals</c>), used once.
+/// </param>
+public sealed record StartSignInRequest(string Method, string PublicKey, string? RedirectUri, string? Purpose = null, string? Confirmation = null,
+    string? ApprovalId = null);
 
 /// <summary>A sign-in that started.</summary>
 /// <param name="AttemptId">The attempt, which only its device completes.</param>
@@ -254,6 +260,25 @@ public sealed record SignInChangeDto(long Version, IReadOnlyList<string> Enabled
 public sealed record SignInApprovalDto(string Id, string Status, string RequesterDeviceId, string? RequesterName, SignInChangeDto Change, string Digest,
     DateTimeOffset ExpiresAt, string? ApprovedBy = null);
 
+/// <summary>The body of <c>POST /api/v1/sign-in/link-approvals</c>: a device asks another device of its person to approve a link.</summary>
+/// <param name="Method">The method to link (<see cref="FleetSignInMethods"/>); <c>passkey</c> to register a passkey.</param>
+public sealed record RequestLinkApprovalRequest(string Method);
+
+/// <summary>
+/// A link of a way to sign in that waits for another approved controller device of the person to approve it
+/// (<c>doc/fleet/identity.md</c>, linked sign-in methods).
+/// </summary>
+/// <param name="Id">The approval.</param>
+/// <param name="Status"><c>pending</c> or <c>approved</c>.</param>
+/// <param name="RequesterDeviceId">The device that links, which alone uses the approval.</param>
+/// <param name="RequesterName">Its name.</param>
+/// <param name="Method">The method it links.</param>
+/// <param name="Digest">The digest the approver signs (<see cref="FleetSignInApprovals.LinkDigest"/>), which it computes itself from what it is shown.</param>
+/// <param name="ExpiresAt">When it stops working.</param>
+/// <param name="ApprovedBy">The device that approved it, once approved.</param>
+public sealed record SignInLinkApprovalDto(string Id, string Status, string RequesterDeviceId, string? RequesterName, string Method, string Digest, DateTimeOffset ExpiresAt,
+    string? ApprovedBy = null);
+
 /// <summary>
 /// What a controller device signs to approve a change of the company sign-in that another device of its person asks for:
 /// <c>{ "v", "org", "approval", "requester", "digest", "signer", "time" }</c>.
@@ -284,6 +309,24 @@ public static class FleetSignInApprovals
 {
     private const string SignDomain = "codealta-sign-in-approval/1\n";
     private const string DigestDomain = "codealta-sign-in-change/1\n";
+    private const string LinkDigestDomain = "codealta-sign-in-link/1\n";
+
+    /// <summary>
+    /// Gets the digest of a link to approve: the organization, the device that links and the method, under a domain of its
+    /// own, so that an approval of a link is never one of a change of the settings.
+    /// </summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="requesterDeviceId">The device that links.</param>
+    /// <param name="method">The method it links.</param>
+    /// <returns>The base64url of the SHA-256.</returns>
+    /// <exception cref="ArgumentException">An argument is null or empty.</exception>
+    public static string LinkDigest(string organizationId, string requesterDeviceId, string method)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        ArgumentException.ThrowIfNullOrEmpty(requesterDeviceId);
+        ArgumentException.ThrowIfNullOrEmpty(method);
+        return Base64Url.EncodeToString(SHA256.HashData(Encoding.UTF8.GetBytes(LinkDigestDomain + organizationId + "\n" + requesterDeviceId + "\n" + method)));
+    }
 
     /// <summary>Describes a change as an approver sees it: the client secret by its SHA-256 only.</summary>
     /// <param name="request">The change.</param>
@@ -391,4 +434,7 @@ public sealed record SignInLoginDto(string Method, string Name, DateTimeOffset C
 [JsonSerializable(typeof(SignInApprovalDto))]
 [JsonSerializable(typeof(ListResponse<SignInApprovalDto>))]
 [JsonSerializable(typeof(FleetSignedSignInApproval))]
+[JsonSerializable(typeof(RequestLinkApprovalRequest))]
+[JsonSerializable(typeof(SignInLinkApprovalDto))]
+[JsonSerializable(typeof(ListResponse<SignInLinkApprovalDto>))]
 public sealed partial class FleetSignInJsonContext : JsonSerializerContext;
