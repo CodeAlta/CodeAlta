@@ -49,6 +49,8 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
     private readonly CopilotModelDiscoveryClient _modelDiscovery;
     // The models the endpoint rejected an effort for: they are sent none for as long as the provider runs.
     private readonly ConcurrentDictionary<string, byte> _modelsWithoutReasoningEffort = new(StringComparer.OrdinalIgnoreCase);
+    // The thinking of Claude models the endpoint refused to verify, sent as text for as long as the provider runs.
+    private readonly AgentRefusedReasoning _refusedReasoning = new();
 
     public CopilotDirectTurnExecutor(CopilotDirectProviderOptions provider)
     {
@@ -140,7 +142,7 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         return endpointKind switch
         {
             CopilotEndpointKind.Responses => await ExecuteOpenAIResponsesAsync(request, credential, onUpdate, onSessionUpdate, cancellationToken).ConfigureAwait(false),
-            CopilotEndpointKind.AnthropicMessages => await ExecuteAnthropicMessagesAsync(request, credential, onUpdate, cancellationToken).ConfigureAwait(false),
+            CopilotEndpointKind.AnthropicMessages => await ExecuteAnthropicMessagesAsync(request, credential, onUpdate, onSessionUpdate, cancellationToken).ConfigureAwait(false),
             _ => await ExecuteOpenAIChatAsync(request, credential, onUpdate, cancellationToken).ConfigureAwait(false),
         };
     }
@@ -203,6 +205,7 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         AgentTurnRequest request,
         CopilotDirectCredential credential,
         Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken)
     {
         var usage = new CopilotRequestUsage();
@@ -219,11 +222,13 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
             Compaction = _provider.Compaction,
             ModelOverrides = _provider.ModelOverrides,
             ExtraHeaders = CreateAnthropicHeaders(request),
+            RefusedReasoning = _refusedReasoning,
         };
         var executor = AnthropicModelProviderRuntime.CreateTurnExecutor(provider);
         var response = await executor.ExecuteTurnAsync(
             CreateDelegatedRequest(request, credential, "anthropic-messages", AgentTransportKind.AnthropicMessages, _provider.Profile ?? AnthropicMessagesProfile),
             onUpdate,
+            onSessionUpdate,
             cancellationToken).ConfigureAwait(false);
         return usage.Apply(response);
     }

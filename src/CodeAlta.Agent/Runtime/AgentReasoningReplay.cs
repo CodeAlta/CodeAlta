@@ -148,11 +148,68 @@ public static class AgentReasoningReplay
         }
 
         changed = true;
-        // The reasoning a model wrote as its own text is not a summary: another model is not given it.
-        return string.IsNullOrWhiteSpace(reasoning.Value) || reasoning.RawText == true
+        return Downgrade(reasoning);
+    }
+
+    /// <summary>
+    /// Returns the conversation where the reasoning with a provider payload that <paramref name="downgrade"/> selects is
+    /// sent as another model would get it: its summary as text, or nothing.
+    /// </summary>
+    /// <param name="conversation">The conversation of a request, already sanitized for its provider.</param>
+    /// <param name="downgrade">Whether a reasoning part with a payload is sent without it.</param>
+    /// <returns>The conversation, the same instance when nothing changed.</returns>
+    internal static IReadOnlyList<AgentConversationMessage> DowngradeReplayed(
+        IReadOnlyList<AgentConversationMessage> conversation,
+        Func<AgentMessagePart.Reasoning, bool> downgrade)
+    {
+        AgentConversationMessage[]? downgraded = null;
+        for (var messageIndex = 0; messageIndex < conversation.Count; messageIndex++)
+        {
+            var message = conversation[messageIndex];
+            if (!message.Parts.Any(part => IsReplayed(part, downgrade)))
+            {
+                if (downgraded is not null)
+                {
+                    downgraded[messageIndex] = message;
+                }
+
+                continue;
+            }
+
+            downgraded ??= CopyPrefix(conversation, messageIndex);
+            var parts = new List<AgentMessagePart>(message.Parts.Count);
+            foreach (var part in message.Parts)
+            {
+                if (!IsReplayed(part, downgrade))
+                {
+                    parts.Add(part);
+                }
+                else if (Downgrade((AgentMessagePart.Reasoning)part) is { } text)
+                {
+                    parts.Add(text);
+                }
+            }
+
+            downgraded[messageIndex] = message with { Parts = parts };
+        }
+
+        return downgraded ?? conversation;
+    }
+
+    /// <summary>Gets whether a conversation replays reasoning with a provider payload (a signature, an encrypted block).</summary>
+    /// <param name="conversation">The conversation of a request.</param>
+    /// <returns>True when a reasoning part carries a payload.</returns>
+    internal static bool HasReplayedReasoning(IReadOnlyList<AgentConversationMessage> conversation)
+        => conversation.Any(static message => message.Parts.Any(static part => IsReplayed(part, static _ => true)));
+
+    private static bool IsReplayed(AgentMessagePart part, Func<AgentMessagePart.Reasoning, bool> downgrade)
+        => part is AgentMessagePart.Reasoning { ProtectedData.Length: > 0 } reasoning && downgrade(reasoning);
+
+    // The reasoning a model wrote as its own text is not a summary: another model is not given it.
+    private static AgentMessagePart.Text? Downgrade(AgentMessagePart.Reasoning reasoning)
+        => string.IsNullOrWhiteSpace(reasoning.Value) || reasoning.RawText == true
             ? null
             : new AgentMessagePart.Text(CreateReasoningSummaryText(reasoning.Value));
-    }
 
     private static bool IsCompatible(AgentReasoningProvenance? provenance, AgentTurnRequest request)
     {

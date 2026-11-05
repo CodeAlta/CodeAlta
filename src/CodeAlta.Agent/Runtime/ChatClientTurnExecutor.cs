@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CodeAlta.Agent.Runtime.Tools;
 using Microsoft.Extensions.AI;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.Runtime;
 
@@ -22,6 +23,8 @@ internal delegate (IReadOnlyList<ChatMessage> Messages, ChatOptions Options) Cha
 /// </summary>
 internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog, IModelProviderToolDeferral
 {
+    private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.Runtime");
+
     private readonly Func<ModelProviderRuntimeDescriptor, CancellationToken, ValueTask<IChatClient>> _chatClientFactory;
     private readonly Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> _listModelsAsync;
     private readonly Func<AgentTurnRequest, AgentReasoningEffort, bool>? _supportsReasoningEffort;
@@ -121,6 +124,19 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     /// </summary>
     public Action<Exception>? AttachFailureDiagnostics { get; init; }
 
+    /// <summary>
+    /// Gets or initializes whether a failure is the refusal of the reasoning a request replays (a thinking block whose
+    /// signature the endpoint cannot verify); null for a provider that replays none. The request is then sent once more
+    /// with that reasoning as text, and its payloads are sent so from then on (<see cref="RefusedReasoning"/>).
+    /// </summary>
+    public Func<Exception, bool>? IsRefusedReplayedReasoning { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the reasoning the endpoint refused, kept for as long as the provider runs: a provider that
+    /// creates an executor per request gives the one it keeps.
+    /// </summary>
+    public AgentRefusedReasoning RefusedReasoning { get; init; } = new();
+
     /// <summary>Gets or sets how long a response that stopped in the middle waits before it is asked again.</summary>
     internal TimeSpan MidStreamRetryDelay { get; init; } = TimeSpan.FromSeconds(2);
 
@@ -151,17 +167,16 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                 // of tool results then follow in a user message.
                 var inlineImages = _toolResultsCarryImages?.Invoke(request) == true;
                 var conversation = AgentReasoningReplay.SanitizeForRequest(request.Conversation, request);
-                IReadOnlyList<ChatMessage> messages = (inlineImages ? conversation : Images.AgentToolResultImages.MoveToUserMessages(conversation))
-                    .Select(message => MapMessage(message, inlineImages))
-                    .ToArray();
-                var options = CreateOptions(request);
-                if (_prepareRequest is not null)
+                if (IsRefusedReplayedReasoning is not null && !RefusedReasoning.IsEmpty)
                 {
-                    (messages, options) = _prepareRequest(request, messages, options);
+                    conversation = AgentReasoningReplay.DowngradeReplayed(conversation, RefusedReasoning.Contains);
                 }
 
+                var (messages, options) = PrepareRequest(request, conversation, inlineImages);
                 List<ChatResponseUpdate> updates;
                 DateTimeOffset requestStartedAt;
+                var askedAgain = false;
+                var replayRefused = false;
                 for (var attempt = 1; ; attempt++)
                 {
                     // The text of an attempt is a draft until the response is complete: a retry discards it.
@@ -185,8 +200,29 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
 
                         break;
                     }
-                    catch (Exception exception) when (attempt == 1 && ShouldAskAgain(exception, updates, cancellationToken))
+                    catch (Exception exception) when (!replayRefused && updates.Count == 0 &&
+                                                      !cancellationToken.IsCancellationRequested &&
+                                                      IsRefusedReplayedReasoning?.Invoke(exception) == true &&
+                                                      AgentReasoningReplay.HasReplayedReasoning(conversation))
                     {
+                        // The endpoint cannot verify a thinking block it is given back (signed for another account or
+                        // backend): the session would fail on each request. Its reasoning goes as text, as to another
+                        // model, and what the endpoint writes from now on is replayed as it comes.
+                        replayRefused = true;
+                        TryAttachFailureDiagnostics(exception);
+                        RefusedReasoning.Add(conversation);
+                        conversation = AgentReasoningReplay.DowngradeReplayed(conversation, static _ => true);
+                        (messages, options) = PrepareRequest(request, conversation, inlineImages);
+                        Logger.Warn($"The provider refused the replayed reasoning of a session; asking again with it as text provider={request.Provider.ProviderKey} model={request.ModelId ?? "(none)"} session={request.SessionId}: {AgentErrorData.RedactText(exception.Message)}");
+                        await onSessionUpdate(new AgentTurnSessionUpdate
+                        {
+                            Kind = AgentSessionUpdateKind.Warning,
+                            Message = "The provider refused the thinking of earlier answers, which it cannot verify. Asking again with that thinking as text.",
+                        }, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception exception) when (!askedAgain && ShouldAskAgain(exception, updates, cancellationToken))
+                    {
+                        askedAgain = true;
                         TryAttachFailureDiagnostics(exception);
                         // An outage in the middle of the stream, before any tool call: the provider's own retries
                         // only cover a request that has not started, so the request is sent once more.
@@ -252,6 +288,18 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         {
             throw CreateTurnExecutionException(ex, _describeFailure?.Invoke(ex, request));
         }
+    }
+
+    private (IReadOnlyList<ChatMessage> Messages, ChatOptions Options) PrepareRequest(
+        AgentTurnRequest request,
+        IReadOnlyList<AgentConversationMessage> conversation,
+        bool inlineImages)
+    {
+        IReadOnlyList<ChatMessage> messages = (inlineImages ? conversation : Images.AgentToolResultImages.MoveToUserMessages(conversation))
+            .Select(message => MapMessage(message, inlineImages))
+            .ToArray();
+        var options = CreateOptions(request);
+        return _prepareRequest is null ? (messages, options) : _prepareRequest(request, messages, options);
     }
 
     private ChatOptions CreateOptions(AgentTurnRequest request)
