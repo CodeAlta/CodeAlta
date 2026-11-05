@@ -138,6 +138,29 @@ public sealed class AutomationRunGuardTests
         }
     }
 
+    // A call the circuit breaker cannot keep with the state of the automations (a full disk, a file that cannot be replaced)
+    // would be given again after a restart: it waits for a person.
+    [TestMethod]
+    public async Task TheCircuitBreaker_AsksAPerson_WhenTheCallsOfTheHourCannotBeKept()
+    {
+        var folder = Directory.CreateTempSubdirectory("codealta-breaker-").FullName;
+        try
+        {
+            // The state file cannot be replaced: a folder holds its place.
+            var path = Directory.CreateDirectory(Path.Combine(folder, "state.json")).FullName;
+            var asker = new Asker { Answer = AgentPermissionDecisionKind.Deny };
+            var autonomy = new AutomationAutonomy { AllowedTools = ["k8s_restart_pod"], MaxCallsPerHour = 2 };
+            var guard = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(new AutomationStateStore(path, false)), asker.AskAsync,
+                new AutomationClock { Now = Noon }, dryRun: false);
+            Assert.IsNotNull((await guard.BeforeToolCallAsync(Call("k8s_restart_pod"), default)).BlockMessage, "a call that is not kept is not made by itself");
+            StringAssert.Contains(asker.Asked.Single().Reason, "cannot be written");
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     [TestMethod]
     public async Task APinnedBoundedTool_RunsAsItWasPinned_WithinItsBounds_OnceItsPreconditionHolds()
     {

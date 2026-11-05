@@ -29,19 +29,23 @@ internal sealed class AutomationCallBreaker
         _store = store;
     }
 
-    /// <summary>Takes one call of an automation, when it has calls left in the hour.</summary>
-    /// <returns>Whether the call may run without a person.</returns>
-    internal bool TryTake(string automationId, int? maximum, DateTimeOffset now)
+    /// <summary>
+    /// Takes one call of an automation, when it has calls left in the hour and the call is kept: one that cannot be written
+    /// with the state of the automations would be given again after a restart, so it waits for a person.
+    /// </summary>
+    /// <returns>Why the call waits for a person; null when it may run without one.</returns>
+    internal string? Take(string automationId, int? maximum, DateTimeOffset now)
     {
-        if (maximum is not { } most) return true;
+        if (maximum is not { } most) return null;
         lock (_gate)
         {
             if (!_calls.TryGetValue(automationId, out var calls)) _calls[automationId] = calls = new(_store?.Calls(automationId) ?? []);
             while (calls.Count > 0 && now - calls.Peek() >= Window) calls.Dequeue();
-            if (calls.Count >= most) return false;
+            if (calls.Count >= most) return $"it called its allowed tools {most} times in the last hour, and its circuit breaker asks a person";
+            // Counted here whatever is written: this run of the application never gives it again.
             calls.Enqueue(now);
-            _store?.SetCalls(automationId, [.. calls]);
-            return true;
+            return _store is null || _store.SetCalls(automationId, [.. calls]) ? null
+                : "the calls of the hour its circuit breaker counts cannot be written, and a restart would give them again";
         }
     }
 }
@@ -211,9 +215,9 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
         var held = rules?.CheckPin(call.Spec) ?? rules?.CheckBounds(call.Invocation.Arguments);
         if (held is null)
         {
-            if (_breaker.TryTake(_entry.Id, _autonomy.MaxCallsPerHour, _time.GetUtcNow()))
+            held = _breaker.Take(_entry.Id, _autonomy.MaxCallsPerHour, _time.GetUtcNow());
+            if (held is null)
                 return await PreconditionsAsync(rules, call, cancellationToken).ConfigureAwait(false) is { } failed ? NotMade(tool, failed) : AgentToolCallDecision.Allow;
-            held = $"it called its allowed tools {_autonomy.MaxCallsPerHour} times in the last hour, and its circuit breaker asks a person";
         }
 
         var decision = await AskAsync(call.Invocation.SessionId, tool, shown, DigestOf(tool, call.Invocation.Arguments), $"The automation '{_entry.Definition.Name}' may not make this call of {tool} by itself: {held}. Allow it once, or deny it.",
