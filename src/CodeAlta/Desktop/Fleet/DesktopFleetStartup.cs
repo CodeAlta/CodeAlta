@@ -52,6 +52,8 @@ internal sealed class DesktopFleetStartup
         remoteChildren.Policy = servers.Policy;
         // A machine of an organization this computer is not paired with is reached through the relay of its server.
         fleet.RelayRoute = servers.FindRoute;
+        // The spaces its machines publish get a key from this computer, whether it links them or not: their sessions show their titles.
+        servers.MachineSpaces = fleet.PublishedSpaces;
         servers.Changed += () => _ = fleet.SyncOrganizationMachinesAsync(servers.OrganizationMachines(), CancellationToken.None);
         return new DesktopFleetStartup(fleet, remoteChildren, servers);
     }

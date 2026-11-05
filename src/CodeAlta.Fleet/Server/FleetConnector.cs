@@ -58,6 +58,13 @@ public sealed partial class FleetConnectorOptions
     /// </summary>
     public Func<IReadOnlyCollection<string>>? LinkedSpaces { get; init; }
 
+    /// <summary>
+    /// Gets the ids of the spaces the machines of this device's person publish to the server, which a controller device keeps a
+    /// key of (makes it when the person has none, gives it to the person's devices) without publishing its own sessions of them:
+    /// <see cref="PublishesSpace"/> alone decides which sessions of this instance are published. Null for none.
+    /// </summary>
+    public Func<IReadOnlyCollection<string>>? MachineSpaces { get; init; }
+
     /// <summary>Gets how often the metadata keys are read again (to wrap them to new devices of the person); every 30 seconds while a space has none.</summary>
     public TimeSpan KeyRefreshInterval { get; init; } = TimeSpan.FromMinutes(5);
 
@@ -905,8 +912,11 @@ public sealed partial class FleetConnector : IAsyncDisposable
     private async Task ReadKeysAsync(IReadOnlyList<FleetLocalSession> published, CancellationToken stop)
     {
         if (_options.MetadataKeys is not { } keys) return;
-        var spaces = _options.LinkedSpaces?.Invoke()
+        IReadOnlyCollection<string> spaces = _options.LinkedSpaces?.Invoke()
             ?? [.. published.Select(static session => string.IsNullOrWhiteSpace(session.SpaceId) ? SpaceDescriptor.DefaultId : session.SpaceId).Distinct(StringComparer.Ordinal)];
+        // The spaces the person's machines publish have a key too, whether this instance links them or not: their titles and
+        // projects are sealed with it. Linking alone decides which sessions of this instance are published.
+        if (_options.MachineSpaces?.Invoke() is { Count: > 0 } machineSpaces) spaces = [.. spaces.Union(machineSpaces, StringComparer.Ordinal)];
         var now = _options.TimeProvider.GetUtcNow();
         // On a machine of a team or of the organization, a session lacks a key while its person has none here yet; one without a
         // person never gets one.

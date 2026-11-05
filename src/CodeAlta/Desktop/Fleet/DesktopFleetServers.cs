@@ -58,6 +58,12 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// <summary>Gets the HTTP handler of the calls to the servers, for tests; null for the usual one.</summary>
     internal HttpMessageHandler? Handler { get; init; }
 
+    /// <summary>
+    /// Gets or sets the ids of the spaces the machines this computer reaches publish: this computer keeps a key of each, which seals
+    /// their titles and projects, without publishing its own sessions of them. Set before the connections start; null for none.
+    /// </summary>
+    public Func<IReadOnlyCollection<string>>? MachineSpaces { get; set; }
+
     /// <summary>Gets the links and their connectors.</summary>
     public IReadOnlyList<FleetServerConnection> Connections
     {
@@ -825,6 +831,7 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             Source = _source,
             Statistics = _statistics,
             WatchDirectory = true,
+            MachineSpaces = MachineSpaces,
             Configure = _configure,
             // A budget reached, a run that waits, a notification: the pages and the Fleet button read them again.
             BudgetsChanged = _ => OnChanged(),

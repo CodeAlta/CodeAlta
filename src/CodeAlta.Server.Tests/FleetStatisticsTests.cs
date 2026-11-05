@@ -69,6 +69,39 @@ public sealed class FleetStatisticsTests
     }
 
     [TestMethod]
+    public async Task TheProjectOfAMachinesSessionInASpaceTheControllerDoesNotLink_IsOneTheControllerNames()
+    {
+        await using var fleet = await StatisticsFixture.StartAsync();
+        const string identity = "repo:github.com/xoofx/markdig";
+        var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey));
+        // The desktop links "work" only; the machine publishes its Default, as a node does once it joined.
+        await using var desktop = new FleetConnector(new FleetConnectorOptions
+        {
+            ServerAddress = fleet.Server.BaseAddress, Identity = fleet.DesktopKey, OutboxPath = Path.Combine(fleet.Root.Path, "desktop-outbox.json"),
+            Client = new FleetClientInfo("desktop", "4.0.0", "windows"), Source = new FakeSessions(), PublishesSpace = static space => space == "work",
+            LinkedSpaces = static () => ["work"], MachineSpaces = static () => ["default"], MetadataKeys = desktopKeys,
+            MinimumBackoff = TimeSpan.FromMilliseconds(100), MaximumBackoff = TimeSpan.FromMilliseconds(500), PublishDelay = TimeSpan.FromMilliseconds(20),
+            PollInterval = TimeSpan.FromMilliseconds(200),
+        });
+        desktop.Start();
+        await WaitForAsync(() => Task.FromResult(desktopKeys.CurrentFor("default") is not null));
+
+        var sessions = new FakeSessions();
+        var statistics = new FakeStatistics();
+        statistics.Set("s1", Usage(Morning, "claude-opus-5-5", 1000, 200));
+        sessions.Set(Session("s1", "default") with { ProjectIdentity = identity });
+        var nodeKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey));
+        await using var connector = fleet.NodeConnector(sessions, statistics, static space => space is null or "default", keys: nodeKeys);
+        connector.Start();
+
+        // The project key the machine published is the one this computer computes for its own checkout of the repository.
+        var named = FleetProjectKeys.Of(desktopKeys.CurrentFor("default")!, identity);
+        await WaitForAsync(async () => (await fleet.Desktop.QueryStatisticsAsync(new StatisticsQueryRequest("2026-11-01", "2026-11-04", null, [StatisticsGroupBy.Project])))
+            .Groups.Any(group => group.Project == named && group.Measures.InputTokens == 1000));
+        Assert.IsTrue(desktopKeys.Held.Any(key => FleetProjectKeys.Of(key, identity) == named), "a key this computer holds names the project, as By project does");
+    }
+
+    [TestMethod]
     public async Task AReplay_ALostOutbox_AndARestartedConnector_ChangeNothing()
     {
         await using var fleet = await StatisticsFixture.StartAsync();
@@ -312,13 +345,14 @@ public sealed class FleetStatisticsTests
             return new StatisticsFixture(server, root, desktopKey, nodeKey, desktop);
         }
 
-        public FleetConnector NodeConnector(IFleetPublicationSource source, IFleetStatisticsSource statistics, Func<string?, bool> publishes, string? outbox = null)
+        public FleetConnector NodeConnector(IFleetPublicationSource source, IFleetStatisticsSource statistics, Func<string?, bool> publishes, string? outbox = null,
+            FleetMetadataKeyring? keys = null)
             => new(new FleetConnectorOptions
             {
                 ServerAddress = Server.BaseAddress, Identity = NodeKey, OutboxPath = outbox ?? Path.Combine(Root.Path, "outbox.json"),
                 Client = new FleetClientInfo("node", "4.0.0", "macos"), Source = source, Statistics = statistics, PublishesSpace = publishes,
                 MinimumBackoff = TimeSpan.FromMilliseconds(100), MaximumBackoff = TimeSpan.FromMilliseconds(500), PendingApprovalRetry = TimeSpan.FromMilliseconds(200),
-                PublishDelay = TimeSpan.FromMilliseconds(20), PollInterval = TimeSpan.FromMilliseconds(200),
+                PublishDelay = TimeSpan.FromMilliseconds(20), PollInterval = TimeSpan.FromMilliseconds(200), MetadataKeys = keys,
             });
 
         public async ValueTask DisposeAsync()

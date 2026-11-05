@@ -37,7 +37,7 @@ public sealed partial class FleetNodeService
             async (index, token) => locations[index] = string.IsNullOrWhiteSpace(projects[index].ProjectPath) ? null
                 : await _locations.GetAsync(projects[index].ProjectPath, token).ConfigureAwait(false)).ConfigureAwait(false);
         return new FleetNodeInfo(_options.Name, _options.Identity.DeviceId, FleetChannelProtocol.OperatingSystemName, _options.Version,
-            [.. spaces.Select(static space => new FleetSpaceInfo(space.Id, space.Name))],
+            [.. spaces.Select(static space => new FleetSpaceInfo(space.Id, space.Name) { Published = space.Settings.Fleet?.Server is { Length: > 0 } })],
             [.. projects.Select((project, index) => FleetProjectEditor.Describe(project, locations[index]))],
             Describe(call.Device!.Permissions))
         {
