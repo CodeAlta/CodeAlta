@@ -43,7 +43,8 @@ public sealed partial class FleetNodeService
         if (Policy is not { } policy) return null;
         var item = await WorkOfLineageAsync(session, Work.List(), parent => _host.RuntimeService.TryGetRecoverableSessionAsync(parent, cancellationToken),
             cancellationToken).ConfigureAwait(false);
-        return item is not null && policy.RulesFor(item.SpaceId ?? session.SpaceId)?.ToolsOff is { Count: > 0 } off ? off : null;
+        // The space the work was started in decides (null is the default space there), whatever space the session is in now.
+        return item is not null && policy.RulesFor(item.SpaceId)?.ToolsOff is { Count: > 0 } off ? off : null;
     }
 
     // The work of the fleet a session is, or comes from: its lineage followed to its start (a session without a parent, or one

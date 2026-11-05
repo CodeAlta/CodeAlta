@@ -25,7 +25,8 @@ public sealed class FleetNodeApiTests
         await using var fixture = await NodeFixture.StartAsync(token);
         var service = fixture.Fleet.Service;
         var policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Rules = new FleetPolicyRules(ToolsOff: ["shell_command"]) };
-        Func<IEnumerable<Fleet.Server.FleetPolicySource>> sources = () => [new Fleet.Server.FleetPolicySource("https://fleet.example", policy, null, static _ => true)];
+        // The server is linked to the default space only.
+        Func<IEnumerable<Fleet.Server.FleetPolicySource>> sources = () => [new Fleet.Server.FleetPolicySource("https://fleet.example", policy, null, static space => space is null)];
         service.Policy = new Fleet.Server.FleetPolicyGuard(fixture.NodeIdentity.DeviceId, sources);
         var commands = fixture.Node.Host.Commands;
         var root = await commands.CreateDraftSessionAsync(null, fixture.Provider.Descriptor, "Remote work", null, null, null, null, null, null, null);
@@ -42,6 +43,9 @@ public sealed class FleetNodeApiTests
         }
 
         CollectionAssert.AreEqual(new[] { "shell_command" }, (await service.PolicyToolsOffAsync(deep, token))?.ToArray(), "a deep descendant of the work of the fleet");
+        // The work started in the default space; a session of it now in a space no server is linked to keeps the rules of the work.
+        var moved = new CodeAlta.Catalog.SessionViewDescriptor { SessionId = Guid.NewGuid().ToString(), ParentSessionId = deep.SessionId, SpaceId = "unlinked" };
+        CollectionAssert.AreEqual(new[] { "shell_command" }, (await service.PolicyToolsOffAsync(moved, token))?.ToArray(), "the space the work started in decides");
         var plain = await commands.CreateDraftSessionAsync(null, fixture.Provider.Descriptor, "Plain", null, null, null, null, null, null, null);
         Assert.IsNull(await service.PolicyToolsOffAsync(plain, token), "a session of the person at the machine keeps its tools");
 

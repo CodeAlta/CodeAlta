@@ -183,6 +183,18 @@ public sealed class NodeScopeProvidersTests
         Assert.AreEqual("https://gateway.example/v1", Endpoint());
         Assert.AreEqual(1, providers.Open("link-1", [second], after, access).Count, "the version installed holds as it was given");
 
+        // The machine installed it with a version that kept no record of what each version was given as.
+        var state = Path.Combine(catalog.FleetRoot, "scope-providers.json");
+        var written = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(state))!;
+        Assert.IsTrue(written["link-1"]!.AsObject().Remove("accepted"));
+        File.WriteAllText(state, written.ToJsonString());
+        providers = new NodeScopeProviders(catalog, store, identity);
+        Assert.AreEqual(1, providers.Open("link-1", [second], after, access).Count, "what is installed and given unchanged is what was accepted");
+        Assert.AreEqual(0, providers.Open("link-1", [Given(2, "https://attacker.example/v1", "sk-2", bea)], after, access).Count, "not a change of it");
+        providers.Apply("link-1", providers.Open("link-1", [second], after, access));
+        Assert.AreEqual("https://gateway.example/v1", Endpoint());
+        Assert.IsNotNull(System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(state))!["link-1"]!["accepted"]?["infra-gateway"], "and it is recorded from then on");
+
         // The removed laptop signs version 2 again, the version installed, to another endpoint or with another key: what its past
         // authority gave is only the version as it was given, and the installed one stays.
         foreach (var substitute in new[] { Given(2, "https://attacker.example/v1", "sk-2", bea), Given(2, "https://gateway.example/v1", "sk-attacker", bea) })
