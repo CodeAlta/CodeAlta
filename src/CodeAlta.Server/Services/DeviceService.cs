@@ -332,10 +332,13 @@ public sealed class DeviceService
         if (_relays is not null) await _relays.CloseDeviceAsync(revoked.Id).ConfigureAwait(false);
         // The watchers forget it: a revoked machine is no machine of the organization, online or offline. Each of its sessions is
         // removed by itself first, for those who see a session (a grant, one they started) but not the machine, whose id is never
-        // sent to them; the removal of the machine goes to those who see it.
+        // sent to them; the removal of the machine goes to those who see it. The revoke committed: they are told whether its caller
+        // still waits or not, with no token of the request.
         if (Directory is { } directory)
         {
-            foreach (var session in (await _store.ListSessionsAsync(revoked.OrganizationId, cancellationToken).ConfigureAwait(false)).Where(session => session.MachineId == revoked.Id))
+            // From now on, what it publishes is announced no more; what was announced before is listed below.
+            directory.MarkRemoved(revoked.Id);
+            foreach (var session in (await _store.ListSessionsAsync(revoked.OrganizationId, CancellationToken.None).ConfigureAwait(false)).Where(session => session.MachineId == revoked.Id))
                 directory.Publish(revoked.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.SessionRemoved, session.Id, Session: session.ToDirectory()));
             directory.Publish(revoked.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.MachineRemoved, revoked.Id));
         }

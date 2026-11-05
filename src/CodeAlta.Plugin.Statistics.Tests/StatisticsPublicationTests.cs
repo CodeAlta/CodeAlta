@@ -72,26 +72,58 @@ public sealed class StatisticsPublicationTests
     }
 
     [TestMethod]
-    public void AnAliasRetargetedByALaterTurn_NeverRelabelsTheModelAnEarlierRequestReported()
+    public async Task TheTimeOfARun_StaysOnTheModelItsOwnRequestsReported_WhenALaterRunOfItsQuarterReportsAnother()
     {
-        // haiku stood for v1 in the first turn; a later turn, started under v1 (the alias as it resolved then), reported v2.
-        static StatisticsFactRow Row(string family, long quarter, string model, string measure)
-            => new(family, quarter, [new("provider", "claude-code"), new("model", model), new("effort", "high")], [new(measure, 1)]);
-        var rows = new[]
-        {
-            Row("activity", 1, "haiku", "runs_started"), Row("usage", 1, "v1", "requests"), Row("cost", 1, "v1", "total_micro"), Row("activity", 1, "v1", "active_ms"),
-            Row("activity", 5, "v1", "runs_started"), Row("usage", 5, "v2", "requests"),
-        };
+        await using var harness = await EngineHarness.CreateAsync();
+        IStatisticsPublication publication = harness.Engine;
+        // The first run reports v1 before 9:15 and goes on until 9:16; the second, from 9:20, starts under v1 and its request reports v2.
+        var session = new JournalBuilder("r", "claude-code").Header(Today9).State(Today9, model: "v1")
+            .User(Today9.AddMinutes(10), "r-run0", "a prompt of some words")
+            .Usage(Today9.AddMinutes(14).AddSeconds(50), "r-run0", model: "v1")
+            .Assistant(Today9.AddMinutes(16), "r-run0")
+            .Idle(Today9.AddMinutes(16).AddSeconds(10), "r-run0")
+            .User(Today9.AddMinutes(20), "r-run1", "another prompt")
+            .Usage(Today9.AddMinutes(21), "r-run1", model: "v2")
+            .Assistant(Today9.AddMinutes(22), "r-run1")
+            .Idle(Today9.AddMinutes(22).AddSeconds(10), "r-run1");
+        harness.Journals.Set(session, Today9.AddMinutes(22).AddSeconds(10));
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
 
-        var published = PublishedModels.Attribute(rows, new Dictionary<string, string> { ["haiku"] = "v1", ["v1"] = "v2" });
+        var rows = await publication.ReadRowsAsync("r", long.MinValue);
+        var second = rows.Where(static row => row.Family == "activity").GroupBy(static row => row.Quarter).OrderBy(static group => group.Key).Last();
+        long Measure(string model, string measure) => second.Where(row => row.Keys.Any(key => key.Key == "model" && key.Value == model))
+            .Sum(row => row.Measures.FirstOrDefault(value => value.Key == measure).Value);
+        Assert.IsTrue(Measure("v1", "active_ms") > 0, "the first run's time after 9:15 stays on v1, the model its own request reported");
+        Assert.AreEqual(0L, Measure("v1", "runs_started"), "the second run did not report v1");
+        Assert.AreEqual(1L, Measure("v2", "runs_started"), "the second run is on the model its own request reported");
+        Assert.AreEqual(130_000L, Measure("v2", "active_ms"), "the whole time of the second run, 9:20 to 9:22:10, is on v2");
+    }
 
-        string Model(string family, long quarter, string measure) => published.Single(row => row.Family == family && row.Quarter == quarter
-            && row.Measures.Any(value => value.Key == measure)).Keys.Single(static key => key.Key == "model").Value;
-        Assert.AreEqual("v1", Model("usage", 1, "requests"), "a model a provider reported is never relabelled");
-        Assert.AreEqual("v1", Model("cost", 1, "total_micro"));
-        Assert.AreEqual("v1", Model("activity", 1, "runs_started"), "the alias goes on the model it stood for in its turn, not on its latest");
-        Assert.AreEqual("v1", Model("activity", 1, "active_ms"));
-        Assert.AreEqual("v2", Model("activity", 5, "runs_started"), "the later turn started under v1 goes on the model its requests reported");
-        Assert.AreEqual("v2", Model("usage", 5, "requests"));
+    [TestMethod]
+    public async Task AnAliasRetargetedByALaterTurn_NeverRelabelsTheModelAnEarlierRequestReported()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        IStatisticsPublication publication = harness.Engine;
+        // haiku stands for v1 in the first turn; the second turn starts under v1 (what haiku stood for) and its request reports v2.
+        var session = new JournalBuilder("h", "claude-code").Header(Today9).State(Today9, model: "haiku")
+            .User(Today9.AddSeconds(1), "h-run0", "a prompt of some words")
+            .Usage(Today9.AddSeconds(5), "h-run0", model: "v1", cost: 0.01, costUnit: "usd")
+            .Idle(Today9.AddSeconds(20), "h-run0")
+            .User(Today9.AddMinutes(40), "h-run1", "another prompt")
+            .Usage(Today9.AddMinutes(40).AddSeconds(5), "h-run1", model: "v2")
+            .Idle(Today9.AddMinutes(40).AddSeconds(20), "h-run1");
+        harness.Journals.Set(session, Today9.AddMinutes(40).AddSeconds(20));
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+
+        var rows = await publication.ReadRowsAsync("h", long.MinValue);
+        string[] Models(string family, bool later) => [.. rows.Where(row => row.Family == family && (row.Quarter > rows.Min(static first => first.Quarter)) == later
+            && row.Measures.Any(static value => value.Value != 0)).Select(static row => row.Keys.Single(static key => key.Key == "model").Value).Distinct()];
+        CollectionAssert.AreEqual(new[] { "v1" }, Models("usage", later: false), "a model a provider reported is never relabelled");
+        CollectionAssert.AreEqual(new[] { "v1" }, Models("cost", later: false));
+        CollectionAssert.AreEqual(new[] { "v1" }, Models("activity", later: false), "the alias goes on the model it stood for in its turn, not on its latest");
+        CollectionAssert.AreEqual(new[] { "v2" }, Models("activity", later: true), "the later turn started under v1 goes on the model its own request reported");
+        CollectionAssert.AreEqual(new[] { "v2" }, Models("usage", later: true));
     }
 }

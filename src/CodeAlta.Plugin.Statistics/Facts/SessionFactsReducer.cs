@@ -477,6 +477,14 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             if (milliseconds != 0)
             {
                 _batch.ActivityFor(new ActivityKey(quarter, provider, model, effort)).ActiveMs += milliseconds;
+                if (!run.ModelReported)
+                {
+                    // Before a request of the run said its model: the time goes on the model it says, once it says it.
+                    if (run.Unreported is [.., var last] && last.Quarter == quarter.Index && last.Provider == provider && last.Model == model && last.Effort == effort)
+                        last.Milliseconds += milliseconds;
+                    else if (run.Unreported.Count < 64)
+                        run.Unreported.Add(new UnreportedTimeState { Quarter = quarter.Index, Provider = provider, Model = model, Effort = effort, Milliseconds = milliseconds });
+                }
             }
 
             cursor = pieceEnd;
@@ -1100,6 +1108,7 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         if (!string.IsNullOrWhiteSpace(op.Model))
         {
             ApplyReportedModel(op.Model);
+            if (run is not null) SettleRunModel(run, op.Model);
         }
 
         var model = CurrentModel();
@@ -1193,6 +1202,36 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         }
 
         _state.Model = model;
+    }
+
+    // The first request of a run that reports its model: the start of the run and the time counted before it, under the model in force
+    // then (an alias, or the model the alias stood for in an earlier turn), go on the model it reports. Later reports of the run move
+    // nothing: what the run counted under a model its own request reported is that model's.
+    private void SettleRunModel(OpenRunState run, string model)
+    {
+        if (run.ModelReported)
+        {
+            return;
+        }
+
+        run.ModelReported = true;
+        if (!string.Equals(run.Model, model, StringComparison.Ordinal))
+        {
+            var start = QuarterHour.Of(run.Start);
+            _batch.ActivityFor(new ActivityKey(start, run.Provider, run.Model, run.Effort)).RunsStarted--;
+            _batch.ActivityFor(new ActivityKey(start, run.Provider, model, run.Effort)).RunsStarted++;
+            run.Model = model;
+        }
+
+        foreach (var time in run.Unreported)
+        {
+            if (string.Equals(time.Model, model, StringComparison.Ordinal)) continue;
+            var quarter = new QuarterHour(time.Quarter);
+            _batch.ActivityFor(new ActivityKey(quarter, time.Provider, time.Model, time.Effort)).ActiveMs -= time.Milliseconds;
+            _batch.ActivityFor(new ActivityKey(quarter, time.Provider, model, time.Effort)).ActiveMs += time.Milliseconds;
+        }
+
+        run.Unreported.Clear();
     }
 
     // ----- tool calls -----

@@ -70,8 +70,8 @@ public sealed class PublicationService
         var result = await _store.PublishInventoryAsync(machine, name, cancellationToken).ConfigureAwait(false);
         if (result.Applied && !await RevokedAsync(device, cancellationToken).ConfigureAwait(false))
         {
-            _directory.Publish(device.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Machine, device.Id,
-                Machine: new FleetDirectoryMachine(device.Id, device.Kind, kept, now)));
+            _directory.PublishFrom(device.OrganizationId, device.Id, [new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Machine, device.Id,
+                Machine: new FleetDirectoryMachine(device.Id, device.Kind, kept, now))]);
         }
 
         return new FleetPublishAck(result.Ack);
@@ -116,6 +116,7 @@ public sealed class PublicationService
 
         var result = await _store.PublishSessionFactsAsync(device.Id, publication.Sequence, records, cancellationToken).ConfigureAwait(false);
         var announce = !await RevokedAsync(device, cancellationToken).ConfigureAwait(false);
+        var announced = new List<FleetDirectoryChange>();
         int applied = 0, unchanged = 0;
         var stale = new List<string>();
         foreach (var (record, outcome) in result.Outcomes)
@@ -124,7 +125,7 @@ public sealed class PublicationService
             {
                 case SessionFactOutcome.Applied:
                     applied++;
-                    if (announce) _directory.Publish(device.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Session, record.Id, Session: record.ToDirectory()));
+                    if (announce) announced.Add(new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Session, record.Id, Session: record.ToDirectory()));
                     break;
                 case SessionFactOutcome.Unchanged:
                     unchanged++;
@@ -135,6 +136,8 @@ public sealed class PublicationService
             }
         }
 
+        // Announced together, unless the machine was revoked meanwhile: then the revoke lists what it removes after them, or they go unsent.
+        if (announced.Count > 0) _directory.PublishFrom(device.OrganizationId, device.Id, announced);
         Metrics?.Facts(applied, unchanged, stale.Count);
         return new FleetFactsPublishResult(result.Ack, applied, unchanged, stale);
     }
