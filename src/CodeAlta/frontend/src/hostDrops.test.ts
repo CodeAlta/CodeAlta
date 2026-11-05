@@ -103,18 +103,18 @@ test("a host drop reads its files within the total of the prompt, and says which
   const content = (size: number) => btoa("a".repeat(size));
   const replies: Record<string, unknown> = {
     [id(1)]: { status: "ok", mediaType: "text/plain", base64: content(3 * mib) },
-    [id(3)]: { status: "ok", mediaType: "text/plain", base64: content(mib) },
+    [id(3)]: { status: "ok", mediaType: "text/plain", base64: content(mib - 5) },
     [id(4)]: { status: "ok", mediaType: "text/plain", base64: content(10) },
   };
   const reads: string[] = [];
   const result = await deliverHostDrop({ x: 1, y: 2, folders: [], files: [
     { id: id(1), name: "three.txt", size: 3 * mib }, { id: id(2), name: "two.txt", size: 2 * mib },
-    { id: id(3), name: "one.txt", size: mib }, { id: id(4), name: "grew.txt", size: 0 }] },
+    { id: id(3), name: "one.txt", size: mib - 5 }, { id: id(4), name: "grew.txt", size: 0 }] },
   async ({ id: read }) => { reads.push(read); return replies[read]; }, root);
   assert.deepEqual(result.problems, [{ name: "two.txt", reason: "over_total" }, { name: "grew.txt", reason: "over_total" }]);
   assert.deepEqual(reads, [id(1), id(3), id(4)], "A file larger than what is left is not read.");
   const detail = left.surface.events[0].detail as HostDropDetail;
-  assert.deepEqual(detail.files.map(file => [file.name, file.size]), [["three.txt", 3 * mib], ["one.txt", mib]]);
+  assert.deepEqual(detail.files.map(file => [file.name, file.size]), [["three.txt", 3 * mib], ["one.txt", mib - 5]]);
 });
 
 test("a host drop of many large files reads only what one prompt takes", async () => {
@@ -128,4 +128,29 @@ test("a host drop of many large files reads only what one prompt takes", async (
   assert.equal(reads.length, fit);
   assert.equal(result.problems.length, 256 - fit);
   assert.ok(result.problems.every(problem => problem.reason === "over_total"));
+});
+
+// An image is attached as a PNG, which the total of the prompt counts, as for an image dropped on the page: a BMP that
+// would not fit fits once converted. Only the converted image is kept, so that the page never holds more than the total.
+test("a host drop counts an image by the PNG it becomes, and stops reading once the prompt is full", async () => {
+  const { root, left } = page();
+  const mib = 1024 * 1024;
+  left.surface.dataset.attachedBytes = String(attachmentLimits.totalBytes - mib);
+  const bmp = 1_920_054, png = 15_772;
+  const replies: Record<string, unknown> = {
+    [id(1)]: { status: "ok", mediaType: "image/bmp", base64: btoa("B".repeat(bmp)) },
+    [id(3)]: { status: "ok", mediaType: "text/plain", base64: btoa("c".repeat(mib - png)) },
+  };
+  const reads: string[] = [];
+  const result = await deliverHostDrop({ x: 1, y: 2, folders: [], files: [
+    { id: id(1), name: "shot.bmp", size: bmp }, { id: id(2), name: "notes.txt", size: 2 * mib },
+    { id: id(3), name: "rest.txt", size: mib - png }, { id: id(4), name: "late.png", size: 10 }] },
+  async ({ id: read }) => { reads.push(read); return replies[read]; }, root,
+  async file => file.type === "image/bmp"
+    ? { title: file.name, mediaType: "image/png", base64: btoa("P".repeat(png)) }
+    : { title: file.name, mediaType: file.type, base64: btoa(await file.text()) });
+  assert.deepEqual(reads, [id(1), id(3)], "A file that is not an image and does not fit is not read, nor any once the prompt is full.");
+  assert.deepEqual(result.problems, [{ name: "notes.txt", reason: "over_total" }, { name: "late.png", reason: "over_total" }]);
+  const detail = left.surface.events[0].detail as HostDropDetail;
+  assert.deepEqual(detail.files.map(file => [file.name, file.type, file.size]), [["shot.bmp", "image/png", png], ["rest.txt", "text/plain", mib - png]]);
 });

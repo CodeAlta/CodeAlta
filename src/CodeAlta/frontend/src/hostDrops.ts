@@ -1,4 +1,5 @@
-import { attachmentLimits } from "./promptImages";
+import type { SessionPromptImage } from "#neoastra";
+import { AttachmentError, attachmentBytes, attachmentLimits, isImageAttachment, readAttachedFile } from "./promptImages";
 
 /**
  * Files and folders dropped on the window from the file manager, as the host tells it with a `files-dropped` notice.
@@ -22,6 +23,12 @@ export const hostDropEvent = "codealta-host-drop";
 export type HostDropProblem = Readonly<{ name: string; reason: "too_large" | "over_total" | "unreadable" }>;
 
 type ReadDroppedFile = (request: { id: string }) => Promise<unknown>;
+
+/** Makes a file the attachment it becomes in a prompt: an image as a PNG, any other file as it is (`readAttachedFile`). */
+export type NormalizeDroppedFile = (file: File) => Promise<SessionPromptImage>;
+
+// The names of the images a prompt converts to PNG, by which a file may be smaller once attached than dropped.
+const imageName = /\.(?:png|jpe?g|webp|gif|bmp)$/iu;
 
 const idPattern = /^[0-9a-f]{32}$/u;
 
@@ -65,12 +72,15 @@ export function dropSurface(root: Document, x: number, y: number): HTMLElement |
 /**
  * Gives a host drop to the composer under its point: reads the content of each file from the host, then sends the
  * files and the folders to that composer's surface, which attaches them as it attaches a drop of the page and a folder
- * of Add folder…. A file larger than an attachment is not read, nor one larger than what the prompt can still take in
- * all: what it holds already (`data-attached-bytes` of its surface) and the files read before it count, so that the page
- * never holds more than one prompt takes, whatever the number of files dropped.
+ * of Add folder…. A file larger than an attachment is not read. The others are read one at a time and counted as the
+ * attachment they become (an image as its PNG), as the composer counts them, within what the prompt can still take in
+ * all: what it holds already (`data-attached-bytes` of its surface) and the files read before. An image is given as its
+ * PNG, so that the page never holds more than one prompt takes, whatever the number of files dropped; a file that is
+ * not an image and is larger than what is left is not read, and none is once nothing is left.
  * @returns Whether a composer was under the point, and the files that could not be attached.
  */
-export async function deliverHostDrop(drop: HostDrop, read: ReadDroppedFile, root: Document = document): Promise<{ delivered: boolean; problems: HostDropProblem[] }> {
+export async function deliverHostDrop(drop: HostDrop, read: ReadDroppedFile, root: Document = document,
+  normalize: NormalizeDroppedFile = file => readAttachedFile(file, null)): Promise<{ delivered: boolean; problems: HostDropProblem[] }> {
   const target = dropSurface(root, drop.x, drop.y);
   if (!target) return { delivered: false, problems: [] };
   const files: File[] = [];
@@ -78,16 +88,23 @@ export async function deliverHostDrop(drop: HostDrop, read: ReadDroppedFile, roo
   let left = attachmentLimits.totalBytes - attachedBytes(target);
   for (const file of drop.files) {
     if (file.size > attachmentLimits.fileBytes) { problems.push({ name: file.name, reason: "too_large" }); continue; }
-    if (file.size > left) { problems.push({ name: file.name, reason: "over_total" }); continue; }
+    if (left <= 0 || file.size > left && !imageName.test(file.name)) { problems.push({ name: file.name, reason: "over_total" }); continue; }
     const reply = await readReply(read, file.id);
     if (reply.status === "too_large") { problems.push({ name: file.name, reason: "too_large" }); continue; }
     const bytes = reply.status === "ok" && typeof reply.base64 === "string" ? decode(reply.base64) : null;
     if (!bytes) { problems.push({ name: file.name, reason: "unreadable" }); continue; }
-    // The file may have grown since it was dropped.
-    if (bytes.length > left) { problems.push({ name: file.name, reason: "over_total" }); continue; }
-    left -= bytes.length;
     const type = typeof reply.mediaType === "string" && reply.mediaType.length <= 128 ? reply.mediaType : "";
-    files.push(new File([bytes], file.name, { type }));
+    const dropped = new File([bytes], file.name, { type });
+    let attachment: SessionPromptImage;
+    try { attachment = await normalize(dropped); }
+    catch (error) {
+      problems.push({ name: file.name, reason: error instanceof AttachmentError && !error.unreadable ? "too_large" : "unreadable" }); continue;
+    }
+    // The file may also have grown since it was dropped.
+    const size = attachmentBytes([attachment]);
+    if (size > left) { problems.push({ name: file.name, reason: "over_total" }); continue; }
+    left -= size;
+    files.push(isImageAttachment(attachment) ? new File([decodeAttachment(attachment)], file.name, { type: "image/png" }) : dropped);
   }
   if (!target.isConnected) return { delivered: false, problems };
   if (files.length || drop.folders.length)
@@ -107,6 +124,11 @@ async function readReply(read: ReadDroppedFile, id: string): Promise<{ status?: 
     const reply = await read({ id });
     return reply && typeof reply === "object" ? reply as { status?: unknown; mediaType?: unknown; base64?: unknown } : {};
   } catch { return {}; }
+}
+
+// The PNG of an image the prompt converted, which the composer attaches again as it is.
+function decodeAttachment(attachment: SessionPromptImage): Uint8Array<ArrayBuffer> {
+  return decode(attachment.base64) ?? new Uint8Array();
 }
 
 function decode(base64: string): Uint8Array<ArrayBuffer> | null {
