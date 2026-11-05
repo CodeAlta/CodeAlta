@@ -47,7 +47,9 @@ Exposure is progressive, so a session pays in context only for the servers it us
 3. Each tool that passes policy (`enabled`, `allowed_tools`, `disabled_tools`) is an agent tool named
    `mcp__<server>__<tool>`, sanitized with a stable hash suffix on collision. Its MCP `inputSchema` (and
    `outputSchema`) is passed through as it is: a provider that cannot take part of a schema rewrites it when it builds
-   its request, never the plugin for every provider.
+   its request, never the plugin for every provider. For example, a choice at the root of a schema (`anyOf`, `oneOf`,
+   `allOf`), which the Anthropic API and Copilot refuse and Claude Code may skip, is merged into one object that keeps
+   every argument (`AgentToolRootChoices`) by the Anthropic, Copilot and Claude Code providers only.
 
 **Deferred tools.** A provider that supports tool search (see [providers](providers.md)) is offered the tools of every
 enabled server of the space, not only activated ones: deferred, grouped by server, from the tool-list cache, without

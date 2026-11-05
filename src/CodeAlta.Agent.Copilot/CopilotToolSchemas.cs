@@ -1,14 +1,17 @@
 using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CodeAlta.Agent.Runtime.Tools;
 
 namespace CodeAlta.Agent.Copilot;
 
 /// <summary>
 /// The tool schemas of a Copilot request, rewritten for what the Copilot API refuses with an HTTP 400 without detail,
 /// whatever the endpoint, as GitHub Copilot's own client rewrites them (<c>normalizeToolSchema</c> of
-/// vscode-copilot-chat): a required name that is not a declared property, and for a GPT-4 model the keywords it does not
-/// take. The schema of a tool, an MCP one included, is otherwise sent as it is.
+/// vscode-copilot-chat): a choice at the root (<c>anyOf</c>, <c>oneOf</c>, <c>allOf</c>, which the client removes and
+/// CodeAlta merges into one object, see <see cref="AgentToolRootChoices"/>) and the other keywords the client removes from
+/// the root (<c>not</c>, <c>if</c>, <c>then</c>, <c>else</c>), a required name that is not a declared property, and for a
+/// GPT-4 model the keywords it does not take. The schema of a tool, an MCP one included, is otherwise sent as it is.
 /// </summary>
 internal static class CopilotToolSchemas
 {
@@ -19,6 +22,10 @@ internal static class CopilotToolSchemas
         "unevaluatedProperties", "propertyNames", "minProperties", "maxProperties", "unevaluatedItems", "contains",
         "minContains", "maxContains", "minItems", "maxItems", "uniqueItems",
     }.ToFrozenSet(StringComparer.Ordinal);
+
+    // The keywords Copilot's own client removes from the root of every schema, besides the choices it merges ("validated
+    // this fails both for claude and 4o").
+    private static readonly string[] RootUnsupportedKeywords = ["not", "if", "then", "else"];
 
     // The keywords whose value is a schema or an array of schemas, and those whose value maps names to schemas.
     private static readonly FrozenSet<string> SubschemaKeywords = new[]
@@ -82,6 +89,15 @@ internal static class CopilotToolSchemas
     private static bool Normalize(JsonObject schema, bool isRoot, bool gpt4)
     {
         var changed = false;
+        if (isRoot)
+        {
+            changed |= AgentToolRootChoices.Merge(schema);
+            foreach (var keyword in RootUnsupportedKeywords)
+            {
+                changed |= schema.Remove(keyword);
+            }
+        }
+
         if (gpt4)
         {
             foreach (var keyword in Gpt4UnsupportedKeywords)

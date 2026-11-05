@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.Runtime;
@@ -1538,6 +1539,129 @@ public sealed class CopilotDirectProviderTests
         Assert.IsTrue(CopilotToolSchemas.TryNormalize(schema.RootElement, gpt4: true, out var gpt4));
         Assert.IsFalse(gpt4.GetProperty("properties").GetProperty("path").TryGetProperty("minLength", out _));
         Assert.AreEqual("string", gpt4.GetProperty("properties").GetProperty("fields").GetProperty("additionalProperties").GetProperty("type").GetString());
+    }
+
+    // Copilot's own client removes oneOf, anyOf, allOf, not, if, then and else from the root of every tool schema, for
+    // every model ("validated this fails both for claude and 4o"): one such MCP tool would fail every turn. The choice is
+    // merged into one object, which keeps the arguments of its branches; the other keywords go as the client removes them.
+    [TestMethod]
+    public async Task CopilotDirect_SendsAChoiceAtTheRootOfAToolSchemaMerged_ToEveryEndpoint()
+    {
+        var bodies = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        var handler = new StubHandler(request =>
+        {
+            if (request.Method == HttpMethod.Get)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        """
+                        {
+                          "data": [
+                            {
+                              "model_picker_enabled": true, "id": "gpt-4.1", "name": "GPT-4.1", "version": "gpt-4.1",
+                              "supported_endpoints": ["/chat/completions"], "policy": { "state": "enabled" },
+                              "capabilities": { "family": "gpt-4.1", "supports": { "streaming": true, "tool_calls": true } }
+                            },
+                            {
+                              "model_picker_enabled": true, "id": "claude-sonnet-4.5", "name": "Claude Sonnet 4.5", "version": "claude-sonnet-4.5",
+                              "supported_endpoints": ["/v1/messages"], "policy": { "state": "enabled" },
+                              "capabilities": { "family": "claude-sonnet-4.5", "limits": { "max_output_tokens": 32000 }, "supports": { "streaming": true, "tool_calls": true } }
+                            }
+                          ]
+                        }
+                        """,
+                        Encoding.UTF8,
+                        "application/json"),
+                };
+            }
+
+            using (var requestDocument = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()))
+            {
+                bodies[requestDocument.RootElement.GetProperty("model").GetString()!] = requestDocument.RootElement.Clone();
+            }
+
+            var stream = request.RequestUri!.AbsolutePath.EndsWith("/v1/messages", StringComparison.Ordinal)
+                ? AnthropicStopReasonTests.Stream(
+                    AnthropicStopReasonTests.TextBlock(0, "Hi"),
+                    """{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}""")
+                : """
+                  data: {"id":"chatcmpl-test","choices":[{"delta":{"content":"Hi"}}]}
+
+                  data: [DONE]
+
+                  """;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(stream, Encoding.UTF8, "text/event-stream") };
+        });
+        var providerRuntime = new CopilotDirectModelProviderRuntime(new CopilotDirectModelProviderRuntimeOptions
+        {
+            StateRootPath = Path.GetTempPath(),
+            Providers =
+            {
+                new CopilotDirectProviderOptions
+                {
+                    ProviderKey = "github-copilot",
+                    Auth = new CopilotDirectAuthOptions
+                    {
+                        AuthSource = CopilotDirectAuthSources.CopilotTokenEnvironment,
+                        CopilotTokenEnvironmentVariable = "CODEALTA_TEST_COPILOT_TOKEN",
+                    },
+                    HttpClient = new HttpClient(handler),
+                },
+            },
+        });
+        var schema = JsonNode.Parse(AgentToolRootChoicesTests.ChoiceSchema)!.AsObject();
+        schema["not"] = JsonNode.Parse("""{ "required": ["id", "key"] }""");
+        using var schemaDocument = JsonDocument.Parse(schema.ToJsonString());
+        var tool = new AgentToolDefinition(
+            new AgentToolSpec("mcp__tracker__findIssue", "Finds an issue.", schemaDocument.RootElement.Clone()),
+            static (_, _) => throw new InvalidOperationException("The tool is not called."));
+
+        Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", "test-token");
+        try
+        {
+            var models = await providerRuntime.ListModelsAsync().ConfigureAwait(false);
+            var executor = providerRuntime.CreateTurnExecutor();
+            foreach (var model in models)
+            {
+                _ = await executor.ExecuteTurnAsync(
+                    new AgentTurnRequest
+                    {
+                        Provider = providerRuntime.RuntimeDescriptor,
+                        ProviderId = new ModelProviderId("github-copilot"),
+                        SessionId = "session-test",
+                        RunId = new AgentRunId("run-test"),
+                        ModelId = model.Id,
+                        ModelInfo = model,
+                        Conversation = [new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("test")])],
+                        Tools = [tool],
+                        State = new AgentSessionState
+                        {
+                            SessionId = "session-test",
+                            ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
+                            ProviderKey = "github-copilot",
+                            UpdatedAt = DateTimeOffset.UtcNow,
+                        },
+                    },
+                    static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", null);
+            await providerRuntime.DisposeAsync().ConfigureAwait(false);
+        }
+
+        var sent = new[]
+        {
+            bodies["gpt-4.1"].GetProperty("tools")[0].GetProperty("function").GetProperty("parameters"),
+            bodies["claude-sonnet-4.5"].GetProperty("tools")[0].GetProperty("input_schema"),
+        };
+        foreach (var parameters in sent)
+        {
+            AgentToolRootChoicesTests.AssertMergedChoice(parameters);
+            Assert.IsFalse(parameters.TryGetProperty("not", out _), parameters.GetRawText());
+        }
     }
 
     [TestMethod]
