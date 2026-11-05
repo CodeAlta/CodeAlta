@@ -456,6 +456,36 @@ public sealed class AccessControlTests
     }
 
     [TestMethod]
+    public async Task AGrantOfASessionWithdrawnSince_DoesNotBreakTheGrantsOfAnybodyElse()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Build box");
+        var (setup, _) = await server.SetUpWithNodeAsync(owner, node);
+        var (max, maxId) = await AddPersonAsync(server, owner, setup, "Max");
+        var (cy, cyId) = await AddPersonAsync(server, owner, setup, "Cy");
+        using var maxDevice = max;
+        using var cyDevice = cy;
+        await PublishSessionAsync(server, node, "s1");
+        var shared = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "session.view-content", FleetScopeKinds.Resource, "session:s1", Sealed: true));
+        Assert.AreEqual(HttpStatusCode.Created, shared.Status, shared.Body.ToString());
+        var cys = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, cyId, "audit.read", FleetScopeKinds.Organization, null));
+        Assert.AreEqual(HttpStatusCode.Created, cys.Status, cys.Body.ToString());
+
+        // The session becomes Private: its machine withdraws it, and its grant stays.
+        var machine = (await server.GetService<ICoordinatorStore>().GetDeviceAsync(node.DeviceId))!;
+        await server.GetService<CodeAlta.Server.Services.PublicationService>().WithdrawFactsAsync(machine, new FleetFactsWithdraw(["s1"]), CancellationToken.None);
+
+        // Cy, who answers for no session, still reads her own grants.
+        var listed = await server.SendAsync(cy, HttpMethod.Get, "/api/v1/grants");
+        Assert.AreEqual(HttpStatusCode.OK, listed.Status, listed.Body.ToString());
+        CollectionAssert.AreEqual(new[] { cys.Read<GrantDto>().Id }, listed.Read<AccessListDto<GrantDto>>().Items.Select(static grant => grant.Id).ToArray());
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grants")).Status, "and the grantee of the session reads hers");
+    }
+
+    [TestMethod]
     public async Task AMaintainerOfAnotherTeam_NeitherReplacesNorTakesOverAProviderTheyDoNotAnswerFor()
     {
         await using var server = await ServerFixture.StartAsync();

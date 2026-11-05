@@ -371,9 +371,19 @@ internal sealed partial class AccessService
             || grant.CreatedByPersonId == person.Id).ToList();
         // The grants on a resource the caller answers for (its owner, a maintainer of the team that owns it): they confirm the
         // keys of its content and take the grants back, without managing the access of the organization.
+        // A resource that is gone since (a session made Private, withdrawn) answers for nothing: its grant is skipped, never the listing.
         foreach (var grant in snapshot.Grants.Where(grant => grant.ScopeKind == FleetScopeKinds.Resource && !visible.Contains(grant)))
         {
-            var target = await GrantTargetAsync(actor.OrganizationId, snapshot, grant.ScopeKind, grant.ScopeId, cancellationToken).ConfigureAwait(false);
+            AccessTarget target;
+            try
+            {
+                target = await GrantTargetAsync(actor.OrganizationId, snapshot, grant.ScopeKind, grant.ScopeId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (CoordinatorException)
+            {
+                continue;
+            }
+
             if (target.OwnerKind == FleetPrincipalKinds.Person ? target.OwnerId == person.Id
                 : target.OwnerKind == FleetPrincipalKinds.Team && target.OwnerId is { } owningTeam && snapshot.TeamRole(owningTeam, person.Id) == FleetTeamRoles.Maintainer)
                 visible.Add(grant);
