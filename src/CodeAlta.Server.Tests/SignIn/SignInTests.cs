@@ -1012,6 +1012,42 @@ public sealed class SignInTests
     }
 
     [TestMethod]
+    public async Task ACompanySignInThatTheSettingsChangedDuring_DoesNotCountUnderTheNewSettings()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        using var key = new SoftwareAuthenticator();
+        await server.SetUpAsync(owner);
+        // The owner has their sole passkey and a company account of contoso.example, and no recovery key.
+        await RegisterPasskeyAsync(server, owner, key, server.BaseAddress.GetLeftPart(UriPartial.Authority));
+        await ConfigureCompanyAsync(server, owner, provider, false);
+        var (link, back) = await StartAsync(server, owner, FleetSignInMethods.Company, FleetSignInPurposes.Link, await ConfirmAsync(server, owner, key));
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, owner, link, back)).Status);
+        var passkey = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items
+            .Single(static login => login.Method == FleetSignInMethods.Passkey);
+
+        // The account signs in on a laptop; the provider holds its token answer while the company lets in only fabrikam.example.
+        var (signIn, signInBack) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        provider.TokenDelay = async () => { asked.TrySetResult(); await held.Task; };
+        var completing = CompleteAsync(server, laptop, signIn, signInBack);
+        await asked.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        provider.TokenDelay = null;
+        await ConfigureCompanyAsync(server, owner, provider, false, domains: ["fabrikam.example"]);
+        server.Clock.Advance(TimeSpan.FromSeconds(30));
+        held.SetResult();
+        await completing;
+
+        // That sign-in was judged by the settings before: the account is not known to sign in under these, which refuse it,
+        // so the passkey stays the owner's last way in.
+        var refused = await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{passkey.Id}");
+        Assert.AreEqual((HttpStatusCode.Conflict, SignInErrorCodes.LastWayIn), Answer(refused), refused.Body.ToString());
+    }
+
+    [TestMethod]
     public async Task APasskeyIsAddedOnlyAtTheSignedCompletion_AndARevokedDeviceAddsNone()
     {
         await using var server = await ServerFixture.StartAsync();

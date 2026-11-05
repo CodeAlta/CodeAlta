@@ -91,6 +91,9 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
     /// <summary>Gets or sets whether its ID tokens carry <c>auth_time</c>.</summary>
     public bool IssuesAuthTime { get; set; } = true;
 
+    /// <summary>Gets or sets what the token endpoint waits for before it answers, as a provider that answers late; null for none.</summary>
+    public Func<Task>? TokenDelay { get; set; }
+
     /// <summary>Gets the authorization requests it received.</summary>
     public ConcurrentQueue<IReadOnlyDictionary<string, string>> Authorizations { get; } = new();
 
@@ -193,6 +196,7 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
 
     private async Task<IResult> Token(HttpContext context)
     {
+        if (TokenDelay is { } delay) await delay();
         var form = await context.Request.ReadFormAsync();
         IResult Refuse(string error)
         {
