@@ -94,7 +94,7 @@ public sealed class FleetBudgetGate
     private TaskCompletionSource _changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>Initializes a new instance of the <see cref="FleetBudgetGate"/> class.</summary>
-    /// <param name="links">Gives the servers the machine joined now.</param>
+    /// <param name="links">Gives the servers the machine joined now, read at each decision; what it throws ends <see cref="AdmitAsync(FleetBudgetRun, Action?, CancellationToken)"/>, the run not admitted.</param>
     /// <param name="spend">What this machine spent.</param>
     /// <param name="time">The clock; null for the system's.</param>
     /// <exception cref="ArgumentNullException"><paramref name="links"/> or <paramref name="spend"/> is null.</exception>

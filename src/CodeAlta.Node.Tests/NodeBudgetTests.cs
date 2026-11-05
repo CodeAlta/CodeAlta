@@ -275,6 +275,10 @@ public sealed class NodeBudgetTests
             servers = NodeServers.Start(node, fleet.Service, "test-node", "1.0.0", Fast);
             await Task.Delay(TimeSpan.FromSeconds(3), token);
             Assert.AreEqual(string.Empty, provider.LastUserText, "the held prompt is not sent as if no server held it");
+            Assert.IsFalse(servers.Connections.Loaded.IsCompleted, "links that do not read are not loaded");
+            Assert.IsNotNull(servers.Connections.LoadProblem);
+            Assert.AreEqual("fleet:held:send-1", new CodeAlta.Fleet.NodeApi.FleetHeldSends(Path.Combine(fleetRoot, "held-sends.json"),
+                new CodeAlta.Catalog.Secrets.LocalSecretStore(node.Host.CatalogOptions.GlobalRoot)).List().Single().RunId, "the held prompt is kept for when they read");
             var admission = await node.Budgets!.AdmitAsync(new CodeAlta.Fleet.NodeApi.FleetNodeBudgetRun("run-new", null, session.SpaceId, null), null, token);
             Assert.IsNotNull(admission.Problem, "no run starts while the links of the node do not read");
         }
@@ -282,6 +286,39 @@ public sealed class NodeBudgetTests
         {
             if (servers is not null) await servers.DisposeAsync();
             if (fleet is not null) await fleet.DisposeAsync();
+            await node.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task ALinksFileThatDoesNotRead_AdmitsNoRun_BeforeItsFirstReloadAndBetweenReloads()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var node = await NodeHost.StartAsync(root.Options(), token);
+        var links = new FleetServerLinkStore(node.Host.CatalogOptions.FleetRoot).FilePath;
+        Directory.CreateDirectory(Path.GetDirectoryName(links)!);
+        NodeServers? servers = null;
+        try
+        {
+            // Damaged before the links are read once: the first run asked at once does not start.
+            File.WriteAllText(links, "{ damaged");
+            servers = NodeServers.Start(node, null, "test-node", "1.0.0", Fast);
+            var run = new CodeAlta.Fleet.NodeApi.FleetNodeBudgetRun("run-1", null, null, null);
+            Assert.IsNotNull((await node.Budgets!.AdmitAsync(run, null, token)).Problem, "a run asked before the first reload of damaged links does not start");
+
+            // Read once (no link), then damaged between two reloads: the next run does not start either, whatever the reload saw last.
+            File.Delete(links);
+            var deadline = DateTime.UtcNow + Patience;
+            while (servers.Connections.LoadProblem is not null && DateTime.UtcNow < deadline) await Task.Delay(50, token);
+            await servers.Connections.Loaded.WaitAsync(Patience, token);
+            Assert.IsNull((await node.Budgets.AdmitAsync(run with { RunId = "run-2" }, null, token)).Problem, "no link, no budget");
+            File.WriteAllText(links, "{ damaged");
+            Assert.IsNotNull((await node.Budgets.AdmitAsync(run with { RunId = "run-3" }, null, token)).Problem, "a run asked between two reloads of damaged links does not start");
+        }
+        finally
+        {
+            if (servers is not null) await servers.DisposeAsync();
             await node.DisposeAsync();
         }
     }

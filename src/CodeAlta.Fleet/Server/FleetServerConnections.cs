@@ -185,7 +185,10 @@ public sealed class FleetServerConnections : IAsyncDisposable
     /// <summary>Gets the store of the links.</summary>
     public FleetServerLinkStore Store => _store;
 
-    /// <summary>Gets the links and their connectors, in the order they were made.</summary>
+    /// <summary>
+    /// Gets the links and their connectors, in the order they were made, to show them: a file of the links that does not read lists
+    /// none. What decides by the links (the budgets that admit a run) reads them with <see cref="ReadConnections"/>, which says so.
+    /// </summary>
     public IReadOnlyList<FleetServerConnection> Connections
     {
         get
@@ -193,9 +196,33 @@ public sealed class FleetServerConnections : IAsyncDisposable
             IReadOnlyList<FleetServerLink> links;
             try { links = _store.List(); }
             catch (InvalidDataException) { links = []; }
-            var running = Volatile.Read(ref _running);
-            return [.. links.Select(link => new FleetServerConnection(link, running.TryGetValue(link.Id, out var value) ? value.Connector : null))];
+            return With(links);
         }
+    }
+
+    /// <summary>
+    /// Reads the links and their connectors, in the order they were made, for what decides by them: a file of the links that does
+    /// not read now, or did not at the last reload (its connectors may be missing), is never taken for a machine without links.
+    /// </summary>
+    /// <returns>The links and their connectors.</returns>
+    /// <exception cref="FleetServerLinksException">The file of the links does not read now, or did not at the last reload.</exception>
+    public IReadOnlyList<FleetServerConnection> ReadConnections()
+    {
+        IReadOnlyList<FleetServerLink> links;
+        try { links = _store.List(); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            throw new FleetServerLinksException($"The server links of this machine do not read: {exception.Message}", exception);
+        }
+
+        if (LoadProblem is { } problem) throw new FleetServerLinksException(problem);
+        return With(links);
+    }
+
+    private FleetServerConnection[] With(IReadOnlyList<FleetServerLink> links)
+    {
+        var running = Volatile.Read(ref _running);
+        return [.. links.Select(link => new FleetServerConnection(link, running.TryGetValue(link.Id, out var value) ? value.Connector : null))];
     }
 
     /// <summary>Finds the connection to a server by the id of its link.</summary>

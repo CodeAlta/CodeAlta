@@ -24,7 +24,8 @@ internal sealed class NodeBudgets
     {
         ArgumentNullException.ThrowIfNull(connections);
         _connections = connections;
-        Gate = new FleetBudgetGate(() => [.. connections.Connections.Where(static connection => connection.Connector is not null)
+        // Read again at each decision of the gate: links that do not read throw, and the run it decides for does not start.
+        Gate = new FleetBudgetGate(() => [.. connections.ReadConnections().Where(static connection => connection.Connector is not null)
             .Select(connection => new FleetBudgetLink(connection.Link.Id, connection.Connector!.Devices, connection.Connector.MetadataKeys,
                 Path.Combine(connections.Store.LinkFolder(connection.Link.Id), FileName))
             {
@@ -37,6 +38,9 @@ internal sealed class NodeBudgets
     /// <summary>Gets the gate.</summary>
     public FleetBudgetGate Gate { get; }
 
+    /// <summary>Gets or sets how long a run waits for the first read of the links (their connectors, with the budgets they keep).</summary>
+    public TimeSpan LoadWait { get; set; } = TimeSpan.FromSeconds(10);
+
     /// <summary>Wakes the runs that wait: a server said that budgets or holds changed.</summary>
     public void Changed() => Gate.Changed();
 
@@ -48,12 +52,31 @@ internal sealed class NodeBudgets
     public async Task<FleetBudgetAdmission> AdmitAsync(FleetNodeBudgetRun run, Action? held, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(run);
-        // The links of the node do not read: their budgets and stops are not known, and no run starts as if none held it.
-        if (_connections.LoadProblem is { } problem) return new FleetBudgetAdmission($"{problem}: the run does not start.", []);
-        var identity = run.Project is { } project ? await FleetProjectKeys.IdentityAsync(project, _repositories, cancellationToken).ConfigureAwait(false) : null;
-        return await Gate.AdmitAsync(new FleetBudgetRun(run.RunId, run.Title, run.SpaceId, identity)
+        try
         {
-            Nonce = run.Nonce, PersonId = run.PersonId, PersonOrganizationId = run.PersonOrganizationId,
-        }, held, cancellationToken).ConfigureAwait(false);
+            // The links of the node do not read, now or at their last reload: their budgets and stops are not known, and no run starts
+            // as if none held it. The file is read here, not only by the reload, which may not have seen it yet.
+            _connections.ReadConnections();
+            if (!_connections.Loaded.IsCompleted)
+            {
+                // Not read once yet (a start): the connectors, and the budgets they keep, exist once it is.
+                await Task.WhenAny(_connections.Loaded, Task.Delay(LoadWait, cancellationToken)).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!_connections.Loaded.IsCompleted)
+                    return Refused(_connections.LoadProblem ?? "The server links of this machine are not read yet");
+            }
+
+            var identity = run.Project is { } project ? await FleetProjectKeys.IdentityAsync(project, _repositories, cancellationToken).ConfigureAwait(false) : null;
+            return await Gate.AdmitAsync(new FleetBudgetRun(run.RunId, run.Title, run.SpaceId, identity)
+            {
+                Nonce = run.Nonce, PersonId = run.PersonId, PersonOrganizationId = run.PersonOrganizationId,
+            }, held, cancellationToken).ConfigureAwait(false);
+        }
+        catch (FleetServerLinksException exception)
+        {
+            return Refused(exception.Message);
+        }
+
+        static FleetBudgetAdmission Refused(string problem) => new($"{problem}: the run does not start.", []);
     }
 }
