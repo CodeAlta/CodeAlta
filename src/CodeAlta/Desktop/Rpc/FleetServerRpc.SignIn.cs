@@ -145,9 +145,9 @@ internal sealed partial class FleetServerService
                 linkApprovals = [.. (await _servers.ListLinkApprovalsAsync(request.LinkId, cancellationToken).ConfigureAwait(false)).Select(static approval =>
                     new FleetSignInLinkApprovalView(approval.Id, approval.RequesterName ?? approval.RequesterDeviceId, approval.Method, approval.Digest, Time(approval.ExpiresAt)))];
             }
-            catch (FleetServerException)
+            catch (Exception exception) when (exception is FleetServerException or FleetDeviceListException)
             {
-                // A server before link approvals has none.
+                // A server before link approvals has none; a device list that does not verify shows none to approve.
             }
 
             try

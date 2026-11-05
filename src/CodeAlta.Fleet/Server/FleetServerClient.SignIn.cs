@@ -150,11 +150,32 @@ public sealed partial class FleetServerClient
     public async Task<SignInLinkApprovalDto> ApproveLinkAsync(SignInLinkApprovalDto approval, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(approval);
-        var organization = await GetOrganizationAsync(cancellationToken).ConfigureAwait(false);
-        var digest = FleetSignInApprovals.LinkDigest(organization.Id, approval.RequesterDeviceId, approval.Method);
-        if (!string.Equals(digest, approval.Digest, StringComparison.Ordinal))
+        return await ApproveLinkAsync(approval, approval.Digest, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Approves a link another device of this device's person asks for, only if it is the link shown: this device computes
+    /// the digest of the link as the server holds it now (its method and the device that links, in the organization this
+    /// device verified) and signs it only when it is <paramref name="shownDigest"/>, the digest it computed of what it showed.
+    /// </summary>
+    /// <param name="approval">The approval, as listed now.</param>
+    /// <param name="shownDigest">The digest of the link shown (<see cref="LinkDigestAsync"/>).</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approval, approved.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="approval"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="shownDigest"/> is null or empty.</exception>
+    /// <exception cref="InvalidOperationException">The link is not the one shown, or the server gives it another digest: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<SignInLinkApprovalDto> ApproveLinkAsync(SignInLinkApprovalDto approval, string shownDigest, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(approval);
+        ArgumentException.ThrowIfNullOrEmpty(shownDigest);
+        var organization = await TrustedOrganizationIdAsync(cancellationToken).ConfigureAwait(false);
+        var digest = FleetSignInApprovals.LinkDigest(organization, approval.RequesterDeviceId, approval.Method);
+        if (!string.Equals(digest, shownDigest, StringComparison.Ordinal) || !string.Equals(digest, approval.Digest, StringComparison.Ordinal))
             throw new InvalidOperationException("The link shown is not the one the server would approve: nothing was signed.");
-        var payload = FleetSignInApprovals.Serialize(new FleetSignInApproval(1, organization.Id, approval.Id, approval.RequesterDeviceId, digest, DeviceId, Now()));
+        var payload = FleetSignInApprovals.Serialize(new FleetSignInApproval(1, organization, approval.Id, approval.RequesterDeviceId, digest, DeviceId, Now()));
         var signed = new FleetSignedSignInApproval(payload, Base64Url.EncodeToString(_identity.SignData(FleetSignInApprovals.GetSignedBytes(payload))));
         return await SendAsync(HttpMethod.Post, $"api/v1/sign-in/link-approvals/{Uri.EscapeDataString(approval.Id)}/approve",
             Body(signed, FleetSignInJsonContext.Default.FleetSignedSignInApproval), FleetSignInJsonContext.Default.SignInLinkApprovalDto, cancellationToken).ConfigureAwait(false);
@@ -296,20 +317,64 @@ public sealed partial class FleetServerClient
     /// <exception cref="InvalidOperationException">The link does not have the digest the server gives: nothing was signed.</exception>
     /// <exception cref="FleetServerException">The server refused: not the recovery key of the person who links (<c>forbidden</c>), too many attempts, or an approval of another link.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<SignInLinkApprovalDto> ApproveLinkWithRecoveryKeyAsync(SignInLinkApprovalDto approval, FleetRecoveryKey key, CancellationToken cancellationToken = default)
+    public Task<SignInLinkApprovalDto> ApproveLinkWithRecoveryKeyAsync(SignInLinkApprovalDto approval, FleetRecoveryKey key, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(approval);
+        return ApproveLinkWithRecoveryKeyAsync(approval, key, approval.Method, cancellationToken);
+    }
+
+    /// <summary>
+    /// Approves with the recovery key of its person the link of <paramref name="method"/> this device asked for: the
+    /// approval must be of that method and of this device, and the key signs the digest this device computes of that link,
+    /// whatever digest the server gives. The words never leave this device.
+    /// </summary>
+    /// <param name="approval">The approval this device asked for (<see cref="RequestLinkApprovalAsync"/>).</param>
+    /// <param name="key">The recovery key, from the words the person kept.</param>
+    /// <param name="method">The method the person chose to link.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approval, approved.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="InvalidOperationException">The approval is of another method or device, or the server gives it another digest: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused: not the recovery key of the person who links (<c>forbidden</c>), too many attempts, or an approval of another link.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<SignInLinkApprovalDto> ApproveLinkWithRecoveryKeyAsync(SignInLinkApprovalDto approval, FleetRecoveryKey key, string method, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(approval);
         ArgumentNullException.ThrowIfNull(key);
-        var organization = await GetOrganizationAsync(cancellationToken).ConfigureAwait(false);
-        var digest = FleetSignInApprovals.LinkDigest(organization.Id, approval.RequesterDeviceId, approval.Method);
-        if (!string.Equals(digest, approval.Digest, StringComparison.Ordinal) || approval.RequesterDeviceId != DeviceId)
+        ArgumentNullException.ThrowIfNull(method);
+        var organization = await TrustedOrganizationIdAsync(cancellationToken).ConfigureAwait(false);
+        var digest = FleetSignInApprovals.LinkDigest(organization, DeviceId, method);
+        if (!string.Equals(approval.Method, method, StringComparison.Ordinal) || !string.Equals(approval.RequesterDeviceId, DeviceId, StringComparison.Ordinal)
+            || !string.Equals(digest, approval.Digest, StringComparison.Ordinal))
             throw new InvalidOperationException("The link shown is not the one the server would approve: nothing was signed.");
         using var recovery = key.CreateIdentity();
-        var payload = FleetSignInApprovals.Serialize(new FleetSignInApproval(1, organization.Id, approval.Id, approval.RequesterDeviceId, digest, recovery.DeviceId, Now()));
+        var payload = FleetSignInApprovals.Serialize(new FleetSignInApproval(1, organization, approval.Id, DeviceId, digest, recovery.DeviceId, Now()));
         var signed = new FleetSignedSignInApproval(payload, Base64Url.EncodeToString(recovery.SignData(FleetSignInApprovals.GetSignedBytes(payload))));
         return await SendAsync(HttpMethod.Post, $"api/v1/sign-in/link-approvals/{Uri.EscapeDataString(approval.Id)}/recovery-key",
             Body(signed, FleetSignInJsonContext.Default.FleetSignedSignInApproval), FleetSignInJsonContext.Default.SignInLinkApprovalDto, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Computes the digest of a link from what it shows (its method and the device that links), in the organization this
+    /// device verified: what a page shows and then names to approve, never the digest the server gives.
+    /// </summary>
+    /// <param name="approval">The approval, as listed.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The digest (<see cref="FleetSignInApprovals.LinkDigest"/>).</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="approval"/> is null.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<string> LinkDigestAsync(SignInLinkApprovalDto approval, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(approval);
+        return FleetSignInApprovals.LinkDigest(await TrustedOrganizationIdAsync(cancellationToken).ConfigureAwait(false), approval.RequesterDeviceId, approval.Method);
+    }
+
+    // The organization of the device list as the anchor of this server verifies it; the server's word only before it names one.
+    private async Task<string> TrustedOrganizationIdAsync(CancellationToken cancellationToken)
+        => (await ReadAnchoredDeviceListAsync(cancellationToken).ConfigureAwait(false)).OrganizationId
+            ?? (await GetOrganizationAsync(cancellationToken).ConfigureAwait(false)).Id;
 
     /// <summary>Lists the sign-in methods and passkeys linked to the person of this device.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
