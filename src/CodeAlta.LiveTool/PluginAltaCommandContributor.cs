@@ -234,6 +234,8 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
 
         public IPluginIdentityService Identity => inner.Identity;
 
+        public IPluginSecretService Secrets => inner.Secrets;
+
         public IPluginSpaceService Spaces => inner.Spaces;
 
         public IPluginAppFileService AppFiles => inner.AppFiles;

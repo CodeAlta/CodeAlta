@@ -54,6 +54,12 @@ public interface IPluginServices
     IPluginIdentityService Identity => NoopPluginIdentityService.Instance;
 
     /// <summary>
+    /// Gets the masking of the values of secrets the plugin gives out (<see cref="IPluginSecretService"/>). A host that was written
+    /// before plugins could tell them masks nothing they tell.
+    /// </summary>
+    IPluginSecretService Secrets => NoopPluginSecretService.Instance;
+
+    /// <summary>
     /// Gets the spaces the plugin is assigned to. A host that was written before plugins were assigned to spaces puts every
     /// plugin in every space.
     /// </summary>

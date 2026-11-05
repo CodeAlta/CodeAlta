@@ -34,4 +34,27 @@ public sealed class SecretIssuanceMaskingTests
         // A process of the session prints the value it took: it is masked.
         Assert.AreEqual("token: ***", fixture.Host.AgentHub.SecretMasker!.MaskText("token: " + Given));
     }
+
+    [TestMethod]
+    public async Task AKeyGivenToAProvider_StaysMasked_OnceTheStoreKeepsNothingOfIt()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        var root = fixture.Host.CatalogOptions.GlobalRoot;
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(root);
+        const string Given = "sk-given-to-the-provider-0123456789";
+        store.SetSecret("GATEWAY_KEY", Given, "tests");
+
+        // The provider of the host is registered with the key of the store, as Settings and the node do; nothing is masked meanwhile.
+        var registered = CodeAlta.Hosting.ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(fixture.Host.ModelProviderRegistry,
+            [new CodeAlta.Catalog.CodeAltaProviderDocument { ProviderKey = "gateway", ProviderType = "openai-responses", ApiKeySecret = "GATEWAY_KEY", ApiUrl = "https://provider.invalid/v1" }],
+            root);
+        Assert.AreEqual(1, registered.Count);
+
+        for (var index = 0; index < CodeAlta.Catalog.Secrets.LocalSecretStore.MaximumRetired + 44; index++) store.SetSecret("GATEWAY_KEY", $"sk-rotated-{index:D4}-0123456789", "tests");
+        Assert.IsFalse(store.GetSecretValues().Contains(Given));
+
+        // What the provider says with the key it took (an error that echoes it) is masked.
+        Assert.AreEqual("key: ***", fixture.Host.AgentHub.SecretMasker!.MaskText("key: " + Given));
+    }
 }

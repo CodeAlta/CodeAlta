@@ -84,6 +84,26 @@ public sealed class PluginRuntimeBuiltInTests
     }
 
     [TestMethod]
+    public async Task ASecretAPluginGivesOut_ReachesTheMaskingOfTheHost_AlsoWhenTheHostAttachesItLater()
+    {
+        using var temp = new TestTempDirectory();
+        var instances = new List<CountingPlugin>();
+        await using var runtime = new PluginRuntimeManager();
+        await runtime.StartAsync(new PluginRuntimeManagerOptions
+        {
+            GlobalRoot = Path.Combine(temp.Path, "home"), IsHeadless = true,
+            BuiltIns = [new BuiltInPluginDefinition { Id = "servers", DisplayName = "Servers", PluginType = typeof(CountingPlugin), Factory = () => Add(instances) }],
+        });
+
+        // The plugin gives a server a key before the host runs (a runtime started early), then another once it runs.
+        instances.Single().Secrets.Mask("key-given-before-the-host");
+        var masked = new List<string>();
+        runtime.Secrets.Attach(masked.Add);
+        instances.Single().Secrets.Mask("key-given-after");
+        CollectionAssert.AreEqual(new[] { "key-given-before-the-host", "key-given-after" }, masked);
+    }
+
+    [TestMethod]
     public void AHostWithoutSpaces_PutsEveryPluginInEverySpace()
     {
         IPluginServices services = new NoopPluginServices(XenoAtom.Logging.LogManager.GetLogger("test"));
@@ -114,6 +134,8 @@ public sealed class PluginRuntimeBuiltInTests
         public bool Deactivated { get; private set; }
 
         public IPluginSpaceService Spaces => Services.Spaces;
+
+        public IPluginSecretService Secrets => Services.Secrets;
 
         public override ValueTask OnActivatedAsync(CancellationToken cancellationToken = default)
         {

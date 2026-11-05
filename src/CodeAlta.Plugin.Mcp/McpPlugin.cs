@@ -59,7 +59,8 @@ public sealed partial class McpPlugin : PluginBase
         ShowsApps = options.ShowsApps;
         LoadsSkills = options.LoadsSkills;
         ReadOnlyConfiguration = options.ReadOnlyConfiguration;
-        _connections = new McpSessionConnections(_configCache, options.ShowsApps, options.LoadsSkills);
+        // What the servers are given of the secrets of the store is masked by the host from then on.
+        _connections = new McpSessionConnections(_configCache, options.ShowsApps, options.LoadsSkills) { SecretIssued = MaskSecret };
         // What the presentation saves through it is read again at once by the runtime and the prompt.
         _managementService = new McpManagementService(home, _configCache, options.ShowsApps, options.LoadsSkills);
         _skills = options.LoadsSkills ? new McpSkillServices(new McpSkillApprovalStore(McpSkillApprovalStore.PathOf(home)), new McpSkillContentCache()) : null;
@@ -68,6 +69,22 @@ public sealed partial class McpPlugin : PluginBase
             _presentation = createPresentation(_managementService, _activationState)
                 ?? throw new InvalidOperationException("The MCP presentation factory returned null.");
         }
+    }
+
+    // Tells the host a value of a secret a server is given; nothing to tell before the plugin runs in a host.
+    private void MaskSecret(string value)
+    {
+        IPluginSecretService secrets;
+        try
+        {
+            secrets = Services.Secrets;
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+
+        secrets.Mask(value);
     }
 
     /// <summary>Gets whether the host shows the views of MCP Apps: the servers are told, and the calls of their tools carry their view.</summary>

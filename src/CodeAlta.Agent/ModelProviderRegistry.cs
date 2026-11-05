@@ -28,6 +28,13 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     public string? Application { get; init; }
 
     /// <summary>
+    /// Gets or sets what is told each value of a secret given to a provider registered here (its key, a variable of its CLI)
+    /// before the provider gets it: the masking of the host, which masks it from then on, whatever the store keeps of it later.
+    /// Null tells nothing.
+    /// </summary>
+    public Action<string>? SecretIssued { get; set; }
+
+    /// <summary>
     /// Gets the processes the runtimes of the providers registered here started and still run. It outlives the
     /// registrations: a provider registered again knows the processes of the sessions that still run on its former runtime.
     /// </summary>

@@ -175,10 +175,20 @@ public sealed class SecretReferenceResolver
     /// </summary>
     /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
     /// <returns>The resolver.</returns>
-    public static SecretReferenceResolver ForMachine(string root)
+    public static SecretReferenceResolver ForMachine(string root) => ForMachine(root, null);
+
+    /// <summary>
+    /// Gets a resolver for what runs on the host side, as <see cref="ForMachine(string)"/> does, that tells each value of a secret
+    /// before it gives it (<see cref="Issued"/>): the masking of the host, so that what a provider, an MCP server or a tool is given
+    /// is masked from then on.
+    /// </summary>
+    /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
+    /// <param name="issued">Told each value of a secret before it is given; null for none.</param>
+    /// <returns>The resolver.</returns>
+    public static SecretReferenceResolver ForMachine(string root, Action<string>? issued)
     {
         var store = new LocalSecretStore(root);
-        return new(Environment.GetEnvironmentVariable, [store, store.FleetScope(FleetSecretScopes.Person, null, shell: false)]);
+        return new(Environment.GetEnvironmentVariable, [store, store.FleetScope(FleetSecretScopes.Person, null, shell: false)]) { Issued = issued };
     }
 
     /// <summary>Gets a resolver for the work of a run: its environment, its project and its space (<see cref="ForScope(string, SecretScope, bool, Action{FleetSecretCopyInfo}?)"/>).</summary>

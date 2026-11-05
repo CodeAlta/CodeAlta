@@ -1063,7 +1063,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         }
     }
 
-    private static IClientTransport CreateTransport(McpServerDefinition definition, string? tokenUrl, McpRuntimeRequest request, int timeoutMs)
+    private IClientTransport CreateTransport(McpServerDefinition definition, string? tokenUrl, McpRuntimeRequest request, int timeoutMs)
     {
         if (definition.Transport == McpTransportKind.Stdio)
         {
@@ -1568,7 +1568,11 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
 
     // Reads a variable of the environment by its name (or env:NAME), and a secret or a variable of the store of the
     // profile by secret:NAME or var:NAME: ${secret:NAME} and ${var:NAME} are resolved as ${NAME} is.
-    private static Func<string, string?> ReaderOf(McpHome home) => SecretReferenceResolver.ForMachine(home.Root).Read;
+    // Each secret read is told to the masking of the host (SecretIssued) before the server gets it.
+    private Func<string, string?> ReaderOf(McpHome home) => SecretReferenceResolver.ForMachine(home.Root, SecretIssued).Read;
+
+    /// <summary>Gets or sets what is told each value of a secret given to a server before it gets it (the masking of the host); null tells nothing.</summary>
+    internal Action<string>? SecretIssued { get; set; }
 
     // Resolves ${NAME} in the command, its arguments, its folder and the address. The values of environment variables
     // and headers are resolved where they are used, so that a diagnostic can name the one that fails.
