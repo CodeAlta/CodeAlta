@@ -95,6 +95,13 @@ internal static class DesktopSettingBindings
         Bool("sessions.prompt_suggestions", config.LoadGlobalPromptSuggestions, config.SaveGlobalPromptSuggestions);
         Bool("review.before_commit", config.LoadGlobalReviewBeforeCommit, config.SaveGlobalReviewBeforeCommit);
         Bool("commits.co_author", config.LoadGlobalCommitCoAuthor, config.SaveGlobalCommitCoAuthor);
+        // The texts are checked by the store, as on the page: an empty one is the text of CodeAlta.
+        Add("commits.co_author_trailer", () => SettingValues.Of(config.LoadGlobalAttributionSettings().CoAuthorTrailer),
+            value => SaveAttribution(config, settings => settings with { CoAuthorTrailer = value.GetString()! }));
+        Bool("external_writing.attribution", () => config.LoadGlobalAttributionSettings().ExternalWriting,
+            value => config.UpdateGlobal(() => config.SaveGlobalAttributionSettings(config.LoadGlobalAttributionSettings() with { ExternalWriting = value })));
+        Add("external_writing.instruction", () => SettingValues.Of(config.LoadGlobalAttributionSettings().ExternalWritingInstruction),
+            value => SaveAttribution(config, settings => settings with { ExternalWritingInstruction = value.GetString()! }));
         Add("code_mode.mode", () => SettingValues.Of(config.LoadCodeModeMode()), value => Do(() => config.SaveCodeModeMode(value.GetString()!)));
         Add("tools.disabled", () => SettingValues.Of(config.LoadGlobalDisabledTools().Order(StringComparer.Ordinal)),
             value => Do(() => config.SaveGlobalDisabledTools(value.EnumerateArray().Select(static item => item.GetString()!))));
@@ -236,6 +243,9 @@ internal static class DesktopSettingBindings
             var settings = config.LoadGlobalModelSettings();
             config.SaveGlobalModelSettings(settings with { Fallback = change(settings.Fallback) });
         });
+
+    private static string? SaveAttribution(CodeAltaConfigStore config, Func<AttributionSettings, AttributionSettings> change)
+        => Do(() => config.UpdateGlobal(() => config.SaveGlobalAttributionSettings(change(config.LoadGlobalAttributionSettings()))));
 
     private static string? SaveRetention(CodeAltaConfigStore config, Func<SessionRetentionSettings, SessionRetentionSettings> change)
     {

@@ -304,13 +304,16 @@ export const sessionUserInput = Object.freeze({ cancel: unavailable, list: empty
 export const settings = Object.freeze({ catalog: async () => ({ status: "unavailable", settings: [] }), get: async () => ({ status: "unavailable", value: null, source: null, message: null, choices: null }),
   set: async () => ({ status: "unavailable", value: null, previous: null, message: null }), reportWindow: async () => ({ status: "unavailable" }), watch: unavailable });
 
+const demoAttribution = Object.freeze({ status: "unavailable", coAuthor: true, coAuthorTrailer: "", defaultCoAuthorTrailer: "", externalWriting: true,
+  externalWritingInstruction: "", defaultExternalWritingInstruction: "", message: null });
+
 // The demo has no host configuration file: the editor reports itself unavailable.
 export const globalConfig = Object.freeze({
   read: async () => ({ status: "unavailable", content: null, revision: null }),
   reviewSettings: async () => ({ status: "unavailable", beforeCommit: false }),
   saveReviewSettings: async () => ({ status: "unavailable", beforeCommit: false }),
-  commitSettings: async () => ({ status: "unavailable", coAuthor: true }),
-  saveCommitSettings: async () => ({ status: "unavailable", coAuthor: true }),
+  attributionSettings: async () => demoAttribution,
+  saveAttributionSettings: async () => demoAttribution,
   promptSuggestionSettings: async () => ({ status: "unavailable", enabled: true }),
   savePromptSuggestionSettings: async () => ({ status: "unavailable", enabled: true }),
   codeModeSettings: async () => ({ status: "unavailable", mode: null, modes: [], scopes: [] }),

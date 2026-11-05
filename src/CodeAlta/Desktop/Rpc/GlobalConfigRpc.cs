@@ -215,35 +215,53 @@ internal sealed partial class GlobalConfigService
         }
     }
 
-    /// <summary>Reads whether agents name CodeAlta as a co-author of their commits (<c>[commits] co_author</c>).</summary>
-    [NeoRpcMethod("commitSettings")]
-    public GlobalConfigCommitSettingsResponse CommitSettings(GlobalConfigSessionTitlesRequest request)
+    /// <summary>
+    /// Reads how agents say that CodeAlta took part in what they write: the trailer of their commits (<c>[commits]</c>)
+    /// and the instruction about the texts they write in an external system (<c>[external_writing]</c>).
+    /// </summary>
+    [NeoRpcMethod("attributionSettings")]
+    public GlobalConfigAttributionSettingsResponse AttributionSettings(GlobalConfigSessionTitlesRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (_store is null) return new("unavailable", true);
-        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", true);
-        lock (_gate) return new("ok", _store.LoadGlobalCommitCoAuthor());
+        if (_store is null) return GlobalConfigAttributionSettingsResponse.Of("unavailable", Catalog.AttributionSettings.Default);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return GlobalConfigAttributionSettingsResponse.Of("stale_epoch", Catalog.AttributionSettings.Default);
+        lock (_gate) return GlobalConfigAttributionSettingsResponse.Of("ok", _store.LoadGlobalAttributionSettings());
     }
 
-    /// <summary>Saves whether agents name CodeAlta as a co-author of their commits; a session is told at its next prompt.</summary>
-    [NeoRpcMethod("saveCommitSettings")]
-    public GlobalConfigCommitSettingsResponse SaveCommitSettings(GlobalConfigSaveCommitSettingsRequest request)
+    /// <summary>
+    /// Saves the choices the request gives, and keeps the others: an empty text is the one of CodeAlta. A session is told
+    /// at its next prompt.
+    /// </summary>
+    [NeoRpcMethod("saveAttributionSettings")]
+    public GlobalConfigAttributionSettingsResponse SaveAttributionSettings(GlobalConfigSaveAttributionSettingsRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (_store is null) return new("unavailable", true);
-        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", true);
+        if (_store is null) return GlobalConfigAttributionSettingsResponse.Of("unavailable", Catalog.AttributionSettings.Default);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return GlobalConfigAttributionSettingsResponse.Of("stale_epoch", Catalog.AttributionSettings.Default);
         lock (_gate)
         {
             try
             {
-                _store.SaveGlobalCommitCoAuthor(request.CoAuthor);
+                _store.UpdateGlobal(() =>
+                {
+                    var current = _store.LoadGlobalAttributionSettings();
+                    _store.SaveGlobalAttributionSettings(new Catalog.AttributionSettings(
+                        request.CoAuthor ?? current.CoAuthor,
+                        request.CoAuthorTrailer ?? current.CoAuthorTrailer,
+                        request.ExternalWriting ?? current.ExternalWriting,
+                        request.ExternalWritingInstruction ?? current.ExternalWritingInstruction));
+                });
+            }
+            catch (ArgumentException exception)
+            {
+                return GlobalConfigAttributionSettingsResponse.Of("invalid", _store.LoadGlobalAttributionSettings()) with { Message = exception.Message };
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or FormatException)
             {
-                return new("write_failed", _store.LoadGlobalCommitCoAuthor());
+                return GlobalConfigAttributionSettingsResponse.Of("write_failed", _store.LoadGlobalAttributionSettings());
             }
 
-            return new("ok", _store.LoadGlobalCommitCoAuthor());
+            return GlobalConfigAttributionSettingsResponse.Of("ok", _store.LoadGlobalAttributionSettings());
         }
     }
 
@@ -1034,13 +1052,32 @@ internal sealed record GlobalConfigSaveReviewSettingsRequest(string? ExpectedEpo
 /// <param name="BeforeCommit">Whether the user reviews the changes of every session before an agent commits them.</param>
 internal sealed record GlobalConfigReviewSettingsResponse(string Status, bool BeforeCommit);
 
+/// <summary>The attribution choices to save; a choice that is null stays as it is.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page was loaded with.</param>
-/// <param name="CoAuthor">Whether agents end the message of their commits with the <c>Co-authored-by</c> line of CodeAlta.</param>
-internal sealed record GlobalConfigSaveCommitSettingsRequest(string? ExpectedEpoch, bool CoAuthor);
+/// <param name="CoAuthor">Whether agents end the message of their commits with the trailer.</param>
+/// <param name="CoAuthorTrailer">The trailer of the commits, one line <c>Token: value</c>; empty for the one of CodeAlta.</param>
+/// <param name="ExternalWriting">Whether agents are told the instruction about the texts they write in an external system.</param>
+/// <param name="ExternalWritingInstruction">That instruction, one line; empty for the one of CodeAlta.</param>
+internal sealed record GlobalConfigSaveAttributionSettingsRequest(string? ExpectedEpoch, bool? CoAuthor, string? CoAuthorTrailer, bool? ExternalWriting, string? ExternalWritingInstruction);
 
-/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c> or <c>write_failed</c>.</param>
-/// <param name="CoAuthor">Whether agents end the message of their commits with the <c>Co-authored-by</c> line of CodeAlta.</param>
-internal sealed record GlobalConfigCommitSettingsResponse(string Status, bool CoAuthor);
+/// <summary>How agents say that CodeAlta took part in what they write, with the texts of CodeAlta the page offers back.</summary>
+/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid</c> or <c>write_failed</c>.</param>
+/// <param name="CoAuthor">Whether agents end the message of their commits with the trailer.</param>
+/// <param name="CoAuthorTrailer">The trailer of the commits.</param>
+/// <param name="DefaultCoAuthorTrailer">The trailer of CodeAlta.</param>
+/// <param name="ExternalWriting">Whether agents are told the instruction about the texts they write in an external system.</param>
+/// <param name="ExternalWritingInstruction">That instruction.</param>
+/// <param name="DefaultExternalWritingInstruction">The instruction of CodeAlta.</param>
+internal sealed record GlobalConfigAttributionSettingsResponse(string Status, bool CoAuthor, string CoAuthorTrailer, string DefaultCoAuthorTrailer,
+    bool ExternalWriting, string ExternalWritingInstruction, string DefaultExternalWritingInstruction)
+{
+    /// <summary>Gets why the choices were refused, for <c>invalid</c>.</summary>
+    public string? Message { get; init; }
+
+    internal static GlobalConfigAttributionSettingsResponse Of(string status, Catalog.AttributionSettings settings)
+        => new(status, settings.CoAuthor, settings.CoAuthorTrailer, Catalog.AttributionSettings.DefaultCoAuthorTrailer,
+            settings.ExternalWriting, settings.ExternalWritingInstruction, Catalog.AttributionSettings.DefaultExternalWritingInstruction);
+}
 
 /// <param name="ExpectedEpoch">The host epoch the page was loaded with.</param>
 /// <param name="Enabled">Whether the model suggests the next prompt at the end of a turn.</param>

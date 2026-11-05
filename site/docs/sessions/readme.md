@@ -65,7 +65,7 @@ A session you did not name takes a short title from its first prompt. Then it fo
   <figcaption class="small text-secondary mt-2">The Sessions page of the Settings chooses how a session you did not name is titled, and whether agents wait for your review before they commit.</figcaption>
 </figure>
 
-The same page has [Suggest the next prompt](#prompt-suggestions), [Review changes before commit](../reviews.md#review-before-commit), [Add CodeAlta as co-author](#codealta-as-co-author) and [Single tab for sessions](../workspace/readme.md#single-tab-for-sessions). The title choice is saved in `~/.alta/config.toml`, and a session takes it with its next prompt:
+The same page has [Suggest the next prompt](#prompt-suggestions), [Review changes before commit](../reviews.md#review-before-commit), [Add CodeAlta as co-author](#codealta-as-co-author), [Say that CodeAlta wrote it](#what-agents-write-elsewhere) and [Single tab for sessions](../workspace/readme.md#single-tab-for-sessions). The title choice is saved in `~/.alta/config.toml`, and a session takes it with its next prompt:
 
 ```toml
 [sessions]
@@ -220,14 +220,38 @@ Agents end each commit message with this line, beside the lines their provider a
 Co-authored-by: CodeAlta <noreply@codealta.io>
 ```
 
-GitHub then shows CodeAlta as a co-author. To turn it off, clear **Settings > Sessions > Commits > Add CodeAlta as co-author**, or write in `~/.alta/config.toml`:
+GitHub then shows CodeAlta as a co-author. To turn it off, clear **Settings > Sessions > Commits > Add CodeAlta as co-author**. To have agents add another line, write it in **Co-author line**, such as `Assisted-by: Contoso Agent <agents@contoso.example>`: one Git trailer, a name, a colon and a value, of 200 characters at most. Empty, the field is the line of CodeAlta. Both are in `~/.alta/config.toml`:
 
 ```toml
 [commits]
 co_author = false
+co_author_trailer = "Assisted-by: Contoso Agent <agents@contoso.example>"
 ```
 
 A session takes the change with its next prompt. Commits you make yourself do not get the line.
+
+### What agents write elsewhere
+
+When an agent writes for you in another system, such as a pull request comment or review, an issue, a chat message or an email, it ends the text with a short italic line saying that it comes from CodeAlta, so that readers do not take it for your own words:
+
+```markdown
+_This review was written by [CodeAlta](https://codealta.io), an AI coding agent._
+```
+
+**Settings > Sessions > Comments and messages** changes it:
+
+- Clear **Say that CodeAlta wrote it**, and agents are told nothing about it.
+- Write in **Instruction to agents** what they are told instead, on one line of 1000 characters at most, such as ``End what you post for me with `_Posted by the Contoso agent._` ``. Empty, the field is the instruction of CodeAlta.
+
+Both are in `~/.alta/config.toml`, and a session takes them with its next prompt:
+
+```toml
+[external_writing]
+attribution = false
+instruction = "End what you post for me with `_Posted by the Contoso agent._`"
+```
+
+Agents cannot change these two settings. A provider can add an attribution of its own, which these settings do not remove.
 
 ## Prompt suggestions
 

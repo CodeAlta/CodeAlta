@@ -138,7 +138,7 @@ Your schemes are files in `~/.alta/color-schemes/`, which you can copy, share or
 - **Notifications**: what tells you that a session is done or waits for you while CodeAlta is in the background (see [Done or waiting](readme.md#done-or-waiting)).
 - **External editor**: see [External editor](code.md#external-editor).
 
-**Sessions** has **Session titles** (see [Session titles](../sessions/readme.md#session-titles)), **Suggest the next prompt** (see [Prompt suggestions](../sessions/readme.md#prompt-suggestions)), **Review changes before commit** (see [Review before commit](../reviews.md#review-before-commit)), **Add CodeAlta as co-author** (see [CodeAlta as co-author](../sessions/readme.md#codealta-as-co-author)) and [Single tab for sessions](readme.md#single-tab-for-sessions).
+**Sessions** has **Session titles** (see [Session titles](../sessions/readme.md#session-titles)), **Suggest the next prompt** (see [Prompt suggestions](../sessions/readme.md#prompt-suggestions)), **Review changes before commit** (see [Review before commit](../reviews.md#review-before-commit)), **Add CodeAlta as co-author** and the **Co-author line** (see [CodeAlta as co-author](../sessions/readme.md#codealta-as-co-author)), **Say that CodeAlta wrote it** and its **Instruction to agents** (see [What agents write elsewhere](../sessions/readme.md#what-agents-write-elsewhere)) and [Single tab for sessions](readme.md#single-tab-for-sessions).
 
 **Windows** is described in [Windows](readme.md#windows), and **Speech** in [Speech](../speech.md).
 

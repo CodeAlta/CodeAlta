@@ -154,6 +154,42 @@ public sealed class DesktopSettingsTests
     }
 
     [TestMethod]
+    public async Task TheAttributionTexts_AreCheckedByTheStore_ResetToTheTextsOfCodeAlta_AndTheExternalOnesAreTheUsers()
+    {
+        using var fixture = Fixture.Create();
+        const string trailer = "Assisted-by: Contoso Agent <agents@contoso.example>";
+        var set = await fixture.Settings.SetAsync("commits.co_author_trailer", Value($"\"{trailer}\""), null, Agent, CancellationToken.None);
+        Assert.AreEqual(AltaSettingStatus.Ok, set.Status, set.Message);
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), $"co_author_trailer = \"{trailer}\"");
+        Assert.AreEqual((trailer, "user"), await Read("commits.co_author_trailer"));
+
+        // The store refuses what is not a trailer, and says why.
+        var refused = await fixture.Settings.SetAsync("commits.co_author_trailer", Value("\"CodeAlta helped\""), null, AltaSettingOrigin.Window, CancellationToken.None);
+        Assert.AreEqual(AltaSettingStatus.Invalid, refused.Status);
+        StringAssert.Contains(refused.Message, "Git trailer");
+        Assert.AreEqual((trailer, "user"), await Read("commits.co_author_trailer"));
+
+        // No value, or an empty one, is the trailer of CodeAlta.
+        Assert.AreEqual(AltaSettingStatus.Ok, (await fixture.Settings.SetAsync("commits.co_author_trailer", null, null, Agent, CancellationToken.None)).Status);
+        Assert.AreEqual((AttributionSettings.DefaultCoAuthorTrailer, "default"), await Read("commits.co_author_trailer"));
+        Assert.AreEqual(AltaSettingStatus.Ok, (await fixture.Settings.SetAsync("commits.co_author_trailer", Value("\"\""), null, AltaSettingOrigin.Window, CancellationToken.None)).Status);
+        Assert.AreEqual((AttributionSettings.DefaultCoAuthorTrailer, "default"), await Read("commits.co_author_trailer"));
+
+        // What readers are told about a text written for the user is the user's own choice.
+        Assert.AreEqual(AltaSettingStatus.ReadOnly, (await fixture.Settings.SetAsync("external_writing.attribution", Value("false"), null, Agent, CancellationToken.None)).Status);
+        Assert.AreEqual(AltaSettingStatus.ReadOnly, (await fixture.Settings.SetAsync("external_writing.instruction", Value("\"Sign nothing.\""), null, Agent, CancellationToken.None)).Status);
+        Assert.AreEqual(AltaSettingStatus.Ok, (await fixture.Settings.SetAsync("external_writing.instruction", Value("\"End it with _Posted by an agent._\""), null, AltaSettingOrigin.Window, CancellationToken.None)).Status);
+        Assert.AreEqual(AltaSettingStatus.Ok, (await fixture.Settings.SetAsync("external_writing.attribution", Value("false"), null, AltaSettingOrigin.Window, CancellationToken.None)).Status);
+        Assert.AreEqual(new AttributionSettings(true, AttributionSettings.DefaultCoAuthorTrailer, false, "End it with _Posted by an agent._"), new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = Path.GetDirectoryName(fixture.ConfigPath)! }).LoadGlobalAttributionSettings());
+
+        async Task<(string?, string?)> Read(string id)
+        {
+            var read = await fixture.Settings.GetAsync(id, null, CancellationToken.None);
+            return (read.Value?.GetString(), read.Source);
+        }
+    }
+
+    [TestMethod]
     public async Task ASettingThePageKeeps_IsReadFromWhatThePageReported_AndChangedByThePage()
     {
         using var fixture = Fixture.Create();

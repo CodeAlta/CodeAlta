@@ -902,6 +902,37 @@ type = "fake-agent"
     }
 
     [TestMethod]
+    public async Task Attribution_SavesWhatTheRequestGives_KeepsTheRest_AndSaysWhyATextIsRefused()
+    {
+        await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");
+        var read = fixture.Service.AttributionSettings(new(Epoch));
+        Assert.AreEqual(GlobalConfigAttributionSettingsResponse.Of("ok", AttributionSettings.Default), read);
+        Assert.AreEqual((AttributionSettings.DefaultCoAuthorTrailer, AttributionSettings.DefaultExternalWritingInstruction), (read.DefaultCoAuthorTrailer, read.DefaultExternalWritingInstruction));
+
+        // One choice at a time: the others stay.
+        const string trailer = "Assisted-by: Contoso Agent <agents@contoso.example>";
+        Assert.AreEqual("ok", fixture.Service.SaveAttributionSettings(new(Epoch, null, trailer, null, null)).Status);
+        var saved = fixture.Service.SaveAttributionSettings(new(Epoch, null, null, false, null));
+        Assert.AreEqual(("ok", true, trailer, false, AttributionSettings.DefaultExternalWritingInstruction),
+            (saved.Status, saved.CoAuthor, saved.CoAuthorTrailer, saved.ExternalWriting, saved.ExternalWritingInstruction));
+        Assert.AreEqual(saved, fixture.Service.AttributionSettings(new(Epoch)));
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "sk-kept", "The other settings stay.");
+
+        // A text that is refused leaves the file as it was, and the page is told why.
+        var refused = fixture.Service.SaveAttributionSettings(new(Epoch, false, "two\nlines", null, null));
+        Assert.AreEqual(("invalid", true, trailer), (refused.Status, refused.CoAuthor, refused.CoAuthorTrailer));
+        StringAssert.Contains(refused.Message, "one line");
+
+        // An empty text is the one of CodeAlta.
+        Assert.AreEqual(GlobalConfigAttributionSettingsResponse.Of("ok", AttributionSettings.Default),
+            fixture.Service.SaveAttributionSettings(new(Epoch, true, "", true, "")));
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("[commits]", StringComparison.Ordinal));
+
+        Assert.AreEqual("stale_epoch", fixture.Service.SaveAttributionSettings(new("another", false, null, null, null)).Status);
+        Assert.AreEqual("unavailable", new GlobalConfigService().AttributionSettings(new(Epoch)).Status);
+    }
+
+    [TestMethod]
     public async Task SaveProvider_WritesTheChoiceForAnthropicApiKeyOfClaudeCode_AndOfNoOtherType()
     {
         await using var fixture = new Fixture(ProvidersConfig);
