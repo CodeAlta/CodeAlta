@@ -49,6 +49,7 @@ Each group says how many results it has for what you typed. **?** means it has n
 
 Press `Ctrl+F` (`Cmd+F` on macOS) in a session, from the prompt too, or run `/find`. Every match in its timeline is marked, and the box counts them: `Enter` and `Shift+Enter` go to the next and previous match, `Alt+C`, `Alt+W` and `Alt+R` match case, whole words or a regular expression, and `Esc` closes it.
 
+- Marks beside the scrollbar show where the matches are, the current one brighter. They are not buttons: dragging the scrollbar works as usual.
 - Going to a match stops following the end of the timeline; **Jump to latest visible** takes you back.
 - [Folded work](workspace/prompt.md#focused-timeline) that holds the text opens while you search and folds again afterwards.
 - Only loaded messages are searched. A `+` after the count says older ones are not loaded yet: the history button in the box loads them all and searches them too.

@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { Button, InputGroup } from "@blueprintjs/core";
 import { AppIcon, type IconName } from "../AppIcon";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
-import { clearFound, defaultFindOptions, findPattern, findPatternInvalid, findRanges, firstBelow, isFindKey, markFound, noFoundMarks, rangeShown, revealRange, samePlace, type FindOptions } from "./findInPage";
+import { clearFound, defaultFindOptions, findPattern, findPatternInvalid, findRanges, firstBelow, isFindKey, markFound, noFoundMarks, rangeShown, revealRange, samePlace, scrollbarTicks, type FindOptions, type FindTick } from "./findInPage";
 
 const mac = typeof navigator !== "undefined" && navigator.platform.startsWith("Mac");
 /** The key that finds in a page, as the window names it. */
@@ -31,6 +31,9 @@ export type FindInPage = Readonly<{
 
 // How many frames a place just gone to is kept in view: the rows that come into view take their real height, and move it.
 const revealFrames = 3;
+// How long a page that changes is left alone before its places are measured along the scrollbar: the first measure
+// lays out the rows not seen yet, which typing does not wait for.
+const tickDelay = 120;
 
 // The element that scrolls a place of the page into view: the page itself, or the first of its parents that scrolls.
 function scrollerOf(element: HTMLElement): HTMLElement {
@@ -39,6 +42,59 @@ function scrollerOf(element: HTMLElement): HTMLElement {
     if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight) return node;
   }
   return element.ownerDocument.scrollingElement as HTMLElement ?? element;
+}
+
+type TickStrip = Readonly<{ left: number; top: number; width: number; height: number; ticks: readonly FindTick[] }>;
+
+/**
+ * Where the places of a page are, along its scrollbar. A row not seen yet has only an estimated height, so the places
+ * are measured again when the page changes size and when scrolling lays out rows that change its height.
+ */
+function useScrollbarTicks(host: HTMLElement | null, places: RefObject<Range[]>, shown: RefObject<number>) {
+  const [strip, setStrip] = useState<TickStrip | null>(null);
+  const measureSoon = useRef(() => { });
+  const measured = useRef<Readonly<{ tops: readonly number[]; contentHeight: number; track: Omit<TickStrip, "ticks"> | null }>>({ tops: [], contentHeight: 0, track: null });
+  const drawn = useRef("");
+
+  function draw() {
+    const { tops, contentHeight, track } = measured.current;
+    const ticks = track ? scrollbarTicks(tops, shown.current, contentHeight, track.height) : [];
+    const next = track && ticks.length > 0 ? { ...track, ticks } : null;
+    const key = JSON.stringify(next);
+    if (key !== drawn.current) { drawn.current = key; setStrip(next); }
+  }
+
+  useEffect(() => {
+    if (!host) { measured.current = { tops: [], contentHeight: 0, track: null }; draw(); return; }
+    let timer: ReturnType<typeof setTimeout> | undefined, watched: HTMLElement | null = null, contentHeight = -1;
+    const soon = () => { clearTimeout(timer); timer = setTimeout(measure, tickDelay); };
+    const resized = new ResizeObserver(soon);
+    function measure() {
+      const view = scrollerOf(host!), frame = view.getBoundingClientRect();
+      if (view !== watched) { if (watched) resized.unobserve(watched); resized.observe(view); watched = view; }
+      contentHeight = view.scrollHeight;
+      const origin = frame.top + view.clientTop - view.scrollTop;
+      // A native scrollbar cannot be drawn on: the marks are laid over it, in the window.
+      const width = view.offsetWidth - view.clientWidth - view.clientLeft * 2;
+      measured.current = {
+        tops: places.current.map(range => { const box = range.getBoundingClientRect(); return box.height > 0 ? box.top - origin : NaN; }),
+        contentHeight,
+        track: width > 0 && view.clientHeight > 0 ? { left: frame.left + view.clientLeft + view.clientWidth, top: frame.top + view.clientTop, width, height: view.clientHeight } : null,
+      };
+      draw();
+    }
+    const scrolled = (event: Event) => { if (event.target === watched && watched!.scrollHeight !== contentHeight) soon(); };
+    const document = host.ownerDocument;
+    resized.observe(host);
+    document.addEventListener("scroll", scrolled, true);
+    measureSoon.current = soon;
+    return () => { clearTimeout(timer); resized.disconnect(); document.removeEventListener("scroll", scrolled, true); measureSoon.current = () => { }; };
+  }, [host]);
+
+  const element = strip ? <div className="find-in-page-ticks" aria-hidden="true" style={{ left: strip.left, top: strip.top, width: strip.width, height: strip.height }}>
+    {strip.ticks.map(tick => <span key={tick.top} data-current={tick.current || undefined} style={{ top: tick.top }} />)}
+  </div> : null;
+  return { element, measureSoon: () => measureSoon.current(), shownChanged: draw };
 }
 
 /**
@@ -83,6 +139,7 @@ export function useFindInPage({ page, available = true, className, returnTo, lab
   const open = finding && available;
   // The page searched: another element (the page drawn again in another place) is searched again.
   const searched = open ? page() : null;
+  const ticks = useScrollbarTicks(searched, ranges, shown);
 
   useEffect(() => {
     const host = searched;
@@ -100,6 +157,7 @@ export function useFindInPage({ page, available = true, className, returnTo, lab
       markFound(marks.current, next, index);
       setFound({ index, count: next.length });
       if (going && !rangeShown(next[index], view)) reveal(next[index], view);
+      ticks.measureSoon();
     };
     run(true);
     const again = () => { timer = undefined; frame ||= requestAnimationFrame(() => { frame = 0; run(false); }); };
@@ -146,6 +204,7 @@ export function useFindInPage({ page, available = true, className, returnTo, lab
     shown.current = index;
     markFound(marks.current, list, index);
     setFound({ index, count: list.length });
+    ticks.shownChanged();
     if (host) reveal(list[index], scrollerOf(host));
   }
   const inBar = (target: EventTarget | null) => target instanceof Node && !!box.current?.contains(target);
@@ -169,7 +228,7 @@ export function useFindInPage({ page, available = true, className, returnTo, lab
   const toggles: readonly (readonly [keyof FindOptions, IconName, "Match case" | "Match whole word" | "Use regular expression", string])[] = [
     ["matchCase", "caseSensitive", "Match case", "c"], ["wholeWord", "wholeWord", "Match whole word", "w"], ["regex", "regex", "Use regular expression", "r"]];
   const toggle = (option: keyof FindOptions) => setOptions(current => ({ ...current, [option]: !current[option] }));
-  const bar = open ? <div className={className ? `find-in-page ${className}` : "find-in-page"} role="search" aria-label={t(label)} ref={box}
+  const bar = open ? <><div className={className ? `find-in-page ${className}` : "find-in-page"} role="search" aria-label={t(label)} ref={box}
     onKeyDown={event => {
       if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       const chosen = toggles.find(entry => entry[3] === event.key.toLowerCase());
@@ -199,7 +258,7 @@ export function useFindInPage({ page, available = true, className, returnTo, lab
     <Button variant="minimal" size="small" icon={<AppIcon name="arrowDown" size={15} />} aria-label={t("Next match")} title={`${t("Next match")} (Enter)`}
       disabled={found.count === 0} onClick={() => step(1)} />
     <Button variant="minimal" size="small" icon={<AppIcon name="close" size={15} />} aria-label={t("Close")} title={`${t("Close")} (Esc)`} onClick={() => close()} />
-  </div> : null;
+  </div>{ticks.element}</> : null;
   const looked = useMemo(() => findPattern(text, options), [text, options]);
   return { finding: open, available, open: start, close, inBar, keyDown, bar, pattern: open ? looked : null };
 }

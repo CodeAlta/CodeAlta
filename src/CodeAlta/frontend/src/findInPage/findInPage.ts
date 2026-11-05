@@ -125,6 +125,24 @@ export function samePlace(left: AbstractRange, right: AbstractRange): boolean {
     && left.endContainer === right.endContainer && left.endOffset === right.endOffset;
 }
 
+/** A mark beside the scrollbar: how far down its track a place is, in pixels, and whether it is the place shown. */
+export type FindTick = Readonly<{ top: number; current: boolean }>;
+
+/**
+ * The marks of the places of a page along its scrollbar, from the height of each in the content of the page (NaN for
+ * a place that is not drawn). Places on the same pixel make one mark, and a page that does not scroll has none.
+ */
+export function scrollbarTicks(tops: readonly number[], shown: number, contentHeight: number, trackHeight: number): FindTick[] {
+  if (trackHeight <= 0 || contentHeight <= trackHeight) return [];
+  const ticks = new Map<number, boolean>();
+  tops.forEach((top, index) => {
+    if (Number.isNaN(top)) return;
+    const at = Math.max(0, Math.min(trackHeight - 3, Math.round(top / contentHeight * trackHeight)));
+    ticks.set(at, ticks.get(at) === true || index === shown);
+  });
+  return [...ticks].map(([top, current]) => ({ top, current }));
+}
+
 /** Whether a key asks for the search in the page: Ctrl+F, and Cmd+F on macOS. */
 export function isFindKey(event: Readonly<{ key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }>, mac: boolean): boolean {
   return event.key.toLowerCase() === "f" && !event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey);

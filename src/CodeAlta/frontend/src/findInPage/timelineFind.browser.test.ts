@@ -14,6 +14,12 @@ const atEnd = `Math.abs(${scroller}.scrollHeight - ${scroller}.clientHeight - ${
 const current = "[...CSS.highlights.get('find-in-page-current')][0]";
 /** Whether the place shown is drawn inside the view of the timeline. */
 const currentSeen = `(() => { const box = ${current}.getBoundingClientRect(), view = ${scroller}.getBoundingClientRect(); return box.height > 0 && box.top >= view.top && box.bottom <= view.bottom; })()`;
+const strip = `document.querySelector('.find-in-page-ticks')`;
+const ticks = `document.querySelectorAll('.find-in-page-ticks > span').length`;
+/** How far the mark of the place shown is from where the place is along the scrollbar, in pixels. */
+const currentTickOff = `(() => { const view = ${scroller}, frame = view.getBoundingClientRect(), mark = document.querySelector('.find-in-page-ticks > span[data-current]');
+  if (!mark) return 999; const at = (${current}.getBoundingClientRect().top - frame.top + view.scrollTop) / view.scrollHeight * view.clientHeight;
+  return Math.abs(mark.getBoundingClientRect().top - frame.top - at); })()`;
 
 async function find(page: Page) {
   await page.command("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "f", code: "KeyF", windowsVirtualKeyCode: 70, modifiers: process.platform === "darwin" ? 4 : 2 });
@@ -49,11 +55,23 @@ test("Ctrl+F in a session finds in its timeline: every match marked and counted,
     const top = await page.evaluate<number>(`${scroller}.scrollTop`);
     assert.equal(await page.evaluate("timelineFindFixture.state.moved > 0"), true);
 
+    // The places are marked along the scrollbar, the place shown apart, and the scrollbar still takes the mouse.
+    await page.until(`${ticks} === 2 && ${currentTickOff} <= 3`, "two marks over the scrollbar, the place shown where it is");
+    const track = await page.evaluate<{ strip: number[]; view: number[]; under: boolean }>(`(() => { const box = ${strip}.getBoundingClientRect(), view = ${scroller}, frame = view.getBoundingClientRect();
+      return { strip: [box.top, box.height, box.right, box.width], view: [frame.top, view.clientHeight, frame.right, view.offsetWidth - view.clientWidth],
+        under: document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) === view }; })()`);
+    assert.deepEqual(track.strip, track.view, "The marks lie on the scrollbar.");
+    assert.ok(track.strip[3] > 0, "There is a scrollbar.");
+    assert.equal(track.under, true, "The mouse goes through the marks to the scrollbar.");
+    const shownTick = `document.querySelector('.find-in-page-ticks > span[data-current]').style.top`;
+    const before = await page.evaluate<string>(shownTick);
+
     // Enter goes on, around, and Shift+Enter back; each place is shown.
     await key(page, "Enter", 13);
     await page.until(`${count} === '1 of 2+'`, "next, around to the first");
     assert.equal(await page.evaluate(`${current}.toString()`), "needle");
     await page.until(currentSeen, "the first place in view");
+    await page.until(`${shownTick} !== ${JSON.stringify(before)}`, "the mark of the place shown goes with it");
     await key(page, "Enter", 13, 8);
     await page.until(`${count} === '2 of 2+' && ${currentSeen}`, "back");
     assert.ok(Math.abs(await page.evaluate<number>(`${scroller}.scrollTop`) - top) < 400, "back near where it was");
@@ -63,6 +81,7 @@ test("Ctrl+F in a session finds in its timeline: every match marked and counted,
     assert.ok(time.length > 0, "A message says its time.");
     await typed(page, time);
     await page.until(`${count}.startsWith('0 of 0')`, "the time is not searched");
+    await page.until(`!${strip}`, "nothing found marks nothing along the scrollbar");
 
     // A word in folded work opens the fold while it is looked for, and it folds again after.
     assert.equal(await page.evaluate(`document.querySelector('.timeline-activity').dataset.expanded`), "false");
@@ -78,10 +97,11 @@ test("Ctrl+F in a session finds in its timeline: every match marked and counted,
     assert.equal(await page.evaluate(`!!${bar}.querySelector('button[aria-label="Load all messages"]')`), false, "Nothing left to load.");
     assert.equal(await page.evaluate(`${current}.toString()`), "NEEDLE", "The place shown stays, though places came before it.");
     assert.equal(await page.evaluate(`${count}`), "6 of 6");
+    await page.until(`${ticks} === 6 && ${currentTickOff} <= 3`, "the older turns are marked too, and the marks follow the taller timeline");
 
     // Escape closes it, takes its marks away and gives the keyboard back to the prompt.
     await key(page, "Escape", 27);
-    await page.until(`!${bar} && !CSS.highlights.has('find-in-page') && !CSS.highlights.has('find-in-page-current')`, "closed");
+    await page.until(`!${bar} && !${strip} && !CSS.highlights.has('find-in-page') && !CSS.highlights.has('find-in-page-current')`, "closed");
     assert.equal(await page.evaluate("document.activeElement?.id"), "session-prompt");
 
     // Outside the session Ctrl+F is still the search of the sessions.

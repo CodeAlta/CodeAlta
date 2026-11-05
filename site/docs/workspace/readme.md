@@ -217,7 +217,7 @@ CodeAlta Desktop ships this guide and shows it in a tab, without a connection. O
 
 - The pages are on the left and the headings of the page on the right.
 - **Search the guide** (`/`) finds a text in every page.
-- `Ctrl+F` (`Cmd+F` on macOS) finds a text in the page: `Enter` / `Shift+Enter` go to the next / previous match, and `Alt+C`, `Alt+W` and `Alt+R` match the case, whole words and regular expressions.
+- `Ctrl+F` (`Cmd+F` on macOS) finds a text in the page: `Enter` / `Shift+Enter` go to the next / previous match, and `Alt+C`, `Alt+W` and `Alt+R` match the case, whole words and regular expressions. Marks beside the scrollbar show where the matches are.
 - `Alt+Left` and `Alt+Right` go back and forward. Click a picture to enlarge it.
 
 **Ask an agent**, above the page, sends a question about the page or the whole guide to a new chat with your default provider. The agent answers with links to the pages it used. Agents in any session read the guide with `alta documentation list`, `search`, `read` and `open`.

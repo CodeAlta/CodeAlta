@@ -99,6 +99,18 @@ test("a rendered Markdown page finds in itself with Ctrl+F, beside another page 
     await press("Enter", "Enter", 13);
     await expect(`${count("first")} === '2 of 3'`);
 
+    // A page that does not scroll has no scrollbar to mark. Once it scrolls, its places are marked along the scrollbar.
+    const ticks = "document.querySelectorAll('#first .find-in-page-ticks > span').length";
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.equal(await evaluate(ticks), 0);
+    await evaluate("document.querySelector('#first .editor-markdown').style.paddingBottom = '2000px'");
+    await evaluate(`findFixture.type(${input("first")}, 'REVIE'); findFixture.type(${input("first")}, 'REVIEW')`);
+    await expect(`${count("first")}.endsWith('of 3') && ${ticks} >= 2`, "The places of two lines have two marks.");
+    await expect(`(() => { const box = document.querySelector('#first .find-in-page-ticks').getBoundingClientRect(), view = document.querySelector('#first .editor-markdown').getBoundingClientRect();
+      return box.right === view.right && box.top === view.top && box.height === view.height; })()`, "The marks lie on the scrollbar of the page.");
+    await press("Enter", "Enter", 13);
+    await expect(`${count("first")} === '2 of 3'`);
+
     // The other page searches at the same time: each marks its own places, and takes only its own back.
     await evaluate("document.querySelector('#second .editor-markdown').focus()");
     await press("f", "KeyF", 70, findModifier);
@@ -114,7 +126,7 @@ test("a rendered Markdown page finds in itself with Ctrl+F, beside another page 
     // Escape in the page, outside the box, closes its search too.
     await evaluate("document.querySelector('#first .editor-markdown').focus()");
     await press("Escape", "Escape", 27);
-    await expect(`!document.querySelector('#first .find-in-page') && !CSS.highlights.has('find-in-page') && !CSS.highlights.has('find-in-page-current')`);
+    await expect(`!document.querySelector('#first .find-in-page') && !document.querySelector('.find-in-page-ticks') && !CSS.highlights.has('find-in-page') && !CSS.highlights.has('find-in-page-current')`);
 
     // Outside the pages Ctrl+F is the search of the sessions.
     await evaluate("(() => { const other = document.createElement('button'); other.id = 'outside'; document.body.appendChild(other); other.focus(); })()");

@@ -3287,6 +3287,13 @@ dialog.mcp-session-dialog:has(> .app-window) > .app-window > .app-window-body { 
 .find-in-page-count[data-empty] { color: var(--red); }
 .find-in-page > .bp6-button { flex: none; min-width: 24px; min-height: 24px; padding: 0; }
 .session-find-loading { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; }
+/* Where the places are along the scrollbar, which still takes the mouse under them. They keep beside its thumb (see
+   `::-webkit-scrollbar-thumb`, 3px from each side), and only the place shown crosses it. */
+.find-in-page-ticks { position: fixed; z-index: 6; pointer-events: none; }
+.find-in-page-ticks > span { position: absolute; left: 0; width: 3px; height: 2px; background: #a8841f; }
+.find-in-page-ticks > span[data-current] { width: 100%; z-index: 1; height: 3px; background: #f0b726; }
+:root[data-theme="light"] .find-in-page-ticks > span { background: #d9a514; }
+:root[data-theme="light"] .find-in-page-ticks > span[data-current] { background: #a86400; }
 ::highlight(find-in-page) { background-color: #5c4a14; }
 ::highlight(find-in-page-current) { background-color: #b07d0e; color: #fff; }
 :root[data-theme="light"] ::highlight(find-in-page) { background-color: #f5df9a; }
