@@ -102,8 +102,11 @@ test("mounted production Notes and proposal overlays cooperate without replacing
         let value = await layout();
         readable(value);
         if (width === 1080) assert.ok(value.tasks!.right <= value.notes.left, "Wide panes place proposals to the left of Notes");
-        else assert.equal(await evaluate("(() => { const card=document.querySelector('.work-card');card.scrollTop=1;const scrolls=card.scrollTop===1;card.scrollTop=0;return scrolls; })()"), true,
-          "The narrow proposal strip scrolls instead of clipping its actions");
+        // Narrow, the card goes above or below Notes when it has room there, else in a strip at the bottom; cut short, it scrolls.
+        else assert.equal(await evaluate(`(() => { const card=document.querySelector('.work-card');
+          if (card.scrollHeight <= card.clientHeight) return true;
+          card.scrollTop=1;const scrolls=card.scrollTop===1;card.scrollTop=0;return scrolls; })()`), true,
+          "A narrow proposal card shows its actions whole or scrolls to them");
         assert.equal(value.collapsed, "false");
         assert.equal(value.stored, before.stored, "Automatic arrangement must not save over dragged Notes geometry");
         assert.equal(await evaluate("notesOwner===document.querySelector('.notes-pane') && notesReads===overlays.reads()"), true, "Geometry does not remount/re-read Notes");
@@ -167,6 +170,113 @@ test("mounted production Notes and proposal overlays cooperate without replacing
         `The tab goes back to the top-right corner: ${JSON.stringify(value)}`);
       value = await click(".session-notes-toggle");
       assert.ok(inside(value.window, value.area) && Math.abs(value.window.right - value.area.right) <= 1, "Expanded at the right edge, inside the pane");
+    });
+    await t.test("proposals follow Notes to its height, stay inside the pane, and keep their own place while Notes are hidden", async () => {
+      for (const y of [0, 36, 300]) {
+        const value = await reset({ width: 1080, stored: { x: 18, y, width: 260, height: 190 }, notes: "Moved notes", proposals: true });
+        readable(value);
+        assert.ok(value.tasks!.right <= value.notes.left, `Proposals stay on the left of Notes: ${JSON.stringify(value)}`);
+        assert.ok(Math.abs(value.tasks!.top - value.notes.top) <= 1, `Proposals take the height of Notes at y=${y}: ${JSON.stringify(value)}`);
+      }
+      // A collapsed Notes tab near the bottom: the card rises just enough to stay whole inside the pane.
+      let value = await reset({ width: 1080, stored: { x: 18, y: 560, width: 260, height: 190 }, proposals: true });
+      assert.equal(value.collapsed, "true");
+      readable(value);
+      assert.ok(value.tasks!.top < value.notes.top && value.pane.bottom - value.tasks!.bottom <= 9, `The card rises to fit: ${JSON.stringify(value)}`);
+      await evaluate("overlays.hide(true)");
+      value = await layout();
+      assert.ok(Math.abs(value.pane.right - 14 - value.tasks!.right) <= 1 && Math.abs(value.tasks!.top - value.pane.top - 44) <= 1,
+        `Without Notes, proposals return to the top right corner: ${JSON.stringify(value)}`);
+      await evaluate("overlays.hide(false)");
+      value = await layout();
+      assert.ok(value.tasks!.top < value.notes.top && value.tasks!.right <= value.notes.left, "Shown again, Notes take the proposals back beside them");
+    });
+    await t.test("collapsed Notes and proposals stay collapsed when the pane is mounted again, until a new proposal arrives", async () => {
+      let value = await reset({ width: 1080, notes: "Notes the user put away", proposals: true });
+      assert.equal(value.collapsed, "false");
+      await click('[aria-label="Put away"]');
+      value = await click('[aria-label="Collapse notes"]');
+      assert.equal(value.collapsed, "true");
+      await evaluate("overlays.remount()");
+      await wait("!!document.querySelector('.session-notes-window') && !document.querySelector('.notes-pane [role=status]')");
+      value = await layout();
+      assert.equal(value.collapsed, "true", "Notes read again after the remount stay collapsed");
+      assert.equal(await evaluate("!!document.querySelector('.work-cards-chip') && !document.querySelector('.work-card')"), true, "Proposals stay put away");
+      readable(value);
+      // After a switch of space, the list of the session is empty for a moment before its proposals come back.
+      await evaluate("overlays.proposals(0); overlays.remount(); overlays.proposals(1)");
+      await wait("!!document.querySelector('.session-notes-window') && !document.querySelector('.notes-pane [role=status]')");
+      value = await layout();
+      assert.equal(await evaluate("!!document.querySelector('.work-cards-chip') && !document.querySelector('.work-card')"), true,
+        "Proposals that come back after a moment without them are not new");
+      await evaluate("overlays.proposals(2)");
+      value = await layout();
+      assert.equal(await evaluate("document.querySelector('.work-card h3')?.textContent"), "A proposal that arrives later", "A new proposal opens the cards on itself");
+      assert.equal(value.collapsed, "true", "A new proposal does not open Notes");
+      readable(value);
+      // Expanded overlays stay expanded too.
+      await evaluate("overlays.remount()");
+      await wait("!!document.querySelector('.session-notes-window') && !document.querySelector('.notes-pane [role=status]')");
+      assert.equal(await evaluate("!!document.querySelector('.work-card')"), true, "Open proposals stay open");
+    });
+    await t.test("dragging the proposals onto a target around Notes docks them there, and the menu does the same", async () => {
+      let value = await reset({ width: 1080, notes: "## Docking\n\n- [ ] Put the proposals below.", proposals: true });
+      readable(value);
+      assert.ok(value.tasks!.right <= value.notes.left, "Left of Notes by default");
+      // The cross of targets is centred on Notes: the one below is 40 pixels under its middle.
+      const middle = center(value.notes);
+      const header = center(await evaluate("(() => { const {left,top,right,bottom,width,height}=document.querySelector('.work-card .work-card-kind').getBoundingClientRect(); return {left,top,right,bottom,width,height}; })()") as Box);
+      value = await drag(header, { x: middle.x, y: middle.y + 40 });
+      readable(value);
+      assert.equal(await evaluate("!!document.querySelector('.work-dock-guide')"), false, "The targets go when the drag ends");
+      assert.equal(await evaluate("getSelection().toString()"), "", "Dragging the header selects no text");
+      assert.ok(value.tasks!.top >= value.notes.bottom && Math.abs(value.tasks!.right - value.notes.right) <= 1,
+        `Dropped below, the proposals sit under Notes, at its right edge: ${JSON.stringify(value)}`);
+      assert.equal(await evaluate("overlays.dock()"), "below");
+      assert.equal(await evaluate("!!document.querySelector('.work-card')"), true, "Dragging the card does not put it away");
+      // The menu of the header: every side can be chosen, and Automatic goes back to the room Notes leave.
+      const choose = async (label: string) => {
+        await click('[aria-label="Place the proposals"]');
+        await wait("!!document.querySelector('.bp6-menu')");
+        assert.deepEqual(await evaluate("[...document.querySelectorAll('.bp6-menu-item')].map(item => item.textContent)"),
+          ["Automatic", "Left of Notes", "Right of Notes", "Above Notes", "Below Notes"]);
+        // A real press and release: the menu is a portal under the header, whose drag handle sees the press too.
+        const item = center(await evaluate(`(() => { const {left,top,right,bottom,width,height}=[...document.querySelectorAll('.bp6-menu-item')]
+          .find(item => item.textContent === ${JSON.stringify(label)}).getBoundingClientRect(); return {left,top,right,bottom,width,height}; })()`) as Box);
+        await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: item.x, y: item.y });
+        await command("Input.dispatchMouseEvent", { type: "mousePressed", x: item.x, y: item.y, button: "left", buttons: 1, clickCount: 1 });
+        await command("Input.dispatchMouseEvent", { type: "mouseReleased", x: item.x, y: item.y, button: "left", buttons: 0, clickCount: 1 });
+        await wait("!document.querySelector('.bp6-menu')");
+        return layout();
+      };
+      value = await choose("Automatic");
+      assert.ok(value.tasks!.right <= value.notes.left && Math.abs(value.tasks!.top - value.notes.top) <= 1, "Automatic puts the proposals on the left");
+      assert.equal(await evaluate("overlays.dock()"), null, "Automatic is not stored");
+      const free = value.window;
+      // The chip of the proposals drags too, and a drag does not open the cards.
+      value = await click('[aria-label="Put away"]');
+      const chip = center(await evaluate("(() => { const {left,top,right,bottom,width,height}=document.querySelector('.work-cards-chip').getBoundingClientRect(); return {left,top,right,bottom,width,height}; })()") as Box);
+      value = await drag(chip, { x: middle.x, y: middle.y + 40 });
+      assert.equal(await evaluate("!!document.querySelector('.work-cards-chip') && !document.querySelector('.work-card')"), true, "The dragged chip stays a chip");
+      assert.ok(value.tasks!.top >= value.notes.bottom, `The chip sits below Notes: ${JSON.stringify(value)}`);
+      // The side is the window's: a pane mounted again keeps it.
+      await evaluate("overlays.remount()");
+      await wait("!!document.querySelector('.session-notes-window') && !document.querySelector('.notes-pane [role=status]')");
+      value = await layout();
+      assert.ok(value.tasks!.top >= value.notes.bottom, "A pane mounted again keeps the side");
+      // A side without room gets it: Notes at the top move down for proposals above them, without saving it.
+      await click(".work-cards-chip");
+      const stored = await evaluate("overlays.stored()");
+      value = await choose("Above Notes");
+      readable(value);
+      assert.ok(value.tasks!.bottom <= value.notes.top - 7 && value.notes.top > free.top + 100, `Notes make room above them: ${JSON.stringify(value)}`);
+      assert.equal(await evaluate("overlays.stored()"), stored, "Making room does not save over the place of Notes");
+      // Notes at the right edge move left for proposals on their right.
+      value = await choose("Right of Notes");
+      readable(value);
+      assert.ok(value.tasks!.left >= value.notes.right + 7 && value.notes.right < free.right - 200, `Notes make room on their right: ${JSON.stringify(value)}`);
+      value = await choose("Automatic");
+      assert.deepEqual(value.window, free, "Automatic gives Notes back their own place");
     });
     await t.test("hiding Notes removes the window and its tab and keeps the loaded notes", async () => {
       for (const notes of ["", "Keep these notes while hidden"]) {

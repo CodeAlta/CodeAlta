@@ -111,6 +111,7 @@ import { createComposerQueue } from "./composerQueue";
 import { AskPanel, type AskMode } from "./AskPanel";
 import { askWireRequest, createAskActions } from "./sessionAsks";
 import { SessionNotesOverlay } from "./SessionNotesOverlay";
+import { createSessionOverlayMemory, type NotesOverlayMemory } from "./sessionOverlayMemory";
 import { RunningSessionBadge } from "./RuntimeObservation";
 import { createNotesReader } from "./sessionNotes";
 import { createUserInputReviewer } from "./sessionUserInput";
@@ -940,6 +941,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     request => sessionAsks.answer(askWireRequest(request), { timeoutMilliseconds: 8000 }),
     request => sessionAsks.cancel(askWireRequest(request), { timeoutMilliseconds: 8000 })));
   const [sessionPaneOwners] = useState(() => new Map<string, ReturnType<typeof createSessionPaneOwners>>());
+  // Unlike the owners above, it outlives the panes that a switch of space mounts again.
+  const [overlayMemory] = useState(createSessionOverlayMemory);
   // The fork and the rewind of sessions: one change at a time, and which pane shows the window that asks for it.
   const [sessionBranch] = useState(() => createSessionBranch(workspaceApi.forkSession, workspaceApi.rewindSession));
   const branchActions = useRef<Pick<SessionBranchHost, "fork" | "rewind">>({ fork: async () => ({ kind: "error", code: "unconfigured" }), rewind: async () => ({ kind: "error", code: "unconfigured" }) });
@@ -5832,10 +5835,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   return { name: origin.name, summary: origin.summary, onOpen: owned && origin.id ? () => openAutomations(origin.id) : undefined };
                 })() : undefined}
                 workCards={owned && workState.settings.notify ? <WorkItemCards hub={workHub} items={sessionCards(work, row.id)} preferredStart={workState.settings.start} busy={workBusy}
-                  onStart={(item, start) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath })}
+                  memory={overlayMemory.proposals(row.id)} onStart={(item, start) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath })}
                   onOpenList={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} /> : undefined}
                 onRunActivity={(running, background) => { runtimeObservations.setLive(tab, running, background); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
-                active={tab.sessionId === sessionId} notesHidden={!notesVisible} onActivate={() => { if (visible && (sessionId !== tab.sessionId || fileTabs.active)) selectSessionTab(tab, "preview"); }}
+                active={tab.sessionId === sessionId} notesHidden={!notesVisible} notesMemory={overlayMemory.notes(row.id)} onActivate={() => { if (visible && (sessionId !== tab.sessionId || fileTabs.active)) selectSessionTab(tab, "preview"); }}
                 infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
                 infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
                   && admitted() && currentView.current === "workspace" && !settingsVisible.current && currentHostEpoch.current === status?.hostEpoch }}
@@ -6452,7 +6455,7 @@ function promptBackComposer(sessionId: string): PromptBackComposer {
 // The run of a session whose prompt was last given back to its composer: a prompt is given back once, whatever reads the window again.
 const unsentPromptKey = (sessionId: string) => `codealta.desktop.unsentPrompt.${sessionId}`;
 
-function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, onOpenDocumentation, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, heldReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, automation, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null, heldElsewhere = null }: {
+function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, onOpenDocumentation, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, heldReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, notesMemory, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, automation, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null, heldElsewhere = null }: {
   canAdmit: () => boolean;
   /**
    * The process that holds the session when another one does (the command line, another instance), with the length of
@@ -6495,6 +6498,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null,
   automation?: AutomationOrigin;
   /** The work items the session proposes, shown over the top right corner of its timeline. */
   workCards?: ReactNode;
+  /** What the Notes overlay of the session remembers when the pane is mounted again. */
+  notesMemory?: NotesOverlayMemory;
   /** Active reminders of this session as last reported by the host; null while unknown. */
   activeReminderCount?: number | null;
   notesReader: ReturnType<typeof createNotesReader>;
@@ -6814,7 +6819,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null,
         : null}
         </div>
         <SessionNotesOverlay observing={observing} sessionId={session.id} epoch={ownedSession ? status?.hostEpoch : undefined} capability={mutation?.capability}
-          fallbackMarkdown={historyNotes} hidden={notesHidden} reader={notesReader} />
+          fallbackMarkdown={historyNotes} hidden={notesHidden} reader={notesReader} memory={notesMemory} />
         {workCards}
         {bookmarks && bookmarkMarks && <BookmarkRail sessionId={session.id} hub={bookmarks.hub} marks={bookmarkMarks} scroll={timeline.elementRef} onGo={bookmarks.go} step={bookmarkStep} />}
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{t(newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible")}</button>}

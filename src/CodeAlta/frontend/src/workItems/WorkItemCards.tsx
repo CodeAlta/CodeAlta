@@ -1,14 +1,21 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { Button, Tag } from "@blueprintjs/core";
+import { useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
+import { Button, Menu, MenuItem, PopoverNext, Tag } from "@blueprintjs/core";
 import { ActivitySpinner } from "../ActivitySpinner";
-import { AppIcon } from "../AppIcon";
+import { AppIcon, type IconName } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { MarkdownContent } from "../MarkdownContent";
 import { useShellLanguage } from "../shellLanguage";
 import { startChoices, startDetail, startIcon, startLabel, taskCategoryIcon, taskCategoryLabel, taskCategoryTone, workItemKey, workKindIcon,
   type WorkItem, type WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
-import { useWorkCardsPlacement } from "./useWorkCardsPlacement";
+import { notesSurface, useWorkCardsPlacement } from "./useWorkCardsPlacement";
+import { dockSides, dockTargetAt, dockTargets, loadDockSide, saveDockSide, type DockSide, type PaneRect } from "./proposalsDock";
+import type { MessageKey } from "../localization";
+import type { ProposalsOverlayMemory } from "../sessionOverlayMemory";
+
+const dockIcons: Readonly<Record<DockSide, IconName>> = Object.freeze({ left: "arrowLeft", right: "arrowRight", above: "arrowUp", below: "arrowDown" });
+const dockLabels: Readonly<Record<DockSide, MessageKey>> = Object.freeze({ left: "Left of Notes", right: "Right of Notes", above: "Above Notes", below: "Below Notes" });
 
 /** The buttons that start the work of an item: the way the user prefers first, the others beside it. */
 export function WorkStartButtons({ preferred, here, disabled, compact = false, onStart }: {
@@ -66,7 +73,7 @@ export function WorkItemTags({ item, projectName }: { item: WorkItem; projectNam
  * few lines, opens its full text, and is decided there: started (in a new worktree, in this session, in a new
  * session), kept for later, or dismissed. A task the session started itself says so, until the user puts it away.
  */
-export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false, onStart, onOpenList }: {
+export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false, memory, onStart, onOpenList }: {
   hub: WorkItemsHub;
   /** The items this session shows, in the order of the cards. */
   items: readonly WorkItem[];
@@ -75,6 +82,8 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   busy: ReadonlySet<string>;
   /** Something else has the place (a file under review). */
   hidden?: boolean;
+  /** What the cards of this session remember when the pane is mounted again (a switch of space). */
+  memory?: ProposalsOverlayMemory;
   onStart: (item: WorkItem, start: WorkStart) => void;
   /** Opens the Work items tab on an item. */
   onOpenList: (item: WorkItem) => void;
@@ -82,18 +91,28 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   const { t } = useShellLanguage();
   const titleId = useId();
   const [selected, setSelected] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const [remembered] = useState<ProposalsOverlayMemory>(() => memory ?? { collapsed: false, known: null });
+  const [collapsed, setCollapsed] = useState(remembered.collapsed);
+  useEffect(() => { remembered.collapsed = collapsed; }, [remembered, collapsed]);
   const [detail, setDetail] = useState(false);
   const [cards, setCards] = useState<HTMLElement | null>(null);
-  useWorkCardsPlacement(cards, collapsed);
-  const known = useRef<ReadonlySet<string>>(new Set());
-  // A proposal that just arrived is the one shown, and brings the cards back when they were put away.
+  // The side of Notes the user chose for the cards, for the whole window; null leaves it to the room around Notes.
+  const [dock, setDock] = useState<DockSide | null>(() => loadDockSide());
+  const chooseDock = (side: DockSide | null) => { setDock(side); saveDockSide(side); };
+  useWorkCardsPlacement(cards, collapsed, dock);
+  // Dragging the chip or the header of the card shows a cross of targets around Notes; dropping on one docks the cards there.
+  const [guide, setGuide] = useState<{ targets: Record<DockSide, PaneRect>; over: DockSide | null } | null>(null);
+  const drag = useRef<{ pointer: number; x: number; y: number; origin: { x: number; y: number }; targets: Record<DockSide, PaneRect> | null } | null>(null);
+  const dragged = useRef(false);
+  // A proposal that just arrived is the one shown, and brings the cards back when they were put away. What was
+  // seen once stays known: the list is empty or partial for a moment after a switch of space mounts the pane
+  // again, and the proposals that come back then are not new. Put away, they stay away.
   useEffect(() => {
-    const keys = new Set(items.map(workItemKey));
-    const arrived = items.find(item => !known.current.has(workItemKey(item)));
-    if (arrived && known.current.size > 0) { setSelected(workItemKey(arrived)); setCollapsed(false); }
-    known.current = keys;
-  }, [items]);
+    const known = remembered.known;
+    const arrived = known && items.find(item => !known.has(workItemKey(item)));
+    if (arrived) { setSelected(workItemKey(arrived)); setCollapsed(false); }
+    if (known || items.length > 0) remembered.known = new Set([...known ?? [], ...items.map(workItemKey)]);
+  }, [remembered, items]);
   if (items.length === 0 || hidden) return null;
   const index = Math.max(0, items.findIndex(item => workItemKey(item) === selected));
   const item = items[index];
@@ -111,6 +130,66 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
     <span aria-live="polite">{t("{index} of {count}", { index: index + 1, count: items.length })}</span>
     <Button variant="minimal" size="small" icon={<AppIcon name="chevronRight" size={14} />} aria-label={t("Next")} title={t("Next")} onClick={() => go(1)} />
   </span>;
+  const over = (event: ReactPointerEvent, targets: Record<DockSide, PaneRect>, origin: { x: number; y: number }) =>
+    dockTargetAt(targets, event.clientX - origin.x, event.clientY - origin.y);
+  const handle = {
+    onPointerDown(event: ReactPointerEvent<HTMLElement>) {
+      // The buttons of the header keep their clicks; the chip itself is a handle. React passes on the presses
+      // in its portals too: those of the placement menu, which is no part of the handle, are not a drag.
+      const target = event.target as Element;
+      if (event.button !== 0 || !event.currentTarget.contains(target) || (!collapsed && target.closest("button"))) return;
+      // No text selection starts from the handle. The click of the chip still comes.
+      event.preventDefault();
+      drag.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, origin: { x: 0, y: 0 }, targets: null };
+      dragged.current = false;
+      // A quick move leaves the handle before the drag starts: the handle keeps the pointer from the press.
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    onPointerMove(event: ReactPointerEvent<HTMLElement>) {
+      const current = drag.current;
+      if (!current || current.pointer !== event.pointerId) return;
+      if (!current.targets) {
+        if (Math.abs(event.clientX - current.x) + Math.abs(event.clientY - current.y) < 5) return;
+        const pane = cards?.parentElement, notes = pane ? notesSurface(pane) : null;
+        if (!pane || !notes) { drag.current = null; return; }
+        const area = pane.getBoundingClientRect();
+        current.origin = { x: area.left, y: area.top };
+        current.targets = dockTargets({ width: area.width, height: area.height }, notes);
+        dragged.current = true;
+        pane.ownerDocument.getSelection()?.removeAllRanges();
+      }
+      const targets = current.targets, side = over(event, targets, current.origin);
+      setGuide(previous => previous?.targets === targets && previous.over === side ? previous : { targets, over: side });
+    },
+    onPointerUp(event: ReactPointerEvent<HTMLElement>) {
+      const current = drag.current;
+      drag.current = null;
+      setGuide(null);
+      if (!current?.targets || current.pointer !== event.pointerId) return;
+      const side = over(event, current.targets, current.origin);
+      if (side) chooseDock(side);
+      // The click of this release, on the chip, comes before this timer: it must not also open the cards.
+      setTimeout(() => { dragged.current = false; });
+    },
+    onPointerCancel() { drag.current = null; dragged.current = false; setGuide(null); },
+  };
+  const pane = cards?.parentElement;
+  const guideView = guide && pane && createPortal(<div className="work-dock-guide" aria-hidden="true">
+    <span className="work-dock-center" style={{ left: (guide.targets.left.left + guide.targets.right.left) / 2, top: guide.targets.left.top }}>
+      <AppIcon name="notes" size={14} /></span>
+    {dockSides.map(side => <span key={side} className="work-dock-target" data-side={side} data-over={guide.over === side || undefined} data-current={dock === side || undefined}
+      style={{ left: guide.targets[side].left, top: guide.targets[side].top, width: guide.targets[side].width, height: guide.targets[side].height }}>
+      <AppIcon name={dockIcons[side]} size={16} /></span>)}
+  </div>, pane);
+  // A side chosen here gets room: Notes move out of its way. Automatic puts the cards where Notes leave room.
+  const placement = <PopoverNext placement="bottom-end" content={<Menu aria-label={t("Place the proposals")}>
+    <MenuItem icon={<AppIcon name="move" size={14} />} text={t("Automatic")} active={dock === null} onClick={() => chooseDock(null)} />
+    {dockSides.map(side => <MenuItem key={side} icon={<AppIcon name={dockIcons[side]} size={14} />} text={t(dockLabels[side])} active={dock === side}
+      onClick={() => chooseDock(side)} />)}
+  </Menu>}>
+    <Button variant="minimal" size="small" icon={<AppIcon name="move" size={14} />} aria-haspopup="menu" aria-label={t("Place the proposals")}
+      title={t("Place the proposals around Notes. You can also drag them onto an arrow.")} />
+  </PopoverNext>;
   const decisions = running
     ? <Button intent="primary" size="small" disabled={working} icon={<AppIcon name="check" size={14} />} title={t("Put the card away. The task stays in Work items.")}
       onClick={acknowledge}>{t("OK")}</Button>
@@ -120,14 +199,16 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
     {!plan && <Button variant="minimal" size="small" disabled={working} icon={<AppIcon name="close" size={14} />} title={t("This task is not worth doing.")} onClick={dismiss}>{t("Dismiss")}</Button>}
   </>;
 
-  return <aside ref={setCards} className="work-cards" data-collapsed={collapsed || undefined} aria-label={t("Proposed work items")}>
+  return <aside ref={setCards} className="work-cards" data-collapsed={collapsed || undefined} data-dragging={guide ? true : undefined} aria-label={t("Proposed work items")}>
+    {guideView}
     {collapsed
-      ? <button type="button" className="work-cards-chip" title={t("Show the proposed work items")} onClick={() => setCollapsed(false)}>
+      ? <button type="button" className="work-cards-chip" title={t("Show the proposed work items")} {...handle} onClick={() => { if (!dragged.current) setCollapsed(false); }}>
           <AppIcon name="task" size={14} />{t(items.length === 1 ? "{count} proposal" : "{count} proposals", { count: items.length })}<AppIcon name="chevronDown" size={14} /></button>
       : <section className="work-card" data-kind={item.kind} aria-labelledby={titleId}>
-          <header>
+          <header {...handle} title={t("Drag onto an arrow around Notes to place the proposals there.")}>
             <span className="work-card-kind"><AppIcon name={workKindIcon(item.kind)} size={14} />{t(plan ? "Plan ready" : running ? "Task in progress" : "Proposed task")}</span>
             {pager}
+            {placement}
             <Button variant="minimal" size="small" icon={<AppIcon name="minus" size={14} />} aria-label={t("Put away")} title={t("Put the proposals away")} onClick={() => setCollapsed(true)} />
           </header>
           <h3 id={titleId}>{item.title}</h3>
