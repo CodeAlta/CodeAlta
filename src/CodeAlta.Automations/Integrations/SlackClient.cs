@@ -96,6 +96,12 @@ internal sealed class SlackSocketListener
     /// <summary>How long a listener whose app is connected elsewhere too waits before it tries again, at least.</summary>
     internal static readonly TimeSpan SharedWait = TimeSpan.FromMinutes(5);
 
+    /// <summary>How long a refresh that Slack counts beside another connection waits before it connects again.</summary>
+    internal static readonly TimeSpan OverlapWait = TimeSpan.FromSeconds(1);
+
+    // The times a refresh connects again while Slack counts another connection, before the app is taken to be connected elsewhere.
+    private const int MaximumOverlaps = 3;
+
     private readonly SlackClient _client;
     private readonly Func<Uri, CancellationToken, Task<WebSocket>> _connect;
     private readonly TimeProvider _time;
@@ -128,13 +134,15 @@ internal sealed class SlackSocketListener
         ArgumentNullException.ThrowIfNull(received);
         var delay = FirstDelay;
         var refresh = false;
+        // The connections a refresh opened while Slack still counted another: the one it replaces may be counted for a moment.
+        var overlaps = 0;
         while (!cancellationToken.IsCancellationRequested)
         {
             var opened = await _client.OpenConnectionAsync(appToken, cancellationToken).ConfigureAwait(false);
-            // A refresh may still count the connection it replaces, for a moment.
-            var refreshing = refresh;
+            var refreshing = refresh || overlaps > 0;
             refresh = false;
             var shared = false;
+            var overlap = false;
             if (opened.Value is { } url)
             {
                 try
@@ -143,14 +151,25 @@ internal sealed class SlackSocketListener
                     (Connected, Problem) = (true, null);
                     changed?.Invoke();
                     delay = FirstDelay;
-                    var (ended, connections) = await ReadAsync(socket, received, refreshing ? 2 : 1, cancellationToken).ConfigureAwait(false);
+                    // One connection of the app, this one, a refresh included: an event of the app never goes to two of them.
+                    var (ended, connections) = await ReadAsync(socket, received, 1, cancellationToken).ConfigureAwait(false);
                     refresh = ended == Ended.Refresh;
-                    if (ended == Ended.Shared)
+                    if (ended == Ended.Shared && refreshing && overlaps < MaximumOverlaps)
                     {
-                        shared = true;
+                        // Most likely the connection it replaces, which Slack still counts: closed, and opened again shortly.
+                        (overlap, overlaps) = (true, overlaps + 1);
+                        await CloseQuietlyAsync(socket).ConfigureAwait(false);
+                    }
+                    else if (ended == Ended.Shared)
+                    {
+                        (shared, overlaps) = (true, 0);
                         Problem = $"This Slack app is connected {connections} times: Slack spreads its events among its connections, so the triggers that listen elsewhere "
                             + "would miss some. Give each machine its own Slack app; this machine listens again once the app is free.";
                         await CloseQuietlyAsync(socket).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        overlaps = 0;
                     }
                 }
                 catch (Exception exception) when (exception is WebSocketException or IOException or HttpRequestException or JsonException
@@ -182,14 +201,14 @@ internal sealed class SlackSocketListener
             try
             {
                 // Connected elsewhere: later, at a time of its own, so that two machines that both stepped aside do not meet again.
-                await Task.Delay(shared ? SharedWait + TimeSpan.FromSeconds(Random.Shared.Next(0, 120)) : delay, _time, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(overlap ? OverlapWait : shared ? SharedWait + TimeSpan.FromSeconds(Random.Shared.Next(0, 120)) : delay, _time, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 return;
             }
 
-            delay = delay * 2 > LongestDelay ? LongestDelay : delay * 2;
+            if (!overlap) delay = delay * 2 > LongestDelay ? LongestDelay : delay * 2;
         }
     }
 
