@@ -468,6 +468,8 @@ internal sealed class NodeServers : IAsyncDisposable
         secrets.Start();
         // The policies kept apply from the start, whether the servers answer or not.
         _ = ApplyPolicyAsync(service, node.Automations);
+        // The budgets and the policies are set: the sends a budget held when the node stopped are taken again through them.
+        service?.ResumeHeldSends();
         var servers = new NodeServers(identity, source, connections, statistics, secrets) { Health = health };
         servers.WatchPolicy(service, node.Automations);
         return servers;

@@ -156,10 +156,10 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         options.Host.Identities.IsOwnerWork = sessionId => Principals.PersonOf(sessionId) is null;
         if (options.AdmitBudget is not null)
         {
-            // A session whose send a budget holds waits for a person (it does not move); the sends held when the node stopped are taken again.
+            // A session whose send a budget holds waits for a person (it does not move); the sends held when the node stopped are
+            // taken again once the host wired its budgets and policies (ResumeHeldSends), not here.
             _heldSessions = () => HeldSends.SessionIds;
             options.Host.HeldSends = _heldSessions;
-            _ = Task.Run(ResumeHeldSendsAsync);
         }
 
         RestoreAgentRestrictions();

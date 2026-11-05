@@ -44,6 +44,7 @@ public sealed class FleetNodeBudgetQueueTests
                 TimeProvider.System), Name = "test-node", Version = "1.0.0",
             AdmitBudget = (_, _, _) => Task.FromResult(FleetBudgetAdmission.Admitted),
         });
+        restarted.ResumeHeldSends();
         try
         {
             var deadline = DateTime.UtcNow + Patience;
@@ -87,6 +88,7 @@ public sealed class FleetNodeBudgetQueueTests
                 TimeProvider.System), Name = "test-node", Version = "1.0.0",
             AdmitBudget = (run, _, _) => { resumed.Enqueue(run); return Task.FromResult(FleetBudgetAdmission.Admitted); },
         });
+        restarted.ResumeHeldSends();
         try
         {
             await WaitUntilAsync(() => fixture.Provider.Prompts.Any(static prompt => prompt.Contains("The first held work.", StringComparison.Ordinal)), token);
@@ -138,12 +140,56 @@ public sealed class FleetNodeBudgetQueueTests
                 TimeProvider.System), Name = "test-node", Version = "1.0.0",
             AdmitBudget = (_, _, _) => { Interlocked.Increment(ref admitted); return Task.FromResult(FleetBudgetAdmission.Admitted); },
         });
+        restarted.ResumeHeldSends();
         try
         {
             await WaitUntilAsync(() => !File.ReadAllText(file).Contains("send-crash", StringComparison.Ordinal), token);
             await Task.Delay(TimeSpan.FromMilliseconds(300), token);
             Assert.AreEqual(1, fixture.Provider.Prompts.Count(static prompt => prompt.Contains("The work of the crash window.", StringComparison.Ordinal)), "a send is made once");
             Assert.AreEqual(0, Volatile.Read(ref admitted), "a send already made is not admitted again");
+        }
+        finally
+        {
+            await restarted.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task TheSendsHeldWhenTheNodeStopped_WaitUntilItsBudgetsAndPoliciesAreWired()
+    {
+        var token = TestContext.CancellationToken;
+        var never = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, async (_, held, cancellation) =>
+        {
+            held();
+            await never.Task.WaitAsync(cancellation).ConfigureAwait(false);
+            return FleetBudgetAdmission.Admitted;
+        });
+        await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Report"), "create-wired", token);
+        Assert.AreEqual(FleetBudgetCommandStatuses.Held, (await client.SendAsync(created.SessionId, "The work that waits for its budgets.", retryKey: "send-wired", cancellationToken: token)).Status);
+
+        // The node starts again: its budgets and policies are set once its servers are started, after the service. Until then
+        // what admits a run is not the budgets yet (here: admits all), and nothing held may be sent by it.
+        var admitted = 0;
+        var restarted = new FleetNodeService(new FleetNodeServiceOptions
+        {
+            Host = fixture.Host, Identity = fixture.NodeIdentity, TrustedDevices = new CodeAlta.Fleet.Identity.TrustedDeviceStore(Path.Combine(fixture.Root, "restarted"),
+                TimeProvider.System), Name = "test-node", Version = "1.0.0",
+            AdmitBudget = (_, _, _) => { Interlocked.Increment(ref admitted); return Task.FromResult(FleetBudgetAdmission.Admitted); },
+        });
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(500), token);
+            Assert.AreEqual(0, Volatile.Read(ref admitted), "a held send is not taken again before the budgets and policies are wired");
+            Assert.IsFalse(fixture.Provider.Prompts.Any(static prompt => prompt.Contains("The work that waits for its budgets.", StringComparison.Ordinal)));
+            CollectionAssert.Contains((await fixture.Host.ListSessionsWaitingForPersonAsync()).ToList(), created.SessionId, "its session still waits for a person");
+
+            // Wired: the sends held are taken again, through the budgets.
+            restarted.ResumeHeldSends();
+            restarted.ResumeHeldSends();
+            await WaitUntilAsync(() => fixture.Provider.Prompts.Any(static prompt => prompt.Contains("The work that waits for its budgets.", StringComparison.Ordinal)), token);
+            Assert.AreEqual(1, Volatile.Read(ref admitted), "taken again once");
         }
         finally
         {

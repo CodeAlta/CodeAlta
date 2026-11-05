@@ -95,6 +95,19 @@ public sealed partial class FleetNodeService
         return false;
     }
 
+    private int _resumed;
+
+    /// <summary>
+    /// Takes again the sends a budget held when the node stopped, once: each asks the same hold of the budgets, and is sent once
+    /// admitted. Called by the host once what admits the runs (the budgets, the policies of the servers) is set, never before:
+    /// a send held is not sent by a node that does not know its budgets yet. Their sessions wait for a person meanwhile.
+    /// </summary>
+    public void ResumeHeldSends()
+    {
+        if (_options.AdmitBudget is null || Interlocked.Exchange(ref _resumed, 1) != 0 || Volatile.Read(ref _disposed) != 0) return;
+        _ = Task.Run(ResumeHeldSendsAsync);
+    }
+
     // Takes again the sends a budget held when the node stopped: each asks the same hold, and is sent once admitted.
     private async Task ResumeHeldSendsAsync()
     {
