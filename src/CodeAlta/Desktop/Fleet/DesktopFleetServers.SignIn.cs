@@ -125,9 +125,27 @@ internal sealed partial class DesktopFleetServers
     /// <exception cref="FleetServerException">The server refused (<c>sign_in.confirmation_required</c> without a confirmation), or gave no usable code.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public Task<FleetSignInCode> StartLinkCodeAsync(string linkId, string method, string? confirmation, CancellationToken cancellationToken)
+        => StartLinkCodeAsync(linkId, method, confirmation, null, cancellationToken);
+
+    /// <summary>
+    /// Starts a sign-in with a code (GitHub) to link the account, with a confirmation or the approval of the link another
+    /// computer of the person signed (<see cref="ApproveLinkOnAnotherDeviceAsync"/>).
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="method">The method; one that uses a device code.</param>
+    /// <param name="confirmation">The confirmation; null for none.</param>
+    /// <param name="approvalId">The approved link; null for none.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The code, and its handle.</returns>
+    /// <exception cref="ArgumentException">The method does not use a device code.</exception>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="DesktopSignInException">Too many sign-ins wait.</exception>
+    /// <exception cref="FleetServerException">The server refused, or gave no usable code.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<FleetSignInCode> StartLinkCodeAsync(string linkId, string method, string? confirmation, string? approvalId, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return StartCodeAsync(Client(linkId), linkId, method, FleetSignInPurposes.Link, cancellationToken, confirmation);
+        return StartCodeAsync(Client(linkId), linkId, method, FleetSignInPurposes.Link, cancellationToken, confirmation, approvalId);
     }
 
     /// <summary>
@@ -293,7 +311,22 @@ internal sealed partial class DesktopFleetServers
     /// <exception cref="DesktopSignInException">The browser did not open, the person cancelled, the code is not one that waits, or the sign-in expired.</exception>
     /// <exception cref="FleetServerException">The server refused (<c>sign_in.confirmation_required</c> without a confirmation).</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<SignInPersonDto> LinkSignInAsync(string linkId, string method, string? handle, string? confirmation, CancellationToken cancellationToken)
+    public Task<SignInPersonDto> LinkSignInAsync(string linkId, string method, string? handle, string? confirmation, CancellationToken cancellationToken)
+        => LinkSignInAsync(linkId, method, handle, confirmation, null, cancellationToken);
+
+    /// <summary>Links a sign-in method with a confirmation, or with the approval of the link another computer of the person signed.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="method">The method.</param>
+    /// <param name="handle">The handle of the code, for a method that uses one (which took the confirmation or the approval); null otherwise.</param>
+    /// <param name="confirmation">The confirmation, for a method through the browser; null for none.</param>
+    /// <param name="approvalId">The approved link, for a method through the browser; null for none.</param>
+    /// <param name="cancellationToken">Cancels the sign-in.</param>
+    /// <returns>The person it was linked to.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="DesktopSignInException">The browser did not open, the person cancelled, the code is not one that waits, or the sign-in expired.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<SignInPersonDto> LinkSignInAsync(string linkId, string method, string? handle, string? confirmation, string? approvalId, CancellationToken cancellationToken)
     {
         if (FleetSignInMethods.UsesDeviceCode(method))
         {
@@ -309,7 +342,112 @@ internal sealed partial class DesktopFleetServers
         }
 
         using var client = Client(linkId);
-        return (await SignInThroughBrowserAsync(client, method, FleetSignInPurposes.Link, cancellationToken, confirmation).ConfigureAwait(false)).Person;
+        return (await SignInThroughBrowserAsync(client, method, FleetSignInPurposes.Link, cancellationToken, confirmation, approvalId).ConfigureAwait(false)).Person;
+    }
+
+    /// <summary>
+    /// Asks another computer of this computer's person to approve a link of a way to sign in from here, and waits until it
+    /// did (at most the 10 minutes an approval waits): what links a way in when this person has none to sign in again with.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="method">The method to link.</param>
+    /// <param name="cancellationToken">Cancels the wait (the person gave up).</param>
+    /// <returns>The id of the approval, to link with.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="DesktopSignInException">The approval did not come before it expired.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<string> ApproveLinkOnAnotherDeviceAsync(string linkId, string method, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        var asked = await client.RequestLinkApprovalAsync(method, cancellationToken).ConfigureAwait(false);
+        while (true)
+        {
+            if (DateTimeOffset.UtcNow >= asked.ExpiresAt) throw new DesktopSignInException("sign_in.timeout", "No other computer approved the link in time: start it again.");
+            await Task.Delay(ApprovalPollInterval, cancellationToken).ConfigureAwait(false);
+            SignInLinkApprovalDto read;
+            try
+            {
+                read = await client.GetLinkApprovalAsync(asked.Id, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FleetServerException exception) when (exception.Code == "sign_in.invalid_attempt")
+            {
+                throw new DesktopSignInException("sign_in.timeout", "No other computer approved the link in time: start it again.");
+            }
+
+            if (read.Status == "approved") return asked.Id;
+        }
+    }
+
+    /// <summary>
+    /// Approves a link from this computer with the recovery key of its person, for a person with no other computer to
+    /// approve on: the words make the key of the recovery key here, which signs the link; they never leave this computer.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="method">The method to link.</param>
+    /// <param name="words">The words of the recovery key, as the person typed them.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The id of the approval, to link with.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetRecoveryException">The words are not a recovery key, or not the recovery key of this person at the server.</exception>
+    /// <exception cref="FleetServerException">The server refused (too many attempts, among others).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<string> ApproveLinkWithRecoveryKeyAsync(string linkId, string method, string words, CancellationToken cancellationToken)
+    {
+        if (!FleetRecoveryKey.TryParse(words, out var key)) throw new FleetRecoveryException("These words are not a recovery key.");
+        using (key)
+        {
+            using var client = Client(linkId);
+            var asked = await client.RequestLinkApprovalAsync(method, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await client.ApproveLinkWithRecoveryKeyAsync(asked, key, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FleetServerException exception) when (exception.Status is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized)
+            {
+                throw new FleetRecoveryException("These words are not your recovery key at this server.", exception);
+            }
+
+            return asked.Id;
+        }
+    }
+
+    /// <summary>Lists the links of ways to sign in that other computers of this computer's person ask it to approve.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The links that wait, of the person's other computers.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<IReadOnlyList<SignInLinkApprovalDto>> ListLinkApprovalsAsync(string linkId, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        return [.. (await client.ListLinkApprovalsAsync(cancellationToken).ConfigureAwait(false)).Where(approval => approval.RequesterDeviceId != client.DeviceId && approval.Status == "pending")];
+    }
+
+    /// <summary>
+    /// Approves from this computer a link another computer of its person asks for: exactly the link its page showed, named
+    /// by its digest; a server that answers another link then gets nothing signed.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="approvalId">The approval.</param>
+    /// <param name="shownDigest">The digest of the link the page showed.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>A task that completes once approved.</returns>
+    /// <exception cref="ArgumentException"><paramref name="shownDigest"/> is null or empty.</exception>
+    /// <exception cref="KeyNotFoundException">No such link, or no such approval.</exception>
+    /// <exception cref="InvalidOperationException">The link the server holds now is not the one shown, or not of its digest: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task ApproveLinkAsync(string linkId, string approvalId, string shownDigest, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(shownDigest);
+        using var client = Client(linkId);
+        var approval = (await client.ListLinkApprovalsAsync(cancellationToken).ConfigureAwait(false)).FirstOrDefault(approval => approval.Id == approvalId)
+            ?? throw new KeyNotFoundException("No link waits for this approval.");
+        if (!string.Equals(approval.Digest, shownDigest, StringComparison.Ordinal))
+            throw new InvalidOperationException("The link the server holds now is not the one shown: nothing was signed.");
+        await client.ApproveLinkAsync(approval, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Reads the sign-in settings of the organization of a server; an owner's computer only.</summary>
@@ -443,12 +581,12 @@ internal sealed partial class DesktopFleetServers
     }
 
     private async Task<CompleteSignInResponse> SignInThroughBrowserAsync(FleetServerClient client, string method, string purpose, CancellationToken cancellationToken,
-        string? confirmation = null)
+        string? confirmation = null, string? approvalId = null)
     {
         // A company registers its own client, and Entra ID's Web platform takes only https:// or http://localhost there; the clients
         // CodeAlta registers come back to 127.0.0.1.
         using var redirect = FleetLoopbackRedirect.Start(method == FleetSignInMethods.Company ? FleetLoopbackHost.Localhost : FleetLoopbackHost.IPAddress);
-        var start = await client.StartSignInAsync(method, redirect.RedirectUri, purpose, confirmation, cancellationToken).ConfigureAwait(false);
+        var start = await client.StartSignInAsync(method, redirect.RedirectUri, purpose, confirmation, approvalId, cancellationToken).ConfigureAwait(false);
         if (start.State is not { Length: > 0 } state)
             throw new FleetServerException(HttpStatusCode.OK, FleetServerException.HttpErrorCode, null, "The server gave no state for the sign-in.");
         if (!Uri.TryCreate(start.AuthorizationUrl, UriKind.Absolute, out var authorization) || authorization.Scheme is not ("https" or "http") || !OpenBrowser(authorization))
@@ -474,14 +612,14 @@ internal sealed partial class DesktopFleetServers
     // The first call of a device flow: the server asks the provider for a code, which waits here, with the client of its
     // device key, for the second call. The client is the code's from now on: it is disposed with it.
     private async Task<FleetSignInCode> StartCodeAsync(FleetServerClient client, string target, string method, string purpose, CancellationToken cancellationToken,
-        string? confirmation = null)
+        string? confirmation = null, string? approvalId = null)
     {
         try
         {
             if (!FleetSignInMethods.UsesDeviceCode(method)) throw new ArgumentException($"'{method}' does not sign in with a code.", nameof(method));
             Sweep();
             if (_codes.Count >= MaximumCodes) throw new DesktopSignInException("sign_in.busy", "Too many sign-ins wait: finish or cancel one first.");
-            var start = await client.StartSignInAsync(method, null, purpose, confirmation, cancellationToken).ConfigureAwait(false);
+            var start = await client.StartSignInAsync(method, null, purpose, confirmation, approvalId, cancellationToken).ConfigureAwait(false);
             if (start.UserCode is not { Length: > 0 and <= 64 } userCode || userCode.Any(static c => c is < '!' or > '~')
                 || !Uri.TryCreate(start.AuthorizationUrl, UriKind.Absolute, out var page) || !(page.Scheme == Uri.UriSchemeHttps || page.Scheme == Uri.UriSchemeHttp && page.IsLoopback))
                 throw new FleetServerException(HttpStatusCode.OK, FleetServerException.HttpErrorCode, null, "The server gave no code to enter.");

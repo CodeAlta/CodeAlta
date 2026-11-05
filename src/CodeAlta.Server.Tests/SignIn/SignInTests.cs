@@ -1017,6 +1017,136 @@ public sealed class SignInTests
     }
 
     [TestMethod]
+    public async Task AnotherDeviceOfThePersonApprovesALink_WhenThePersonHasNoWayInAnyMore()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var desktop = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        using var key = new SoftwareAuthenticator();
+        var setup = await server.SetUpAsync(desktop);
+        var origin = server.BaseAddress.GetLeftPart(UriPartial.Authority);
+        var enrolled = await server.EnrollAsync(desktop, laptop, FleetDeviceKinds.Controller);
+        var entry = await server.NextEntryAsync(desktop, FleetDeviceListOperations.Add, enrolled.Id, laptop.PublicKey, FleetDeviceKinds.Controller, setup.Owner.Id,
+            setup.Organization.Id);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(desktop, HttpMethod.Post, $"/api/v1/devices/{laptop.DeviceId}/approve", new DeviceListChangeRequest(entry))).Status);
+
+        // Days later, the owner has no way in and both devices joined long ago: the laptop's key alone adds none.
+        server.Clock.Advance(TimeSpan.FromDays(3));
+        StartSignInRequest Link(string method, string? approval = null) => new(method, laptop.PublicKey, Redirect, FleetSignInPurposes.Link, null, approval);
+        Assert.AreEqual(SignInErrorCodes.FirstWayInExpired, (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", Link(FleetSignInMethods.Passkey))).Code);
+
+        // The laptop asks; it does not approve its own link, and an approval that is not signed by the approving device is refused.
+        var asked = await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/link-approvals", new RequestLinkApprovalRequest(FleetSignInMethods.Passkey));
+        Assert.AreEqual(HttpStatusCode.OK, asked.Status, asked.Body.ToString());
+        var approval = asked.Read<SignInLinkApprovalDto>();
+        Assert.AreEqual((FleetSignInMethods.Passkey, "pending", FleetSignInApprovals.LinkDigest(setup.Organization.Id, laptop.DeviceId, FleetSignInMethods.Passkey)),
+            (approval.Method, approval.Status, approval.Digest));
+        FleetSignedSignInApproval Signed(TestDevice signer, string digest)
+        {
+            var payload = FleetSignInApprovals.Serialize(new FleetSignInApproval(1, setup.Organization.Id, approval.Id, laptop.DeviceId, digest, signer.DeviceId, server.Clock.Now));
+            return new FleetSignedSignInApproval(payload, signer.Sign(FleetSignInApprovals.GetSignedBytes(payload)));
+        }
+
+        var listed = (await server.SendAsync(desktop, HttpMethod.Get, "/api/v1/sign-in/link-approvals")).Read<ListResponse<SignInLinkApprovalDto>>().Items;
+        Assert.AreEqual((approval.Id, "Laptop"), (listed.Single().Id, listed.Single().RequesterName));
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(laptop, HttpMethod.Post, $"/api/v1/sign-in/link-approvals/{approval.Id}/approve",
+            Signed(laptop, approval.Digest))).Status, "the device that links does not approve it");
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await server.SendAsync(desktop, HttpMethod.Post, $"/api/v1/sign-in/link-approvals/{approval.Id}/approve",
+            Signed(desktop, FleetSignInApprovals.LinkDigest(setup.Organization.Id, laptop.DeviceId, FleetSignInMethods.Microsoft)))).Status, "the digest of another link");
+        Assert.AreEqual(SignInErrorCodes.ConfirmationRequired, (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start",
+            Link(FleetSignInMethods.Passkey, approval.Id))).Code, "an approval that waits approves nothing");
+
+        // The desktop approves it: the laptop registers its passkey with it, once, and for that method only.
+        var approved = await server.SendAsync(desktop, HttpMethod.Post, $"/api/v1/sign-in/link-approvals/{approval.Id}/approve", Signed(desktop, approval.Digest));
+        Assert.AreEqual(HttpStatusCode.OK, approved.Status, approved.Body.ToString());
+        Assert.AreEqual(("approved", desktop.DeviceId), (approved.Read<SignInLinkApprovalDto>().Status, approved.Read<SignInLinkApprovalDto>().ApprovedBy));
+        Assert.AreEqual(SignInErrorCodes.ConfirmationRequired, (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start",
+            Link(FleetSignInMethods.Microsoft, approval.Id))).Code, "an approval is of its method");
+        var started = await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", Link(FleetSignInMethods.Passkey, approval.Id));
+        Assert.AreEqual(HttpStatusCode.OK, started.Status, started.Body.ToString());
+        var start = started.Read<StartSignInResponse>();
+        var created = await PasskeyCeremonyAsync(server, start, "create", options => key.Create(options, origin));
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, laptop, start, created)).Status);
+        Assert.AreEqual(1, (await ((ISignInStore)server.Server.Store).ListPasskeysAsync(setup.Owner.Id)).Count);
+        Assert.AreEqual(SignInErrorCodes.ConfirmationRequired, (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start",
+            Link(FleetSignInMethods.Passkey, approval.Id))).Code, "an approval works once");
+
+        var audit = (await server.SendAsync(desktop, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        Assert.AreEqual(1, audit.Count(static record => record.Action == "sign_in.link_approval.approve" && record.Result == AuditEntry.Success));
+    }
+
+    [TestMethod]
+    public async Task TheRecoveryKeyOfTheOwnerApprovesALinkOnTheirOnlyComputer_NoOneElsesDoes_AndFailedAttemptsAreLimited()
+    {
+        await using var server = await ServerFixture.StartAsync(configure: options => new Hosting.CoordinatorServerOptions
+        {
+            DataRoot = options.DataRoot, Urls = options.Urls, TimeProvider = options.TimeProvider, ConfigureLogging = options.ConfigureLogging,
+            EnvironmentVariable = options.EnvironmentVariable,
+            RateLimits = new AuthenticationRateLimits { RecoverPerPerson = new RateLimit(4, TimeSpan.FromMinutes(15)), PersonSlowPath = TimeSpan.FromHours(1) },
+        });
+        using var desktop = new TestDevice("Desktop");
+        using var recovery = new TestDevice("Recovery key");
+        using var stranger = new TestDevice("Not a recovery key");
+        using var key = new SoftwareAuthenticator();
+        var setup = await server.SetUpAsync(desktop);
+        var origin = server.BaseAddress.GetLeftPart(UriPartial.Authority);
+        async Task AddRecoveryKeyAsync(TestDevice device, TestDevice recoveryKey, string personId)
+        {
+            var entry = await server.NextEntryAsync(device, FleetDeviceListOperations.Add, recoveryKey.DeviceId, recoveryKey.PublicKey, FleetDeviceKinds.Recovery, personId,
+                setup.Organization.Id);
+            var added = await server.SendAsync(device, HttpMethod.Post, "/api/v1/recovery-keys", new CreateRecoveryKeyRequest(recoveryKey.PublicKey, entry, "sealed-anchor"));
+            Assert.AreEqual(HttpStatusCode.Created, added.Status, added.Body.ToString());
+        }
+
+        await AddRecoveryKeyAsync(desktop, recovery, setup.Owner.Id);
+        // Sam, another person of the organization, with a recovery key of their own.
+        var (samDevice, samId) = await AccessControlTests.AddPersonAsync(server, desktop, setup, "Sam");
+        using var sam = samDevice;
+        using var samRecovery = new TestDevice("Sam's recovery key");
+        await AddRecoveryKeyAsync(sam, samRecovery, samId);
+
+        // Days later, on the only computer of the owner, who never linked a way in: the device key alone adds none.
+        server.Clock.Advance(TimeSpan.FromDays(3));
+        Assert.AreEqual(SignInErrorCodes.FirstWayInExpired, (await server.SendAsync(desktop, HttpMethod.Post, "/api/v1/sign-in/start",
+            new StartSignInRequest(FleetSignInMethods.Passkey, desktop.PublicKey, Redirect, FleetSignInPurposes.Link))).Code);
+        var approval = (await server.SendAsync(desktop, HttpMethod.Post, "/api/v1/sign-in/link-approvals", new RequestLinkApprovalRequest(FleetSignInMethods.Passkey)))
+            .Read<SignInLinkApprovalDto>();
+        FleetSignedSignInApproval Signed(TestDevice signer, string? digest = null)
+        {
+            var payload = FleetSignInApprovals.Serialize(new FleetSignInApproval(1, setup.Organization.Id, approval.Id, desktop.DeviceId, digest ?? approval.Digest, signer.DeviceId,
+                server.Clock.Now));
+            return new FleetSignedSignInApproval(payload, signer.Sign(FleetSignInApprovals.GetSignedBytes(payload)));
+        }
+
+        // The approval is signed by the recovery key on the computer that has its words: the request names no device of the server.
+        Task<ApiAnswer> ApproveAsync(FleetSignedSignInApproval signed) => server.SendAsync(null, HttpMethod.Post, $"/api/v1/sign-in/link-approvals/{approval.Id}/recovery-key", signed);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await ApproveAsync(Signed(samRecovery))).Status, "the recovery key of another person");
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await ApproveAsync(Signed(stranger))).Status, "a key that is no recovery key");
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await ApproveAsync(Signed(recovery,
+            FleetSignInApprovals.LinkDigest(setup.Organization.Id, desktop.DeviceId, FleetSignInMethods.Microsoft)))).Status, "the digest of another link");
+        var approved = await ApproveAsync(Signed(recovery));
+        Assert.AreEqual(HttpStatusCode.OK, approved.Status, approved.Body.ToString());
+        Assert.AreEqual(("approved", recovery.DeviceId), (approved.Read<SignInLinkApprovalDto>().Status, approved.Read<SignInLinkApprovalDto>().ApprovedBy));
+
+        // The passkey is linked with it, once.
+        var started = await server.SendAsync(desktop, HttpMethod.Post, "/api/v1/sign-in/start",
+            new StartSignInRequest(FleetSignInMethods.Passkey, desktop.PublicKey, Redirect, FleetSignInPurposes.Link, null, approval.Id));
+        Assert.AreEqual(HttpStatusCode.OK, started.Status, started.Body.ToString());
+        var start = started.Read<StartSignInResponse>();
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, desktop, start, await PasskeyCeremonyAsync(server, start, "create", options => key.Create(options, origin)))).Status);
+        Assert.AreEqual(1, (await ((ISignInStore)server.Server.Store).ListPasskeysAsync(setup.Owner.Id)).Count);
+
+        // Attempts in the name of the owner are limited, as recoveries are: past the limit, the next one waits.
+        approval = (await server.SendAsync(desktop, HttpMethod.Post, "/api/v1/sign-in/link-approvals", new RequestLinkApprovalRequest(FleetSignInMethods.Microsoft)))
+            .Read<SignInLinkApprovalDto>();
+        Assert.AreEqual(HttpStatusCode.TooManyRequests, (await ApproveAsync(Signed(recovery))).Status);
+
+        var audit = (await server.SendAsync(desktop, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        Assert.AreEqual(1, audit.Count(static record => record.Action == "sign_in.link_approval.recovery_key" && record.Result == AuditEntry.Success));
+        Assert.AreEqual(2, audit.Count(static record => record.Action == "sign_in.link_approval.recovery_key" && record.Result == FleetErrorCodes.Forbidden));
+    }
+
+    [TestMethod]
     public async Task AConfirmationIsAFreshSignInAtTheProvider_NotTheSessionItKeeps()
     {
         await using var provider = await FakeOidcProvider.StartAsync();

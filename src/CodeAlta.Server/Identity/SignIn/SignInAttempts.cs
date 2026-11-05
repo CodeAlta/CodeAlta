@@ -212,6 +212,37 @@ public sealed class SignInApprovalRequest
     public string? ApprovedBy { get; set; }
 }
 
+/// <summary>A link of a way to sign in that waits for another controller device of its person to approve it, in memory.</summary>
+public sealed class SignInLinkApproval
+{
+    /// <summary>Gets the id of the approval.</summary>
+    public required string Id { get; init; }
+
+    /// <summary>Gets the organization.</summary>
+    public required string OrganizationId { get; init; }
+
+    /// <summary>Gets the person whose devices ask and approve.</summary>
+    public required string PersonId { get; init; }
+
+    /// <summary>Gets the device that links, which alone uses the approval.</summary>
+    public required string RequesterDeviceId { get; init; }
+
+    /// <summary>Gets the name of that device.</summary>
+    public string? RequesterName { get; init; }
+
+    /// <summary>Gets the method it links.</summary>
+    public required string Method { get; init; }
+
+    /// <summary>Gets the digest the approver signs.</summary>
+    public required string Digest { get; init; }
+
+    /// <summary>Gets when it stops working.</summary>
+    public required DateTimeOffset ExpiresAt { get; init; }
+
+    /// <summary>Gets or sets the device that approved it, or null while it waits.</summary>
+    public string? ApprovedBy { get; set; }
+}
+
 /// <summary>The grant of a sign-in: it lets one device enroll as a controller device of one person, once.</summary>
 /// <param name="OrganizationId">The organization.</param>
 /// <param name="PersonId">The person.</param>
@@ -233,6 +264,7 @@ public sealed class SignInAttempts
     private readonly ConcurrentDictionary<string, SignInGrant> _grants = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SignInGrant> _confirmations = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SignInApprovalRequest> _approvals = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, SignInLinkApproval> _linkApprovals = new(StringComparer.Ordinal);
     private readonly TimeProvider _time;
     private readonly int _capacity;
 
@@ -382,6 +414,41 @@ public sealed class SignInAttempts
         return _approvals.TryRemove(approval.Id, out var taken) ? taken : null;
     }
 
+    /// <summary>Keeps a link that waits for an approval.</summary>
+    /// <param name="approval">The link.</param>
+    /// <returns>Whether it is kept; false when too many wait.</returns>
+    public bool AddLinkApproval(SignInLinkApproval approval)
+    {
+        ArgumentNullException.ThrowIfNull(approval);
+        Sweep();
+        return _linkApprovals.Count < _capacity && _linkApprovals.TryAdd(approval.Id, approval);
+    }
+
+    /// <summary>Finds a link approval that has not expired.</summary>
+    /// <param name="id">Its id.</param>
+    /// <returns>The approval, or null.</returns>
+    public SignInLinkApproval? FindLinkApproval(string? id)
+        => !string.IsNullOrEmpty(id) && _linkApprovals.TryGetValue(id, out var approval) && approval.ExpiresAt > _time.GetUtcNow() ? approval : null;
+
+    /// <summary>Lists the link approvals of a person that have not expired.</summary>
+    /// <param name="personId">The person.</param>
+    /// <returns>The approvals.</returns>
+    public IReadOnlyList<SignInLinkApproval> ListLinkApprovals(string personId)
+    {
+        Sweep();
+        return [.. _linkApprovals.Values.Where(approval => approval.PersonId == personId).OrderBy(static approval => approval.ExpiresAt)];
+    }
+
+    /// <summary>Takes an approved link for the device that asked for it; it works once.</summary>
+    /// <param name="id">Its id.</param>
+    /// <param name="deviceId">The device that links.</param>
+    /// <returns>The approval, or null when it is unknown, not approved, expired, or of another device.</returns>
+    public SignInLinkApproval? TakeLinkApproval(string? id, string deviceId)
+    {
+        if (FindLinkApproval(id) is not { ApprovedBy: not null } approval || approval.RequesterDeviceId != deviceId) return null;
+        return _linkApprovals.TryRemove(approval.Id, out var taken) ? taken : null;
+    }
+
     /// <summary>
     /// Forgets what a device has in progress, once it is revoked: its sign-ins (a passkey its page registers, an account it
     /// links), its confirmations and the changes it asked to have approved.
@@ -404,6 +471,12 @@ public sealed class SignInAttempts
         {
             if (pair.Value.RequesterDeviceId == deviceId) _approvals.TryRemove(pair.Key, out _);
         }
+
+        // A link it asked for, and one it approved that was not used yet.
+        foreach (var pair in _linkApprovals)
+        {
+            if (pair.Value.RequesterDeviceId == deviceId || pair.Value.ApprovedBy == deviceId) _linkApprovals.TryRemove(pair.Key, out _);
+        }
     }
 
     private void Sweep()
@@ -412,6 +485,11 @@ public sealed class SignInAttempts
         foreach (var pair in _approvals)
         {
             if (pair.Value.ExpiresAt <= now) _approvals.TryRemove(pair.Key, out _);
+        }
+
+        foreach (var pair in _linkApprovals)
+        {
+            if (pair.Value.ExpiresAt <= now) _linkApprovals.TryRemove(pair.Key, out _);
         }
 
         foreach (var pair in _confirmations)

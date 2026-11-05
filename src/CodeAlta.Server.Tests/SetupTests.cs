@@ -45,33 +45,47 @@ public sealed class SetupTests
     [TestMethod]
     public async Task AServerRefusesPlainHttpBeyondTheLoopbackUnlessForced()
     {
-        // Before it binds anything: no port is opened on the networks of the machine.
+        // Every interface (0.0.0.0, [::], *, +), an address of the network and a host name (which Kestrel binds on every
+        // interface) are checked by the rule alone: a test never hands them to a server that could bind them.
         foreach (var url in new[] { "http://0.0.0.0:0", "http://[::]:0", "http://*:0", "http://+:0", "http://192.168.1.20:0", "http://fleet.example:0" })
         {
-            using var root = new TempDirectory();
-            var refused = await Assert.ThrowsExactlyAsync<ArgumentException>(() => CoordinatorServer.StartAsync(new CoordinatorServerOptions
-            {
-                DataRoot = root.Path, Urls = [url], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
-            }));
+            var refused = Assert.ThrowsExactly<ArgumentException>(() => ServerBindings.Require([url], allowInsecureHttp: false), url);
             StringAssert.Contains(refused.Message, ServerBindings.AllowInsecureHttpOption, url);
         }
 
         foreach (var url in new[] { "http://127.0.0.1:2586", "http://[::1]:2586", "http://localhost:2586", "https://0.0.0.0:443" })
             ServerBindings.Require([url], allowInsecureHttp: false);
         ServerBindings.Require(["http://0.0.0.0:2586"], allowInsecureHttp: true);
+
+        // The start applies the rule before it binds anything. Its address is of TEST-NET-1, which no machine has: a start
+        // that did not apply it would fail to bind there, never open a port beyond the loopback.
+        RequireNotOfThisMachine(NotOfThisMachine);
+        using var root = new TempDirectory();
+        var start = await Assert.ThrowsExactlyAsync<ArgumentException>(() => CoordinatorServer.StartAsync(new CoordinatorServerOptions
+        {
+            DataRoot = root.Path, Urls = [$"http://{NotOfThisMachine}:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+        }));
+        StringAssert.Contains(start.Message, ServerBindings.AllowInsecureHttpOption);
+    }
+
+    // An address of TEST-NET-1 (RFC 5737): what a test gives a server where an address beyond the loopback is needed, so
+    // that code which wrongly takes it fails to bind instead of listening on a network of the machine.
+    private const string NotOfThisMachine = "192.0.2.1";
+
+    private static void RequireNotOfThisMachine(string address)
+    {
+        if (System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+            .SelectMany(static network => network.GetIPProperties().UnicastAddresses).Any(unicast => unicast.Address.ToString() == address))
+            Assert.Inconclusive($"{address} is an address of this machine: the test would bind beyond the loopback.");
     }
 
     [TestMethod]
     public async Task KestrelSettingsOfTheEnvironmentDoNotOpenPlainHttpToOtherMachines()
     {
         // Kestrel__Endpoints__Http__Url in the environment, or Kestrel:Endpoints in an appsettings.json: Kestrel would take them over --urls.
-        // The endpoint of the test is of TEST-NET-1 (RFC 5737), an address no machine has: a server that took it would fail
-        // to bind, never open a port beyond the loopback, whatever the code under test does. A test never binds every
-        // interface (0.0.0.0, [::], *, +).
-        const string NotOfThisMachine = "192.0.2.1";
-        if (System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
-            .SelectMany(static network => network.GetIPProperties().UnicastAddresses).Any(static unicast => unicast.Address.ToString() == NotOfThisMachine))
-            Assert.Inconclusive($"{NotOfThisMachine} is an address of this machine: the test would bind beyond the loopback.");
+        // The endpoint of the test is of TEST-NET-1: a server that took it would fail to bind, never open a port beyond the
+        // loopback, whatever the code under test does. A test never binds every interface (0.0.0.0, [::], *, +).
+        RequireNotOfThisMachine(NotOfThisMachine);
         using var root = new TempDirectory();
         await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
         {

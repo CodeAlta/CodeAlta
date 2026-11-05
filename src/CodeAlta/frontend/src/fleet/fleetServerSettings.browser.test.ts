@@ -236,6 +236,46 @@ test("a computer without a server recovers with the 32 words of the recovery key
   }, options);
 });
 
+test("another computer of the person asks to add a way to sign in: this one approves it; and a link asks another computer instead of a sign-in again", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
+    await page.evaluate(`window.fleetFixture.askLink()`);
+    // The first way in links at once, and the row reads again.
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.clickText(".bp6-menu-item", "Add a passkey");
+    await page.until(`document.querySelector('.fleet-sign-in-link-approval')`, "the link to approve");
+    assert.match(await page.evaluate(`document.querySelector('.fleet-sign-in-link-approval').textContent`) as string, /^Laptop asks to add a way to sign in: Passkey\./u);
+    await page.clickText(".fleet-sign-in-link-approval .bp6-button", "Approve");
+    await page.until(`!document.querySelector('.fleet-sign-in-link-approval')`, "approved");
+    // The approval names the digest of the link shown: the host signs that link or nothing.
+    assert.ok((await calls(page)).some(call => call.approvedLink === "link-1" && call.digest === "digest-of-the-link-shown"));
+
+    // A second way in offers another computer's approval beside a sign-in again.
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.until(`[...document.querySelectorAll('.bp6-menu-item')].some(item => item.textContent === 'Link Microsoft')`, "Microsoft offered");
+    await page.clickText(".bp6-menu-item", "Link Microsoft");
+    await page.until(`[...document.querySelectorAll('.fleet-sign-in-confirm-methods .bp6-button')].some(button => button.textContent === 'Approve on another of my computers')`,
+      "the approval on another computer offered");
+    await page.clickText(".fleet-sign-in-confirm-methods .bp6-button", "Approve on another of my computers");
+    await page.until(`window.fleetFixture.calls.some(call => call.includes('"confirmWith":"device"'))`, "the link waits for another computer");
+    assert.ok((await calls(page)).some(call => call.linkSignIn === "microsoft" && call.confirmWith === "device"));
+
+    // Or the recovery key: its words, typed here, approve the link on this computer; words that are not the key are said so.
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.until(`[...document.querySelectorAll('.bp6-menu-item')].some(item => item.textContent === 'Link Microsoft')`, "Microsoft offered again");
+    await page.clickText(".bp6-menu-item", "Link Microsoft");
+    await page.until(`[...document.querySelectorAll('.fleet-sign-in-confirm-methods .bp6-button')].some(button => button.textContent === 'Use my recovery key')`, "the recovery key offered");
+    await page.clickText(".fleet-sign-in-confirm-methods .bp6-button", "Use my recovery key");
+    await page.until(`document.querySelector('.fleet-sign-in-recovery-words input')`, "the field of the words");
+    const type = (words: string) => page.evaluate(`(() => { const input = document.querySelector('.fleet-sign-in-recovery-words input');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(words)}); input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await type("not the words");
+    await page.clickText(".fleet-sign-in-recovery-words .bp6-button", "Approve with my recovery key");
+    await page.until(`document.querySelector('.fleet-server-sign-in [role=alert]')?.textContent === 'These words are not a recovery key of this server.'`, "the words refused");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("each linked account has its mark and a remove button asking beside the row; a company account has none, and Link… still offers an account already linked", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
@@ -296,7 +336,7 @@ test("the owner links a passkey, turns company sign-in on and requires it, and t
     await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
     await page.until(`[...document.querySelectorAll('.bp6-menu-item')].some(item => item.textContent === 'Link GitHub')`, "GitHub may be linked");
     await page.clickText(".bp6-menu-item", "Link GitHub");
-    await page.until(`document.querySelector('.fleet-sign-in-confirm')?.textContent.startsWith('Adding a way to sign in needs you to sign in again with one you have.')`,
+    await page.until(`document.querySelector('.fleet-sign-in-confirm')?.textContent.startsWith('Adding a way to sign in needs you to sign in again with one you have, or to approve it on another of your computers.')`,
       "the sign-in again asked");
     await page.clickText(".fleet-sign-in-confirm-methods .bp6-button", "Continue with Passkey");
     await page.until(`document.querySelector('.fleet-sign-in-code code')?.textContent === 'WDJB-MJHT'`, "the code to enter");

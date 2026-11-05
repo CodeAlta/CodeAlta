@@ -2,7 +2,7 @@
 // its telemetry through it. Driven by fleetServerSettings.browser.test.ts through `fleetFixture`: what the page asks is recorded.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { FleetDeviceView, FleetServerDeviceRequest, FleetServerRecoverRequest, FleetServerView, FleetSignInApprovalView, FleetSignInCodeRequest, FleetSignInLinkRequest, FleetSignInLoginView, FleetSignInSettingsRequest,
+import type { FleetDeviceView, FleetServerDeviceRequest, FleetServerRecoverRequest, FleetServerView, FleetSignInApprovalView, FleetSignInCodeRequest, FleetSignInLinkApprovalView, FleetSignInLinkRequest, FleetSignInLoginView, FleetSignInSettingsRequest,
   FleetSignInSettingsView, FleetTelemetryRequest, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyRequest, FleetUpdateStartRequest, FleetUpdatesView } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { FleetServerSettings, type FleetServerApi } from "./FleetServerSettings";
@@ -23,6 +23,7 @@ let devices: FleetDeviceView[] = [pending];
 let skippedEntries = 0;
 // Changes of the company sign-in another computer of the owner asks this one to approve; a test adds one.
 let approvals: FleetSignInApprovalView[] = [];
+let linkApprovals: FleetSignInLinkApprovalView[] = [];
 // The clipboard of the page is recorded, as headless Edge refuses to write the real one.
 Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => { calls.push(JSON.stringify({ copied: text })); } } });
 let telemetry: FleetTelemetryView = { enabled: true, endpoint: "https://otlp.example:4318", protocol: "http/protobuf", route: "server", signals: ["traces", "metrics"],
@@ -93,7 +94,12 @@ const api: FleetServerApi = {
     updates = { ...updates, policy: { ...updates.policy, mode: request.mode, pinnedVersion: request.pinnedVersion, window: request.window, timeZone: request.timeZone } };
     return { status: "ok", message: null };
   },
-  signInSettings: async () => ({ status: "ok", settings: signIn, logins, message: null, approvals }),
+  signInSettings: async () => ({ status: "ok", settings: signIn, logins, message: null, approvals, linkApprovals }),
+  approveSignInLink: async (request: { approvalId: string; digest: string }) => {
+    calls.push(JSON.stringify({ approvedLink: request.approvalId, digest: request.digest }));
+    linkApprovals = linkApprovals.filter(approval => approval.id !== request.approvalId);
+    return { status: "ok", message: null };
+  },
   approveSignInChange: async (request: { approvalId: string; digest: string }) => {
     calls.push(JSON.stringify({ approved: request.approvalId, digest: request.digest }));
     approvals = approvals.filter(approval => approval.id !== request.approvalId);
@@ -103,13 +109,13 @@ const api: FleetServerApi = {
     calls.push(JSON.stringify({ signIn: { version: request.version, enabled: request.enabled, issuer: request.issuer, clientId: request.clientId, secret: request.clientSecret,
       name: request.displayName, requireSso: request.requireSso, domains: request.allowedDomains, confirmWith: request.confirmWith } }));
     // As the server: a change of the company sign-in waits for the owner to sign in again.
-    if (request.issuer !== signIn.issuer && !request.confirmWith) return { status: "sign_in.confirmation_required", settings: null, logins: [], message: null, approvals: null };
+    if (request.issuer !== signIn.issuer && !request.confirmWith) return { status: "sign_in.confirmation_required", settings: null, logins: [], message: null, approvals: null, linkApprovals: null };
     // As the server: the Microsoft account the person picks to confirm is not one linked to them.
-    if (request.confirmWith === "microsoft") return { status: "sign_in.not_linked", settings: null, logins: [], message: "This account is not linked to you: confirm with a method linked to you.", approvals: null };
+    if (request.confirmWith === "microsoft") return { status: "sign_in.not_linked", settings: null, logins: [], message: "This account is not linked to you: confirm with a method linked to you.", approvals: null, linkApprovals: null };
     signIn = { ...signIn, version: signIn.version + 1, issuer: request.issuer, clientId: request.clientId, hasClientSecret: !!request.clientSecret, displayName: request.displayName,
       requireSso: request.requireSso, allowedDomains: request.allowedDomains ?? [], methods: signIn.methods.map(method => ({ ...method, enabled: request.enabled.includes(method.id),
         name: method.id === "company" ? request.displayName ?? method.name : method.name, available: method.id === "company" ? !!request.issuer : method.available })) };
-    return { status: "ok", settings: signIn, logins: [], message: null, approvals: null };
+    return { status: "ok", settings: signIn, logins: [], message: null, approvals: null, linkApprovals: null };
   },
   // GitHub gives a code and waits for the person, until Cancel; the others link at once.
   startSignInCode: async (request: FleetSignInCodeRequest) => {
@@ -118,7 +124,9 @@ const api: FleetServerApi = {
       url: "https://github.com/login/device", expiresAt: "2026-11-04T12:15:00Z" } };
   },
   linkSignIn: async (request: FleetSignInLinkRequest, options?: { signal?: AbortSignal }) => {
-    calls.push(JSON.stringify({ linkSignIn: request.method }));
+    calls.push(JSON.stringify({ linkSignIn: request.method, ...(request.confirmWith ? { confirmWith: request.confirmWith } : {}) }));
+    // As the host: the words of the recovery key are checked here, never sent on.
+    if (request.confirmWith === "recovery" && request.recoveryWords !== recoveryWords) return { status: "recovery.refused", message: null };
     if (request.method === "github") {
       while (!options?.signal?.aborted) await new Promise(resolve => setTimeout(resolve, 20));
       calls.push(JSON.stringify({ linkCancelled: request.method }));
@@ -145,6 +153,7 @@ Object.assign(window, { fleetFixture: { calls, skip: (count: number) => { skippe
   logins: () => { logins = [
     { method: "company", name: "alex@contoso.example", createdAt: "2026-11-01T08:00:00Z", lastUsedAt: null, id: "a_company" },
     { method: "microsoft", name: "alex@outlook.com", createdAt: "2026-11-02T08:00:00Z", lastUsedAt: null, id: "a_microsoft" }]; },
+  askLink: () => { linkApprovals = [{ id: "link-1", requestedBy: "Laptop", method: "passkey", digest: "digest-of-the-link-shown", expiresAt: "2026-11-04T12:10:00Z" }]; },
   ask: () => { approvals = [{ id: "approval-1", requestedBy: "Office desktop", issuer: "https://login.contoso.example", clientId: "contoso-client", secretChanges: true,
     allowedDomains: ["contoso.example"], allowedTenants: [], requireSso: true, enabled: ["company", "passkey"], expiresAt: "2026-11-04T12:10:00Z",
     digest: "digest-of-the-change-shown", displayName: "Contoso", groupsClaim: "roles", groupRoles: [{ group: "g-admins", role: "admin" }], secretRemoved: false,
