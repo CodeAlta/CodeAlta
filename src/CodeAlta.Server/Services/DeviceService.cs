@@ -330,8 +330,15 @@ public sealed class DeviceService
         // What it had in progress ends with it: a way to sign in its page was adding, a confirmation it held.
         SignInGrants?.ForgetDevice(revoked.Id);
         if (_relays is not null) await _relays.CloseDeviceAsync(revoked.Id).ConfigureAwait(false);
-        // The watchers forget it: a revoked machine is no machine of the organization, online or offline.
-        Directory?.Publish(revoked.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.MachineRemoved, revoked.Id));
+        // The watchers forget it: a revoked machine is no machine of the organization, online or offline. Each of its sessions is
+        // removed by itself first, for those who see a session (a grant, one they started) but not the machine, whose id is never
+        // sent to them; the removal of the machine goes to those who see it.
+        if (Directory is { } directory)
+        {
+            foreach (var session in (await _store.ListSessionsAsync(revoked.OrganizationId, cancellationToken).ConfigureAwait(false)).Where(session => session.MachineId == revoked.Id))
+                directory.Publish(revoked.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.SessionRemoved, session.Id, Session: session.ToDirectory()));
+            directory.Publish(revoked.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.MachineRemoved, revoked.Id));
+        }
         return revoked.ToDto(false);
     }
 

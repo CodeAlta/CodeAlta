@@ -87,6 +87,50 @@ public sealed class DirectoryVisibilityTests
         }
     }
 
+    [TestMethod]
+    public async Task AViewerOfASessionOnly_HearsItRemovedWithItsRevokedMachine_WithoutTheMachine()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var home = new TestDevice("Alex node");
+        using var box = new TestDevice("Build box");
+        var (setup, _) = await server.SetUpWithNodeAsync(owner, home);
+        await ApproveNodeAsync(server, owner, box, setup.Owner.Id, setup.Organization.Id);
+        var (max, maxId) = await AccessControlTests.AddPersonAsync(server, owner, setup, "Max");
+        var team = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/teams", new CreateTeamRequest("Infra"))).Read<TeamDto>();
+        await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{team.Id}/members/{maxId}", new SetTeamMemberRequest(FleetTeamRoles.Member));
+        var offer = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers",
+            new OfferTransferRequest(FleetResourceKinds.Machine, box.DeviceId, FleetPrincipalKinds.Team, team.Id))).Read<TransferDto>();
+        await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/transfers/{offer.Id}/accept");
+        await PublishAsync(server, box, "s-max", maxId);
+        // Out of the team, Max sees the session he started there, not its machine.
+        await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/teams/{team.Id}/members/{maxId}");
+
+        var events = new ConcurrentQueue<FleetDirectoryChange>();
+        var (connection, _) = await server.ConnectAsync(max, connection => connection.SetEventHandler((fleetEvent, _) =>
+        {
+            if (fleetEvent.Event == FleetServerMethods.DirectoryChanged && fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetDirectoryChange) is { } change)
+                events.Enqueue(change);
+            return ValueTask.CompletedTask;
+        }));
+        await using (connection)
+        {
+            var snapshot = (await connection.SendRequestAsync(FleetServerMethods.DirectoryWatch, null))!.Value.Deserialize(FleetServerJsonContext.Default.FleetDirectorySnapshot)!;
+            CollectionAssert.AreEquivalent(new[] { "s-max" }, snapshot.Sessions.Select(static session => session.Fact.SessionId).ToArray());
+            Assert.AreEqual(0, snapshot.Machines.Count(machine => machine.DeviceId == box.DeviceId));
+
+            var remove = await server.NextEntryAsync(owner, FleetDeviceListOperations.Remove, box.DeviceId, null, null, null, setup.Organization.Id);
+            Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{box.DeviceId}/revoke", new DeviceListChangeRequest(remove))).Status);
+
+            // The session leaves his view live, as a new snapshot would leave it out; the machine he does not see is not named to him.
+            await WaitForAsync(() => events.Any(static change => change.Kind == FleetServerMethods.ChangeKinds.SessionRemoved && change.Id == "s-max"));
+            Assert.IsFalse(events.Any(change => change.Kind == FleetServerMethods.ChangeKinds.MachineRemoved), "no removal of a machine he does not see");
+            var view = CodeAlta.Fleet.Server.FleetDirectoryView.From(snapshot);
+            foreach (var change in events) view = view.Apply(change);
+            Assert.AreEqual(0, view.Sessions.Count);
+        }
+    }
+
     private static string Ids(params string[] ids) => string.Join(",", ids.Order(StringComparer.Ordinal));
 
     private static async Task<string> MachinesAsync(ServerFixture server, TestDevice device)
