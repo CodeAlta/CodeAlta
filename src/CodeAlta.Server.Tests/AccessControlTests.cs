@@ -124,10 +124,15 @@ public sealed class AccessControlTests
         var listed = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/sessions")).Read<ListResponse<SessionDto>>().Items;
         Assert.AreEqual("s1", listed.Single().Id, "the grantee sees the session whose content they were given");
         var teamGrant = await server.SendAsync(mia, HttpMethod.Post, "/api/v1/grants",
-            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "automation.edit", FleetScopeKinds.Team, team.Id));
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "automation.run", FleetScopeKinds.Team, team.Id));
         Assert.AreEqual(HttpStatusCode.Created, teamGrant.Status, "a maintainer grants on the team");
         Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(mia, HttpMethod.Post, "/api/v1/grants",
-            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "automation.edit", FleetScopeKinds.Organization))).Status, "not on the organization");
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "automation.run", FleetScopeKinds.Organization))).Status, "not on the organization");
+        // Editing automations is not granted: machines take versions from the maintainers of their team only.
+        var edit = await server.SendAsync(mia, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "automation.edit", FleetScopeKinds.Team, team.Id));
+        Assert.AreEqual(HttpStatusCode.BadRequest, edit.Status, edit.Body.ToString());
+        StringAssert.Contains(edit.Body.ToString(), "maintainer");
         var maxGrants = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grants")).Read<AccessListDto<GrantDto>>();
         Assert.AreEqual(2, maxGrants.Items.Count, "a person sees the grants made to them");
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(max, HttpMethod.Delete, $"/api/v1/grants/{pending.Id}")).Status, "and may give one back");
@@ -137,7 +142,7 @@ public sealed class AccessControlTests
         Assert.AreEqual(HttpStatusCode.OK, review.Status, review.Body.ToString());
         var rows = review.Read<AccessReviewDto>().Rows;
         Assert.IsTrue(rows.Any(row => row.PrincipalId == miaId && row.Source == $"team:{team.Id}:maintainer"));
-        Assert.IsTrue(rows.Any(row => row.PrincipalId == maxId && row.Capability == "automation.edit" && row.Source.StartsWith("grant:", StringComparison.Ordinal)));
+        Assert.IsTrue(rows.Any(row => row.PrincipalId == maxId && row.Capability == "automation.run" && row.Source.StartsWith("grant:", StringComparison.Ordinal)));
         Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Get, "/api/v1/access/review")).Status);
     }
 

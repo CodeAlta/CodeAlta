@@ -145,6 +145,21 @@ public sealed class AccessPolicyTests
     }
 
     [TestMethod]
+    public void AGrantToEditAutomations_GivesNothing_WhileMachinesCannotCheckIt()
+    {
+        // Machines take versions of an automation from the owner of the machine or the maintainers of its team only: a grant to
+        // edit one is never honored, also one kept from before.
+        var access = Snapshot(people: [Person("owner", FleetOrganizationRoles.Owner), Person("gil", FleetOrganizationRoles.Member)], teams: [Team("web")],
+            grants: [Grant("g1", FleetPrincipalKinds.Person, "gil", "automation.edit", FleetScopeKinds.Team, "web"),
+                Grant("g2", FleetPrincipalKinds.Person, "gil", "automation.edit", FleetScopeKinds.Resource, "automation:a1")]);
+        var automation = AccessTarget.Resource(FleetResourceKinds.Automation, "a1", FleetPrincipalKinds.Team, "web");
+        Assert.IsFalse(AccessPolicy.Allows(access, "gil", "automation.edit", automation, Now));
+        Assert.IsFalse(AccessPolicy.IsGrantable("automation.edit"));
+        Assert.IsTrue(AccessPolicy.IsGrantable("automation.run"));
+        Assert.IsTrue(AccessPolicy.Allows(access, "owner", "automation.edit", automation, Now), "the roles that edit an automation still do");
+    }
+
+    [TestMethod]
     public void WhoIsGrantedToRunAnAutomation_IsARunner_AnAdminToo()
     {
         var access = Snapshot(

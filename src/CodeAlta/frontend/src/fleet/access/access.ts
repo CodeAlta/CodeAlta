@@ -33,7 +33,6 @@ export const grantCapabilities: readonly { value: string; label: MessageKey }[] 
   { value: "machine.start", label: "Start sessions on machines" },
   { value: "machine.manage", label: "Manage machines" },
   { value: "automation.run", label: "Run automations by hand" },
-  { value: "automation.edit", label: "Edit automations" },
   { value: "automation.approve", label: "Answer the approvals of automations" },
   { value: "run.view-facts", label: "See runs" },
   { value: "budget.set", label: "Set budgets" },
