@@ -77,14 +77,33 @@ internal sealed class NodeScopeProviders
         using var client = connector.Devices.CreateClient();
         var keys = await client.ListProviderKeysAsync(cancellationToken).ConfigureAwait(false);
         var list = connector.Devices.Current ?? await connector.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return Apply(linkId, Open(linkId, keys.Items, list, access));
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    // Opens the keys a server gives this machine. A version this machine never installed from the link opens only when the
+    // device that signed its copy is still a controller device of the list as this machine holds it now: a device removed since
+    // cannot give a new version, another endpoint, against the entry of the list it signed at. The version installed holds as
+    // it was given.
+    internal IReadOnlyList<(ScopeProviderDto Provider, string Key)> Open(string linkId, IReadOnlyList<ScopeProviderKeyDto> keys, FleetDeviceListState list, FleetAccessState access)
+    {
+        var installed = ReadApplied().GetValueOrDefault(linkId)?.Applied ?? new Dictionary<string, long>(StringComparer.Ordinal);
         var opened = new List<(ScopeProviderDto Provider, string Key)>();
-        foreach (var key in keys.Items)
+        foreach (var key in keys)
         {
             try
             {
-                // The copy is signed over the definition: what is installed below is what the maintainer sealed, not what the server says.
+                // The copy is signed over the definition: what is installed is what the maintainer sealed, not what the server says.
+                var known = installed.TryGetValue(key.Provider.Id, out var version) && version == key.Provider.Version;
                 opened.Add((key.Provider, FleetProviderKeys.Open(key.Sealed, key.Wrapped, list.OrganizationId ?? string.Empty, key.Provider.Id, key.Provider.Version,
-                    FleetProviderDefinition.Of(key.Provider), _identity, list, access)));
+                    FleetProviderDefinition.Of(key.Provider), _identity, list, access, signedNow: !known)));
             }
             catch (InvalidDataException exception)
             {
@@ -92,15 +111,7 @@ internal sealed class NodeScopeProviders
             }
         }
 
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            return Apply(linkId, opened);
-        }
-        finally
-        {
-            _gate.Release();
-        }
+        return opened;
     }
 
     // Writes the providers of a link: the keys in the protected store, the definitions in the configuration; those of the
