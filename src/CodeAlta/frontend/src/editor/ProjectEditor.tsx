@@ -439,8 +439,10 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   useEffect(() => {
     // The page of the preview of the file before it may still be there for a moment: the keyboard waits for the one of this file.
     if (!focusWanted.current || !showSurface && !markdownBox?.isConnected) return;
-    focusWanted.current = false;
+    // The request is kept until its frame runs: the page of the preview that goes away after the text is shown
+    // cancels the frame asked for the text, and the next one keeps the request.
     const frame = requestAnimationFrame(() => {
+      focusWanted.current = false;
       if (modalOpen()) return;
       if (showSurface) surface.current?.focus(); else markdownBox?.focus({ preventScroll: true });
     });
