@@ -1114,6 +1114,12 @@ public sealed record FleetDirectoryView(
     /// <summary>Gets how many times the server said an update campaign or the update policy changed since the watch began.</summary>
     public long UpdatesRevision { get; init; }
 
+    /// <summary>
+    /// Gets the machines the server said were removed since the watch began: a revoked device never comes back (a machine that joins
+    /// again is a new device), so a change of one that a handler of the server sent late is passed over.
+    /// </summary>
+    public ImmutableHashSet<string> Removed { get; init; } = ImmutableHashSet.Create<string>(StringComparer.Ordinal);
+
     /// <summary>Makes the directory of a snapshot of <c>directory.watch</c>.</summary>
     /// <param name="snapshot">The snapshot.</param>
     /// <returns>The directory.</returns>
@@ -1137,6 +1143,9 @@ public sealed record FleetDirectoryView(
         ArgumentNullException.ThrowIfNull(change);
         switch (change.Kind)
         {
+            case FleetServerMethods.ChangeKinds.Machine or FleetServerMethods.ChangeKinds.Session or FleetServerMethods.ChangeKinds.Presence
+                when (change.Machine?.DeviceId ?? change.Session?.MachineId ?? change.Presence?.DeviceId) is { } device && Removed.Contains(device):
+                return this;
             case FleetServerMethods.ChangeKinds.Machine when change.Machine is { } machine:
                 return this with { Machines = Machines.SetItem(machine.DeviceId, machine) };
             case FleetServerMethods.ChangeKinds.Session when change.Session is { } session:
@@ -1147,11 +1156,11 @@ public sealed record FleetDirectoryView(
                 // connection closes after it left, is not listed again by it.
                 if (!presence.Online && !Presence.ContainsKey(presence.DeviceId) && !Machines.ContainsKey(presence.DeviceId)) return this;
                 return this with { Presence = Presence.SetItem(presence.DeviceId, presence) };
-            case FleetServerMethods.ChangeKinds.MachineRemoved when Machines.ContainsKey(change.Id) || Presence.ContainsKey(change.Id)
-                || Sessions.Values.Any(session => session.MachineId == change.Id):
-                // A revoked machine leaves with what it published: nothing of it is listed as a machine any more.
+            case FleetServerMethods.ChangeKinds.MachineRemoved when !Removed.Contains(change.Id):
+                // A revoked machine leaves with what it published: nothing of it is listed as a machine any more, nor again.
                 return this with
                 {
+                    Removed = Removed.Add(change.Id),
                     Machines = Machines.Remove(change.Id),
                     Presence = Presence.Remove(change.Id),
                     Sessions = Sessions.RemoveRange(Sessions.Where(pair => pair.Value.MachineId == change.Id).Select(static pair => pair.Key)),

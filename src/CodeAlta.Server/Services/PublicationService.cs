@@ -64,18 +64,23 @@ public sealed class PublicationService
         var now = _time.GetUtcNow();
         var machine = new MachineRecord(device.Id, device.OrganizationId, JsonSerializer.Serialize(kept, FleetServerJsonContext.Default.FleetMachineInventory),
             publication.Sequence, now);
-        var result = await _store.PublishInventoryAsync(machine, cancellationToken).ConfigureAwait(false);
-        if (result.Applied)
+        // A node renamed (altanode run --name) is listed by its new name in the devices too, as on the canvas: the name of its newest inventory.
+        var name = device.Kind == FleetDeviceKinds.Node && kept.Name.Trim() is { Length: > 0 and <= SetupService.MaxNameLength } trimmed && !trimmed.Any(char.IsControl)
+            ? trimmed : null;
+        var result = await _store.PublishInventoryAsync(machine, name, cancellationToken).ConfigureAwait(false);
+        if (result.Applied && !await RevokedAsync(device, cancellationToken).ConfigureAwait(false))
         {
-            // A node renamed (altanode run --name) is listed by its new name in the devices too, as on the canvas.
-            if (device.Kind == FleetDeviceKinds.Node && kept.Name.Trim() is { Length: > 0 and <= SetupService.MaxNameLength } name && !name.Any(char.IsControl))
-                await _store.RenameNodeAsync(device.Id, name, cancellationToken).ConfigureAwait(false);
             _directory.Publish(device.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Machine, device.Id,
                 Machine: new FleetDirectoryMachine(device.Id, device.Kind, kept, now)));
         }
 
         return new FleetPublishAck(result.Ack);
     }
+
+    // A handler in flight when its device was revoked keeps what it wrote (no directory lists a revoked machine) but announces
+    // nothing: the watchers heard that the machine left, and a late change of it would list it again.
+    private async Task<bool> RevokedAsync(DeviceRecord device, CancellationToken cancellationToken)
+        => (await _store.GetDeviceAsync(device.Id, cancellationToken).ConfigureAwait(false))?.Status is null or DeviceStatuses.Revoked;
 
     /// <summary>Keeps the facts of the sessions of a machine and announces those that changed.</summary>
     /// <param name="device">The device of the machine.</param>
@@ -110,6 +115,7 @@ public sealed class PublicationService
         }
 
         var result = await _store.PublishSessionFactsAsync(device.Id, publication.Sequence, records, cancellationToken).ConfigureAwait(false);
+        var announce = !await RevokedAsync(device, cancellationToken).ConfigureAwait(false);
         int applied = 0, unchanged = 0;
         var stale = new List<string>();
         foreach (var (record, outcome) in result.Outcomes)
@@ -118,7 +124,7 @@ public sealed class PublicationService
             {
                 case SessionFactOutcome.Applied:
                     applied++;
-                    _directory.Publish(device.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Session, record.Id, Session: record.ToDirectory()));
+                    if (announce) _directory.Publish(device.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Session, record.Id, Session: record.ToDirectory()));
                     break;
                 case SessionFactOutcome.Unchanged:
                     unchanged++;

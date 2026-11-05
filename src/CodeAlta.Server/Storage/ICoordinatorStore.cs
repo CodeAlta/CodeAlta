@@ -174,14 +174,15 @@ public interface ICoordinatorStore : IStatisticsFactStore, IAsyncDisposable
     ValueTask<InventoryPublication> PublishInventoryAsync(MachineRecord machine, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Names a node as its inventory names it (<c>altanode run --name</c>): its device is listed by the name it has now. The
-    /// name is no part of the signed device list, which names devices by their keys.
+    /// Keeps the inventory a device published, if its sequence is newer than the one held, and with it the name of a node as that
+    /// inventory names it (<c>altanode run --name</c>): its device is listed by the name of its newest inventory. The name is no part
+    /// of the signed device list, which names devices by their keys.
     /// </summary>
-    /// <param name="deviceId">The device of the node.</param>
-    /// <param name="name">Its name now.</param>
+    /// <param name="machine">The machine and its snapshot.</param>
+    /// <param name="nodeName">The name the inventory gives the node; null keeps the name of the device.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
-    /// <returns>Whether the name changed.</returns>
-    ValueTask<bool> RenameNodeAsync(string deviceId, string name, CancellationToken cancellationToken = default);
+    /// <returns>The acknowledged sequence, and whether the snapshot was kept.</returns>
+    ValueTask<InventoryPublication> PublishInventoryAsync(MachineRecord machine, string? nodeName, CancellationToken cancellationToken);
 
     /// <summary>
     /// Keeps the session facts a machine published: per session the highest <c>(epoch, version)</c>; a fact of an older

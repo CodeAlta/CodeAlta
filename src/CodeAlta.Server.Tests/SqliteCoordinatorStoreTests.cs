@@ -343,6 +343,22 @@ public sealed class SqliteCoordinatorStoreTests
         Assert.AreEqual(2, (await store.GetPublicationCursorsAsync("mac")).Inventory);
     }
 
+    [TestMethod]
+    public async Task TheNameOfANode_IsTheOneOfItsNewestInventory_WhateverOrderThePublicationsEnd()
+    {
+        using var root = new TempDirectory();
+        await using var store = await OpenAsync(root);
+        await SetUpAsync(store);
+        await InsertDevicesAsync(root, Node("mac"));
+        // Two publications of the node in flight end out of order: the older inventory, and its name, come last.
+        Assert.IsTrue((await store.PublishInventoryAsync(new MachineRecord("mac", "org", "{\"name\":\"b\",\"os\":\"macos\"}", 2, Start), "b", CancellationToken.None)).Applied);
+        Assert.IsFalse((await store.PublishInventoryAsync(new MachineRecord("mac", "org", "{\"name\":\"a\",\"os\":\"macos\"}", 1, Start), "a", CancellationToken.None)).Applied);
+        Assert.AreEqual("b", (await store.GetDeviceAsync("mac"))!.Name, "the name of the newest inventory");
+        // In order, the newer one names it.
+        Assert.IsTrue((await store.PublishInventoryAsync(new MachineRecord("mac", "org", "{\"name\":\"c\",\"os\":\"macos\"}", 3, Start), "c", CancellationToken.None)).Applied);
+        Assert.AreEqual("c", (await store.GetDeviceAsync("mac"))!.Name);
+    }
+
     private static async Task InsertDevicesAsync(TempDirectory root, params DeviceRecord[] devices)
     {
         await using var connection = new SqliteConnection($"Data Source={Path.Combine(root.Path, "test.sqlite3")};Pooling=False");

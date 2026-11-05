@@ -195,11 +195,27 @@ public sealed class ControlConnectionTests
             await NextAsync(events, FleetServerMethods.ChangeKinds.Session);
         }
 
+        // A handler of the machine still holds its record as it was before the revoke.
+        var held = (await server.GetService<CodeAlta.Server.Storage.ICoordinatorStore>().GetDeviceAsync(mac.DeviceId))!;
         var remove = await server.NextEntryAsync(owner, FleetDeviceListOperations.Remove, mac.DeviceId, null, null, null, setup.Organization.Id);
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{mac.DeviceId}/revoke", new DeviceListChangeRequest(remove))).Status);
 
         // The watchers hear that it left, and a watch that starts later does not list it, its sessions or its presence.
         Assert.AreEqual(mac.DeviceId, (await NextAsync(events, FleetServerMethods.ChangeKinds.MachineRemoved)).Id);
+
+        // What that handler publishes after the revoke is not announced: the next change the watcher hears is the desktop's own presence.
+        var publications = server.GetService<CodeAlta.Server.Services.PublicationService>();
+        await publications.PublishInventoryAsync(held, new FleetInventoryPublish(2, new FleetMachineInventory("Mac mini", "macos")), CancellationToken.None);
+        await publications.PublishFactsAsync(held, new FleetFactsPublish(2, [Fact("s2", 1, 1)]), CancellationToken.None);
+        await desktop.SendRequestAsync(FleetServerMethods.PresenceUpdate,
+            JsonSerializer.SerializeToElement(new FleetPresenceUpdate("busy", 1), FleetServerJsonContext.Default.FleetPresenceUpdate));
+        while (true)
+        {
+            var next = await events.Reader.ReadAsync().AsTask().WaitAsync(Waits.Hang);
+            Assert.IsFalse(next.Kind is FleetServerMethods.ChangeKinds.Machine or FleetServerMethods.ChangeKinds.Session && (next.Machine?.DeviceId ?? next.Session?.MachineId) == mac.DeviceId,
+                $"a late {next.Kind} of the revoked machine");
+            if (next.Kind == FleetServerMethods.ChangeKinds.Presence && next.Id == owner.DeviceId && next.Presence?.State == "busy") break;
+        }
         var snapshot = (await desktop.SendRequestAsync(FleetServerMethods.DirectoryWatch))!.Value.Deserialize(FleetServerJsonContext.Default.FleetDirectorySnapshot)!;
         Assert.AreEqual(0, snapshot.Machines.Count(machine => machine.DeviceId == mac.DeviceId));
         Assert.AreEqual(0, snapshot.Sessions.Count(session => session.MachineId == mac.DeviceId));
@@ -241,6 +257,24 @@ public sealed class ControlConnectionTests
         // Its connection closes after it left: the offline presence that follows does not list it again.
         var closed = removed.Apply(new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Presence, "mac", Presence: new FleetPresence("mac", false, null, null, Created)));
         CollectionAssert.AreEqual(new[] { "pc" }, closed.Presence.Keys.ToArray());
+    }
+
+    [TestMethod]
+    public void ALateUpdateOfARemovedMachine_DoesNotListItAgain()
+    {
+        var machine = new FleetDirectoryMachine("mac", FleetDeviceKinds.Node, new FleetMachineInventory("Mac mini", "macos"), Created);
+        var view = CodeAlta.Fleet.Server.FleetDirectoryView.From(new FleetDirectorySnapshot([machine], [new FleetDirectorySession("mac", Fact("s1", 1, 1))],
+            [new FleetPresence("mac", true, null, null, Created)]));
+        var removed = view.Apply(new FleetDirectoryChange(FleetServerMethods.ChangeKinds.MachineRemoved, "mac"));
+
+        // An inventory, facts and a presence the server sent from handlers that were in flight when the machine was revoked.
+        var late = removed.Apply(new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Machine, "mac", Machine: machine with { UpdatedAt = Created.AddMinutes(1) }))
+            .Apply(new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Session, "s2", Session: new FleetDirectorySession("mac", Fact("s2", 1, 1))))
+            .Apply(new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Presence, "mac", Presence: new FleetPresence("mac", true, null, null, Created)));
+
+        Assert.AreEqual(0, late.Machines.Count);
+        Assert.AreEqual(0, late.Sessions.Count);
+        Assert.AreEqual(0, late.Presence.Count);
     }
 
     [TestMethod]

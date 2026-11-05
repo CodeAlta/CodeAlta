@@ -70,4 +70,28 @@ public sealed class StatisticsPublicationTests
         Assert.AreEqual(1, rows.Count(static row => row.Family == "activity" && row.Measures.Any(static measure => measure.Key == "runs_started")),
             "the start of the run is on one row");
     }
+
+    [TestMethod]
+    public void AnAliasRetargetedByALaterTurn_NeverRelabelsTheModelAnEarlierRequestReported()
+    {
+        // haiku stood for v1 in the first turn; a later turn, started under v1 (the alias as it resolved then), reported v2.
+        static StatisticsFactRow Row(string family, long quarter, string model, string measure)
+            => new(family, quarter, [new("provider", "claude-code"), new("model", model), new("effort", "high")], [new(measure, 1)]);
+        var rows = new[]
+        {
+            Row("activity", 1, "haiku", "runs_started"), Row("usage", 1, "v1", "requests"), Row("cost", 1, "v1", "total_micro"), Row("activity", 1, "v1", "active_ms"),
+            Row("activity", 5, "v1", "runs_started"), Row("usage", 5, "v2", "requests"),
+        };
+
+        var published = PublishedModels.Attribute(rows, new Dictionary<string, string> { ["haiku"] = "v1", ["v1"] = "v2" });
+
+        string Model(string family, long quarter, string measure) => published.Single(row => row.Family == family && row.Quarter == quarter
+            && row.Measures.Any(value => value.Key == measure)).Keys.Single(static key => key.Key == "model").Value;
+        Assert.AreEqual("v1", Model("usage", 1, "requests"), "a model a provider reported is never relabelled");
+        Assert.AreEqual("v1", Model("cost", 1, "total_micro"));
+        Assert.AreEqual("v1", Model("activity", 1, "runs_started"), "the alias goes on the model it stood for in its turn, not on its latest");
+        Assert.AreEqual("v1", Model("activity", 1, "active_ms"));
+        Assert.AreEqual("v2", Model("activity", 5, "runs_started"), "the later turn started under v1 goes on the model its requests reported");
+        Assert.AreEqual("v2", Model("usage", 5, "requests"));
+    }
 }

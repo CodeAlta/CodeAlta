@@ -458,6 +458,10 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
 
     /// <inheritdoc />
     public ValueTask<InventoryPublication> PublishInventoryAsync(MachineRecord machine, CancellationToken cancellationToken = default)
+        => PublishInventoryAsync(machine, null, cancellationToken);
+
+    /// <inheritdoc />
+    public ValueTask<InventoryPublication> PublishInventoryAsync(MachineRecord machine, string? nodeName, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(machine);
         return WriteAsync((connection, transaction) =>
@@ -470,18 +474,15 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
                 ("$device", machine.DeviceId), ("$org", machine.OrganizationId), ("$inventory", machine.Inventory), ("$seq", machine.InventorySequence),
                 ("$updated", ToTime(machine.UpdatedAt)));
             WriteCursor(connection, transaction, machine.DeviceId, InventoryStream, machine.InventorySequence);
+            // The name goes with the inventory it came in, in its sequence: an older inventory never names the node again.
+            if (!string.IsNullOrEmpty(nodeName))
+            {
+                Execute(connection, transaction, "UPDATE devices SET name = $name WHERE id = $device AND kind = $kind AND name <> $name",
+                    ("$device", machine.DeviceId), ("$name", nodeName), ("$kind", FleetDeviceKinds.Node));
+            }
+
             return new InventoryPublication(machine.InventorySequence, true);
         }, cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public ValueTask<bool> RenameNodeAsync(string deviceId, string name, CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(deviceId);
-        ArgumentException.ThrowIfNullOrEmpty(name);
-        return WriteAsync((connection, transaction) => Execute(connection, transaction,
-            "UPDATE devices SET name = $name WHERE id = $device AND kind = $kind AND name <> $name",
-            ("$device", deviceId), ("$name", name), ("$kind", FleetDeviceKinds.Node)) > 0, cancellationToken);
     }
 
     /// <inheritdoc />
