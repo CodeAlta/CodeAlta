@@ -101,6 +101,25 @@ public sealed partial class SqliteCoordinatorStore : IHookStore
     }
 
     /// <inheritdoc />
+    public ValueTask<IReadOnlyList<HookEventRecord>> ListPendingHookEventsAsync(string organizationId, string machineId, DateTimeOffset now, DateTimeOffset afterReceivedAt,
+        string afterDeliveryId, int limit, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        ArgumentException.ThrowIfNullOrEmpty(machineId);
+        ArgumentNullException.ThrowIfNull(afterDeliveryId);
+        return ReadAsync(connection => QueryList(connection, null,
+            HookEventColumns + ", headers, body FROM hook_events WHERE machine_id = $machine AND organization_id = $org AND state = $pending AND expires_at > $now " +
+            "AND (received_at > $after OR (received_at = $after AND delivery_id > $afterId)) ORDER BY received_at, delivery_id LIMIT $limit",
+            static reader => ReadHookEvent(reader) with
+            {
+                Headers = GetNullableString(reader, 10), Body = reader.IsDBNull(11) ? null : (byte[])reader.GetValue(11),
+            },
+            ("$org", organizationId), ("$machine", machineId), ("$pending", HookEventStates.Pending), ("$now", ToTime(now)), ("$after", ToTime(afterReceivedAt)),
+            ("$afterId", afterDeliveryId), ("$limit", Math.Clamp(limit, 1, 1000))),
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
     public ValueTask<bool> AnswerHookEventAsync(string organizationId, string machineId, string deliveryId, string state, string? message, DateTimeOffset at,
         CancellationToken cancellationToken = default)
     {

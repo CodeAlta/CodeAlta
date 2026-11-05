@@ -229,9 +229,21 @@ internal sealed class HookService
     private async Task DrainAsync(ControlSession session, bool fresh)
     {
         var now = _time.GetUtcNow();
+        bool Due(HookEventRecord item) => fresh || !_handed.TryGetValue(item.DeliveryId, out var at) || now - at >= HandAgainAfter;
+        // Page after page of what waits, oldest first, until a batch is due: events handed and not answered yet (or to be taken
+        // later) never hold back those behind them, however many they are.
+        var next = new List<HookEventRecord>(PendingPerConnection);
         var pending = await _hooks.ListPendingHookEventsAsync(session.Device.OrganizationId, session.Device.Id, now, MaxListedPending).ConfigureAwait(false);
-        var next = pending.Where(item => fresh || !_handed.TryGetValue(item.DeliveryId, out var at) || now - at >= HandAgainAfter).Take(PendingPerConnection).ToArray();
-        if (next.Length > 0) await PushAsync(session, next).ConfigureAwait(false);
+        while (true)
+        {
+            next.AddRange(pending.Where(Due).Take(PendingPerConnection - next.Count));
+            if (next.Count >= PendingPerConnection || pending.Count < MaxListedPending) break;
+            var last = pending[^1];
+            pending = await _hooks.ListPendingHookEventsAsync(session.Device.OrganizationId, session.Device.Id, now, last.ReceivedAt, last.DeliveryId, MaxListedPending)
+                .ConfigureAwait(false);
+        }
+
+        if (next.Count > 0) await PushAsync(session, next).ConfigureAwait(false);
     }
 
     /// <summary>Records what a machine did with the events it was given, and forgets their content.</summary>
