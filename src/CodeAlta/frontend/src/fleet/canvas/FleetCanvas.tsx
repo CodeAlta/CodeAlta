@@ -125,7 +125,7 @@ function MachineCard({ machine, sessions, time, onOpen, onOpenMachine }: {
       </div>
       <span className="muted-text fleet-machine-count">{working > 0 ? `${count} · ${working} ${t("at work")}` : count}</span>
     </div>
-    {sessions.length > 0 && <table className="fleet-sessions">
+    {sessions.length > 0 && <div className="fleet-sessions-list"><table className="fleet-sessions">
       <tbody>
         {sessions.map(session => {
           const state = sessionState(session);
@@ -141,6 +141,6 @@ function MachineCard({ machine, sessions, time, onOpen, onOpenMachine }: {
           </tr>;
         })}
       </tbody>
-    </table>}
+    </table></div>}
   </section>;
 }
