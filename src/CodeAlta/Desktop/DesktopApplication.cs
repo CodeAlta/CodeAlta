@@ -316,6 +316,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         DesktopBookmarks? bookmarkLife = null;
         Fleet.DesktopFleet? fleet = null;
         Fleet.DesktopFleetServers? fleetServers = null;
+        Fleet.DesktopNode? desktopNode = null;
         Fleet.DesktopRemoteChildren? remoteChildren = null;
         Automations.AutomationService? automations = null;
         Fleet.DesktopAutomationPlacement? placement = null;
@@ -582,6 +583,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await CloseStepAsync(closing, "placed automations", async () => { if (placement is not null) await placement.DisposeAsync(); }); // What was copied runs on its machines.
                 await CloseStepAsync(closing, "remote children", async () => { if (remoteChildren is not null) await remoteChildren.DisposeAsync(); }); // Their answers wait on their machines.
                 await CloseStepAsync(closing, "paired machines", async () => { if (fleet is not null) await fleet.DisposeAsync(); }); // Their channels close; their sessions go on where they run.
+                await CloseStepAsync(closing, "paired computers", async () => { if (desktopNode is not null) await desktopNode.DisposeAsync(); }); // The computers paired with this one see it offline.
                 await CloseStepAsync(closing, "servers", async () => { if (fleetServers is not null) await fleetServers.DisposeAsync(); }); // Their control connections close; the servers see this computer offline.
                 await CloseStepAsync(closing, "sessions", async () => { if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync()); });
                 await CloseStepAsync(closing, "automations", async () => { if (automations is not null) await automations.DisposeAsync(); }); // Nothing more is started; sessions end with the host.
@@ -797,6 +799,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 fleet = fleetStartup.Fleet;
                 remoteChildren = fleetStartup.RemoteChildren;
                 fleetServers = fleetStartup.Servers;
+                desktopNode = fleetStartup.Node;
                 // The bookmarks of the sessions of this instance, in its database. A bookmarked session is kept by the
                 // retention of sessions, which deletes nothing before the bookmarks were read.
                 var bookmarks = new CodeAlta.Catalog.Bookmarks.BookmarkService(host.ApplicationDatabase,
@@ -1060,6 +1063,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddAppUpdateService(appUpdate);
                     builder.AddWorkspaceService(workspace);
                     var machinesService = fleet is null ? new MachinesService() : MachinesService.Create(fleet, epoch, host.ProjectCatalog);
+                    // This computer as a machine of the person's other computers: visible to them, its pairing links and its paired computers.
+                    machinesService.Node = desktopNode;
                     if (fleet is not null && fleetServers is not null)
                     {
                         // A machine this computer manages joins a server this computer owns, and is approved here.

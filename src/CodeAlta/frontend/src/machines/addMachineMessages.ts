@@ -14,12 +14,12 @@ export const addMachineMessages = {
     "CodeAlta installiert dort CodeAlta Node, startet es als Dienst und koppelt es mit diesem Computer. Auf der Maschine ist nichts einzugeben.",
     "CodeAlta がマシンに CodeAlta Node をインストールし、サービスとして起動して、このコンピューターとペアリングします。マシンで入力する必要はありません。",
     "CodeAlta 会在其上安装 CodeAlta Node，将其作为服务启动并与本机配对。无需在该机器上输入任何内容。"],
-  "CodeAlta Node runs there already: paste the link its altanode pair command shows.": [
-    "CodeAlta Node ya se ejecuta allí: pega el enlace que muestra su comando altanode pair.",
-    "CodeAlta Node y tourne déjà : collez le lien qu’affiche sa commande altanode pair.",
-    "CodeAlta Node läuft dort bereits: Den Link einfügen, den sein Befehl altanode pair anzeigt.",
-    "CodeAlta Node はすでに実行中です。altanode pair コマンドが表示するリンクを貼り付けます。",
-    "CodeAlta Node 已在其上运行：粘贴其 altanode pair 命令显示的链接。"],
+  "CodeAlta Desktop or CodeAlta Node runs there: paste the link of its Pair another computer…, or of altanode pair.": [
+    "CodeAlta Desktop o CodeAlta Node se ejecuta allí: pega el enlace de su Emparejar otro ordenador…, o de altanode pair.",
+    "CodeAlta Desktop ou CodeAlta Node y tourne : collez le lien de son Associer un autre ordinateur…, ou d’altanode pair.",
+    "Dort läuft CodeAlta Desktop oder CodeAlta Node: Den Link von dessen Anderen Computer koppeln… oder von altanode pair einfügen.",
+    "そこで CodeAlta Desktop か CodeAlta Node が実行中です。その「別のコンピューターをペアリング…」か altanode pair のリンクを貼り付けます。",
+    "那里运行着 CodeAlta Desktop 或 CodeAlta Node：粘贴其“配对另一台计算机…”或 altanode pair 的链接。"],
   "The machine joins your server with one command; you approve it here when it shows the same words.": [
     "La máquina se une a tu servidor con un comando; la apruebas aquí cuando muestre las mismas palabras.",
     "La machine rejoint votre serveur avec une commande ; vous l’approuvez ici quand elle affiche les mêmes mots.",
@@ -139,14 +139,20 @@ export const addMachineMessages = {
   "A folder of the machine is a full path, or starts with ~/.": ["Una carpeta de la máquina es una ruta completa o empieza por ~/.", "Un dossier de la machine est un chemin complet, ou commence par ~/.",
     "Ein Ordner der Maschine ist ein vollständiger Pfad oder beginnt mit ~/.", "マシンのフォルダーはフルパスか、~/ で始まります。", "机器上的文件夹应为完整路径，或以 ~/ 开头。"],
   "The setup did not go through.": ["La configuración no se completó.", "L’installation n’a pas abouti.", "Die Einrichtung ist nicht durchgelaufen.", "セットアップを完了できませんでした。", "设置未能完成。"],
-  "Another computer of yours can run sessions for you: a Mac mini that stays on, a build machine, a cloud server. CodeAlta installs CodeAlta Node there over SSH, or pairs with one that runs already.": [
-    "Otro ordenador tuyo puede ejecutar sesiones por ti: un Mac mini siempre encendido, una máquina de compilación, un servidor en la nube. CodeAlta instala CodeAlta Node allí por SSH, o se empareja con uno que ya se ejecuta.",
-    "Un autre de vos ordinateurs peut exécuter des sessions pour vous : un Mac mini toujours allumé, une machine de build, un serveur dans le cloud. CodeAlta y installe CodeAlta Node par SSH, ou s’associe à un nœud qui tourne déjà.",
-    "Ein anderer Computer von Ihnen kann Sitzungen für Sie ausführen: ein Mac mini, der immer läuft, eine Build-Maschine, ein Cloud-Server. CodeAlta installiert dort CodeAlta Node über SSH oder koppelt sich mit einem, der schon läuft.",
-    "ほかのコンピューターでセッションを実行できます: 常時稼働の Mac mini、ビルドマシン、クラウドサーバーなど。CodeAlta は SSH で CodeAlta Node をインストールするか、実行中のノードとペアリングします。",
-    "你的另一台计算机可以为你运行会话：常开的 Mac mini、构建机、云服务器。CodeAlta 可通过 SSH 在其上安装 CodeAlta Node，或与已在运行的节点配对。"],
-  "On the machine, with .NET 10 installed, run these once:": ["En la máquina, con .NET 10 instalado, ejecuta esto una vez:", "Sur la machine, avec .NET 10 installé, exécutez ceci une fois :",
-    "Auf der Maschine mit installiertem .NET 10 einmal ausführen:", ".NET 10 がインストールされたマシンで、次を一度実行します:", "在已安装 .NET 10 的机器上运行一次："],
+  "Another computer of yours can run sessions for you: another CodeAlta Desktop, a Mac mini that stays on, a build machine, a cloud server. Pair with a CodeAlta Desktop or a CodeAlta Node from its link, or let CodeAlta install CodeAlta Node over SSH.": [
+    "Otro ordenador tuyo puede ejecutar sesiones por ti: otro CodeAlta Desktop, un Mac mini siempre encendido, una máquina de compilación, un servidor en la nube. Emparéjate con un CodeAlta Desktop o un CodeAlta Node desde su enlace, o deja que CodeAlta instale CodeAlta Node por SSH.",
+    "Un autre de vos ordinateurs peut exécuter des sessions pour vous : un autre CodeAlta Desktop, un Mac mini toujours allumé, une machine de build, un serveur dans le cloud. Associez-vous à un CodeAlta Desktop ou à un CodeAlta Node depuis son lien, ou laissez CodeAlta installer CodeAlta Node par SSH.",
+    "Ein anderer Computer von Ihnen kann Sitzungen für Sie ausführen: ein anderes CodeAlta Desktop, ein Mac mini, der immer läuft, eine Build-Maschine, ein Cloud-Server. Koppeln Sie sich über seinen Link mit einem CodeAlta Desktop oder CodeAlta Node, oder lassen Sie CodeAlta CodeAlta Node über SSH installieren.",
+    "ほかのコンピューターでセッションを実行できます: 別の CodeAlta Desktop、常時稼働の Mac mini、ビルドマシン、クラウドサーバーなど。CodeAlta Desktop か CodeAlta Node とそのリンクでペアリングするか、CodeAlta に SSH で CodeAlta Node をインストールさせます。",
+    "你的另一台计算机可以为你运行会话：另一个 CodeAlta Desktop、常开的 Mac mini、构建机、云服务器。通过链接与 CodeAlta Desktop 或 CodeAlta Node 配对，或让 CodeAlta 通过 SSH 安装 CodeAlta Node。"],
+  "In CodeAlta Desktop on the other computer: Settings > Fleet > Machines, turn on Let my other computers pair with this one, then Pair another computer….": [
+    "En CodeAlta Desktop del otro ordenador: Configuración > Flota > Máquinas, activa Permitir que mis otros ordenadores se emparejen con este y luego Emparejar otro ordenador….",
+    "Dans CodeAlta Desktop sur l’autre ordinateur : Paramètres > Flotte > Machines, activez Permettre à mes autres ordinateurs de s’associer à celui-ci, puis Associer un autre ordinateur….",
+    "In CodeAlta Desktop auf dem anderen Computer: Einstellungen > Flotte > Maschinen, Meinen anderen Computern das Koppeln mit diesem erlauben einschalten, dann Anderen Computer koppeln….",
+    "もう一方のコンピューターの CodeAlta Desktop で: 設定 > フリート > マシン で「ほかのコンピューターにこのコンピューターとのペアリングを許可」をオンにし、「別のコンピューターをペアリング…」を選びます。",
+    "在另一台计算机的 CodeAlta Desktop 中：设置 > 机群 > 机器，打开“允许我的其他计算机与本机配对”，然后点“配对另一台计算机…”。"],
+  "Or on a machine with CodeAlta Node and .NET 10, run these once:": ["O en una máquina con CodeAlta Node y .NET 10, ejecuta esto una vez:", "Ou sur une machine avec CodeAlta Node et .NET 10, exécutez ceci une fois :",
+    "Oder auf einer Maschine mit CodeAlta Node und .NET 10 einmal ausführen:", "または CodeAlta Node と .NET 10 があるマシンで、次を一度実行します:", "或在装有 CodeAlta Node 和 .NET 10 的机器上运行一次："],
   "starts it as a service": ["lo inicia como servicio", "le démarre comme service", "startet es als Dienst", "サービスとして起動", "将其作为服务启动"],
   "shows the link and six words": ["muestra el enlace y seis palabras", "affiche le lien et six mots", "zeigt den Link und sechs Wörter", "リンクと 6 つの単語を表示", "显示链接和六个词语"],
 } as const satisfies Record<string, Row>;

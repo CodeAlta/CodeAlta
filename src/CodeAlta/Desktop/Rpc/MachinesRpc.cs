@@ -304,6 +304,9 @@ internal sealed partial class MachinesService
         void OnChanged() => changes.Writer.TryWrite(new MachinesEvent("changed"));
         _fleet!.Changed += OnChanged;
         ChangedLocally += OnChanged;
+        // A computer that paired with this one, or this computer starting or stopping to listen.
+        var node = Node;
+        if (node is not null) node.Changed += OnChanged;
         try
         {
             await foreach (var value in changes.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
@@ -312,6 +315,7 @@ internal sealed partial class MachinesService
         {
             _fleet.Changed -= OnChanged;
             ChangedLocally -= OnChanged;
+            if (node is not null) node.Changed -= OnChanged;
         }
     }
 

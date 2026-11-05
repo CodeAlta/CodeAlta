@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -217,46 +216,8 @@ internal sealed class NodeFleet : IAsyncDisposable
         }
     }
 
-    // The addresses of a pairing code: loopback when the node listens there; otherwise this machine's name and its
-    // addresses on the networks that are up, then loopback, for the owner's local control.
-    internal static IReadOnlyList<string> DescribeAddresses(IPEndPoint endPoint)
-    {
-        var port = endPoint.Port;
-        var bound = endPoint.Address.IsIPv4MappedToIPv6 ? endPoint.Address.MapToIPv4() : endPoint.Address;
-        if (IPAddress.IsLoopback(bound)) return [FleetDirectConnector.Format(bound, port)];
-        var addresses = new List<string>();
-        if (bound.Equals(IPAddress.Any) || bound.Equals(IPAddress.IPv6Any))
-        {
-            try
-            {
-                foreach (var network in NetworkInterface.GetAllNetworkInterfaces())
-                {
-                    if (network.OperationalStatus != OperationalStatus.Up || network.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
-                    foreach (var unicast in network.GetIPProperties().UnicastAddresses)
-                    {
-                        var address = unicast.Address;
-                        if (address.AddressFamily == AddressFamily.InterNetwork
-                            || address.AddressFamily == AddressFamily.InterNetworkV6 && bound.Equals(IPAddress.IPv6Any) && !address.IsIPv6LinkLocal)
-                            addresses.Add(FleetDirectConnector.Format(address, port));
-                    }
-                }
-            }
-            catch (NetworkInformationException)
-            {
-                // Without the list of networks, the name of the machine stays.
-            }
-
-            var host = Dns.GetHostName();
-            if (PairingPayload.IsValidAddress($"{host}:{port}")) addresses.Insert(0, $"{host}:{port}");
-            addresses.Add(FleetDirectConnector.Format(IPAddress.Loopback, port));
-        }
-        else
-        {
-            addresses.Add(FleetDirectConnector.Format(bound, port));
-        }
-
-        return [.. addresses.Distinct(StringComparer.OrdinalIgnoreCase).Where(PairingPayload.IsValidAddress).Take(PairingPayload.MaxAddresses)];
-    }
+    // The addresses of a pairing code, as a desktop that other computers pair with describes its own.
+    internal static IReadOnlyList<string> DescribeAddresses(IPEndPoint endPoint) => FleetListenAddresses.Describe(endPoint);
 
     private static void WriteListenerFile(string path, NodeListenerFile file)
     {

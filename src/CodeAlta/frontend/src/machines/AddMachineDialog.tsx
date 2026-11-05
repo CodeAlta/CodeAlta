@@ -53,7 +53,7 @@ export function AddMachineDialog({ epoch, api = machines, serverApi = fleetServe
         <ChoiceCard icon="terminal" title="Over SSH" recommended
           description="CodeAlta installs CodeAlta Node there, starts it as a service and pairs it with this computer. Nothing to type on the machine." onClick={() => setChoice("ssh")} />
         <ChoiceCard icon="remote" title="With a pairing link"
-          description="CodeAlta Node runs there already: paste the link its altanode pair command shows." onClick={() => { onPairLink(); }} />
+          description="CodeAlta Desktop or CodeAlta Node runs there: paste the link of its Pair another computer…, or of altanode pair." onClick={() => { onPairLink(); }} />
         <ChoiceCard icon="server" title={server ? "Through my server" : "Through my server"} disabled={!server}
           description={server ? "The machine joins your server with one command; you approve it here when it shows the same words." : "Create your server first, in Settings > Fleet > Server."}
           detail={server?.organization ?? undefined} onClick={() => setChoice("server")} />

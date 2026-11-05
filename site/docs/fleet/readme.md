@@ -17,11 +17,11 @@ This is CodeAlta as you know it. CodeAlta Desktop, or CodeAlta TUI in a terminal
 
 ## Your machines
 
-Install **CodeAlta Node** (`altanode`) on another computer: a Mac mini that stays on, a build machine, a small cloud server. Pair it with CodeAlta Desktop once, and its sessions are listed beside yours. You read them, answer their questions, send them prompts and start new ones there. You can move a session from one machine to another, and run your automations on the machine that suits them.
+Pair your other computers with this one. Another computer that runs CodeAlta Desktop pairs in a minute, from a link and six words, with nothing to install; a computer that must stay on without a window, such as a Mac mini, a build machine or a small cloud server, runs **CodeAlta Node** (`altanode`). Pair it with CodeAlta Desktop once, and its sessions are listed beside yours. You read them, answer their questions, send them prompts and start new ones there. You can move a session from one machine to another, and run your automations on the machine that suits them.
 
 Your computers talk to each other directly, encrypted end to end. Each machine keeps its own sessions, providers and sign-ins: nothing is copied from one computer to another, and no server is involved.
 
-- [Your machines](machines.md): add a machine over SSH or with a pairing link, run it as a service, update it.
+- [Your machines](machines.md): pair two CodeAlta Desktops, add a machine over SSH or with a pairing link, run it as a service, update it.
 - [Work on your machines](sessions.md): see and drive their sessions, start one there, move a session, let agents use your machines.
 
 ## Your organization
@@ -64,6 +64,7 @@ The details are in [Security](security.md).
 
 | I want to… | Go to |
 | --- | --- |
+| Reach my other laptop or desktop | [Pair two CodeAlta Desktops](machines.md#pair-two-codealta-desktops) |
 | Run sessions on my Mac mini or build machine | [Add a machine](machines.md#add-a-machine) |
 | Reach my machines from anywhere | [Create my server](server.md#create-my-server) |
 | Join the CodeAlta of my company | [Join an organization](server.md#join-an-organization) |

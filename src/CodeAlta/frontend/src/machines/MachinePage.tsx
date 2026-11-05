@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { Button, Callout, HTMLSelect, InputGroup, PopoverNext, Switch, Tag } from "@blueprintjs/core";
 import { machines, type MachinePeopleView, type MachineAgentsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type SecretsList } from "#neoastra";
 import { AppIcon } from "../AppIcon";
@@ -125,14 +125,27 @@ function DevicesSection({ view, busy, machine, onPermission, onRevoke }: {
   onPermission: (device: MachineDeviceView, permission: DevicePermission, allowed: boolean) => void; onRevoke: (device: MachineDeviceView) => void;
 }) {
   const { t } = useShellLanguage();
-  const devices = orderedDevices(view.devices);
   return <section className="machine-section" aria-label={t("Devices")}>
     <h2>{t("Devices")}</h2>
     <p className="muted-text">{t("The computers paired with {name}, and what each may do there.", { name: machine.name })}</p>
-    <div className="machine-devices" role="table" aria-label={t("Devices")}>
+    <DeviceTable devices={view.devices} busy={busy} subject={machine.name} onPermission={onPermission} onRevoke={onRevoke} />
+  </section>;
+}
+
+/**
+ * The computers paired with a machine, or with this computer, and a switch per permission each has there; Revoke refuses
+ * one from now on. `permissions` are the columns: those the machine serves.
+ */
+export function DeviceTable({ devices: unordered, permissions = devicePermissions, busy, subject, here = false, onPermission, onRevoke }: {
+  devices: readonly MachineDeviceView[]; permissions?: readonly DevicePermission[]; busy: boolean; subject: string; here?: boolean;
+  onPermission: (device: MachineDeviceView, permission: DevicePermission, allowed: boolean) => void; onRevoke: (device: MachineDeviceView) => void;
+}) {
+  const { t } = useShellLanguage();
+  const devices = orderedDevices(unordered);
+  return <div className="machine-devices" role="table" aria-label={t("Devices")} style={{ "--machine-permission-columns": permissions.length } as CSSProperties}>
       <div className="machine-device machine-device-head" role="row">
         <span role="columnheader">{t("Device")}</span>
-        {devicePermissions.map(permission => <span key={permission} role="columnheader" title={t(permissionLabel(permission).description)}>{t(permissionLabel(permission).name)}</span>)}
+        {permissions.map(permission => <span key={permission} role="columnheader" title={t(permissionLabel(permission).description)}>{t(permissionLabel(permission).name)}</span>)}
         <span role="columnheader" aria-label={t("Revoke")} />
       </div>
       {devices.map(device => <div key={device.id} className="machine-device" role="row" data-revoked={device.revokedAt ? "true" : undefined}>
@@ -142,20 +155,19 @@ function DevicesSection({ view, busy, machine, onPermission, onRevoke }: {
           {device.revokedAt ? <Tag minimal round intent="danger">{t("Revoked")}</Tag> : device.channels > 0 && <Tag minimal round intent="success">{t("Connected")}</Tag>}
           <code className="muted-text" title={device.fingerprint}>{device.fingerprint.split(" ").slice(0, 2).join(" ")}</code>
         </span>
-        {devicePermissions.map(permission => <span key={permission} role="cell" className="machine-permission-cell">
+        {permissions.map(permission => <span key={permission} role="cell" className="machine-permission-cell">
           <small className="machine-permission-name" aria-hidden="true">{t(permissionLabel(permission).name)}</small>
           <PermissionSwitch device={device} permission={permission} disabled={busy || !permissionsEditable(device)} onChange={allowed => onPermission(device, permission, allowed)} />
         </span>)}
         <span role="cell">{!device.revokedAt && <PopoverNext placement="left" content={<div className="machine-confirm">
-          <p>{t(device.isThisComputer ? "Revoke this computer on {name}?" : "Revoke {device}?", { device: device.name, name: machine.name })}</p>
-          <p className="muted-text">{t("Its key is refused there from now on; pairing again trusts it again.")}</p>
+          <p>{t(device.isThisComputer ? "Revoke this computer on {name}?" : "Revoke {device}?", { device: device.name, name: subject })}</p>
+          <p className="muted-text">{t(here ? "Its key is refused here from now on; pairing again trusts it again." : "Its key is refused there from now on; pairing again trusts it again.")}</p>
           <Button className="bp6-popover-dismiss" intent="danger" disabled={busy} onClick={() => onRevoke(device)}>{t("Revoke")}</Button></div>}>
           <Button variant="minimal" size="small" intent="danger" icon={<AppIcon name="close" size={15} />} disabled={busy}
             aria-label={`${t("Revoke")} ${device.name}`} title={t("Revoke")} />
         </PopoverNext>}</span>
       </div>)}
-    </div>
-  </section>;
+    </div>;
 }
 
 /** One permission of one device: a switch, and a small confirmation beside it when this computer would give up managing the machine. */

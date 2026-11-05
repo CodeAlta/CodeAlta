@@ -171,10 +171,14 @@ labels, its local policy).
 
 ## Desktop and TUI as nodes
 
-A desktop or a TUI that runs on a machine is a node of the fleets its spaces link to, while it runs: its sessions
-are visible, and drivable when the space allows it (**Allow my other devices to drive the sessions of this machine**,
-per space). When it exits, it is offline. A machine that must stay reachable runs `altanode`, and the desktop opens
-it in client mode ([architecture](architecture.md#the-desktop-one-session-host-abstraction)).
+A desktop is a node of the person's other computers while it runs, once they let it be (**Let my other computers pair
+with this one**, off by default): it serves the same node API as `altanode` over its own runtime, on a port of its own
+(2586, so that a node of the same machine keeps 2585), with the same key it pairs with its machines and its own list of
+paired devices. Another desktop pairs with it from a link, exactly as with a node. Until it is turned on, it listens
+nowhere and makes no key (S1). On a Tailscale network its links name it on the tailnet first, so that a laptop away
+from home reaches it. When it exits, it is offline. A machine that must stay reachable runs `altanode`, and the desktop
+opens it in client mode ([architecture](architecture.md#the-desktop-one-session-host-abstraction)). Reaching a desktop
+through the relay of a server, as a machine of an organization, is not part of it yet.
 
 ## Packaging
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Callout, Dialog, DialogBody, DialogFooter, NonIdealState, PopoverNext, Switch, Tag, TextArea } from "@blueprintjs/core";
 import { machines, type MachinePairPreview, type MachineView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
@@ -10,12 +10,15 @@ import { machineIntent, machineState, machineStateLabel, orderedMachines, pairin
 import { MachinePage, type MachinePageApi } from "./MachinePage";
 import { managesMachine } from "./machineManagement";
 import { AddMachineDialog, type AddMachineApi } from "./AddMachineDialog";
+import { ThisComputerSection, type ThisComputerApi } from "./ThisComputer";
 
-type MachinesApi = Pick<typeof machines, "list" | "previewPairing" | "pair" | "forget" | "watch" | "moveSettings" | "setReceiveMoves"> & Partial<MachinePageApi> & Partial<AddMachineApi>;
+type MachinesApi = Pick<typeof machines, "list" | "previewPairing" | "pair" | "forget" | "watch" | "moveSettings" | "setReceiveMoves"> & Partial<MachinePageApi> & Partial<AddMachineApi>
+  & Partial<ThisComputerApi>;
 
 /**
- * Settings > Fleet > Machines: the machines this computer is paired with and their state, pairing with another one
- * from the link `altanode pair` shows there, and forgetting one.
+ * Settings > Fleet > Machines: this computer, which the person's other computers may pair with; the machines this
+ * computer is paired with and their state, pairing with another one from the link it shows (Pair another computer… in
+ * CodeAlta Desktop, `altanode pair` on a node), and forgetting one.
  */
 export function MachinesSettings({ epoch, api = machines, initialMachine = null }: { epoch: string | null; api?: MachinesApi; initialMachine?: string | null }) {
   const { t } = useShellLanguage();
@@ -27,6 +30,10 @@ export function MachinesSettings({ epoch, api = machines, initialMachine = null 
   const [opened, setOpened] = useState<string | null>(initialMachine);
   // Whether this computer receives the sessions its machines move here: off until the person turns it on.
   const [receive, setReceive] = useState<boolean | null>(null);
+  // Counts the changes the host said, so that the This computer section reads itself again with the list.
+  const [changes, setChanges] = useState(0);
+  // One object for the life of the page: the pairing link of the section is made once per opening, not at each render.
+  const thisComputerApi = useMemo(() => ({ ...machines, ...api }) as ThisComputerApi, [api]);
   useEffect(() => {
     if (!epoch) return;
     const abort = new AbortController();
@@ -38,7 +45,7 @@ export function MachinesSettings({ epoch, api = machines, initialMachine = null 
     if (!epoch) return;
     const abort = new AbortController();
     void (async () => {
-      try { for await (const _ of await api.watch({ expectedEpoch: epoch }, { signal: abort.signal })) if (!abort.signal.aborted) reload(); }
+      try { for await (const _ of await api.watch({ expectedEpoch: epoch }, { signal: abort.signal })) if (!abort.signal.aborted) { reload(); setChanges(value => value + 1); } }
       catch { /* The bridge is gone: Reload still reads the list. */ }
     })();
     return () => abort.abort();
@@ -50,9 +57,10 @@ export function MachinesSettings({ epoch, api = machines, initialMachine = null 
     description="The computers that run sessions for this one: paired with it, or added through your server. Their sessions are listed and driven from here."
     notice={notice} loading={loading} busy={busy} onReload={reload}
     actions={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch || !listing} onClick={() => setAdding(true)}>{t("Add a machine…")}</Button>}>
+    {epoch && <ThisComputerSection epoch={epoch} api={thisComputerApi} generation={changes} />}
     {!listing ? <SettingsUnavailable loading={loading} icon="remote" title="Machines unavailable" />
       : listing.machines.length === 0 ? <NonIdealState className="machines-empty" icon={<AppIcon name="remote" size={36} />} title={t("No machine yet.")}
-        description={t("Another computer of yours can run sessions for you: a Mac mini that stays on, a build machine, a cloud server. CodeAlta installs CodeAlta Node there over SSH, or pairs with one that runs already.")}
+        description={t("Another computer of yours can run sessions for you: another CodeAlta Desktop, a Mac mini that stays on, a build machine, a cloud server. Pair with a CodeAlta Desktop or a CodeAlta Node from its link, or let CodeAlta install CodeAlta Node over SSH.")}
         action={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch} onClick={() => setAdding(true)}>{t("Add a machine…")}</Button>} />
       : <><ul className="machine-list" aria-label={t("Machines")}>
         {orderedMachines(listing.machines).map(machine => <MachineRow key={machine.id} machine={machine} busy={busy}
@@ -146,7 +154,8 @@ export function PairMachineDialog({ epoch, api, guide = false, onClose }: { epoc
   return <Dialog isOpen className="pair-machine-dialog" title={t("Pair a machine")} canOutsideClickClose={false} onClose={() => { if (!pairing) onClose(false); }}>
     <DialogBody>
       {guide && !preview && <div className="pair-machine-guide">
-        <p className="muted-text">{t("On the machine, with .NET 10 installed, run these once:")}</p>
+        <p className="muted-text">{t("In CodeAlta Desktop on the other computer: Settings > Fleet > Machines, turn on Let my other computers pair with this one, then Pair another computer….")}</p>
+        <p className="muted-text">{t("Or on a machine with CodeAlta Node and .NET 10, run these once:")}</p>
         <ol>
           <li><code>dotnet tool install -g CodeAlta.Node</code></li>
           <li><code>altanode install --listen-all</code> <span className="muted-text">{t("starts it as a service")}</span></li>
@@ -156,7 +165,7 @@ export function PairMachineDialog({ epoch, api, guide = false, onClose }: { epoc
       <label className="pair-machine-field"><span>{t("Pairing link")}</span>
         <TextArea autoFocus fill rows={3} value={text} disabled={pairing} placeholder="codealta-pair://…" aria-label={t("Pairing link")}
           onChange={event => setText(event.currentTarget.value)} />
-        <small className="muted-text">{t("Paste the link that altanode pair shows on the machine.")}</small>
+        <small className="muted-text">{t("Paste the link that Pair another computer… shows in CodeAlta Desktop there, or that altanode pair shows on a node.")}</small>
       </label>
       {preview && <section className="pair-machine-preview" aria-label={preview.name ?? undefined}>
         <div className="machine-title"><AppIcon name="remote" size={16} /><strong>{preview.name}</strong>

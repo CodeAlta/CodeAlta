@@ -11,11 +11,12 @@ namespace CodeAlta.Desktop.Fleet;
 /// </summary>
 internal sealed class DesktopFleetStartup
 {
-    private DesktopFleetStartup(DesktopFleet fleet, DesktopRemoteChildren remoteChildren, DesktopFleetServers servers)
+    private DesktopFleetStartup(DesktopFleet fleet, DesktopRemoteChildren remoteChildren, DesktopFleetServers servers, DesktopNode node)
     {
         Fleet = fleet;
         RemoteChildren = remoteChildren;
         Servers = servers;
+        Node = node;
     }
 
     /// <summary>Gets the paired machines of the instance.</summary>
@@ -26,6 +27,9 @@ internal sealed class DesktopFleetStartup
 
     /// <summary>Gets the CodeAlta Servers this instance is linked to.</summary>
     public DesktopFleetServers Servers { get; }
+
+    /// <summary>Gets this computer as a machine of the person's other computers, while they let it be one.</summary>
+    public DesktopNode Node { get; }
 
     /// <summary>Wires the fleet of a desktop instance; nothing starts yet.</summary>
     /// <param name="host">The host of the instance.</param>
@@ -55,7 +59,10 @@ internal sealed class DesktopFleetStartup
         // The spaces its machines publish get a key from this computer, whether it links them or not: their sessions show their titles.
         servers.MachineSpaces = fleet.PublishedSpaces;
         servers.Changed += () => _ = fleet.SyncOrganizationMachinesAsync(servers.OrganizationMachines(), CancellationToken.None);
-        return new DesktopFleetStartup(fleet, remoteChildren, servers);
+        // This computer as a machine of the person's other computers: it listens only once the person turned it on.
+        // On a Tailscale network, its links name it there first, so that a laptop away from home still reaches it.
+        var node = new DesktopNode(host, machineName, version, host.CatalogOptions.FleetRoot) { FindTailnet = Mcp.DesktopTailnet.FindAsync };
+        return new DesktopFleetStartup(fleet, remoteChildren, servers, node);
     }
 
     /// <summary>Starts the deliveries of the sessions agents started on other machines, once the window shows the application.</summary>
@@ -63,7 +70,8 @@ internal sealed class DesktopFleetStartup
 
     /// <summary>
     /// Starts what the window waits for: the moves this computer took and a stop left unfinished end first, by its own
-    /// decisions; then the paired machines are reached, and the servers this instance is linked to.
+    /// decisions; then the paired machines are reached, this computer listens for the computers paired with it when the
+    /// person lets them, and the servers this instance is linked to are reached.
     /// </summary>
     /// <param name="cancellationToken">Cancels the start.</param>
     /// <returns>A task that completes once they started.</returns>
@@ -71,6 +79,7 @@ internal sealed class DesktopFleetStartup
     {
         if (Fleet.Moves is { } moves) await moves.RecoverAsync(cancellationToken).ConfigureAwait(false);
         await Fleet.StartAsync(cancellationToken).ConfigureAwait(false);
+        await Node.StartAsync(cancellationToken).ConfigureAwait(false);
         await Servers.StartAsync(cancellationToken).ConfigureAwait(false);
     }
 }

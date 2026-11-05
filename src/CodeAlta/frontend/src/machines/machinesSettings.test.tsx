@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { MachineView } from "#neoastra";
+import type { MachineView, ThisComputerView } from "#neoastra";
 import { translate } from "../localization";
 import { ShellLanguageContext } from "../shellLanguage";
 import { MachineRow } from "./MachinesSettings";
 import { orderedMachines, throughServer } from "./machines";
+import { ThisComputerBody } from "./ThisComputer";
 
 const never = () => assert.fail("rendering must not act");
 const machine = (change: Partial<MachineView> = {}): MachineView => ({ id: "m1", name: "mac-mini", state: "online", os: "macos", version: "4.0.0",
@@ -32,4 +33,29 @@ test("a machine added through the server is one of the person's machines: listed
   const own = render(paired);
   assert.ok(own.includes(`aria-label="${english("Forget")} mac-mini"`), own);
   assert.ok(!own.includes(english("Through your server")));
+});
+
+const thisComputer = (change: Partial<ThisComputerView> = {}): ThisComputerView => ({ status: "ok", visible: false, listening: false, name: "DESKTOP-ALEX", words: null,
+  port: 2586, addresses: [], tailnet: null, problem: null, devices: [], ...change });
+const renderThisComputer = (view: ThisComputerView) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+  createElement(ThisComputerBody, { view, busy: false, onVisible: never, onPair: never, onPermission: never, onRevoke: never })));
+
+test("this computer is reachable by nobody until the person lets their other computers pair with it, then offers a link and lists them", () => {
+  const off = renderThisComputer(thisComputer());
+  assert.ok(off.includes(english("Let my other computers pair with this one")), off);
+  assert.ok(!off.includes(english("Pair another computer…")), "no link while nothing listens");
+
+  const on = renderThisComputer(thisComputer({ visible: true, listening: true, words: "apple river stone cloud amber tiger", tailnet: "desk.tail1234.ts.net",
+    addresses: ["desk.tail1234.ts.net:2586", "192.168.1.5:2586"],
+    devices: [{ id: "d1", name: "macbook", fingerprint: "ABCD EFGH IJKL", permissions: ["view", "drive", "start"], pairedAt: "2026-11-05T10:00:00Z", revokedAt: null,
+      channels: 0, isThisComputer: false }] }));
+  assert.ok(on.includes(english("Pair another computer…")), on);
+  assert.ok(on.includes("desk.tail1234.ts.net"), "its name on the tailnet, which reaches it away from home");
+  assert.ok(on.includes(english("Computers paired with this one")));
+  assert.ok(on.includes(`aria-label="${english("Move")} — macbook"`), "the person lets a paired computer move sessions here");
+  assert.ok(!on.includes(`${english("Manage")} — macbook`), "no other computer manages a desktop");
+
+  const blocked = renderThisComputer(thisComputer({ visible: true, listening: false, problem: "Port 2586 cannot be opened" }));
+  assert.ok(blocked.includes(english("This computer cannot listen for your other computers.")), blocked);
+  assert.ok(blocked.includes("Port 2586 cannot be opened"));
 });

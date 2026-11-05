@@ -4,7 +4,9 @@ title: Your Machines
 
 # Your Machines
 
-A machine is another computer of yours that runs sessions for you: a Mac mini that stays on, a build machine, a small cloud server. It runs **CodeAlta Node** (`altanode`), and you pair it with CodeAlta Desktop once. Its sessions are then listed beside yours ([Work on your machines](sessions.md)).
+A machine is another computer of yours that runs sessions for you: your other laptop or desktop, a Mac mini that stays on, a build machine, a small cloud server. It runs **CodeAlta Desktop**, or **CodeAlta Node** (`altanode`) when it must run without a window, and you pair it with CodeAlta Desktop once. Its sessions are then listed beside yours ([Work on your machines](sessions.md)).
+
+Two computers that both run CodeAlta Desktop pair in a minute, with nothing to install: see [Pair two CodeAlta Desktops](#pair-two-codealta-desktops).
 
 Each machine keeps its own sessions, providers and sign-ins. Nothing is copied from one computer to another, and no server is needed: your computers talk to each other directly. A [CodeAlta Server](server.md) adds machines you reach from anywhere.
 
@@ -20,8 +22,24 @@ In CodeAlta Desktop, open **Settings** > **Fleet** > **Machines** and click **Ad
 | Choice | When |
 | --- | --- |
 | **Over SSH** | A Linux or macOS computer you reach with `ssh`. CodeAlta does everything there; nothing to type on the machine |
-| **With a pairing link** | CodeAlta Node runs there already: paste the link of `altanode pair` (see [Pair it with CodeAlta Desktop](#pair-it-with-codealta-desktop)) |
+| **With a pairing link** | CodeAlta Desktop runs there: paste the link of its **Pair another computer…** (see [Pair two CodeAlta Desktops](#pair-two-codealta-desktops)). Or CodeAlta Node runs there: paste the link of `altanode pair` (see [Pair it with CodeAlta Desktop](#pair-it-with-codealta-desktop)) |
 | **Through my server** | The machine joins your CodeAlta Server with one command, and you approve it when it shows the same six words (see [Connect to a CodeAlta Server](server.md)) |
+
+## Pair two CodeAlta Desktops
+
+Your laptop and your desktop at home, a Windows PC and a Mac: each runs CodeAlta Desktop, and each can be a machine of the other. Nothing else is installed.
+
+1. On the computer whose sessions you want to reach, open **Settings** > **Fleet** > **Machines**. Under **This computer**, turn on **Let my other computers pair with this one**.
+2. Click **Pair another computer…**. CodeAlta shows a pairing link, six words, and waits.
+3. On the other computer, open **Settings** > **Fleet** > **Machines** > **Add a machine…** > **With a pairing link**, and paste the link (**Copy link** copies it; send it to yourself as you like).
+4. Check that the other computer shows the same six words, then click **Pair**. The first computer says which computer paired.
+
+The link works once and expires after 10 minutes. The first computer is then listed as a machine of the second: its sessions show in the Explorer, and you read, answer, steer and start them as on any machine ([Work on your machines](sessions.md)). Do the same the other way round to reach the second computer from the first.
+
+- **While CodeAlta runs.** A desktop is reached while CodeAlta Desktop runs there; once you quit it, the other computers see it **Offline**. A computer that must stay reachable runs [CodeAlta Node](#install-codealta-node-by-hand).
+- **Away from home.** On a computer of a [Tailscale](https://tailscale.com) network, the link names it on the tailnet first, so your laptop reaches it from anywhere. **This computer** shows that name. Without Tailscale, the link names its addresses on your local network.
+- **What each computer may do.** **Computers paired with this one** lists them, with a switch per permission: **View**, **Drive** and **Start** are on after pairing. Turn on **Move** to let a computer move its sessions here (see [Move a session](sessions.md#move-a-session)). **Revoke** refuses a computer at once; pairing again trusts it again.
+- **Off by default.** Until you turn it on, this computer listens on no network and makes no key. It listens on port 2586 of its networks (2585 stays free for a node of the same computer); the first time, Windows or macOS may ask whether CodeAlta may accept connections: allow it. Turning it off stops listening; the paired computers stay listed, and reach it again once you turn it back on.
 
 ### Over SSH
 

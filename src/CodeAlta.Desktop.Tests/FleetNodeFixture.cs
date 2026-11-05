@@ -123,7 +123,8 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         Addresses = [FleetDirectConnector.Format(IPAddress.Loopback, _listener.LocalEndPoint.Port)];
     }
 
-    private static Task<CodeAltaHost> CreateHostAsync(string root, ScriptedFleetProvider provider, bool appliesSpaceIdentities, CancellationToken cancellationToken)
+    /// <summary>Creates a real host on a profile under <paramref name="root"/>, its turns scripted by <paramref name="provider"/>.</summary>
+    internal static Task<CodeAltaHost> CreateHostAsync(string root, ScriptedFleetProvider provider, bool appliesSpaceIdentities, CancellationToken cancellationToken)
     {
         var global = Path.Combine(root, "global");
         var project = Path.Combine(root, "project");
