@@ -593,6 +593,30 @@ public sealed class FleetSecretsTests
     }
 
     [TestMethod]
+    public async Task AnotherPersonNamedApprover_ApprovesARunOfTheEnvironment_FromTheDefinitionTheyVerify()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        using var beaKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "bea"));
+        var invitation = await fleet.Desktop.InvitePersonAsync(new InvitePersonRequest("Bea"));
+        using (var client = new FleetServerClient(fleet.Server.BaseAddress, beaKey)) await client.EnrollAsync(invitation.Token, "Bea laptop", FleetDeviceKinds.Controller, CancellationToken.None);
+        await fleet.Desktop.ApproveAsync(beaKey.DeviceId, FleetDeviceKinds.Controller, CancellationToken.None);
+        var list = await fleet.NodeListAsync();
+
+        // Alice names Bea the approver of her environment: Bea holds none of its values and does not manage it.
+        var production = await fleet.Manager.PutEnvironmentAsync("production", [invitation.Person.Id], [], [], false, CancellationToken.None);
+        using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        var nonce = FleetApprovalRequests.Nonce(fleet.NodeKey, list.OrganizationId!, production.Id, 1, "run-1", null);
+        var asked = await node.RequestApprovalAsync(production.Id, new RequestFleetApprovalRequest("run-1", nonce, 1, null, null));
+
+        // Bea's device verifies the definition of the environment the run asks, and approves the run under its name.
+        var bea = new FleetSecretsManager(new FleetOrganizationDevices(fleet.Server.BaseAddress, beaKey, Path.Combine(fleet.Root.Path, "bea-link", FleetOrganizationDevices.PinFileName)));
+        var listed = (await bea.ListApprovalsAsync(CancellationToken.None)).Approvals.Single(approval => approval.Id == asked.Id);
+        Assert.AreEqual(0, (await bea.ListEnvironmentsAsync(CancellationToken.None)).Count, "Bea is given no environment to manage");
+        await bea.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(listed), CancellationToken.None);
+        Assert.AreEqual(FleetApprovalStates.Approved, (await node.GetApprovalAsync(asked.Id)).Status);
+    }
+
+    [TestMethod]
     public async Task AnApproval_IsGivenOnlyForARunTheMachineAskedItself()
     {
         await using var fleet = await SecretsFixture.StartAsync();

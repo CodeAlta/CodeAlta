@@ -288,11 +288,33 @@ public sealed class FleetSecretsManager
     }
 
     /// <summary>
+    /// Gives the environment of an approval as this device verifies it, as <see cref="VerifiedEnvironmentOf(FleetApprovalDto, IEnumerable{FleetEnvironmentDefinition})"/>
+    /// does, also from the definition the server gives with the approval: one of another person, which names this device's person
+    /// among its approvers and a controller device of its person signed (<see cref="FleetEnvironmentDocuments.TryVerifyForApprover"/>).
+    /// </summary>
+    /// <param name="approval">The approval.</param>
+    /// <param name="verified">The definitions of this device's person it verified.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <param name="personId">The person of this device.</param>
+    /// <returns>The definition; null when none verifies for that environment and version.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static FleetEnvironmentDefinition? VerifiedEnvironmentOf(FleetApprovalDto approval, IEnumerable<FleetEnvironmentDefinition> verified, FleetDeviceListState list,
+        string personId)
+    {
+        ArgumentNullException.ThrowIfNull(list);
+        ArgumentNullException.ThrowIfNull(personId);
+        if (VerifiedEnvironmentOf(approval, verified) is { } own) return own;
+        return FleetEnvironmentDocuments.TryVerifyForApprover(approval.Environment, list, personId, out var definition, out _)
+            ? VerifiedEnvironmentOf(approval, [definition])
+            : null;
+    }
+
+    /// <summary>
     /// Gives what a person reviews of an approval (<see cref="ReviewOf(FleetApprovalDto)"/>), under the name of the environment
     /// its definition, as this device verified it, gives.
     /// </summary>
     /// <param name="approval">The approval as it was shown.</param>
-    /// <param name="environment">The environment as this device verified it (<see cref="VerifiedEnvironmentOf"/>).</param>
+    /// <param name="environment">The environment as this device verified it (<see cref="VerifiedEnvironmentOf(FleetApprovalDto, IEnumerable{FleetEnvironmentDefinition}, FleetDeviceListState, string)"/>).</param>
     /// <returns>The text, the same for the same approval.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     public static string ReviewOf(FleetApprovalDto approval, FleetEnvironmentDefinition environment)
@@ -345,7 +367,7 @@ public sealed class FleetSecretsManager
         var environments = await client.ListEnvironmentsAsync(cancellationToken).ConfigureAwait(false);
         var verified = environments.Environments.Select(environment => FleetEnvironmentDocuments.TryVerify(environment.Signed, list, Access?.Invoke(), _devices.Identity.DeviceId,
             out var definition, out _) ? definition : null).OfType<FleetEnvironmentDefinition>();
-        if (VerifiedEnvironmentOf(asked, verified) is not { } environment)
+        if (VerifiedEnvironmentOf(asked, verified, list, person) is not { } environment)
             throw new InvalidDataException("The environment of the approval is not one this device verifies at the version the machine asked: nothing is signed.");
         if (asked.Id != approvalId || !string.Equals(ReviewOf(asked, environment), reviewed, StringComparison.Ordinal))
             throw new InvalidDataException("The approval changed since it was shown: read the approvals again before approving.");

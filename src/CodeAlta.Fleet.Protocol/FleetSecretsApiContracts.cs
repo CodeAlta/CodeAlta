@@ -184,7 +184,14 @@ public sealed record ApproveFleetApprovalRequest(FleetSignedApproval Approval);
 /// <param name="RequestedAt">When the machine asked.</param>
 /// <param name="Approval">The signed approval, once given.</param>
 public sealed record FleetApprovalDto(string Id, string EnvironmentId, string EnvironmentName, long EnvironmentVersion, string MachineId, string RunId, string Nonce,
-    string? AutomationId, string? Title, string Status, DateTimeOffset RequestedAt, FleetSignedApproval? Approval);
+    string? AutomationId, string? Title, string Status, DateTimeOffset RequestedAt, FleetSignedApproval? Approval)
+{
+    /// <summary>
+    /// Gets the signed definition of the environment as the server holds it, which an approver of another person verifies to know
+    /// what they approve (its name, its approvers), without its values or the right to manage it; null from a server that gives none.
+    /// </summary>
+    public FleetSignedEnvironment? Environment { get; init; }
+}
 
 /// <summary>Approvals.</summary>
 /// <param name="Approvals">The approvals.</param>

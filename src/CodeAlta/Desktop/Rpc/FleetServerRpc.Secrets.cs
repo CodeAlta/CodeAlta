@@ -47,7 +47,10 @@ internal sealed partial class FleetServerService
             var verified = read.Environments.Select(static pair => pair.Definition).OfType<FleetEnvironmentDefinition>().ToArray();
             var approvals = read.Approvals.Select(approval =>
             {
-                var environment = CodeAlta.Fleet.Server.FleetSecretsManager.VerifiedEnvironmentOf(approval, verified);
+                // Also an environment of another person who names this one an approver, from the definition the server gives with the approval.
+                var environment = read.Manager.Devices.Current is { } devices
+                    ? CodeAlta.Fleet.Server.FleetSecretsManager.VerifiedEnvironmentOf(approval, verified, devices, read.PersonId)
+                    : CodeAlta.Fleet.Server.FleetSecretsManager.VerifiedEnvironmentOf(approval, verified);
                 return new FleetApprovalView(approval.Id, environment?.Name ?? UnverifiedEnvironment, DeviceName(approval.MachineId), approval.RunId, approval.Title,
                     approval.Status, approval.RequestedAt, approval.Status == FleetApprovalStates.Pending && environment is not null
                         && environment.Approvers.Contains(read.PersonId, StringComparer.Ordinal)
