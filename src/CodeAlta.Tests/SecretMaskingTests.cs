@@ -81,6 +81,22 @@ public sealed class SecretMaskingTests
     }
 
     [TestMethod]
+    public void AValueTheStoreNoLongerGives_StaysMasked_WhileTheProcessThatMayHoldItRuns()
+    {
+        // The store gives a value, then no longer does (its retired copies were evicted by many rotations, or their time passed),
+        // while a process or a stream of this host that took it may still write it.
+        var values = new List<string> { Secret };
+        var masker = new AgentSecretMasker(() => [.. values]);
+        Assert.AreEqual("***", masker.MaskText(Secret));
+        values.Clear();
+        values.Add("another-rotated-value");
+        masker.Refresh();
+
+        Assert.AreEqual("***", masker.MaskText(Secret), "a value masked once stays masked in this process");
+        Assert.AreEqual("***", masker.MaskText("another-rotated-value"));
+    }
+
+    [TestMethod]
     public async Task ASecretATool_Prints_NeverLandsInTheJournal_NorReachesTheModelOrTheEvents()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-masking-" + Guid.NewGuid().ToString("N"));

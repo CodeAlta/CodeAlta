@@ -67,16 +67,42 @@ internal sealed class NodeFleetSecrets : IAsyncDisposable
     }
 
     /// <summary>Gets the environments of the person as the last refresh of each link verified them, with the sync of their link.</summary>
-    /// <returns>The environments, by name; the first link that has one wins.</returns>
+    /// <returns>
+    /// The environments, by name; a name two environments share, of one link or of two, is not among them (<see cref="IsAmbiguous"/>):
+    /// a run is admitted by a name to one environment only.
+    /// </returns>
     public IReadOnlyDictionary<string, (FleetEnvironmentDefinition Definition, FleetSecretSync Sync)> Environments()
     {
         var environments = new Dictionary<string, (FleetEnvironmentDefinition, FleetSecretSync)>(StringComparer.Ordinal);
+        var ambiguous = new HashSet<string>(StringComparer.Ordinal);
         foreach (var state in _links.Values.OrderBy(static state => state.Sync.Source, StringComparer.Ordinal))
         {
-            foreach (var (name, definition) in state.Sync.Environments) environments.TryAdd(name, (definition, state.Sync));
+            ambiguous.UnionWith(state.Sync.AmbiguousEnvironments);
+            foreach (var (name, definition) in state.Sync.Environments)
+            {
+                if (!environments.TryAdd(name, (definition, state.Sync)) && FleetSecretSync.ScopeOf(environments[name].Item1) != FleetSecretSync.ScopeOf(definition))
+                    ambiguous.Add(name);
+            }
         }
 
+        foreach (var name in ambiguous) environments.Remove(name);
         return environments;
+    }
+
+    /// <summary>Tells whether several environments the links verified have a name: a run is admitted to none of them by it.</summary>
+    /// <param name="name">The name.</param>
+    /// <returns>Whether it is ambiguous.</returns>
+    public bool IsAmbiguous(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        var scopes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var state in _links.Values)
+        {
+            if (state.Sync.AmbiguousEnvironments.Contains(name, StringComparer.Ordinal)) return true;
+            if (state.Sync.Environments.TryGetValue(name, out var definition)) scopes.Add(FleetSecretSync.ScopeOf(definition));
+        }
+
+        return scopes.Count > 1;
     }
 
     /// <summary>
@@ -90,7 +116,7 @@ internal sealed class NodeFleetSecrets : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(admission);
         if (!_links.Values.Any(static state => state.Synced)) return true;
         return Environments().TryGetValue(admission.Admission.Environment, out var found) && found.Definition.EnvironmentId == admission.Admission.EnvironmentId
-            && found.Definition.Number == admission.Admission.Version;
+            && FleetSecretSync.ScopeOf(found.Definition) == admission.Admission.ScopeId && found.Definition.Number == admission.Admission.Version;
     }
 
     /// <summary>Reads the values of every link again now, before a run: what a server does not answer keeps what was held.</summary>
@@ -168,7 +194,7 @@ internal sealed class NodeFleetSecrets : IAsyncDisposable
             state.Synced = !result.Revoked;
             foreach (var refused in result.Refused) Log(true, $"A value of {FleetServerAddress.Format(connector.ServerAddress)} was refused: {refused}.");
             if (result.Revoked) Log(true, $"This machine was revoked by {FleetServerAddress.Format(connector.ServerAddress)}: the values it gave were taken away.");
-            // The sessions of the node mask the values they may now be given, and stop masking those taken away.
+            // The sessions of the node mask the values they may now be given; those taken away stay masked while the node runs.
             _host.AgentHub.SecretMasker?.Refresh();
         }
         catch (Exception exception) when (exception is FleetServerException or HttpRequestException or TaskCanceledException or FleetDeviceListException

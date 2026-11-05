@@ -150,6 +150,8 @@ internal sealed class NodeFleet : IAsyncDisposable
             {
                 automations.Devices = deviceId => trusted.List().FirstOrDefault(device => string.Equals(device.DeviceId, deviceId, StringComparison.Ordinal));
                 automations.DeviceId = identity.DeviceId;
+                // A run that is not positively its owner's work is recorded as such before its session attaches: none of the owner's values.
+                automations.RecordNotOwnerWork = service.RecordUnattendedWork;
             }
             string? file = null;
             // Without a listener the node API still serves the channels its servers relay.
@@ -475,6 +477,8 @@ internal sealed class NodeServers : IAsyncDisposable
         secrets.Start();
         // The policies kept apply from the start, whether the servers answer or not.
         _ = ApplyPolicyAsync(service, node.Automations);
+        // The budgets and the policies are set: the sends a budget held when the node stopped are taken again through them.
+        service?.ResumeHeldSends();
         var servers = new NodeServers(identity, source, connections, statistics, secrets) { Health = health };
         servers.WatchPolicy(service, node.Automations);
         return servers;

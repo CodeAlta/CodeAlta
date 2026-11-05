@@ -44,13 +44,152 @@ public sealed class FleetNodeBudgetQueueTests
                 TimeProvider.System), Name = "test-node", Version = "1.0.0",
             AdmitBudget = (_, _, _) => Task.FromResult(FleetBudgetAdmission.Admitted),
         });
+        restarted.ResumeHeldSends();
         try
         {
             var deadline = DateTime.UtcNow + Patience;
             while (!fixture.Provider.Prompts.Any(static prompt => prompt.Contains("The held work.", StringComparison.Ordinal)) && DateTime.UtcNow < deadline)
                 await Task.Delay(50, token);
             Assert.IsTrue(fixture.Provider.Prompts.Any(static prompt => prompt.Contains("The held work.", StringComparison.Ordinal)), "the held send survives a restart");
+            // Forgotten once its run started: the session waits no more.
+            while ((await fixture.Host.ListSessionsWaitingForPersonAsync()).Contains(created.SessionId) && DateTime.UtcNow < deadline) await Task.Delay(50, token);
             Assert.IsFalse((await fixture.Host.ListSessionsWaitingForPersonAsync()).Contains(created.SessionId), "sent, the session waits no more");
+        }
+        finally
+        {
+            await restarted.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task TheHeldFirstPromptOfANewSession_AsksTheSameHoldAfterARestart()
+    {
+        var token = TestContext.CancellationToken;
+        var never = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = new ConcurrentQueue<FleetNodeBudgetRun>();
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, async (run, held, cancellation) =>
+        {
+            first.Enqueue(run);
+            held();
+            await never.Task.WaitAsync(cancellation).ConfigureAwait(false);
+            return FleetBudgetAdmission.Admitted;
+        });
+        await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Report", Prompt: "The first held work."), "create-first-held", token);
+        Assert.AreEqual(FleetBudgetCommandStatuses.Held, created.Send?.Status);
+        var asked = first.Single();
+        Assert.AreEqual(created.SessionId, asked.RunId, "the first run of a session is admitted as the session");
+
+        // After a restart the same run asks the same hold: the person who continues it continues this one, not another.
+        var resumed = new ConcurrentQueue<FleetNodeBudgetRun>();
+        var restarted = new FleetNodeService(new FleetNodeServiceOptions
+        {
+            Host = fixture.Host, Identity = fixture.NodeIdentity, TrustedDevices = new CodeAlta.Fleet.Identity.TrustedDeviceStore(Path.Combine(fixture.Root, "restarted"),
+                TimeProvider.System), Name = "test-node", Version = "1.0.0",
+            AdmitBudget = (run, _, _) => { resumed.Enqueue(run); return Task.FromResult(FleetBudgetAdmission.Admitted); },
+        });
+        restarted.ResumeHeldSends();
+        try
+        {
+            await WaitUntilAsync(() => fixture.Provider.Prompts.Any(static prompt => prompt.Contains("The first held work.", StringComparison.Ordinal)), token);
+            var again = resumed.Single();
+            Assert.AreEqual((asked.RunId, asked.Nonce), (again.RunId, again.Nonce), "the restart asks the hold the first start asked");
+        }
+        finally
+        {
+            await restarted.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task AHeldSend_IsKeptUntilItsRunStarts_AndARestartAfterItStartedDoesNotSendItAgain()
+    {
+        var token = TestContext.CancellationToken;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, async (_, held, cancellation) =>
+        {
+            held();
+            await release.Task.WaitAsync(cancellation).ConfigureAwait(false);
+            return FleetBudgetAdmission.Admitted;
+        });
+        await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Report"), "create-crash", token);
+        Assert.AreEqual(FleetBudgetCommandStatuses.Held, (await client.SendAsync(created.SessionId, "The work of the crash window.", retryKey: "send-crash", cancellationToken: token)).Status);
+        var file = Path.Combine(fixture.Host.CatalogOptions.FleetRoot, "held-sends.json");
+
+        // Admitted, the send reaches the runtime, which has not started its run yet: a process that ended here would lose it.
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var unblock = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Host.Commands.SendStarting = (_, cancellation) => { reached.TrySetResult(); return unblock.Task.WaitAsync(cancellation); };
+        release.SetResult();
+        await reached.Task.WaitAsync(Patience, token);
+        var whileStarting = File.ReadAllText(file);
+        StringAssert.Contains(whileStarting, "send-crash", "a held send is kept until its run starts");
+
+        unblock.SetResult();
+        fixture.Host.Commands.SendStarting = null;
+        await WaitUntilAsync(() => fixture.Provider.Prompts.Any(static prompt => prompt.Contains("The work of the crash window.", StringComparison.Ordinal)), token);
+        await WaitUntilAsync(() => !File.ReadAllText(file).Contains("send-crash", StringComparison.Ordinal), token);
+
+        // A process that ended after the run started but before it forgot the send: its next start finds the prompt in the journal.
+        File.WriteAllText(file, whileStarting);
+        var admitted = 0;
+        var restarted = new FleetNodeService(new FleetNodeServiceOptions
+        {
+            Host = fixture.Host, Identity = fixture.NodeIdentity, TrustedDevices = new CodeAlta.Fleet.Identity.TrustedDeviceStore(Path.Combine(fixture.Root, "restarted"),
+                TimeProvider.System), Name = "test-node", Version = "1.0.0",
+            AdmitBudget = (_, _, _) => { Interlocked.Increment(ref admitted); return Task.FromResult(FleetBudgetAdmission.Admitted); },
+        });
+        restarted.ResumeHeldSends();
+        try
+        {
+            await WaitUntilAsync(() => !File.ReadAllText(file).Contains("send-crash", StringComparison.Ordinal), token);
+            await Task.Delay(TimeSpan.FromMilliseconds(300), token);
+            Assert.AreEqual(1, fixture.Provider.Prompts.Count(static prompt => prompt.Contains("The work of the crash window.", StringComparison.Ordinal)), "a send is made once");
+            Assert.AreEqual(0, Volatile.Read(ref admitted), "a send already made is not admitted again");
+        }
+        finally
+        {
+            await restarted.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task TheSendsHeldWhenTheNodeStopped_WaitUntilItsBudgetsAndPoliciesAreWired()
+    {
+        var token = TestContext.CancellationToken;
+        var never = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, async (_, held, cancellation) =>
+        {
+            held();
+            await never.Task.WaitAsync(cancellation).ConfigureAwait(false);
+            return FleetBudgetAdmission.Admitted;
+        });
+        await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Report"), "create-wired", token);
+        Assert.AreEqual(FleetBudgetCommandStatuses.Held, (await client.SendAsync(created.SessionId, "The work that waits for its budgets.", retryKey: "send-wired", cancellationToken: token)).Status);
+
+        // The node starts again: its budgets and policies are set once its servers are started, after the service. Until then
+        // what admits a run is not the budgets yet (here: admits all), and nothing held may be sent by it.
+        var admitted = 0;
+        var restarted = new FleetNodeService(new FleetNodeServiceOptions
+        {
+            Host = fixture.Host, Identity = fixture.NodeIdentity, TrustedDevices = new CodeAlta.Fleet.Identity.TrustedDeviceStore(Path.Combine(fixture.Root, "restarted"),
+                TimeProvider.System), Name = "test-node", Version = "1.0.0",
+            AdmitBudget = (_, _, _) => { Interlocked.Increment(ref admitted); return Task.FromResult(FleetBudgetAdmission.Admitted); },
+        });
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(500), token);
+            Assert.AreEqual(0, Volatile.Read(ref admitted), "a held send is not taken again before the budgets and policies are wired");
+            Assert.IsFalse(fixture.Provider.Prompts.Any(static prompt => prompt.Contains("The work that waits for its budgets.", StringComparison.Ordinal)));
+            CollectionAssert.Contains((await fixture.Host.ListSessionsWaitingForPersonAsync()).ToList(), created.SessionId, "its session still waits for a person");
+
+            // Wired: the sends held are taken again, through the budgets.
+            restarted.ResumeHeldSends();
+            restarted.ResumeHeldSends();
+            await WaitUntilAsync(() => fixture.Provider.Prompts.Any(static prompt => prompt.Contains("The work that waits for its budgets.", StringComparison.Ordinal)), token);
+            Assert.AreEqual(1, Volatile.Read(ref admitted), "taken again once");
         }
         finally
         {

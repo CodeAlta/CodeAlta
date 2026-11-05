@@ -70,13 +70,16 @@ internal sealed class NodeEnvironmentGate
         // The newest rules and values before the run.
         await _secrets.SyncAsync(cancellationToken).ConfigureAwait(false);
         if (!_secrets.Environments().TryGetValue(environment, out var found))
-            return ($"The environment '{environment}' is not an environment of the owner of this machine that a controller device signed.", null);
+            return (_secrets.IsAmbiguous(environment)
+                ? $"Several environments are named '{environment}': a run is admitted to none of them by that name."
+                : $"The environment '{environment}' is not an environment of the owner of this machine that a controller device signed.", null);
         var (definition, sync) = found;
         if (definition.Automations.Count > 0 && (automationId is null || !definition.Automations.Contains(automationId, StringComparer.Ordinal)))
             return ($"The environment '{environment}' is open to some automations only, not to this run.", null);
         if (definition.MachineLabels.Count > 0 && !definition.MachineLabels.Intersect(FleetMachineLabels.Read(_fleetRoot), StringComparer.OrdinalIgnoreCase).Any())
             return ($"The environment '{environment}' runs on machines labeled {string.Join(", ", definition.MachineLabels)}: this machine is not.", null);
-        if (definition.Approvers.Count == 0) return (null, new EnvironmentAdmission(environment, definition.EnvironmentId, definition.Number, null));
+        if (definition.Approvers.Count == 0)
+            return (null, new EnvironmentAdmission(environment, definition.EnvironmentId, definition.Number, null) { ScopeId = FleetSecretSync.ScopeOf(definition) });
 
         // The nonce carries this machine's signature of what it asks: an approver signs nothing the server made up or changed.
         var nonce = sync.ApprovalNonce(definition, runId, automationId);
@@ -122,7 +125,7 @@ internal sealed class NodeEnvironmentGate
                     return ($"The approval of the run was refused: {reason}.", null);
                 if (!TakeOnce(approval.ApprovalId)) return ("The approval of the run was used already.", null);
                 Log($"The run {runId} was approved for the environment '{environment}' by {approval.ApproverPersonId}.");
-                return (null, new EnvironmentAdmission(environment, definition.EnvironmentId, definition.Number, approval.ApprovalId));
+                return (null, new EnvironmentAdmission(environment, definition.EnvironmentId, definition.Number, approval.ApprovalId) { ScopeId = FleetSecretSync.ScopeOf(definition) });
             }
 
             var left = deadline - DateTimeOffset.UtcNow;

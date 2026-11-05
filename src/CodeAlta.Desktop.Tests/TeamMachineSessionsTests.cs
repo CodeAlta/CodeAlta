@@ -73,6 +73,44 @@ public sealed class TeamMachineSessionsTests
             "a session another person started never gets the owner's secrets");
     }
 
+    [TestMethod]
+    public async Task TheSubSessionsAMembersSessionStarts_GetNoneOfTheOwnersSecretsEither()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, null, null, appliesSpaceIdentities: true);
+        new CodeAlta.Catalog.Secrets.LocalSecretStore(fixture.Host.CatalogOptions.GlobalRoot).SetSecret("GRAFANA_TOKEN", "owner-token-value", "owner (tests)");
+        await fixture.Host.SpaceCatalog.UpdateSettingsAsync(CodeAlta.Catalog.SpaceDescriptor.DefaultId, settings => settings with
+        {
+            Identity = new CodeAlta.Catalog.SpaceIdentity(Cli: [new CodeAlta.Catalog.SpaceCliProfile("grafana", [new("GRAFANA_TOKEN", "${secret:GRAFANA_TOKEN}")])]),
+        }, token);
+        using var maxKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "max"));
+        var trust = new TeamTrust();
+        trust.Members[maxKey.Fingerprint] = ("max", maxKey.DeviceId);
+        await using var max = await ConnectAsync(fixture, trust, maxKey, token);
+        var created = await max.CreateSessionAsync(new FleetCreateSessionParams(Title: "Max's work", SpaceId: CodeAlta.Catalog.SpaceDescriptor.DefaultId), "create-max", token);
+
+        // Its agent starts a sub-session on this machine, which starts one in turn (alta session create): Max's work too.
+        var provider = fixture.Provider.Descriptor;
+        var child = await fixture.Host.Commands.CreateDraftSessionAsync(null, provider, "Max's sub-agent", null, null, CodeAlta.Catalog.SpaceDescriptor.DefaultId, null,
+            Guid.NewGuid().ToString(), created.SessionId);
+        var childIdentity = await fixture.Host.RuntimeService.GetSessionIdentityAsync(child.SessionId, token);
+        Assert.IsFalse(childIdentity.Environment.Variables.Any(static variable => variable.Value.Contains("owner-token-value", StringComparison.Ordinal)),
+            "a sub-session of another person's session never gets the owner's secrets");
+        var grandchild = await fixture.Host.Commands.CreateDraftSessionAsync(null, provider, "Its own sub-agent", null, null, CodeAlta.Catalog.SpaceDescriptor.DefaultId, null,
+            Guid.NewGuid().ToString(), child.SessionId);
+        var grandchildIdentity = await fixture.Host.RuntimeService.GetSessionIdentityAsync(grandchild.SessionId, token);
+        Assert.IsFalse(grandchildIdentity.Environment.Variables.Any(static variable => variable.Value.Contains("owner-token-value", StringComparison.Ordinal)),
+            "nor does one it starts");
+
+        // A sub-session of the owner's own session keeps the owner's work.
+        var own = await fixture.Host.Commands.CreateDraftSessionAsync(null, provider, "The owner's work", null, null, CodeAlta.Catalog.SpaceDescriptor.DefaultId, null,
+            Guid.NewGuid().ToString(), null);
+        var ownChild = await fixture.Host.Commands.CreateDraftSessionAsync(null, provider, "The owner's sub-agent", null, null, CodeAlta.Catalog.SpaceDescriptor.DefaultId, null,
+            Guid.NewGuid().ToString(), own.SessionId);
+        Assert.IsTrue((await fixture.Host.RuntimeService.GetSessionIdentityAsync(ownChild.SessionId, token)).Environment.Variables
+            .Any(static variable => variable.Value == "owner-token-value"));
+    }
+
     private static async Task<FleetNodeClient> ConnectAsync(FleetNodeFixture fixture, IDeviceTrustPolicy trust, DeviceIdentity identity, CancellationToken token)
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);

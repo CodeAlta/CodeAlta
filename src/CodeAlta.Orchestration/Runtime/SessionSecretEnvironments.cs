@@ -11,7 +11,14 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="EnvironmentId">Its id at the server; null for an environment named without one (a host that keeps no rules).</param>
 /// <param name="Version">The version of its rules that admitted the run; 0 when unknown.</param>
 /// <param name="ApprovalId">The approval taken for the run; null when the rules required none.</param>
-public sealed record EnvironmentAdmission(string Environment, string? EnvironmentId, long Version, string? ApprovalId);
+public sealed record EnvironmentAdmission(string Environment, string? EnvironmentId, long Version, string? ApprovalId)
+{
+    /// <summary>
+    /// Gets the scope the values of the environment are kept under on this host: the organization and the id its signed definition
+    /// names, never its name, which another environment may have too; null for an environment admitted by its name alone.
+    /// </summary>
+    public string? ScopeId { get; init; }
+}
 
 /// <summary>Whether a run was admitted to an environment, and by what.</summary>
 /// <param name="Problem">Why the run may not start; null when it was admitted.</param>
@@ -113,6 +120,14 @@ public sealed class SessionSecretEnvironments
     /// <param name="sessionId">The session.</param>
     /// <returns>The name of the environment, or null.</returns>
     public string? Get(string sessionId) => Find(sessionId)?.Admission.Environment;
+
+    /// <summary>
+    /// Gets the scope of the values a session gets of the environment it was admitted to, when the admission still holds: the
+    /// environment the admission verified (<see cref="EnvironmentAdmission.ScopeId"/>), or its name for one admitted by its name alone.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <returns>The scope, or null.</returns>
+    public string? ScopeOf(string sessionId) => Find(sessionId)?.Admission is { } admission ? admission.ScopeId ?? admission.Environment : null;
 
     /// <summary>Forgets the environment of a session.</summary>
     /// <param name="sessionId">The session.</param>

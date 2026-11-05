@@ -122,6 +122,30 @@ public sealed class FleetSecretsTests
     }
 
     [TestMethod]
+    public async Task AMachineWithdrawn_IsNotGivenTheNextVersion_WhenTheServerListsItsOldCopyAgain()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var set = await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "GRAFANA_TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), Token, false,
+            [fleet.NodeKey.DeviceId, fleet.OtherKey.DeviceId], CancellationToken.None);
+        var otherCopy = (await fleet.HeldAsync(fleet.OtherKey)).Secrets.Single().Copy!;
+        await fleet.Manager.WithdrawAsync(set.Id, fleet.OtherKey.DeviceId, CancellationToken.None);
+        Assert.AreEqual(Token, await fleet.OpenHeldAsync(fleet.NodeKey, "GRAFANA_TOKEN"), "the machines that keep it still open it");
+
+        // The server lists the withdrawn machine as a holder again, with the copy a controller device genuinely gave it before.
+        var store = (IFleetSecretStore)fleet.Server.GetService<ICoordinatorStore>();
+        var organization = (await fleet.NodeListAsync()).OrganizationId!;
+        var current = (await fleet.Manager.ListAsync(CancellationToken.None)).Secrets.Single(secret => secret.Id == set.Id);
+        await store.AddFleetSecretCopiesAsync(organization, set.Id, current.Version, [new FleetSecretCopyRecord(set.Id, fleet.OtherKey.DeviceId, current.Version, otherCopy,
+            fleet.DesktopKey.DeviceId, DateTimeOffset.UtcNow)], new AuditEntry("test.forge", AuditEntry.Success, null, null, null, null, null));
+
+        // The rotation seals the new value for the machines a controller device gave the current version to: not the one withdrawn.
+        var rotated = await fleet.Manager.RotateAsync(set.Id, "rotated-value", CancellationToken.None);
+        CollectionAssert.DoesNotContain(rotated.Holders.ToArray(), fleet.OtherKey.DeviceId, "a machine withdrawn does not get the next version");
+        Assert.IsFalse((await fleet.HeldAsync(fleet.OtherKey)).Secrets.Any(secret => secret.Id == set.Id));
+        Assert.AreEqual("rotated-value", await fleet.OpenHeldAsync(fleet.NodeKey, "GRAFANA_TOKEN"));
+    }
+
+    [TestMethod]
     public async Task AMachineAllowedLater_GetsItsCopy_WhenAControllerOfThePersonGivesIt()
     {
         await using var fleet = await SecretsFixture.StartAsync();
@@ -139,7 +163,10 @@ public sealed class FleetSecretsTests
         Assert.AreEqual(HttpStatusCode.Forbidden, byNode.Status);
         await fleet.Manager.WithdrawAsync(set.Id, fleet.OtherKey.DeviceId, CancellationToken.None);
         Assert.AreEqual(0, (await fleet.HeldAsync(fleet.OtherKey)).Secrets.Count);
-        CollectionAssert.AreEqual(new[] { "secret.set", "secret.grant", "secret.grant", "secret.withdraw" }, (await fleet.AuditAsync("secret.")).Select(static record => record.Action).ToArray());
+        // Withdrawn, the value is sealed again as its next version for the machines that keep it.
+        CollectionAssert.AreEqual(new[] { "secret.set", "secret.grant", "secret.grant", "secret.withdraw", "secret.rotate" },
+            (await fleet.AuditAsync("secret.")).Select(static record => record.Action).ToArray());
+        Assert.AreEqual(Token, await fleet.OpenHeldAsync(fleet.NodeKey, "GRAFANA_TOKEN"));
     }
 
     [TestMethod]
@@ -301,7 +328,7 @@ public sealed class FleetSecretsTests
         Assert.AreEqual("staging", sync.Environments.Single().Key);
         string Resolve(CodeAlta.Catalog.Secrets.SecretScope scope, string text = "${secret:TOKEN}")
             => CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForScope(nodeRoot.Path, scope, shell: true).Resolve(text);
-        Assert.AreEqual("staging-value", Resolve(new("default", "local-project", "staging")));
+        Assert.AreEqual("staging-value", Resolve(new("default", "local-project", FleetSecretSync.ScopeOf(sync.Environments["staging"]))));
         Assert.AreEqual("project-value", Resolve(new("default", "local-project", null)));
         Assert.AreEqual("space-value", Resolve(new("default", "another-project", null)));
         Assert.AreEqual("person-value", Resolve(new("home", null, null)));
@@ -382,6 +409,141 @@ public sealed class FleetSecretsTests
     }
 
     [TestMethod]
+    public async Task TwoEnvironmentsOfOneName_AreNeitherChosenByName_NorShareTheirValues()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var list = await fleet.NodeListAsync();
+        var person = list.Members[fleet.DesktopKey.DeviceId].OwnerId!;
+        var guarded = await fleet.Manager.PutEnvironmentAsync("production", [person], [], [], false, CancellationToken.None);
+        await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "DEPLOY_TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Environment, guarded.Id), "guarded-value", false,
+            [fleet.NodeKey.DeviceId], CancellationToken.None);
+
+        // Another environment of the same name, signed as genuinely, that requires no approval (another maintainer's, say).
+        var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        var open = new FleetEnvironmentDefinition(FleetEnvironmentDefinition.CurrentVersion, list.OrganizationId!, person, "open-environment", "production", 5, [], [], [], false,
+            fleet.DesktopKey.DeviceId, now);
+        var openDto = new FleetEnvironmentDto(open.EnvironmentId, open.Name, open.Number, fleet.DesktopKey.DeviceId, now, FleetServerClient.SignEnvironment(fleet.DesktopKey, open));
+        using var rewrite = new RewriteHandler { InnerHandler = new HttpClientHandler(), Environments = environments => environments with { Environments = [.. environments.Environments, openDto] } };
+        using var nodeRoot = new TempDirectory();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(nodeRoot.Path, new CodeAlta.Catalog.Secrets.MasterKeySecretProtector(
+            new CodeAlta.Catalog.Secrets.FileSecretKeyStore(Path.Combine(nodeRoot.Path, "secrets", "key"))));
+        var sync = new FleetSecretSync("link-1", new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey,
+            Path.Combine(fleet.Root.Path, "node-link", FleetOrganizationDevices.PinFileName), rewrite), null, store, null);
+        await sync.SyncAsync(CancellationToken.None);
+
+        // A run that names "production" could be admitted by the open one: the name chooses neither.
+        Assert.IsFalse(sync.Environments.ContainsKey("production"), "a name two environments share is not chosen");
+        // The values of an environment are its own, by the id its definition signs: never reached by another of the same name.
+        var copy = store.ListFleetCopies().Single(static copy => copy.Name == "DEPLOY_TOKEN");
+        Assert.AreNotEqual("production", copy.ScopeId);
+        Assert.IsFalse(CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForScope(nodeRoot.Path, new CodeAlta.Catalog.Secrets.SecretScope(null, null, "production"), shell: true)
+            .TryGet(new CodeAlta.Catalog.Secrets.SecretReference(CodeAlta.Catalog.Secrets.SecretReferenceKind.Secret, "DEPLOY_TOKEN"), out _));
+    }
+
+    [TestMethod]
+    public async Task AnAnswerThatNamesOneEnvironmentTwice_RecordsTheVersionTheMachineTakes()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var person = (await fleet.NodeListAsync()).Members[fleet.DesktopKey.DeviceId].OwnerId!;
+        var production = await fleet.Manager.PutEnvironmentAsync("production", [], [], [], false, CancellationToken.None);
+        using var rewrite = new RewriteHandler { InnerHandler = new HttpClientHandler() };
+        using var nodeRoot = new TempDirectory();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(nodeRoot.Path, new CodeAlta.Catalog.Secrets.MasterKeySecretProtector(
+            new CodeAlta.Catalog.Secrets.FileSecretKeyStore(Path.Combine(nodeRoot.Path, "secrets", "key"))));
+        var sync = new FleetSecretSync("link-1", new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey,
+            Path.Combine(fleet.Root.Path, "node-link", FleetOrganizationDevices.PinFileName), rewrite), null, store, null);
+        using var reader = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        var first = (await reader.ListEnvironmentsAsync()).Environments.Single();
+
+        // Version 2 requires an approval; the server answers it, then version 1 of the same environment.
+        await fleet.Manager.PutEnvironmentAsync("production", [person], [], [], false, CancellationToken.None);
+        rewrite.Environments = environments => environments with { Environments = [.. environments.Environments, first] };
+        await sync.SyncAsync(CancellationToken.None);
+        Assert.AreEqual(2L, sync.Environments["production"].Number, "the newest version of the environment is the one taken");
+        var organization = (await fleet.NodeListAsync()).OrganizationId!;
+        Assert.AreEqual(2L, store.ReadFleetCheckpoint(organization).Environments[production.Id].Number, "the version recorded is the one taken");
+
+        // Then it answers version 1 alone: the rule of approval stays.
+        rewrite.Environments = _ => new FleetEnvironmentListDto([first]);
+        var result = await sync.SyncAsync(CancellationToken.None);
+        Assert.IsFalse(sync.Environments.TryGetValue("production", out var rolledBack) && rolledBack.Approvers.Count == 0, "the rule of approval is not dropped");
+        Assert.IsTrue(result.Refused.Count >= 1, string.Join("; ", result.Refused));
+
+        // The same for a value: its newest version is the one kept and recorded, whatever comes after it in the answer.
+        rewrite.Environments = null;
+        var secret = await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), "v1-value", false,
+            [fleet.NodeKey.DeviceId], CancellationToken.None);
+        var firstCopy = (await fleet.HeldAsync(fleet.NodeKey)).Secrets.Single();
+        await fleet.Manager.RotateAsync(secret.Id, "v2-value", CancellationToken.None);
+        rewrite.Held = held => held with { Secrets = [.. held.Secrets, firstCopy] };
+        await sync.SyncAsync(CancellationToken.None);
+        Assert.AreEqual(2, store.ListFleetCopies().Single(static copy => copy.Name == "TOKEN").Version);
+        Assert.AreEqual(2, store.ReadFleetCheckpoint(organization).Secrets[secret.Id]);
+    }
+
+    [TestMethod]
+    public async Task AValueDeletedOrWithdrawn_DoesNotComeBackWhenTheServerAnswersItAgain()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var deleted = await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "DELETED_TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), "deleted-value", false,
+            [fleet.NodeKey.DeviceId], CancellationToken.None);
+        var withdrawn = await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "WITHDRAWN_TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), "withdrawn-value", false,
+            [fleet.NodeKey.DeviceId], CancellationToken.None);
+        using var rewrite = new RewriteHandler { InnerHandler = new HttpClientHandler() };
+        using var nodeRoot = new TempDirectory();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(nodeRoot.Path, new CodeAlta.Catalog.Secrets.MasterKeySecretProtector(
+            new CodeAlta.Catalog.Secrets.FileSecretKeyStore(Path.Combine(nodeRoot.Path, "secrets", "key"))));
+        FleetSecretSync NewSync() => new("link-1", new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey,
+            Path.Combine(fleet.Root.Path, "node-link", FleetOrganizationDevices.PinFileName), rewrite), null, store, null);
+        var sync = NewSync();
+        await sync.SyncAsync(CancellationToken.None);
+        var copies = (await fleet.HeldAsync(fleet.NodeKey)).Secrets;
+        Assert.AreEqual(2, store.ListFleetCopies().Count);
+
+        // One is deleted, the other is taken away from this machine: the machine sees both go.
+        await fleet.Manager.DeleteAsync(deleted.Id, CancellationToken.None);
+        await fleet.Manager.WithdrawAsync(withdrawn.Id, fleet.NodeKey.DeviceId, CancellationToken.None);
+        await sync.SyncAsync(CancellationToken.None);
+        Assert.AreEqual(0, store.ListFleetCopies().Count);
+
+        // The server answers their copies again, correctly sealed: neither comes back, also once the machine restarted.
+        rewrite.Held = held => held with { Secrets = [.. held.Secrets, .. copies] };
+        foreach (var refreshed in new[] { sync, NewSync() })
+        {
+            var result = await refreshed.SyncAsync(CancellationToken.None);
+            Assert.AreEqual(0, store.ListFleetCopies().Count, "a value deleted or withdrawn does not come back: " + string.Join("; ", result.Refused));
+            Assert.AreEqual(2, result.Refused.Count, string.Join("; ", result.Refused));
+        }
+    }
+
+    [TestMethod]
+    public async Task AValueOrAnEnvironmentTheCheckpointCannotRecord_IsNotTaken()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var organization = (await fleet.NodeListAsync()).OrganizationId!;
+        using var nodeRoot = new TempDirectory();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(nodeRoot.Path, new CodeAlta.Catalog.Secrets.MasterKeySecretProtector(
+            new CodeAlta.Catalog.Secrets.FileSecretKeyStore(Path.Combine(nodeRoot.Path, "secrets", "key"))));
+        // The checkpoint holds as many values and environments as it records.
+        var full = Enumerable.Range(0, 4096).Select(static index => $"old-{index}").ToArray();
+        store.AdvanceFleetCheckpoint(organization, new CodeAlta.Catalog.Secrets.FleetCheckpoint(
+            full.ToDictionary(static id => id, static _ => new CodeAlta.Catalog.Secrets.FleetEnvironmentCheckpoint(1, false, "digest"), StringComparer.Ordinal),
+            full.ToDictionary(static id => id, static _ => 1, StringComparer.Ordinal)));
+        await fleet.Manager.PutEnvironmentAsync("production", [], [], [], false, CancellationToken.None);
+        await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), "v1-value", false,
+            [fleet.NodeKey.DeviceId], CancellationToken.None);
+
+        var sync = new FleetSecretSync("link-1", new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey,
+            Path.Combine(fleet.Root.Path, "node-link", FleetOrganizationDevices.PinFileName)), null, store, null);
+        var result = await sync.SyncAsync(CancellationToken.None);
+
+        // Taken without a checkpoint, a server could make the machine take an older version later: neither is taken.
+        Assert.IsFalse(store.ListFleetCopies().Any(static copy => copy.Name == "TOKEN"), "a value whose version cannot be recorded is not kept");
+        Assert.IsFalse(sync.Environments.ContainsKey("production"), "an environment whose version cannot be recorded is not taken");
+        Assert.AreEqual(2, result.Refused.Count, string.Join("; ", result.Refused));
+    }
+
+    [TestMethod]
     public async Task AnApproval_SignsTheRunThePersonReviewed_NeverOneTheServerSubstitutesAtTheClick()
     {
         await using var fleet = await SecretsFixture.StartAsync();
@@ -406,6 +568,52 @@ public sealed class FleetSecretsTests
         await manager.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(reviewed), CancellationToken.None);
         FleetEnvironmentDocuments.TryReadApproval((await node.GetApprovalAsync(asked.Id)).Approval!.Payload, out var signed, out _);
         Assert.AreEqual(("run-reviewed", nonce, fleet.NodeKey.DeviceId), (signed!.RunId, signed.Nonce, signed.MachineId));
+    }
+
+    [TestMethod]
+    public async Task AnApproval_IsReviewedUnderTheNameItsSignedDefinitionGives_NeverTheOneTheServerLists()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var list = await fleet.NodeListAsync();
+        var person = list.Members[fleet.DesktopKey.DeviceId].OwnerId!;
+        var production = await fleet.Manager.PutEnvironmentAsync("production", [person], [], [], false, CancellationToken.None);
+        using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        var nonce = FleetApprovalRequests.Nonce(fleet.NodeKey, list.OrganizationId!, production.Id, 1, "run-1", null);
+        var asked = await node.RequestApprovalAsync(production.Id, new RequestFleetApprovalRequest("run-1", nonce, 1, null, null));
+
+        // From the first listing on, the server labels the run of production as one of staging: what the person reviews is that label.
+        using var swap = new ApprovalSwapHandler { InnerHandler = new HttpClientHandler(), Swap = approval => approval with { EnvironmentName = "staging" } };
+        var manager = new FleetSecretsManager(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey,
+            Path.Combine(fleet.Root.Path, "desktop-link", FleetOrganizationDevices.PinFileName), swap));
+        var spoofed = (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single() with { EnvironmentName = "staging" };
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => manager.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(spoofed), CancellationToken.None),
+            "a review of the name the server made up signs nothing");
+        Assert.AreEqual(0, swap.Sent);
+        Assert.AreEqual(FleetApprovalStates.Pending, (await node.GetApprovalAsync(asked.Id)).Status);
+    }
+
+    [TestMethod]
+    public async Task AnotherPersonNamedApprover_ApprovesARunOfTheEnvironment_FromTheDefinitionTheyVerify()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        using var beaKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "bea"));
+        var invitation = await fleet.Desktop.InvitePersonAsync(new InvitePersonRequest("Bea"));
+        using (var client = new FleetServerClient(fleet.Server.BaseAddress, beaKey)) await client.EnrollAsync(invitation.Token, "Bea laptop", FleetDeviceKinds.Controller, CancellationToken.None);
+        await fleet.Desktop.ApproveAsync(beaKey.DeviceId, FleetDeviceKinds.Controller, CancellationToken.None);
+        var list = await fleet.NodeListAsync();
+
+        // Alice names Bea the approver of her environment: Bea holds none of its values and does not manage it.
+        var production = await fleet.Manager.PutEnvironmentAsync("production", [invitation.Person.Id], [], [], false, CancellationToken.None);
+        using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        var nonce = FleetApprovalRequests.Nonce(fleet.NodeKey, list.OrganizationId!, production.Id, 1, "run-1", null);
+        var asked = await node.RequestApprovalAsync(production.Id, new RequestFleetApprovalRequest("run-1", nonce, 1, null, null));
+
+        // Bea's device verifies the definition of the environment the run asks, and approves the run under its name.
+        var bea = new FleetSecretsManager(new FleetOrganizationDevices(fleet.Server.BaseAddress, beaKey, Path.Combine(fleet.Root.Path, "bea-link", FleetOrganizationDevices.PinFileName)));
+        var listed = (await bea.ListApprovalsAsync(CancellationToken.None)).Approvals.Single(approval => approval.Id == asked.Id);
+        Assert.AreEqual(0, (await bea.ListEnvironmentsAsync(CancellationToken.None)).Count, "Bea is given no environment to manage");
+        await bea.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(listed), CancellationToken.None);
+        Assert.AreEqual(FleetApprovalStates.Approved, (await node.GetApprovalAsync(asked.Id)).Status);
     }
 
     [TestMethod]
@@ -456,6 +664,34 @@ public sealed class FleetSecretsTests
             {
                 Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(swap(approval), FleetSecretsApiJsonContext.Default.FleetApprovalDto), Encoding.UTF8, "application/json"),
             };
+        }
+    }
+
+    // Answers the environments and the values of a machine changed as a server can change them.
+    private sealed class RewriteHandler : DelegatingHandler
+    {
+        public Func<FleetEnvironmentListDto, FleetEnvironmentListDto>? Environments { get; set; }
+
+        public Func<FleetSecretListDto, FleetSecretListDto>? Held { get; set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = await base.SendAsync(request, cancellationToken);
+            if (request.Method != HttpMethod.Get) return response;
+            var path = request.RequestUri!.AbsolutePath;
+            string? body = null;
+            if (Environments is { } environments && path.EndsWith("/api/v1/environments", StringComparison.Ordinal))
+            {
+                var read = System.Text.Json.JsonSerializer.Deserialize(await response.Content.ReadAsStringAsync(cancellationToken), FleetSecretsApiJsonContext.Default.FleetEnvironmentListDto)!;
+                body = System.Text.Json.JsonSerializer.Serialize(environments(read), FleetSecretsApiJsonContext.Default.FleetEnvironmentListDto);
+            }
+            else if (Held is { } held && path.EndsWith("/api/v1/secrets/held", StringComparison.Ordinal))
+            {
+                var read = System.Text.Json.JsonSerializer.Deserialize(await response.Content.ReadAsStringAsync(cancellationToken), FleetSecretsApiJsonContext.Default.FleetSecretListDto)!;
+                body = System.Text.Json.JsonSerializer.Serialize(held(read), FleetSecretsApiJsonContext.Default.FleetSecretListDto);
+            }
+
+            return body is null ? response : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
         }
     }
 

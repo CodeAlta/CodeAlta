@@ -46,7 +46,10 @@ public sealed class SecretReferenceException : Exception
 /// <summary>The work of a run, which tells the scopes its references resolve in (<c>doc/fleet/secrets.md</c>, scopes).</summary>
 /// <param name="SpaceId">The space of the run on this machine; null for none.</param>
 /// <param name="ProjectId">The project of the run on this machine; null for a chat.</param>
-/// <param name="Environment">The environment the run names, once it was admitted; null for none.</param>
+/// <param name="Environment">
+/// The scope of the environment the run was admitted to, as its values are kept: the organization and the id its signed definition
+/// names, never its name alone, which another environment may have too; null for none.
+/// </param>
 public sealed record SecretScope(string? SpaceId, string? ProjectId, string? Environment)
 {
     /// <summary>Gets the work of no space, project or environment.</summary>

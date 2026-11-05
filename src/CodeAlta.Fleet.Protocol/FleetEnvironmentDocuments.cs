@@ -255,6 +255,36 @@ public static class FleetEnvironmentDocuments
     }
 
     /// <summary>
+    /// Verifies a definition for one of its approvers, who may be of another person than the one it is of: it reads and holds,
+    /// is of the organization of the device list, names the approver among its approvers, and is signed by a controller device
+    /// of the person it is of, with the key the device list holds for it. It gives the approver what they approve, nothing more.
+    /// </summary>
+    /// <param name="signed">The signed definition.</param>
+    /// <param name="devices">The device list as the approver's device verified it.</param>
+    /// <param name="approverPersonId">The person of the approver.</param>
+    /// <param name="definition">The definition, when it verifies.</param>
+    /// <param name="reason">Why it does not verify, or null.</param>
+    /// <returns>Whether it verifies.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="devices"/> or <paramref name="approverPersonId"/> is null.</exception>
+    public static bool TryVerifyForApprover(FleetSignedEnvironment? signed, FleetDeviceListState devices, string approverPersonId,
+        [NotNullWhen(true)] out FleetEnvironmentDefinition? definition, [NotNullWhen(false)] out string? reason)
+    {
+        ArgumentNullException.ThrowIfNull(devices);
+        ArgumentNullException.ThrowIfNull(approverPersonId);
+        definition = null;
+        if (signed is null || string.IsNullOrEmpty(signed.Signature)) return Refuse("the environment does not read", out reason);
+        if (!TryRead(signed.Payload, out var read, out reason)) return false;
+        if (devices.OrganizationId is not { } organization || organization != read.OrganizationId) return Refuse("the environment is of another organization", out reason);
+        if (!read.Approvers.Contains(approverPersonId, StringComparer.Ordinal)) return Refuse("the environment does not name this person among its approvers", out reason);
+        if (!IsSigner(devices, read.SignerDeviceId, read.PersonId, out var signer))
+            return Refuse("the environment is not signed by a controller device of its person", out reason);
+        if (!signer.Key.Verify(GetSignedBytes(signed.Payload), signed.Signature))
+            return Refuse("the signature of the environment does not verify with the key the device list holds for its signer", out reason);
+        definition = read;
+        return true;
+    }
+
+    /// <summary>
     /// Verifies the approval of a run for a machine: it reads and holds, names the environment and the version of the
     /// definition the machine verified, this machine, this run and this nonce; it is valid at <paramref name="now"/>; and it
     /// is signed by a controller device of one of the approvers of the environment, with the key the device list holds for it.

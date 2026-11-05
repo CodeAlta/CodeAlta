@@ -7,12 +7,14 @@ namespace CodeAlta.Agent.Runtime;
 /// <summary>
 /// Replaces the values of the secrets of the machine by <see cref="Mask"/> wherever they would be written or shown: in
 /// the outputs of tools, the events of sessions (and so their journals and what the user sees), the logs and the
-/// telemetry. It reads the values from the store when they change, and never keeps them anywhere else.
+/// telemetry. It reads the values from the store when they change, and never keeps them anywhere else than in its memory.
 /// </summary>
 /// <remarks>
 /// A value shorter than <see cref="MinimumLength"/> is not masked: masking it would hide ordinary words. A text that
 /// comes in parts (the deltas of a stream) is masked through <see cref="CreateStream"/>, which holds back the end of a
-/// part that could begin a secret until the next part tells.
+/// part that could begin a secret until the next part tells. A value it masked once stays masked for as long as it lives,
+/// also once the store no longer gives it (a rotation, a deletion, a value taken away, the bounded and dated values the store keeps
+/// for masking): a process or a stream of this host that took it may still write it.
 /// </remarks>
 public sealed class AgentSecretMasker
 {
@@ -30,6 +32,8 @@ public sealed class AgentSecretMasker
     private readonly Lock _gate = new();
     private Patterns _patterns = Patterns.Empty;
     private long _readAt = long.MinValue;
+    // Every value read from the store since this masker was made, under the gate: the work of this process may still hold one.
+    private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
 
     /// <summary>Initializes a new instance of the <see cref="AgentSecretMasker"/> class.</summary>
     /// <param name="values">Gives the values of the secrets; read again at most once a second.</param>
@@ -358,7 +362,13 @@ public sealed class AgentSecretMasker
                 return _patterns;
             }
 
-            return _patterns = Patterns.Of(values);
+            var count = _seen.Count;
+            foreach (var value in values)
+            {
+                if (value is { Length: >= MinimumLength }) _seen.Add(value);
+            }
+
+            return count == _seen.Count && _patterns.Plain.Length == count ? _patterns : _patterns = Patterns.Of(_seen);
         }
     }
 

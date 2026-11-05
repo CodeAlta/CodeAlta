@@ -77,6 +77,14 @@ public sealed class SessionIdentityResolver
     /// </summary>
     public Func<string, bool>? IsOwnerWork { get; set; }
 
+    /// <summary>
+    /// Gets or sets what records that a session another session started is the work of the same person or run as that session,
+    /// when that session is not the work of the owner (<see cref="IsOwnerWork"/>): a sub-session of a member's session, or of a run
+    /// nobody attends that is not the owner's, resolves none of the owner's values either, and neither do the sessions it starts.
+    /// Called with the session and the session that started it; null records nothing.
+    /// </summary>
+    public Action<string, string>? InheritWork { get; set; }
+
     /// <summary>Gets a new resolver that gives every session the usual settings (its <see cref="Environments"/> its own).</summary>
     public static SessionIdentityResolver None => new(null);
 
@@ -106,7 +114,21 @@ public sealed class SessionIdentityResolver
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The identity; the usual one when the space and the project set none or cannot be read.</returns>
     /// <exception cref="OperationCanceledException">The read was canceled.</exception>
-    public async Task<SessionIdentity> ResolveAsync(string? recordedSpaceId, string? projectId, string? sessionId, CancellationToken cancellationToken)
+    public Task<SessionIdentity> ResolveAsync(string? recordedSpaceId, string? projectId, string? sessionId, CancellationToken cancellationToken)
+        => ResolveAsync(recordedSpaceId, projectId, sessionId, null, cancellationToken);
+
+    /// <summary>
+    /// Gives the identity of a session (<see cref="ResolveAsync(string?, string?, string?, CancellationToken)"/>) started by another
+    /// session: one started by a session that is not the work of the owner is not the owner's work either (<see cref="InheritWork"/>).
+    /// </summary>
+    /// <param name="recordedSpaceId">The space the journal of the session records, or <see langword="null"/>.</param>
+    /// <param name="projectId">The project of the session, or <see langword="null"/> for a chat.</param>
+    /// <param name="sessionId">The session, the run its uses of values are recorded for; null for none.</param>
+    /// <param name="parentSessionId">The session that started it; null for none.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The identity; the usual one when the space and the project set none or cannot be read.</returns>
+    /// <exception cref="OperationCanceledException">The read was canceled.</exception>
+    public async Task<SessionIdentity> ResolveAsync(string? recordedSpaceId, string? projectId, string? sessionId, string? parentSessionId, CancellationToken cancellationToken)
     {
         if (_spaces is null) return SessionIdentity.Usual;
         SpaceDescriptor space;
@@ -126,11 +148,22 @@ public sealed class SessionIdentityResolver
             return SessionIdentity.Usual;
         }
 
-        return Of(space, profiles, new SecretScope(space.Id, string.IsNullOrWhiteSpace(projectId) ? null : projectId, sessionId is null ? null : Environments.Get(sessionId))
+        return Of(space, profiles, new SecretScope(space.Id, string.IsNullOrWhiteSpace(projectId) ? null : projectId, sessionId is null ? null : Environments.ScopeOf(sessionId))
         {
             RunId = sessionId,
-            OwnerWork = sessionId is null || IsOwnerWork?.Invoke(sessionId) != false,
+            OwnerWork = IsOwnersWork(sessionId, parentSessionId),
         });
+    }
+
+    // Whether a session is the work of the owner: neither recorded as another person's or a run's, nor started by such a session,
+    // which it is then recorded as the work of, so that the sessions it starts in turn are not the owner's either.
+    private bool IsOwnersWork(string? sessionId, string? parentSessionId)
+    {
+        if (sessionId is null || IsOwnerWork is not { } isOwnerWork) return true;
+        if (!isOwnerWork(sessionId)) return false;
+        if (string.IsNullOrWhiteSpace(parentSessionId) || string.Equals(parentSessionId, sessionId, StringComparison.Ordinal) || isOwnerWork(parentSessionId)) return true;
+        InheritWork?.Invoke(sessionId, parentSessionId);
+        return false;
     }
 
     /// <summary>Gives the identity of one space.</summary>

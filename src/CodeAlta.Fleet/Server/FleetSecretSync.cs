@@ -38,6 +38,7 @@ public sealed class FleetSecretSync
     private readonly LocalSecretStore _store;
     private readonly Func<CancellationToken, Task<IReadOnlyList<FleetSecretProject>>>? _projects;
     private ImmutableDictionary<string, FleetEnvironmentDefinition> _environments = ImmutableDictionary<string, FleetEnvironmentDefinition>.Empty;
+    private ImmutableHashSet<string> _ambiguous = ImmutableHashSet<string>.Empty;
 
     /// <summary>Initializes a new instance of the <see cref="FleetSecretSync"/> class.</summary>
     /// <param name="source">The id of the server link, which the values are kept under.</param>
@@ -113,8 +114,28 @@ public sealed class FleetSecretSync
         return await client.GetApprovalAsync(approvalId, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Gets the environments of the person as the last refresh verified them, by name; those taken away are not among them.</summary>
+    /// <summary>
+    /// Gets the environments of the person as the last refresh verified them, by name; those taken away are not among them,
+    /// nor a name two environments share (<see cref="AmbiguousEnvironments"/>): a run names an environment it may be admitted to,
+    /// never one of two.
+    /// </summary>
     public IReadOnlyDictionary<string, FleetEnvironmentDefinition> Environments => Volatile.Read(ref _environments);
+
+    /// <summary>Gets the names two environments the last refresh verified share: no run is admitted by them.</summary>
+    public IReadOnlyCollection<string> AmbiguousEnvironments => Volatile.Read(ref _ambiguous);
+
+    /// <summary>
+    /// Gives the scope the values of an environment are kept under on this machine: the organization and the id its signed
+    /// definition names, never its name, which another environment may have too.
+    /// </summary>
+    /// <param name="definition">The environment, as this machine verified it.</param>
+    /// <returns>The scope.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="definition"/> is null.</exception>
+    public static string ScopeOf(FleetEnvironmentDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        return definition.OrganizationId + "/" + definition.EnvironmentId;
+    }
 
     /// <summary>Reads the values of the server for this machine again, and keeps those that open.</summary>
     /// <param name="cancellationToken">Cancels the calls.</param>
@@ -153,11 +174,32 @@ public sealed class FleetSecretSync
         var byId = new Dictionary<string, FleetEnvironmentDefinition>(StringComparer.Ordinal);
         // The person of this machine: the one the signed access document names once it was given to another person.
         var access = Access?.Invoke();
+        // One definition of each environment, its newest version: an answer that names one twice gives no older version, and
+        // two definitions of one version are a conflict, none of which is taken.
+        var answered = new Dictionary<string, (FleetEnvironmentDefinition Definition, string Digest)>(StringComparer.Ordinal);
+        var conflicts = new HashSet<string>(StringComparer.Ordinal);
         foreach (var environment in environments.Environments)
         {
             if (!FleetEnvironmentDocuments.TryVerify(environment.Signed, list, access, _devices.Identity.DeviceId, out var definition, out _) || definition.EnvironmentId != environment.Id)
                 continue;
             var digest = Digest(environment.Signed.Payload);
+            if (answered.TryGetValue(definition.EnvironmentId, out var other))
+            {
+                if (other.Definition.Number == definition.Number && other.Digest != digest) conflicts.Add(definition.EnvironmentId);
+                if (other.Definition.Number >= definition.Number) continue;
+            }
+
+            answered[definition.EnvironmentId] = (definition, digest);
+        }
+
+        foreach (var id in conflicts)
+        {
+            if (answered.Remove(id, out var conflict))
+                refused.Add($"environment {conflict.Definition.Name}: the server answers two definitions of version {conflict.Definition.Number}");
+        }
+
+        foreach (var (definition, digest) in answered.Values)
+        {
             if (checkpoint.Environments.TryGetValue(definition.EnvironmentId, out var newest)
                 && (definition.Number < newest.Number || definition.Number == newest.Number && digest != newest.Digest))
             {
@@ -169,18 +211,38 @@ public sealed class FleetSecretSync
 
             takenEnvironments[definition.EnvironmentId] = new FleetEnvironmentCheckpoint(definition.Number, definition.Removed, digest);
             byId[definition.EnvironmentId] = definition;
-            if (!definition.Removed && (!verified.TryGetValue(definition.Name, out var known) || known.Number < definition.Number)) verified[definition.Name] = definition;
         }
 
-        Volatile.Write(ref _environments, verified.ToImmutable());
         var spaces = SpacesById();
         var projects = await ProjectsByKeyAsync(cancellationToken).ConfigureAwait(false);
         var values = new List<FleetSecretValue>(held.Secrets.Count);
-        foreach (var secret in held.Secrets)
+        var opened = new List<(FleetSecretDto Secret, string Value)>(held.Secrets.Count);
+        // One copy of each value, its newest version: two copies of one version are a conflict, none of which is taken.
+        var offered = new List<FleetSecretDto>(held.Secrets.Count);
+        foreach (var group in held.Secrets.GroupBy(static secret => secret.Id, StringComparer.Ordinal))
+        {
+            var newestOffered = group.Max(static secret => secret.Version);
+            var candidates = group.Where(secret => secret.Version == newestOffered).ToArray();
+            if (candidates.Length > 1)
+            {
+                refused.Add($"{candidates[0].Name}: the server answers two copies of version {newestOffered}");
+                continue;
+            }
+
+            offered.Add(candidates[0]);
+        }
+
+        foreach (var secret in offered)
         {
             if (checkpoint.Secrets.TryGetValue(secret.Id, out var newestVersion) && secret.Version < newestVersion)
             {
                 refused.Add($"{secret.Name}: version {secret.Version} is older than version {newestVersion}, which this machine took");
+                continue;
+            }
+
+            if (checkpoint.Withdrawn.TryGetValue(secret.Id, out var withdrawnVersion) && secret.Version <= withdrawnVersion)
+            {
+                refused.Add($"{secret.Name}: version {secret.Version} was taken away from this machine");
                 continue;
             }
 
@@ -191,13 +253,54 @@ public sealed class FleetSecretSync
             }
 
             takenSecrets[secret.Id] = Math.Max(secret.Version, takenSecrets.GetValueOrDefault(secret.Id));
-            // A value of a scope this machine does not know (a space it does not link, a project it does not have) is not kept.
+            opened.Add((secret, value));
+        }
+
+        // A value this machine took that the server no longer answers was deleted or withdrawn from it: the version it held is
+        // recorded as taken away, so that a server that answers it again later, correctly sealed, does not bring it back. Only a
+        // newer version is taken then (a value given again to this machine is rotated first).
+        var answeredIds = held.Secrets.Select(static secret => secret.Id).ToHashSet(StringComparer.Ordinal);
+        var withdrawn = checkpoint.Secrets.Where(entry => !answeredIds.Contains(entry.Key)
+                && (!checkpoint.Withdrawn.TryGetValue(entry.Key, out var known) || known < entry.Value))
+            .ToDictionary(static entry => entry.Key, static entry => entry.Value, StringComparer.Ordinal);
+
+        // The checkpoint first: an environment and a value are taken only once their version is recorded, and one the checkpoint
+        // cannot record (it holds as many as it records) is not taken at all.
+        if (organization is not null && _store.AdvanceFleetCheckpoint(organization, new FleetCheckpoint(takenEnvironments, takenSecrets) { Withdrawn = withdrawn }) is { } unrecorded)
+        {
+            foreach (var id in unrecorded.Environments.Keys)
+            {
+                if (byId.Remove(id, out var definition)) refused.Add($"environment {definition.Name}: this machine records the versions of {LocalSecretStore.MaximumCheckpointEntries} environments already");
+            }
+
+            foreach (var (secret, _) in opened.Where(pair => unrecorded.Secrets.ContainsKey(pair.Secret.Id)))
+                refused.Add($"{secret.Name}: this machine records the versions of {LocalSecretStore.MaximumCheckpointEntries} values already");
+            opened.RemoveAll(pair => unrecorded.Secrets.ContainsKey(pair.Secret.Id));
+        }
+
+        // By name, the environments not taken away; a name two of them share chooses neither.
+        var ambiguous = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
+        foreach (var group in byId.Values.Where(static definition => !definition.Removed).GroupBy(static definition => definition.Name, StringComparer.Ordinal))
+        {
+            if (group.Skip(1).Any())
+            {
+                ambiguous.Add(group.Key);
+                refused.Add($"environment {group.Key}: {group.Count()} environments have this name, a run names none of them");
+                continue;
+            }
+
+            verified[group.Key] = group.First();
+        }
+
+        Volatile.Write(ref _ambiguous, ambiguous.ToImmutable());
+        Volatile.Write(ref _environments, verified.ToImmutable());
+        // A value of a scope this machine does not know (a space it does not link, a project it does not have) is not kept.
+        foreach (var (secret, value) in opened)
+        {
             foreach (var scopeId in LocalScopes(secret.Scope, spaces, projects, byId))
                 values.Add(new FleetSecretValue(_source, secret.Id, secret.Kind, secret.Name, LocalKind(secret.Scope.Kind), scopeId, secret.Version, secret.HostOnly, value));
         }
 
-        // The checkpoint first: a value is kept only once its version is recorded.
-        if (organization is not null) _store.AdvanceFleetCheckpoint(organization, new FleetCheckpoint(takenEnvironments, takenSecrets));
         _store.ReplaceFleetCopies(_source, values);
         return new FleetSecretSyncResult(values.Count, refused, false);
     }
@@ -225,6 +328,7 @@ public sealed class FleetSecretSync
     public void Forget()
     {
         Volatile.Write(ref _environments, ImmutableDictionary<string, FleetEnvironmentDefinition>.Empty);
+        Volatile.Write(ref _ambiguous, ImmutableHashSet<string>.Empty);
         _store.RemoveFleetCopies(_source);
     }
 
@@ -257,7 +361,7 @@ public sealed class FleetSecretSync
                 foreach (var project in projects[id]) yield return project;
                 break;
             case FleetSecretScopeKinds.Environment when scope.Id is { } id && environments.TryGetValue(id, out var environment) && !environment.Removed:
-                yield return environment.Name;
+                yield return ScopeOf(environment);
                 break;
         }
     }

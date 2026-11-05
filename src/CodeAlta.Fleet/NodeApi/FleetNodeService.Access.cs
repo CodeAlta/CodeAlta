@@ -46,6 +46,20 @@ public sealed partial class FleetNodeService
     /// <returns>The person, or null.</returns>
     public string? PersonOfSession(string sessionId) => Principals.PersonOf(sessionId);
 
+    /// <summary>
+    /// Records that a session of this machine is a run nobody attends that is not the work of its owner (an automation of a team or of
+    /// the organization, or one another person gave): it resolves none of the owner's values. Called before the session attaches.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="actingAs">The service identity it acts as; null for none.</param>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
+    /// <exception cref="IOException">It could not be recorded.</exception>
+    public void RecordUnattendedWork(string sessionId, string? actingAs)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        Principals.RecordUnattended(sessionId, actingAs);
+    }
+
     /// <summary>Gets the organization of the person who started a session here through a team membership; null otherwise.</summary>
     /// <param name="sessionId">The session.</param>
     /// <returns>The organization, or null.</returns>
@@ -248,12 +262,31 @@ internal sealed class FleetSessionPrincipals
     {
         if (personId is null) return false;
         lock (_gate)
-            return _items.Any(item => item.SessionId == sessionId && item.PersonId == personId && string.Equals(item.OrganizationId, organizationId, StringComparison.Ordinal));
+            return _items.Any(item => item.SessionId == sessionId && !item.Unattended && item.PersonId == personId
+                && string.Equals(item.OrganizationId, organizationId, StringComparison.Ordinal));
     }
 
     public string? PersonOf(string sessionId)
     {
-        lock (_gate) return _items.FirstOrDefault(item => item.SessionId == sessionId)?.PersonId;
+        lock (_gate) return _items.FirstOrDefault(item => item.SessionId == sessionId && !item.Unattended)?.PersonId;
+    }
+
+    // Whether whose work a session is was recorded: a person's, or a run nobody attends that is not the owner's.
+    public bool IsAttributed(string sessionId)
+    {
+        lock (_gate) return _items.Any(item => item.SessionId == sessionId);
+    }
+
+    // A run nobody attends that is not the work of the owner (an automation of a team or of the organization), with the service
+    // identity it acts as: it resolves none of the owner's values, and is the work of no person.
+    public void RecordUnattended(string sessionId, string? actingAs)
+    {
+        lock (_gate)
+        {
+            if (_items.Any(item => item.SessionId == sessionId)) return;
+            _items.Add(new FleetSessionPrincipal(sessionId, actingAs ?? string.Empty, null) { Unattended = true });
+            Save();
+        }
     }
 
     public string? OrganizationOf(string sessionId)
@@ -263,7 +296,7 @@ internal sealed class FleetSessionPrincipals
 
     public IReadOnlyList<(string SessionId, string PersonId, string? OrganizationId)> List()
     {
-        lock (_gate) return [.. _items.Select(static item => (item.SessionId, item.PersonId, item.OrganizationId))];
+        lock (_gate) return [.. _items.Where(static item => !item.Unattended).Select(static item => (item.SessionId, item.PersonId, item.OrganizationId))];
     }
 
     public void Record(string sessionId, string personId, string? organizationId)
@@ -272,10 +305,33 @@ internal sealed class FleetSessionPrincipals
         {
             if (_items.Any(item => item.SessionId == sessionId)) return;
             _items.Add(new FleetSessionPrincipal(sessionId, personId, organizationId));
-            if (_items.Count > MaxSessions) _items.RemoveRange(0, _items.Count - MaxSessions);
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            FleetFiles.WriteAtomically(_path, JsonSerializer.SerializeToUtf8Bytes(_items, FleetSessionPrincipalJson.Default.ListFleetSessionPrincipal));
+            Save();
         }
+    }
+
+    // A session another session started: the work of the same person, or the same run nobody attends, as that session; nothing for a
+    // session of the owner. A file that cannot be written leaves it unrecorded: the session is still not the owner's work while
+    // its parent is not, and it is recorded at its next resolution.
+    public void Inherit(string sessionId, string parentSessionId)
+    {
+        lock (_gate)
+        {
+            if (_items.Any(item => item.SessionId == sessionId) || _items.FirstOrDefault(item => item.SessionId == parentSessionId) is not { } parent) return;
+            _items.Add(parent with { SessionId = sessionId });
+            try { Save(); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                _items.RemoveAt(_items.Count - 1);
+            }
+        }
+    }
+
+    // Under the gate.
+    private void Save()
+    {
+        if (_items.Count > MaxSessions) _items.RemoveRange(0, _items.Count - MaxSessions);
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        FleetFiles.WriteAtomically(_path, JsonSerializer.SerializeToUtf8Bytes(_items, FleetSessionPrincipalJson.Default.ListFleetSessionPrincipal));
     }
 
     private static List<FleetSessionPrincipal> Load(string path)
@@ -335,7 +391,11 @@ internal sealed class FleetPairedOwner(string fleetRoot)
 /// <param name="SessionId">The session.</param>
 /// <param name="PersonId">The person.</param>
 /// <param name="OrganizationId">The organization of the person; null for a session recorded before it was kept.</param>
-internal sealed record FleetSessionPrincipal(string SessionId, string PersonId, string? OrganizationId = null);
+internal sealed record FleetSessionPrincipal(string SessionId, string PersonId, string? OrganizationId = null)
+{
+    /// <summary>Gets whether the session is a run nobody attends that is not the owner's work; <see cref="PersonId"/> is then the service identity it acts as, or empty.</summary>
+    public bool Unattended { get; init; }
+}
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
 [JsonSerializable(typeof(List<FleetSessionPrincipal>))]

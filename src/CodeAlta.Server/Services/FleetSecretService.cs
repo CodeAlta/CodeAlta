@@ -316,7 +316,7 @@ internal sealed class FleetSecretService
             details: Json(("environment", environment.Name), ("run", request.RunId))), cancellationToken).ConfigureAwait(false);
         if (held.EnvironmentId != environment.Id || held.Nonce != request.Nonce)
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.ApprovalConflict, "This run asked another approval already.");
-        return ToDto(held, environment.Name);
+        return ToDto(held, environment);
     }
 
     /// <summary>Reads an approval: its machine, or a controller device of the environment's person or of one of its approvers.</summary>
@@ -329,7 +329,7 @@ internal sealed class FleetSecretService
     {
         ArgumentNullException.ThrowIfNull(actor);
         var (approval, environment, _) = await ReadApprovalAsync(actor, id, cancellationToken).ConfigureAwait(false);
-        return ToDto(approval, environment.Name);
+        return ToDto(approval, environment);
     }
 
     /// <summary>Lists the approvals of the environments of the calling device's person, and of those it approves, the newest first.</summary>
@@ -346,7 +346,7 @@ internal sealed class FleetSecretService
         var approvals = await _secrets.ListFleetApprovalsAsync(actor.OrganizationId, environments.Keys, MaxListed, cancellationToken).ConfigureAwait(false);
         // A machine sees the approvals of its own runs only.
         return new FleetApprovalListDto([.. approvals.Where(approval => actor.Kind == FleetDeviceKinds.Controller || approval.MachineId == actor.Id)
-            .Select(approval => ToDto(approval, environments[approval.EnvironmentId].Name))]);
+            .Select(approval => ToDto(approval, environments[approval.EnvironmentId]))]);
     }
 
     /// <summary>Gives an approval that waits, with the approval the calling controller device of an approver signed.</summary>
@@ -382,7 +382,7 @@ internal sealed class FleetSecretService
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.ApprovalConflict, "The approval was given already.");
         Notify([approval.MachineId], actor.Id);
         return ToDto(approval with { Status = FleetApprovalStates.Approved, ApprovalPayload = signed.Payload, ApprovalSignature = signed.Signature, ApproverDeviceId = actor.Id,
-            ApprovedAt = now }, environment.Name);
+            ApprovedAt = now }, environment);
     }
 
     private async Task<(FleetApprovalRecord Approval, FleetEnvironmentRecord Environment, IReadOnlyList<string> Approvers)> ReadApprovalAsync(DeviceRecord actor, string id,
@@ -521,10 +521,14 @@ internal sealed class FleetSecretService
     private static FleetEnvironmentDto ToDto(FleetEnvironmentRecord environment)
         => new(environment.Id, environment.Name, environment.Number, environment.SignerDeviceId, environment.UpdatedAt, new FleetSignedEnvironment(environment.Payload, environment.Signature));
 
-    private static FleetApprovalDto ToDto(FleetApprovalRecord approval, string environmentName)
-        => new(approval.Id, approval.EnvironmentId, environmentName, approval.EnvironmentNumber, approval.MachineId, approval.RunId, approval.Nonce, approval.AutomationId,
+    // With the signed definition of its environment: an approver of another person verifies what they approve, its values stay out.
+    private static FleetApprovalDto ToDto(FleetApprovalRecord approval, FleetEnvironmentRecord environment)
+        => new(approval.Id, approval.EnvironmentId, environment.Name, approval.EnvironmentNumber, approval.MachineId, approval.RunId, approval.Nonce, approval.AutomationId,
             approval.Title, approval.Status, approval.RequestedAt,
-            approval.ApprovalPayload is { } payload && approval.ApprovalSignature is { } signature ? new FleetSignedApproval(payload, signature) : null);
+            approval.ApprovalPayload is { } payload && approval.ApprovalSignature is { } signature ? new FleetSignedApproval(payload, signature) : null)
+        {
+            Environment = new FleetSignedEnvironment(environment.Payload, environment.Signature),
+        };
 
     private static string Details(FleetSecretRecord secret, params (string Name, string Value)[] more)
         => Json([("kind", secret.Kind), ("name", secret.Name), ("scope", secret.ScopeKind), ("scopeId", secret.ScopeId), ("version", secret.Version.ToString(CultureInfo.InvariantCulture)),

@@ -170,20 +170,39 @@ public sealed class FleetSecretsManager
         return await client.AddSecretCopiesAsync(id, new AddFleetSecretCopiesRequest(held.Version, [copy]), cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Takes a machine's copy of a value away: it does not get the value at its next run.</summary>
+    /// <summary>
+    /// Takes a machine's copy of a value away: it does not get the value at its next run. The value is sealed again as its next
+    /// version for the machines that keep it, from the copy of this device: the grant the machine withdrawn was given is of an
+    /// older version, so that a server that lists it again as a holder does not make a rotation give it the next value.
+    /// </summary>
     /// <param name="id">The id of the value.</param>
     /// <param name="machineId">The machine.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The value as the server holds it now.</returns>
-    /// <exception cref="ArgumentException">An id is empty.</exception>
+    /// <exception cref="ArgumentException">An id is empty, or this device is not a controller device of the list.</exception>
+    /// <exception cref="KeyNotFoundException">No value of the person has this id.</exception>
+    /// <exception cref="InvalidDataException">The copy of this device does not open: the copy is taken away, the value is not sealed again.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
     /// <exception cref="FleetServerException">The server refused it.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<FleetSecretDto> WithdrawAsync(string id, string machineId, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
         ArgumentException.ThrowIfNullOrEmpty(machineId);
+        var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        var person = PersonOf(list);
         using var client = Client();
-        return await client.RemoveSecretCopyAsync(id, machineId, cancellationToken).ConfigureAwait(false);
+        await client.RemoveSecretCopyAsync(id, machineId, cancellationToken).ConfigureAwait(false);
+        var held = await FindAsync(client, id, cancellationToken).ConfigureAwait(false);
+        var own = held.Copy ?? throw new InvalidDataException("This device holds no copy of the value to seal again.");
+        var access = Access?.Invoke();
+        var binding = FleetSecretBinding.Of(held);
+        var kept = FleetSecretSealing.GrantedHolders(held, list, access).Intersect(held.Holders, StringComparer.Ordinal)
+            .Where(holder => !string.Equals(holder, machineId, StringComparison.Ordinal));
+        var copies = FleetSecretSealing.Reseal(own, binding, binding with { Version = held.Version + 1 }, FleetSecretSealing.Recipients(list, access, person, kept)
+            .Where(member => !string.Equals(member.DeviceId, machineId, StringComparison.Ordinal)).ToArray(), list, access, _devices.Identity);
+        return await client.PutSecretAsync(id, new SetFleetSecretRequest(held.Kind, held.Name, held.Scope, held.Version + 1, held.HostOnly, copies), cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Reads a variable back from the copy sealed for this device; a secret is never read back.</summary>
@@ -253,6 +272,59 @@ public sealed class FleetSecretsManager
     }
 
     /// <summary>
+    /// Gives the environment of an approval as this device verified it: among the definitions it verified, the one of that
+    /// environment at the version the machine asked, not taken away. Its name is the one a person reviews, never the one the
+    /// server lists with the approval.
+    /// </summary>
+    /// <param name="approval">The approval.</param>
+    /// <param name="verified">The definitions this device verified.</param>
+    /// <returns>The definition; null when this device verified none of that environment and version.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static FleetEnvironmentDefinition? VerifiedEnvironmentOf(FleetApprovalDto approval, IEnumerable<FleetEnvironmentDefinition> verified)
+    {
+        ArgumentNullException.ThrowIfNull(approval);
+        ArgumentNullException.ThrowIfNull(verified);
+        return verified.FirstOrDefault(definition => !definition.Removed && definition.EnvironmentId == approval.EnvironmentId && definition.Number == approval.EnvironmentVersion);
+    }
+
+    /// <summary>
+    /// Gives the environment of an approval as this device verifies it, as <see cref="VerifiedEnvironmentOf(FleetApprovalDto, IEnumerable{FleetEnvironmentDefinition})"/>
+    /// does, also from the definition the server gives with the approval: one of another person, which names this device's person
+    /// among its approvers and a controller device of its person signed (<see cref="FleetEnvironmentDocuments.TryVerifyForApprover"/>).
+    /// </summary>
+    /// <param name="approval">The approval.</param>
+    /// <param name="verified">The definitions of this device's person it verified.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <param name="personId">The person of this device.</param>
+    /// <returns>The definition; null when none verifies for that environment and version.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static FleetEnvironmentDefinition? VerifiedEnvironmentOf(FleetApprovalDto approval, IEnumerable<FleetEnvironmentDefinition> verified, FleetDeviceListState list,
+        string personId)
+    {
+        ArgumentNullException.ThrowIfNull(list);
+        ArgumentNullException.ThrowIfNull(personId);
+        if (VerifiedEnvironmentOf(approval, verified) is { } own) return own;
+        return FleetEnvironmentDocuments.TryVerifyForApprover(approval.Environment, list, personId, out var definition, out _)
+            ? VerifiedEnvironmentOf(approval, [definition])
+            : null;
+    }
+
+    /// <summary>
+    /// Gives what a person reviews of an approval (<see cref="ReviewOf(FleetApprovalDto)"/>), under the name of the environment
+    /// its definition, as this device verified it, gives.
+    /// </summary>
+    /// <param name="approval">The approval as it was shown.</param>
+    /// <param name="environment">The environment as this device verified it (<see cref="VerifiedEnvironmentOf(FleetApprovalDto, IEnumerable{FleetEnvironmentDefinition}, FleetDeviceListState, string)"/>).</param>
+    /// <returns>The text, the same for the same approval.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static string ReviewOf(FleetApprovalDto approval, FleetEnvironmentDefinition environment)
+    {
+        ArgumentNullException.ThrowIfNull(approval);
+        ArgumentNullException.ThrowIfNull(environment);
+        return ReviewOf(approval with { EnvironmentName = environment.Name });
+    }
+
+    /// <summary>
     /// Gives what a person reviews of an approval, as a short text that the approval they click must still match: its id,
     /// the environment, its name and version, the machine, the run, the nonce, the automation and the title.
     /// </summary>
@@ -271,11 +343,12 @@ public sealed class FleetSecretsManager
     /// <summary>
     /// Approves the run a person reviewed, which waits for an environment: this device signs an approval bound to that
     /// environment and its version, the machine, the run and the nonce the machine chose, valid for <see cref="ApprovalLifetime"/>.
-    /// The approval is read again first and must be the one reviewed (<see cref="ReviewOf"/>): a server that answers another
-    /// run, machine or nonce for the same approval gets nothing signed.
+    /// The approval is read again first and must be the one reviewed (<see cref="ReviewOf(FleetApprovalDto, FleetEnvironmentDefinition)"/>): a server
+    /// that answers another run, machine or nonce for the same approval gets nothing signed. Its environment is the one this device
+    /// verifies, at the version the machine asked, and the name reviewed is the one that definition gives: never one the server lists.
     /// </summary>
     /// <param name="approvalId">The approval.</param>
-    /// <param name="reviewed">What the person reviewed of it (<see cref="ReviewOf"/> of the approval shown).</param>
+    /// <param name="reviewed">What the person reviewed of it (<see cref="ReviewOf(FleetApprovalDto, FleetEnvironmentDefinition)"/> of the approval shown).</param>
     /// <param name="cancellationToken">Cancels the calls.</param>
     /// <returns>The approval as the server holds it now.</returns>
     /// <exception cref="ArgumentException">An argument is empty, or this device is not a controller device of the list.</exception>
@@ -291,7 +364,12 @@ public sealed class FleetSecretsManager
         var person = PersonOf(list);
         using var client = Client();
         var asked = await client.GetApprovalAsync(approvalId, cancellationToken).ConfigureAwait(false);
-        if (asked.Id != approvalId || !string.Equals(ReviewOf(asked), reviewed, StringComparison.Ordinal))
+        var environments = await client.ListEnvironmentsAsync(cancellationToken).ConfigureAwait(false);
+        var verified = environments.Environments.Select(environment => FleetEnvironmentDocuments.TryVerify(environment.Signed, list, Access?.Invoke(), _devices.Identity.DeviceId,
+            out var definition, out _) ? definition : null).OfType<FleetEnvironmentDefinition>();
+        if (VerifiedEnvironmentOf(asked, verified, list, person) is not { } environment)
+            throw new InvalidDataException("The environment of the approval is not one this device verifies at the version the machine asked: nothing is signed.");
+        if (asked.Id != approvalId || !string.Equals(ReviewOf(asked, environment), reviewed, StringComparison.Ordinal))
             throw new InvalidDataException("The approval changed since it was shown: read the approvals again before approving.");
         // What the machine asked itself, never a request the server made up or changed.
         if (!FleetApprovalRequests.IsAskedBy(asked, list, out var notAsked)) throw new InvalidDataException($"The run is not one its machine asked: {notAsked}.");
