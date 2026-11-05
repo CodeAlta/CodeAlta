@@ -24,8 +24,10 @@ internal sealed class SessionFactsState
     /// Version 8 counts an <c>alta mcp skill activate</c> as a use of a skill of its MCP server (<c>mcp:&lt;server&gt;</c>).
     /// Version 9 counts the runs of scripts of Code Mode from their records, the calls scripts make, the <c>exec</c> calls of a
     /// run, <c>exec</c> and <c>wait</c> as tools of their own kind, and the run of the script that started a session.
+    /// Version 10 counts the start and the time of a run, until its first request reports its model, under the model that request
+    /// reports (an alias, or what it stood for in an earlier turn, until then).
     /// </summary>
-    public const int CurrentVersion = 9;
+    public const int CurrentVersion = 10;
 
     /// <summary>The number of runs whose end is remembered, so that a late record of a run that ended does not open it again.</summary>
     public const int MaxClosedRuns = 32;
@@ -392,6 +394,34 @@ internal sealed class OpenRunState
 
     /// <summary>Gets or sets the <c>exec</c> calls of the run.</summary>
     public long ExecCalls { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether a request of the run reported the model it ran.</summary>
+    public bool ModelReported { get; set; }
+
+    /// <summary>
+    /// Gets or sets the time of the run counted before a request of the run reported its model, under the model in force then: it
+    /// goes on the model that request reports, with the start of the run.
+    /// </summary>
+    public List<UnreportedTimeState> Unreported { get; set; } = [];
+}
+
+/// <summary>Active time of a run counted in a quarter hour before a request of the run reported its model.</summary>
+internal sealed class UnreportedTimeState
+{
+    /// <summary>Gets or sets the quarter hour.</summary>
+    public int Quarter { get; set; }
+
+    /// <summary>Gets or sets the provider it was counted under.</summary>
+    public string Provider { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the model it was counted under.</summary>
+    public string Model { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the effort it was counted under.</summary>
+    public string Effort { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the milliseconds.</summary>
+    public long Milliseconds { get; set; }
 }
 
 /// <summary>A run of a script of Code Mode that started and has not ended, with what it did so far.</summary>

@@ -372,8 +372,10 @@ public sealed class SessionFactsReducerTests
         var batch = Reduce(b);
 
         Assert.IsTrue(batch.Activity.Keys.All(static key => key.Model is "opus" or "claude-opus-5-5"));
-        Assert.AreEqual(1, batch.Activity.Where(static pair => pair.Key.Model == "opus").Sum(static pair => pair.Value.RunsStarted), "only the first run of the session started under the alias");
-        Assert.AreEqual(1, batch.Activity.Where(static pair => pair.Key.Model == "claude-opus-5-5").Sum(static pair => pair.Value.RunsStarted));
+        // The first run started under the alias, and its request said the model: its start and its time go there too.
+        Assert.AreEqual(0, batch.Activity.Where(static pair => pair.Key.Model == "opus").Sum(static pair => pair.Value.RunsStarted), "no run stays on the alias");
+        Assert.AreEqual(0, batch.Activity.Where(static pair => pair.Key.Model == "opus").Sum(static pair => pair.Value.ActiveMs));
+        Assert.AreEqual(2, batch.Activity.Where(static pair => pair.Key.Model == "claude-opus-5-5").Sum(static pair => pair.Value.RunsStarted));
     }
 
     [TestMethod]
