@@ -133,6 +133,37 @@ public sealed class NamedPeopleTests
             await Assert.ThrowsExactlyAsync<FleetException>(() => bea.ReadHistoryAsync(new FleetHistoryParams(shared.SessionId), token));
     }
 
+    [TestMethod]
+    public async Task ALiveReadOfAGrantee_EndsOnceTheGrantIsGone()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        using var beaKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "bea"));
+        var acme = new OtherPeople("acme") { [beaKey.Fingerprint] = ("bea", beaKey.DeviceId) };
+        FleetCreateSessionResult shared;
+        await using (var owner = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token))
+            shared = await owner.CreateSessionAsync(new FleetCreateSessionParams(Title: "Fix the parser"), "create-shared", token);
+        var gone = 0;
+        fixture.Service.ContentGrants = (organization, person, session) => Volatile.Read(ref gone) == 0 && (organization, person, session) == ("acme", "bea", shared.SessionId);
+
+        await using var bea = await ConnectAsync(fixture, acme, beaKey, token);
+        var watch = await bea.WatchAsync(shared.SessionId, token);
+        // The grant expires, or a newer signed document takes it away: what she reads live ends, while nothing new is sent too.
+        Interlocked.Exchange(ref gone, 1);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        try
+        {
+            await foreach (var _ in watch.Updates.ReadAllAsync(timeout.Token)) { }
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            Assert.Fail("the live read of a grant that is gone goes on");
+        }
+
+        Assert.AreEqual("forbidden", watch.EndReason);
+    }
+
     private static async Task<FleetNodeClient> ConnectAsync(FleetNodeFixture fixture, IDeviceTrustPolicy trust, DeviceIdentity identity, CancellationToken token)
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
