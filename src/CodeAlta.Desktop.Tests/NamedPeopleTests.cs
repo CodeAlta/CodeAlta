@@ -108,8 +108,14 @@ public sealed class NamedPeopleTests
         {
             shared = await owner.CreateSessionAsync(new FleetCreateSessionParams(Title: "Fix the parser", Prompt: "Find the bug."), "create-shared", token);
             other = await owner.CreateSessionAsync(new FleetCreateSessionParams(Title: "Not shared"), "create-other", token);
+            // The prompt the grantee reads below is in the history of the session first, as its owner reads it: an earlier entry
+            // (the start of the session) comes before it.
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-            while ((await owner.ReadHistoryAsync(new FleetHistoryParams(shared.SessionId), token)).Entries.Count == 0 && DateTime.UtcNow < deadline) await Task.Delay(100, token);
+            while (!HasPrompt(await owner.ReadHistoryAsync(new FleetHistoryParams(shared.SessionId), token)))
+            {
+                if (DateTime.UtcNow > deadline) Assert.Fail("The owner does not read the first prompt of the session in its history within 30 seconds.");
+                await Task.Delay(100, token);
+            }
         }
 
         // The signed access document of Acme grants Bea the content of the first session: she reads it, and nothing else.
@@ -117,8 +123,7 @@ public sealed class NamedPeopleTests
         fixture.Service.ContentGrants = (organization, person, session) => grants.Contains((organization, person, session));
         await using (var bea = await ConnectAsync(fixture, acme, beaKey, token))
         {
-            var history = await bea.ReadHistoryAsync(new FleetHistoryParams(shared.SessionId), token);
-            Assert.IsTrue(history.Entries.Any(static entry => entry.Text?.Contains("Find the bug.", StringComparison.Ordinal) == true), "the grantee reads the conversation");
+            Assert.IsTrue(HasPrompt(await bea.ReadHistoryAsync(new FleetHistoryParams(shared.SessionId), token)), "the grantee reads the conversation");
             Assert.AreEqual(shared.SessionId, (await bea.GetSessionStateAsync(shared.SessionId, token)).SessionId);
             var hidden = await Assert.ThrowsExactlyAsync<FleetException>(() => bea.ReadHistoryAsync(new FleetHistoryParams(other.SessionId), token));
             Assert.AreEqual(FleetErrorCodes.Forbidden, hidden.Error.Code, "another session is not hers to read");
@@ -131,6 +136,8 @@ public sealed class NamedPeopleTests
         grants.Clear();
         await using (var bea = await ConnectAsync(fixture, acme, beaKey, token))
             await Assert.ThrowsExactlyAsync<FleetException>(() => bea.ReadHistoryAsync(new FleetHistoryParams(shared.SessionId), token));
+
+        static bool HasPrompt(FleetHistoryResult history) => history.Entries.Any(static entry => entry.Text?.Contains("Find the bug.", StringComparison.Ordinal) == true);
     }
 
     [TestMethod]
