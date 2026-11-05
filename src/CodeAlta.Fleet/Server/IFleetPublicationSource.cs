@@ -38,7 +38,7 @@ public static class FleetSessionStates
 /// What recognizes its project on the person's machines (<see cref="FleetProjectKeys"/>); null for a session without a project.
 /// Never published: its statistics carry its blind index only.
 /// </param>
-/// <param name="PersonId">The person who started it here through a team membership (a team machine); null otherwise.</param>
+/// <param name="PersonId">The person who started it here through a role (a machine of a team or of the organization); null otherwise.</param>
 /// <param name="PersonOrganizationId">
 /// The organization of <paramref name="PersonId"/>: only its server is told the person, a person's id being unique within one organization.
 /// </param>

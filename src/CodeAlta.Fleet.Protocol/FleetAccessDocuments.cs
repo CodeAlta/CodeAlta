@@ -388,10 +388,31 @@ public sealed record FleetAccessState(
     }
 
     /// <summary>
+    /// Gets whether a member of the device list is a machine with no person of its own, as the signed access document says: a
+    /// machine of a team or of the organization, which holds what roles give (<see cref="HoldsValuesOf"/>, <see cref="HoldsKeysOf"/>),
+    /// never what the person the device list names for it has by that alone.
+    /// </summary>
+    /// <param name="access">The access document, as the device verified it; null for none: every machine is of its person.</param>
+    /// <param name="member">The member of the device list.</param>
+    /// <returns>Whether it is a machine of a team or of the organization.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="member"/> is null.</exception>
+    public static bool IsSharedMachine(FleetAccessState? access, FleetDeviceListMember member)
+    {
+        ArgumentNullException.ThrowIfNull(member);
+        return member.Kind == FleetDeviceKinds.Node && access is not null && access.IsSharedMachine(member.DeviceId);
+    }
+
+    /// <summary>Gets whether a machine has no person of its own: a machine of a team or of the organization.</summary>
+    /// <param name="deviceId">The device of the machine.</param>
+    /// <returns>Whether the document gives it to a team or to the organization.</returns>
+    public bool IsSharedMachine(string deviceId) => TeamOf(deviceId) is not null || IsOrganizationMachine(deviceId);
+
+    /// <summary>
     /// Gets whether a member of the device list takes the values, budgets, environments and hooks of a person
     /// (<c>doc/fleet/access-control.md</c>, team roles): on a machine of a team, the person is a maintainer of that team, who
-    /// manages it, and not suspended; on any other device, the person is its own (<see cref="PersonOf"/>). The person the device
-    /// list names for a team machine gets nothing of it by that alone.
+    /// manages it, and not suspended; on a machine of the organization, an owner or an admin who signs (<see cref="IsSigner"/>);
+    /// on any other device, the person is its own (<see cref="PersonOf"/>). The person the device list names for a team machine
+    /// or a machine of the organization gets nothing of it by that alone.
     /// </summary>
     /// <param name="access">The access document, as the device verified it; null for none: the device list decides alone.</param>
     /// <param name="member">The member of the device list.</param>
@@ -403,7 +424,8 @@ public sealed record FleetAccessState(
     /// <summary>
     /// Gets whether a member of the device list takes the metadata keys of a person, which seal the titles of their sessions: on a
     /// machine of a team, the person is a maintainer or a member of that team, who use it for their own sessions, and not
-    /// suspended; on any other device, the person is its own (<see cref="PersonOf"/>).
+    /// suspended; on a machine of the organization, an owner or an admin who signs (<see cref="IsSigner"/>); on any other device,
+    /// the person is its own (<see cref="PersonOf"/>).
     /// </summary>
     /// <param name="access">The access document, as the device verified it; null for none: the device list decides alone.</param>
     /// <param name="member">The member of the device list.</param>
@@ -412,13 +434,15 @@ public sealed record FleetAccessState(
     /// <exception cref="ArgumentNullException"><paramref name="member"/> is null.</exception>
     public static bool HoldsKeysOf(FleetAccessState? access, FleetDeviceListMember member, string? personId) => Holds(access, member, personId, null);
 
-    // A team machine holds what the roles of its team give, never by the person the device list names; any other device, its person's.
+    // A team machine holds what the roles of its team give, a machine of the organization what its owners and admins who sign
+    // give (the same people for values and keys), never by the person the device list names; any other device, its person's.
     private static bool Holds(FleetAccessState? access, FleetDeviceListMember member, string? personId, string? role)
     {
         ArgumentNullException.ThrowIfNull(member);
         if (personId is null) return false;
         if (member.Kind == FleetDeviceKinds.Node && access?.TeamOf(member.DeviceId) is { } team)
             return !access.IsSuspended(personId) && RoleIn(team, personId) is { } held && (role is null || held == role);
+        if (member.Kind == FleetDeviceKinds.Node && access?.IsOrganizationMachine(member.DeviceId) == true) return access.IsSigner(personId);
         return PersonOf(access, member) == personId;
     }
 

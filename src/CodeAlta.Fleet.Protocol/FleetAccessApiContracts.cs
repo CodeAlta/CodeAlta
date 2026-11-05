@@ -364,7 +364,8 @@ public sealed record GrantKeyDto(string GrantId, string SessionId, string Machin
 {
     /// <summary>
     /// Gets the person who started the session on its machine, as the machine published it; null for none, or a server that does
-    /// not say. On a machine of a team, the copy holds only when a device of that person, of the team, gave it.
+    /// not say. On a machine of a team, the copy holds only when a device of that person, of the team, gave it; on a machine of the
+    /// organization, of that person when they are an owner or an admin who signs.
     /// </summary>
     public string? PersonId { get; init; }
 }

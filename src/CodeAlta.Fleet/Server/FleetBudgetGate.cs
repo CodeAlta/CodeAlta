@@ -311,9 +311,10 @@ public sealed class FleetBudgetGate
     {
         var machine = link.Devices.Identity.DeviceId;
         // The owner the signed access document names once the machine was given to another person, else the device list's; a
-        // machine of a team has none, and a run names no person whose space it is: only the budgets of the machine cover it.
-        var team = access?.TeamOf(machine) is not null;
-        var owner = team ? null : FleetAccessState.OwnerOfMachine(access, machine, list);
+        // machine of a team or of the organization has none, and a run names no person whose space it is: only the budgets of the
+        // machine cover it.
+        var shared = access?.IsSharedMachine(machine) == true;
+        var owner = shared ? null : FleetAccessState.OwnerOfMachine(access, machine, list);
         var key = link.Keys?.CurrentFor(run.SpaceId, null);
         var project = key is not null && run.ProjectIdentity is { Length: > 0 } identity ? FleetProjectKeys.Of(key, identity) : null;
         return new FleetBudgetRunScope(machine, owner, key?.Grant?.SpaceId, project);
@@ -507,7 +508,8 @@ public sealed class FleetBudgetLocalSpend : IFleetBudgetSpend
         }
     }
 
-    // The key of the space of a session, as it seals it: on a machine of a team, the one of its person, of this server's organization.
+    // The key of the space of a session, as it seals it: on a machine of a team or of the organization, the one of its person, of
+    // this server's organization.
     private static FleetMetadataKey? KeyOf(FleetBudgetLink link, FleetLocalSession session)
         => link.Keys?.CurrentFor(session.SpaceId, session.PersonOrganizationId is { } of && of == link.Devices.Current?.OrganizationId ? session.PersonId : null);
 }

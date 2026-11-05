@@ -63,7 +63,8 @@ internal sealed class FleetSecretService
     public IAccessStore? Access { get; init; }
 
     // The people whose values and environments the calling device takes: its person (the owner of a machine given to them), or on
-    // a machine of a team, the maintainers of the team; never the person the device list names for a team machine by that alone.
+    // a machine of a team, the maintainers of the team, on a machine of the organization its owners and admins; never the person
+    // the device list names for such a machine by that alone.
     private async ValueTask<IReadOnlyList<string>> PeopleAsync(DeviceRecord actor, CancellationToken cancellationToken)
         => actor.Kind == FleetDeviceKinds.Controller ? actor.OwnerPersonId is { } own ? [own] : []
             : await MachineOwners.ValuePeopleOfAsync(Access, actor, cancellationToken).ConfigureAwait(false);

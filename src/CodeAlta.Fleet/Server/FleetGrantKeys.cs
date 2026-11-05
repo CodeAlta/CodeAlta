@@ -103,7 +103,8 @@ public static class FleetGrantKeys
     /// Opens the metadata a grant gives this device, as
     /// <see cref="Open(string, string, string, string, string, string, DeviceIdentity, FleetDeviceListState, FleetAccessState?)"/> does; on a
     /// machine of a team, which has no person of its own, the copy is signed by a controller device of the person who started the
-    /// session there, a maintainer or a member of that team (<see cref="FleetAccessState.HoldsKeysOf"/>), never of another person.
+    /// session there, a maintainer or a member of that team (<see cref="FleetAccessState.HoldsKeysOf"/>), never of another person;
+    /// on a machine of the organization, of that person when they are an owner or an admin who signs.
     /// </summary>
     /// <param name="sealedText">The sealed metadata.</param>
     /// <param name="wrapped">The copy of its key for this device.</param>
@@ -114,7 +115,7 @@ public static class FleetGrantKeys
     /// <param name="identity">The key of this device.</param>
     /// <param name="list">The device list as this device verified it.</param>
     /// <param name="access">The access document as this device verified it; null for none.</param>
-    /// <param name="personId">The person who started the session on its machine (<see cref="Protocol.Api.GrantKeyDto.PersonId"/>); null for none, which a team machine refuses.</param>
+    /// <param name="personId">The person who started the session on its machine (<see cref="Protocol.Api.GrantKeyDto.PersonId"/>); null for none, which a team machine or a machine of the organization refuses.</param>
     /// <returns>The metadata.</returns>
     /// <exception cref="ArgumentNullException">An argument but <paramref name="access"/> or <paramref name="personId"/> is null.</exception>
     /// <exception cref="InvalidDataException">The copy is not for this device, grant or session, is not signed by the owner of the session, or does not open.</exception>
@@ -126,7 +127,7 @@ public static class FleetGrantKeys
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(list);
         var key = Unwrap(wrapped, organizationId, grantId, sessionId, identity, list, signer => list.Members.TryGetValue(machineId, out var machine)
-            && (machine.Kind == FleetDeviceKinds.Node && access?.TeamOf(machineId) is not null
+            && (FleetAccessState.IsSharedMachine(access, machine)
                 ? personId is not null && signer.OwnerId == personId && FleetAccessState.HoldsKeysOf(access, machine, personId)
                 : FleetAccessState.OwnerOfMachine(access, machineId, list) is { } owner && owner == signer.OwnerId), Grants);
         return key.TryOpen(sessionId, sealedText, out var metadata) && metadata is not null

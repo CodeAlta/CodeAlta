@@ -265,20 +265,26 @@ public sealed partial class SqliteCoordinatorStore : IBudgetStore
 
     // What the facts of the machines of the owner count of a budget's scope in its quarter hours, by machine. A machine given to
     // another person counts for the person its owner record names, no more for the one the device list names. A machine of a team
-    // counts for the maintainers of its team, never for the person the device list names by that alone, and never for a budget of
-    // a person's own machines: it is none of theirs.
+    // counts for the maintainers of its team, and a machine of the organization for its owners and admins who are active, never for
+    // the person the device list names by that alone, and never for a budget of a person's own machines: it is none of theirs.
     private static IReadOnlyDictionary<string, long> SumUsage(SqliteConnection connection, SqliteTransaction? transaction, BudgetUsageQuery query)
     {
         var owner = new StringBuilder("(SELECT o.owner_id FROM resource_owners o WHERE d.kind = '").Append(FleetDeviceKinds.Node)
             .Append("' AND o.organization_id = d.organization_id AND o.resource_kind = '").Append(FleetResourceKinds.Machine).Append("' AND o.resource_id = d.id AND o.owner_kind = '");
         var team = owner.ToString() + FleetPrincipalKinds.Team + "')";
+        var organization = owner.ToString() + FleetPrincipalKinds.Organization + "')";
         var person = owner.ToString() + FleetPrincipalKinds.Person + "')";
+        var personal = query.ScopeKind == FleetBudgetScopeKinds.Person;
         var sql = new StringBuilder("SELECT r.device_id, SUM(r.value) FROM statistics_rows r ")
             .Append("JOIN statistics_sets s ON s.device_id = r.device_id AND s.session_id = r.session_id ")
             .Append("JOIN devices d ON d.id = r.device_id ")
-            .Append("WHERE s.organization_id = $org AND (CASE WHEN ").Append(team).Append(" IS NULL THEN COALESCE(").Append(person).Append(", d.owner_person_id) = $owner ")
-            .Append(query.ScopeKind == FleetBudgetScopeKinds.Person ? "ELSE 0 " : "ELSE EXISTS (SELECT 1 FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.team_id = "
+            .Append("WHERE s.organization_id = $org AND (CASE WHEN ").Append(team).Append(" IS NOT NULL THEN ")
+            .Append(personal ? "0 " : "EXISTS (SELECT 1 FROM team_members m JOIN teams t ON t.id = m.team_id WHERE m.team_id = "
                 + team + " AND t.dissolved_at IS NULL AND m.person_id = $owner AND m.role = '" + FleetTeamRoles.Maintainer + "') ")
+            .Append("WHEN ").Append(organization).Append(" IS NOT NULL THEN ")
+            .Append(personal ? "0 " : "EXISTS (SELECT 1 FROM people p WHERE p.id = $owner AND p.organization_id = d.organization_id AND p.status = '"
+                + FleetPersonStatuses.Active + "' AND p.role IN ('" + FleetOrganizationRoles.Owner + "', '" + FleetOrganizationRoles.Admin + "')) ")
+            .Append("ELSE COALESCE(").Append(person).Append(", d.owner_person_id) = $owner ")
             .Append("END) AND r.q >= $lo AND r.q < $hi ");
         sql.Append(query.Measure == FleetBudgetMeasures.Cost
             ? $"AND r.family = '{FleetStatisticsFamilies.Cost}' AND r.measure = 'total_micro' AND r.keys IN ('', 'usd') "

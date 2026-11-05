@@ -483,9 +483,16 @@ internal sealed partial class AccessService
         if (grant.Status != FleetGrantStatuses.PendingKeys && !(grant.Status == FleetGrantStatuses.Active && grant.Capability == "session.view-content" && request is not null))
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.AccessConflict, "The grant does not wait for keys.");
         var target = await GrantTargetAsync(actor.OrganizationId, snapshot, grant.ScopeKind, grant.ScopeId, cancellationToken).ConfigureAwait(false);
-        var holds = target.OwnerKind == FleetPrincipalKinds.Person ? target.OwnerId == person.Id
-            : target.OwnerKind == FleetPrincipalKinds.Team && target.OwnerId is { } team && (snapshot.TeamRole(team, person.Id) == FleetTeamRoles.Maintainer
-                || await IsSessionOfAsync(actor.OrganizationId, grant, team, person.Id, snapshot, cancellationToken).ConfigureAwait(false));
+        var holds = target.OwnerKind switch
+        {
+            FleetPrincipalKinds.Person => target.OwnerId == person.Id,
+            FleetPrincipalKinds.Team => target.OwnerId is { } team && (snapshot.TeamRole(team, person.Id) == FleetTeamRoles.Maintainer
+                || snapshot.TeamRole(team, person.Id) is not null && await IsSessionOfAsync(actor.OrganizationId, grant, person.Id, cancellationToken).ConfigureAwait(false)),
+            // A session of a machine of the organization is sealed with the key of the owner or admin who started it there, who signs.
+            FleetPrincipalKinds.Organization => AccessPolicy.IsSigner(snapshot, person.Id)
+                && await IsSessionOfAsync(actor.OrganizationId, grant, person.Id, cancellationToken).ConfigureAwait(false),
+            _ => false,
+        };
         if (!holds) throw Denied("Only a device of the owner of the content holds its keys and confirms them.");
         if (grant.Capability == "session.view-content")
         {
@@ -526,19 +533,19 @@ internal sealed partial class AccessService
         {
             if (scopeId is not { } scope || !scope.StartsWith("session:", StringComparison.Ordinal)) continue;
             var sessionId = scope["session:".Length..];
-            // The person who started the session on its machine: on a team machine, the copy holds only when one of their devices gave it.
+            // The person who started the session on its machine: on a machine of a team or of the organization, the copy holds only
+            // when one of their devices gave it.
             if (sessions.TryGetValue(sessionId, out var session)) listed.Add(new GrantKeyDto(grantId, sessionId, session.MachineId, sealedText, wrapped) { PersonId = session.PersonId });
         }
 
         return new(listed);
     }
 
-    // On a machine of a team, each session is sealed with the key of the person who started it there: that person, of the team,
-    // holds its keys and gives them for a grant of their session, as a maintainer of the team does.
-    private async Task<bool> IsSessionOfAsync(string organizationId, GrantRecord grant, string team, string personId, AccessSnapshot snapshot, CancellationToken cancellationToken)
+    // On a machine of a team or of the organization, each session is sealed with the key of the person who started it there: that
+    // person, of the team or signing for the organization, holds its keys and gives them for a grant of their session.
+    private async Task<bool> IsSessionOfAsync(string organizationId, GrantRecord grant, string personId, CancellationToken cancellationToken)
     {
-        if (grant.Capability != "session.view-content" || grant.ScopeId is not { } scope || !scope.StartsWith("session:", StringComparison.Ordinal)
-            || snapshot.TeamRole(team, personId) is null)
+        if (grant.Capability != "session.view-content" || grant.ScopeId is not { } scope || !scope.StartsWith("session:", StringComparison.Ordinal))
             return false;
         var sessionId = scope["session:".Length..];
         return (await _store.ListSessionsAsync(organizationId, cancellationToken).ConfigureAwait(false)).FirstOrDefault(session => session.Id == sessionId) is { } session
