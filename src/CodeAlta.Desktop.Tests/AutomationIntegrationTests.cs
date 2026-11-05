@@ -127,22 +127,50 @@ public sealed class AutomationIntegrationTests
         await fixture.Service.RunAsync(First, default);
         CollectionAssert.AreEqual(new[] { "alice@acme.test", "Alice" }, fixture.Service.Runs(First, 1)[0].OnCall!.ToArray(), "on call when the run started");
         var guard = fixture.Runner.Guard!;
+        // What the run tells its server each time it says it waits: who answers that approval.
+        var told = new System.Collections.Concurrent.ConcurrentQueue<(string? Approval, string[]? OnCall)>();
+        fixture.Service.Changed += () =>
+        {
+            if (fixture.Service.Runs(First, 1)[0] is { Status: AutomationRun.Waiting } waiting) told.Enqueue((waiting.Approval, waiting.OnCall?.ToArray()));
+        };
 
-        // Bob is on call when the run waits: the approval is told with Bob, never with Alice.
-        fixture.Tools.On(HttpMethod.Get, "/oncalls", """{"oncalls":[{"user":{"email":"bob@acme.test","name":"Bob"}}]}""");
-        var first = guard.BeforeToolCallAsync(Call("k8s_delete_namespace"), default).AsTask();
-        await fixture.UntilAsync(() => fixture.Service.Runs(First, 1)[0].Status == AutomationRun.Waiting);
-        CollectionAssert.AreEqual(new[] { "bob@acme.test", "Bob" }, fixture.Service.Runs(First, 1)[0].OnCall!.ToArray(), "the person on call when it waits");
+        // Bob is on call when the run waits, and the tool takes its time to say so: nothing is told meanwhile, and the approval
+        // is first told with Bob, never with Alice.
+        using var answer = new ManualResetEventSlim();
+        fixture.Tools.On(HttpMethod.Get, "/oncalls", _ =>
+        {
+            answer.Wait(TimeSpan.FromSeconds(20));
+            return (System.Net.HttpStatusCode.OK, """{"oncalls":[{"user":{"email":"bob@acme.test","name":"Bob"}}]}""");
+        });
+        // Off the test thread: the fake tool answers on the thread that asks it.
+        var first = Task.Run(() => guard.BeforeToolCallAsync(Call("k8s_delete_namespace"), default).AsTask());
+        await Task.Delay(300);
+        Assert.IsEmpty(told, "the approval is not told before who is on call is known: " + string.Join(";", told.Select(static fact => fact.Approval + "=" + string.Join(",", fact.OnCall ?? []))));
+        answer.Set();
+        await fixture.UntilAsync(() => !told.IsEmpty);
+        Assert.IsTrue(told.TryPeek(out var firstTold));
+        CollectionAssert.AreEqual(new[] { "bob@acme.test", "Bob" }, firstTold.OnCall, "the first fact of the approval names the person on call when it waits");
         held.SetResult(new(CodeAlta.Agent.AgentPermissionDecisionKind.Deny));
         await first;
         await fixture.UntilAsync(() => fixture.Service.Runs(First, 1)[0].Status == AutomationRun.Running);
 
-        // The tool does not answer at the next approval: it goes to the rotation of the team, not to Bob.
+        // The tool does not answer at the next approval, late: it is first told with nobody (the rotation of the team), not with Bob.
         held = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        fixture.Tools.On(HttpMethod.Get, "/oncalls", _ => (System.Net.HttpStatusCode.ServiceUnavailable, """{"error":{"message":"down"}}"""));
-        var second = guard.BeforeToolCallAsync(Call("k8s_delete_namespace"), default).AsTask();
-        await fixture.UntilAsync(() => fixture.Service.Runs(First, 1)[0].Status == AutomationRun.Waiting);
-        Assert.IsNull(fixture.Service.Runs(First, 1)[0].OnCall, "nobody named: the rotation of the team");
+        using var failure = new ManualResetEventSlim();
+        fixture.Tools.On(HttpMethod.Get, "/oncalls", _ =>
+        {
+            failure.Wait(TimeSpan.FromSeconds(20));
+            return (System.Net.HttpStatusCode.ServiceUnavailable, """{"error":{"message":"down"}}""");
+        });
+        var before = told.Count;
+        var second = Task.Run(() => guard.BeforeToolCallAsync(Call("k8s_delete_namespace"), default).AsTask());
+        await Task.Delay(300);
+        Assert.HasCount(before, told, "nothing is told while the tool is read");
+        failure.Set();
+        await fixture.UntilAsync(() => told.Count > before);
+        var secondTold = told.Skip(before).First();
+        Assert.IsNull(secondTold.OnCall, "nobody named: the rotation of the team");
+        Assert.AreNotEqual(firstTold.Approval, secondTold.Approval, "another approval");
         held.SetResult(new(CodeAlta.Agent.AgentPermissionDecisionKind.Deny));
         await second;
         fixture.Runner.Starts.Single().Complete(new(AutomationRun.Completed));
