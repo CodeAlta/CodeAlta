@@ -44,6 +44,9 @@ test("the timeline groups records by the day they were recorded here, newest fir
 test("words of actions, short hashes and details", () => {
   assert.equal(actionLabels["device.approve"], "Approved a device");
   assert.equal(actionLabels["policy.stop"], "Stopped the work of the fleet");
+  // The server records the end of a relay as "relay", with what went through it: it has words, and the kind of devices holds it.
+  assert.equal(actionLabels["relay"], "Closed a channel to a machine");
+  assert.ok(auditCategories.find(category => category.id === "devices")?.actions.includes("relay"));
   assert.equal(shortHash("abcdefghijklmnopqrstuvwxyz0123456789"), "abcdefgh…456789");
   assert.equal(shortHash("short"), "short");
   assert.equal(formatDetails("{\"a\":1}"), "{\n  \"a\": 1\n}");
