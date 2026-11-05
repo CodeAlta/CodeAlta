@@ -471,6 +471,26 @@ public sealed class MobileServerTests
         Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/a/linked-images/8/0")).StatusCode, "Another record than the answer asked for.");
     }
 
+    [TestMethod]
+    public void LinkedImages_NeverNameAnotherComputer()
+    {
+        // Only parsed, never opened: opening one is what would send the credentials of the user to that computer.
+        foreach (var target in (string[])[
+            "//server/share/a.png", @"\\server\share\a.png", @"/\server/share/a.png", "%5C%5Cserver%5Cshare%5Ca.png", "%2F%2Fserver/share/a.png",
+            "file://server/share/a.png", "file:////server/share/a.png", "file:///%5C%5Cserver/share/a.png", @"file:\\server\share\a.png",
+            @"\\?\UNC\server\share\a.png", @"\\.\UNC\server\share\a.png", "//?/C:/shots/a.png",
+            @"\??\UNC\server\share\a.png", @"/??\UNC\server\share\a.png", "/??/UNC/server/share/a.png", "%5C%3F%3F%5CUNC%5Cserver%5Cshare%5Ca.png", "file:///%5C%3F%3F%5CUNC%5Cserver%5Cshare%5Ca.png"])
+        {
+            Assert.IsEmpty(MobileTimeline.LinkedImages($"![a](<{target}>)"), target);
+            Assert.IsEmpty(MobileTimeline.LinkedImages($"![a]({target})"), target);
+        }
+
+        // A picture of this computer still shows.
+        Assert.AreEqual(
+            string.Join('|', (string[])["shots/a.png", @"C:\shots\b.png", "file:///C:/shots/c.png"]),
+            string.Join('|', MobileTimeline.LinkedImages(@"![a](shots/a.png) ![b](<C:\shots\b.png>) ![c](file:///C:/shots/c.png)").Select(static image => image.Target)));
+    }
+
     private sealed class TempFolder : IDisposable
     {
         internal string Path { get; } = Directory.CreateTempSubdirectory("mobile-images-").FullName;

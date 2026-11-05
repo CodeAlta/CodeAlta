@@ -101,7 +101,7 @@ internal static partial class MobileTimeline
                     catch (UriFormatException) { continue; }
                 }
 
-                if (target.Length == 0 || IsAddress(target)) continue;
+                if (target.Length == 0 || IsAddress(target) || NamesAnotherComputer(target)) continue;
                 found.Add((match.Groups["alt"].Value.Trim(), target));
                 if (found.Count >= MaximumLinkedImages) return found;
             }
@@ -117,6 +117,26 @@ internal static partial class MobileTimeline
         if (colon <= 1) return false;
         var scheme = target[..colon];
         return !scheme.Equals("file", StringComparison.OrdinalIgnoreCase) && scheme.All(static c => char.IsAsciiLetterOrDigit(c) || c is '+' or '-' or '.');
+    }
+
+    /// <summary>
+    /// Whether the target of a link leaves the paths of this computer, as the desktop reads it (<c>DesktopFileLink</c>):
+    /// <c>//server/share</c>, <c>//?/C:/</c>, <c>//./device</c>, <c>\??\UNC\server\share</c>, which .NET takes for a full path,
+    /// and a <c>file:</c> address with a host. Reading such a path would send the credentials of the user to that computer,
+    /// with no tap for a picture, which the phone loads when it shows it.
+    /// </summary>
+    internal static bool NamesAnotherComputer(string target)
+    {
+        var path = Uri.UnescapeDataString(target);
+        if (target.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!Uri.TryCreate(target, UriKind.Absolute, out var uri) || !uri.IsFile || uri.IsUnc) return true;
+            if (uri.Host.Length > 0 && !uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
+            path = uri.LocalPath;
+        }
+
+        path = path.Replace('\\', '/');
+        return path.StartsWith("//", StringComparison.Ordinal) || path.StartsWith("/??/", StringComparison.Ordinal);
     }
 
     // The line with its spans of code blanked, so that a picture written as code is not one.

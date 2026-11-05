@@ -72,7 +72,7 @@ With more than the Default space, the **Mobile** row of **Settings > Plugins** h
 - The page is served by CodeAlta on `127.0.0.1` only. Tailscale Serve publishes it at `https://<computer>.<tailnet>.ts.net:2584` to the devices of your tailnet, with a certificate of Tailscale. No other device of your network reaches it.
 - The QR code holds a pairing token. A phone that scans it gets a key of its own, which it keeps, and every request needs it. CodeAlta keeps neither on disk, only their fingerprints, so no program of the computer can read them there. After CodeAlta restarts, the Mobile tab shows a new code; the phones already connected stay connected.
 - **Reset access**, in **Settings > Extensions > Mobile**, disconnects every phone and makes a new code: every phone has to scan it.
-- An image reaches the phone by an id, never by its path: a file of a prompt or an image of a tool is read from the files of its session only, and a picture of the disk is read only when an answer of that session shows it, the way CodeAlta Desktop shows it.
+- An image reaches the phone by an id, never by its path: a file of a prompt or an image of a tool is read from the files of its session only, and a picture of the disk is read only when an answer of that session shows it, the way CodeAlta Desktop shows it. A picture whose link names another computer, such as `\\server\share\a.png`, is never read.
 - The plugin publishes one port of the computer on the tailnet, 2584 unless you change it, and nothing else. It never changes what you serve with Tailscale Serve on other ports, and when the port already serves something else, it leaves it and says so.
 - Turn the plugin off in **Settings > Plugins**: the page stops, and Tailscale no longer serves it.
 

@@ -86,8 +86,13 @@ internal readonly partial record struct DesktopFileLink(string Path, int? Line, 
     // The address of a heading: letters, digits, dashes and underscores. Anything else names no heading.
     private static string? HeadingAnchor(string fragment) => HeadingName().IsMatch(fragment) ? fragment : null;
 
-    // "//server/share", "//?/C:/" and "//./device": the first names another computer, the others leave the rules of a path.
-    private static bool NamesAnotherComputer(string path) => path.Length >= 2 && path[0] is '/' or '\\' && path[1] is '/' or '\\';
+    // "//server/share", "//?/C:/", "//./device" and "/??/UNC/server/share": the first and the last name another computer, the
+    // others leave the rules of a path. .NET takes "\??\" for a full path, which it hands to the system as it is written.
+    private static bool NamesAnotherComputer(string path)
+    {
+        if (path.Length < 2 || path[0] is not ('/' or '\\')) return false;
+        return path[1] is '/' or '\\' || (path.Length >= 4 && path[1] == '?' && path[2] == '?' && path[3] is '/' or '\\');
+    }
 
     // The place a fragment names: "L10", "L10C5", "L10-L20", or the same without the letter.
     private static (int? Line, int? Column) Place(ReadOnlySpan<char> fragment)
