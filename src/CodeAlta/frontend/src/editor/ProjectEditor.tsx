@@ -810,7 +810,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     </PopoverNext>
   </span>;
 
-  return <section ref={root} className="project-editor" data-active={active} data-side={side ?? "none"} data-narrow={narrow} data-file-tab-keys
+  return <section ref={root} className="project-editor" data-active={active} data-side={side ?? "none"} data-narrow={narrow} data-file-tab-keys data-find-files-keys
     data-find-keys={previewFind.available || undefined} tabIndex={-1}
     aria-label={`${t("Editor")} · ${projectName ?? tab.projectPath}`} onFocusCapture={onActivate} onPointerDownCapture={onActivate} onKeyDownCapture={keyDown}>
     {side !== null && <>

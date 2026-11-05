@@ -234,13 +234,22 @@ export function activityWorkflows(groups: readonly TimelineGroup[]): ActivityWor
 
 /**
  * Whether a block is open: the reader's own choice when they made one for one of its rows, open in a timeline
- * that is not focused, and open when it holds a row the timeline is asked to show.
+ * that is not focused, open when it holds a row the timeline is asked to show, and, while the timeline is searched,
+ * open when it holds what is looked for (`found`).
  */
-export function activityExpanded(groups: readonly TimelineGroup[], choices: ReadonlyMap<string, boolean>, focused: boolean, shown?: string | null): boolean {
+export function activityExpanded(groups: readonly TimelineGroup[], choices: ReadonlyMap<string, boolean>, focused: boolean, shown?: string | null, found?: RegExp | null): boolean {
   for (const group of groups) for (const row of group.rows) {
     const choice = choices.get(row.key);
     if (choice !== undefined) return choice;
   }
   if (shown && groups.some(group => group.rows.some(row => row.source === "history" && row.item.key === shown))) return true;
-  return !focused;
+  return !focused || !!found && activityHolds(groups, found);
+}
+
+/** Whether what a row of a block shows once it is open has a text: the search opens that block, and marks the text in the page. */
+export function activityHolds(groups: readonly TimelineGroup[], pattern: RegExp): boolean {
+  return groups.some(group => group.rows.some(row => {
+    const item = itemOf(row), job = item.jobResult;
+    return [item.title, item.summary, item.markdown, item.toolOutput, job?.title, job?.command, job?.result].some(text => !!text && text.search(pattern) >= 0);
+  }));
 }

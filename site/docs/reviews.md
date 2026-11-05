@@ -23,7 +23,7 @@ A comment is a **draft** until you submit the review, and drafts survive a resta
 
 The review bar above the file counts the comments, jumps to each one, and has **Submit review**.
 
-In a rendered plan or Markdown file, `Ctrl+F` (`Cmd+F` on macOS) finds text: `Enter` and `Shift+Enter` go to the next and previous match, `Alt+C`, `Alt+W` and `Alt+R` match case, whole words or a regular expression, and `Esc` closes it.
+In a rendered plan or Markdown file, `Ctrl+F` (`Cmd+F` on macOS) finds text: `Enter` and `Shift+Enter` go to the next and previous match, `Alt+C`, `Alt+W` and `Alt+R` match case, whole words or a regular expression, and `Esc` closes it. Marks beside the scrollbar show where the matches are.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-review-plan.webp" alt="A plan of SharpYaml under review in CodeAlta Desktop: a draft comment under a paragraph, a diagram of the plan, and below the question of the agent with the decision written, and Request changes chosen" loading="lazy">

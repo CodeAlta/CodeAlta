@@ -1,5 +1,8 @@
 // English source keys; translations in es, fr, de, ja, zh-CN order.
 export const localSearchMessages = {
+  // A category the search window has not asked the host about yet.
+  "Not searched yet: choose this category to search it.": ["Aún sin buscar: elige esta categoría para buscar en ella.", "Pas encore recherché : choisissez cette catégorie pour y chercher.",
+    "Noch nicht durchsucht: Wähle diese Kategorie, um sie zu durchsuchen.", "未検索: このカテゴリを選択すると検索します。", "尚未搜索：选择此类别即可搜索。"],
   // The groups of the search window that the index of the host fills.
   "Conversations": ["Conversaciones", "Conversations", "Unterhaltungen", "会話", "对话"],
   "Docs": ["Documentación", "Documentation", "Dokumentation", "ドキュメント", "文档"],

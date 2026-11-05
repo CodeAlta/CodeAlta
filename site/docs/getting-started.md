@@ -220,6 +220,7 @@ Both apps use the same shortcuts and slash commands unless noted.
 | --- | --- |
 | Help / command discovery | `F1`, `/help`, or `?` |
 | Search (desktop) or command palette (TUI) | `Ctrl+P`; `/` for commands, and for skills in the desktop app |
+| Find in the session (desktop) / search the sessions (desktop) | `Ctrl+F` or `/find` / `Ctrl+Shift+F` |
 | Open project | `Ctrl+O` or `/open` |
 | Open a file in the editor | `Ctrl+E` or `/edit` |
 | Open the code editor of the project (desktop) | `Ctrl+E` `Ctrl+E` or `/editor` |
