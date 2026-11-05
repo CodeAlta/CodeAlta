@@ -12,7 +12,11 @@ namespace CodeAlta.Desktop.WorkItems;
 /// <param name="SessionId">The session that was created; null when none was.</param>
 /// <param name="Problem">Why the work did not start; null when it did.</param>
 /// <param name="Reason">A short code for the page when the problem is one it has a text for.</param>
-internal sealed record SessionStartResult(string? SessionId, string? Problem, string? Reason = null);
+internal sealed record SessionStartResult(string? SessionId, string? Problem, string? Reason = null)
+{
+    /// <summary>Gets what went wrong without stopping the start, such as a worktree whose branch could not be marked; null when nothing did.</summary>
+    public string? Warning { get; init; }
+}
 
 /// <summary>Starts a piece of work (a task, a plan, an issue) in a new session of a project.</summary>
 internal interface ISessionStarter
@@ -97,8 +101,12 @@ internal sealed class SessionStarter : ISessionStarter
 
             if (worktree)
             {
-                created = await _worktrees!.CreateAsync(project, null, CancellationToken.None).ConfigureAwait(false);
+                created = await _worktrees!.CreateAsync(project, null, model?.Branch, progress: null, withoutHooks: false, CancellationToken.None).ConfigureAwait(false);
                 if (!created.Succeeded) return new(null, created.Message ?? "The worktree could not be created.", "worktree_" + created.Status);
+            }
+            else if (model is { Branch: { } branchName, Worktree: null } && await SwitchProjectFolderAsync(project, branchName).ConfigureAwait(false) is { } refused)
+            {
+                return refused;
             }
 
             var folder = created?.Folder;
@@ -129,7 +137,7 @@ internal sealed class SessionStarter : ISessionStarter
                 return new(sessionId, $"The session was created, but the prompt was not accepted ({admission.Kind.ToString().ToLowerInvariant()}).");
             }
 
-            return new(sessionId, null);
+            return new(sessionId, null) { Warning = created?.Warning };
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or KeyNotFoundException or IOException
             or UnauthorizedAccessException or ObjectDisposedException or NotSupportedException or OperationCanceledException)
@@ -145,6 +153,23 @@ internal sealed class SessionStarter : ISessionStarter
         }
 
         static SessionStartResult Refuse(string problem) => new(null, problem);
+    }
+
+    // Moves the checkout of the project to a new branch for the work, or says why not: never under a session at work in
+    // it, never onto a branch that is there (also in another case), and what git refuses comes back with its message.
+    // Changes that are not committed go along, as git does for a new branch.
+    private async Task<SessionStartResult?> SwitchProjectFolderAsync(ProjectDescriptor project, string branch)
+    {
+        if (_worktrees is null) return new(null, "Branches are not available.");
+        if (GitWorktreeService.FindCheckoutRoot(project.ProjectPath) is not { } checkout)
+            return new(null, "The folder of the project is in no git repository.", "worktree_not_repository");
+        var comparison = OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        if (_host.RuntimeService.ListBusySessionFolders().Any(session => GitWorktreeService.FindCheckoutRoot(session.Folder) is { } busy && string.Equals(busy, checkout, comparison)))
+            return new(null, "A session is at work in the folder of the project: its branch is not changed under it.", "branch_in_use");
+        if (await _worktrees.FindBranchAsync(checkout, branch, CancellationToken.None).ConfigureAwait(false) is { } taken)
+            return new(null, $"The branch {taken} already exists.", "branch_exists");
+        var switched = await _worktrees.SwitchAsync(checkout, branch, create: true, CancellationToken.None).ConfigureAwait(false);
+        return switched.Status == GitWorktreeService.Ok ? null : new(null, switched.Message ?? "The branch could not be created.", "branch_" + switched.Status);
     }
 
     private static string FirstLine(string message)

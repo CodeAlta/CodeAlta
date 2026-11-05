@@ -43,6 +43,7 @@ flowchart LR
 | `CodeAlta.Orchestration` | Headless runtime: `SessionRuntimeService`, `AgentHub`, session actors, queues, skills, plugin bridges, `CodeAltaHost`. See [runtime](runtime.md). |
 | `CodeAlta.Agent` | Provider-neutral contracts and the agent runtime: sessions, events, tools, journals, compaction, provider contracts, the harness for agents that run their own loop. |
 | `CodeAlta.Agent.*` | One package per provider family (OpenAI, Anthropic, Google, Mistral, Copilot, xAI, Claude Code). See [providers](providers.md). |
+| `CodeAlta.Automations` | The automation engine: definitions in the configuration files, schedules, triggers, runs and their state, for any host (CodeAlta Desktop, CodeAlta Node). It starts runs through the runtime and knows no window and no network; a host adds what is its own: what it checks before a run starts, who claims a due time, where an automation placed on another machine runs. |
 | `CodeAlta.Hosting` | Composition only: registering configured providers, their defaults, sign-in flows the frontends share, and the export of traces (OpenTelemetry). |
 | `CodeAlta.Catalog` | `~/.alta` and project `.alta`: config, projects, spaces, session views, skills, the application database. See [catalog and config](catalog-and-config.md). |
 | `CodeAlta.LiveTool` | The `alta` tool agents call: command registry and dispatcher. See [live tool](live-tool.md). |
@@ -55,7 +56,7 @@ flowchart LR
 | `CodeAlta.CodeMode` | The engine of Code Mode: runs the JavaScript of agents (Jint, one engine per run), with the functions its host binds; prepares sources, reads descriptors, renders declarations and results. See [code mode](codemode.md). |
 | `CodeAlta.Acp` | Agent Client Protocol types, the client (ACP agents as providers) and the agent server (`altacli acp`). |
 
-Dependencies point down: frontends → Orchestration/LiveTool/Hosting → Agent, Catalog, Plugins. Nothing below a frontend references a frontend; `CodeAlta.Search`, `CodeAlta.NativeEngines`, `CodeAlta.Sandbox`, `CodeAlta.CodeMode` and `CodeAlta.Browser` know neither the host nor a window. `ArchitectureGuardrailTests` checks the main boundaries.
+Dependencies point down: frontends → Automations/Orchestration/LiveTool/Hosting → Agent, Catalog, Plugins. Nothing below a frontend references a frontend; `CodeAlta.Search`, `CodeAlta.NativeEngines`, `CodeAlta.Sandbox`, `CodeAlta.CodeMode` and `CodeAlta.Browser` know neither the host nor a window. `ArchitectureGuardrailTests` checks the main boundaries.
 
 ## A turn
 

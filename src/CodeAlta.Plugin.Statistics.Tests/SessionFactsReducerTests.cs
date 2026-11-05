@@ -360,6 +360,43 @@ public sealed class SessionFactsReducerTests
     }
 
     [TestMethod]
+    public void Model_ACompactionThatReportsAnotherModelFirst_DoesNotSettleTheModelOfTheRun()
+    {
+        // The run starts under the alias; an automatic compaction (on model C) reports before the conversation's request (on T).
+        var b = new JournalBuilder("44444444-4444-4444-4444-444444444444", "claude-code");
+        b.ModelChanged(T0, "r1", "claude-code", "opus", "High")
+            .Usage(T0.AddSeconds(5), "r1", model: "compactor-c", provider: "claude-code", initiator: "compaction")
+            .Usage(T0.AddSeconds(8), "r1", model: "claude-opus-5-5", provider: "claude-code")
+            .Idle(T0.AddSeconds(10), "r1");
+
+        var batch = Reduce(b);
+
+        Assert.AreEqual(1, batch.Activity.Where(static pair => pair.Key.Model == "claude-opus-5-5").Sum(static pair => pair.Value.RunsStarted),
+            "the run is on the model its conversation request reported");
+        Assert.AreEqual(0, batch.Activity.Where(static pair => pair.Key.Model != "claude-opus-5-5").Sum(static pair => pair.Value.RunsStarted));
+        Assert.AreEqual(0, batch.Activity.Where(static pair => pair.Key.Model != "claude-opus-5-5").Sum(static pair => pair.Value.ActiveMs), "and so is its time");
+    }
+
+    [TestMethod]
+    public void Model_ARunThatReportsItsModelAfterManyQuarterHours_StaysOnOneModel()
+    {
+        // The run starts at midnight under the alias, and its first request, at 17:00, says the model: 68 quarter hours before it.
+        var b = new JournalBuilder("55555555-5555-5555-5555-555555555555", "claude-code");
+        b.ModelChanged(T0, "r1", "claude-code", "opus", "High")
+            .Usage(T0.AddHours(17), "r1", model: "claude-opus-5-5", provider: "claude-code")
+            .Idle(T0.AddHours(17).AddSeconds(10), "r1");
+
+        var batch = Reduce(b);
+
+        var models = batch.Activity.Where(static pair => pair.Value.ActiveMs != 0 || pair.Value.RunsStarted != 0).Select(static pair => pair.Key.Model).Distinct().ToArray();
+        Assert.AreEqual(1, models.Length, $"the start and the time of one run are on one model: {string.Join(", ", models)}");
+        Assert.AreEqual("claude-opus-5-5", models[0]);
+        Assert.AreEqual(1, batch.Activity.Sum(static pair => pair.Value.RunsStarted));
+        Assert.AreEqual((long)TimeSpan.FromHours(17).Add(TimeSpan.FromSeconds(10)).TotalMilliseconds,
+            batch.Activity.Where(static pair => pair.Key.Model == "claude-opus-5-5").Sum(static pair => pair.Value.ActiveMs), "every quarter hour of it moved, none twice");
+    }
+
+    [TestMethod]
     public void Model_AliasLearnedFromARequestIsUsedWhenTheModelIsChosenAgain()
     {
         var b = new JournalBuilder("33333333-3333-3333-3333-333333333333", "claude-code");
@@ -372,8 +409,10 @@ public sealed class SessionFactsReducerTests
         var batch = Reduce(b);
 
         Assert.IsTrue(batch.Activity.Keys.All(static key => key.Model is "opus" or "claude-opus-5-5"));
-        Assert.AreEqual(1, batch.Activity.Where(static pair => pair.Key.Model == "opus").Sum(static pair => pair.Value.RunsStarted), "only the first run of the session started under the alias");
-        Assert.AreEqual(1, batch.Activity.Where(static pair => pair.Key.Model == "claude-opus-5-5").Sum(static pair => pair.Value.RunsStarted));
+        // The first run started under the alias, and its request said the model: its start and its time go there too.
+        Assert.AreEqual(0, batch.Activity.Where(static pair => pair.Key.Model == "opus").Sum(static pair => pair.Value.RunsStarted), "no run stays on the alias");
+        Assert.AreEqual(0, batch.Activity.Where(static pair => pair.Key.Model == "opus").Sum(static pair => pair.Value.ActiveMs));
+        Assert.AreEqual(2, batch.Activity.Where(static pair => pair.Key.Model == "claude-opus-5-5").Sum(static pair => pair.Value.RunsStarted));
     }
 
     [TestMethod]

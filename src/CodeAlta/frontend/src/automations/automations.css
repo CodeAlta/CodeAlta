@@ -69,6 +69,7 @@
 .automation-card-state[data-problem] { color: var(--danger, #e76a6e); }
 .automation-card-last { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .automation-card-actions { display: inline-flex; align-items: center; gap: 2px; }
+.automation-start-anchor { position: relative; display: inline-flex; }
 .automation-allow > .bp6-callout-body, .automation-allow { display: flex; align-items: center; gap: 10px; }
 .automation-allow span { flex: 1; min-width: 0; }
 
@@ -76,6 +77,7 @@
 .automation-run-mark[data-tone="ok"] { color: #3fb950; }
 .automation-run-mark[data-tone="failed"] { color: #e76a6e; }
 .automation-run-mark[data-tone="running"] { color: var(--accent); }
+.automation-run-mark[data-tone="held"] { color: #d9822b; }
 .automation-run-mark[data-tone="muted"] { color: var(--muted); }
 
 /* The detail of one automation, or the latest runs of all. */
@@ -97,6 +99,14 @@
 button.automation-run { cursor: pointer; }
 button.automation-run:hover, button.automation-run:focus-visible { background: var(--panel-3); outline: none; }
 .automation-run-text { display: grid; min-width: 0; }
+.automation-run-waits { display: flex; align-items: center; gap: 10px; margin: 0 8px 6px 30px; color: var(--muted); font-size: 12px; }
+.automation-run-waits > span { flex: 1; min-width: 0; }
+.automation-run-calls { margin: 0 8px 6px 30px; padding: 0; list-style: none; display: grid; gap: 2px; }
+.automation-run-calls > li { color: var(--muted); font-family: var(--code-font); font-size: 11px; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.automation-autonomy-fact { display: grid; gap: 4px; justify-items: start; }
+.automation-autonomy-fact > span { color: var(--muted); font-size: 12px; }
+.automation-autonomy-fact > .automation-autonomy-said { color: var(--text); font-size: inherit; }
+.automation-autonomy-fact code { font-family: var(--code-font); color: var(--text); }
 .automation-run-text strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .automation-run-text span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .automation-run time { color: var(--muted); white-space: nowrap; }
@@ -153,6 +163,38 @@ button.automation-run:hover, button.automation-run:focus-visible { background: v
 .automation-trigger-preview { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; font-size: 11px; color: var(--muted); }
 .automation-trigger-preview span { text-transform: uppercase; letter-spacing: .06em; }
 .automation-trigger-preview[data-problem] { color: var(--danger, #e76a6e); }
+/* A trigger of another tool: its settings on the lines of the row, then how to set it up, test it and try it. */
+.automation-integration { flex: 1 0 100%; display: grid; gap: 8px; min-width: 0; }
+.automation-integration-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.automation-integration-fields .bp6-input-group { flex: 1 1 160px; min-width: 120px; }
+.automation-integration-fields .automation-integration-wide { flex: 3 1 100%; }
+.automation-integration-fields input { font-family: var(--code-font); font-size: 12px; }
+.automation-integration-fields .bp6-input-left-container { display: flex; align-items: center; height: 100%; }
+.automation-integration-secret-icon { display: grid; place-items: center; padding: 0 2px 0 8px; color: var(--muted); }
+.automation-integration-reply.bp6-control { flex: 1 0 100%; margin: 0; }
+.automation-integration-address { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: 12px; color: var(--muted); }
+.automation-integration-address code { overflow-wrap: anywhere; color: var(--text); }
+.automation-integration-setup { font-size: 12px; color: var(--muted); }
+.automation-integration-setup summary { cursor: pointer; width: fit-content; }
+.automation-integration-setup p { margin: 6px 0; line-height: 1.45; }
+.automation-integration-example.bp6-input { min-height: 72px; font-family: var(--code-font); font-size: 12px; }
+.automation-integration-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.automation-integration-check p { margin: 2px 0; }
+.automation-integration-prompt { max-height: 180px; overflow: auto; margin: 6px 0 0; padding: 6px 8px; border-radius: 6px; background: var(--panel); font-family: var(--code-font);
+  font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.automation-autonomy .bp6-form-content { display: grid; gap: 8px; }
+.automation-autonomy .bp6-control { margin: 0; }
+.automation-autonomy-help, .automation-autonomy-summary { margin: 0; color: var(--muted); font-size: 12px; }
+.automation-autonomy-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 6px 12px; }
+.automation-autonomy-grid > label, .automation-autonomy-label { font-size: 12px; }
+.automation-autonomy-tools { display: grid; gap: 2px; margin-top: -2px; }
+.automation-autonomy-tools > p { margin: 0; color: var(--muted); font-size: 11px; }
+.automation-autonomy-tools code { font-family: var(--code-font); color: var(--text); }
+.automation-autonomy-approvers { color: var(--muted); font-size: 12px; }
+#automation-allowed-tools { font-family: var(--code-font); font-size: 12px; }
+.automation-autonomy-grid .bp6-numeric-input, .automation-autonomy-grid .bp6-numeric-input .bp6-input-group { width: 96px; min-width: 0; }
+.automation-autonomy-approvers-field { display: grid; gap: 4px; justify-items: start; }
+.automation-autonomy-timeout { display: flex; gap: 8px; align-items: center; }
 .automation-editor-switches { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-bottom: 8px; }
 .automation-editor-switches .bp6-control { margin: 0; }
 .automation-editor-footer { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 18px 14px; border-top: 1px solid var(--line); }

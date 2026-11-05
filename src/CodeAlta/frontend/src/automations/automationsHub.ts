@@ -1,9 +1,13 @@
 // The page's link to the automations of the application: what they are now, and the calls that change them.
-import type { automations, AutomationInput, AutomationItem, AutomationRunItem, AutomationScriptItem, AutomationsListResponse, AutomationTriggerItem } from "#neoastra";
+import type { automations, AutomationInput, AutomationItem, AutomationPublishTarget, AutomationRunItem, AutomationScriptItem, AutomationsListResponse, AutomationTeamItem,
+  AutomationTriggerItem } from "#neoastra";
 
 /** The calls of the host; `scripts` is missing from a host that has no library of scripts. */
-export type AutomationsApi = Pick<typeof automations, "list" | "refresh" | "save" | "delete" | "setEnabled" | "allow" | "setPaused" | "run" | "runs" | "preview" | "watch">
-  & Partial<Pick<typeof automations, "scripts">>;
+export type AutomationsApi = Pick<typeof automations, "list" | "refresh" | "save" | "delete" | "setEnabled" | "allow" | "startPlaced" | "setPaused" | "run" | "runs" | "preview" | "watch">
+  & Partial<Pick<typeof automations, "scripts" | "testTrigger" | "sampleEvent" | "tryRun" | "createHook" | "hookAddress" | "takeOver" | "publishTargets"
+  | "teamAutomations" | "openTeamAutomation">>;
+/** What a test or a sample of a trigger of another tool answered: a text, or what is wrong. */
+export type TriggerCheck = Readonly<{ ok: boolean; message: string | null; detail?: string | null; prompt?: string | null; replyTo?: string | null }>;
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
 
 /** What the page shows of the automations. `loaded` is false until the host answered once. */
@@ -109,6 +113,8 @@ export function createAutomationsHub(api: AutomationsApi, timers: Timers = { set
     setEnabled: (id: string, enabled: boolean) => change(host => api.setEnabled({ expectedEpoch: host, id, enabled }, { timeoutMilliseconds: 30_000 })),
     /** Allows the triggers of an automation that came with its project to start it, as it is now. */
     allow: (id: string) => change(host => api.allow({ expectedEpoch: host, id }, { timeoutMilliseconds: 15_000 })),
+    /** Starts an automation on the machine it was placed on without waiting for the machine it left: both may run it until that one answers. */
+    startPlaced: (id: string) => change(host => api.startPlaced({ expectedEpoch: host, id }, { timeoutMilliseconds: 15_000 })),
     setPaused: (paused: boolean) => change(host => api.setPaused({ expectedEpoch: host, paused }, { timeoutMilliseconds: 15_000 })),
     /** Runs an automation now. The answer comes once its session exists. */
     async run(id: string): Promise<AutomationOutcome> {
@@ -130,6 +136,28 @@ export function createAutomationsHub(api: AutomationsApi, timers: Timers = { set
         return reply.status === "ok" ? reply.runs : [];
       } catch { return []; }
     },
+    /** Whom an automation that runs on a machine may be published to, beside the person: the team of the machine, the organization. */
+    async publishTargets(machineId: string, signal: AbortSignal): Promise<readonly AutomationPublishTarget[]> {
+      const host = epoch;
+      if (!host || !api.publishTargets) return [];
+      try {
+        const reply = await api.publishTargets({ expectedEpoch: host, machineId }, { signal, timeoutMilliseconds: 15_000 });
+        return reply.status === "ok" ? reply.targets : [];
+      } catch { return []; }
+    },
+    /** The automations of the teams this person maintains, and of the organization, that another person gave their machines. */
+    async teamAutomations(signal?: AbortSignal): Promise<readonly AutomationTeamItem[]> {
+      const host = epoch;
+      if (!host || !api.teamAutomations) return [];
+      try {
+        const reply = await api.teamAutomations({ expectedEpoch: host }, { signal, timeoutMilliseconds: 30_000 });
+        return reply.status === "ok" ? reply.items : [];
+      } catch { return []; }
+    },
+    /** Takes one of those into the automations of this computer, to change it in the editor; the list is read again. */
+    openTeamAutomation: (item: AutomationTeamItem) => api.openTeamAutomation
+      ? change(host => api.openTeamAutomation!({ expectedEpoch: host, linkId: item.linkId, id: item.id, machineId: item.machineId }, { timeoutMilliseconds: 30_000 }))
+      : Promise.resolve<AutomationOutcome>({ ok: false, message: null }),
     /** The scripts of the library an automation of a project, or a chat, can run in place of a prompt. */
     async scripts(projectId: string | null, signal: AbortSignal): Promise<readonly AutomationScriptItem[]> {
       const host = epoch;
@@ -138,6 +166,62 @@ export function createAutomationsHub(api: AutomationsApi, timers: Timers = { set
         const reply = await api.scripts({ expectedEpoch: host, projectId }, { signal, timeoutMilliseconds: 15_000 });
         return reply.status === "ok" ? reply.scripts : [];
       } catch { return []; }
+    },
+    /** Tests the connection of a trigger of another tool, with the secrets of this computer. */
+    async testTrigger(trigger: AutomationTriggerItem, projectId: string | null): Promise<TriggerCheck> {
+      const host = epoch;
+      if (!host || !api.testTrigger) return { ok: false, message: null };
+      try {
+        const reply = await api.testTrigger({ expectedEpoch: host, projectId, trigger, prompt: null, body: null }, { timeoutMilliseconds: 60_000 });
+        return { ok: reply.status === "ok", message: reply.message ?? null };
+      } catch { return { ok: false, message: null }; }
+    },
+    /** The event a trigger of another tool would start on now, with the prompt it would send; nothing starts. */
+    async sample(trigger: AutomationTriggerItem, projectId: string | null, prompt: string, body: string | null): Promise<TriggerCheck> {
+      const host = epoch;
+      if (!host || !api.sampleEvent) return { ok: false, message: null };
+      try {
+        const reply = await api.sampleEvent({ expectedEpoch: host, projectId, trigger, prompt, body }, { timeoutMilliseconds: 60_000 });
+        return { ok: reply.status === "ok", message: reply.message ?? null, detail: reply.detail ?? null, prompt: reply.prompt ?? null, replyTo: reply.replyTo ?? null };
+      } catch { return { ok: false, message: null }; }
+    },
+    /** Runs a saved automation once on the sample event of one of its triggers; its answer is kept on the run, not written back. */
+    async tryRun(id: string, triggerIndex: number, body: string | null): Promise<AutomationOutcome> {
+      const host = epoch;
+      if (!host || !api.tryRun) return { ok: false };
+      try {
+        const reply = await api.tryRun({ expectedEpoch: host, id, triggerIndex, body }, { timeoutMilliseconds: 120_000 });
+        await list();
+        return { ok: reply.status === "ok" && reply.run !== null && reply.run?.status !== "failed", run: reply.run ?? null, message: reply.message ?? reply.run?.message ?? null };
+      } catch { return { ok: false }; }
+    },
+    /** Makes a hook on the server of a machine: the address a tool pushes its signed events to. */
+    async createHook(machineId: string, source: "incident_io" | "webhook", label: string | null): Promise<Readonly<{ ok: boolean; message: string | null; hookId: string | null; url: string | null }>> {
+      const host = epoch;
+      if (!host || !api.createHook) return { ok: false, message: null, hookId: null, url: null };
+      try {
+        const reply = await api.createHook({ expectedEpoch: host, machineId, source, label }, { timeoutMilliseconds: 30_000 });
+        return { ok: reply.status === "ok", message: reply.message ?? null, hookId: reply.hookId ?? null, url: reply.url ?? null };
+      } catch { return { ok: false, message: null, hookId: null, url: null }; }
+    },
+    /** Reads again the address of a hook a trigger names, from the server of its machine. */
+    async hookAddress(machineId: string, hookId: string): Promise<Readonly<{ ok: boolean; message: string | null; url: string | null }>> {
+      const host = epoch;
+      if (!host || !api.hookAddress) return { ok: false, message: null, url: null };
+      try {
+        const reply = await api.hookAddress({ expectedEpoch: host, machineId, hookId }, { timeoutMilliseconds: 30_000 });
+        return { ok: reply.status === "ok", message: reply.message ?? null, url: reply.url ?? null };
+      } catch { return { ok: false, message: null, url: null }; }
+    },
+    /** A person takes a run that waits over: its approvals wait for them as long as they take, and they drive its session. */
+    async takeOver(id: string, runId: string): Promise<Readonly<{ ok: boolean; message: string | null; sessionId: string | null }>> {
+      const host = epoch;
+      if (!host || !api.takeOver) return { ok: false, message: null, sessionId: null };
+      try {
+        const reply = await api.takeOver({ expectedEpoch: host, id, runId }, { timeoutMilliseconds: 30_000 });
+        await list();
+        return { ok: reply.status === "ok", message: reply.message ?? null, sessionId: reply.sessionId ?? null };
+      } catch { return { ok: false, message: null, sessionId: null }; }
     },
     /** The next times a trigger being written is due, or what is wrong with it. */
     async preview(trigger: AutomationTriggerItem, signal: AbortSignal): Promise<Readonly<{ times: readonly string[]; problem: string | null }> | null> {

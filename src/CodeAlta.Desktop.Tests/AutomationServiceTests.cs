@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
+using CodeAlta.Automations;
 using CodeAlta.Catalog;
-using CodeAlta.Desktop.Automations;
 using CodeAlta.Plugin.Git;
 
 namespace CodeAlta.Desktop.Tests;

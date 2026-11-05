@@ -753,14 +753,18 @@ test("the canvas is used with the keyboard: tabs, menus, the table of a chart, t
     await page.key("Enter", 13, "\r");
     await page.until(`document.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim() === 'Overview' && ${settled}`, "the previous page");
     assert.equal(await page.evaluate(`document.querySelector('[role="tablist"]').getAttribute('role')`), "tablist");
-    // A menu opens with Enter, moves with the arrows, and closes with Escape.
+    // A menu opens with Enter, moves with the arrows, and closes with Escape. Its frames come late here, as on a loaded
+    // machine: the popover takes the focus a frame after it opens, and an Escape before that goes to the button.
+    await page.evaluate(`(() => { const frame = window.requestAnimationFrame.bind(window); window.promptFrame = frame;
+      window.requestAnimationFrame = callback => frame(() => setTimeout(() => frame(callback), 600)); })()`);
     await page.evaluate(`document.querySelector('button[aria-label^="Compare:"]').focus()`);
     await page.key("Enter", 13, "\r");
     await page.until(`document.querySelector('.bp6-menu')`, "the menu");
-    // The popover ignores an Escape while it is still opening.
-    await idle(400);
+    // The popover closes on an Escape it receives: once its focus is in it, whatever the time that takes.
+    await page.until(`document.activeElement?.closest('.bp6-portal') != null`, "the focus in the menu");
     await page.key("Escape", 27);
     await page.until(`!document.querySelector('.bp6-menu')`, "the menu closed");
+    await page.evaluate(`window.requestAnimationFrame = window.promptFrame`);
     assert.equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')?.startsWith('Compare:')`), true, "the focus comes back to the button");
     // The legend is a row of buttons with a pressed state, and the year is one tab stop.
     assert.ok(await page.evaluate<number>(`document.querySelectorAll('.chart-legend-item[aria-pressed]').length`) >= 2);
@@ -845,5 +849,54 @@ test("the spaces and the project of a canvas open filtered, and a color scheme r
     // A color scheme that redefines the palette changes the colors of the series.
     await page.evaluate(`document.documentElement.style.setProperty('--chart-1', '#ff0000')`);
     await page.until(`[...document.querySelectorAll('.stat-chart .chart-surface svg path')].some(path => (path.getAttribute('fill') || '').toLowerCase() === '#ff0000')`, "the series redrawn in the new color");
+  });
+});
+
+test("the canvas of the application offers My fleet once a server is linked, with the machines, projects and models of the fleet", { skip: !edge, timeout: 300_000 }, async () => {
+  await withCanvas(async page => {
+    // Without a server, or for one project, the canvas is the one of this machine alone: no scope to choose.
+    for (const options of [{}, { fleet: "unlinked" }, { fleet: true, projectId: "proj-tomlyn", instanceId: "canvas-project" }]) {
+      await render(page, { scenario: "ready", ...options });
+      await page.until(settled, "the overview");
+      await idle(200);
+      assert.equal(await page.evaluate(`!!document.querySelector('.stats-scope')`), false, `no scope for ${JSON.stringify(options)}`);
+    }
+
+    await render(page, { scenario: "ready", fleet: true });
+    await page.until(`document.querySelector('.stats-scope') && ${settled}`, "the scope");
+    await page.evaluate(`statsFixture.clearCalls()`);
+    await page.clickText('.stats-scope button', "My fleet");
+    const fleetSettled = `document.querySelector('.statistics-canvas[data-scope="fleet"]') && document.querySelectorAll('.stats-fleet .stats-table').length === 3 && !document.querySelector('.stats-block[data-state="loading"]')`;
+    await page.until(fleetSettled, "the fleet");
+    assert.equal(await page.evaluate(`!!document.querySelector('.stats-tabs')`), false, "the pages of this machine give way to the fleet");
+    // StrictMode runs the effects twice: the first questions are cancelled, three remain.
+    const asked = (await calls(page)).filter(call => call.method === "fleet" && !call.aborted);
+    assert.deepEqual(asked.map(call => call.request.groupBy.join(",")).sort(), ["machine", "project", "provider,model"]);
+    assert.ok(asked.every(call => call.request.from <= call.request.to && call.request.timeZone), "local days of the last 30 days");
+    const text = await page.evaluate<string>(`document.querySelector('.stats-fleet').textContent`);
+    for (const expected of ["Mac mini", "Desktop", "Laptop", "Not published yet", "CodeAlta", "Project Zz81kQ", "claude-opus-5-5", "openai", "No model"]) {
+      assert.ok(text.includes(expected), `the fleet shows ${expected}`);
+    }
+    assert.ok((await page.evaluate<string[]>(`[...document.querySelectorAll('.stats-fleet .stat-tile-label')].map(label => label.textContent)`)).includes("Tokens"));
+
+    // Another period asks again; the tables fit a narrow tab, in both themes.
+    await page.evaluate(`statsFixture.clearCalls()`);
+    await page.clickText('.stats-fleet-bar button', "Last 7 days");
+    await page.until(`${fleetSettled} && statsFixture.calls().filter(call => call.method === 'fleet').length >= 3`, "the period of 7 days");
+    for (const [theme, dark] of [["dark", true], ["light", false]] as const) {
+      await page.evaluate(`statsFixture.setTheme(${dark})`);
+      for (const width of [1280, 640]) {
+        await page.resize(width, 800);
+        await idle(300);
+        await page.shot(`fleet-${theme}-${width}`);
+        const overflow = await page.evaluate<number>(`document.documentElement.scrollWidth - document.documentElement.clientWidth`);
+        assert.ok(overflow <= 0, `My fleet at ${width}px scrolls sideways by ${overflow}px`);
+      }
+    }
+
+    await page.evaluate(`statsFixture.setTheme(true)`);
+    await page.clickText('.stats-scope button', "This machine");
+    await page.until(`document.querySelector('.statistics-canvas[data-scope="machine"]') && ${settled}`, "this machine again");
+    assert.equal(await page.evaluate(`!!document.querySelector('.stats-tabs')`), true);
   });
 });

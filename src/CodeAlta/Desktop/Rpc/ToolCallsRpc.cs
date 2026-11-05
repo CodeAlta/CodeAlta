@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Orchestration.Jobs;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
@@ -29,18 +30,30 @@ internal sealed partial class ToolCallsService
     /// <summary>Longest text of one item of the live output channel, in UTF-16 code units.</summary>
     internal const int ItemCharacters = 64 * 1024;
     /// <summary>Most paths listed for the files a call read or modified.</summary>
-    internal const int MaximumPaths = 64;
+    internal const int MaximumPaths = AgentToolCallProjection.MaximumPaths;
 
     private readonly Func<string, long, CancellationToken, Task<AgentEvent?>>? _read;
-    private readonly RuntimeToolOutputProjection? _output;
+    // What a running call of a session writes (session, activity); null serves no live output.
+    private readonly Func<string, string, CancellationToken, IAsyncEnumerable<RuntimeToolOutputUpdate>>? _output;
+    // The job of a session (session, job), and what it writes; null serves no job.
+    private readonly Func<string, string, SessionJob?>? _findJob;
+    private readonly Func<string, string, CancellationToken, IAsyncEnumerable<RuntimeToolOutputUpdate>>? _observeJob;
     private readonly string? _epoch;
     private readonly TimeSpan _pace;
 
     /// <summary>
-    /// Gets the background jobs of the sessions, whose output is followed like the one of a running call, under
-    /// the identity of the job; null serves none.
+    /// Sets the background jobs of the sessions of this process, whose output is followed like the one of a running
+    /// call, under the identity of the job; null serves none. The service over the session hosts asks those hosts instead.
     /// </summary>
-    internal SessionJobService? Jobs { get; init; }
+    internal SessionJobService? Jobs
+    {
+        init
+        {
+            _findJob = value is null ? null : (sessionId, jobId) => value.Get(jobId) is { } job
+                && string.Equals(job.SessionId, sessionId, StringComparison.OrdinalIgnoreCase) ? job : null;
+            _observeJob = value is null ? null : (_, jobId, token) => value.ObserveOutputAsync(jobId, token);
+        }
+    }
 
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
     internal ToolCallsService()
@@ -59,6 +72,21 @@ internal sealed partial class ToolCallsService
         Prompts = reads.ReadSystemPromptAsync;
     }
 
+    /// <summary>Creates the service over the hosts of the sessions: each read and observation goes to the host of its session.</summary>
+    /// <param name="hosts">The hosts of the sessions.</param>
+    /// <param name="epoch">The host epoch that requests must name.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="hosts"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
+    internal ToolCallsService(SessionHostRegistry hosts, string epoch)
+        : this((sessionId, offset, token) => hosts.Resolve(sessionId).ReadHistoryRecordAsync(sessionId, offset, token), (RuntimeToolOutputProjection?)null, epoch)
+    {
+        ArgumentNullException.ThrowIfNull(hosts);
+        Prompts = (sessionId, offset, token) => hosts.Resolve(sessionId).ReadSystemPromptAsync(sessionId, offset, token);
+        _output = (sessionId, activityId, token) => hosts.Resolve(sessionId).ObserveToolOutputAsync(sessionId, activityId, token);
+        _findJob = (sessionId, jobId) => hosts.Resolve(sessionId).FindJob(sessionId, jobId);
+        _observeJob = (sessionId, jobId, token) => hosts.Resolve(sessionId).ObserveJobOutputAsync(sessionId, jobId, token);
+    }
+
     /// <summary>Creates the service over a literal record read.</summary>
     /// <param name="read">Reads the event at (session, record offset).</param>
     /// <param name="output">The output of the running tool calls; null serves no live output.</param>
@@ -71,7 +99,7 @@ internal sealed partial class ToolCallsService
         ArgumentNullException.ThrowIfNull(read);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
         _read = read;
-        _output = output;
+        _output = output is null ? null : output.ObserveAsync;
         _epoch = epoch;
         _pace = pace ?? TimeSpan.FromMilliseconds(40);
     }
@@ -101,7 +129,7 @@ internal sealed partial class ToolCallsService
         var output = attached is AgentContentCompletedEvent { Kind: AgentContentKind.ToolOutput or AgentContentKind.CommandOutput or AgentContentKind.FileChangeOutput } completed
             && (string.Equals(completed.ParentActivityId, activity.ActivityId, StringComparison.Ordinal) || string.Equals(completed.ContentId, activity.ActivityId, StringComparison.Ordinal))
             ? completed : null;
-        var call = ToolCallProjection.Project(activity, output);
+        var call = AgentToolCallProjection.Project(activity, output);
         if (request.Part is { } part)
         {
             var text = part switch { "arguments" => call.Arguments, "output" => call.Output, _ => call.Diff };
@@ -120,13 +148,13 @@ internal sealed partial class ToolCallsService
     public BackgroundJobDetailsResponse ReadJob(BackgroundJobDetailsRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (Jobs is null) return new("unavailable", null);
+        if (_findJob is null) return new("unavailable", null);
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null);
         if (!Identity(request.SessionId) || !Identity(request.JobId) || !request.JobId.StartsWith(SessionJobService.IdPrefix, StringComparison.OrdinalIgnoreCase))
             return new("invalid", null);
         cancellationToken.ThrowIfCancellationRequested();
-        var job = Jobs.Get(request.JobId);
-        if (job is null || !string.Equals(job.SessionId, request.SessionId, StringComparison.OrdinalIgnoreCase)) return new("missing_job", null);
+        var job = _findJob(request.SessionId, request.JobId);
+        if (job is null) return new("missing_job", null);
         return new("ok", new(job.Id, job.Title, job.Command, job.Folder, job.Timeout is { } timeout ? (int)Math.Ceiling(timeout.TotalSeconds) : null));
     }
 
@@ -142,9 +170,9 @@ internal sealed partial class ToolCallsService
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) { yield return Ended("stale_epoch"); yield break; }
         cancellationToken.ThrowIfCancellationRequested();
         // A background job of the session is followed the same way: it writes outside any tool call, until its command ends.
-        var job = Jobs is not null && request.ActivityId.StartsWith(SessionJobService.IdPrefix, StringComparison.OrdinalIgnoreCase)
-            && Jobs.Get(request.ActivityId) is { } found && string.Equals(found.SessionId, request.SessionId, StringComparison.OrdinalIgnoreCase);
-        await using var observation = (job ? Jobs!.ObserveOutputAsync(request.ActivityId, cancellationToken) : _output.ObserveAsync(request.SessionId, request.ActivityId, cancellationToken))
+        var job = _findJob is not null && request.ActivityId.StartsWith(SessionJobService.IdPrefix, StringComparison.OrdinalIgnoreCase)
+            && _findJob(request.SessionId, request.ActivityId) is not null;
+        await using var observation = (job ? _observeJob!(request.SessionId, request.ActivityId, cancellationToken) : _output(request.SessionId, request.ActivityId, cancellationToken))
             .GetAsyncEnumerator(cancellationToken);
         while (true)
         {
@@ -222,77 +250,6 @@ internal sealed partial class ToolCallsService
     {
         internal string Status { get; } = status;
     }
-}
-
-/// <summary>What a tool call's records say, whole: the texts are not cut here.</summary>
-internal sealed record ToolCallParts(string? Name, string? Message, string? Command, string? WorkingDirectory, int? ExitCode, string? Error,
-    string? Arguments, string? Output, string? Diff, string[] ReadFiles, string[] ModifiedFiles);
-
-/// <summary>Reads a tool call from the records providers write, with the shapes the terminal UI reads.</summary>
-internal static class ToolCallProjection
-{
-    /// <summary>Projects the activity record of a call and, when the timeline attached one, its output record.</summary>
-    /// <param name="activity">The newest activity record of the call.</param>
-    /// <param name="output">The completed output record of the call, when there is one.</param>
-    internal static ToolCallParts Project(AgentActivityEvent activity, AgentContentCompletedEvent? output)
-    {
-        ArgumentNullException.ThrowIfNull(activity);
-        var details = activity.Details;
-        var name = activity.Name is { Length: > 0 } given ? given
-            : Text(details, "toolName") ?? Text(details, "mcpToolName") ?? Text(details, "tool") ?? Text(details, "name");
-        var command = Text(details, "command") ?? Text(details, "arguments", "command") ?? Text(details, "input", "command")
-            ?? (activity.Kind == AgentActivityKind.CommandExecution ? activity.Name : null);
-        var directory = Text(details, "cwd") ?? Text(details, "arguments", "workdir") ?? Text(details, "arguments", "cwd") ?? Text(details, "input", "cwd");
-        var ended = activity.Phase is AgentActivityPhase.Completed or AgentActivityPhase.Failed or AgentActivityPhase.Canceled;
-        var text = output?.Content ?? Text(details, "aggregatedOutput") ?? ResultItems(details) ?? Text(details, "result", "content")
-            ?? Text(details, "error", "message") ?? Text(details, "output", "body") ?? Text(details, "result", "detailedContent")
-            ?? Text(details, "output") ?? Text(details, "result") ?? (ended ? activity.Message : null);
-        var diff = Text(details, "diff") ?? Text(details, "result", "diff") ?? Text(details, "output", "diff")
-            ?? Text(output?.Details, "diff");
-        var error = Text(details, "result", "error") ?? Text(details, "error", "message")
-            ?? (activity.Phase == AgentActivityPhase.Failed ? activity.Message : null);
-        return new(name, activity.Message, command, directory,
-            Number(details, "exitCode") ?? Number(details, "exit_code") ?? Number(details, "result", "exitCode"), error,
-            Json(details, "arguments") ?? Json(details, "input"), text, diff, Paths(details, "readFiles"), Paths(details, "modifiedFiles"));
-    }
-
-    // The result of a tool of the CodeAlta runtime: its text items, in order.
-    private static string? ResultItems(JsonElement? details)
-    {
-        if (Value(details, "result", "items") is not { ValueKind: JsonValueKind.Array } items) return null;
-        StringBuilder? text = null;
-        foreach (var item in items.EnumerateArray())
-        {
-            if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.String) continue;
-            if (text is null) text = new();
-            else text.Append('\n');
-            text.Append(value.GetString());
-        }
-        return text?.ToString();
-    }
-
-    private static string? Json(JsonElement? details, string property)
-        => Value(details, property) is { } value && value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
-            ? value.ValueKind == JsonValueKind.String ? value.GetString() : value.GetRawText() : null;
-
-    private static int? Number(JsonElement? details, params string[] path)
-        => Value(details, path) is { ValueKind: JsonValueKind.Number } value && value.TryGetInt32(out var number) ? number : null;
-
-    private static string[] Paths(JsonElement? details, string property)
-    {
-        if (Value(details, property) is not { ValueKind: JsonValueKind.Array } values) return [];
-        var paths = new List<string>();
-        foreach (var value in values.EnumerateArray())
-        {
-            if (paths.Count == ToolCallsService.MaximumPaths) break;
-            if (value.ValueKind == JsonValueKind.String && value.GetString() is { Length: > 0 and <= 1024 } path) paths.Add(path);
-        }
-        return paths.ToArray();
-    }
-
-    private static string? Text(JsonElement? value, params string[] path) => HistoryToolProjection.Text(value, path);
-
-    private static JsonElement? Value(JsonElement? value, params string[] path) => HistoryToolProjection.Value(value, path);
 }
 
 /// <summary>Asks for the record of a tool call, or for the next part of one of its texts.</summary>

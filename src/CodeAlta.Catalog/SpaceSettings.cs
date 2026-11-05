@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using CodeAlta.Agent;
 using CodeAlta.Catalog.ModelTiers;
+using CodeAlta.Catalog.Secrets;
 
 namespace CodeAlta.Catalog;
 
@@ -16,18 +17,21 @@ namespace CodeAlta.Catalog;
 /// <param name="Identity">The identity the sessions of the space work under; <see langword="null"/> for the usual.</param>
 /// <param name="Tools">The tools the sessions of the space do without; <see langword="null"/> for none.</param>
 /// <param name="Skills">The folders of skills the sessions of the space read besides the others; <see langword="null"/> for none.</param>
-public sealed record SpaceSettings(SpaceNewSessions? NewSessions = null, SpaceIdentity? Identity = null, SpaceTools? Tools = null, SpaceSkills? Skills = null)
+/// <param name="Fleet">The CodeAlta Server the space is linked to; <see langword="null"/> for none.</param>
+public sealed record SpaceSettings(SpaceNewSessions? NewSessions = null, SpaceIdentity? Identity = null, SpaceTools? Tools = null, SpaceSkills? Skills = null,
+    SpaceFleet? Fleet = null)
 {
     /// <summary>Gets settings that set nothing.</summary>
     public static SpaceSettings Empty { get; } = new();
 
     /// <summary>Gets whether nothing is set.</summary>
-    public bool IsEmpty => (NewSessions?.IsEmpty ?? true) && (Identity?.IsEmpty ?? true) && (Tools?.IsEmpty ?? true) && (Skills?.IsEmpty ?? true);
+    public bool IsEmpty => (NewSessions?.IsEmpty ?? true) && (Identity?.IsEmpty ?? true) && (Tools?.IsEmpty ?? true) && (Skills?.IsEmpty ?? true)
+        && (Fleet?.IsEmpty ?? true);
 
     /// <summary>Tells what is wrong with the settings.</summary>
     /// <returns>The first problem found, or <see langword="null"/> when they are valid.</returns>
     public string? Problem()
-        => NewSessions?.Problem() ?? Identity?.Problem() ?? Tools?.Problem() ?? Skills?.Problem();
+        => NewSessions?.Problem() ?? Identity?.Problem() ?? Tools?.Problem() ?? Skills?.Problem() ?? Fleet?.Problem();
 
     /// <summary>
     /// Keeps what is valid of settings read from a file: a value that is not valid is left out, so that one wrong
@@ -35,11 +39,46 @@ public sealed record SpaceSettings(SpaceNewSessions? NewSessions = null, SpaceId
     /// </summary>
     /// <returns>The settings without their invalid values.</returns>
     public SpaceSettings Sanitized()
-        => new(NewSessions?.Sanitized(), Identity?.Sanitized(), Tools?.Sanitized(), Skills?.Sanitized());
+        => new(NewSessions?.Sanitized(), Identity?.Sanitized(), Tools?.Sanitized(), Skills?.Sanitized(), Fleet?.Sanitized());
 
     // Text on one line, without control characters, of at most the length given.
     internal static bool IsLine([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? value, int maximum)
         => value is { Length: > 0 } && value.Length <= maximum && value == value.Trim() && !value.Any(char.IsControl);
+}
+
+/// <summary>
+/// The CodeAlta Server a space is linked to (<c>doc/fleet/identity.md</c>, spaces and servers): the sessions of the space
+/// that are not Private publish their facts to it. Only the address and the organization are kept here; the device and
+/// its state are the instance's link to that server.
+/// </summary>
+/// <param name="Server">The address of the server, <c>http://</c> or <c>https://</c>.</param>
+/// <param name="Organization">The id of its organization, once known; <see langword="null"/> otherwise.</param>
+public sealed record SpaceFleet(string? Server = null, string? Organization = null)
+{
+    /// <summary>The longest address of a server.</summary>
+    public const int MaximumServerLength = 2048;
+
+    /// <summary>Gets whether nothing is set: a space without a server.</summary>
+    public bool IsEmpty => Server is null;
+
+    /// <summary>Tells what is wrong with the link.</summary>
+    /// <returns>The first problem found, or <see langword="null"/>.</returns>
+    public string? Problem()
+        => Server is not null && !IsServer(Server)
+            ? $"'{Server}' is not the address of a server (http:// or https://)."
+            : Organization is not null && !SpaceSettings.IsLine(Organization, 128) ? "The organization of a server is one line of at most 128 characters." : null;
+
+    /// <summary>Keeps what is valid.</summary>
+    /// <returns>The link without its invalid values; <see langword="null"/> when no valid server is left.</returns>
+    public SpaceFleet? Sanitized()
+        => IsServer(Server) ? new SpaceFleet(Server!.Trim(), SpaceSettings.IsLine(Organization?.Trim(), 128) ? Organization!.Trim() : null) : null;
+
+    /// <summary>Gets whether a text is the address of a server: absolute, <c>http://</c> or <c>https://</c>, without query.</summary>
+    /// <param name="value">The text.</param>
+    /// <returns>True when it may name a server.</returns>
+    public static bool IsServer(string? value)
+        => value is { Length: > 0 and <= MaximumServerLength } && Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
+            && !string.IsNullOrEmpty(uri.Host) && string.IsNullOrEmpty(uri.Query) && string.IsNullOrEmpty(uri.UserInfo);
 }
 
 /// <summary>What the new sessions of a space start with.</summary>
@@ -365,8 +404,9 @@ public sealed record SpaceJiraIdentity(string? Site = null, string? Email = null
 /// </summary>
 /// <remarks>
 /// A value is a path, a name of a profile or a context, never a secret: <c>~</c> at its start is the folder of the
-/// user, and <c>${env:NAME}</c> is the value of a variable of the environment of the application. A variable whose
-/// name says it holds a secret (a token, a password, a secret key) can only be given such a reference.
+/// user, <c>${env:NAME}</c> is the value of a variable of the environment of the application, and <c>${secret:NAME}</c>
+/// and <c>${var:NAME}</c> the value of a secret or a variable of this machine. A variable whose name says it holds a
+/// secret (a token, a password, a secret key) can only be given one <c>${secret:NAME}</c> or <c>${env:NAME}</c>.
 /// </remarks>
 /// <param name="Name">The name of the profile, such as <c>azure</c> or <c>kubectl</c>.</param>
 /// <param name="Environment">The variables it sets, in their order.</param>
@@ -388,8 +428,6 @@ public sealed record SpaceCliProfile(string Name, IReadOnlyList<KeyValuePair<str
 
     /// <summary>The longest check or login command.</summary>
     public const int MaximumCommandLength = 2048;
-
-    private const string ReferenceStart = "${env:";
 
     // The variables the Git and GitHub cards give: a profile does not set them.
     private static readonly FrozenSet<string> Reserved = FrozenSet.Create(StringComparer.OrdinalIgnoreCase,
@@ -519,7 +557,7 @@ public sealed record SpaceCliProfile(string Name, IReadOnlyList<KeyValuePair<str
         if (!SpaceSettings.IsLine(value, MaximumValueLength)) return $"The value of {name} is one line of at most {MaximumValueLength} characters.";
         if (ReferenceProblem(value) is { } reference) return $"The value of {name}: {reference}";
         return IsSecretName(name) && !IsLoneReference(value)
-            ? $"{name} holds a secret: give it as ${{env:NAME}}, the name of a variable of your environment, never the secret itself."
+            ? $"{name} holds a secret: give it as ${{secret:NAME}}, a secret of this machine, or ${{env:NAME}}, a variable of your environment, never the secret itself."
             : null;
     }
 
@@ -530,25 +568,25 @@ public sealed record SpaceCliProfile(string Name, IReadOnlyList<KeyValuePair<str
     public static IReadOnlyList<string> References(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        var names = new List<string>();
-        for (var start = value.IndexOf(ReferenceStart, StringComparison.Ordinal); start >= 0; start = value.IndexOf(ReferenceStart, start + 1, StringComparison.Ordinal))
-        {
-            var end = value.IndexOf('}', start);
-            if (end > start) names.Add(value[(start + ReferenceStart.Length)..end]);
-        }
-
-        return names;
+        return [.. SecretReferences.Find(value).Where(static reference => reference.Kind == SecretReferenceKind.Environment).Select(static reference => reference.Name)];
     }
 
     /// <summary>
     /// Gives the value a process is given for a value as written: <c>~</c> at its start, or after the separator of a
-    /// list of paths, is the folder of the user, and each <c>${env:NAME}</c> is the value of that variable.
+    /// list of paths, is the folder of the user, each <c>${env:NAME}</c> is the value of that variable, and each
+    /// <c>${secret:NAME}</c> or <c>${var:NAME}</c> the value of that secret or variable of the machine.
     /// </summary>
     /// <param name="value">The value, as written.</param>
-    /// <param name="inherited">Reads a variable of the environment of the application.</param>
+    /// <param name="inherited">
+    /// Reads a variable of the environment of the application by its name, and a secret or a variable of the machine by
+    /// <c>secret:NAME</c> or <c>var:NAME</c> (<see cref="SecretReferenceResolver.Read"/>).
+    /// </param>
     /// <param name="userProfile">The folder of the user.</param>
     /// <param name="windows">Whether the processes run on Windows, where a list of paths is separated by <c>;</c>, not <c>:</c>.</param>
-    /// <param name="missing">The first variable it refers to that is not set; <see langword="null"/> when all are.</param>
+    /// <param name="missing">
+    /// The first variable of the environment it refers to that is not set, by its name, or the first secret or variable
+    /// of the machine, as it is written (<c>${secret:NAME}</c>); <see langword="null"/> when all are.
+    /// </param>
     /// <returns>The value, or <see langword="null"/> when a variable it refers to is not set.</returns>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
     public static string? Resolve(string value, Func<string, string?> inherited, string userProfile, bool windows, out string? missing)
@@ -562,17 +600,17 @@ public sealed record SpaceCliProfile(string Name, IReadOnlyList<KeyValuePair<str
         var index = 0;
         while (index < value.Length)
         {
-            if (value.AsSpan(index).StartsWith(ReferenceStart, StringComparison.Ordinal) && value.IndexOf('}', index) is var end and > 0)
+            if (value[index] == '$' && SecretReferences.TryReadAt(value, index, out var reference, out var length))
             {
-                var name = value[(index + ReferenceStart.Length)..end];
-                if (inherited(name) is not { } set)
+                var environment = reference.Kind == SecretReferenceKind.Environment;
+                if (inherited(environment ? reference.Name : SecretReferences.PrefixOf(reference.Kind) + ":" + reference.Name) is not { } set)
                 {
-                    missing = name;
+                    missing = environment ? reference.Name : reference.ToString();
                     return null;
                 }
 
                 text.Append(set);
-                index = end + 1;
+                index += length;
                 continue;
             }
 
@@ -596,22 +634,21 @@ public sealed record SpaceCliProfile(string Name, IReadOnlyList<KeyValuePair<str
             || name.StartsWith("GIT_CONFIG_KEY_", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase);
 
-    // Every ${ starts a reference ${env:NAME} to a variable.
+    // Every ${ starts a reference: ${env:NAME}, ${secret:NAME} or ${var:NAME}.
     private static string? ReferenceProblem(string value)
     {
         for (var start = value.IndexOf("${", StringComparison.Ordinal); start >= 0; start = value.IndexOf("${", start + 2, StringComparison.Ordinal))
         {
-            var end = value.IndexOf('}', start);
-            if (!value.AsSpan(start).StartsWith(ReferenceStart, StringComparison.Ordinal) || end < 0
-                || !SpaceJiraIdentity.IsVariableName(value[(start + ReferenceStart.Length)..end]))
-                return "${...} is only ${env:NAME}, the value of a variable of your environment.";
+            if (!SecretReferences.TryReadAt(value, start, out _, out _))
+                return "${...} is only ${env:NAME}, a variable of your environment, or ${secret:NAME} and ${var:NAME}, a secret and a variable of this machine.";
         }
 
         return null;
     }
 
+    // One reference to a secret: of the machine, or of the environment.
     private static bool IsLoneReference(string value)
-        => value.StartsWith(ReferenceStart, StringComparison.Ordinal) && value.EndsWith('}') && value.IndexOf('}') == value.Length - 1;
+        => SecretReferences.TryParseLone(value, out var reference) && reference.Kind != SecretReferenceKind.Variable;
 
     // The valid values of this profile, without a variable another profile before it gives another value.
     private SpaceCliProfile? Sanitized(Dictionary<string, string> owners)

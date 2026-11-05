@@ -1,0 +1,634 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using CodeAlta.Catalog.SessionMoves;
+using CodeAlta.Fleet.Client;
+using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.Moves;
+using CodeAlta.Fleet.NodeApi;
+using CodeAlta.Fleet.Protocol;
+using CodeAlta.Orchestration.Hosting;
+using CodeAlta.Orchestration.Runtime;
+
+namespace CodeAlta.Node.Tests;
+
+/// <summary>
+/// Sessions moved between two machines over the network (fleet M2): a node (<see cref="NodeHost"/> with its
+/// <see cref="NodeFleet"/>) and a viewer with a runtime of its own, as CodeAlta Desktop is, over real TCP on loopback,
+/// each with a clone of one origin as its project. The viewer gives a session to the node (it drives the node's target
+/// methods), and the node gives one to the viewer (moves.start: the viewer serves the target's methods back on its
+/// channel).
+/// </summary>
+[TestClass]
+public sealed class FleetMoveTests
+{
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(60);
+
+    public TestContext TestContext { get; set; } = null!;
+
+    [TestMethod]
+    public async Task ViewerToNode_MovesTheSessionWithItsWork_AndTheNodeRunsIt()
+    {
+        await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        await using var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, token);
+        var sessionId = await fixture.CreateViewerSessionAsync("Parser work");
+        fixture.Write(fixture.ViewerProject, "readme.md", "work in progress\n");
+        fixture.Write(fixture.ViewerProject, ".env", "TOKEN=secret\n");
+
+        var preview = await fixture.ViewerSender.PreviewAsync(sessionId, token);
+        Assert.AreEqual("ok", preview.Status, preview.Message);
+        Assert.IsNull(preview.Busy);
+        CollectionAssert.Contains(preview.Secrets.ToList(), ".env");
+
+        var moved = await fixture.ViewerSender.MoveAsync(sessionId, "move-push", client.AsMoveTarget(), "test-node", fixture.NodeRoute, false, token);
+
+        Assert.AreEqual(SessionMoveState.Finished, moved.Status, $"{moved.Code}: {moved.Message} {string.Join(" ", moved.Warnings)}");
+        Assert.AreEqual(1, moved.Epoch);
+        Assert.IsTrue(fixture.ViewerHost.RuntimeService.Relinquishments.Read(sessionId)!.IsRelinquished, "The viewer keeps a read-only copy.");
+        var folder = await fixture.Node.Host.RuntimeService.GetSessionWorktreeAsync(sessionId);
+        Assert.IsNotNull(folder);
+        Assert.AreEqual("work in progress\n", File.ReadAllText(Path.Combine(folder, "readme.md")));
+        Assert.IsFalse(File.Exists(Path.Combine(folder, ".env")), "A secret stays on the source.");
+
+        // The node runs it now, driven through its API, in its worktree.
+        var sent = await client.SendAsync(sessionId, "Go on.", cancellationToken: token);
+        Assert.AreEqual("accepted", sent.Status);
+        await fixture.WaitIdleOnNodeAsync(client, sessionId, token);
+        Assert.AreEqual(folder, fixture.NodeProvider.LastWorkingDirectory);
+        StringAssert.Contains(fixture.NodeProvider.LastUserText, "this session moved from viewer");
+        var moves = await client.ListMovesAsync(token);
+        Assert.AreEqual(SessionMoveState.Finished, moves.Moves.Single(record => record.MoveId == "move-push").State);
+        Assert.IsFalse(Directory.Exists(Path.Combine(fixture.Node.Host.CatalogOptions.FleetRoot, "moves", "bundles", "move-push")), "The copies of the bundle go.");
+    }
+
+    [TestMethod]
+    public async Task NodeToViewer_MovesStart_GivesTheSessionToTheCaller()
+    {
+        await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        var created = await fixture.CreateNodeSessionAsync(token);
+        fixture.Write(fixture.NodeProject, "src/node.txt", "from the node\n");
+        await using var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Start | DevicePermissions.Move, token,
+            serve: connection => FleetMoveRoutes.Register(connection, (_, via) => via is null
+                ? fixture.ViewerReceiver.For(fixture.Fleet.DeviceId)
+                : throw new FleetException(FleetErrorCodes.Forbidden, null, "No relay here.")));
+
+        var probe = await client.StartMoveAsync(new FleetMoveStartParams(created, "move-pull", Probe: true), cancellationToken: token);
+        Assert.AreEqual("preview", probe.Status);
+        Assert.AreEqual("ok", probe.Preview!.Status);
+        Assert.IsTrue(probe.Preview.Dirty);
+
+        var moved = await client.StartMoveAsync(new FleetMoveStartParams(created, "move-pull", "viewer"), cancellationToken: token);
+
+        Assert.AreEqual(SessionMoveState.Finished, moved.Status, $"{moved.Code}: {moved.Message} {string.Join(" ", moved.Warnings)}");
+        var folder = await fixture.ViewerHost.RuntimeService.GetSessionWorktreeAsync(created);
+        Assert.IsNotNull(folder);
+        Assert.AreEqual("from the node\n", File.ReadAllText(Path.Combine(folder, "src", "node.txt")));
+        Assert.IsTrue(fixture.Node.Host.RuntimeService.Relinquishments.Read(created)!.IsRelinquished);
+        var receipt = fixture.Node.Host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), created, "Still there?")).Receipt!;
+        Assert.AreEqual(SessionRuntimeService.SessionInUseCode, (await receipt.Completion.WaitAsync(Patience, token)).Code,
+            "The node no longer runs a session it gave away.");
+
+        await fixture.SendOnViewerAsync(created, "Here now.");
+        Assert.AreEqual(folder, fixture.ViewerProvider.LastWorkingDirectory);
+        StringAssert.Contains(fixture.ViewerProvider.LastUserText, "this session moved from test-node");
+    }
+
+    [TestMethod]
+    public async Task LostConnectionAfterTheCommit_IsRecovered_ByAskingTheArbiter()
+    {
+        await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        var sessionId = await fixture.CreateViewerSessionAsync(null);
+        fixture.Write(fixture.ViewerProject, "readme.md", "dirty\n");
+        FleetMoveResult first;
+        await using (var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, token))
+        {
+            // The node commits and installs, then the channel fails before its answer arrives.
+            first = await fixture.ViewerSender.MoveAsync(sessionId, "move-lost", new LoseAnswerOfCommit(client.AsMoveTarget()), "test-node", fixture.NodeRoute, false, token);
+        }
+
+        Assert.AreEqual(SessionMoveState.Offered, first.Status, first.Message);
+        Assert.AreEqual(SessionRelinquishment.Frozen, fixture.ViewerHost.RuntimeService.Relinquishments.Read(sessionId)!.State,
+            "A lost answer never makes the source take the session back.");
+        Assert.IsNotNull(await fixture.Node.Host.RuntimeService.GetSessionWorktreeAsync(sessionId), "The node installed the session it committed.");
+        var sent = await TrySendOnViewerAsync(fixture, sessionId);
+        Assert.AreEqual(SessionRuntimeService.SessionInUseCode, sent.Code, "The frozen copy is not written.");
+
+        await using (var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, token))
+        {
+            var resumed = await fixture.ViewerSender.ResumeAsync(client.AsMoveTarget(), fixture.NodeRoute, token);
+            Assert.AreEqual(SessionMoveState.Finished, resumed.Single().Status, resumed.Single().Message);
+        }
+
+        Assert.IsTrue(fixture.ViewerHost.RuntimeService.Relinquishments.Read(sessionId)!.IsRelinquished);
+        Assert.AreEqual(SessionMoveState.Finished, fixture.ViewerSender.Moves.Store.Read("move-lost", SessionMoveRole.Source)!.State);
+    }
+
+    [TestMethod]
+    public async Task ALostCommit_GoesOnOnlyWithTheMachineItWasOfferedTo_NotOneOfTheSameName()
+    {
+        await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        // A third machine, paired with the viewer too, with the name of the first one.
+        await using var twin = await fixture.StartSecondNodeAsync("test-node", token);
+        var sessionId = await fixture.CreateViewerSessionAsync(null);
+        fixture.Write(fixture.ViewerProject, "readme.md", "dirty\n");
+        FleetMoveResult first;
+        await using (var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, token))
+            first = await fixture.ViewerSender.MoveAsync(sessionId, "move-twin", new LoseAnswerOfCommit(client.AsMoveTarget()), "test-node", fixture.NodeRoute, false, token);
+        Assert.AreEqual(SessionMoveState.Offered, first.Status, first.Message);
+        Assert.IsNotNull(await fixture.Node.Host.RuntimeService.GetSessionWorktreeAsync(sessionId), "The first machine committed and installed the session.");
+
+        // The twin comes online first: the move does not go on with it, by recovery or by its id.
+        await using (var other = await fixture.ConnectToAsync(twin, DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, token))
+        {
+            var resumed = await fixture.ViewerSender.ResumeAsync(other.AsMoveTarget(), new SessionMoveRoute(twin.Fleet.DeviceId), token);
+            Assert.IsEmpty(resumed, "A machine of the same name is not the one the move was offered to.");
+            var again = await fixture.ViewerSender.MoveAsync(sessionId, "move-twin", other.AsMoveTarget(), "test-node", new SessionMoveRoute(twin.Fleet.DeviceId), false, token);
+            Assert.AreEqual(("refused", "move_target_mismatch"), (again.Status, again.Code), again.Message);
+        }
+
+        Assert.IsNull(await twin.Node.Host.RuntimeService.TryGetRecoverableSessionAsync(sessionId, token), "Only one machine committed the session.");
+        Assert.IsNull(twin.Node.Host.RuntimeService.Relinquishments.Read(sessionId));
+        Assert.AreEqual(SessionRelinquishment.Frozen, fixture.ViewerHost.RuntimeService.Relinquishments.Read(sessionId)!.State);
+
+        await using (var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, token))
+        {
+            var resumed = await fixture.ViewerSender.ResumeAsync(client.AsMoveTarget(), fixture.NodeRoute, token);
+            Assert.AreEqual(SessionMoveState.Finished, resumed.Single().Status, resumed.Single().Message);
+        }
+
+        Assert.IsTrue(fixture.ViewerHost.RuntimeService.Relinquishments.Read(sessionId)!.IsRelinquished);
+    }
+
+    [TestMethod]
+    public async Task AnotherDevice_NeitherReadsNorResolvesAMoveItDidNotOffer()
+    {
+        await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        // A second machine the node lets move sessions too.
+        await using var other = await fixture.StartSecondNodeAsync("node-b", token);
+        var sessionId = await fixture.CreateViewerSessionAsync(null);
+        fixture.Write(fixture.ViewerProject, "readme.md", "dirty\n");
+        FleetMoveResult first;
+        await using (var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, token))
+            first = await fixture.ViewerSender.MoveAsync(sessionId, "move-guarded", new LoseChannelBeforeCommit(client.AsMoveTarget()), "test-node", fixture.NodeRoute,
+                false, token);
+        Assert.AreEqual(SessionMoveState.Offered, first.Status, first.Message);
+        var store = fixture.Fleet.Service.MoveReceiver.Moves.Store;
+        Assert.AreEqual(SessionMoveState.Prepared, store.Read("move-guarded", SessionMoveRole.Target)!.State, "The node prepared the move, not decided yet.");
+
+        // The other machine asks about the viewer's move: it is refused, and the move stays undecided.
+        using (var identity = DeviceIdentity.LoadOrCreate(other.Node.Host.CatalogOptions))
+        await using (var intruder = await FleetNodeClient.ConnectAsync(new PairedMachineStore(other.Node.Host.CatalogOptions.FleetRoot).Find("test-node")!, identity, null, token))
+        {
+            var resolved = await Assert.ThrowsExactlyAsync<FleetException>(() => intruder.AsMoveTarget().StatusAsync(new FleetMoveStatusParams("move-guarded", Resolve: true), token));
+            Assert.AreEqual(FleetErrorCodes.Forbidden, resolved.Error.Code);
+            var read = await Assert.ThrowsExactlyAsync<FleetException>(() => intruder.AsMoveTarget().StatusAsync(new FleetMoveStatusParams("move-guarded"), token));
+            Assert.AreEqual(FleetErrorCodes.Forbidden, read.Error.Code);
+            // A move the node never took is decided by the one that asks: its offer is refused afterwards.
+            var unknown = await intruder.AsMoveTarget().StatusAsync(new FleetMoveStatusParams("move-never-taken", Resolve: true), token);
+            Assert.AreEqual(SessionMoveState.Aborted, unknown.Outcome);
+            Assert.IsEmpty(unknown.Records);
+        }
+
+        Assert.IsNull(store.ReadDecision("move-guarded"), "The move was not decided by another device.");
+        Assert.AreEqual(SessionMoveState.Prepared, store.Read("move-guarded", SessionMoveRole.Target)!.State);
+
+        // The node's owner reads every move of its node.
+        using (var nodeIdentity = DeviceIdentity.LoadOrCreate(fixture.Node.Host.CatalogOptions))
+        await using (var owner = await FleetNodeClient.ConnectAsOwnerAsync(fixture.Fleet.Addresses, nodeIdentity, token))
+        {
+            var status = await owner.AsMoveTarget().StatusAsync(new FleetMoveStatusParams("move-guarded"), token);
+            Assert.IsNull(status.Outcome);
+            Assert.AreEqual(SessionMoveState.Prepared, status.Records.Single(record => record.Role == SessionMoveRole.Target).State);
+        }
+
+        // The device that offered it goes on with it.
+        await using (var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, token))
+        {
+            var resumed = await fixture.ViewerSender.ResumeAsync(client.AsMoveTarget(), fixture.NodeRoute, token);
+            Assert.AreEqual(SessionMoveState.Finished, resumed.Single().Status, resumed.Single().Message);
+        }
+
+        Assert.IsNotNull(await fixture.Node.Host.RuntimeService.GetSessionWorktreeAsync(sessionId), "The node installed the session.");
+        Assert.IsTrue(fixture.ViewerHost.RuntimeService.Relinquishments.Read(sessionId)!.IsRelinquished);
+    }
+
+    [TestMethod]
+    public async Task WithoutTheMovePermission_TheMoveIsRefused_AndNothingIsFrozen()
+    {
+        await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        await using var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Start, token,
+            serve: connection => FleetMoveRoutes.Register(connection, (_, _) => fixture.ViewerReceiver.For(fixture.Fleet.DeviceId)));
+        var sessionId = await fixture.CreateViewerSessionAsync(null);
+
+        var pushed = await fixture.ViewerSender.MoveAsync(sessionId, "move-forbidden", client.AsMoveTarget(), "test-node", fixture.NodeRoute, false, token);
+
+        Assert.AreEqual(("refused", FleetErrorCodes.Forbidden), (pushed.Status, pushed.Code));
+        Assert.IsNull(fixture.ViewerHost.RuntimeService.Relinquishments.Read(sessionId), "Nothing was frozen.");
+        Assert.IsNull(fixture.ViewerSender.Moves.Store.Read("move-forbidden", SessionMoveRole.Source));
+
+        var nodeSession = await fixture.CreateNodeSessionAsync(token);
+        var pulled = await Assert.ThrowsExactlyAsync<FleetException>(() => client.StartMoveAsync(new FleetMoveStartParams(nodeSession, "move-forbidden-2"),
+            cancellationToken: token));
+        Assert.AreEqual(FleetErrorCodes.Forbidden, pulled.Error.Code);
+        Assert.IsNull(fixture.Node.Host.RuntimeService.Relinquishments.Read(nodeSession));
+    }
+
+    [TestMethod]
+    public async Task ABusySession_IsRefused_AndKeepsWorking()
+    {
+        await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        await using var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Start | DevicePermissions.Move, token,
+            serve: connection => FleetMoveRoutes.Register(connection, (_, _) => fixture.ViewerReceiver.For(fixture.Fleet.DeviceId)));
+        var gate = new TaskCompletionSource();
+        var started = new TaskCompletionSource();
+        fixture.NodeProvider.Turns.Enqueue(ScriptedNodeProvider.WaitThenReply(gate.Task, "Finally.", started));
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(fixture.NodeProjectId, Prompt: "A long turn."), cancellationToken: token);
+        await started.Task.WaitAsync(Patience, token);
+
+        var refused = await client.StartMoveAsync(new FleetMoveStartParams(created.SessionId, "move-busy", "viewer"), cancellationToken: token);
+
+        Assert.AreEqual(("refused", "working"), (refused.Status, refused.Code), refused.Message);
+        Assert.IsNull(fixture.Node.Host.RuntimeService.Relinquishments.Read(created.SessionId));
+        gate.SetResult();
+        await fixture.WaitIdleOnNodeAsync(client, created.SessionId, token);
+        Assert.IsNull(await fixture.ViewerHost.RuntimeService.TryGetRecoverableSessionAsync(created.SessionId, token), "Nothing reached the viewer.");
+    }
+
+    [TestMethod]
+    public async Task ASessionWaitingForAPermission_IsRefused_AsWaitingForAPerson()
+    {
+        await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        await using var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Start | DevicePermissions.Move, token,
+            serve: connection => FleetMoveRoutes.Register(connection, (_, _) => fixture.ViewerReceiver.For(fixture.Fleet.DeviceId)));
+        var gate = new TaskCompletionSource();
+        var started = new TaskCompletionSource();
+        fixture.NodeProvider.Turns.Enqueue(ScriptedNodeProvider.WaitThenReply(gate.Task, "Finally.", started));
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(fixture.NodeProjectId, Prompt: "Run git status."), cancellationToken: token);
+        await started.Task.WaitAsync(Patience, token);
+
+        // Its turn asks to run a command: the session waits for a person, not for its turn to end.
+        using var asking = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var command = new CodeAlta.Agent.AgentCommandPermissionRequest(new CodeAlta.Agent.ModelProviderId("scripted"), created.SessionId, DateTimeOffset.UtcNow, null, "i-1", null,
+            "git status", fixture.NodeProject, null, null, null, null, null);
+        var answer = fixture.Node.Host.RuntimeService.Permissions.RequestForSessionAsync(created.SessionId, command, asking.Token);
+        var deadline = DateTime.UtcNow + Patience;
+        while (!(await fixture.Node.Host.RuntimeService.Permissions.ListWaitingSessionsAsync()).Contains(created.SessionId))
+        {
+            Assert.IsFalse(answer.IsCompleted, "The request waits for a person.");
+            if (DateTime.UtcNow > deadline) Assert.Fail("The request did not wait.");
+            await Task.Delay(25, token);
+        }
+
+        var preview = await fixture.Fleet.Service.MoveSender.PreviewAsync(created.SessionId, token);
+        Assert.AreEqual("waiting", preview.Busy, "A command to allow keeps it as a question does.");
+        var refused = await client.StartMoveAsync(new FleetMoveStartParams(created.SessionId, "move-waiting", "viewer"), cancellationToken: token);
+        Assert.AreEqual(("refused", "waiting"), (refused.Status, refused.Code), refused.Message);
+
+        await asking.CancelAsync();
+        await answer;
+        gate.SetResult();
+        await fixture.WaitIdleOnNodeAsync(client, created.SessionId, token);
+    }
+
+    [TestMethod]
+    public async Task Cli_RemoteMove_BringsASessionToTheNodeOfItsProfile_AndMovesListsIt()
+    {
+        await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        await using var second = await fixture.StartSecondNodeAsync("node-b", token);
+        var sessionId = await fixture.CreateNodeSessionAsync(token);
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var cli = new NodeApplication(output, error) { InitializeLogging = false, ClientStop = token, ServiceEnvironment = static () => null };
+
+        var code = await cli.RunAsync(["remote", "test-node", "move", sessionId, "--data-root", second.DataRoot]);
+
+        Assert.AreEqual(NodeExitCodes.Success, code, error + "" + output);
+        StringAssert.Contains(output.ToString(), "The session runs on node-b now");
+        Assert.IsNotNull(await second.Node.Host.RuntimeService.GetSessionWorktreeAsync(sessionId), "The node of the profile took the session.");
+        Assert.IsTrue(fixture.Node.Host.RuntimeService.Relinquishments.Read(sessionId)!.IsRelinquished);
+
+        var listed = new StringWriter();
+        Assert.AreEqual(NodeExitCodes.Success, await new NodeApplication(listed, error) { InitializeLogging = false, ServiceEnvironment = static () => null }
+            .RunAsync(["moves", "--data-root", second.DataRoot]));
+        StringAssert.Contains(listed.ToString(), "target finished");
+        StringAssert.Contains(listed.ToString(), sessionId);
+    }
+
+    private static async Task<OwnedSessionCommandResult> TrySendOnViewerAsync(MoveFixture fixture, string sessionId)
+    {
+        var receipt = fixture.ViewerHost.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "Back here?")).Receipt!;
+        return await receipt.Completion.WaitAsync(Patience);
+    }
+
+    // A target whose commit happens, but whose answer is lost with the channel.
+    private sealed class LoseAnswerOfCommit(IFleetMoveTarget inner) : IFleetMoveTarget
+    {
+        public Task<FleetMoveOfferResult> OfferAsync(FleetMoveOffer offer, CancellationToken cancellationToken) => inner.OfferAsync(offer, cancellationToken);
+
+        public Task<FleetMoveChunkResult> TransferAsync(FleetMoveChunk chunk, CancellationToken cancellationToken) => inner.TransferAsync(chunk, cancellationToken);
+
+        public Task<FleetMoveStepResult> PrepareAsync(FleetMoveRef move, CancellationToken cancellationToken) => inner.PrepareAsync(move, cancellationToken);
+
+        public async Task<FleetMoveStepResult> CommitAsync(FleetMoveRef move, CancellationToken cancellationToken)
+        {
+            await inner.CommitAsync(move, cancellationToken);
+            throw new FleetConnectionClosedException(new FleetConnectionCloseInfo(FleetErrorCodes.ConnectionClosed, "lost", ClosedLocally: false));
+        }
+
+        public Task<FleetMoveStatus> StatusAsync(FleetMoveStatusParams parameters, CancellationToken cancellationToken)
+            => throw new FleetConnectionClosedException(new FleetConnectionCloseInfo(FleetErrorCodes.ConnectionClosed, "lost", ClosedLocally: false));
+
+        public Task<FleetMoveStepResult> CompleteAsync(FleetMoveRef move, CancellationToken cancellationToken)
+            => throw new FleetConnectionClosedException(new FleetConnectionCloseInfo(FleetErrorCodes.ConnectionClosed, "lost", ClosedLocally: false));
+    }
+
+    // A target prepared the move, then the channel fails before the commit reaches it: the move is not decided.
+    private sealed class LoseChannelBeforeCommit(IFleetMoveTarget inner) : IFleetMoveTarget
+    {
+        public Task<FleetMoveOfferResult> OfferAsync(FleetMoveOffer offer, CancellationToken cancellationToken) => inner.OfferAsync(offer, cancellationToken);
+
+        public Task<FleetMoveChunkResult> TransferAsync(FleetMoveChunk chunk, CancellationToken cancellationToken) => inner.TransferAsync(chunk, cancellationToken);
+
+        public Task<FleetMoveStepResult> PrepareAsync(FleetMoveRef move, CancellationToken cancellationToken) => inner.PrepareAsync(move, cancellationToken);
+
+        public Task<FleetMoveStepResult> CommitAsync(FleetMoveRef move, CancellationToken cancellationToken) => throw Lost();
+
+        public Task<FleetMoveStatus> StatusAsync(FleetMoveStatusParams parameters, CancellationToken cancellationToken) => throw Lost();
+
+        public Task<FleetMoveStepResult> CompleteAsync(FleetMoveRef move, CancellationToken cancellationToken) => throw Lost();
+
+        private static FleetConnectionClosedException Lost() => new(new FleetConnectionCloseInfo(FleetErrorCodes.ConnectionClosed, "lost", ClosedLocally: false));
+    }
+}
+
+/// <summary>
+/// A node and a viewer with runtimes of their own, each with a clone of one origin as its project, and the viewer's
+/// device key; the viewer is paired with the node by the test with the permissions it asks for.
+/// </summary>
+internal sealed class MoveFixture : IAsyncDisposable
+{
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(60);
+    private readonly NodeTestRoot _root;
+
+    private MoveFixture(NodeTestRoot root, NodeHost node, NodeFleet fleet, ScriptedNodeProvider nodeProvider, CodeAltaHost viewer,
+        ScriptedNodeProvider viewerProvider, string nodeProject, string viewerProject, string nodeProjectId)
+    {
+        _root = root;
+        Node = node;
+        Fleet = fleet;
+        NodeProvider = nodeProvider;
+        ViewerHost = viewer;
+        ViewerProvider = viewerProvider;
+        NodeProject = nodeProject;
+        ViewerProject = viewerProject;
+        NodeProjectId = nodeProjectId;
+        var viewerFleet = Path.Combine(root.Root, "viewer", "fleet");
+        ViewerIdentity = DeviceIdentity.LoadOrCreate(viewerFleet);
+        ViewerMachines = new PairedMachineStore(viewerFleet);
+        var moves = new SessionMoveService(viewer, "viewer");
+        ViewerReceiver = new FleetMoveReceiver(viewer, moves, null);
+        ViewerSender = new FleetMoveSender(viewer, moves);
+    }
+
+    public NodeHost Node { get; }
+
+    public NodeFleet Fleet { get; }
+
+    public ScriptedNodeProvider NodeProvider { get; }
+
+    public CodeAltaHost ViewerHost { get; }
+
+    public ScriptedNodeProvider ViewerProvider { get; }
+
+    public string NodeProject { get; }
+
+    public string ViewerProject { get; }
+
+    public string NodeProjectId { get; }
+
+    public DeviceIdentity ViewerIdentity { get; }
+
+    public PairedMachineStore ViewerMachines { get; }
+
+    public FleetMoveReceiver ViewerReceiver { get; }
+
+    public FleetMoveSender ViewerSender { get; }
+
+    /// <summary>The route of a move the viewer gives to the node: the node itself, by its device.</summary>
+    public SessionMoveRoute NodeRoute => new(Fleet.DeviceId);
+
+    public static async Task<MoveFixture> StartAsync(CancellationToken cancellationToken)
+    {
+        var root = new NodeTestRoot();
+        NodeHost? node = null;
+        NodeFleet? fleet = null;
+        try
+        {
+            var origin = Path.Combine(root.Root, "origin.git");
+            try
+            {
+                Git(root.Root, "init", "-q", "--bare", "-b", "main", origin);
+            }
+            catch (Win32Exception)
+            {
+                Assert.Inconclusive("git is not installed.");
+            }
+
+            var viewerProject = Path.Combine(root.Root, "viewer", "project");
+            var nodeProject = Path.Combine(root.Root, "node-project");
+            Git(root.Root, "clone", "-q", origin, viewerProject);
+            Configure(viewerProject);
+            File.WriteAllText(Path.Combine(viewerProject, "readme.md"), "one\n");
+            Git(viewerProject, "add", "-A");
+            Git(viewerProject, "commit", "-q", "-m", "One");
+            Git(viewerProject, "push", "-q", "-u", "origin", "main");
+            Git(root.Root, "clone", "-q", origin, nodeProject);
+            Configure(nodeProject);
+
+            var nodeProvider = new ScriptedNodeProvider();
+            node = await NodeHost.StartAsync(root.Options() with { CurrentProjectPath = nodeProject, ConfigureModelProviders = nodeProvider.Register }, cancellationToken);
+            var project = await node.Host.ProjectCatalog.EnsurePersistedAsync(node.Host.CurrentProject, cancellationToken);
+            fleet = NodeFleet.Start(node, new NodeListenOptions { Port = 0 }, "test-node", "1.0.0");
+
+            var viewerProvider = new ScriptedNodeProvider();
+            var viewer = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = Directory.CreateDirectory(Path.Combine(root.Root, "viewer", "global")).FullName,
+                CurrentProjectPath = viewerProject,
+                IsHeadless = true,
+                AutoApproveOwnedPermissions = true,
+                OwnedCommandReceiptCapacity = 32,
+                ConfigureModelProviders = viewerProvider.Register,
+            }, cancellationToken);
+            await viewer.ProjectCatalog.EnsurePersistedAsync(viewer.CurrentProject, cancellationToken);
+            return new MoveFixture(root, node, fleet, nodeProvider, viewer, viewerProvider, nodeProject, viewerProject, project.Id);
+        }
+        catch
+        {
+            if (fleet is not null) await fleet.DisposeAsync();
+            if (node is not null) await node.DisposeAsync();
+            root.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Pairs the viewer with the node once, gives it the permissions, and connects.</summary>
+    public async Task<FleetNodeClient> ConnectAsync(DevicePermissions permissions, CancellationToken cancellationToken, Action<FleetConnection>? serve = null)
+    {
+        var machine = ViewerMachines.Find("test-node");
+        if (machine is null)
+        {
+            var (offer, _) = Fleet.Service.Pairing.CreateOffer("test-node", Fleet.Addresses, TimeSpan.FromMinutes(1));
+            machine = await FleetNodeClient.PairAsync(offer, ViewerIdentity, "viewer", ViewerMachines, cancellationToken);
+        }
+
+        await Fleet.Service.SetPermissionsAsync(ViewerIdentity.DeviceId, permissions);
+        return await FleetNodeClient.ConnectAsync(machine, ViewerIdentity, serve, cancellationToken);
+    }
+
+    /// <summary>Pairs the viewer with a second node once (kept apart from the first, whose name it may share), and connects.</summary>
+    public async Task<FleetNodeClient> ConnectToAsync(SecondNode node, DevicePermissions permissions, CancellationToken cancellationToken)
+    {
+        var machines = new PairedMachineStore(Path.Combine(_root.Root, "viewer", "fleet-" + node.Fleet.DeviceId[..8]));
+        var machine = machines.Find(node.Fleet.DeviceId);
+        if (machine is null)
+        {
+            var (offer, _) = node.Fleet.Service.Pairing.CreateOffer("viewer-pairing", node.Fleet.Addresses, TimeSpan.FromMinutes(1));
+            machine = await FleetNodeClient.PairAsync(offer, ViewerIdentity, "viewer", machines, cancellationToken);
+        }
+
+        await node.Fleet.Service.SetPermissionsAsync(ViewerIdentity.DeviceId, permissions);
+        return await FleetNodeClient.ConnectAsync(machine, ViewerIdentity, null, cancellationToken);
+    }
+
+    public async Task<string> CreateViewerSessionAsync(string? title)
+    {
+        var session = await ViewerHost.Commands.CreateDraftSessionAsync(ViewerHost.CurrentProject, ViewerProvider.Descriptor, title);
+        await SendOnViewerAsync(session.SessionId, "Let us plan.");
+        return session.SessionId;
+    }
+
+    public async Task SendOnViewerAsync(string sessionId, string prompt)
+    {
+        var receipt = ViewerHost.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, prompt)).Receipt;
+        Assert.IsNotNull(receipt);
+        var result = await receipt.Completion.WaitAsync(Patience);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
+    }
+
+    /// <summary>A session of the node's project with one turn done, made through the node's own runtime.</summary>
+    public async Task<string> CreateNodeSessionAsync(CancellationToken cancellationToken)
+    {
+        var project = await Node.Host.ProjectCatalog.GetByIdAsync(NodeProjectId, cancellationToken);
+        var session = await Node.Host.Commands.CreateDraftSessionAsync(project, NodeProvider.Descriptor, "Node work");
+        var receipt = Node.Host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, "Start.")).Receipt!;
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(Patience, cancellationToken)).Outcome);
+        return session.SessionId;
+    }
+
+    public async Task WaitIdleOnNodeAsync(FleetNodeClient client, string sessionId, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + Patience;
+        while (true)
+        {
+            var listed = await client.ListSessionsAsync(cancellationToken: cancellationToken);
+            if (listed.Sessions.FirstOrDefault(session => session.Id == sessionId) is { State: "idle" }
+                && (await client.GetSessionStateAsync(sessionId, cancellationToken)).ActiveRunId is null) return;
+            if (DateTime.UtcNow > deadline) Assert.Fail("The session never became idle on the node.");
+            await Task.Delay(100, cancellationToken);
+        }
+    }
+
+    /// <summary>Starts a second node on a profile of its own, with a clone as its project, paired with the first one, which lets it move sessions.</summary>
+    public async Task<SecondNode> StartSecondNodeAsync(string name, CancellationToken cancellationToken)
+    {
+        var root = new NodeTestRoot();
+        var project = Path.Combine(root.Root, "project-b");
+        Git(root.Root, "clone", "-q", Path.Combine(_root.Root, "origin.git"), project);
+        Configure(project);
+        var provider = new ScriptedNodeProvider();
+        var node = await NodeHost.StartAsync(root.Options() with { CurrentProjectPath = project, ConfigureModelProviders = provider.Register }, cancellationToken);
+        await node.Host.ProjectCatalog.EnsurePersistedAsync(node.Host.CurrentProject, cancellationToken);
+        var fleet = NodeFleet.Start(node, new NodeListenOptions { Port = 0 }, name, "1.0.0");
+        using var identity = DeviceIdentity.LoadOrCreate(node.Host.CatalogOptions);
+        var (offer, _) = Fleet.Service.Pairing.CreateOffer("test-node", Fleet.Addresses, TimeSpan.FromMinutes(1));
+        await FleetNodeClient.PairAsync(offer, identity, name, new PairedMachineStore(node.Host.CatalogOptions.FleetRoot), cancellationToken);
+        await Fleet.Service.SetPermissionsAsync(identity.DeviceId, DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move);
+        return new SecondNode(root, node, fleet);
+    }
+
+    public void Write(string root, string relative, string content)
+    {
+        var path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await ViewerHost.DisposeAsync();
+        await Fleet.DisposeAsync();
+        await Node.DisposeAsync();
+        ViewerIdentity.Dispose();
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(_root.Root, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        _root.Dispose();
+    }
+
+    private static void Configure(string root)
+    {
+        foreach (var (name, value) in new[] { ("user.name", "Test"), ("user.email", "test@example.invalid"), ("core.autocrlf", "false"), ("commit.gpgsign", "false") })
+            Git(root, "config", name, value);
+    }
+
+    private static string Git(string folder, params string[] arguments)
+    {
+        var start = new ProcessStartInfo("git") { WorkingDirectory = folder, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start)!;
+        var error = process.StandardError.ReadToEndAsync();
+        var output = process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        Assert.AreEqual(0, process.ExitCode, $"git {string.Join(' ', arguments)}: {error.Result}");
+        return output;
+    }
+}
+
+/// <summary>A second node, on a profile of its own.</summary>
+internal sealed class SecondNode(NodeTestRoot root, NodeHost node, NodeFleet fleet) : IAsyncDisposable
+{
+    public NodeHost Node { get; } = node;
+
+    public NodeFleet Fleet { get; } = fleet;
+
+    public string DataRoot => root.DataRoot;
+
+    public async ValueTask DisposeAsync()
+    {
+        await Fleet.DisposeAsync();
+        await Node.DisposeAsync();
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(root.Root, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        root.Dispose();
+    }
+}

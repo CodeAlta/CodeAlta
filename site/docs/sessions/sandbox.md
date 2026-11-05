@@ -51,10 +51,10 @@ In CodeAlta TUI, the sandbox follows the same settings; it is set in CodeAlta De
 
 Two profiles come with CodeAlta:
 
-| Profile | Network | Run outside |
-| --- | --- | --- |
-| `workspace` | The package registries: NuGet, npm, Yarn, PyPI and crates.io | Asked each time |
-| `strict` | None | Never |
+| Profile | Network | Run outside | Other machines |
+| --- | --- | --- | --- |
+| `workspace` | The package registries: NuGet, npm, Yarn, PyPI and crates.io | Asked each time | Allowed |
+| `strict` | None | Never | Never |
 
 **New profile** makes a profile of your own, which starts from the profile shown and adds to it:
 
@@ -63,6 +63,7 @@ Two profiles come with CodeAlta:
 - **Local ports**: ports of this computer it may reach, such as a local database.
 - **MCP servers**: the servers a sandboxed session may use. Others are not offered to it.
 - **Run outside**: **Ask me**, or **Never**.
+- **Other machines**: **Allow** or **Never**: whether its agents start or drive sessions on the other machines of your [fleet](../fleet/readme.md).
 
 In `~/.alta/config.toml`:
 
@@ -75,6 +76,7 @@ extends = "workspace"
 hosts = ["pkgs.dev.azure.com", "*.company.com"]
 local_ports = [5432]
 mcp_servers = ["docs"]
+fleet = "never"
 
 [providers.ollama]
 sandbox = "strict"
@@ -112,6 +114,16 @@ The tools of CodeAlta itself run outside the container, so a sandboxed agent use
 - It uses the plugin tools made for a sandbox, and the MCP servers of its profile.
 
 An agent can turn a sandbox on for a session it creates, never turn one off.
+
+### On other machines
+
+Another machine is never a way out of the sandbox. Where its profile allows **Other machines**, a sandboxed agent:
+
+- starts a session elsewhere only in the project of its own repository, in a profile of that machine at least as strict as its own: same network or less, no host, folder, port, variable or MCP server more. The machine refuses it otherwise, even when its profile of the same name gives more;
+- sends prompts only to the sessions it started there, which must run as sandboxed as itself and in a permission mode that asks no less;
+- does not move sessions, nor run automations.
+
+A session moved to another machine keeps its sandbox and its permission mode there; the machine refuses it when its profile of that name gives more.
 
 ## Providers
 

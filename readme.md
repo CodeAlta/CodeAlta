@@ -1,6 +1,8 @@
 # CodeAlta [![ci](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml) [![NuGet](https://img.shields.io/nuget/v/CodeAlta.svg?label=CodeAlta)](https://www.nuget.org/packages/CodeAlta/) [![NuGet](https://img.shields.io/nuget/v/CodeAlta.Tui.svg?label=CodeAlta.Tui)](https://www.nuget.org/packages/CodeAlta.Tui/) [![NuGet](https://img.shields.io/nuget/v/CodeAlta.Cli.svg?label=CodeAlta.Cli)](https://www.nuget.org/packages/CodeAlta.Cli/)
 
-CodeAlta is an open-source workspace for AI coding agents, local code, terminals and Git. It runs on Windows, macOS and Linux, with a desktop app, a terminal UI and a command line.
+**Your agents. One workspace. One fleet.**
+
+CodeAlta is an open-source agentic development environment, local and distributed: AI coding agents, your code, terminals and Git in one workspace. Run your agents on this computer, on your other machines, or across a whole company, from one laptop at home to the machines of your organization. It runs on Windows, macOS and Linux, with a desktop app, a terminal UI, a command line, and a node and a server for your fleet.
 
 Its agent harness holds its own against the vendors' own agents: on hard tasks of [SWE-bench Pro](https://codealta.io/docs/benchmark/), it resolves as many tasks as Claude Code with Claude Opus, for 12% less, and one more than Codex with GPT.
 
@@ -37,6 +39,40 @@ Launch the app from a project folder. On first launch it opens the provider setu
 
 See [Getting Started](https://codealta.io/docs/getting-started/) for requirements and the first steps.
 
+For your [fleet](https://codealta.io/docs/fleet/), CodeAlta Node runs sessions and automations on an always-on machine, a build machine or a cloud VM, driven from CodeAlta Desktop; CodeAlta Desktop can also [install it over SSH](https://codealta.io/docs/fleet/machines/):
+
+```sh
+dotnet tool install -g CodeAlta.Node
+altanode run
+```
+
+CodeAlta Server brings your people and machines together, for you alone or a whole team ([CodeAlta Server](https://codealta.io/docs/fleet/server/)); CodeAlta Desktop can also [create one for you](https://codealta.io/docs/fleet/server/#create-my-server) on this computer or over SSH:
+
+```sh
+dotnet tool install -g CodeAlta.Server
+altaserver run
+```
+
+## 🛰️ Fleet
+
+<p align="center">
+  <img src="site/img/fleet-in-action.svg" alt="CodeAlta Fleet in action: your desktop and a teammate's laptop connect to CodeAlta Server, which runs no agent and reads no conversation; sessions travel encrypted end to end to a Mac mini, also paired directly, and to a build box; a session moves from one machine to the other; a cloud runner joins once approved with the same six words; every machine checks the rules signed by your devices" width="920">
+</p>
+
+CodeAlta is no longer one desktop: [Fleet](https://codealta.io/docs/fleet/) scales it from home to enterprise, one optional step at a time.
+
+- **Move a session, mid-task**: [send a session to another machine](https://codealta.io/docs/fleet/sessions/#move-a-session) and it goes on there, with its conversation, its commits and its changes; bring it back the same way.
+- **Run on any machine**: start sessions on the Mac that runs your iOS tests or the box with the GPU, run automations where they fit, and read, answer and steer them from CodeAlta Desktop.
+- **Agents that use the fleet**: ask an agent to "run the iOS tests on a Mac that is free": it [picks a machine, starts a session there and gets its answer back](https://codealta.io/docs/fleet/sessions/#let-agents-use-the-fleet), moves sessions, places automations and reads the health of the fleet with `alta fleet`, within the limits each machine accepts.
+- **Your machines, no server**: [pair two CodeAlta Desktops](https://codealta.io/docs/fleet/machines/#pair-two-codealta-desktops) from a link and six words, nothing to install, at home or away through Tailscale; or [add a machine](https://codealta.io/docs/fleet/machines/) over SSH; your computers talk directly, encrypted end to end.
+- **A server that cannot read**: [CodeAlta Server](https://codealta.io/docs/fleet/server/) reaches every machine from anywhere without opening a port, [your other CodeAlta Desktops](https://codealta.io/docs/fleet/server/#reach-a-codealta-desktop-through-the-server) too; it relays sessions encrypted end to end, runs no agent and reads no conversation.
+- **Rules your devices sign**: who may do what is signed by your devices and checked by every machine; [a kill switch and an audit log](https://codealta.io/docs/fleet/policies-and-audit/) for the whole fleet.
+- **For teams**: [people and teams](https://codealta.io/docs/fleet/people-and-access/) who sign in with Microsoft, Google, GitHub, a passkey or your company's sign-in; team machines, budgets, secrets, updates and statistics of every machine.
+
+<p align="center">
+  <img src="site/img/alta-desktop-fleet-canvas.webp" alt="The Fleet canvas of CodeAlta Desktop: the server online, three machines online, and a card per machine (this computer, Build box with its labels gpu and always-on, Workstation) with their sessions" width="920">
+</p>
+
 ## ✨ Features
 
 CodeAlta Desktop brings together:
@@ -48,7 +84,7 @@ CodeAlta Desktop brings together:
 - **Attach files**: [add files, images, folders and issues to a prompt](https://codealta.io/docs/getting-started/#attach-files) from a menu, a drop or a paste; PDFs go to the models that read them, and other documents (Word, Excel, PowerPoint…) are converted to Markdown for any model.
 - **[Math & research](https://codealta.io/docs/workspace/prompt/#equations)**: LaTeX formulas, chemistry and footnotes in messages and documents, a live preview of the formula you type and an equation editor in the prompt (`Alt+=`), and LaTeX and BibTeX files highlighted.
 - **Speech to prompt**: [dictate a prompt](https://codealta.io/docs/speech/) with a speech model that runs on your computer, downloaded the first time you use the microphone.
-- **Search your work**: `Ctrl+P` and [`alta search`](https://codealta.io/docs/search/) find the prompts and answers of your sessions, your plans, the guide, the skills and the tools from a local index; turn on search by meaning to find them by what they are about, with a model that runs on your computer.
+- **Search your work**: `Ctrl+P` and [`alta search`](https://codealta.io/docs/search/) find the prompts and answers of your sessions, your plans, the guide, the skills and the tools from a local index; turn on search by meaning to find them by what they are about, with a model that runs on your computer. `Ctrl+F` finds in the session you are in, with every match marked and counted.
 - **Code & Git**: search and edit files, run terminals and inspect diffs.
 - **Worktrees**: give sessions separate checkouts and branches, move a session to another worktree with its conversation; manage and clean them up.
 - **Prompt suggestions**: after a turn, the model suggests the next prompt in the empty composer, with any provider; `Tab` or `→` takes it.
@@ -57,7 +93,7 @@ CodeAlta Desktop brings together:
 - **[Reviews](https://codealta.io/docs/reviews/)**: comment on the lines of a plan, a file or an agent's changes, send them with a verdict, and have agents wait for your approval before they commit.
 - **Bookmarks**: mark a message or a whole session, jump between the bookmarks of a timeline, and find them all in one tab.
 - **Issues & pull requests**: browse issues and PRs on GitHub, GitLab, Azure DevOps or Bitbucket, plus Jira issues, with views of your filters (on Azure DevOps, the PRs that wait for your review, also through nested groups); start sessions and open PRs.
-- **Automations**: start sessions on a schedule, issue/PR events or on demand.
+- **Automations**: start sessions on a schedule, issue/PR events, Jira, Slack, incident.io and signed webhooks, or on demand, and write the answer back where the event came from.
 - **On your phone**: [follow, answer, steer and start sessions from a phone, follow their background jobs, and answer the questions, permission requests and review requests of agents](https://codealta.io/docs/plugins/mobile/), on your own tailnet through Tailscale, or through a Dev Tunnel of Microsoft.
 - **Canvases**: use interactive boards, checklists, graphs and custom tools beside your conversations.
 - **Plugins**: ask agents to build trusted local .NET canvases, dialogs, tools, commands and buttons for one project or the whole workspace, and [hooks](https://codealta.io/docs/plugins/developers/) that check, block or change the tool calls and prompts of sessions, or continue a session when its run ends.
@@ -79,7 +115,7 @@ CodeAlta Desktop brings together:
 - **Agent prompts**: plan, build, review or define your own roles.
 - **Skills & MCP**: bring in skills, tools and services, and the skills MCP servers publish, loaded once you approve them; the views of [MCP Apps](https://codealta.io/docs/plugins/mcp/#views-of-mcp-apps) show in the conversation; the skills used most come first in the prompt, and hundreds of them stay cheap.
 - **Command line**: run a prompt to its end with [`altacli`](https://codealta.io/docs/command-line/) from a script, a CI job or a benchmark, with exit codes and a JSON Lines trace in the ACP format, or serve CodeAlta to an editor as an ACP agent; its sessions show in the app as they run.
-- **Copilot compatibility**: reuse `.github` instructions, skills and agents unchanged.
+- **Your agent files, unchanged**: reuse the instructions, skills and agents a project already has for other agents: `AGENTS.md`, `CLAUDE.md` and `.github/copilot-instructions.md`, the skills of `.agents/skills` and `.github/skills`, the custom agents of GitHub Copilot and the subagents of Claude Code.
 - **UI automation**: let agents see and drive CodeAlta through built-in tools or MCP.
 - **[Browser tools](https://codealta.io/docs/browser/)**: let agents drive Chrome, Edge, Firefox or Safari with the tools of Chrome DevTools MCP, without Node.js: in a private profile by default, in a profile where you signed in once, or in your own browser after you agree, site by site.
 - **[Settings you find](https://codealta.io/docs/workspace/settings/#search-settings)**: search Settings and change a setting where it is found, find settings with `Ctrl+P`, and ask an agent to show or change one with `alta settings`: it changes only what does not protect you, and the window offers Undo; plugins declare settings of their own.
@@ -91,7 +127,7 @@ CodeAlta Desktop brings together:
 
 ## 📖 Documentation
 
-Visit the [website](https://codealta.io/) for the feature tour and [user guide](https://codealta.io/docs/getting-started/), including [model providers](https://codealta.io/docs/model-providers/) and [how Desktop and TUI compare](https://codealta.io/docs/desktop-and-tui/).
+Visit the [website](https://codealta.io/) for the feature tour and [user guide](https://codealta.io/docs/getting-started/), including [model providers](https://codealta.io/docs/model-providers/), [Fleet](https://codealta.io/docs/fleet/) for your machines and your team, and [how Desktop and TUI compare](https://codealta.io/docs/desktop-and-tui/).
 
 For architecture and contributor guidance, see the [developer documentation](doc/readme.md).
 

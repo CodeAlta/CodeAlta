@@ -101,6 +101,12 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
     /// <summary>Gets the contribution registry owned by the runtime.</summary>
     public PluginContributionRegistry Registry => _registry;
 
+    /// <summary>
+    /// Gets the masking the plugins of this runtime tell the secrets they give out (<see cref="CodeAlta.Plugins.Abstractions.IPluginServices.Secrets"/>):
+    /// the host attaches its own to it once it runs.
+    /// </summary>
+    public PluginSecretSink Secrets { get; } = new();
+
     /// <summary>Gets the model provider types the running plugins contribute, in their registration order.</summary>
     /// <returns>The contributions.</returns>
     public IReadOnlyList<PluginModelProviderContribution> GetModelProviderTypes()
@@ -287,7 +293,7 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
                     discovered,
                     sourcePackage: null,
                     loadContext: null,
-                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = ++_activationGeneration, BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments },
+                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = ++_activationGeneration, BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments, Secrets = Secrets },
                     cancellationToken)
                 .ConfigureAwait(false);
             if (activation.ActivePlugin is not null)

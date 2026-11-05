@@ -1,6 +1,7 @@
 import type { WorkspaceProject } from "#neoastra";
 import { Fragment, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { AppIcon } from "../AppIcon";
+import { machineRowState, machineStateLabel } from "../machines/machines";
 import { useShellLanguage } from "../shellLanguage";
 import { ProjectRowActions, type ProjectRowAuthority, type ProjectRowDrop } from "./ProjectRowActions";
 import { SessionTabMenu } from "../SessionTabMenu";
@@ -149,7 +150,26 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   // A project listed under several labels: its first row is its own (its forms, the sessions of the selected scope),
   // the others show the same project.
   const listed = new Set<string>();
+  // The row of a paired machine groups its sessions of no project of this catalog: it opens and closes, starts a new
+  // session on that machine, and offers nothing that works on a folder of this computer (code editor, changes,
+  // terminals, project actions). It is listed while the machine is paired, with no session too: a machine that is not
+  // online is dimmed, and its tooltip says its state.
+  const machineRow = (project: WorkspaceProject, place: string) => {
+    const primary = !listed.has(project.id);
+    listed.add(project.id);
+    const state = machineRowState(project);
+    return <Fragment key={`${place}:${project.id}`}><li className="project-action-row project-machine-row" data-machine={project.machineId ?? undefined} data-state={state}>
+      <button type="button" title={`${project.name}\n${t(machineStateLabel(state))}`} aria-pressed={selectedId === project.id} aria-expanded={open(project.id)}
+        data-scope={project.id} onClick={event => select(project.id, event.detail > 0)}>
+        {twist(project.id)}
+        <span className="project-icon" data-file-tone="teal"><AppIcon name="remote" size={15} /></span>
+        <strong>{project.name}</strong>{activity?.(project.id)}
+      </button>
+      {newSession(project.id, t("New session on {name}", { name: project.name }), t("New session"))}
+    </li>{primary ? branch(project.id) : null}</Fragment>;
+  };
   const row = (project: WorkspaceProject, place = "", from: string | null = null) => {
+    if (project.machineId) return machineRow(project, place);
     const primary = !listed.has(project.id);
     listed.add(project.id);
     const favorite = !!tree?.favorite(project.id);

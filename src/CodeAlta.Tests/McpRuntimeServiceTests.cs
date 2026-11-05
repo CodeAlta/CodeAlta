@@ -267,8 +267,10 @@ public sealed partial class McpRuntimeServiceTests
         Assert.AreEqual(before, other);
     }
 
+    // A schema that OpenAI strict mode cannot express (an open map, a required name without its property) is sent as
+    // it is: no provider refuses it, OpenAI sends it non-strict, and the model fills the real arguments.
     [TestMethod]
-    public async Task PluginBeforeAgentRun_WrapsIncompatibleMcpToolSchemaArgumentsJson()
+    public async Task PluginBeforeAgentRun_SendsTheSchemaOfAnMcpToolAsItIs()
     {
         using var project = TempDirectory.Create();
         WriteTinyServerConfig(
@@ -310,14 +312,14 @@ public sealed partial class McpRuntimeServiceTests
         var tool = before.AdditionalTools.Single();
         Assert.AreEqual("mcp__atlassian__editJiraIssue", tool.Spec.Name);
         var schema = tool.Spec.InputSchema;
-        var properties = schema.GetProperty("properties");
-        Assert.IsTrue(properties.TryGetProperty("arguments_json", out var argumentsJsonSchema));
-        Assert.AreEqual("string", argumentsJsonSchema.GetProperty("type").GetString());
-        Assert.IsFalse(properties.TryGetProperty("fields", out _));
-        StringAssert.Contains(argumentsJsonSchema.GetProperty("description").GetString(), "Original MCP input schema");
+        Assert.IsFalse(schema.TryGetProperty("properties", out _), schema.GetRawText());
+        Assert.AreEqual("fields", schema.GetProperty("required").EnumerateArray().Single().GetString());
+        var map = schema.GetProperty("additionalProperties");
+        Assert.AreEqual("object", map.GetProperty("type").GetString());
+        Assert.AreEqual(JsonValueKind.True, map.GetProperty("additionalProperties").ValueKind);
 
         using var arguments = JsonDocument.Parse("""
-            { "arguments_json": "{\"fields\":{\"summary\":\"Updated\"}}" }
+            { "fields": { "summary": "Updated" } }
             """);
         var result = await tool.Handler(
             new AgentToolInvocation(new ModelProviderId("test"), "session", "call", tool.Spec.Name, arguments.RootElement.Clone()),
@@ -327,22 +329,12 @@ public sealed partial class McpRuntimeServiceTests
         StringAssert.Contains(text, "jira:");
         StringAssert.Contains(text, "\"fields\":{\"summary\":\"Updated\"}");
 
-        using var invalidArguments = JsonDocument.Parse("""{ "arguments_json": "not json" }""");
+        using var invalidArguments = JsonDocument.Parse("""[ "not", "an", "object" ]""");
         var invalidResult = await tool.Handler(
             new AgentToolInvocation(new ModelProviderId("test"), "session", "call", tool.Spec.Name, invalidArguments.RootElement.Clone()),
             CancellationToken.None);
         Assert.IsFalse(invalidResult.Success);
-        StringAssert.Contains(invalidResult.Error, "valid JSON");
-    }
-
-    [TestMethod]
-    public void McpPlugin_RequiresArgumentsJsonWrapper_ForImplicitDynamicObjectSchema()
-    {
-        using var openObject = JsonDocument.Parse("""{ "type": "object" }""");
-        using var closedObject = JsonDocument.Parse("""{ "type": "object", "properties": {}, "additionalProperties": false }""");
-
-        Assert.IsTrue(McpPlugin.RequiresArgumentsJsonWrapper(openObject.RootElement));
-        Assert.IsFalse(McpPlugin.RequiresArgumentsJsonWrapper(closedObject.RootElement));
+        StringAssert.Contains(invalidResult.Error, "must be a JSON object");
     }
 
     [TestMethod]
@@ -587,6 +579,61 @@ public sealed partial class McpRuntimeServiceTests
         finally
         {
             Environment.SetEnvironmentVariable(variableName, originalValue);
+        }
+    }
+
+    [TestMethod]
+    public async Task Search_StartsAStdioServerWithASecretOfTheMachine_AndNamesItWhenItIsNotSet()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: new Dictionary<string, string> { ["MCP_TEST_EXTRA_TOOL"] = "${secret:MCP_TOOL_NAME}" });
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(Path.Combine(_home.Path, ".alta"));
+        try
+        {
+            await using (var service = new McpRuntimeService(_home.Path))
+            {
+                var missing = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: "tiny", query: null, CancellationToken.None);
+                StringAssert.Contains(missing.Diagnostics.Single().Message, "references ${secret:MCP_TOOL_NAME}: The secret MCP_TOOL_NAME is not set on this machine.");
+            }
+
+            store.SetSecret("MCP_TOOL_NAME", "from_secret", "tests");
+            await using (var service = new McpRuntimeService(_home.Path))
+            {
+                var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: "tiny", query: null, CancellationToken.None);
+                Assert.AreEqual(0, search.Diagnostics.Count, string.Join(Environment.NewLine, search.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+                Assert.IsTrue(search.Tools.Any(static tool => tool.Name == "from_secret"));
+            }
+        }
+        finally
+        {
+            store.Delete();
+        }
+    }
+
+    [TestMethod]
+    public async Task ASecretGivenToAnMcpServerOfTheSessions_IsMaskedFromThen_WhateverTheStoreKeepsOfItLater()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: new Dictionary<string, string> { ["MCP_TEST_EXTRA_TOOL"] = "${secret:MCP_TOOL_NAME}" });
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(Path.Combine(_home.Path, ".alta"));
+        store.SetSecret("MCP_TOOL_NAME", "given_to_the_server", "tests");
+        try
+        {
+            // The masking of the host, whose reads of the store come later, once it keeps nothing of the value (rotated past what it keeps).
+            var masker = new CodeAlta.Agent.Runtime.AgentSecretMasker(static () => []);
+            var connections = new McpSessionConnections(new McpConfigCache(), false, false) { SecretIssued = masker.Retain };
+            await using (var runtime = connections.CreateRuntime(_home.Path))
+            {
+                var search = await runtime.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: "tiny", query: null, CancellationToken.None);
+                Assert.IsTrue(search.Tools.Any(static tool => tool.Name == "given_to_the_server"), string.Join(Environment.NewLine, search.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+            }
+
+            // What the server prints of the value it took is masked.
+            Assert.AreEqual("tool: ***", masker.MaskText("tool: given_to_the_server"));
+        }
+        finally
+        {
+            store.Delete();
         }
     }
 

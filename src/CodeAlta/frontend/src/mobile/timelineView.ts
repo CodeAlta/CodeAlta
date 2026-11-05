@@ -1,16 +1,19 @@
 // The blocks of the timeline of a session on the phone, drawn as compact cards for a touch screen: a message, a message
 // the host sent (a background job, a message of another agent, a reminder...), the folded activity of a turn with the
-// images its tools gave the model and the runs of its scripts, and the images of a message. A card is one line that opens
-// on a tap; what is open stays open while the page shows the session.
+// images its tools gave the model and the runs of its scripts that have a card of their own, and the images of a message.
+// A card is one line that opens on a tap; what is open stays open while the page shows the session.
 import { activityDuration } from "../timelineActivity/activityText";
 import { plainResult } from "../workflows/scriptResult";
+import { copyText } from "./clipboard";
+import type { ToolCallDetail, ToolOutputPage, ToolOutputPlace } from "./contract";
 import { activityLine, el, icon } from "./dom";
 import { previewLine, type HostPrompt } from "./hostPrompt";
 import { linkedImageUrl, matchLinkedImages, savedImageUrl, splitFiles, type ImageItem } from "./imageModel";
 import type { ImageViewer } from "./imageViewer";
-import { activityFacts, clockTime, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
+import type { OutputViewer } from "./outputViewer";
+import { activityFacts, canWithdraw, clockTime, outputPreview, readWholeOutput, subjectPath, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
 import { timelineIcon, type TimelineIconName } from "./timelineIcons";
-import type { WorkflowCall, WorkflowRun, WorkflowState } from "./workflowRun";
+import { hasRunBlock, runsUnderLine, type WorkflowCall, type WorkflowRun, type WorkflowState } from "./workflowRun";
 
 /** A block as the page holds it: its element, the version it was drawn at, and whether it has a diagram (drawn again with the theme). */
 export type DrawnBlock = { element: HTMLLIElement; version: string; diagram: boolean };
@@ -26,7 +29,14 @@ export type TimelineViewOptions = Readonly<{
   sessionTitle: (id: string) => string | null;
   /** Opens a session on the phone. */
   openSession: (id: string) => void;
+  /** Reads a tool call, when its row opens. */
+  readTool: (activityId: string, seq: number | undefined) => Promise<ToolCallDetail>;
+  /** Reads a page of the output of a tool call, in its full-screen view. */
+  readToolOutput: (activityId: string, seq: number | undefined, place: ToolOutputPlace) => Promise<ToolOutputPage>;
+  /** Takes a pending prompt back, to forget it or to edit it in the composer. */
+  withdraw: (key: string, then: "delete" | "edit") => void;
   viewer: ImageViewer;
+  outputViewer: OutputViewer;
 }>;
 
 const pendingLabels: Readonly<Record<PendingPrompt["mode"], string>> = { send: "You", steer: "You · steering", queue: "You · queued" };
@@ -51,6 +61,8 @@ export function createTimelineView(options: TimelineViewOptions) {
   let shownResults = new Set<string>();
   // The images of each group (a message, an activity), which the viewer goes through.
   let groups = new Map<string, ImageItem[]>();
+  // The last read of each tool call that is open: an answer to an earlier one is dropped.
+  const toolReads = new Map<string, number>();
 
   /** Forgets what was open: another session is shown. */
   function reset() { open = new Set(); shownResults = new Set(); groups = new Map(); }
@@ -133,12 +145,27 @@ export function createTimelineView(options: TimelineViewOptions) {
       time.dateTime = block.at!;
       label.append(time);
     }
+    if (pending && canWithdraw(pending)) {
+      // A prompt with files is not edited here: its files are on the computer, and the composer could not send them again.
+      const actions = make("span", "pending-actions");
+      if (!pending.attachments?.length) actions.append(pendingAction(pending, "edit", "Edit this prompt"));
+      actions.append(pendingAction(pending, "delete", "Delete this prompt"));
+      label.append(actions);
+    }
     item.append(label);
     const content = make("div", "markdown-content");
     const diagram = fillMessage(content, block, block.text);
     if (block.text.trim()) item.append(content);
     files(item, block);
     return { element: item, version: block.key, diagram };
+  }
+
+  function pendingAction(pending: PendingPrompt, then: "delete" | "edit", label: string): HTMLButtonElement {
+    const action = button(`pending-${then}`, label);
+    action.dataset.prompt = pending.key;
+    action.dataset.then = then;
+    action.append(icon(document, then === "delete" ? "trash" : "edit"));
+    return action;
   }
 
   // The files of a message: its images as pictures, the others as chips.
@@ -241,34 +268,179 @@ export function createTimelineView(options: TimelineViewOptions) {
     files(item, block);
   }
 
-  // ---- The activity of a turn: its line, the images of its tools and the runs of its scripts, then its rows when open ----
+  // ---- The activity of a turn: its line, the images of its tools and the runs of its scripts with a card, then its rows when open ----
 
+  // A call is a row, which a tap opens on what the call does: a call whose events have no id cannot be read.
   function toolRow(tool: ToolRow): HTMLDivElement {
-    const element = make("div", "tool-row");
+    const element = make("div", "tool-call");
     element.dataset.key = tool.key;
+    const row = tool.activityId ? button("tool-row") : make("div", "tool-row");
+    if (tool.activityId) row.setAttribute("aria-expanded", "false");
+    element.append(row);
     toolState(element, tool);
     return element;
   }
 
-  // A row says its state by an icon, and how long the call took once it ended.
+  const toolKey = (activityId: string) => `tool:${activityId}`;
+
+  // What a call works on, on its line. A path keeps the name of its file when the line is too short for it.
+  function subjectElement(subject: string): HTMLElement {
+    const path = subjectPath(subject);
+    if (!path) return make("span", "tool-subject", subject);
+    const element = make("span", "tool-subject tool-path");
+    element.append(make("span", "tool-path-folders", path.folders), make("span", "tool-path-file", path.file));
+    return element;
+  }
+
+  // A row says its state by an icon, what the call works on, and how long the call took once it ended.
   function toolState(element: HTMLElement, tool: ToolRow) {
     element.dataset.phase = tool.phase;
+    element.dataset.subject = tool.subject ?? "";
+    const row = element.querySelector<HTMLElement>(":scope > .tool-row")!;
+    row.dataset.phase = tool.phase;
+    if (tool.activityId) row.dataset.activity = tool.activityId;
+    if (tool.seq !== undefined) row.dataset.seq = String(tool.seq);
     const state: WorkflowState = tool.phase === "completed" ? "completed" : tool.phase === "failed" ? "failed" : tool.phase === "canceled" ? "canceled" : "running";
     const mark = timelineIcon(document, stateIcons[state], "tool-mark");
     mark.title = tool.phase;
     const took = Date.parse(tool.end ?? "") - Date.parse(tool.at ?? "");
     const time = state !== "running" && took >= 1000 ? duration(took) : null;
-    element.replaceChildren(mark, make("strong", null, tool.title), make("span", "tool-phase", time ?? (state === "running" ? "" : tool.phase === "completed" ? "" : tool.phase)));
-    element.setAttribute("aria-label", `${tool.title}: ${tool.phase}`);
+    row.replaceChildren(mark, make("strong", null, tool.title));
+    if (tool.subject) row.append(subjectElement(tool.subject));
+    row.append(make("span", "tool-phase", time ?? (state === "running" ? "" : tool.phase === "completed" ? "" : tool.phase)));
+    row.setAttribute("aria-label", `${tool.title}${tool.subject ? ` ${tool.subject}` : ""}: ${tool.phase}`);
+    // What is open follows the call: it says more once the call has ended, and the row comes open again when its activity does.
+    if (tool.activityId && open.has(toolKey(tool.activityId))) void showTool(element, row, tool.activityId);
+  }
+
+  // Reads a call and shows it under its row. A read that a later one replaced, or that comes once the row closed, is dropped.
+  async function showTool(element: HTMLElement, row: HTMLElement, activityId: string) {
+    let panel = element.querySelector<HTMLElement>(":scope > .tool-detail");
+    if (!panel) {
+      panel = make("div", "tool-detail");
+      panel.append(make("p", "tool-note", "Loading…"));
+      element.append(panel);
+    }
+    row.setAttribute("aria-expanded", "true");
+    const reading = (toolReads.get(activityId) ?? 0) + 1;
+    toolReads.set(activityId, reading);
+    const current = () => toolReads.get(activityId) === reading && open.has(toolKey(activityId));
+    let content: Node[];
+    try {
+      const seq = Number(row.dataset.seq) || undefined;
+      const call = await options.readTool(activityId, seq);
+      if (!current()) return;
+      const caption = () => {
+        const subject = element.dataset.subject;
+        return [make("strong", null, call.name ?? "Output"), ...(subject ? [subjectElement(subject)] : [])];
+      };
+      content = call.error ? [make("p", "tool-note", call.error)] : toolParts(call, element.dataset.subject, place => options.readToolOutput(activityId, seq, place), caption);
+    } catch (error) {
+      if (!current()) return;
+      content = [make("p", "tool-note", error instanceof Error ? error.message : String(error))];
+    }
+    panel.replaceChildren(...content);
+  }
+
+  // Copies a value of a call, whole: selecting it is what is hard on a phone. The icon says how it went, and a failure says why under the line.
+  function copyButton(label: string, value: () => string | Promise<string>): HTMLButtonElement {
+    const item = button("tool-copy", `Copy ${label.toLowerCase()}`);
+    const show = (state: "idle" | "copying" | "copied" | "failed") => {
+      item.dataset.state = state;
+      item.replaceChildren(timelineIcon(document, state === "copied" ? "check" : state === "failed" ? "close" : state === "copying" ? "spinner" : "copy"));
+    };
+    show("idle");
+    let timer = 0, failure: HTMLElement | null = null;
+    item.addEventListener("click", async () => {
+      if (item.dataset.state === "copying") return;
+      document.defaultView!.clearTimeout(timer);
+      failure?.remove();
+      show("copying");
+      try {
+        await copyText(document.defaultView!, value());
+        show("copied");
+        timer = document.defaultView!.setTimeout(() => show("idle"), 1500);
+      } catch (error) {
+        show("failed");
+        failure = make("p", "tool-note tool-bad", `Could not copy: ${error instanceof Error ? error.message : String(error)}`);
+        item.parentElement?.after(failure);
+      }
+    });
+    return item;
+  }
+
+  // The name of a part of a call, with the button that copies it.
+  function sectionTitle(label: string, value: () => string | Promise<string>): HTMLElement {
+    const section = make("div", "tool-section", label);
+    section.append(copyButton(label, value));
+    return section;
+  }
+
+  // The few lines of an output, under its call; a tap on them reads it all, full screen. An output these lines hold is only shown.
+  function outputParts(call: ToolCallDetail, read: (place: ToolOutputPlace) => Promise<ToolOutputPage>, caption: () => Node[]): Node[] {
+    if (!call.output) return [];
+    const output = call.output, fromEnd = !!call.command, length = call.outputLength ?? output.length;
+    const preview = outputPreview(output, length, fromEnd);
+    const section = sectionTitle("Output", () => output.length >= length ? output : readWholeOutput(read, length));
+    if (preview.whole) return [section, make("pre", "tool-text", preview.text)];
+    const more = `Read all ${length.toLocaleString()} characters`;
+    const open = button("tool-output", more);
+    open.append(make("span", "tool-output-text", preview.text), make("span", "tool-output-more", more));
+    open.addEventListener("click", () => options.outputViewer.open(caption(), read, fromEnd));
+    return [section, open];
+  }
+
+  // What a call does, each fact on its own line. Its long texts scroll, and say when only a part of them came.
+  function toolParts(call: ToolCallDetail, subject: string | undefined, readOutput: (place: ToolOutputPlace) => Promise<ToolOutputPage>, caption: () => Node[]): Node[] {
+    const parts: Node[] = [];
+    const fact = (label: string, value: string, className?: string, copied = true) => {
+      const line = make("div", "tool-fact");
+      line.append(make("span", "tool-fact-label", label), make("code", className, value));
+      if (copied) line.append(copyButton(label, () => value));
+      parts.push(line);
+    };
+    const text = (label: string, value: string | null | undefined, length: number | undefined, kept: "start" | "end") => {
+      if (!value) return;
+      parts.push(sectionTitle(label, () => value), make("pre", "tool-text", value));
+      if (length !== undefined && length > value.length) parts.push(make("p", "tool-note", `The ${kept === "start" ? "first" : "last"} ${value.length.toLocaleString()} of ${length.toLocaleString()} characters.`));
+    };
+    // The row is a button, whose text cannot be selected: the path it shows comes here, unless a list of files below has it.
+    if (subject && subjectPath(subject) && !call.readFiles?.includes(subject) && !call.modifiedFiles?.includes(subject)) fact("Path", subject);
+    const folder = call.workingDirectory || call.sessionFolder;
+    if (folder) fact("Folder", folder);
+    if (call.exitCode !== null && call.exitCode !== undefined) fact("Exit code", String(call.exitCode), call.exitCode !== 0 ? "tool-bad" : undefined, false);
+    if (call.failure) fact("Error", call.failure, "tool-bad");
+    if (call.command) text("Command", call.command, undefined, "start");
+    else text("Arguments", call.arguments, call.argumentsLength, "start");
+    text("Modified files", call.modifiedFiles?.join("\n"), undefined, "start");
+    text("Read files", call.readFiles?.join("\n"), undefined, "start");
+    text("Diff", call.diff, call.diffLength, "start");
+    parts.push(...outputParts(call, readOutput, caption));
+    if (!parts.length) parts.push(make("p", "tool-note", "The call says nothing more yet."));
+    return parts;
   }
 
   function activityBody(block: ActivityBlock, body: HTMLElement) {
-    // Rows are kept by key: a thought never changes, a tool changes its phase; new rows are added after.
+    // A run of a script that only made calls is in the place of its call, and folds with the activity.
+    const cards = new Map((block.workflows ?? []).filter(run => run.callId && !hasRunBlock(run)).map(run => [run.callId!, run]));
+    // Rows are kept by key: a thought never changes, a tool changes its phase; new rows are added after. The card of a run is
+    // drawn again, as the version of the activity changes with its runs.
     const existing = new Map(Array.from(body.children as HTMLCollectionOf<HTMLElement>).map(child => [child.dataset.key!, child]));
     let previous: Element | null = null;
     for (const entry of block.rows) {
       let element = existing.get(entry.key);
-      if (!element) {
+      const run = entry.type === "tool" && entry.activityId ? cards.get(entry.activityId) : undefined;
+      if (run) {
+        const card = workflowCard(run);
+        card.dataset.key = entry.key;
+        element?.replaceWith(card);
+        element = card;
+      } else if (entry.type === "tool" && element?.classList.contains("wf-card")) {
+        // The run got a card of its own under the line: its call is a row again.
+        const row = toolRow(entry);
+        element.replaceWith(row);
+        element = row;
+      } else if (!element) {
         if (entry.type === "thought") {
           element = make("div", "msg msg-reasoning");
           element.dataset.key = entry.key;
@@ -277,7 +449,7 @@ export function createTimelineView(options: TimelineViewOptions) {
           fill();
           element.append(make("div", "msg-label", "Thinking"), content);
         } else element = toolRow(entry);
-      } else if (entry.type === "tool" && element.dataset.phase !== entry.phase) toolState(element, entry);
+      } else if (entry.type === "tool" && (element.dataset.phase !== entry.phase || element.dataset.subject !== (entry.subject ?? ""))) toolState(element, entry);
       const expected: ChildNode | null = previous ? previous.nextSibling : body.firstChild;
       if (expected !== element) body.insertBefore(element, expected);
       previous = element;
@@ -298,9 +470,10 @@ export function createTimelineView(options: TimelineViewOptions) {
     toggle.setAttribute("aria-expanded", String(isOpen));
     toggle.querySelector(".act-line")?.remove();
     toggle.append(activityLine(document, facts, live, Date.now()));
-    // What shows folded: the runs of its scripts, then the images its tools gave the model.
+    // What shows folded or not: the runs of its scripts with a card of their own (folded, also those that go on), then the
+    // images its tools gave the model. The other runs fold with the activity, in the place of their call (#323).
     let extras = item.querySelector<HTMLElement>(":scope > .act-extras");
-    const runs = block.workflows ?? [];
+    const runs = runsUnderLine(block.workflows ?? [], isOpen);
     if (runs.length || block.images?.length) {
       if (!extras) { extras = make("div", "act-extras"); toggle.after(extras); }
       const cards = runs.map(run => workflowCard(run));
@@ -435,8 +608,8 @@ export function createTimelineView(options: TimelineViewOptions) {
     return body;
   }
 
-  // A call of the script: its state, its title (the tool and what it was given) and how long it took. A call still
-  // running in a run that ended was stopped with it.
+  // A call of the script: its state, its title (the tool and what it was given), what it works on and how long it took.
+  // A call still running in a run that ended was stopped with it.
   function callRow(call: WorkflowCall, live: boolean): HTMLLIElement {
     const state: WorkflowState = call.phase === "completed" ? "completed" : call.phase === "failed" ? "failed" : call.phase === "canceled" ? "canceled" : live ? "running" : "interrupted";
     const row = make("li", "wf-call");
@@ -444,14 +617,31 @@ export function createTimelineView(options: TimelineViewOptions) {
     const mark = timelineIcon(document, stateIcons[state], "wf-step-mark");
     mark.title = stateWords[state];
     const took = Date.parse(call.end ?? "") - Date.parse(call.at ?? "");
-    row.append(mark, make("span", "wf-step-title", call.title), make("span", "wf-step-time", state !== "running" && took >= 1000 ? duration(took) : ""));
-    row.setAttribute("aria-label", `${call.title}: ${stateWords[state]}`);
+    row.append(mark, make("span", "wf-step-title", call.title));
+    if (call.subject) row.append(subjectElement(call.subject));
+    row.append(make("span", "wf-step-time", state !== "running" && took >= 1000 ? duration(took) : ""));
+    row.setAttribute("aria-label", `${call.title}${call.subject ? ` ${call.subject}` : ""}: ${stateWords[state]}`);
     return row;
   }
 
   /** Answers a tap the view draws for; says whether it did. */
   function click(event: Event): boolean {
     const target = event.target as Element | null;
+    const withdraw = target?.closest<HTMLButtonElement>("button.pending-delete, button.pending-edit");
+    if (withdraw?.dataset.prompt) { options.withdraw(withdraw.dataset.prompt, withdraw.dataset.then === "edit" ? "edit" : "delete"); return true; }
+    const toolCall = target?.closest<HTMLButtonElement>("button.tool-row");
+    if (toolCall?.dataset.activity) {
+      const key = toolKey(toolCall.dataset.activity), element = toolCall.closest<HTMLElement>(".tool-call")!;
+      if (open.has(key)) {
+        open.delete(key);
+        toolCall.setAttribute("aria-expanded", "false");
+        element.querySelector(":scope > .tool-detail")?.remove();
+      } else {
+        open.add(key);
+        void showTool(element, toolCall, toolCall.dataset.activity);
+      }
+      return true;
+    }
     const source = target?.closest<HTMLButtonElement>("button.host-source, button.wf-session");
     if (source?.dataset.session) { options.openSession(source.dataset.session); return true; }
     const shown = target?.closest<HTMLButtonElement>("button.thumb, button.md-image");

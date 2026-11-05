@@ -182,7 +182,7 @@ test("the window shows one space at a time: its projects, its sessions and its o
       // An existing project joins the shown space through the same path as the header's plus action.
       await evaluate("projectFocusFixture.pick={status:'ok',path:'/fixture/other'};document.querySelector('.space-empty button').click()");
       assert.equal(await wait("!document.querySelector('.space-empty') && !!document.querySelector('#project-list button[data-scope=other]')"), true);
-      assert.deepEqual(await evaluate("spacesFixture.assigned.at(-1)"), { expectedEpoch: "12345678-1234-1234-1234-123456789abc", projectId: "other", join: ["work"], leave: [] });
+      assert.deepEqual(await evaluate("spacesFixture.assigned.at(-1)"), { expectedEpoch: "12345678-1234-1234-1234-123456789abc", projectId: "other", join: ["work"], leave: [], sessionsFrom: null, sessionsTo: null });
       assert.equal(await shown(), "Work");
       assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), false);
       assert.deepEqual(exceptions, []);
@@ -276,6 +276,20 @@ test("the window shows one space at a time: its projects, its sessions and its o
       await evaluate("document.querySelector('.space-section-tab[aria-selected=true]').focus()");
       for (const type of ["rawKeyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
       assert.equal(await wait("document.activeElement?.dataset.spaceSection==='projects' && !!document.querySelector('.space-page .space-project-checks')"), true);
+      // Checking a project brings its sessions of the default space, and the page names the one at work that stayed;
+      // unchecking it sends the sessions of the space back to the default one, and says how many went.
+      const check = "[...document.querySelectorAll('.space-page .space-project-checks label')].find(label=>label.querySelector('.space-project-name').textContent==='Project').querySelector('input')";
+      const checked = await evaluate("spacesFixture.assigned.length") as number;
+      await evaluate(`${check}.click()`);
+      assert.equal(await wait(`spacesFixture.assigned.length===${checked + 1} && (document.querySelector('.space-page .bp6-callout')?.textContent?.includes('Busy session') ?? false)`), true);
+      assert.deepEqual(await evaluate("(({ join, leave, sessionsFrom, sessionsTo }) => ({ join, leave, sessionsFrom, sessionsTo }))(spacesFixture.assigned.at(-1))"),
+        { join: ["work"], leave: [], sessionsFrom: "default", sessionsTo: "work" });
+      assert.equal(await wait(`${check}.checked && !${check}.disabled`), true);
+      await evaluate(`${check}.click()`);
+      assert.equal(await wait(`spacesFixture.assigned.length===${checked + 2} && (document.querySelector('.space-page .bp6-callout')?.textContent?.startsWith('1 session moved with the project.') ?? false)`), true);
+      assert.deepEqual(await evaluate("(({ join, leave, sessionsFrom, sessionsTo }) => ({ join, leave, sessionsFrom, sessionsTo }))(spacesFixture.assigned.at(-1))"),
+        { join: [], leave: ["work"], sessionsFrom: "work", sessionsTo: "default" });
+      assert.equal(await wait(`!${check}.checked`), true);
 
       await evaluate("document.querySelector('.space-section-tab[data-space-section=resources]').click()");
       assert.equal(await wait("!!document.querySelector('.space-available')"), true);
@@ -398,31 +412,38 @@ test("the window shows one space at a time: its projects, its sessions and its o
       };
       const assigned = async (count: number) => {
         assert.equal(await wait(`spacesFixture.assigned.length===${count}`), true, "The drop changed nothing.");
-        const request = await evaluate("spacesFixture.assigned.at(-1)") as { projectId: string; join: string[]; leave: string[] };
-        return { projectId: request.projectId, join: request.join, leave: request.leave };
+        const request = await evaluate("spacesFixture.assigned.at(-1)") as { projectId: string; join: string[]; leave: string[]; sessionsFrom: string | null; sessionsTo: string | null };
+        return { projectId: request.projectId, join: request.join, leave: request.leave, sessions: request.sessionsFrom === null ? null : `${request.sessionsFrom}>${request.sessionsTo}` };
       };
-      const before = await evaluate("spacesFixture.assigned.length") as number;
+      let before = await evaluate("spacesFixture.assigned.length") as number;
 
       // From the list of every project onto a space: it joins it.
       assert.deepEqual(await drag(project(".space-pool", "Project"), card("Work")), { over: "work", ghost: "Project", near: true, copy: true });
-      assert.deepEqual(await assigned(before + 1), { projectId: "project", join: ["work"], leave: [] });
+      assert.deepEqual(await assigned(before + 1), { projectId: "project", join: ["work"], leave: [], sessions: "default>work" });
+      // Its sessions went with it, but one at work stayed: the page names it.
+      assert.equal(await wait("document.querySelector('.space-settings .bp6-callout')?.textContent?.includes('Busy session') ?? false"), true);
       assert.equal(await wait(`!!${project(".space-card[aria-label=Work]", "Project")}`), true);
       assert.equal(await evaluate("!!document.querySelector('.space-page')"), false, "A drag opens no page.");
 
+      // Dragged again from the list onto that space: it gathers there its sessions of the default space.
+      assert.deepEqual(await drag(project(".space-pool", "Project"), card("Work")), { over: "work", ghost: "Project", near: true, copy: true });
+      assert.deepEqual(await assigned(before + 2), { projectId: "project", join: [], leave: [], sessions: "default>work" });
+      before++;
+
       // From a space onto another: it moves.
       assert.deepEqual(await drag(project(".space-card[aria-label=Work]", "Project"), card("Home")), { over: "home", ghost: "Project", near: true, copy: false });
-      assert.deepEqual(await assigned(before + 2), { projectId: "project", join: ["home"], leave: ["work"] });
+      assert.deepEqual(await assigned(before + 2), { projectId: "project", join: ["home"], leave: ["work"], sessions: "work>home" });
       assert.equal(await wait(`!!${project(".space-card[aria-label=Home]", "Project")} && !${project(".space-card[aria-label=Work]", "Project")}`), true);
 
       // With Ctrl, it is in both.
       assert.deepEqual(await drag(project(".space-card[aria-label=Home]", "Project"), card("Work"), 2), { over: "work", ghost: "Project", near: true, copy: true });
-      assert.deepEqual(await assigned(before + 3), { projectId: "project", join: ["work"], leave: [] });
+      assert.deepEqual(await assigned(before + 3), { projectId: "project", join: ["work"], leave: [], sessions: null });
       assert.equal(await wait(`!!${project(".space-card[aria-label=Home]", "Project")} && !!${project(".space-card[aria-label=Work]", "Project")}`), true);
 
       // Back on the list of every project: it leaves the space it came from.
       assert.deepEqual(await drag(project(".space-card[aria-label=Work]", "Project"), "document.querySelector('.space-pool .space-projects')"),
         { over: "", ghost: "Project", near: true, copy: false });
-      assert.deepEqual(await assigned(before + 4), { projectId: "project", join: [], leave: ["work"] });
+      assert.deepEqual(await assigned(before + 4), { projectId: "project", join: [], leave: ["work"], sessions: "work>default" });
       assert.equal(await wait(`!${project(".space-card[aria-label=Work]", "Project")}`), true);
       assert.equal(await evaluate("!!document.querySelector('.space-page')"), false);
 

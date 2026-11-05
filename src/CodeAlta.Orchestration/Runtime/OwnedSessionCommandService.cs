@@ -1145,7 +1145,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         }
         catch (OperationCanceledException) when ((operation.Request.References is not null || operation.Request.Images is { Count: > 0 } || Plugins is not null)
             && operation.Execution.IsCancellationRequested) { throw; }
-        catch (Exception ex)
+        // A session another process holds, or that moved to another machine, is refused as such by the send.
+        catch (Exception ex) when (SessionRuntimeService.FindSessionInUse(ex) is null)
         {
             RecordFailure(ex, cleanup: false, operation.ReleaseDecision);
             return null;

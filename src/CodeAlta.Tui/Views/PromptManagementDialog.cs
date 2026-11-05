@@ -407,8 +407,8 @@ internal sealed class PromptManagementDialog
     {
         var prompts = _promptCatalog.ListPrompts(_query);
         _rows = prompts
-            // The files of CodeAlta: a custom agent of GitHub Copilot is not edited here.
-            .Where(static prompt => !prompt.IsCopilot)
+            // The files of CodeAlta: an agent of GitHub Copilot or Claude Code is not edited here.
+            .Where(static prompt => !prompt.IsExternal)
             .OrderBy(static prompt => prompt.Precedence)
             .ThenBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static prompt => prompt.SourcePath, StringComparer.OrdinalIgnoreCase)

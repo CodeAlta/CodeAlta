@@ -38,6 +38,12 @@ public sealed partial class AgentHub : IAsyncDisposable
     // locks of their own append at the same offset, and the second record overwrites the first.
     internal AgentSessionJournalFile JournalFile { get; init; } = new();
 
+    /// <summary>
+    /// Gets or initializes what masks the secrets of the machine in the tool results and events of the sessions of the
+    /// hub, before they are journaled, published or traced; null masks nothing.
+    /// </summary>
+    public AgentSecretMasker? SecretMasker { get; init; }
+
     /// <summary>The version of the registration of a provider (<see cref="ModelProviderRegistry.GetRegistrationVersion"/>); 0 when it is not registered.</summary>
     internal long GetProviderRegistrationVersion(string? providerKey)
         => string.IsNullOrWhiteSpace(providerKey) ? 0 : _modelProviderRegistry.GetRegistrationVersion(new ModelProviderId(providerKey.Trim()));
@@ -202,6 +208,26 @@ public sealed partial class AgentHub : IAsyncDisposable
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
         return await ExecuteReferencedAsync(entry,
             () => entry.Coordinator.SteerAsync(sessionHandleId, options, _events, cancellationToken)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Takes back a steering input that the active run has not given to the model yet.
+    /// </summary>
+    /// <param name="sessionHandleId">The active session handle.</param>
+    /// <param name="withdrawalId">The identifier given with the input.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Whether the input was taken back.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the handle does not reference an active session.</exception>
+    public async Task<bool> TryWithdrawSteerAsync(
+        AgentSessionHandleId sessionHandleId,
+        string withdrawalId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(withdrawalId);
+
+        var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
+        return await ExecuteReferencedAsync(entry,
+            () => entry.Coordinator.TryWithdrawSteerAsync(withdrawalId, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -593,6 +619,45 @@ public sealed partial class AgentHub : IAsyncDisposable
     }
 
     /// <summary>
+    /// Copies what the provider of a session keeps of it into a folder of a session bundle, when the provider keeps such
+    /// a copy. Nothing of the provider is started.
+    /// </summary>
+    /// <returns>Whether something was copied, and what went wrong in words.</returns>
+    internal async Task<(bool Copied, string? Warning)> ExportProviderSessionAsync(AgentSessionState state, string workingDirectory, string destination,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        IModelProviderRuntime runtime;
+        try { runtime = await _modelProviderRegistry.CreateRuntimeAsync(new ModelProviderId(state.ProviderKey), cancellationToken).ConfigureAwait(false); }
+        catch (KeyNotFoundException) { return (false, null); }
+        await using (runtime.ConfigureAwait(false))
+        {
+            return runtime is IAgentSessionTransferProvider transfer
+                ? await transfer.ExportSessionAsync(state, workingDirectory, destination, cancellationToken).ConfigureAwait(false)
+                : (false, null);
+        }
+    }
+
+    /// <summary>
+    /// Places what a session bundle carries of a session's provider where that provider looks for it on this machine.
+    /// Nothing of the provider is started.
+    /// </summary>
+    /// <returns><see langword="null"/> when there was nothing to do or it was placed; otherwise what went wrong.</returns>
+    internal async Task<string?> ImportProviderSessionAsync(AgentSessionState state, string source, string workingDirectory, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        IModelProviderRuntime runtime;
+        try { runtime = await _modelProviderRegistry.CreateRuntimeAsync(new ModelProviderId(state.ProviderKey), cancellationToken).ConfigureAwait(false); }
+        catch (KeyNotFoundException) { return $"The provider {state.ProviderKey} is not configured on this machine: its own copy of the conversation was not placed."; }
+        await using (runtime.ConfigureAwait(false))
+        {
+            return runtime is IAgentSessionTransferProvider transfer
+                ? await transfer.ImportSessionAsync(state, source, workingDirectory, cancellationToken).ConfigureAwait(false)
+                : null;
+        }
+    }
+
+    /// <summary>
     /// Reads the protocol family of the runtime of a provider. Nothing of the provider is started.
     /// </summary>
     /// <returns>The family; <see langword="null"/> when the provider is not registered or owns its sessions itself.</returns>
@@ -784,6 +849,7 @@ public sealed partial class AgentHub : IAsyncDisposable
                     StateRootPath = _stateRootPath,
                     SessionProjectionCache = _sessionProjectionCache,
                     JournalFile = JournalFile,
+                    SecretMasker = SecretMasker,
                     Providers = [agentProviderRuntime.CreateProviderRegistration()],
                 });
             await InvokeOriginalAsync(() => providerRuntime.StartAsync(cancellationToken)).ConfigureAwait(false);
@@ -977,6 +1043,19 @@ public sealed partial class AgentHub : IAsyncDisposable
             {
                 events.TryPublish(new RunFailedEvent(DateTimeOffset.UtcNow, sessionHandleId, ex.Message));
                 throw;
+            }
+            finally
+            {
+                _controlGate.Release();
+            }
+        }
+
+        public async Task<bool> TryWithdrawSteerAsync(string withdrawalId, CancellationToken cancellationToken)
+        {
+            await _controlGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await InvokeOriginalAsync(() => _session.TryWithdrawSteerAsync(withdrawalId, cancellationToken)).ConfigureAwait(false);
             }
             finally
             {

@@ -313,6 +313,114 @@ public sealed class MobileSessionsTests
     }
 
     [TestMethod]
+    public async Task Prompt_NamesWhatTakesThePromptBack()
+    {
+        var alta = new FakeAlta()
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal", running: true))
+            .Answer("session steer", new JsonObject { ["type"] = "alta.session.steered", ["withdrawalId"] = "steer-1" })
+            .Answer("session queue", new JsonObject { ["type"] = "alta.session.queued", ["queueItemId"] = "queue-1" })
+            .Answer("session send", new JsonObject { ["type"] = "alta.session.queued", ["queueItemId"] = "queue-2" });
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces(), new MobileLive()));
+
+        Assert.AreEqual("steer-1", (string?)(await api.PromptAsync("a", new JsonObject { ["text"] = "x", ["mode"] = "steer" }, default))!["withdrawalId"]);
+        Assert.AreEqual("queue-1", (string?)(await api.PromptAsync("a", new JsonObject { ["text"] = "x", ["mode"] = "queue" }, default))!["queueItemId"]);
+        Assert.AreEqual("queue-2", (string?)(await api.PromptAsync("a", new JsonObject { ["text"] = "x" }, default))!["queueItemId"], "A send to a session that works is queued.");
+    }
+
+    [TestMethod]
+    public async Task Queue_ListsThePromptsOfAPerson_AndARemovalSaysWhatItBecame()
+    {
+        var alta = new FakeAlta()
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session status theirs", FakeAlta.Status("theirs", "p1", "work"))
+            .Answer("session queued a",
+                new JsonObject { ["type"] = "alta.session.queued.item", ["queueItemId"] = "queue-1", ["kind"] = "queue", ["state"] = "queued", ["prompt"] = "Then the docs", ["createdAt"] = "2026-11-05T10:00:00Z",
+                    ["files"] = new JsonArray(new JsonObject { ["title"] = "a.txt", ["mediaType"] = "text/plain" }) },
+                new JsonObject { ["type"] = "alta.session.queued.item", ["queueItemId"] = "queue-2", ["kind"] = "send", ["state"] = "queued", ["prompt"] = "Sent while it worked" },
+                new JsonObject { ["type"] = "alta.session.queued.item", ["queueItemId"] = "queue-3", ["kind"] = "message", ["state"] = "queued", ["prompt"] = "From another agent" })
+            .Answer("session unqueue a queue-1", new JsonObject { ["type"] = "alta.session.unqueued", ["status"] = "removed" })
+            .Answer("session unsteer a steer-1", new JsonObject { ["type"] = "alta.session.unsteered", ["withdrawn"] = true })
+            .Answer("session unsteer a steer-2", new JsonObject { ["type"] = "alta.session.unsteered", ["withdrawn"] = false });
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces("personal"), new MobileLive()));
+
+        var items = (await api.QueueAsync("a", default))!["items"]!.AsArray();
+        CollectionAssert.AreEqual(new[] { "queue-1", "queue-2" }, items.Select(static item => (string?)item!["id"]).ToArray(), "The messages of agents are not the phone's to take back.");
+        Assert.AreEqual(("Then the docs", "a.txt"), ((string?)items[0]!["text"], (string?)items[0]!["files"]![0]!["title"]));
+
+        Assert.AreEqual("removed", (string?)(await api.UnqueueAsync("a", "queue-1", default))!["status"]);
+        Assert.IsTrue((bool)(await api.UnsteerAsync("a", "steer-1", default))!["withdrawn"]!);
+        Assert.IsFalse((bool)(await api.UnsteerAsync("a", "steer-2", default))!["withdrawn"]!);
+
+        // A session of another space stays unknown, and nothing of it is asked.
+        Assert.IsNull(await api.QueueAsync("theirs", default));
+        Assert.IsNull(await api.UnqueueAsync("theirs", "queue-1", default));
+        Assert.IsNull(await api.UnsteerAsync("theirs", "steer-1", default));
+        Assert.IsNull(await api.UnqueueAsync("a", "--all", default), "An id is one argument of alta, never an option.");
+        Assert.AreEqual(1, alta.CallsOf("session unqueue").Length);
+    }
+
+    [TestMethod]
+    public async Task Tool_ReadsOneCallOnDemand_WhatItReportedIsNotAFailureOfTheRead()
+    {
+        var alta = new FakeAlta()
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session status theirs", FakeAlta.Status("theirs", "p1", "work"))
+            .Answer("session tool a call-1", new JsonObject
+            {
+                ["type"] = "alta.session.tool", ["activityId"] = "call-1", ["phase"] = "failed", ["name"] = "Bash", ["command"] = "git status", ["workingDirectory"] = "C:/work/tree",
+                ["sessionFolder"] = "C:/work", ["exitCode"] = 3, ["error"] = "it broke", ["output"] = "the end", ["outputLength"] = 7, ["modifiedFiles"] = new JsonArray("a.txt"), ["correlationId"] = "internal",
+            })
+            .Answer("session tool a call-2", (_, _) => FakeAlta.Transcript(3));
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces("personal"), new MobileLive()));
+
+        var call = await api.ToolAsync("a", "call-1", 41, default);
+        Assert.IsNull((string?)call!["error"]);
+        Assert.AreEqual(("Bash", "git status", "C:/work/tree", 3, "it broke", "the end"),
+            ((string?)call["name"], (string?)call["command"], (string?)call["workingDirectory"], (int)call["exitCode"]!, (string?)call["failure"], (string?)call["output"]));
+        Assert.IsFalse(call.ContainsKey("correlationId"));
+        CollectionAssert.AreEqual(new[] { "session", "tool", "a", "call-1", "--max-text", "12000", "--max-output", "2000", "--since", "41" }, alta.CallsOf("session tool a call-1").Single());
+
+        Assert.IsNotNull((string?)(await api.ToolAsync("a", "call-2", null, default))!["error"]);
+        Assert.IsNull(await api.ToolAsync("theirs", "call-1", null, default));
+        Assert.IsNull(await api.ToolAsync("a", "--all", null, default));
+    }
+
+    [TestMethod]
+    public async Task ToolOutput_ReadsAPageAtATime_WhereThePhoneAsks_AndNothingElseOfTheCall()
+    {
+        var alta = new FakeAlta()
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session status theirs", FakeAlta.Status("theirs", "p1", "work"))
+            .Answer("session tool a call-1", new JsonObject
+            {
+                ["type"] = "alta.session.tool", ["name"] = "Bash", ["command"] = "git status", ["output"] = "a page", ["outputOffset"] = 8000, ["outputLength"] = 90000,
+            })
+            .Answer("session tool a call-2", (_, _) => FakeAlta.Transcript(3));
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces("personal"), new MobileLive()));
+        string[] Asked() => [.. alta.CallsOf("session tool a call-1").Last()];
+        const string Page = "32000";
+
+        var page = await api.ToolOutputAsync("a", "call-1", 41, null, null, default);
+        Assert.AreEqual(("a page", 8000, 90000), ((string?)page!["output"], (int)page["outputOffset"]!, (int)page["outputLength"]!));
+        Assert.IsNull((string?)page["error"]);
+        Assert.IsFalse(page.ContainsKey("command"));
+        CollectionAssert.AreEqual(new[] { "session", "tool", "a", "call-1", "--max-text", "1", "--max-output", Page, "--since", "41" }, Asked(), "Where the output says the most.");
+
+        await api.ToolOutputAsync("a", "call-1", null, 32000, null, default);
+        CollectionAssert.AreEqual(new[] { "session", "tool", "a", "call-1", "--max-text", "1", "--max-output", Page, "--output-offset", "32000" }, Asked(), "The page after the one it has.");
+        await api.ToolOutputAsync("a", "call-1", null, null, 40000, default);
+        CollectionAssert.AreEqual(new[] { "session", "tool", "a", "call-1", "--max-text", "1", "--max-output", Page, "--output-offset", "8000" }, Asked(), "The page before the one it has.");
+        await api.ToolOutputAsync("a", "call-1", null, null, 100, default);
+        CollectionAssert.AreEqual(new[] { "session", "tool", "a", "call-1", "--max-text", "1", "--max-output", "100", "--output-offset", "0" }, Asked(), "What is left before it, and no more.");
+
+        Assert.IsNotNull((string?)(await api.ToolOutputAsync("a", "call-2", null, null, null, default))!["error"]);
+        Assert.IsNull(await api.ToolOutputAsync("theirs", "call-1", null, null, null, default));
+        Assert.IsNull(await api.ToolOutputAsync("a", "--all", null, null, null, default));
+        Assert.IsNull(await api.ToolOutputAsync("a", "call-1", null, -1, null, default));
+        Assert.IsNull(await api.ToolOutputAsync("a", "call-1", null, null, 0, default));
+    }
+
+    [TestMethod]
     public async Task Choices_GiveWhatTheComposerOffers_WithTheNamesOfTheSelection()
     {
         var alta = new FakeAlta()
@@ -751,13 +859,17 @@ public sealed class MobileSessionsTests
     [TestMethod]
     public void LinkedImages_AreThePicturesOfTheDiskOutsideCode()
     {
+        var (full, address) = OperatingSystem.IsWindows() ? (@"C:\shots\h.png", "file:///C:/shots/i.png") : ("/shots/h.png", "file:///shots/i.png");
         var text = "![a](one.png) `![b](two.png)` ![c](<with space.png> \"title\") ![d](https://example.com/x.png) ![e](data:image/png;base64,AA==)\n"
-            + "    ![f](indented.png)\n~~~\n![g](fenced.png)\n~~~\n![h](C:\\shots\\h.png) ![i](file:///tmp/i.png) ![j](my%20shot.png)";
+            + $"    ![f](indented.png)\n~~~\n![g](fenced.png)\n~~~\n![h]({full}) ![i]({address}) ![j](my%20shot.png)";
 
-        CollectionAssert.AreEqual(new[] { ("a", "one.png"), ("c", "with space.png"), ("h", @"C:\shots\h.png"), ("i", "file:///tmp/i.png"), ("j", "my shot.png") },
+        CollectionAssert.AreEqual(new[] { ("a", "one.png"), ("c", "with space.png"), ("h", full), ("i", address), ("j", "my%20shot.png") },
             MobileTimeline.LinkedImages(text).ToArray());
-        Assert.IsNull(MobileImages.Locate("~/x.png", "/tmp"), "A path of the shell is not resolved.");
+        var folder = Path.GetFullPath("/start");
+        Assert.IsNull(MobileImages.Locate("~/x.png", folder), "A path of the shell is not resolved.");
         Assert.IsNull(MobileImages.Locate("x.png", null), "A relative path needs the folder of the session.");
+        Assert.AreEqual(Path.Combine(folder, "my shot.png"), MobileImages.Locate("my%20shot.png", folder));
+        Assert.AreEqual(Path.Combine(folder, "a%20b.png"), MobileImages.Locate("a%2520b.png", folder), "A target is decoded once: this file has a % in its name.");
     }
 
     private static JsonObject Event(int sequence, string kind, string text, string? activity = null)

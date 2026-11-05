@@ -68,8 +68,10 @@ function markTitleBars(host: HTMLElement) {
   });
 }
 
-export function SessionTabLabel({ label, path, dirty: shown, drafts, sessionId = null }: {
+export function SessionTabLabel({ label, path, dirty: shown, drafts, sessionId = null, channel = null }: {
   label: string; path: string | null;
+  /** Where the channel to the machine of a remote session goes while it is online: `direct` or `relayed`. */
+  channel?: string | null;
   /** Whether the prompt of the session was edited, when the caller knows. */
   dirty?: boolean;
   /** The edited prompts of the window: the label follows the one of its session by itself. */
@@ -79,6 +81,8 @@ export function SessionTabLabel({ label, path, dirty: shown, drafts, sessionId =
   const edited = useDraftIndicator(drafts?.indicators, sessionId, drafts?.selectedId ?? null);
   const dirty = shown ?? edited;
   return <span className="session-tab-title"><span className="session-tab-label" title={`${label}\n${path ?? ""}`}>{label}</span>
+    {(channel === "direct" || channel === "relayed") && <span className="session-tab-channel" data-channel={channel}
+      title={t(channel === "relayed" ? "Through the server, encrypted from end to end" : "Straight to the machine")}>{t(channel === "relayed" ? "Relayed" : "Direct")}</span>}
     {dirty && <span className="session-tab-dirty" role="img" title={t("Draft edited in this window")} aria-label={t("Draft edited in this window")} />}</span>;
 }
 
@@ -509,7 +513,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
           return;
         }
         const tab = state.open.find(value => sessionNodeId(value) === node.getId());
-        values.content = <span data-session-node={node.getId()} data-transient={isPreviewTab(state, tab) ? "true" : undefined}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} drafts={drafts} sessionId={tab?.sessionId ?? null} /></span>;
+        values.content = <span data-session-node={node.getId()} data-transient={isPreviewTab(state, tab) ? "true" : undefined}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} drafts={drafts} sessionId={tab?.sessionId ?? null}
+          channel={(tab && snapshot ? resolveSessionTab(snapshot, tab)?.machineChannel : null) ?? null} /></span>;
         // A session that waits for the user says so before anything else: its run goes nowhere until it is answered.
         if (tab?.sessionId && waiting?.has(tab.sessionId)) values.leading = <SessionWaitingBadge waiting />;
         // One another process holds says so: it is read-only here meanwhile.

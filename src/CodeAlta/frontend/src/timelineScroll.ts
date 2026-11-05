@@ -397,17 +397,23 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     if (element) selection.pauseAt(element.scrollTop);
     setFollowing(false);
   }
-  // Shows the message of a journal offset at the top of the timeline, when the window holds it. The reader
-  // is then where they chose to be, not at the end. With `mark`, the row is pointed out for a moment.
+  // The timeline was put where something is shown: the reader is then where they chose to be, not at the end.
+  function moved() {
+    const element = elementRef.current;
+    if (!element) return;
+    placed(element);
+    messageAnchor.current = null;
+    selection.pauseAt(element.scrollTop);
+    setFollowing(false);
+  }
+  // Shows the message of a journal offset at the top of the timeline, when the window holds it. With `mark`, the
+  // row is pointed out for a moment.
   function showRow(key: string, mark = false): boolean {
     const element = elementRef.current;
     const row = /^\d+$/u.test(key) ? element?.querySelector<HTMLElement>(`[data-row-offset="${key}"], [data-prompt-offset="${key}"]`) : null;
     if (!element || !row) return false;
     element.scrollTop += row.getBoundingClientRect().top - element.getBoundingClientRect().top - 8;
-    placed(element);
-    messageAnchor.current = null;
-    selection.pauseAt(element.scrollTop);
-    setFollowing(false);
+    moved();
     if (mark) {
       // Asked for twice, the mark is drawn again from its start.
       row.removeAttribute("data-revealed");
@@ -465,7 +471,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   }
   return { elementRef, following, settled, scroll, wheel, keyDown, pointerDown, pointerMove, pointerEnd,
     jump, pause, beforeOlderPage, afterOlderPage, olderRequestRef,
-    messageReady, navigateMessage, resetMessageNavigation, pauseIfUnfollowed, showRow, position, restorePosition };
+    messageReady, navigateMessage, resetMessageNavigation, pauseIfUnfollowed, moved, showRow, position, restorePosition };
 }
 
 // Only a user-requested, generation-matched settled tail can opt a reader into follow.

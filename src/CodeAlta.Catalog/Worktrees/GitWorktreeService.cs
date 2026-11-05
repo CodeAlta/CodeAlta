@@ -124,8 +124,14 @@ public sealed class GitWorktreeService
     /// <summary>The status of a change that was made.</summary>
     public const string Ok = "ok";
 
-    /// <summary>What the branches of the worktrees created here start with.</summary>
+    /// <summary>What the branches of the worktrees created here start with, unless the branch was named when it was created.</summary>
     public const string BranchPrefix = "alta/";
+
+    /// <summary>
+    /// The key of the git configuration, <c>branch.&lt;name&gt;.alta-created</c>, that marks a branch named by the user
+    /// as one a worktree was created on here: it goes with its worktree as an <c>alta/</c> branch does.
+    /// </summary>
+    public const string CreatedBranchKey = "alta-created";
 
     /// <summary>How long a command that reads may run.</summary>
     public static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(30);
@@ -251,7 +257,27 @@ public sealed class GitWorktreeService
     /// <returns>The worktree, or why none was created.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
     /// <exception cref="OperationCanceledException">The token was canceled.</exception>
-    public async Task<GitWorktreeCreation> CreateAsync(ProjectDescriptor project, string? baseReference, Action<GitWorktreeProgress>? progress,
+    public Task<GitWorktreeCreation> CreateAsync(ProjectDescriptor project, string? baseReference, Action<GitWorktreeProgress>? progress,
+        bool withoutHooks, CancellationToken cancellationToken = default)
+        => CreateAsync(project, baseReference, branchName: null, progress, withoutHooks, cancellationToken);
+
+    /// <summary>
+    /// Creates a worktree for a project as <see cref="CreateAsync(ProjectDescriptor, string?, Action{GitWorktreeProgress}?, bool, CancellationToken)"/>
+    /// does, on a branch of a name the user chose, such as <c>feature/123-export</c>. The folder of the worktree is named
+    /// after the last part of that name, and the branch is marked (<see cref="CreatedBranchKey"/>) so that it goes with
+    /// its worktree as an <c>alta/</c> branch does. A branch that already exists is not taken: the status is
+    /// <c>branch_exists</c>; a name git refuses gives <c>invalid_branch</c>.
+    /// </summary>
+    /// <param name="project">The project; its folder is in a git repository.</param>
+    /// <param name="baseReference">The branch or commit the worktree starts from; the commit the folder of the project is on when null.</param>
+    /// <param name="branchName">The name of the new branch; null for <c>alta/</c> and a name picked here.</param>
+    /// <param name="progress">Told each step, and each progress line of the checkout; called on the thread git is read on.</param>
+    /// <param name="withoutHooks">Whether the commands that add the worktree and check out its files run no hook.</param>
+    /// <param name="cancellationToken">Stops waiting; a checkout that started is stopped with it.</param>
+    /// <returns>The worktree, or why none was created.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public async Task<GitWorktreeCreation> CreateAsync(ProjectDescriptor project, string? baseReference, string? branchName, Action<GitWorktreeProgress>? progress,
         bool withoutHooks, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(project);
@@ -260,6 +286,11 @@ public sealed class GitWorktreeService
         if (baseReference is not null && !IsReferenceName(baseReference))
         {
             return new("invalid");
+        }
+
+        if (branchName is not null && (!IsReferenceName(branchName) || branchName.StartsWith("refs/", StringComparison.Ordinal) || branchName == "HEAD"))
+        {
+            return new("invalid_branch");
         }
 
         string projectFolder;
@@ -280,6 +311,7 @@ public sealed class GitWorktreeService
         // Only the name and the worktree are made one at a time: the checkout of the files and the submodules, which take
         // long in a large repository, run beside those of the other creations.
         string root, path, branch, name, below;
+        string? unmarked = null;
         await _writes.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -311,11 +343,42 @@ public sealed class GitWorktreeService
                 EnsureIgnored(parent);
             }
 
-            var branches = await _run(root, ["for-each-ref", "--format=%(refname:short)", "refs/heads/" + BranchPrefix], ReadTimeout, cancellationToken).ConfigureAwait(false);
-            var taken = new HashSet<string>(Lines(branches.Output), StringComparer.OrdinalIgnoreCase);
-            name = WorktreeNames.PickFree(_random, candidate => taken.Contains(BranchPrefix + candidate) || Path.Exists(Path.Combine(parent, candidate)));
+            if (branchName is not null)
+            {
+                // Git's own rules for a branch name, which are more than what IsReferenceName checks.
+                var format = await _run(root, ["check-ref-format", "--branch", branchName], ReadTimeout, cancellationToken).ConfigureAwait(false);
+                if (!format.Succeeded)
+                {
+                    return new("invalid_branch", Message(format));
+                }
+
+                // Compared without case: on a file system that ignores it (macOS, Windows), git does not see a packed
+                // feature/Foo when it creates feature/foo, and the new loose ref then hides the other one.
+                var heads = await _run(root, ["for-each-ref", "--format=%(refname)", "refs/heads"], ReadTimeout, cancellationToken).ConfigureAwait(false);
+                if (!heads.Succeeded)
+                {
+                    return new(StatusOf(heads), Message(heads));
+                }
+
+                if (Taken(heads.Output, branchName) is { } taken)
+                {
+                    return new("branch_exists", string.Equals(taken, branchName, StringComparison.Ordinal)
+                        ? $"The branch {branchName} already exists."
+                        : $"The branch {taken} already exists, and differs from {branchName} only in case.");
+                }
+
+                name = FreeFolderName(FolderNameOfBranch(branchName), parent);
+                branch = branchName;
+            }
+            else
+            {
+                var branches = await _run(root, ["for-each-ref", "--format=%(refname:short)", "refs/heads/" + BranchPrefix], ReadTimeout, cancellationToken).ConfigureAwait(false);
+                var taken = new HashSet<string>(Lines(branches.Output), StringComparer.OrdinalIgnoreCase);
+                name = WorktreeNames.PickFree(_random, candidate => taken.Contains(BranchPrefix + candidate) || Path.Exists(Path.Combine(parent, candidate)));
+                branch = BranchPrefix + name;
+            }
+
             path = Path.Combine(parent, name);
-            branch = BranchPrefix + name;
             // Not tracking: a worktree that starts from a branch of a remote must not push to that branch. Its files
             // are checked out next, where git can say its progress.
             progress?.Invoke(new(GitWorktreeProgress.Add, branch));
@@ -323,6 +386,19 @@ public sealed class GitWorktreeService
             if (!add.Succeeded)
             {
                 return new(StatusOf(add), Message(add));
+            }
+
+            if (branchName is not null)
+            {
+                // Marks the branch as one made here: it goes with its worktree, and git deletes the mark with the branch.
+                // The configuration every worktree shares is written one creation at a time, as the submodules do, and
+                // to the end once the worktree is there. Without the mark the branch is only kept when the worktree goes,
+                // so a failure does not stop the creation: it is said.
+                var mark = await _run(root, ["config", "--local", $"branch.{branch}.{CreatedBranchKey}", "true"], ReadTimeout, CancellationToken.None).ConfigureAwait(false);
+                if (!mark.Succeeded)
+                {
+                    unmarked = $"The branch {branch} could not be marked as made here, so it stays when the worktree is removed: {Message(mark)}";
+                }
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or InvalidOperationException)
@@ -372,7 +448,7 @@ public sealed class GitWorktreeService
 
             var folder = below == "." ? path : Path.Combine(path, below);
             Directory.CreateDirectory(folder);
-            return new(Ok, null, path, folder, name, branch) { Warning = warning };
+            return new(Ok, null, path, folder, name, branch) { Warning = unmarked is null ? warning : warning is null ? unmarked : unmarked + " " + warning };
         }
         catch (OperationCanceledException)
         {
@@ -542,7 +618,8 @@ public sealed class GitWorktreeService
             }
 
             string? kept = null, deleted = null;
-            if (deleteBranch && target.Branch is { } branch && branch.StartsWith(BranchPrefix, StringComparison.Ordinal))
+            if (deleteBranch && target.Branch is { } branch
+                && (branch.StartsWith(BranchPrefix, StringComparison.Ordinal) || await CreatedHereAsync(home, branch, cancellationToken).ConfigureAwait(false)))
             {
                 // Only a branch whose commits are all in another one goes: no commit is lost with a worktree.
                 var delete = await _run(home, ["branch", "-d", branch], ReadTimeout, cancellationToken).ConfigureAwait(false);
@@ -843,6 +920,69 @@ public sealed class GitWorktreeService
         var below = Path.GetRelativePath(projectCheckout, Normalize(projectPath));
         var place = below == "." ? targetCheckout : Path.Combine(targetCheckout, below);
         return Directory.Exists(place) ? (Ok, place) : ("project_missing", null);
+    }
+
+    /// <summary>
+    /// Finds a local branch of the repository a folder is in whose name is the one given, compared without case: on a
+    /// file system that ignores case, git does not see a packed <c>feature/Foo</c> when it creates <c>feature/foo</c>,
+    /// and the new loose ref then hides the other one.
+    /// </summary>
+    /// <param name="checkout">A folder of the repository.</param>
+    /// <param name="name">The name of a branch, such as <c>feature/123-export</c>.</param>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>The name of the branch as the repository writes it; null when there is none, or git cannot say.</returns>
+    /// <exception cref="ArgumentException"><paramref name="checkout"/> or <paramref name="name"/> is empty.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public async Task<string?> FindBranchAsync(string checkout, string name, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(checkout);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (!Directory.Exists(checkout)) return null;
+        var heads = await _run(checkout, ["for-each-ref", "--format=%(refname)", "refs/heads"], ReadTimeout, cancellationToken).ConfigureAwait(false);
+        return heads.Succeeded ? Taken(heads.Output, name) : null;
+    }
+
+    // The branch of a for-each-ref listing (full names) whose name is the one given, compared without case.
+    private static string? Taken(string listing, string name)
+        => Lines(listing).Select(static reference => reference.StartsWith("refs/heads/", StringComparison.Ordinal) ? reference["refs/heads/".Length..] : reference)
+            .FirstOrDefault(existing => string.Equals(existing, name, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Answers whether a branch named by the user was created here with a worktree (<see cref="CreatedBranchKey"/>).</summary>
+    private async Task<bool> CreatedHereAsync(string checkout, string branch, CancellationToken cancellationToken)
+    {
+        var mark = await _run(checkout, ["config", "--bool", "--get", $"branch.{branch}.{CreatedBranchKey}"], ReadTimeout, cancellationToken).ConfigureAwait(false);
+        return mark.Succeeded && FirstLine(mark.Output) == "true";
+    }
+
+    /// <summary>
+    /// Gives the folder name of a worktree on a branch the user named: the last part of the name, such as
+    /// <c>123-export</c> for <c>feature/123-export</c>, with only letters, digits, <c>.</c>, <c>_</c> and <c>-</c>.
+    /// </summary>
+    /// <param name="branch">The name of the branch.</param>
+    /// <returns>The name of the folder; <c>worktree</c> when nothing of the name is left.</returns>
+    private static string FolderNameOfBranch(string branch)
+    {
+        var last = branch[(branch.LastIndexOf('/') + 1)..];
+        var name = new StringBuilder(last.Length);
+        foreach (var character in last)
+        {
+            name.Append(char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-' ? character : '-');
+        }
+
+        var text = name.ToString().Trim('-', '.');
+        return text.Length == 0 ? "worktree" : text;
+    }
+
+    /// <summary>Gives a name no file or folder of a parent folder has: the name, else the name and <c>-2</c>, <c>-3</c>…</summary>
+    private static string FreeFolderName(string name, string parent)
+    {
+        var candidate = name;
+        for (var number = 2; Path.Exists(Path.Combine(parent, candidate)); number++)
+        {
+            candidate = name + "-" + number.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return candidate;
     }
 
     /// <summary>

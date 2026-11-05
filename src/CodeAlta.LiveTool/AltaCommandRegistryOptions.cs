@@ -39,7 +39,8 @@ public sealed record AltaCommandRegistryOptions
         "issue",
         "issues",
         "notes",
-        "note");
+        "note",
+        "secret");
 
     // Declared after the set it reads: static initializers run in the order of the source.
     /// <summary>
@@ -47,6 +48,18 @@ public sealed record AltaCommandRegistryOptions
     /// the built-in roots of <see cref="CliBuiltInRoots"/> only.
     /// </summary>
     public static AltaCommandRegistryOptions Cli { get; } = new() { AllowedBuiltInRoots = CliBuiltInRoots };
+
+    /// <summary>
+    /// Gets the built-in roots of CodeAlta Node (<c>altanode</c>), a long-lived host without a window: those of
+    /// <see cref="CliBuiltInRoots"/>, and the reminders and automations a host that outlives the turns of its sessions
+    /// keeps. Without <c>ask</c> and <c>review</c>, until they reach people.
+    /// </summary>
+    public static FrozenSet<string> NodeBuiltInRoots { get; } = FrozenSet.Create(
+        StringComparer.Ordinal,
+        [.. CliBuiltInRoots, "reminder", "automation"]);
+
+    /// <summary>Gets the options of CodeAlta Node (<c>altanode</c>): the built-in roots of <see cref="NodeBuiltInRoots"/> only.</summary>
+    public static AltaCommandRegistryOptions Node { get; } = new() { AllowedBuiltInRoots = NodeBuiltInRoots };
 
     /// <summary>
     /// Gets the names of the built-in root commands the registry offers, or <see langword="null"/> for all of

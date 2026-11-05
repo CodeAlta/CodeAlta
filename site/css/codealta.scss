@@ -1016,6 +1016,63 @@ a.alta-card,
   span { grid-column: 2; grid-row: 2; color: var(--bs-secondary-color); font-size: .9rem; }
   i:last-child { grid-column: 3; grid-row: 1; font-size: .8rem; }
 }
+// Fleet: the animated picture (its animations stop by themselves when motion is reduced) and its highlights.
+#fleet { scroll-margin-top: 5rem; }
+.alta-fleet-live {
+  position: relative;
+  max-width: 72rem;
+  margin: 0 auto 2.5rem;
+  isolation: isolate;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: -2.5rem -1rem;
+    z-index: -1;
+    background: radial-gradient(closest-side at 30% 50%, rgba(0, 209, 255, .14), transparent), radial-gradient(closest-side at 72% 50%, rgba(168, 85, 247, .14), transparent);
+    pointer-events: none;
+  }
+  img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--alta-card-border);
+    border-radius: 1.25rem;
+    box-shadow: var(--alta-shadow);
+  }
+}
+.alta-fleet-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  max-width: 72rem;
+  margin: 0 auto;
+
+  a {
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    padding: 1.35rem;
+    border: 1px solid var(--alta-card-border);
+    border-radius: 1rem;
+    color: var(--bs-body-color);
+    text-decoration: none;
+    background: var(--alta-card-bg);
+    transition: border-color .15s, transform .15s;
+  }
+  a:hover { border-color: var(--lunet-color-cyan); transform: translateY(-2px); }
+  i { font-size: 1.5rem; line-height: 1; color: var(--lunet-color-cyan); }
+  a:first-child { border-color: color-mix(in srgb, var(--alta-purple) 55%, var(--alta-card-border)); }
+  a:first-child i { color: var(--alta-purple); }
+  strong { font-size: 1.1rem; letter-spacing: -.01em; }
+  span { color: var(--bs-secondary-color); font-size: .92rem; line-height: 1.6; }
+}
+.alta-fleet-more {
+  margin: 1.75rem 0 0;
+  text-align: center;
+  a { font-weight: 600; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+}
 .alta-terminal-section {
   display: grid;
   grid-template-columns: minmax(0, 4fr) minmax(0, 5fr);
@@ -1058,6 +1115,7 @@ a.alta-card,
   .alta-story-step { grid-template-columns: 1fr; gap: 1.5rem; scroll-margin-top: 5rem; }
   .alta-story-copy { max-width: 32rem; }
   .alta-workflow-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .alta-fleet-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .alta-terminal-section { grid-template-columns: 1fr; }
 }
 @media (max-width: 575.98px) {
@@ -1077,8 +1135,11 @@ a.alta-card,
   .alta-story-step { margin-bottom: 4rem; }
   .alta-highlight-grid { grid-template-columns: 1fr; }
   .alta-workflow-links { grid-template-columns: 1fr; }
+  .alta-fleet-grid { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .alta-fleet-grid a { transition: none; }
+  .alta-fleet-grid a:hover { transform: none; }
   .alta-scroll-brand { animation: none; }
   .alta-story-index a { transition: none; }
   .alta-home .btn { transition: none; }

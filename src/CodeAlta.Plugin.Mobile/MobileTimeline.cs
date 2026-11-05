@@ -1,14 +1,16 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using CodeAlta.Catalog;
 
 namespace CodeAlta.Plugin.Mobile;
 
 /// <summary>
 /// One event of <c>alta session events</c> as the phone reads it: its kind and text, and what the timeline of the desktop
 /// tells from its metadata. A prompt the host sent says what it is (its provenance) and the session it comes from; a tool
-/// call names the call that ran it (a call of a script); an output lists the images it gave the model; a record of a script
-/// of Code Mode has its facts; an answer lists the pictures of the disk its Markdown shows. A path of this computer never
-/// goes to the phone: an image has an id, which the server reads from the records of the session itself.
+/// call says what it works on, on one line, and names the call that ran it (a call of a script); an output lists the images
+/// it gave the model; a record of a script of Code Mode has its facts; an answer lists the pictures of the disk its Markdown
+/// shows. An image has an id, which the server reads from the records of the session itself, never a path. The rest of a
+/// tool call is read when the phone opens it (<see cref="MobileApi.ToolAsync"/>).
 /// </summary>
 internal static partial class MobileTimeline
 {
@@ -32,7 +34,7 @@ internal static partial class MobileTimeline
         JsonArray? attachments = null;
         if (kind == "user.message" && metadata?["attachments"] is JsonArray listed && listed.Count > 0) (text, attachments) = MobileSessions.WithoutPaths(text, listed);
         var linked = kind == "assistant.message" ? LinkedImages(text) : [];
-        // The output of a tool comes for its images only: its text stays on the computer.
+        // The output of a tool comes for its images only: its text is read when the phone opens the call.
         var tool = kind.StartsWith("tool.", StringComparison.Ordinal);
         if (tool) text = "";
         if (text.Length > MaximumText) text = text[..MaximumText] + "…";
@@ -50,6 +52,7 @@ internal static partial class MobileTimeline
 
         if ((kind.StartsWith("activity.", StringComparison.Ordinal) || tool) && MobileAlta.Text(metadata, "parentActivityId") is { } parent && parent != activityId)
             entry["parentId"] = parent;
+        if (kind.StartsWith("activity.", StringComparison.Ordinal) && MobileAlta.Text(metadata, "subject") is { } subject) entry["subject"] = subject;
         if (tool && SavedImages(metadata?["images"] as JsonArray) is { Count: > 0 } images) entry["images"] = images;
         if (linked.Count > 0)
         {
@@ -95,28 +98,15 @@ internal static partial class MobileTimeline
             foreach (Match match in ImagePattern().Matches(WithoutCodeSpans(line)))
             {
                 var target = match.Groups["angle"].Success ? match.Groups["angle"].Value : match.Groups["bare"].Value;
-                if (target.Contains('%', StringComparison.Ordinal) && !match.Groups["angle"].Success)
-                {
-                    try { target = Uri.UnescapeDataString(target); }
-                    catch (UriFormatException) { continue; }
-                }
-
-                if (target.Length == 0 || IsAddress(target)) continue;
+                // The rule of every link: no address of the web, and nothing of another computer, which the phone would have read
+                // with no tap, as it loads the pictures it shows. The target stays as written: reading it again decodes it.
+                if (!FileLink.TryParse(target, out _)) continue;
                 found.Add((match.Groups["alt"].Value.Trim(), target));
                 if (found.Count >= MaximumLinkedImages) return found;
             }
         }
 
         return found;
-    }
-
-    // An address of the web, data: or another scheme; `C:\` and `file:` name files.
-    private static bool IsAddress(string target)
-    {
-        var colon = target.IndexOf(':', StringComparison.Ordinal);
-        if (colon <= 1) return false;
-        var scheme = target[..colon];
-        return !scheme.Equals("file", StringComparison.OrdinalIgnoreCase) && scheme.All(static c => char.IsAsciiLetterOrDigit(c) || c is '+' or '-' or '.');
     }
 
     // The line with its spans of code blanked, so that a picture written as code is not one.

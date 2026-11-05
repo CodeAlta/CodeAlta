@@ -195,6 +195,57 @@ public sealed class SpacesRpcTests
     }
 
     [TestMethod]
+    public async Task AChildOnAnotherMachineThatWaitsForThePerson_IsListedUnderItsParentHere()
+    {
+        using var fixture = new Fixture();
+        var now = DateTimeOffset.UtcNow;
+        CodeAlta.Fleet.NodeApi.FleetSessionSummary Remote(string id, string? parent, string state, string? project = null)
+            => new(id, "Run the iOS tests", project, "default", parent, "codex", null, now, now, state);
+        IReadOnlyList<(string, CodeAlta.Fleet.NodeApi.FleetSessionSummary)> remote =
+        [
+            ("mac", Remote("asks", "parent", "waiting")), ("mac", Remote("works", "parent", "working", "node-project")),
+            ("mac", Remote("idle", "parent", "idle")), ("mac", Remote("stranger", "elsewhere", "waiting")),
+        ];
+        var service = new SpacesService(new SpaceCatalog(fixture.Projects), fixture.View, () => fixture.Runs, () => ValueTask.FromResult(fixture.Waiting), Epoch)
+        {
+            RemoteSessions = () => remote,
+        };
+        fixture.Runs = [new("parent", "p1", "Parent", false, 0, false) { ParentSessionId = "grandparent" }, new("grandparent", "p1", "Grandparent", false, 0, false)];
+
+        var reply = await service.ActivityAsync(new(Epoch), default);
+
+        // A child of a session here, at work or waiting there: named with its parents, so that the window says it waits.
+        CollectionAssert.AreEquivalent(new[] { "asks", "works" }, reply.Sessions.Select(static session => session.SessionId).ToArray());
+        var asks = reply.Sessions[0];
+        Assert.AreEqual(("asks", true, false), (asks.SessionId, asks.Waiting, asks.Running), "A session that waits for the person comes first.");
+        CollectionAssert.AreEqual(new[] { "parent", "grandparent" }, asks.Ancestors.ToArray());
+        Assert.AreEqual("machine:mac", asks.ProjectId, "A child of no project is listed under its machine.");
+        Assert.AreEqual("p1", reply.Sessions.Single(static session => session.SessionId == "works").ProjectId, "A child of a project is listed under its parent's project.");
+    }
+
+    [TestMethod]
+    public async Task ASessionAPersonStartedOnAnotherMachine_ThatWaits_IsListedAsWaiting()
+    {
+        using var fixture = new Fixture();
+        var now = DateTimeOffset.UtcNow;
+        CodeAlta.Fleet.NodeApi.FleetSessionSummary Remote(string id, string state, string? project = null)
+            => new(id, "Run git status", project, "default", null, "claude-code", null, now, now, state);
+        IReadOnlyList<(string, CodeAlta.Fleet.NodeApi.FleetSessionSummary)> remote =
+            [("mac", Remote("asks", "waiting", "node-project")), ("mac", Remote("works", "working")), ("mac", Remote("idle", "idle"))];
+        var service = new SpacesService(new SpaceCatalog(fixture.Projects), fixture.View, () => fixture.Runs, () => ValueTask.FromResult(fixture.Waiting), Epoch)
+        {
+            RemoteSessions = () => remote,
+        };
+
+        var reply = await service.ActivityAsync(new(Epoch), default);
+
+        // A command or a question there waits for the person here: its row and its machine say so, as for a session of this computer.
+        var asks = reply.Sessions.Single();
+        Assert.AreEqual(("asks", true, false, "machine:mac"), (asks.SessionId, asks.Waiting, asks.Running, asks.ProjectId));
+        Assert.AreEqual(0, asks.Ancestors.Count);
+    }
+
+    [TestMethod]
     public async Task ARecentRestoreForARun_IsGivenWithTheActivityOfItsSession()
     {
         using var fixture = new Fixture();

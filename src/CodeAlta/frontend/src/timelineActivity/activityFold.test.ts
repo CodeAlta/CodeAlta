@@ -4,7 +4,7 @@ import type { HistoryResponse } from "#neoastra";
 import { reconcileTimeline } from "../reconcileTimeline";
 import { groupTimelineTools } from "../toolGroups";
 import { groupEntryTypes } from "../timelineEmphasis/timelineEmphasis";
-import { activityDuration, activityExpanded, activitySummary, foldTimeline, stepName, thoughtHeadline, type TimelineBlock } from "./activityFold";
+import { activityDuration, activityExpanded, activityHolds, activitySummary, foldTimeline, stepName, thoughtHeadline, type TimelineBlock } from "./activityFold";
 
 type Entry = HistoryResponse["entries"][number];
 const entry = (offset: string, overrides: Partial<Entry> = {}): Entry => ({ offset, eventType: "contentCompleted", providerId: "provider",
@@ -30,6 +30,24 @@ test("the work between two messages folds into one activity, the messages keep t
     thought("6", "Now the fix"), call("7", "c"), entry("8", { text: "Done." }), prompt("9"), entry("10", { text: "Again." })]);
   assert.deepEqual(shape(blocks), ["row", "activity(6)", "row", "row", "row"]);
   assert.equal(blocks[1].key, `activity:${blocks[1].kind === "activity" ? blocks[1].groups[0].key : ""}`, "an activity is named by its first group, so it keeps its key while it grows");
+});
+
+test("the search opens the folded work that holds its text, while the reader's own choice stays theirs", () => {
+  const block = fold([prompt("1"), thought("2", "Reading the logs"), call("3", "a", "Completed", "dotnet build"), entry("4")])[1];
+  assert.equal(block.kind, "activity");
+  const groups = block.kind === "activity" ? block.groups : [];
+  // A pattern of the search is global: the rows are tested from their start each time.
+  const logs = /LOGS/giu, build = /dotnet\s+build/giu, other = /nowhere/giu;
+  assert.equal(activityHolds(groups, logs), true, "A thought.");
+  assert.equal(activityHolds(groups, logs), true, "Again, the same pattern.");
+  assert.equal(activityHolds(groups, build), true, "A command.");
+  assert.equal(activityHolds(groups, other), false);
+  const none = new Map<string, boolean>();
+  assert.equal(activityExpanded(groups, none, true), false, "Folded when nothing is looked for.");
+  assert.equal(activityExpanded(groups, none, true, null, build), true);
+  assert.equal(activityExpanded(groups, none, true, null, other), false, "Work without the text stays folded.");
+  const closed = new Map([[groups[0].rows[0].key, false]]);
+  assert.equal(activityExpanded(groups, closed, true, null, build), false, "A fold the reader closed stays closed.");
 });
 
 test("a lone one-line row between two messages is not folded, a lone call or thought is", () => {

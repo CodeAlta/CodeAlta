@@ -22,9 +22,16 @@ internal static class MobileAlta
     private static readonly PluginAltaInvocationOptions ForTheUser = new() { OnBehalfOfUser = true };
 
     /// <summary>Runs one command, for the user.</summary>
-    internal static async Task<MobileAltaResult> RunAsync(IPluginAltaService alta, IReadOnlyList<string> args, string? stdin, CancellationToken cancellationToken)
+    internal static Task<MobileAltaResult> RunAsync(IPluginAltaService alta, IReadOnlyList<string> args, string? stdin, CancellationToken cancellationToken)
+        => RunAsync(alta, args, stdin, ForTheUser, cancellationToken);
+
+    /// <summary>Runs one read of the user that may give more than a command usually does.</summary>
+    internal static Task<MobileAltaResult> RunLongAsync(IPluginAltaService alta, IReadOnlyList<string> args, int maximumBytes, CancellationToken cancellationToken)
+        => RunAsync(alta, args, null, new PluginAltaInvocationOptions { OnBehalfOfUser = true, MaxOutputBytes = maximumBytes }, cancellationToken);
+
+    private static async Task<MobileAltaResult> RunAsync(IPluginAltaService alta, IReadOnlyList<string> args, string? stdin, PluginAltaInvocationOptions options, CancellationToken cancellationToken)
     {
-        var result = await alta.InvokeAsync(args, stdin, ForTheUser, cancellationToken).ConfigureAwait(false);
+        var result = await alta.InvokeAsync(args, stdin, options, cancellationToken).ConfigureAwait(false);
         var records = new List<JsonObject>();
         string? error = null;
         foreach (var record in Parse(result.TranscriptJsonl))

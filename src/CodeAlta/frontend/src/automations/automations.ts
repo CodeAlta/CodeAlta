@@ -1,6 +1,6 @@
 // What the page knows of an automation without asking the host: how a trigger reads, what a form holds, the
 // templates a new one can start from.
-import type { AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem, SessionOptionsChoice } from "#neoastra";
+import type { AutomationAllowedToolItem, AutomationAutonomyItem, AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem, SessionOptionsChoice } from "#neoastra";
 import type { IconName } from "../AppIcon";
 import type { Locale, MessageKey } from "../localization";
 import { permissionModeName } from "../permissionModes";
@@ -9,8 +9,16 @@ import { sessionOptionsOf, storedSessionOptions } from "../sessionSettings/sessi
 import type { SessionSettings } from "../sessionSettings/sessionSettings";
 
 export type Translate = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => string;
-export type TriggerType = "hourly" | "daily" | "weekly" | "cron" | "issue" | "pull_request" | "jira" | "command";
-export const triggerTypes: readonly TriggerType[] = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira", "command"];
+export type IntegrationType = "jira_version" | "jira_query" | "slack" | "incident_io" | "webhook";
+export type TriggerType = "hourly" | "daily" | "weekly" | "cron" | "issue" | "pull_request" | "jira" | "command" | IntegrationType;
+export const triggerTypes: readonly TriggerType[] = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira", "command", "jira_version", "jira_query", "slack", "incident_io", "webhook"];
+/** The triggers of other tools: their settings, secrets included as references, are in `integration`. */
+export const integrationTypes: readonly IntegrationType[] = ["jira_version", "jira_query", "slack", "incident_io", "webhook"];
+export const isIntegration = (type: string): type is IntegrationType => (integrationTypes as readonly string[]).includes(type);
+/** Whether a trigger of another tool can write the answer of its run back to the source of its event. */
+export const canReply = (type: string): boolean => type === "jira_query" || type === "slack" || type === "incident_io";
+/** Whether the events of a trigger are pushed to a hook of a server, for a machine of that server. */
+export const isHooked = (type: string): boolean => type === "incident_io" || type === "webhook";
 /** The days as the host names them, Monday first as a week is shown. */
 export const weekDays = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 export const maximumTriggers = 8;
@@ -21,12 +29,14 @@ export const maximumFolderLength = 1024;
 
 const typeLabels: Readonly<Record<TriggerType, MessageKey>> = {
   hourly: "Hourly", daily: "Daily", weekly: "Weekly", cron: "Cron", issue: "Issue", pull_request: "Pull request", jira: "Jira issue", command: "Command",
+  jira_version: "Jira version", jira_query: "Jira query", slack: "Slack", incident_io: "incident.io", webhook: "Webhook",
 };
 const typeIcons: Readonly<Record<TriggerType, IconName>> = {
   hourly: "repeat", daily: "sun", weekly: "calendar", cron: "terminal", issue: "issueOpen", pull_request: "pullRequest", jira: "list", command: "tool",
+  jira_version: "tag", jira_query: "filter", slack: "chat", incident_io: "warning", webhook: "remote",
 };
 
-export const triggerLabel = (type: string): MessageKey => typeLabels[type as TriggerType] ?? "Manual";
+export const triggerLabel = (type: string): MessageKey => type === "try" ? "Try" : typeLabels[type as TriggerType] ?? "Manual";
 /** The icon of what starts an automation: of its first trigger, or the one of a run by hand. */
 export const triggerIcon = (type: string | undefined): IconName => type && type in typeIcons ? typeIcons[type as TriggerType] : "hand";
 /** The color of a kind of trigger, one of the tones of the application. */
@@ -40,6 +50,12 @@ export function triggerTone(type: string | undefined): string {
     case "pull_request": return "orange";
     case "jira": return "blue";
     case "command": return "cyan";
+    // The two of Jira beside the one of its issues; there are fewer tones than kinds of triggers.
+    case "jira_version": return "cadet";
+    case "jira_query": return "blue";
+    case "slack": return "yellow";
+    case "incident_io": return "pink";
+    case "webhook": return "teal";
     default: return "muted";
   }
 }
@@ -47,7 +63,7 @@ export function triggerTone(type: string | undefined): string {
 /** Whether a trigger is an event of the repository of a project, or of its tracker: it needs a project. */
 export const needsProject = (trigger: Readonly<{ type: string }>): boolean => trigger.type === "issue" || trigger.type === "pull_request" || trigger.type === "jira";
 /** Whether a trigger is a time on the clock, as opposed to an event of the repository of a project or a command. */
-export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => !needsProject(trigger) && trigger.type !== "command";
+export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => !needsProject(trigger) && trigger.type !== "command" && !isIntegration(trigger.type);
 
 /**
  * Whether an automation waits for the user before its triggers start it: it came with the configuration of its
@@ -55,12 +71,27 @@ export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => !nee
  */
 export const waitsToBeAllowed = (item: Readonly<{ allowed: boolean; triggers: readonly unknown[] }>): boolean => !item.allowed && item.triggers.length > 0;
 
+/** The events each trigger of another tool starts on, the default first, as the host names them. */
+export const integrationEvents: Readonly<Record<IntegrationType, readonly string[]>> = {
+  jira_version: ["released"], jira_query: ["matches", "updated"], slack: ["mention", "message"], incident_io: ["declared", "updated"], webhook: ["received"],
+};
+
 /** A trigger with the values a new one of its kind starts with. */
 export function newTrigger(type: TriggerType): AutomationTriggerItem {
+  const integration = isIntegration(type) ? {
+    site: null, email: null, token: null, jiraProject: null, query: null, appToken: null, botToken: null, channel: null, match: null, apiKey: null, hook: null, secret: null,
+    // Writing in another tool is something the person turns on: a new trigger only reads.
+    signature: type === "webhook" ? "standard" : null, signatureHeader: null, fields: [], reply: false, threads: false,
+  } : null;
   return { type, minute: 0, every: 1, at: type === "daily" || type === "weekly" ? ["09:00"] : [], days: type === "weekly" ? ["mon"] : [],
-    expression: type === "cron" ? "0 9 * * 1-5" : null, event: type === "jira" ? "created" : "opened", authors: "trusted",
-    command: type === "command" ? "" : null, folder: null };
+    expression: type === "cron" ? "0 9 * * 1-5" : null, event: isIntegration(type) ? integrationEvents[type][0]! : type === "jira" ? "created" : "opened", authors: "trusted",
+    command: type === "command" ? "" : null, folder: null, integration };
 }
+
+/** The name of the secret a reference names (`${secret:JIRA_TOKEN}` gives `JIRA_TOKEN`), or the text when it is no reference. */
+export const secretName = (reference: string | null | undefined): string => /^\$\{secret:([^}]*)\}$/.exec(reference ?? "")?.[1] ?? reference ?? "";
+/** The reference of a secret by its name; null for a blank name. */
+export const secretReference = (name: string): string | null => name.trim() ? `${"$"}{secret:${name.trim()}}` : null;
 
 /** The name of a day in the language of the page, short: "Mon". */
 export function dayName(day: string, locale: Locale): string {
@@ -91,6 +122,11 @@ export function describeTrigger(trigger: AutomationTriggerItem, t: Translate, lo
     case "issue": return t("When an issue is opened");
     case "pull_request": return t(trigger.event === "updated" ? "When a pull request is updated" : "When a pull request is opened");
     case "jira": return t(trigger.event === "updated" ? "When a Jira issue is updated" : "When a Jira issue is created");
+    case "jira_version": return t("When a version of {project} is released", { project: trigger.integration?.jiraProject ?? "Jira" });
+    case "jira_query": return t(trigger.event === "updated" ? "When an issue changes while it matches a Jira query" : "When an issue matches a Jira query");
+    case "slack": return t(trigger.event === "message" ? "When a message is posted in Slack" : "When the app is mentioned in Slack");
+    case "incident_io": return t(trigger.event === "updated" ? "When incident.io updates an incident" : "When incident.io declares an incident");
+    case "webhook": return t("When a signed webhook arrives");
     case "command": {
       const command = (trigger.command ?? "").trim();
       const folder = (trigger.folder ?? "").trim();
@@ -106,13 +142,15 @@ export function describeTriggers(triggers: readonly AutomationTriggerItem[], t: 
   return triggers.length === 0 ? t("Manual") : triggers.map(trigger => describeTrigger(trigger, t, locale)).join(" · ");
 }
 
-export type RunTone = "running" | "ok" | "failed" | "muted";
+export type RunTone = "running" | "ok" | "failed" | "held" | "muted";
 /** How the status of a run is shown. */
 export function runTone(status: string): RunTone {
-  return status === "running" ? "running" : status === "completed" ? "ok" : status === "failed" ? "failed" : "muted";
+  return status === "running" || status === "waiting" ? "running" : status === "completed" ? "ok" : status === "failed" ? "failed" : status === "held" ? "held" : "muted";
 }
 const statusLabels: Readonly<Record<string, MessageKey>> = {
-  running: "Running", completed: "Completed", failed: "Failed", cancelled: "Cancelled", interrupted: "Interrupted", skipped: "Skipped",
+  running: "Running", waiting: "Waits for you", completed: "Completed", failed: "Failed", cancelled: "Cancelled", interrupted: "Interrupted", skipped: "Skipped",
+  // A budget of its machine is reached: the run goes on once its owner continues it anyway.
+  held: "Waits for Continue anyway",
 };
 export const runStatusLabel = (status: string): MessageKey => statusLabels[status] ?? "Unknown";
 /** What started a run, in words: a run by hand, or the kind of its trigger. */
@@ -134,29 +172,81 @@ export type AutomationForm = Readonly<{
   permissionMode: string; reviewBeforeCommit: boolean | null; sandbox: string;
   /** The options of its sessions (sub-sessions); null for the defaults. */
   options: SessionOptionsChoice | null;
+  /** The paired machine it runs on (its id); null for this computer. Only an automation kept in the configuration of the user runs elsewhere. */
+  runsOn: string | null;
+  /** Whom it is published to on the server of its machine: `team:<id>`, `organization`, or null (absent) for the person's own. */
+  publishTo?: string | null;
   triggers: readonly AutomationTriggerItem[];
+  /** What its runs may do without a person; null for an automation that runs as before. */
+  autonomy: AutomationAutonomyItem | null;
 }>;
+
+/** The autonomy a person turns on: read only, no tool of another source allowed yet, approvals to the owner, an hour to answer. */
+export const newAutonomy = (): AutomationAutonomyItem => ({ allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner", tools: null, onCall: null });
+// The tools it allows, trimmed, and the pins, bounds and preconditions of those it still allows.
+function autonomyInput(autonomy: AutomationAutonomyItem): AutomationAutonomyItem {
+  const allowedTools = autonomy.allowedTools.map(tool => tool.trim()).filter(Boolean);
+  const tools = (autonomy.tools ?? []).filter(tool => allowedTools.includes(tool.name));
+  return { ...autonomy, allowedTools, tools: tools.length > 0 ? tools : null };
+}
+
+/** What an allowed tool must be and stay within, in words: its pin, the arguments it bounds, how many preconditions; null for a tool allowed by its name alone. */
+export function describeAllowedTool(tool: AutomationAllowedToolItem, t: Translate): string | null {
+  const parts = [
+    tool.hash || tool.version ? t(tool.version ? "pinned to {version}" : "pinned", { version: tool.version ?? "" }) : null,
+    tool.bounds.length > 0 ? t("bounds on {arguments}", { arguments: tool.bounds.map(bound => bound.argument).join(", ") }) : null,
+    tool.preconditions.length > 0 ? t(tool.preconditions.length === 1 ? "checks {tools} first" : "checks {tools} first", { tools: tool.preconditions.map(item => item.tool).join(", ") }) : null,
+  ].filter((part): part is string => !!part);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/** What the runs of an automation with autonomy do without a person, in one line. */
+export const describeAutonomy = (autonomy: AutomationAutonomyItem, t: Translate): string => autonomy.allowedTools.length === 0
+  ? t("Read only: it asks you before anything else than reading.")
+  : t("It calls {tools} by itself; it asks you for anything else.", { tools: autonomy.allowedTools.join(", ") });
+/** The names of tools a person writes, one per comma or line, without repeats. */
+export const toolNames = (text: string): readonly string[] => [...new Set(text.split(/[\s,]+/).map(name => name.trim()).filter(Boolean))];
 
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {
   return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
-    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, triggers: [] };
+    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, publishTo: null, triggers: [], autonomy: null };
 }
 
 /** The form of an automation that exists. */
 export function formOf(item: AutomationItem): AutomationForm {
   return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, script: item.script ?? "", scriptArguments: item.scriptArguments ?? "", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
     provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
-    permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options), triggers: item.triggers };
+    permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options),
+    runsOn: item.runsOn ?? null, publishTo: item.publishTo ?? null, triggers: item.triggers, autonomy: item.autonomy ?? null };
+}
+
+/** The machine an automation runs on, in words: null for this computer. */
+export function placementLabel(item: Pick<AutomationItem, "runsOn" | "placement">, t: Translate): string | null {
+  if (!item.runsOn) return null;
+  return t("On {machine}", { machine: item.placement?.machineName ?? t("Unavailable machine") });
+}
+
+/** What keeps an automation from running on its machine as it is here: why it was not copied there; null when nothing does. */
+export function placementProblem(item: Pick<AutomationItem, "placement">): string | null {
+  return item.placement && item.placement.state === "failed" ? item.placement.message ?? null : null;
+}
+
+/**
+ * Why an automation is not copied yet to the machine it was placed on: the machine it left may still run its copy, until
+ * it takes it away or the user starts it anyway. Null when it waits for no machine.
+ */
+export function placementWait(item: Pick<AutomationItem, "placement">): string | null {
+  return item.placement && item.placement.state === "waiting" ? item.placement.message ?? "" : null;
 }
 
 /**
  * What the sessions of an automation run with besides the defaults, one fact each, as its details list them: an
  * automation that came with a project shows them before the user allows it.
  */
-export function runsWithFacts(item: AutomationItem, t: Translate): readonly string[] {
+export function runsWithFacts(item: AutomationItem, t: Translate, providerName: string | null = null): readonly string[] {
   const permission = item.permissionMode ? permissionModeName(item.permissionMode) : null;
-  return [item.provider, item.model, item.effort, item.agent ? t("agent {name}", { name: item.agent }) : null,
+  return [item.provider ? providerName ?? item.provider : null, item.model, item.effort, item.agent ? t("agent {name}", { name: item.agent }) : null,
     item.permissionMode ? `${t("Permissions")}: ${permission ? t(permission) : item.permissionMode}` : null,
     item.reviewBeforeCommit !== null ? `${t("Review before commit")}: ${t(item.reviewBeforeCommit ? "On" : "Off")}` : null,
     item.sandbox ? `${t("Sandbox")}: ${item.sandbox.toLowerCase() === notSandboxed ? t("Off") : item.sandbox}` : null,
@@ -193,7 +283,10 @@ export function formProblem(form: AutomationForm): MessageKey | null {
     if (trigger.type === "weekly" && trigger.days.length === 0) return "Choose a day for the weekly trigger.";
     if (trigger.type === "cron" && !(trigger.expression ?? "").trim()) return "Write the cron expression.";
     if (trigger.type === "command" && !(trigger.command ?? "").trim()) return "Write the command of the trigger.";
+    if (trigger.type === "command" && form.runsOn && !form.storeInProject) return "A command trigger runs on this computer only.";
   }
+  // A team or the organization runs it with the key of an account: the machine and the server check the provider it names.
+  if (form.publishTo && form.runsOn && !form.storeInProject && !form.provider.trim()) return "An automation of a team or of the organization names the provider it runs with.";
   return null;
 }
 
@@ -208,6 +301,11 @@ export function inputOf(form: AutomationForm): AutomationInput {
     provider: provider || null, model: model || null, effort: model && form.effort ? form.effort : null, agent: form.agent.trim() || null,
     permissionMode: form.permissionMode.trim() || null, reviewBeforeCommit: form.reviewBeforeCommit, sandbox: form.sandbox.trim() || null,
     options: storedSessionOptions(form.options),
+    // The configuration of a project runs its automations on the machines that have it.
+    runsOn: form.storeInProject ? null : form.runsOn,
+    // Published to a team or the organization of the machine it runs on; on this computer it stays the person's.
+    publishTo: form.storeInProject || !form.runsOn ? null : form.publishTo ?? null,
+    autonomy: form.autonomy ? autonomyInput(form.autonomy) : null,
     // An automation that is run by hand misses nothing.
     catchUp: form.catchUp && form.triggers.length > 0,
     triggers: form.triggers.map(trigger => ({ ...trigger, at: [...trigger.at].sort(), expression: trigger.type === "cron" ? (trigger.expression ?? "").trim() : null,

@@ -9,8 +9,8 @@ export type CommandId =
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "bookmarkPrevious" | "bookmarkNext" | "bookmarkSession"
   | "attachFiles" | "attachFolder" | "attachIssues"
-  | "expandPrompt" | "insertEquation" | "dictate" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "moveTabToNewWindow" | "clearQueue" | "compact" | "fork" | "rewind"
-  | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
+  | "expandPrompt" | "insertEquation" | "dictate" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "moveTabToNewWindow" | "clearQueue" | "compact" | "fork" | "rewind" | "archiveSession"
+  | "newSession" | "browseSessions" | "searchSessions" | "findInSession" | "toggleNotes" | "previousSession" | "nextSession"
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
   | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession" | "reviewChanges"
   | "openInVsCode" | "copyResumeCommand" | "runInTerminal"
@@ -29,10 +29,14 @@ export type CommandDefinition = Readonly<{
   macKeys?: readonly string[];
   /** Extra gestures listed in help that are handled elsewhere (typed in an empty prompt, or by the composer). */
   hints?: readonly string[];
+  /** The hints on macOS, in place of `hints`, where the gesture handled elsewhere is another one. */
+  macHints?: readonly string[];
   /** Additional words the search matches. */
   search?: string;
   /** Gestures that only apply while focus is not in a text field (they are ordinary typing or caret keys there). */
   outsideText?: boolean;
+  /** The gestures of an `outsideText` command that are no typing or caret key, and apply in a text field too. */
+  textKeys?: readonly string[];
   /** Hidden from the search window (still listed in help when it has a gesture). */
   hidden?: boolean;
 }>;
@@ -97,8 +101,11 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "abort", name: "abort", label: "Abort", description: "Stop the running turn.", category: "Session", keys: ["F8"], search: "stop cancel" },
   { id: "clearQueue", name: "clear_queue", label: "Clear Queue", description: "Remove every queued prompt.", category: "Session", keys: ["F10"] },
   { id: "compact", name: "compact", label: "Compact", description: "Compact the conversation of the idle session.", category: "Session", keys: ["Ctrl+F11"] },
-  { id: "fork", name: "fork", label: "Fork Session", description: "Continue from a point of the session in a new session.", category: "Session", search: "branch duplicate copy clone" },
+  // Not Ctrl+Shift+F, the search in the files of the code editor: B for the branch a fork makes of the conversation.
+  { id: "fork", name: "fork", label: "Fork Session", description: "Continue from a point of the session in a new session.", category: "Session", keys: ["Ctrl+Shift+B"], search: "branch duplicate copy clone" },
   { id: "rewind", name: "rewind", label: "Rewind Session", description: "Take the session back to an earlier turn.", category: "Session", search: "undo roll back revert" },
+  { id: "archiveSession", name: "archive", label: "Archive Session", description: "Archive the selected session: it leaves the Explorer and keeps its history.", category: "Session",
+    keys: ["Ctrl+Shift+A"], search: "hide put away done finished close" },
   { id: "reviewChanges", name: "review_changes", label: "Review Changes", description: "Comment on the changes of the session's checkout, then submit the review.", category: "Session",
     search: "review comment diff changes approve request" },
   { id: "bookmarkSession", name: "bookmark", label: "Bookmark Session", description: "Bookmark or remove the bookmark of this session.", category: "Session", search: "bookmark mark save favorite star pin keep" },
@@ -122,7 +129,11 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "nextTab", name: "tab_right", label: "Tab Right", description: "Switch to the next tab.", category: "Session", keys: ["Ctrl+Tab", "Ctrl+PageDown", "Ctrl+Alt+Right"] },
   { id: "reminders", name: "reminder", label: "Reminders", description: "Schedule prompts for this session.", category: "Session", keys: ["Ctrl+G Ctrl+D"], search: "reminders delayed_prompt" },
   { id: "browseSessions", name: "sessions", label: "Browse Sessions", description: "Find and open a saved session.", category: "Session", keys: ["Ctrl+Alt+B"], search: "saved sessions history" },
-  { id: "searchSessions", name: "search_sessions", label: "Search Sessions", description: "Search the sessions of every project.", category: "Session", keys: ["Ctrl+F"], outsideText: true, search: "find session chat" },
+  // Ctrl+F outside a session and a rendered page, which find in themselves; Ctrl+Shift+F from them too, the prompt
+  // included, except from the code editor and a terminal, which keep it.
+  { id: "searchSessions", name: "search_sessions", label: "Search Sessions", description: "Search the sessions of every project.", category: "Session", keys: ["Ctrl+Shift+F", "Ctrl+F"], macKeys: ["Cmd+Shift+F", "Ctrl+F"], outsideText: true, textKeys: ["Ctrl+Shift+F", "Cmd+Shift+F"], search: "find session chat" },
+  // Ctrl+F is kept by a session (`data-find-keys`), as by a rendered page: it is no key of the window, and only named here.
+  { id: "findInSession", name: "find", label: "Find in Session", description: "Find a text in the timeline of this session, with every match marked.", category: "Session", hints: ["Ctrl+F"], macHints: ["Cmd+F"], search: "search highlight timeline messages conversation matches" },
 
   { id: "messagePrevious", name: "msg_prev", label: "Previous Message", description: "Scroll to the previous message.", category: "Navigation", keys: ["F3"] },
   { id: "messageNext", name: "msg_next", label: "Next Message", description: "Scroll to the next message.", category: "Navigation", keys: ["F4"] },
@@ -184,6 +195,8 @@ function keymap(mac: boolean) {
   return { single, chords };
 }
 const keymaps = Object.freeze({ other: keymap(false), mac: keymap(true) });
+// Whether a pressed gesture of a command applies where the keyboard is.
+const appliesAt = (command: CommandDefinition, pressed: string, focus: CommandFocus) => !command.outsideText || focus === "none" || !!command.textKeys?.some(gesture => normalize(gesture) === pressed);
 
 /**
  * Maps a key press to a command. `chord` is true after Ctrl+G, when the next key (with or without
@@ -196,7 +209,7 @@ export function resolveCommandKey(event: CommandKey, chord: boolean, focus: Comm
   // The Command key only takes the gestures that name it (`macKeys`): everything else it does stays the system's.
   if (event.metaKey) {
     const command = !chord && !event.repeat ? single.get(stroke(event)) : undefined;
-    return command && (!command.outsideText || focus === "none") ? { command: command.id, chord: false, handled: true } : none;
+    return command && appliesAt(command, stroke(event), focus) ? { command: command.id, chord: false, handled: true } : none;
   }
   const key = event.key.toLowerCase();
   if (["control", "shift", "alt", "meta"].includes(key)) return { command: null, chord, handled: false };
@@ -209,14 +222,14 @@ export function resolveCommandKey(event: CommandKey, chord: boolean, focus: Comm
   const pressed = stroke(event);
   if (pressed === chordPrefix) return event.repeat ? none : { command: null, chord: true, handled: true };
   const command = single.get(pressed);
-  if (!command || command.outsideText && focus !== "none") return none;
+  if (!command || !appliesAt(command, pressed, focus)) return none;
   // Holding a key down does not run a command repeatedly, but the key stays claimed.
   return { command: event.repeat ? null : command.id, chord: false, handled: true };
 }
 
 /** The gestures of a command as shown to the user (its key bindings, then the typed hints). */
 export function commandKeys(command: CommandDefinition, mac = isMacPlatform()): readonly string[] {
-  return [...((mac ? command.macKeys ?? command.keys : command.keys) ?? []), ...(command.hints ?? [])];
+  return [...((mac ? command.macKeys ?? command.keys : command.keys) ?? []), ...((mac ? command.macHints ?? command.hints : command.hints) ?? [])];
 }
 
 export type RankedCommand = Readonly<{ command: CommandDefinition; score: number }>;

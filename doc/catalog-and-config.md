@@ -36,6 +36,8 @@ per-project provider preferences.
 | --- | --- |
 | `sessions/yyyy/MM/dd/<id>.jsonl`, `<id>.attachments/` | Session journals and their files ([runtime](runtime.md#journals-are-the-source-of-truth)). |
 | `sessions/leases/<id>.lease` | `SessionLeaseStore`: the process that runs or shows a session holds an open handle on its lease, so no other process runs or changes it; the system releases it when the process ends. Never removed by retention. |
+| `sessions/leases/<id>.moved` | `SessionRelinquishmentStore`: a session frozen for a move to another machine, or given to it. Written by rename by the holder of the lease; every writer checks it once it holds the lease, so the session stays read-only here. Never removed by retention. |
+| `fleet/moves/` | `SessionMoveTransactionStore`: the state of each move on this side (offered, prepared, committed, finished, aborted), the write-once decisions of this machine as arbiter, and the bundles (`bundles/<move-id>/`). |
 | `sessions/markers/<id>.json` | `SessionMarkerStore`: a process without the database (the command line) names each journal it writes there; the instance lists those sessions, then deletes the markers. Written by rename, never read as journals, never removed by retention. |
 | `data/alta.sqlite3`, `data/backups/`, `data/search.sqlite3` | `ApplicationDatabase` and its copies; the desktop search index (derived). |
 | `saved_statistics_after_deleted_sessions/` | `StatisticsArchiveStore`: statistics of retired sessions (see below). |
@@ -70,7 +72,7 @@ Skills are also read from `.agents/skills/` of the project and of the home folde
 | `[chat]`, `[providers.<key>]` | Default provider; provider definitions (`type`, `enabled`, `model`, credentials by environment variable name). |
 | `[plugins.<id>]` | Enablement, the settings the plugin declares (one key each, written by `PluginSettingsStore`), plus plugin-owned policy (`[plugins.mcp]`, `[plugins.mcp.servers.*]`) the store does not model. |
 | `[skills]`, `[tools]` | Disabled skills and the folders of skills added for every space; tools every session does without. |
-| `[sessions]`, `[review]`, `[commits]`, `[work_items]` | Title mode and prompt suggestions; review before commit; co-author trailer; tasks and plans. |
+| `[sessions]`, `[review]`, `[commits]`, `[external_writing]`, `[work_items]` | Title mode and prompt suggestions; review before commit; co-author trailer; the attribution of what agents write in other systems; tasks and plans. |
 | `[worktrees]`, `[storage]`, `[speech]`, `[search]` | Where worktrees go; scratchpad and session retention; desktop speech and search. |
 | `[models]` | Model tiers and fallback (below). |
 | `[automations.<guid>]` | Desktop automations, read and written by the desktop, kept by every typed save. |

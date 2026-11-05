@@ -294,6 +294,7 @@ public sealed class AgentInstructionTemplateProvider
         var (models, spaces, space, spaceResources) = context;
         // The tiers and the fallback of the space (its own, or the global ones), with the providers it has.
         var tiers = ModelTierScope.Of(models, space, spaceResources.Assignments);
+        var attribution = _configStore?.LoadGlobalAttributionSettings() ?? AttributionSettings.Default;
         return _promptBuilder.Build(new SystemPromptBuildRequest
         {
             ProviderKey = session.ResolvedProviderKey,
@@ -318,8 +319,10 @@ public sealed class AgentInstructionTemplateProvider
             // The Runtime Context names the space only when there is another one than the default, where it tells something.
             Space = spaces.Count < 2 ? null : space,
             GitIdentity = AppliesSpaceIdentities ? space.Settings.Identity?.Git : null,
-            // On by default: a host without a configuration file asks for the line too.
-            CommitCoAuthor = _configStore?.LoadGlobalCommitCoAuthor() ?? true,
+            // On by default: a host without a configuration file asks for the lines too.
+            CommitCoAuthor = attribution.CoAuthor,
+            CommitCoAuthorTrailer = attribution.CoAuthorTrailer,
+            ExternalWritingInstruction = attribution.ExternalWriting ? attribution.ExternalWritingInstruction : null,
             ModelTiers = ModelTierResolver.DescribeForAgents(tiers.Tiers, tiers.IsProviderAvailable),
             ModelFallback = tiers.Fallback.Enabled,
             ModelResume = tiers.Fallback is { Enabled: true, OnQuota: true, Resume: true },

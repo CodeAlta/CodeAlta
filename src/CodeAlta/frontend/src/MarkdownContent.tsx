@@ -1,11 +1,14 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { showToast } from "./appToaster";
 import { diagramAppearance, diagrams } from "./diagrams";
+import { takeKeyContextMenu } from "./keyContextMenu";
 import { translate } from "./localization";
+import { MarkdownLinkMenu, type LinkMenu } from "./MarkdownLinkMenu";
 import { createMarkdownRenderer, equationCopy, followFootnote, localImageClass, markdownPending, toggleRenderedSource } from "./markdownBoundary";
 import { loadMath } from "./math";
 import type { MarkdownImage, MarkdownImages } from "./markdownImages";
 import { markdownHrefKind, markdownLinkActivation, maximumMarkdownHrefLength, tooLongMarkdownHref, type MarkdownLinkScope } from "./markdownLinks";
+import { isSessionContextKey } from "./sessionRowActions";
 import { appearanceKey, subscribeAppearance } from "./shellColors";
 import { useShellLanguage } from "./shellLanguage";
 import { inModalDialog, modalDialogOpen } from "./modalDialogs";
@@ -173,6 +176,18 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     }
     openLink?.(address);
   }
+  // The menu of a link that can be followed. A link in a selected text keeps the menu of the system, which copies the text.
+  const [linkMenu, setLinkMenu] = useState<LinkMenu | null>(null);
+  function openLinkMenu(target: EventTarget, at?: LinkMenu["at"]): boolean {
+    const link = target instanceof Element ? target.closest("a") : null;
+    if (!openLink || !link || !content.current?.contains(link) || link.closest("[inert], [hidden]") || modalDialogOpen() && !inModalDialog(link)) return false;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed && selection.containsNode(link, true)) return false;
+    const address = link.getAttribute("href");
+    if (!address || !markdownHrefKind(address)) return false;
+    setLinkMenu({ address, anchor: link, at });
+    return true;
+  }
   // The button of a code block copies the text of that block, as it is written, and says so for a moment.
   // The buttons of a displayed equation copy its LaTeX or its MathML.
   function copyCode(event: { target: EventTarget }) {
@@ -191,10 +206,17 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     if (!handled && event.target instanceof Element && (followFootnote(event.target) || toggleRenderedSource(event.target))) return;
     if (!handled) copyCode(event); // Our navigation suppression must not swallow Copy inside an anchor.
   }} onAuxClick={activateLink}
+    onContextMenu={event => { if (!event.defaultPrevented && openLinkMenu(event.target, { x: event.clientX, y: event.clientY })) event.preventDefault(); }}
     onKeyDown={event => {
       if (event.key === "Enter") activateLink(event);
+      if (isSessionContextKey(event.key, event.shiftKey, event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229, false) && openLinkMenu(event.target)) {
+        event.preventDefault();
+        takeKeyContextMenu();
+      }
       if (timelineCodeBlocks) scrollCode(event);
     }} dangerouslySetInnerHTML={codeMarkup} />
+    {linkMenu && openLink && <MarkdownLinkMenu key={linkMenu.address} menu={linkMenu} scope={scope} onOpen={openLink}
+      onClose={() => queueMicrotask(() => setLinkMenu(value => value === linkMenu ? null : value))} />}
     {viewing && <TimelineImageViewer images={[{ index: 0, title: viewing.title, mediaType: null }]}
       source={inlineImageSource(viewing.image.path, [viewing.image])} index={0} initialSize={viewing.size} onIndex={() => { /* One picture. */ }}
       onClose={closeViewer} file={viewing.web ? undefined : { path: viewing.image.path, platform: images?.platform ?? null,

@@ -121,6 +121,88 @@ public sealed class IssuesRpcTests
     }
 
     [TestMethod]
+    public async Task TheSchemeOfTheBranches_ComesWithTheTrackersOfTheProject()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var plain = (await fixture.Rpc.SourcesAsync(new(Epoch, fixture.Project.Id), default)).Branch;
+        Assert.AreEqual(("{type}/{id}-{title}", false), (plain?.Template, plain?.Configured), "Without a [branch] table the project has no convention of its own.");
+
+        Directory.CreateDirectory(Path.Combine(fixture.Project.ProjectPath, ".alta"));
+        File.WriteAllText(Path.Combine(fixture.Project.ProjectPath, ".alta", "issues.toml"), "[branch]\ntemplate = \"{type}/{id}_{title}\"\ntitle_length = 25\n[branch.types]\nBug = \"hotfix\"\n");
+        var reply = await fixture.Rpc.SourcesAsync(new(Epoch, fixture.Project.Id), default);
+
+        Assert.AreEqual(("{type}/{id}_{title}", 25, (string?)null, true), (reply.Branch?.Template, reply.Branch?.TitleLength, reply.Branch?.Problem, reply.Branch?.Configured));
+        CollectionAssert.AreEqual(new[] { new IssueBranchTypeRow("Bug", "hotfix") }, reply.Branch!.Types.ToArray());
+        StringAssert.Contains(JsonSerializer.Serialize(reply, DesktopJsonContext.Default.IssueSourcesResponse), "\"titleLength\":25");
+    }
+
+    [TestMethod]
+    public async Task TheFormOfTheScheme_ReadsAndWritesTheTableOfOneFile()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var team = Path.Combine(fixture.Project.ProjectPath, ".alta", "issues.toml");
+
+        var empty = await fixture.Rpc.BranchSchemeAsync(new(Epoch, fixture.Project.Id, "team"), default);
+        Assert.AreEqual(("ok", false, team, "{type}/{id}-{title}"), (empty.Status, empty.Own, empty.Path, empty.Scheme?.Template));
+
+        var saved = await fixture.Rpc.SaveBranchSchemeAsync(new(Epoch, fixture.Project.Id, "team", false, " {type}/{id}_{title} ", 30,
+            [new(" Bug ", " hotfix "), new("*", "feature")]), default);
+
+        Assert.AreEqual(("ok", "{type}/{id}_{title}", 30), (saved.Status, saved.Branch?.Template, saved.Branch?.TitleLength));
+        CollectionAssert.AreEqual(new[] { new IssueBranchTypeRow("Bug", "hotfix"), new IssueBranchTypeRow("*", "feature") }, saved.Branch!.Types.ToArray());
+        Assert.IsTrue((await fixture.Rpc.BranchSchemeAsync(new(Epoch, fixture.Project.Id, "team"), default)).Own);
+        Assert.AreEqual("{type}/{id}_{title}", (await fixture.Rpc.SourcesAsync(new(Epoch, fixture.Project.Id), default)).Branch?.Template);
+
+        var wrong = await fixture.Rpc.SaveBranchSchemeAsync(new(Epoch, fixture.Project.Id, "team", false, "{nummer}", 30, [new("*", "feature")]), default);
+        Assert.AreEqual("invalid", wrong.Status);
+        StringAssert.Contains(wrong.Message, "{nummer}");
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveBranchSchemeAsync(new(Epoch, fixture.Project.Id, "team", false), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.BranchSchemeAsync(new(Epoch, fixture.Project.Id, "everyone"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Rpc.BranchSchemeAsync(new("another", fixture.Project.Id, "team"), default)).Status);
+
+        var removed = await fixture.Rpc.SaveBranchSchemeAsync(new(Epoch, fixture.Project.Id, "team", true), default);
+        Assert.AreEqual(("ok", "{type}/{id}-{title}"), (removed.Status, removed.Branch?.Template));
+        Assert.IsFalse((await fixture.Rpc.BranchSchemeAsync(new(Epoch, fixture.Project.Id, "team"), default)).Own);
+
+        File.WriteAllText(team, "branch.template = \"team/{id}\"\n");
+        var inline = await fixture.Rpc.SaveBranchSchemeAsync(new(Epoch, fixture.Project.Id, "team", true), default);
+        Assert.AreEqual("config_invalid", inline.Status);
+        StringAssert.Contains(inline.Message, "in a form the window does not change");
+
+        File.WriteAllText(team, "[broken");
+        Assert.AreEqual("config_invalid", (await fixture.Rpc.SaveBranchSchemeAsync(new(Epoch, fixture.Project.Id, "team", true), default)).Status);
+        Assert.AreEqual("[broken", File.ReadAllText(team), "A file that does not parse is left as it is.");
+    }
+
+    [TestMethod]
+    public async Task TheBranchTheUserNamed_IsTheBranchTheWorkIsDoneOn_InANewWorktreeOrInTheProjectFolder()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Tracker.Detail = new TrackedItemDetail(new(TrackedItemKind.Issue, "12", "Crash", "https://github.com/o/r/issues/12", TrackedItemState.Open), string.Empty, []);
+
+        Assert.AreEqual("ok", (await fixture.Rpc.StartAsync(new(Epoch, fixture.Project.Id, "github", "issue", "12", true, null, Branch: "fix/12-crash"), default)).Status);
+        Assert.AreEqual("fix/12-crash", fixture.Starter.Models[^1]?.Branch);
+
+        // A session in the folder of the project works on that branch as well: the folder moves to it.
+        Assert.AreEqual("ok", (await fixture.Rpc.StartAsync(new(Epoch, fixture.Project.Id, "github", "issue", "12", false, null, Branch: "fix/12-crash"), default)).Status);
+        Assert.AreEqual(("fix/12-crash", false), (fixture.Starter.Models[^1]?.Branch, fixture.Starter.Started[^1].Worktree));
+
+        // Without a name, CodeAlta names the branch of the worktree.
+        Assert.AreEqual("ok", (await fixture.Rpc.StartAsync(new(Epoch, fixture.Project.Id, "github", "issue", "12", true, null), default)).Status);
+        Assert.IsNull(fixture.Starter.Models[^1]?.Branch);
+
+        // What cannot be a branch is refused before anything starts.
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.StartAsync(new(Epoch, fixture.Project.Id, "github", "issue", "12", true, null, Branch: "-x"), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.StartAsync(new(Epoch, fixture.Project.Id, "github", "issue", "12", true, null, Branch: "fix/a b"), default)).Status);
+        Assert.AreEqual(3, fixture.Starter.Started.Count);
+
+        // What went wrong without stopping the start is said to the page.
+        fixture.Starter.Warning = "The branch fix/12-crash could not be marked as made here.";
+        var warned = await fixture.Rpc.StartAsync(new(Epoch, fixture.Project.Id, "github", "issue", "12", true, null, Branch: "fix/12-crash"), default);
+        Assert.AreEqual(("ok", "The branch fix/12-crash could not be marked as made here."), (warned.Status, warned.Warning));
+    }
+
+    [TestMethod]
     public async Task TheReviewOfAPullRequest_StartsWithTheTextOfTheProject_AndWhatThePullRequestIsFollowsIt()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -757,12 +839,15 @@ public sealed class IssuesRpcTests
     private sealed class FakeStarter : ISessionStarter
     {
         public List<(string ProjectId, string Title, string Prompt, bool Worktree, string? Like, string Origin)> Started { get; } = [];
+        public List<SessionStartModel?> Models { get; } = [];
         public (string Message, string Reason)? Problem { get; set; }
+        public string? Warning { get; set; }
 
         public Task<SessionStartResult> StartAsync(ProjectDescriptor project, string title, Func<string, string> prompt, bool worktree, string? likeSessionId, string origin, SessionStartModel? model)
         {
             Started.Add((project.Id, title, prompt(project.ProjectPath), worktree, likeSessionId, origin));
-            return Task.FromResult(Problem is { } problem ? new SessionStartResult(null, problem.Message, problem.Reason) : new SessionStartResult("new-session", null));
+            Models.Add(model);
+            return Task.FromResult(Problem is { } problem ? new SessionStartResult(null, problem.Message, problem.Reason) : new SessionStartResult("new-session", null) { Warning = Warning });
         }
     }
 

@@ -2,6 +2,7 @@ using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Secrets;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Catalog.Storage;
 using CodeAlta.Orchestration.Runtime;
@@ -94,8 +95,13 @@ public sealed class CodeAltaHost : IAsyncDisposable
             ModelOptions = modelProviderInitializationService.SetModelOptionAsync,
         };
         Commands.Fallback.ProviderStates = () => modelProviderInitializationService.CurrentStates;
-        // Every tool call of a session goes through the tool hooks of the plugins, whatever runs the session.
-        if (Commands.Plugins is { } toolHooks) runtimeService.ToolInterceptorOf = toolHooks.CreateToolInterceptor;
+        // Every tool call of a session goes through the tool hooks of the plugins, whatever runs the session, then through the
+        // guard the host gave that session (the autonomy of an automation's run), looked up at each call.
+        var toolHooks = Commands.Plugins;
+        runtimeService.ToolInterceptorOf = scope => ToolGuards.Compose(scope, toolHooks?.CreateToolInterceptor(scope));
+        runtimeService.ToolGuards = ToolGuards;
+        // A session without a guard of its own takes the one of where it comes from: its lineage is read from the store.
+        ToolGuards.ReadSession = runtimeService.TryGetRecoverableSessionAsync;
         // A plugin can continue a session whose run ended, with a prompt of its own.
         if (runtimeService.PluginEventObserver is { } pluginEvents)
             pluginEvents.RunEndHooks = new PluginRunEndHooks(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins,
@@ -112,6 +118,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         // A long result is kept whole with the attachments of its session (~/.alta/sessions), where a long output of a command is,
         // and goes with it; the sandbox of the session reads it there.
         CodeModeRuns.ResultFolder = runtimeService.GetToolOutputDirectoryAsync;
+        CodeModeRuns.SecretMasker = agentHub.SecretMasker;
         // The sessions scripts start go through a headless driver of the host, made when a script first asks for one.
         _codeModeAgents = new Lazy<CodeModeAgents>(() => new CodeModeAgents(this), LazyThreadSafetyMode.ExecutionAndPublication);
         // The sessions a run kept open close with it.
@@ -257,8 +264,33 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <summary>Gets the host-owned text-send and abort admission service; completion is not transcript completion.</summary>
     public OwnedSessionCommandService Commands { get; }
 
+    /// <summary>
+    /// Lists the sessions that wait for a person: a question a session asked, a command or a file change to allow, a form to
+    /// fill, a conversation held by another process, a send a budget holds. A session that waits for several is listed once.
+    /// </summary>
+    /// <returns>The ids of the sessions.</returns>
+    public async ValueTask<IReadOnlyList<string>> ListSessionsWaitingForPersonAsync()
+    {
+        var reviews = await RuntimeService.Permissions.ListWaitingSessionsAsync().ConfigureAwait(false);
+        var held = await RuntimeService.ConversationHolds.ListWaitingSessionsAsync().ConfigureAwait(false);
+        var sends = HeldSends?.Invoke() ?? [];
+        return [.. Commands.Asks.ListWaitingSessions().Concat(reviews).Concat(held).Concat(sends).Distinct(StringComparer.OrdinalIgnoreCase)];
+    }
+
+    /// <summary>
+    /// Gets or sets what gives the sessions whose send waits for a person elsewhere than in this host: a send of the fleet a
+    /// budget holds until its owner continues it (<see cref="ListSessionsWaitingForPersonAsync"/>); null for none.
+    /// </summary>
+    public Func<IReadOnlyCollection<string>>? HeldSends { get; set; }
+
     /// <summary>Gets host-owned admission and drainage for up to eight actual cached workspace reads.</summary>
     public OwnedSessionWorkspace WorkspaceReads { get; }
+
+    /// <summary>
+    /// Gets the tool guards the host gives sessions, by session: every tool call of a session goes through its guard after the
+    /// hooks of the plugins (the autonomy of the run of an automation).
+    /// </summary>
+    public SessionToolGuards ToolGuards { get; } = new();
 
     /// <summary>Gets the runs of the Code Mode scripts of the sessions.</summary>
     public Runtime.Scripts.CodeModeRunRegistry CodeModeRuns { get; }
@@ -404,6 +436,10 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 ReadOnlyGlobalState = readOnlyGlobalState,
             };
             Directory.CreateDirectory(catalogOptions.StateRoot);
+            // The secrets of this machine are shared by the hosts of the profile: their values are masked in what the
+            // sessions keep, journal, show and trace.
+            var secretMasker = new AgentSecretMasker(new LocalSecretStore(globalRoot).GetSecretValues);
+            var secretUses = new SecretUseLog(globalRoot);
             var startupScratchpadCleanup = options.StartupScratchpadCleanup;
             if (startupScratchpadCleanup is not null
                 && (!string.Equals(startupScratchpadCleanup.StateRoot, catalogOptions.StateRoot, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
@@ -530,12 +566,17 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     _ => null,
                 },
             };
+            // A secret given to a provider (its key, a variable of its CLI) is masked from then on, before the provider gets it; so is
+            // one a plugin gives out (an MCP server's variables and headers), told to the runtime of the plugins.
+            modelProviderRegistry.SecretIssued = secretMasker.Retain;
+            pluginRuntime.Secrets.Attach(secretMasker.Retain);
             options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
             options.ConfigurePluginModelProviders?.Invoke(modelProviderRegistry, pluginRuntime);
             var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry, null, retentionProtection);
             agentHub = new AgentHub(modelProviderRegistry, catalogOptions.StateRoot, sessionViewCatalog.JournalStore.ProjectionCache, retentionProtection)
             {
                 JournalFile = sessionJournalFile,
+                SecretMasker = secretMasker,
             };
             var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());
             var projectFileSnapshotCache = new ProjectFileSnapshotCache();
@@ -580,7 +621,17 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 InheritPermissionMode = options.InheritPermissionModePolicy,
                 ShowsPromptSuggestions = options.ShowsPromptSuggestions,
                 Identities = options.AppliesSpaceIdentities
-                    ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog), projectProfiles: new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles)
+                    // The CLI profiles read their ${secret:NAME} and ${var:NAME} from the store of this machine: its own values,
+                    // then those the fleet gave it for the environment, the project and the space of the session, never a
+                    // host-only one; each use of a value of the fleet is recorded for the session.
+                    ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog),
+                        // Each secret is masked from the moment it is given, before the processes of the session take it.
+                        (identity, scope) => SpaceIdentityEnvironment.Create(identity, SecretReferenceResolver.ForScope(catalogOptions.GlobalRoot, scope, shell: true,
+                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain).Read,
+                            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
+                        new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles,
+                        // An admission to an environment is kept across a restart of the host, bound to the rules and the approval that admitted it.
+                        new SessionSecretEnvironments(readOnlyGlobalState ? null : Path.Combine(catalogOptions.FleetRoot, "environment-admissions.json")))
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
                 SandboxBackend = options.SandboxBackend,

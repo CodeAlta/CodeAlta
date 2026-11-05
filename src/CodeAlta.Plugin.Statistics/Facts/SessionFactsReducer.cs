@@ -15,6 +15,10 @@ namespace CodeAlta.Plugin.Statistics.Facts;
 /// <para>A session that starts with the turns of another one (a fork, or the session that keeps what a rewind removed) holds a
 /// copy of their records. Its header says from when its records are its own (<c>forked_from.counted_from</c>): the older ones
 /// were counted in the source session and add no fact here; only the choices in force are followed through them.</para>
+/// <para>A session moved to another machine takes its journal there, and that machine appends the move record
+/// (<c>codealta.sessionMoved</c>). Every machine counts its own: the records another machine wrote are followed for the choices in
+/// force only, as those of a fork. A move that changes which records are this machine's asks for a reading from the start
+/// (<see cref="RestartRequested"/>).</para>
 /// <para>Not thread-safe.</para>
 /// </remarks>
 internal sealed class SessionFactsReducer : IJournalRecordSink
@@ -56,6 +60,13 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
 
     /// <summary>Gets the counters of the oddities the reducer met, for the tests and the harness; they are not facts and are not kept.</summary>
     public ReducerDiagnostics Diagnostics { get; } = new();
+
+    /// <summary>
+    /// Gets a value indicating whether the reading met a move it did not know that changes which records are the work of this
+    /// machine: the records read before it were counted as they should not be, so the journal must be read again from its start,
+    /// given the moves of <see cref="SessionFactsState.Moved"/>. The records after it add nothing; the moves after it are still taken.
+    /// </summary>
+    public bool RestartRequested { get; private set; }
 
     /// <summary>Gets or sets a value indicating whether an open run is closed as interrupted when another run starts.</summary>
     public bool InterruptRunWhenAnotherStarts { get; set; } = true;
@@ -125,7 +136,13 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
     public void OnRecord(JournalRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        if (record.Timestamp is not { } timestamp)
+        if (record is MoveRecord move)
+        {
+            OnMove(move);
+            return;
+        }
+
+        if (RestartRequested || record.Timestamp is not { } timestamp)
         {
             return;
         }
@@ -134,6 +151,21 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         {
             // The header is the first line of a journal: it is read before the records it tells apart.
             (_state.Inherited ??= new InheritedRecordsState()).CountedFrom = countedFrom;
+        }
+
+        if (_state.Moved is { IsOwn: false })
+        {
+            // A record another machine wrote, counted there. The header still says what the session is.
+            if (record is HeaderRecord header)
+            {
+                ApplyHeader(header);
+            }
+            else
+            {
+                OnInheritedRecord(record);
+            }
+
+            return;
         }
 
         if (_state.Inherited is { } inherited && IsInherited(inherited, record, timestamp))
@@ -279,6 +311,37 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         }
     }
 
+    // ----- the moves of the session between machines -----
+
+    // The records after a move are the work of the machine it went to. A move the reading knows only takes it further; a new one to
+    // the machine of the last move keeps every record where it was; any other changes which records are this machine's.
+    private void OnMove(MoveRecord move)
+    {
+        var moved = _state.Moved ??= new MovedSessionState();
+        if (moved.Met < moved.Moves.Count)
+        {
+            if (string.Equals(moved.Moves[moved.Met].MoveId, move.MoveId, StringComparison.Ordinal))
+            {
+                moved.Met++;
+                return;
+            }
+
+            // Not the moves the reading was given: those it did not meet yet are not the ones of this journal.
+            moved.Moves.RemoveRange(moved.Met, moved.Moves.Count - moved.Met);
+            RestartRequested = true;
+        }
+
+        var added = new MoveState { MoveId = move.MoveId!, From = move.From, To = move.To, FromDevice = move.FromDevice, ToDevice = move.ToDevice };
+        if (moved.Moves.Count == 0 || !added.KnowsTarget
+            || !MoveState.SameMachine(added.ToDevice, added.To, moved.Moves[^1].ToDevice, moved.Moves[^1].To))
+        {
+            RestartRequested = true;
+        }
+
+        moved.Moves.Add(added);
+        moved.Met++;
+    }
+
     // ----- runs -----
 
     // Opens the run of a record or counts the time of the one that is going. A change of model that starts a run is in force from the
@@ -414,6 +477,11 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             if (milliseconds != 0)
             {
                 _batch.ActivityFor(new ActivityKey(quarter, provider, model, effort)).ActiveMs += milliseconds;
+                if (!run.ModelReported)
+                {
+                    // Before a request of the run said its model: the time goes on the model it says, once it says it.
+                    RememberUnreported(run, quarter.Index, provider, model, effort, milliseconds);
+                }
             }
 
             cursor = pieceEnd;
@@ -549,6 +617,13 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
 
     private void OnHeader(HeaderRecord header, DateTimeOffset timestamp)
     {
+        ApplyHeader(header);
+        CountOrigin(header.CreatedAt ?? timestamp);
+    }
+
+    // What the session is: its kind, its project, its space, its folder, who created it, its title and its first provider.
+    private void ApplyHeader(HeaderRecord header)
+    {
         _state.HasHeader = true;
         _state.SessionKind = header.SessionKind ?? _state.SessionKind;
         _state.ProjectRef = header.ProjectRef ?? _state.ProjectRef;
@@ -564,8 +639,6 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         {
             _state.Provider = _state.InitialProvider;
         }
-
-        CountOrigin(header.CreatedAt ?? timestamp);
     }
 
     private void CountOrigin(DateTimeOffset at)
@@ -1029,14 +1102,16 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         }
 
         _lastOperation = op;
+        var purpose = string.Equals(op.Initiator, "compaction", StringComparison.OrdinalIgnoreCase) ? UsagePurpose.Compaction : UsagePurpose.Turn;
         if (!string.IsNullOrWhiteSpace(op.Model))
         {
             ApplyReportedModel(op.Model);
+            // A compaction may run on another model: only a request of the conversation says the model of the run.
+            if (run is not null && purpose == UsagePurpose.Turn) SettleRunModel(run, op.Model);
         }
 
         var model = CurrentModel();
         var effort = NormalizeEffort(op.ReasoningEffort) ?? _state.Effort;
-        var purpose = string.Equals(op.Initiator, "compaction", StringComparison.OrdinalIgnoreCase) ? UsagePurpose.Compaction : UsagePurpose.Turn;
 
         // A provider that reports the cost and the duration of a whole turn repeats them: the same pair twice in a run is one. A
         // cost without a duration is the cost of its request (the credits of Copilot), and two requests may well cost the same.
@@ -1125,6 +1200,83 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         }
 
         _state.Model = model;
+    }
+
+    // The first request of a run that reports its model: the start of the run and the time counted before it, under the model in force
+    // then (an alias, or the model the alias stood for in an earlier turn), go on the model it reports. Later reports of the run move
+    // nothing: what the run counted under a model its own request reported is that model's.
+    // The stretches of time of a run kept to move once its model is reported: one per change of model or effort, or long gap.
+    private const int MaxUnreportedTimes = 64;
+
+    // The milliseconds of a whole quarter hour.
+    private const long QuarterMilliseconds = 15 * 60 * 1000;
+
+    // The time of a run is counted without holes between its records: a stretch under one model keeps its first and last quarter
+    // hours, and those between are whole. A stretch that cannot be kept (more than the limit) leaves the run where it was counted.
+    private static void RememberUnreported(OpenRunState run, int quarter, string provider, string model, string effort, long milliseconds)
+    {
+        if (run.Unreported is [.., var last] && last.Provider == provider && last.Model == model && last.Effort == effort)
+        {
+            var end = Math.Max(last.LastQuarter, last.Quarter);
+            if (quarter == end)
+            {
+                if (end == last.Quarter) last.Milliseconds += milliseconds;
+                else last.LastMilliseconds += milliseconds;
+                return;
+            }
+
+            // The quarter it ended in becomes one between, unless it is the first: kept so only when it is whole.
+            if (quarter == end + 1 && (end == last.Quarter || last.LastMilliseconds == QuarterMilliseconds))
+            {
+                last.LastQuarter = quarter;
+                last.LastMilliseconds = milliseconds;
+                return;
+            }
+        }
+
+        if (run.Unreported.Count < MaxUnreportedTimes)
+            run.Unreported.Add(new UnreportedTimeState { Quarter = quarter, LastQuarter = quarter, Provider = provider, Model = model, Effort = effort, Milliseconds = milliseconds });
+        else
+            run.UnreportedOverflow = true;
+    }
+
+    private void SettleRunModel(OpenRunState run, string model)
+    {
+        if (run.ModelReported)
+        {
+            return;
+        }
+
+        run.ModelReported = true;
+        if (run.UnreportedOverflow)
+        {
+            // More time than is kept was counted before: moving part of it would split the run, so all of it stays where it was counted.
+            run.Unreported.Clear();
+            return;
+        }
+
+        if (!string.Equals(run.Model, model, StringComparison.Ordinal))
+        {
+            var start = QuarterHour.Of(run.Start);
+            _batch.ActivityFor(new ActivityKey(start, run.Provider, run.Model, run.Effort)).RunsStarted--;
+            _batch.ActivityFor(new ActivityKey(start, run.Provider, model, run.Effort)).RunsStarted++;
+            run.Model = model;
+        }
+
+        foreach (var time in run.Unreported)
+        {
+            if (string.Equals(time.Model, model, StringComparison.Ordinal)) continue;
+            var end = Math.Max(time.LastQuarter, time.Quarter);
+            for (var index = time.Quarter; index <= end; index++)
+            {
+                var milliseconds = index == time.Quarter ? time.Milliseconds : index == end ? time.LastMilliseconds : QuarterMilliseconds;
+                var quarter = new QuarterHour(index);
+                _batch.ActivityFor(new ActivityKey(quarter, time.Provider, time.Model, time.Effort)).ActiveMs -= milliseconds;
+                _batch.ActivityFor(new ActivityKey(quarter, time.Provider, model, time.Effort)).ActiveMs += milliseconds;
+            }
+        }
+
+        run.Unreported.Clear();
     }
 
     // ----- tool calls -----

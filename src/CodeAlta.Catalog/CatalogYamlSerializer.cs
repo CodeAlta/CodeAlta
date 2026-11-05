@@ -140,6 +140,21 @@ public sealed class CatalogYamlSerializer
         [JsonPropertyName("skills")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public SpaceSkillsFrontMatter? Skills { get; set; }
+
+        [JsonPropertyName("fleet")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SpaceFleetFrontMatter? Fleet { get; set; }
+    }
+
+    private sealed class SpaceFleetFrontMatter
+    {
+        [JsonPropertyName("server")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Server { get; set; }
+
+        [JsonPropertyName("organization")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Organization { get; set; }
     }
 
     private sealed class SpaceNewSessionsFrontMatter
@@ -478,7 +493,8 @@ public sealed class CatalogYamlSerializer
                         Text(entry.Value?.Check), Text(entry.Value?.Login)))]
                     : null),
             frontMatter.Tools is { } tools ? new SpaceTools([.. (tools.Disabled ?? []).Select(static name => name?.Trim() ?? string.Empty)]) : null,
-            frontMatter.Skills is { } skills ? new SpaceSkills([.. (skills.Folders ?? []).Select(static folder => folder?.Trim() ?? string.Empty)]) : null);
+            frontMatter.Skills is { } skills ? new SpaceSkills([.. (skills.Folders ?? []).Select(static folder => folder?.Trim() ?? string.Empty)]) : null,
+            frontMatter.Fleet is { } fleet && Text(fleet.Server) is { } server ? new SpaceFleet(server, Text(fleet.Organization)) : null);
     }
 
     // What the file writes of the settings: nothing for what is not set.
@@ -540,6 +556,11 @@ public sealed class CatalogYamlSerializer
         if (settings.Skills is { IsEmpty: false } skills)
         {
             frontMatter.Skills = new SpaceSkillsFrontMatter { Folders = [.. skills.Folders] };
+        }
+
+        if (settings.Fleet is { IsEmpty: false } fleet)
+        {
+            frontMatter.Fleet = new SpaceFleetFrontMatter { Server = fleet.Server, Organization = fleet.Organization };
         }
     }
 

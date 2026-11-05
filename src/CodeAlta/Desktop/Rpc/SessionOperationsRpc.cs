@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json.Serialization;
 using CodeAlta.Agent;
+using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 using XenoAtom.Logging;
@@ -26,6 +27,7 @@ internal sealed class SessionOperationsService
     private readonly int _capacity = 256;
     private bool _closed;
     private readonly Func<string, CancellationToken, Task<OwnedSelectionChoices?>>? _choices;
+    private readonly Func<string, string, CancellationToken, Task<string>>? _stopBackgroundTask;
     private readonly OwnedSessionCommandService? _commands;
     private readonly Func<string, Task<OwnedSharedConversationResult>>? _describeShared;
     private readonly Func<string, Task<OwnedSharedConversationResult>>? _releaseShared;
@@ -48,8 +50,55 @@ internal sealed class SessionOperationsService
         _compact = commands.AdmitCompact;
         _abortRun = commands.AdmitAbortRun;
         _choices = commands.GetObservedSelectionChoicesAsync;
+        _stopBackgroundTask = commands.StopBackgroundTaskAsync;
         _describeShared = commands.GetSharedConversationAsync;
         _releaseShared = commands.ReleaseSharedConversationAsync;
+    }
+
+    /// <summary>
+    /// Creates the service over the hosts of the sessions: the commands that run a session (send, steer, compact,
+    /// stop) go to the host of that session; the others still go to the command owner of this process.
+    /// </summary>
+    /// <param name="hosts">The hosts of the sessions.</param>
+    /// <param name="commands">The command owner of this process.</param>
+    /// <param name="epoch">The host epoch that requests must name.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="hosts"/> or <paramref name="commands"/> is null.</exception>
+    internal SessionOperationsService(SessionHostRegistry hosts, OwnedSessionCommandService commands, string epoch)
+        : this(commands, epoch)
+    {
+        ArgumentNullException.ThrowIfNull(hosts);
+        _capacity = hosts.Local.ReceiptCapacity;
+        _send = (request, token) => hosts.Resolve(request.SessionId).AdmitSend(request, token);
+        _abort = (request, token) => hosts.ResolveOperation(request.TargetOperationId).AdmitAbort(request, token);
+        _steer = (request, token) => hosts.Resolve(request.SessionId).AdmitSteer(request, token);
+        _compact = (request, token) => hosts.Resolve(request.SessionId).AdmitCompact(request, token);
+        _abortRun = (request, token) => hosts.Resolve(request.SessionId).AdmitAbortRun(request, token);
+        _stopBackgroundTask = (sessionId, taskId, token) => hosts.Resolve(sessionId).StopBackgroundTaskAsync(sessionId, taskId, token);
+        // The composer of a session of a paired machine offers what its machine listed; the space checks of this catalog
+        // do not apply to it.
+        _remote = sessionId => hosts.Resolve(sessionId) is Fleet.RemoteSessionHost;
+        _choices = (sessionId, token) => hosts.Resolve(sessionId) is Fleet.RemoteSessionHost remote
+            ? Task.FromResult(remote.SelectionChoices(sessionId))
+            : commands.GetObservedSelectionChoicesAsync(sessionId, token);
+        _routes = hosts.Routes;
+    }
+
+    // Whether the commands of a session go to the machine a request names for it; null without hosts: only this process.
+    private readonly Func<SessionReference, bool>? _routes;
+
+    private readonly Func<string, bool>? _remote;
+
+    // The commands of the hosts alone, without the command owner of this process: tests of the routing.
+    internal SessionOperationsService(string epoch, SessionHostRegistry hosts)
+    {
+        ArgumentNullException.ThrowIfNull(hosts);
+        _epoch = epoch;
+        _capacity = hosts.Local.ReceiptCapacity;
+        _send = (request, token) => hosts.Resolve(request.SessionId).AdmitSend(request, token);
+        _steer = (request, token) => hosts.Resolve(request.SessionId).AdmitSteer(request, token);
+        _compact = (request, token) => hosts.Resolve(request.SessionId).AdmitCompact(request, token);
+        _abortRun = (request, token) => hosts.Resolve(request.SessionId).AdmitAbortRun(request, token);
+        _routes = hosts.Routes;
     }
 
     // The seam of the conversation a session shares with VS Code and a terminal: what the host says of it, and what opens
@@ -112,6 +161,7 @@ internal sealed class SessionOperationsService
                 return new("invalid_request", _epoch, null);
             if (request.References is { } references && (!Identity(references.ProjectId, 256) || !Identity(references.ProjectPath, 4096)))
                 return new("invalid_request", _epoch, null);
+            if (Misrouted(request.SessionId, request.MachineId) is { } refused) return new(refused, _epoch, null);
             cancellationToken.ThrowIfCancellationRequested();
             if (request.Selection is { } selection && (!Identity(selection.ProviderKey, 256) || !Identity(selection.AgentPromptId, 256)
                 || selection.ModelId is not null && !Identity(selection.ModelId, 256)
@@ -194,7 +244,8 @@ internal sealed class SessionOperationsService
         {
             var choices = _choices is null ? null : await _choices(request.SessionId, cancellationToken).ConfigureAwait(false);
             if (choices is null) return new("unavailable", _epoch, request.SessionId, null, [], []);
-            var space = _commands is null ? null : await _commands.GetSessionSpaceProvidersAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
+            var space = _commands is null || _remote?.Invoke(request.SessionId) == true ? null
+                : await _commands.GetSessionSpaceProvidersAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
             return new("ok", _epoch, request.SessionId,
                 new(choices.Current.ProviderKey, choices.Current.AgentPromptId, choices.Current.ModelId, choices.Current.ReasoningEffort?.ToString())
                     { PermissionMode = choices.Current.PermissionMode },
@@ -222,7 +273,9 @@ internal sealed class SessionOperationsService
                 // asks for another provider before a send.
                 ProviderUnavailable = space is { ProviderAvailable: false } ? true : null,
                 ReplacementProvider = space?.ReplacementProvider,
-                ProviderName = space?.ProviderName,
+                // A session of another machine names its provider as that machine does.
+                ProviderName = choices.HostProviderName ?? space?.ProviderName,
+                MachineProvider = choices.HostProviderName is not null ? true : null,
                 // The providers whose state the composer reports: those of the space of the session.
                 SpaceProviders = space is null ? null : [.. space.Providers.Take(64).Select(static provider => provider.ProviderId.Value)],
             };
@@ -308,9 +361,9 @@ internal sealed class SessionOperationsService
             var denied = CheckEpoch(request.ExpectedEpoch);
             if (denied is not null) return new(denied, _epoch, request.SessionId);
             if (!Identity(request.SessionId, 256) || !Identity(request.TaskId, 256)) return new("invalid_request", _epoch, request.SessionId);
-            if (_commands is null) return new("unavailable", _epoch, request.SessionId);
+            if (_stopBackgroundTask is null) return new("unavailable", _epoch, request.SessionId);
         }
-        return new(await _commands.StopBackgroundTaskAsync(request.SessionId, request.TaskId, cancellationToken).ConfigureAwait(false), _epoch, request.SessionId);
+        return new(await _stopBackgroundTask(request.SessionId, request.TaskId, cancellationToken).ConfigureAwait(false), _epoch, request.SessionId);
     }
 
     // The resume after a limit a session waits for, as its card shows it. It leaves no receipt: the cards of the session
@@ -631,6 +684,7 @@ internal sealed class SessionOperationsService
                 || attachment <= 0 || attachment.ToString(CultureInfo.InvariantCulture) != request.ExpectedAttachmentGeneration
                 || !Identity(request.ExpectedRunId, 256) || !Identity(request.Text, 32768, trim: false))
                 return new("invalid_request", _epoch, null);
+            if (Misrouted(request.SessionId, request.MachineId) is { } refused) return new(refused, _epoch, null);
             cancellationToken.ThrowIfCancellationRequested();
             try { return Retain(_steer!(new(request.ClientRequestId, request.SessionId, runtime, attachment, request.ExpectedRunId, request.Text), cancellationToken)); }
             catch (ArgumentException) { return new("invalid_request", _epoch, null); }
@@ -652,6 +706,7 @@ internal sealed class SessionOperationsService
                 || !long.TryParse(request.ExpectedAttachmentGeneration, NumberStyles.None, CultureInfo.InvariantCulture, out var attachment)
                 || attachment <= 0 || attachment.ToString(CultureInfo.InvariantCulture) != request.ExpectedAttachmentGeneration)
                 return new("invalid_request", _epoch, null);
+            if (Misrouted(request.SessionId, request.MachineId) is { } refused) return new(refused, _epoch, null);
             cancellationToken.ThrowIfCancellationRequested();
             try { return Retain(_compact!(new(request.ClientRequestId, request.SessionId, runtime, attachment), cancellationToken)); }
             catch (ArgumentException) { return new("invalid_request", _epoch, null); }
@@ -673,6 +728,7 @@ internal sealed class SessionOperationsService
                 || !long.TryParse(request.ExpectedAttachmentGeneration, NumberStyles.None, CultureInfo.InvariantCulture, out var attachment)
                 || attachment <= 0 || attachment.ToString(CultureInfo.InvariantCulture) != request.ExpectedAttachmentGeneration)
                 return new("invalid_request", _epoch, null);
+            if (Misrouted(request.SessionId, request.MachineId) is { } refused) return new(refused, _epoch, null);
             cancellationToken.ThrowIfCancellationRequested();
             try { return Retain(_abortRun!(new(request.ClientRequestId, request.SessionId, runtime, attachment, request.ExpectedRunId), cancellationToken)); }
             catch (ArgumentException) { return new("invalid_request", _epoch, null); }
@@ -705,6 +761,16 @@ internal sealed class SessionOperationsService
     }
 
     internal void CloseAdmission() { lock (_gate) _closed = true; }
+
+    // A request that names the machine of its session goes there only when that machine owns the session as the hosts
+    // resolve it (this process for a session it owns, whatever a machine lists): never redirected to another one.
+    private string? Misrouted(string sessionId, string? machineId)
+    {
+        if (machineId is null) return null;
+        if (!Identity(machineId, 64)) return "invalid_request";
+        return _routes is not null && _routes(new SessionReference(sessionId, machineId)) ? null
+            : OwnedSessionCommandAdmissionKind.UnknownTarget.ToString().ToLowerInvariant();
+    }
     private string? CheckEpoch(string expected) => _epoch is null ? "unconfigured"
         : !string.Equals(expected, _epoch, StringComparison.Ordinal) ? "stale_epoch" : _closed ? "closed" : null;
 
@@ -814,6 +880,9 @@ internal sealed class SessionOperationsService
 
 internal sealed record SessionSendRequest(string ExpectedEpoch, string ClientRequestId, string SessionId, string Text)
 {
+    // The machine of the session as the page shows it; null for this computer, or when the page does not say.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineId { get; init; }
     public IReadOnlyList<SessionPromptImage>? Images { get; init; }
     public SessionReferenceScope? References { get; init; }
     public SessionSelection? Selection { get; init; }
@@ -893,6 +962,10 @@ internal sealed record SessionChoicesResponse(string Status, string? Epoch, stri
     // The display name of the provider of the session, as Settings names it; absent when no provider has its key.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ProviderName { get; init; }
+    // True when the provider is one of the machine that runs the session: ProviderName names it as that machine does, and
+    // a provider of the same key on this computer is another one.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? MachineProvider { get; init; }
     // The keys of the enabled providers of the space of the session; absent where the host does not say.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? SpaceProviders { get; init; }
@@ -916,11 +989,26 @@ internal sealed record SessionAdaptiveResult(string Status, string? Epoch, strin
 internal sealed record SessionPermissionModeChoice(string Id);
 internal sealed record SessionAbortRequest(string ExpectedEpoch, string ClientRequestId, string TargetOperationId);
 internal sealed record SessionSteerRequest(string ExpectedEpoch, string ClientRequestId, string SessionId,
-    string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration, string ExpectedRunId, string Text);
+    string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration, string ExpectedRunId, string Text)
+{
+    // The machine of the session as the page shows it; null for this computer, or when the page does not say.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineId { get; init; }
+}
 internal sealed record SessionCompactRequest(string ExpectedEpoch, string ClientRequestId, string SessionId,
-    string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration);
+    string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration)
+{
+    // The machine of the session as the page shows it; null for this computer, or when the page does not say.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineId { get; init; }
+}
 internal sealed record SessionAbortRunRequest(string ExpectedEpoch, string ClientRequestId, string SessionId,
-    string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration, string ExpectedRunId);
+    string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration, string ExpectedRunId)
+{
+    // The machine of the session as the page shows it; null for this computer, or when the page does not say.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineId { get; init; }
+}
 internal sealed record SessionReceiptRequest(string ExpectedEpoch, int Offset);
 internal sealed record SessionAdmission(string Status, string? Epoch, SessionReceiptView? Receipt);
 internal sealed record SessionReceiptPage(string Status, string? Epoch, SessionReceiptView[] Rows, int? Next);

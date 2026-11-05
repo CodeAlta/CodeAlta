@@ -1,5 +1,7 @@
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog.Logging;
 using XenoAtom.Logging;
+using XenoAtom.Logging.Formatters;
 using XenoAtom.Logging.Writers;
 
 namespace CodeAlta.Desktop;
@@ -20,6 +22,15 @@ internal static class DesktopLogging
     /// <param name="flushPending">Writes what is waiting in the queue to the file; null when the log was started elsewhere.</param>
     /// <returns>The rows of the log viewer; null when the log was started elsewhere.</returns>
     internal static DesktopLogCapture? Initialize(string dataRoot, Func<LoggingSettings>? settings, out Action? flushPending)
+        => Initialize(dataRoot, settings, masker: null, out flushPending);
+
+    /// <summary>Starts the log of the application, with the secrets of the machine masked in its file and its rows.</summary>
+    /// <param name="dataRoot">The folder of the data of the window.</param>
+    /// <param name="settings">Reads the levels of the features (<c>[logging]</c>); null for the defaults.</param>
+    /// <param name="masker">Masks the secrets of the machine; null masks nothing.</param>
+    /// <param name="flushPending">Writes what is waiting in the queue to the file; null when the log was started elsewhere.</param>
+    /// <returns>The rows of the log viewer; null when the log was started elsewhere.</returns>
+    internal static DesktopLogCapture? Initialize(string dataRoot, Func<LoggingSettings>? settings, AgentSecretMasker? masker, out Action? flushPending)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataRoot);
         flushPending = null;
@@ -32,9 +43,10 @@ internal static class DesktopLogging
         };
         config.RootLogger.MinimumLevel = LogLevel.Warn;
         var capture = new DesktopLogCapture();
-        config.RootLogger.Writers.Add(new DesktopCaptureLogWriter(capture));
+        config.RootLogger.Writers.Add(new DesktopCaptureLogWriter(capture) { Masker = masker });
         var file = new FileLogWriter(new FileLogWriterOptions(Path.Combine(directory, "codealta.log"))
         {
+            Formatter = masker is null ? StandardLogFormatter.Instance : new AgentSecretMaskingLogFormatter(StandardLogFormatter.Instance, masker),
             AutoFlush = true, FileSizeLimitBytes = 10L * 1024 * 1024,
             RollingInterval = FileRollingInterval.Daily, RetainedFileCountLimit = 10,
             FailureMode = FileLogWriterFailureMode.Ignore,

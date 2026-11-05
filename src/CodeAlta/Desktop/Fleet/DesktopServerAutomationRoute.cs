@@ -1,0 +1,132 @@
+using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
+using CodeAlta.Fleet.Server;
+
+namespace CodeAlta.Desktop.Fleet;
+
+/// <summary>
+/// The way to give automations to a machine through a server that lists it (<c>doc/fleet/orchestration.md</c>): what an
+/// automation does is sealed for the machine and the controller devices of this computer's person, as the device list of
+/// that server verifies them here, and the signed version goes to the server, which delivers it to the machine.
+/// </summary>
+internal sealed class DesktopServerAutomationRoute : IDisposable
+{
+    private readonly FleetOrganizationDevices _devices;
+    private readonly DeviceIdentity _identity;
+    private readonly FleetServerClient _client;
+
+    /// <summary>Creates a route; it owns the client.</summary>
+    /// <param name="linkId">The link of the server.</param>
+    /// <param name="organizationId">The organization of the server.</param>
+    /// <param name="machineName">The name of the machine, as the server lists it.</param>
+    /// <param name="devices">The anchored device list of the server.</param>
+    /// <param name="identity">The key of this computer, which seals.</param>
+    /// <param name="client">The client of the REST API of the server.</param>
+    internal DesktopServerAutomationRoute(string linkId, string organizationId, string machineName, FleetOrganizationDevices devices, DeviceIdentity identity, FleetServerClient client)
+    {
+        (LinkId, OrganizationId, MachineName, _devices, _identity, _client) = (linkId, organizationId, machineName, devices, identity, client);
+    }
+
+    /// <summary>Gets the link of the server.</summary>
+    internal string LinkId { get; }
+
+    /// <summary>Gets the organization of the server, which each version names.</summary>
+    internal string OrganizationId { get; }
+
+    /// <summary>Gets the name of the machine.</summary>
+    internal string MachineName { get; }
+
+    /// <summary>
+    /// Gets the team of the machine when this computer's person maintains it, as the signed access document this computer
+    /// verified says: what is given to that machine is an automation of the team, which runs as its service identity; null otherwise.
+    /// </summary>
+    internal string? TeamId { get; init; }
+
+    /// <summary>Gets whether the machine is the organization's and this computer's person an owner or an admin who signs: what is given to it is the organization's.</summary>
+    internal bool OfOrganization { get; init; }
+
+    /// <summary>Says why an automation published to a scope cannot be given to the machine of this route; null when it can.</summary>
+    /// <param name="scope">The scope it is published to: <c>team:&lt;id&gt;</c>, <c>organization</c>, or null for the person's own.</param>
+    /// <returns>Why not, or null.</returns>
+    internal string? CheckScope(string? scope) => scope switch
+    {
+        null => null,
+        FleetAutomationVersion.OrganizationScope => OfOrganization ? null
+            : $"{MachineName} is not a machine of the organization, or you are not an owner or an admin who signs: an automation of the organization runs on its machines.",
+        _ when scope.StartsWith(FleetAutomationVersion.TeamScopePrefix, StringComparison.Ordinal) && scope[FleetAutomationVersion.TeamScopePrefix.Length..] == TeamId => null,
+        _ => $"{MachineName} is not a machine of a team you maintain: an automation of a team runs on the machines of that team.",
+    };
+
+    /// <summary>Seals what a version does for its machine and the controllers of this computer's person, as the device list of the server verifies them now.</summary>
+    /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
+    /// <exception cref="ArgumentException">The machine is not in the device list.</exception>
+    internal async Task<string> SealAsync(FleetAutomationContent content, string automationId, long number, string machineId, string? scope, CancellationToken cancellationToken)
+    {
+        var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        // An automation of a team is sealed for its machine and every maintainer of the team, as the access document says;
+        // one of the organization for its machine and its owners and signers.
+        if (scope == FleetAutomationVersion.OrganizationScope && Access is { } organization)
+            return FleetAutomationSigning.SealForOrganization(content, automationId, number, machineId, list, await organization.RefreshAsync(cancellationToken).ConfigureAwait(false),
+                _identity);
+        if (scope is not null && TeamId is { } team && Access is { } access)
+            return FleetAutomationSigning.SealForTeam(content, automationId, number, machineId, team, list, await access.RefreshAsync(cancellationToken).ConfigureAwait(false), _identity);
+        return FleetAutomationSigning.Seal(content, automationId, number, machineId, list, _identity);
+    }
+
+    /// <summary>Gets the access document of the server as this computer verifies it, which seals the automations of a team.</summary>
+    internal FleetOrganizationAccess? Access { get; init; }
+
+    /// <summary>
+    /// Says whether the machine is a node of this computer's person, as the device list of the server verifies it now and the
+    /// access document names its owner once it was given to another person: the authority the server and the machine check
+    /// for each version this computer signs for it.
+    /// </summary>
+    /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
+    internal async Task<bool> IsOwnMachineAsync(string machineId, CancellationToken cancellationToken)
+    {
+        var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        return list.Members.TryGetValue(machineId, out var machine) && machine.Kind == FleetDeviceKinds.Node && !list.Removed.Contains(machineId)
+            && list.Members.TryGetValue(_identity.DeviceId, out var self) && self.Kind == FleetDeviceKinds.Controller && !list.Removed.Contains(self.DeviceId)
+            && self.OwnerId is { } person && string.Equals(FleetAccessState.OwnerOfMachine(Access?.Current, machineId, list), person, StringComparison.Ordinal);
+    }
+
+    /// <summary>Gives a signed version to the server.</summary>
+    internal Task<AutomationDto> PutAsync(FleetSignedAutomationVersion signed, CancellationToken cancellationToken) => _client.PutAutomationAsync(signed, cancellationToken);
+
+    /// <summary>Asks the machine, through the server, to run an automation now.</summary>
+    internal Task<AutomationRunDto> RunAsync(FleetSignedAutomationRunRequest signed, CancellationToken cancellationToken) => _client.RunAutomationAsync(signed, cancellationToken);
+
+    /// <summary>Passes a take-over of a run in progress, signed by this computer, to the machine through the server.</summary>
+    internal Task<AutomationRunDto> TakeOverAsync(FleetSignedAutomationRunRequest signed, CancellationToken cancellationToken) => _client.TakeOverAutomationRunAsync(signed, cancellationToken);
+
+    /// <summary>Forgets an automation for the machine once it took away what it held.</summary>
+    internal Task<AutomationListDto> DeleteAsync(string automationId, string machineId, CancellationToken cancellationToken)
+        => _client.DeleteAutomationAsync(automationId, machineId, cancellationToken);
+
+    /// <summary>Lists the automations of this computer's person as the server holds them.</summary>
+    internal Task<AutomationListDto> ListAsync(CancellationToken cancellationToken) => _client.ListAutomationsAsync(cancellationToken);
+
+    /// <summary>Lists the runs of an automation as its machines reported them.</summary>
+    internal Task<AutomationRunListDto> ListRunsAsync(string automationId, int limit, CancellationToken cancellationToken)
+        => _client.ListAutomationRunsAsync(automationId, limit, cancellationToken);
+
+    /// <inheritdoc />
+    /// <summary>Makes a hook of the server for the machine: the address a tool pushes its signed events to.</summary>
+    /// <returns>The hook and its full address.</returns>
+    internal async Task<(HookDto Hook, Uri Address)> CreateHookAsync(string machineId, string source, string? label, CancellationToken cancellationToken)
+    {
+        var hook = await _client.CreateHookAsync(machineId, source, label, cancellationToken).ConfigureAwait(false);
+        return (hook, new Uri(_client.ServerAddress, hook.Path));
+    }
+
+    /// <summary>Reads the address of a hook of this computer's person on the server, for its machine.</summary>
+    /// <returns>The address; null when no hook of the person has this id for this machine.</returns>
+    internal async Task<Uri?> HookAddressAsync(string machineId, string hookId, CancellationToken cancellationToken)
+    {
+        var hooks = await _client.ListHooksAsync(cancellationToken).ConfigureAwait(false);
+        return hooks.Hooks.FirstOrDefault(hook => hook.Id == hookId && hook.MachineId == machineId) is { } found ? new Uri(_client.ServerAddress, found.Path) : null;
+    }
+
+    public void Dispose() => _client.Dispose();
+}

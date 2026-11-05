@@ -164,6 +164,145 @@ public sealed class AltaSessionSelectionTests
         Assert.AreEqual(("large", AgentReasoningEffort.XHigh), (kept.ModelId, kept.ReasoningEffort));
     }
 
+    // A session whose tool calls a guard checks (the run of an automation with autonomy) hands work only to the sessions of its
+    // own run: a prompt, a reminder or the end of a job handed to another session would be done there with its tools, unchecked.
+    [TestMethod]
+    public async Task AGuardedSession_HandsWorkOnlyToTheSessionsOfItsRun()
+    {
+        using var temp = new TempFolder();
+        var provider = new GatedProvider();
+        await using var host = await CreateHostAsync(temp, provider, inherit: () => true);
+        _ = new CodeAlta.Automations.AutomationRunner(host);
+        var commands = DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()));
+        const string AutomationId = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d79";
+        var run = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Run", new AltaActorProvenance
+        {
+            Kind = AltaActorProvenance.AutomationKind, AutomationId = AutomationId, CorrelationId = "run-1", CreatedAt = DateTimeOffset.UtcNow,
+        }, null, null, null, null, null, null);
+        var child = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Child", new AltaActorProvenance
+        {
+            Kind = AltaActorProvenance.WorkflowKind, SourceSessionId = run.SessionId, CreatedAt = DateTimeOffset.UtcNow,
+        }, null, null, null, null, null, null);
+        var other = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "The user's own");
+        Assert.IsNotNull(await host.ToolGuards.FindAsync(run.SessionId, default), "the session of the run is guarded");
+        var agent = new AltaCallerIdentity { Kind = "agent", SourceSessionId = run.SessionId, SourceProjectId = host.CurrentProject.Id };
+
+        foreach (var args in new[]
+                 {
+                     new[] { "session", "send", other.SessionId, "--message", "deploy" }, ["session", "queue", other.SessionId, "--message", "deploy"],
+                     ["session", "message", other.SessionId, "--message", "deploy"], ["reminder", "create", "--session", other.SessionId, "--duration", "60", "--content", "deploy"],
+                     ["job", "start", "--session", other.SessionId, "--command", "echo deploy"],
+                 })
+        {
+            var refused = await commands.InvokeAsync(args, caller: agent);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, refused.ExitCode, string.Join(' ', args) + ": " + refused.Transcript);
+            StringAssert.Contains(refused.Transcript, "guard.otherSession", string.Join(' ', args));
+        }
+
+        Assert.AreEqual(0, provider.Turns.Count, "the user's session was handed nothing");
+        // Nor to another machine: a session it starts there, or one it moves there, runs out of reach of the guard.
+        var moves = new RecordingMoves();
+        var fleetCommands = DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()), machineMoves: moves);
+        foreach (var args in new[]
+                 {
+                     new[] { "session", "move", "--machine", "mac-mini" }, ["session", "move", child.SessionId, "--machine", "mac-mini"],
+                     ["session", "create", "--machine", "mac-mini", "--message", "deploy"],
+                 })
+        {
+            var refused = await fleetCommands.InvokeAsync(args, caller: agent);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, refused.ExitCode, string.Join(' ', args) + ": " + refused.Transcript);
+            StringAssert.Contains(refused.Transcript, "guard.otherSession", string.Join(' ', args));
+        }
+
+        Assert.AreEqual(0, moves.Calls, "nothing was moved");
+        // A session of its own run takes it; a session no guard checks hands work as before.
+        var toChild = await commands.InvokeAsync(["session", "queue", child.SessionId, "--message", "look"], caller: agent);
+        Assert.AreEqual(AltaExitCodes.Success, toChild.ExitCode, toChild.Transcript);
+        var plain = new AltaCallerIdentity { Kind = "agent", SourceSessionId = other.SessionId, SourceProjectId = host.CurrentProject.Id };
+        var fromPlain = await commands.InvokeAsync(["reminder", "create", "--session", child.SessionId, "--duration", "60", "--content", "later"], caller: plain);
+        Assert.AreEqual(AltaExitCodes.Success, fromPlain.ExitCode, fromPlain.Transcript);
+        var plainMove = await fleetCommands.InvokeAsync(["session", "move", "--machine", "mac-mini"], caller: plain);
+        Assert.AreEqual(AltaExitCodes.Success, plainMove.ExitCode, plainMove.Transcript);
+        Assert.AreEqual(1, moves.Calls);
+    }
+
+    private sealed class RecordingMoves : IAltaSessionMachineMoves
+    {
+        public int Calls { get; private set; }
+
+        public IReadOnlyList<AltaMoveMachine> ListMachines() => [new("", "pc", true, "online"), new("m1", "mac-mini", false, "online")];
+
+        public Task<AltaSessionMoveResult> MoveAsync(string sessionId, string machine, bool cloneRepository, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(new AltaSessionMoveResult("finished", null, null, machine, "/work/x", []));
+        }
+
+        public AltaSessionMoveResult Schedule(string sessionId, string machine, bool cloneRepository)
+        {
+            Calls++;
+            return new AltaSessionMoveResult("scheduled", null, null, machine, null, []);
+        }
+    }
+
+    // A session of a run whose first turn ended (or after a restart) takes its guard from its automation: its later turns are
+    // supervised as its first one was. An approval of a command that waits too long is denied and stops the turn that waits.
+    [TestMethod]
+    public async Task ALaterTurnOfARun_StopsWhenAnApprovalWaitsTooLong()
+    {
+        using var temp = new TempFolder();
+        var provider = new GatedProvider();
+        await using var host = await CreateHostAsync(temp, provider, inherit: () => true);
+        const string AutomationId = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d79";
+        var entry = new CodeAlta.Automations.AutomationEntry(new(AutomationId, "Diagnosis")
+        {
+            Prompt = "Diagnose the incident.", Autonomy = new CodeAlta.Automations.AutomationAutonomy { ApprovalTimeout = 30 },
+        }, new CodeAlta.Automations.AutomationSource(Path.Combine(temp.Path, "config.toml"), null, null), null, null, null);
+        var clock = new AutomationRunGuardTests.TimerClock(DateTimeOffset.UtcNow);
+        var runner = new CodeAlta.Automations.AutomationRunner(host) { Time = clock, WatchInterval = TimeSpan.FromMilliseconds(50), Origin = (_, _) => (entry, false) };
+        Assert.IsNotNull(runner);
+        var run = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Run", new AltaActorProvenance
+        {
+            Kind = AltaActorProvenance.AutomationKind, AutomationId = AutomationId, CorrelationId = "run-1", CreatedAt = DateTimeOffset.UtcNow,
+        }, null, null, null, null, null, null);
+
+        // A later turn of its session (a queued prompt, a reminder), which works until it is stopped.
+        async Task<OwnedSessionCommandReceipt> LaterTurnAsync()
+        {
+            provider.Hold();
+            var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), run.SessionId, "Look again.")).Receipt!;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            while (!await host.RuntimeService.HasActiveRunAsync(run, timeout.Token)) await Task.Delay(20, timeout.Token);
+            return receipt;
+        }
+
+        var turn = await LaterTurnAsync();
+        var later = (CodeAlta.Automations.AutomationRunGuard)(await host.ToolGuards.FindAsync(run.SessionId, default))!;
+        // It runs a command that waits for its approval.
+        var approval = host.RuntimeService.Permissions.RequestForSessionAsync(run.SessionId, new AgentCommandPermissionRequest(new ModelProviderId("gated"), run.SessionId,
+            DateTimeOffset.UtcNow, null, "approval-1", null, "deploy --all", temp.Path, null, null, null, null, null), CancellationToken.None);
+        using (var visible = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+        {
+            while ((await host.RuntimeService.Permissions.ListOwnedCommandsAsync(run.SessionId, visible.Token)).Entries.Count == 0)
+            {
+                Assert.IsFalse(approval.IsCompleted, "the approval waits for a person");
+                await Task.Delay(20, visible.Token);
+            }
+        }
+
+        Assert.IsNull((await later.BeforeToolCallAsync(Call(run.SessionId, "shell_command"), default)).BlockMessage, "a command keeps the guards of the host");
+        using (var watched = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+            while (!later.Waiting) await Task.Delay(20, watched.Token);
+        clock.Advance(TimeSpan.FromMinutes(31));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await approval.WaitAsync(TimeSpan.FromSeconds(20))).Kind, "the approval that waited too long is denied");
+        // Stopped (aborted), never completed: the provider holds the turn until then.
+        Assert.AreNotEqual(OwnedSessionCommandOutcome.Completed, (await turn.Completion.WaitAsync(TimeSpan.FromSeconds(20))).Outcome, "the turn that waited is stopped");
+
+        static CodeAlta.Agent.Runtime.Tools.AgentToolHookCall Call(string sessionId, string tool)
+            => CodeAlta.Agent.Runtime.Tools.AgentToolHookCall.Create(new AgentToolInvocation(new ModelProviderId("gated"), sessionId, "call-" + tool, tool,
+                JsonDocument.Parse("{}").RootElement.Clone()), null, null, CodeAlta.Agent.Runtime.Tools.AgentToolHookCapabilities.All);
+    }
+
     [TestMethod]
     public async Task Choices_RefuseWithoutTheOwnerOfTheSessions()
     {

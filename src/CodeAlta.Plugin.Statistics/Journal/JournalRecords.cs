@@ -43,6 +43,9 @@ internal enum JournalRecordKind : byte
 
     /// <summary>A record of a run of a script of Code Mode (<c>workflow</c>).</summary>
     Workflow,
+
+    /// <summary>The record the machine a session moved to appends to its journal (<c>codealta.sessionMoved</c>).</summary>
+    Moved,
 }
 
 /// <summary>Base of the records the reader hands to its sink. Only the cheap, shared fields live here.</summary>
@@ -119,6 +122,34 @@ internal sealed class HeaderRecord : JournalRecord
     /// Null for a session that is not a fork.
     /// </summary>
     public DateTimeOffset? CountedFrom { get; set; }
+}
+
+/// <summary>
+/// The move of a session to another machine (<c>codealta.sessionMoved</c>), appended by the machine it moved to after the records
+/// it brought: the records before it were written on other machines.
+/// </summary>
+internal sealed class MoveRecord : JournalRecord
+{
+    /// <inheritdoc />
+    public override JournalRecordKind Kind => JournalRecordKind.Moved;
+
+    /// <summary>Gets or sets the identifier of the move.</summary>
+    public string? MoveId { get; set; }
+
+    /// <summary>Gets or sets the name of the machine the session came from.</summary>
+    public string? From { get; set; }
+
+    /// <summary>Gets or sets the name of the machine the session moved to: the one that wrote the record.</summary>
+    public string? To { get; set; }
+
+    /// <summary>
+    /// Gets or sets the device id of the machine the session came from; null in a record written before the ids were recorded. The id
+    /// does not change when a machine is renamed, the name does.
+    /// </summary>
+    public string? FromDevice { get; set; }
+
+    /// <summary>Gets or sets the device id of the machine the session moved to; null in a record written before the ids were recorded.</summary>
+    public string? ToDevice { get; set; }
 }
 
 /// <summary>An actor (<c>AltaActorProvenance</c>): who created a session or submitted a prompt.</summary>

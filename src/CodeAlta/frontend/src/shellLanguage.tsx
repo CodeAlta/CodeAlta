@@ -5,7 +5,8 @@ type LanguageState = Readonly<{ locale: Locale; choice: LanguageChoice; issue?: 
 export const ShellLanguageContext = createContext<LanguageState>({ locale: "en", choice: "en", setLanguage: () => {} });
 export function useShellLanguage() {
   const value = useContext(ShellLanguageContext);
-  return { ...value, t: (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(value.locale, key, parameters) };
+  // The same t while the language stays: an effect that translates with it runs again for a new language, not at each render.
+  return useMemo(() => ({ ...value, t: (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(value.locale, key, parameters) }), [value]);
 }
 // Called once by App. Locale updates do not replace/key any owner or workspace subtree.
 export function useLanguagePreference(): LanguageState {

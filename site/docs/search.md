@@ -38,10 +38,22 @@ Press `Ctrl+P` and type a few words. Besides sessions, projects, files, commands
 </figure>
 | A tool | Its description is shown. |
 
-**Search sessions…** in a project's menu searches that project's conversations.
+`Ctrl+Shift+F` (`Cmd+Shift+F` on macOS) opens the search window on **Sessions**, from anywhere but the code editor and a terminal, which use that key for themselves. **Search sessions…** in a project's menu searches that project's conversations.
+
+Each group says how many results it has for what you typed. **?** means it has not been searched yet: choose it, or **All**, to search it.
 
 - Only the prompt that starts a turn and the turn's final answer are indexed: messages between tool calls, steering, tool output and reasoning are left out. An agent reads them around a hit with `alta search show --full`.
 - A query matches words and parts of identifiers: `fingerprint journal` finds `JournalFingerprint`, `read file` finds `read_file`. The last word matches the start of a word.
+
+## Find in a session
+
+Press `Ctrl+F` (`Cmd+F` on macOS) in a session, from the prompt too, or run `/find`. Every match in its timeline is marked, and the box counts them: `Enter` and `Shift+Enter` go to the next and previous match, `Alt+C`, `Alt+W` and `Alt+R` match case, whole words or a regular expression, and `Esc` closes it.
+
+- Marks beside the scrollbar show where the matches are, the current one brighter. They are not buttons: dragging the scrollbar works as usual.
+- Going to a match stops following the end of the timeline; **Jump to latest visible** takes you back.
+- [Folded work](workspace/prompt.md#focused-timeline) that holds the text opens while you search and folds again afterwards.
+- Only loaded messages are searched. A `+` after the count says older ones are not loaded yet: the history button in the box loads them all and searches them too.
+- It finds what the timeline shows. The whole output of a tool call is in its window, and is not searched.
 
 ## Search by meaning
 

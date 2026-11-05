@@ -1,0 +1,396 @@
+using System.Collections.Immutable;
+using CodeAlta.Catalog.Secrets;
+using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
+
+namespace CodeAlta.Fleet.Server;
+
+/// <summary>A project of this machine, as the values scoped to projects find it: its id here, and what recognizes it on every machine of the person.</summary>
+/// <param name="ProjectId">The id of the project on this machine.</param>
+/// <param name="Identity">What recognizes it on the person's machines (<see cref="FleetProjectKeys.IdentityAsync"/>).</param>
+public sealed record FleetSecretProject(string ProjectId, string Identity);
+
+/// <summary>What a refresh of the values of one server took.</summary>
+/// <param name="Taken">How many values this machine holds now from that server.</param>
+/// <param name="Refused">
+/// The values and environments not taken, with why: a copy no controller device of the person gave, or a version older
+/// than one this machine took from the organization (a server that answers what it held before).
+/// </param>
+/// <param name="Revoked">Whether this machine was revoked: every value of that server was taken away.</param>
+public sealed record FleetSecretSyncResult(int Taken, IReadOnlyList<string> Refused, bool Revoked);
+
+/// <summary>
+/// Takes the values one server holds for this machine (<c>doc/fleet/secrets.md</c>, how a run gets them): it reads the
+/// copies sealed for it, opens each one whose key a controller device of its person gave by the device list the anchor
+/// of the link verified, its person being the one the signed access document names once the machine was given to another
+/// person (<see cref="FleetSecretSealing.TryOpen(string?, FleetSecretBinding, Identity.DeviceIdentity, FleetDeviceListState, FleetAccessState?, out string?, out string?)"/>), maps its scope to this machine (a space by the key of
+/// that space, a project by the blind index of its repository, an environment by its signed definition) and keeps the
+/// values in the protected store of the machine (<see cref="LocalSecretStore.ReplaceFleetCopies"/>). A rotation is taken
+/// at the next refresh, which runs before each run; a value the server no longer gives is dropped. A machine the list
+/// removed, or the server refuses as revoked, takes every value of that server away.
+/// </summary>
+/// <remarks>One caller of <see cref="SyncAsync"/> at a time.</remarks>
+public sealed class FleetSecretSync
+{
+    private readonly string _source;
+    private readonly FleetOrganizationDevices _devices;
+    private readonly FleetMetadataKeyring? _keys;
+    private readonly LocalSecretStore _store;
+    private readonly Func<CancellationToken, Task<IReadOnlyList<FleetSecretProject>>>? _projects;
+    private ImmutableDictionary<string, FleetEnvironmentDefinition> _environments = ImmutableDictionary<string, FleetEnvironmentDefinition>.Empty;
+    private ImmutableHashSet<string> _ambiguous = ImmutableHashSet<string>.Empty;
+
+    /// <summary>Initializes a new instance of the <see cref="FleetSecretSync"/> class.</summary>
+    /// <param name="source">The id of the server link, which the values are kept under.</param>
+    /// <param name="devices">The anchored device list of the server, whose key and HTTP handler the calls use too.</param>
+    /// <param name="keys">The metadata keys of the spaces of the person, which map spaces and projects; null maps none.</param>
+    /// <param name="store">The store of the machine.</param>
+    /// <param name="projects">Lists the projects of this machine with what recognizes them; null maps none.</param>
+    /// <exception cref="ArgumentException"><paramref name="source"/> is empty.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="devices"/> or <paramref name="store"/> is null.</exception>
+    public FleetSecretSync(string source, FleetOrganizationDevices devices, FleetMetadataKeyring? keys, LocalSecretStore store,
+        Func<CancellationToken, Task<IReadOnlyList<FleetSecretProject>>>? projects)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(source);
+        ArgumentNullException.ThrowIfNull(devices);
+        ArgumentNullException.ThrowIfNull(store);
+        _source = source;
+        _devices = devices;
+        _keys = keys;
+        _store = store;
+        _projects = projects;
+    }
+
+    /// <summary>
+    /// Gets the signed access document of the server as this machine verified it, read at each refresh: once it gives the machine
+    /// to another person, the values and environments of that person are taken, and those of the person the device list names no
+    /// more. Null reads the device list alone.
+    /// </summary>
+    public Func<FleetAccessState?>? Access { get; init; }
+
+    /// <summary>Gets the id of the server link.</summary>
+    public string Source => _source;
+
+    /// <summary>Gets the anchored device list of the server.</summary>
+    public FleetOrganizationDevices Devices => _devices;
+
+    /// <summary>Gets the device id of this machine.</summary>
+    public string MachineId => _devices.Identity.DeviceId;
+
+    /// <summary>Makes the nonce of an approval this machine asks: signed by this machine (<see cref="FleetApprovalRequests"/>).</summary>
+    /// <param name="definition">The environment, as this machine verified it.</param>
+    /// <param name="runId">The run.</param>
+    /// <param name="automationId">Its automation; null for a session.</param>
+    /// <returns>The nonce.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="automationId"/> is null.</exception>
+    public string ApprovalNonce(FleetEnvironmentDefinition definition, string runId, string? automationId)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        return FleetApprovalRequests.Nonce(_devices.Identity, definition.OrganizationId, definition.EnvironmentId, definition.Number, runId, automationId);
+    }
+
+    /// <summary>Asks the server, for a run of this machine, the approval an environment requires.</summary>
+    /// <param name="environmentId">The environment.</param>
+    /// <param name="request">The run, the nonce this machine chose and the version of the definition it verified.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approval asked.</returns>
+    /// <exception cref="FleetServerException">The server refused it.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<FleetApprovalDto> RequestApprovalAsync(string environmentId, RequestFleetApprovalRequest request, CancellationToken cancellationToken)
+    {
+        using var client = _devices.CreateClient();
+        return await client.RequestApprovalAsync(environmentId, request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads an approval this machine asked.</summary>
+    /// <param name="approvalId">The approval.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approval, with the signed approval once given.</returns>
+    /// <exception cref="FleetServerException">The server refused it.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<FleetApprovalDto> GetApprovalAsync(string approvalId, CancellationToken cancellationToken)
+    {
+        using var client = _devices.CreateClient();
+        return await client.GetApprovalAsync(approvalId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Gets the environments of the person as the last refresh verified them, by name; those taken away are not among them,
+    /// nor a name two environments share (<see cref="AmbiguousEnvironments"/>): a run names an environment it may be admitted to,
+    /// never one of two.
+    /// </summary>
+    public IReadOnlyDictionary<string, FleetEnvironmentDefinition> Environments => Volatile.Read(ref _environments);
+
+    /// <summary>Gets the names two environments the last refresh verified share: no run is admitted by them.</summary>
+    public IReadOnlyCollection<string> AmbiguousEnvironments => Volatile.Read(ref _ambiguous);
+
+    /// <summary>
+    /// Gives the scope the values of an environment are kept under on this machine: the organization and the id its signed
+    /// definition names, never its name, which another environment may have too.
+    /// </summary>
+    /// <param name="definition">The environment, as this machine verified it.</param>
+    /// <returns>The scope.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="definition"/> is null.</exception>
+    public static string ScopeOf(FleetEnvironmentDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        return definition.OrganizationId + "/" + definition.EnvironmentId;
+    }
+
+    /// <summary>Reads the values of the server for this machine again, and keeps those that open.</summary>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>What it took.</returns>
+    /// <exception cref="FleetDeviceListException">The device list does not verify: nothing is taken, what was held stays.</exception>
+    /// <exception cref="FleetServerException">The server refused a call (but a revocation, which takes every value away).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer: what was held stays.</exception>
+    public async Task<FleetSecretSyncResult> SyncAsync(CancellationToken cancellationToken)
+    {
+        FleetDeviceListState list;
+        FleetSecretListDto held;
+        FleetEnvironmentListDto environments;
+        try
+        {
+            list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+            if (list.Removed.Contains(_devices.Identity.DeviceId)) return Revoke();
+            using var client = _devices.CreateClient();
+            held = await client.ListHeldSecretsAsync(cancellationToken).ConfigureAwait(false);
+            environments = await client.ListEnvironmentsAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (FleetServerException exception) when (exception.Code == FleetErrorCodes.Revoked)
+        {
+            return Revoke();
+        }
+
+        // The newest versions this machine took from the organization, also before a restart: a server that answers an
+        // older document, correctly signed, makes it loosen no rule, bring back no environment taken away, take no older value.
+        var organization = list.OrganizationId;
+        var checkpoint = organization is null ? FleetCheckpoint.Empty : _store.ReadFleetCheckpoint(organization);
+        var takenEnvironments = new Dictionary<string, FleetEnvironmentCheckpoint>(StringComparer.Ordinal);
+        var takenSecrets = new Dictionary<string, int>(StringComparer.Ordinal);
+        var refused = new List<string>();
+
+        // The environments whose definition a controller device of the person signed, the newest of each name.
+        var verified = ImmutableDictionary.CreateBuilder<string, FleetEnvironmentDefinition>(StringComparer.Ordinal);
+        var byId = new Dictionary<string, FleetEnvironmentDefinition>(StringComparer.Ordinal);
+        // The person of this machine: the one the signed access document names once it was given to another person.
+        var access = Access?.Invoke();
+        // One definition of each environment, its newest version: an answer that names one twice gives no older version, and
+        // two definitions of one version are a conflict, none of which is taken.
+        var answered = new Dictionary<string, (FleetEnvironmentDefinition Definition, string Digest)>(StringComparer.Ordinal);
+        var conflicts = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var environment in environments.Environments)
+        {
+            if (!FleetEnvironmentDocuments.TryVerify(environment.Signed, list, access, _devices.Identity.DeviceId, out var definition, out _) || definition.EnvironmentId != environment.Id)
+                continue;
+            var digest = Digest(environment.Signed.Payload);
+            if (answered.TryGetValue(definition.EnvironmentId, out var other))
+            {
+                if (other.Definition.Number == definition.Number && other.Digest != digest) conflicts.Add(definition.EnvironmentId);
+                if (other.Definition.Number >= definition.Number) continue;
+            }
+
+            answered[definition.EnvironmentId] = (definition, digest);
+        }
+
+        foreach (var id in conflicts)
+        {
+            if (answered.Remove(id, out var conflict))
+                refused.Add($"environment {conflict.Definition.Name}: the server answers two definitions of version {conflict.Definition.Number}");
+        }
+
+        foreach (var (definition, digest) in answered.Values)
+        {
+            if (checkpoint.Environments.TryGetValue(definition.EnvironmentId, out var newest)
+                && (definition.Number < newest.Number || definition.Number == newest.Number && digest != newest.Digest))
+            {
+                refused.Add(definition.Number < newest.Number
+                    ? $"environment {definition.Name}: version {definition.Number} is older than version {newest.Number}, which this machine took"
+                    : $"environment {definition.Name}: another definition of version {definition.Number} than the one this machine took");
+                continue;
+            }
+
+            takenEnvironments[definition.EnvironmentId] = new FleetEnvironmentCheckpoint(definition.Number, definition.Removed, digest);
+            byId[definition.EnvironmentId] = definition;
+        }
+
+        var spaces = SpacesById();
+        var projects = await ProjectsByKeyAsync(cancellationToken).ConfigureAwait(false);
+        var values = new List<FleetSecretValue>(held.Secrets.Count);
+        var opened = new List<(FleetSecretDto Secret, string Value)>(held.Secrets.Count);
+        // One copy of each value, its newest version: two copies of one version are a conflict, none of which is taken.
+        var offered = new List<FleetSecretDto>(held.Secrets.Count);
+        foreach (var group in held.Secrets.GroupBy(static secret => secret.Id, StringComparer.Ordinal))
+        {
+            var newestOffered = group.Max(static secret => secret.Version);
+            var candidates = group.Where(secret => secret.Version == newestOffered).ToArray();
+            if (candidates.Length > 1)
+            {
+                refused.Add($"{candidates[0].Name}: the server answers two copies of version {newestOffered}");
+                continue;
+            }
+
+            offered.Add(candidates[0]);
+        }
+
+        foreach (var secret in offered)
+        {
+            if (checkpoint.Secrets.TryGetValue(secret.Id, out var newestVersion) && secret.Version < newestVersion)
+            {
+                refused.Add($"{secret.Name}: version {secret.Version} is older than version {newestVersion}, which this machine took");
+                continue;
+            }
+
+            if (checkpoint.Withdrawn.TryGetValue(secret.Id, out var withdrawnVersion) && secret.Version <= withdrawnVersion)
+            {
+                refused.Add($"{secret.Name}: version {secret.Version} was taken away from this machine");
+                continue;
+            }
+
+            if (!FleetSecretSealing.TryOpen(secret.Copy, FleetSecretBinding.Of(secret), _devices.Identity, list, access, out var value, out var reason))
+            {
+                refused.Add($"{secret.Name}: {reason}");
+                continue;
+            }
+
+            takenSecrets[secret.Id] = Math.Max(secret.Version, takenSecrets.GetValueOrDefault(secret.Id));
+            opened.Add((secret, value));
+        }
+
+        // A value this machine took that the server no longer answers was deleted or withdrawn from it: the version it held is
+        // recorded as taken away, so that a server that answers it again later, correctly sealed, does not bring it back. Only a
+        // newer version is taken then (a value given again to this machine is rotated first).
+        var answeredIds = held.Secrets.Select(static secret => secret.Id).ToHashSet(StringComparer.Ordinal);
+        var withdrawn = checkpoint.Secrets.Where(entry => !answeredIds.Contains(entry.Key)
+                && (!checkpoint.Withdrawn.TryGetValue(entry.Key, out var known) || known < entry.Value))
+            .ToDictionary(static entry => entry.Key, static entry => entry.Value, StringComparer.Ordinal);
+
+        // The checkpoint first: an environment and a value are taken only once their version is recorded, and one the checkpoint
+        // cannot record (it holds as many as it records) is not taken at all.
+        if (organization is not null && _store.AdvanceFleetCheckpoint(organization, new FleetCheckpoint(takenEnvironments, takenSecrets) { Withdrawn = withdrawn }) is { } unrecorded)
+        {
+            foreach (var id in unrecorded.Environments.Keys)
+            {
+                if (byId.Remove(id, out var definition)) refused.Add($"environment {definition.Name}: this machine records the versions of {LocalSecretStore.MaximumCheckpointEntries} environments already");
+            }
+
+            foreach (var (secret, _) in opened.Where(pair => unrecorded.Secrets.ContainsKey(pair.Secret.Id)))
+                refused.Add($"{secret.Name}: this machine records the versions of {LocalSecretStore.MaximumCheckpointEntries} values already");
+            opened.RemoveAll(pair => unrecorded.Secrets.ContainsKey(pair.Secret.Id));
+        }
+
+        // By name, the environments not taken away; a name two of them share chooses neither.
+        var ambiguous = ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal);
+        foreach (var group in byId.Values.Where(static definition => !definition.Removed).GroupBy(static definition => definition.Name, StringComparer.Ordinal))
+        {
+            if (group.Skip(1).Any())
+            {
+                ambiguous.Add(group.Key);
+                refused.Add($"environment {group.Key}: {group.Count()} environments have this name, a run names none of them");
+                continue;
+            }
+
+            verified[group.Key] = group.First();
+        }
+
+        Volatile.Write(ref _ambiguous, ambiguous.ToImmutable());
+        Volatile.Write(ref _environments, verified.ToImmutable());
+        // A value of a scope this machine does not know (a space it does not link, a project it does not have) is not kept.
+        foreach (var (secret, value) in opened)
+        {
+            foreach (var scopeId in LocalScopes(secret.Scope, spaces, projects, byId))
+                values.Add(new FleetSecretValue(_source, secret.Id, secret.Kind, secret.Name, LocalKind(secret.Scope.Kind), scopeId, secret.Version, secret.HostOnly, value));
+        }
+
+        _store.ReplaceFleetCopies(_source, values);
+        return new FleetSecretSyncResult(values.Count, refused, false);
+    }
+
+    // The digest of a signed definition, which tells two definitions of one version apart.
+    private static string Digest(string payload)
+        => System.Buffers.Text.Base64Url.EncodeToString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload)));
+
+    /// <summary>Publishes the uses this machine recorded of the values of the server: which run, which value, which version, never a value.</summary>
+    /// <param name="uses">The uses.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>A task that completes once the server took them.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="uses"/> is null.</exception>
+    /// <exception cref="FleetServerException">The server refused them.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task PublishUsesAsync(IReadOnlyList<FleetSecretUseDto> uses, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(uses);
+        if (uses.Count == 0) return;
+        using var client = _devices.CreateClient();
+        await client.PublishSecretUsesAsync(uses, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Takes away every value of the server: the link is gone, or the machine was revoked.</summary>
+    public void Forget()
+    {
+        Volatile.Write(ref _environments, ImmutableDictionary<string, FleetEnvironmentDefinition>.Empty);
+        Volatile.Write(ref _ambiguous, ImmutableHashSet<string>.Empty);
+        _store.RemoveFleetCopies(_source);
+    }
+
+    private FleetSecretSyncResult Revoke()
+    {
+        Forget();
+        return new FleetSecretSyncResult(0, [], true);
+    }
+
+    private static string LocalKind(string kind) => kind switch
+    {
+        FleetSecretScopeKinds.Environment => FleetSecretScopes.Environment,
+        FleetSecretScopeKinds.Project => FleetSecretScopes.Project,
+        FleetSecretScopeKinds.Space => FleetSecretScopes.Space,
+        _ => FleetSecretScopes.Person,
+    };
+
+    private static IEnumerable<string?> LocalScopes(FleetSecretScopeDto scope, IReadOnlyDictionary<string, string> spaces, ILookup<string, string> projects,
+        IReadOnlyDictionary<string, FleetEnvironmentDefinition> environments)
+    {
+        switch (scope.Kind)
+        {
+            case FleetSecretScopeKinds.Person:
+                yield return null;
+                break;
+            case FleetSecretScopeKinds.Space when scope.Id is { } id && spaces.TryGetValue(id, out var local):
+                yield return local;
+                break;
+            case FleetSecretScopeKinds.Project when scope.Id is { } id:
+                foreach (var project in projects[id]) yield return project;
+                break;
+            case FleetSecretScopeKinds.Environment when scope.Id is { } id && environments.TryGetValue(id, out var environment) && !environment.Removed:
+                yield return ScopeOf(environment);
+                break;
+        }
+    }
+
+    // The spaces of this machine by the opaque id the server knows them by: the grant of the key of each space names it.
+    private Dictionary<string, string> SpacesById()
+    {
+        var spaces = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (_keys is null) return spaces;
+        // On a machine of a team, the spaces of its maintainers and members, each by its own key.
+        foreach (var (local, key) in _keys.SealingKeys)
+        {
+            if (key.Grant?.SpaceId is { } id) spaces.TryAdd(id, local);
+        }
+
+        return spaces;
+    }
+
+    // The projects of this machine by their blind index with every key of the person this machine holds: a project
+    // scoped by another device with the key of its space is found here whatever epoch that key is of.
+    private async Task<ILookup<string, string>> ProjectsByKeyAsync(CancellationToken cancellationToken)
+    {
+        if (_keys is not { Held: { Count: > 0 } keys } || _projects is null) return Array.Empty<(string, string)>().ToLookup(static pair => pair.Item1, static pair => pair.Item2);
+        var pairs = new List<(string Key, string Project)>();
+        foreach (var project in await _projects(cancellationToken).ConfigureAwait(false))
+        {
+            foreach (var key in keys) pairs.Add((FleetProjectKeys.Of(key, project.Identity), project.ProjectId));
+        }
+
+        return pairs.Distinct().ToLookup(static pair => pair.Key, static pair => pair.Project, StringComparer.Ordinal);
+    }
+}

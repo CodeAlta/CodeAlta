@@ -2,13 +2,48 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { TimelineEvent } from "./contract";
 import {
-  activityFacts, appendEvents, blockTime, blockVersion, clockTime, dayLabel, foldEvents, liveBlock, pendingBlock, pendingGrace, planTimeline, prependEvents, stillPending, withDays,
+  activityFacts, appendEvents, blockTime, blockVersion, canWithdraw, clockTime, dayLabel, foldEvents, liveBlock, outputCopyLimit, outputPreview, pendingBlock, pendingGrace, planTimeline, prependEvents, readWholeOutput, stillPending, subjectPath, withDays, withQueue,
   type ActivityBlock, type DayBlock, type MessageBlock, type PendingPrompt, type TimelineBlock,
 } from "./timeline";
 
 let seq = 0;
 const at = (second: number) => new Date(Date.UTC(2026, 9, 24, 12, 0, second)).toISOString();
 const event = (kind: string, text: string | null = null, activityId: string | null = null, second = seq): TimelineEvent => ({ seq: ++seq, at: at(second), kind, text, activityId });
+
+test("a subject that is a path comes apart before the name of its file; anything else stays whole", () => {
+  assert.deepEqual(subjectPath("C:/dev2/stride/Upgrade/Shader.cs"), { folders: "C:/dev2/stride/Upgrade", file: "/Shader.cs" });
+  assert.deepEqual(subjectPath("C:\\Users\\me\\Stride Projects\\a b.cs"), { folders: "C:\\Users\\me\\Stride Projects", file: "\\a b.cs" });
+  assert.deepEqual(subjectPath("src/app.ts"), { folders: "src", file: "/app.ts" });
+  for (const whole of ["dotnet build src/a.csproj -c Release", "a.txt", "login", "src/", "/root"]) assert.equal(subjectPath(whole), null, whole);
+});
+
+test("a row shows the first lines of a file and the last lines of a command, and says when they are all of the output", () => {
+  const seven = "1\n2\n3\n4\n5\n6\n7\n";
+  assert.deepEqual(outputPreview(seven, seven.length, false), { text: "1\n2\n3\n4\n5", whole: false });
+  assert.deepEqual(outputPreview(seven, seven.length, true), { text: "3\n4\n5\n6\n7", whole: false });
+  assert.deepEqual(outputPreview("1\r\n2\r\n", 6, true), { text: "1\n2", whole: true }, "the end of a file is no line of its own");
+  assert.deepEqual(outputPreview("1\n2", 9000, false), { text: "1\n2", whole: false }, "the part read holds few lines, not all of the output");
+});
+
+test("a copy reads an output from its start to its end, and fails rather than give a part of it", async () => {
+  const whole = "abcdefgh";
+  const offsets: (number | undefined)[] = [];
+  assert.equal(await readWholeOutput(async place => {
+    offsets.push(place.offset);
+    return { output: whole.slice(place.offset, place.offset! + 3), outputOffset: place.offset, outputLength: whole.length, error: null };
+  }, whole.length), whole);
+  assert.deepEqual(offsets, [0, 3, 6]);
+
+  const grown = "abcdef";
+  assert.equal(await readWholeOutput(async place => ({ output: grown.slice(place.offset, place.offset! + 3), outputOffset: place.offset, outputLength: 6, error: null }), 3), grown, "an output still growing is read to where it is now");
+
+  await assert.rejects(readWholeOutput(async () => ({ error: "It broke" }), 5), { message: "It broke" });
+  await assert.rejects(readWholeOutput(async () => ({ output: "", outputOffset: 0, outputLength: 5, error: null }), 5), { message: "the output was not read to its end." });
+  await assert.rejects(readWholeOutput(async () => ({ output: "ab", outputOffset: 0, outputLength: 5, error: null }), 5), { message: "the output was not read to its end." }, "a page that does not go further ends the copy");
+  let read = false;
+  await assert.rejects(readWholeOutput(async () => { read = true; return { error: null }; }, outputCopyLimit + 1), /too many to copy/u);
+  assert.equal(read, false, "nothing is read of an output too long");
+});
 
 test("prompts, answers and errors stand alone; the work between them is one activity; turns and notices are not rows", () => {
   seq = 0;
@@ -162,6 +197,52 @@ test("a user message keeps its words and the files the server named: their title
   assert.equal(foldEvents([{ ...event("user.message", ""), attachments: files }]).length, 1, "Files alone are a message.");
   const prompt: PendingPrompt = { key: "p", text: "Read these", mode: "send", sentAt: 0, after: 0, attachments: files.map(({ title, mediaType }) => ({ title, mediaType })) };
   assert.deepEqual(stillPending([prompt], [sent], true, pendingGrace).map(item => item.key), []);
+});
+
+test("a queued prompt waits as long as the queue holds it, and the queue names what the phone did not send", () => {
+  const queued: PendingPrompt = { key: "p1", text: "Then the docs", mode: "queue", sentAt: 0, after: 0, queueId: "queue-1" };
+  assert.deepEqual(stillPending([queued], [], false, pendingGrace * 10), [queued], "no grace: the queue says when it goes");
+  const steered: PendingPrompt = { key: "p2", text: "Faster", mode: "steer", sentAt: 0, after: 0, withdrawalId: "steer-1" };
+  assert.deepEqual(stillPending([steered], [], false, pendingGrace * 10), [], "a steered prompt has no list to read");
+  assert.equal(canWithdraw(queued) && canWithdraw(steered), true);
+  assert.equal(canWithdraw({ ...steered, taken: true }), false, "too late");
+  assert.equal(canWithdraw({ key: "p3", text: "x", mode: "send", sentAt: 0, after: 0 }), false, "nothing names it yet");
+
+  // It left the queue, sent or removed elsewhere: it goes.
+  assert.deepEqual(withQueue([queued, steered], [], new Set(), 5), [steered]);
+  // Another prompt of the queue comes, with its files; the steered one stays.
+  const read = withQueue([steered], [{ id: "queue-9", text: "From before", at: "2026-11-05T10:00:00Z", files: [{ title: "a.txt", mediaType: "text/plain" }] }], new Set(), 5);
+  assert.deepEqual(read.map(prompt => [prompt.key, prompt.mode, prompt.queueId, prompt.after, prompt.attachments?.[0]?.title]),
+    [["p2", "steer", undefined, 0, undefined], ["qqueue-9", "queue", "queue-9", 5, "a.txt"]]);
+  // A prompt whose answer has not come yet is the one the queue names, not one more.
+  const sending: PendingPrompt = { key: "p4", text: "Sent while it worked", mode: "send", sentAt: 0, after: 0 };
+  const adopted = withQueue([sending], [{ id: "queue-2", text: " Sent while it worked " }], new Set(), 5);
+  assert.deepEqual(adopted.map(prompt => [prompt.key, prompt.mode, prompt.queueId]), [["p4", "queue", "queue-2"]]);
+  // What this page removed stays gone, whatever a read on its way says.
+  assert.deepEqual(withQueue([], [{ id: "queue-3", text: "Removed" }], new Set(["queue-3"]), 5), []);
+  // Nothing changes: the prompts are the same objects, so nothing is drawn again.
+  assert.equal(withQueue([queued], [{ id: "queue-1", text: "Then the docs" }], new Set(), 5)[0], queued);
+});
+
+test("a tool call says what it works on, from the first of its events that does, and the running one says it on the folded line", () => {
+  seq = 0;
+  const blocks = foldEvents([
+    event("activity.toolcall.requested", "Bash", "call-1"),
+    { ...event("activity.toolcall.started", "Bash", "call-1"), subject: "git status" },
+    { ...event("activity.toolcall.started", "Read", "call-2"), subject: "a.txt" },
+  ]);
+  const block = blocks[0];
+  assert.equal(block.kind, "activity");
+  if (block.kind !== "activity") return;
+  assert.deepEqual(block.rows.map(row => row.type === "tool" ? [row.subject, row.seq, row.activityId] : null), [["git status", 1, "call-1"], ["a.txt", 3, "call-2"]]);
+  const facts = activityFacts(block, true);
+  assert.equal(facts.current, "Read · a.txt", "the last that runs");
+  assert.equal(facts.names, null, "it says more than the names of the tools");
+  assert.equal(activityFacts(block, false).current, null, "a turn that ended runs nothing");
+  assert.notEqual(blockVersion(block, true, false), blockVersion({ ...block, rows: block.rows.map(row => row.type === "tool" ? { ...row, subject: "other" } : row) }, true, false), "a row is drawn again when it learns its subject");
+  // A tool without a subject leaves the names of the tools on the line, as before.
+  const named = foldEvents([event("activity.toolcall.started", "Grep", "call-3")])[0];
+  if (named.kind === "activity") assert.deepEqual([activityFacts(named, true).current, activityFacts(named, true).names], [null, "Grep"]);
 });
 
 test("the host's prompts, the images of tools, the pictures of an answer and the runs of scripts fold where they belong", () => {

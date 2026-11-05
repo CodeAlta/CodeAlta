@@ -234,6 +234,35 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     assert.equal(await evaluate("markdownFixture.viewer()"), null);
     assert.deepEqual(await evaluate(`markdownFixture.state.external.slice(${gestures + 1})`), ["out/chart.png"]);
     await check();
+    // The menu of a link: a page opens and copies its address; a file also copies its full path, as the host finds it, and goes outside CodeAlta.
+    await evaluate(`markdownFixture.renderLinkMenu(${JSON.stringify("[page](https://remote.invalid/a) [file](src/Program.cs#L3) [gone](src/gone.cs) [mail](mailto:x@y.invalid)")})`);
+    assert.deepEqual(await evaluate("markdownFixture.linkMenu('a[href^=https]')"), { prevented: true, items: ["Open", "Copy link"] });
+    const copied = await evaluate<number>("markdownFixture.state.copies.length");
+    assert.equal(await evaluate("markdownFixture.chooseLinkMenu('Copy link')"), 0, "The menu closes");
+    assert.deepEqual(await evaluate(`markdownFixture.state.copies.slice(${copied})`), ["https://remote.invalid/a"]);
+    assert.deepEqual(await evaluate("markdownFixture.linkMenu('a[href^=\"src/Program\"]')"), { prevented: true, items: ["Open", "Copy path", "Reveal in File Explorer", "Open in Visual Studio Code"] });
+    await evaluate("markdownFixture.chooseLinkMenu('Copy path')");
+    assert.deepEqual(await evaluate(`markdownFixture.state.copies.slice(${copied})`), ["https://remote.invalid/a", "C:\\work\\src\\Program.cs"]);
+    await evaluate("markdownFixture.linkMenu('a[href^=\"src/Program\"]')");
+    await evaluate("markdownFixture.chooseLinkMenu('Reveal in File Explorer')");
+    await evaluate("markdownFixture.linkMenu('a[href^=\"src/Program\"]')");
+    await evaluate("markdownFixture.chooseLinkMenu('Open in Visual Studio Code')");
+    assert.deepEqual(await evaluate("markdownFixture.state.linkFiles"), ["path src/Program.cs#L3@s1", "path src/Program.cs#L3@s1", "reveal src/Program.cs#L3@s1", "path src/Program.cs#L3@s1", "editor src/Program.cs#L3@s1"],
+      "The path is asked when a menu opens, and every action names the link, not a path");
+    // A link the host cannot read is copied as it is written; Open follows the link as a click does.
+    await evaluate("markdownFixture.linkMenu('a[href=\"src/gone.cs\"]')");
+    await evaluate("markdownFixture.chooseLinkMenu('Copy path')");
+    assert.deepEqual(await evaluate(`markdownFixture.state.copies.slice(${copied + 2})`), ["src/gone.cs"]);
+    const opened = await evaluate<number>("markdownFixture.state.external.length");
+    await evaluate("markdownFixture.linkMenu('a[href=\"src/gone.cs\"]')");
+    await evaluate("markdownFixture.chooseLinkMenu('Open')");
+    assert.deepEqual(await evaluate(`markdownFixture.state.external.slice(${opened})`), ["src/gone.cs"]);
+    // A selected link, and a text that is no link, keep the menu of the system.
+    await evaluate("markdownFixture.selectLink('a[href^=https]')");
+    assert.deepEqual(await evaluate("markdownFixture.linkMenu('a[href^=https]')"), { prevented: false, items: [] });
+    await evaluate("markdownFixture.clearSelection()");
+    assert.deepEqual(await evaluate("markdownFixture.linkMenu('p')"), { prevented: false, items: [] });
+    await check();
     // A document is wrapped in its source: its lines follow each other, where a message breaks them.
     await evaluate("markdownFixture.render('one\\ntwo', false)");
     assert.equal(await evaluate("document.querySelectorAll('.markdown-content br').length"), 1);

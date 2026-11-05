@@ -135,6 +135,13 @@ is therefore limited where they run:
   when the hook says they follow the sandbox. The MCP plugin gives the tools of the servers the profile lists
   (`SandboxMcpServers`) and refuses the others in its commands.
 - **The window** (`alta ui`, its tools) is refused.
+- **Other machines** are never a way out ([remote execution](fleet/security-and-privacy.md#remote-execution), rule 8).
+  `SessionRuntimeService.GetFleetFloorAsync` gives what a session carries to the work it starts or drives elsewhere:
+  its permission mode, its profile and what that profile confines (`SandboxConfinement`, compared with
+  `WeakerThan`), or a refusal when the profile does not allow the fleet (`fleet = "never"`, the default of
+  `strict`) or cannot be used. The commands that reach another machine and `agent({ machine })` read it in the host;
+  the receiving machine holds the work to it or refuses; a sandboxed session drives only the sessions it started there,
+  and a moved session keeps its sandbox and its permission mode.
 - **The browser** (`alta browser`, its tools) is allowed in the isolated profile only: its context goes through a
   proxy of the network of the profile, and its files keep to the folders of the policy (`GetSandboxReachAsync`). See
   [browser](browser.md).

@@ -1,0 +1,1181 @@
+using System.Buffers.Text;
+using System.Collections.Immutable;
+using System.Text.Json;
+using System.Threading.Channels;
+using CodeAlta.Catalog;
+using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.Protocol;
+using XenoAtom.Logging;
+
+namespace CodeAlta.Fleet.Server;
+
+/// <summary>How the control connection of a <see cref="FleetConnector"/> stands.</summary>
+public enum FleetConnectorState
+{
+    /// <summary>Not started, or stopped.</summary>
+    Stopped,
+
+    /// <summary>Connecting, or waiting before the next attempt after a failure.</summary>
+    Connecting,
+
+    /// <summary>Connected and welcomed: presence, publications and the directory flow.</summary>
+    Online,
+
+    /// <summary>The server does not answer; the connector tries again, with backoff.</summary>
+    Offline,
+
+    /// <summary>The device waits for a controller device to approve it; the connector asks again now and then.</summary>
+    PendingApproval,
+
+    /// <summary>The server does not know the device, or its proof failed; the connector tries again slowly.</summary>
+    Unauthenticated,
+
+    /// <summary>The device was revoked: the connector stopped for good.</summary>
+    Revoked,
+}
+
+/// <summary>What a <see cref="FleetConnector"/> connects with and publishes.</summary>
+public sealed partial class FleetConnectorOptions
+{
+    /// <summary>Gets the address of the server.</summary>
+    public required Uri ServerAddress { get; init; }
+
+    /// <summary>Gets the key of the device; the caller keeps and disposes it.</summary>
+    public required DeviceIdentity Identity { get; init; }
+
+    /// <summary>Gets the file of the outbox of the link (<c>fleet/servers/&lt;link&gt;/outbox.json</c>).</summary>
+    public required string OutboxPath { get; init; }
+
+    /// <summary>Gets what the device says of itself in the hello: kind (<c>node</c>, <c>desktop</c>), version, system.</summary>
+    public required FleetClientInfo Client { get; init; }
+
+    /// <summary>Gets the metadata keys of the spaces of the device's person at this server, which seal the titles it publishes, each with the key of its space; null publishes no title.</summary>
+    public FleetMetadataKeyring? MetadataKeys { get; init; }
+
+    /// <summary>
+    /// Gets the ids of the spaces of this instance linked to the server, which get a key; null for the spaces of the
+    /// sessions published.
+    /// </summary>
+    public Func<IReadOnlyCollection<string>>? LinkedSpaces { get; init; }
+
+    /// <summary>
+    /// Gets the ids of the spaces the machines of this device's person publish to the server, which a controller device keeps a
+    /// key of (makes it when the person has none, gives it to the person's devices) without publishing its own sessions of them:
+    /// <see cref="PublishesSpace"/> alone decides which sessions of this instance are published. Null for none.
+    /// </summary>
+    public Func<IReadOnlyCollection<string>>? MachineSpaces { get; init; }
+
+    /// <summary>Gets how often the metadata keys are read again (to wrap them to new devices of the person); every 30 seconds while a space has none.</summary>
+    public TimeSpan KeyRefreshInterval { get; init; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>Gets what there is to publish; null publishes nothing.</summary>
+    public IFleetPublicationSource? Source { get; init; }
+
+    /// <summary>
+    /// Gets the statistics facts of the instance, published as a versioned set per session for the sessions <see cref="Source"/>
+    /// publishes (<c>doc/fleet/statistics.md</c>); null publishes none.
+    /// </summary>
+    public IFleetStatisticsSource? Statistics { get; init; }
+
+    /// <summary>Gets the first quarter hour of the statistics published (<see cref="FleetStatisticsFamilies.QuarterOf"/>): the facts before it stay on the machine.</summary>
+    public long StatisticsFromQuarter { get; init; } = long.MinValue;
+
+    /// <summary>Gets the file of the outbox of the statistics; null for <c>statistics.json</c> beside <see cref="OutboxPath"/>.</summary>
+    public string? StatisticsOutboxPath { get; init; }
+
+    /// <summary>
+    /// Gets whether the sessions of a space are published to this server: only the spaces linked to it are (the default
+    /// space when null). Private sessions are never published, whatever this says.
+    /// </summary>
+    public Func<string?, bool> PublishesSpace { get; init; } = static _ => false;
+
+    /// <summary>Gets whether the connector follows the directory of the organization (a desktop does; a node does not).</summary>
+    public bool WatchDirectory { get; init; }
+
+    /// <summary>Gets the clock.</summary>
+    public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
+
+    /// <summary>Gets the first wait after a failure; it doubles up to <see cref="MaximumBackoff"/>, with jitter.</summary>
+    public TimeSpan MinimumBackoff { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>Gets how often a device that waits for its approval asks again.</summary>
+    public TimeSpan PendingApprovalRetry { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>Gets the longest wait between two attempts.</summary>
+    public TimeSpan MaximumBackoff { get; init; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>Gets how long the connector gathers the changes of the source before it reads it.</summary>
+    public TimeSpan PublishDelay { get; init; } = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>Gets how often the source is read even when it says nothing changed.</summary>
+    public TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>Gets what opens the transport to the control address; null opens a WebSocket.</summary>
+    public Func<Uri, CancellationToken, Task<IFleetTransport>>? ConnectTransport { get; init; }
+
+    /// <summary>
+    /// Gets what serves a relayed channel the server offers this device (<c>relay.incoming</c>): it is given the stream of
+    /// the relay, which it owns, and runs the node's side of the channel on it. Null declines every relay.
+    /// </summary>
+    public Func<FleetRelayIncoming, Stream, CancellationToken, Task>? AcceptRelay { get; init; }
+
+    /// <summary>Gets the file that pins the first entry of the device list of the server (<see cref="FleetOrganizationDevices"/>); null pins it in memory.</summary>
+    public string? DeviceListPinPath { get; init; }
+
+    /// <summary>
+    /// Gets the pin of the server's own certificate (<c>altaserver run --tls self</c>, <see cref="FleetServerCertificates"/>):
+    /// the control connection, the relays and the calls of the device list then trust that key only. Null validates the
+    /// certificate as usual.
+    /// </summary>
+    public string? CertificatePin { get; init; }
+
+    /// <summary>
+    /// Gets the anchored device list of the server, shared with <see cref="MetadataKeys"/> so that trust, signatures and
+    /// keys follow one verifier; null makes one on <see cref="DeviceListPinPath"/>.
+    /// </summary>
+    public FleetOrganizationDevices? Devices { get; init; }
+
+    /// <summary>Gets what wraps the stream of each relay, for tests that look at the bytes the server pipes; null for none.</summary>
+    public Func<Stream, Stream>? WrapRelayStream { get; init; }
+
+    /// <summary>
+    /// Gets what receives the fleet's telemetry setting the server sends (<see cref="FleetServerMethods.TelemetrySettings"/>),
+    /// as signed: it verifies the signature before it applies anything. It is given one setting at a time, in the order
+    /// the server sent them. Null ignores it.
+    /// </summary>
+    public Func<FleetSignedTelemetrySettings, CancellationToken, Task>? TelemetrySettings { get; init; }
+
+    /// <summary>Gets the instruments of the connections and publications; null for none.</summary>
+    public Telemetry.FleetMetrics? Metrics { get; init; }
+
+    /// <summary>
+    /// Gets what receives an update the fleet asks of this node (<see cref="FleetServerMethods.UpdateInstruction"/>); it
+    /// verifies the signed manifest itself. Null ignores it.
+    /// </summary>
+    public Func<FleetUpdateInstruction, CancellationToken, Task>? UpdateInstruction { get; init; }
+
+    /// <summary>Gets what receives a campaign cancelled by the fleet (<see cref="FleetServerMethods.UpdateCancel"/>); null ignores it.</summary>
+    public Func<FleetUpdateCancel, CancellationToken, Task>? UpdateCancel { get; init; }
+
+    /// <summary>
+    /// Gets what receives the update policy of the fleet (<see cref="FleetServerMethods.UpdatePolicy"/>), as signed: it
+    /// verifies the signature itself. It is given one event of the updates at a time, in the order the server sent them.
+    /// Null ignores it.
+    /// </summary>
+    public Func<FleetSignedUpdateDocument, CancellationToken, Task>? UpdatePolicy { get; init; }
+
+    /// <summary>
+    /// Gets where this node stands in the campaign of this server, sent with its presence and once it connects
+    /// (<see cref="FleetServerMethods.UpdateReport"/>); null for none.
+    /// </summary>
+    public Func<FleetUpdateReport?>? UpdateReport { get; init; }
+}
+
+/// <summary>
+/// The control connection of this instance to one CodeAlta Server (<c>doc/fleet/protocol.md</c>): the handshake with the
+/// device proof, reconnection with backoff and jitter, presence in each heartbeat, the inventory of the machine and the
+/// facts of its published sessions from an outbox (versions per session, acknowledgements, resumed from the cursors of the
+/// welcome), and the directory of the organization for a desktop.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Only the sessions of the spaces linked to the server are published (<see cref="FleetConnectorOptions.PublishesSpace"/>),
+/// and never a Private one: no fact, not listed. A session published before that is made Private, or whose space is
+/// unlinked, has its facts withdrawn (<c>facts.withdraw</c>). Facts carry the allow-list, and the title sealed with
+/// the metadata key of the session's space (<see cref="FleetConnectorOptions.MetadataKeys"/>), which the server cannot read.
+/// </para>
+/// <para>One loop owns the connection and the outbox; the source and the callers only wake it.</para>
+/// </remarks>
+public sealed partial class FleetConnector : IAsyncDisposable
+{
+    /// <summary>The most facts in one batch, as the server takes them.</summary>
+    public const int MaxFactsPerBatch = 500;
+
+    /// <summary>The most statistics sets in one batch.</summary>
+    public const int MaxStatisticsSetsPerBatch = 200;
+
+    /// <summary>The most statistics rows in one batch: a batch stays far below the largest frame.</summary>
+    public const int MaxStatisticsRowsPerBatch = 4000;
+
+    /// <summary>The most rows of the set of one session; a larger one is not published (a log says so).</summary>
+    public const int MaxStatisticsRowsPerSet = 8000;
+
+    private readonly FleetConnectorOptions _options;
+    private readonly FleetPublicationOutbox _outbox;
+    private readonly FleetStatisticsOutbox? _statistics;
+    // Whether the server of the connection keeps statistics: announced in its welcome.
+    private bool _statisticsServed;
+    // The sessions whose set is too large to publish, logged once.
+    private readonly HashSet<string> _statisticsTooLarge = new(StringComparer.Ordinal);
+    private readonly Channel<bool> _wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
+    private readonly CancellationTokenSource _stop = new();
+    private readonly Logger _logger = LogManager.GetLogger("CodeAlta.Fleet.Server");
+    private readonly Lock _gate = new();
+    private readonly HashSet<Task> _relays = [];
+    private Task _loop = Task.CompletedTask;
+    // The last telemetry setting taken or waiting: each one waits for the one before, so that the check of a setting
+    // against the one held is never raced by another push, and an older one never lands after a newer one.
+    private Task _telemetryTail = Task.CompletedTask;
+    // The last update instruction or cancellation taken or waiting, for the same reason.
+    private Task _updateTail = Task.CompletedTask;
+    private FleetDirectoryView _directory = FleetDirectoryView.Empty;
+    // The changes received while a directory.watch waits for its snapshot, replayed after it; null when none waits.
+    private List<FleetDirectoryChange>? _directoryPending;
+    private FleetConnectorState _state;
+    private FleetError? _lastError;
+    private FleetConnection? _connection;
+    private int _started;
+    private TimeSpan _heartbeat = TimeSpan.FromMilliseconds(FleetConnectionPolicy.DefaultHeartbeatMilliseconds);
+    private int _activeSessions;
+    // When the metadata key was last read, in UTC ticks; 0 to read it at the next publication.
+    private long _keysReadAt;
+    // Completed once a read of the keys ends, then replaced: what RefreshKeysAsync waits for.
+    private TaskCompletionSource _keysRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Initializes a new instance of the <see cref="FleetConnector"/> class; <see cref="Start"/> connects.</summary>
+    /// <param name="options">The server, the device and what to publish.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    public FleetConnector(FleetConnectorOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options.ServerAddress);
+        ArgumentNullException.ThrowIfNull(options.Identity);
+        _options = options;
+        _outbox = FleetPublicationOutbox.Load(options.OutboxPath);
+        if (options.Statistics is not null)
+        {
+            _statistics = FleetStatisticsOutbox.Load(options.StatisticsOutboxPath
+                ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(options.OutboxPath)) ?? ".", "statistics.json"));
+        }
+
+        Devices = options.Devices ?? options.MetadataKeys?.Devices ?? new FleetOrganizationDevices(options.ServerAddress, options.Identity, options.DeviceListPinPath) { CertificatePin = options.CertificatePin };
+        InitializeAccess();
+        InitializePolicy();
+    }
+
+    /// <summary>Gets the devices of the organization of the server, as this device verified its signed device list.</summary>
+    public FleetOrganizationDevices Devices { get; }
+
+    /// <summary>Raised when <see cref="State"/> changes.</summary>
+    public event Action<FleetConnector>? StateChanged;
+
+    /// <summary>Raised when the directory changes.</summary>
+    public event Action<FleetConnector>? DirectoryChanged;
+
+    /// <summary>Raised after a batch of facts was answered, with the answer.</summary>
+    public event Action<FleetConnector, FleetFactsPublishResult>? Published;
+
+    /// <summary>Raised after a withdrawal of facts was answered, with the answer.</summary>
+    public event Action<FleetConnector, FleetFactsWithdrawResult>? Withdrawn;
+
+    /// <summary>Raised after a batch of statistics sets was answered, with the answer.</summary>
+    public event Action<FleetConnector, FleetStatisticsPublishResult>? StatisticsPublished;
+
+    /// <summary>Raised after a withdrawal of statistics sets was answered, with the answer.</summary>
+    public event Action<FleetConnector, FleetStatisticsWithdrawResult>? StatisticsWithdrawn;
+
+    /// <summary>Gets the address of the server.</summary>
+    public Uri ServerAddress => _options.ServerAddress;
+
+    /// <summary>Gets how the connection stands.</summary>
+    public FleetConnectorState State { get { lock (_gate) return _state; } }
+
+    /// <summary>Gets the last refusal or failure, or null.</summary>
+    public FleetError? LastError { get { lock (_gate) return _lastError; } }
+
+    /// <summary>Gets the directory of the organization, as the server last said it (empty without <see cref="FleetConnectorOptions.WatchDirectory"/>).</summary>
+    public FleetDirectoryView Directory => Volatile.Read(ref _directory);
+
+    /// <summary>Gets the metadata keys of the spaces of the device's person, which open the titles of the directory; null for a connector without keys.</summary>
+    public FleetMetadataKeyring? MetadataKeys => _options.MetadataKeys;
+
+    /// <summary>Gets the cursors the outbox believes the server holds.</summary>
+    internal FleetPublicationCursors Cursors => _outbox.Cursors;
+
+    /// <summary>Starts the loop of the connection; a second call does nothing.</summary>
+    /// <exception cref="ObjectDisposedException">The connector was disposed.</exception>
+    public void Start()
+    {
+        ObjectDisposedException.ThrowIf(_stop.IsCancellationRequested, this);
+        if (Interlocked.Exchange(ref _started, 1) != 0) return;
+        if (_options.Source is { } source) source.Changed += Nudge;
+        if (_options.Statistics is { } statistics) statistics.Changed += Nudge;
+        _loop = Task.Run(() => RunAsync(_stop.Token));
+    }
+
+    /// <summary>Asks the connector to read its source again soon: something to publish may have changed.</summary>
+    public void Nudge() => _wake.Writer.TryWrite(true);
+
+    /// <summary>Asks the connector to read the metadata key again soon: a device of the person was approved and needs its copy.</summary>
+    public void RefreshKeys()
+    {
+        Volatile.Write(ref _keysReadAt, 0);
+        Nudge();
+    }
+
+    /// <summary>
+    /// Asks the connector to read the metadata keys again now, for every space it links, and waits for that read: the connector is the
+    /// one that reads its keyring (<see cref="MetadataKeys"/>), so what needs a key asks it here rather than reading the keys itself.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the wait; the read goes on.</param>
+    /// <returns>A task that completes once the connector read the keys, or tried and failed; never while it is not connected.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    public Task RefreshKeysAsync(CancellationToken cancellationToken)
+    {
+        var read = Volatile.Read(ref _keysRead).Task;
+        RefreshKeys();
+        return read.WaitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Opens a relayed stream to another device of the organization (<c>relay.open</c>): the server asks that device,
+    /// and once it accepted, this side opens its WebSocket with its ticket. What runs on the stream is the caller's: the
+    /// whole channel stack, with the device's key pinned, so that the server sees ciphertext only.
+    /// </summary>
+    /// <param name="targetDeviceId">The device to reach.</param>
+    /// <param name="cancellationToken">Cancels the opening.</param>
+    /// <returns>The stream of the relay; the caller owns it.</returns>
+    /// <exception cref="ArgumentException"><paramref name="targetDeviceId"/> is empty.</exception>
+    /// <exception cref="FleetConnectionClosedException">The control connection is not open.</exception>
+    /// <exception cref="FleetException">The server refused the relay (<see cref="FleetRelayErrorCodes"/>, <see cref="FleetErrorCodes.Forbidden"/>).</exception>
+    /// <exception cref="System.Net.WebSockets.WebSocketException">The side of the relay did not open.</exception>
+    public async Task<Stream> OpenRelayAsync(string targetDeviceId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(targetDeviceId);
+        var connection = Volatile.Read(ref _connection)
+            ?? throw new FleetConnectionClosedException(new FleetConnectionCloseInfo(FleetErrorCodes.ConnectionClosed, "The control connection to the server is not open.", false));
+        var ticket = await connection.SendRequestAsync(FleetServerMethods.RelayOpen, new FleetRelayOpen(targetDeviceId), FleetServerJsonContext.Default.FleetRelayOpen,
+            FleetServerJsonContext.Default.FleetRelayTicket, null, cancellationToken).ConfigureAwait(false)
+            ?? throw new FleetException(FleetErrorCodes.ProtocolError, null, "The server gave no ticket for the relay.");
+        var stream = await FleetRelayStreams.ConnectAsync(_options.ServerAddress, ticket, _options.Identity, _options.TimeProvider, _options.CertificatePin, cancellationToken).ConfigureAwait(false);
+        return _options.WrapRelayStream is { } wrap ? wrap(stream) : stream;
+    }
+
+    /// <summary>Stops the connection and waits for the loop to end.</summary>
+    /// <returns>A task that completes once stopped.</returns>
+    public async ValueTask DisposeAsync()
+    {
+        if (_options.Source is { } source) source.Changed -= Nudge;
+        if (_options.Statistics is { } statistics) statistics.Changed -= Nudge;
+        if (!_stop.IsCancellationRequested) await _stop.CancelAsync().ConfigureAwait(false);
+        try { await _loop.ConfigureAwait(false); }
+        catch (OperationCanceledException) { }
+        Task[] relays;
+        lock (_gate) relays = [.. _relays];
+        await Task.WhenAll(relays).ConfigureAwait(false);
+        SetState(FleetConnectorState.Stopped, LastError);
+        _stop.Dispose();
+    }
+
+    private async Task RunAsync(CancellationToken stop)
+    {
+        var attempt = 0;
+        var connectedBefore = false;
+        while (!stop.IsCancellationRequested)
+        {
+            SetState(FleetConnectorState.Connecting, LastError);
+            TimeSpan wait;
+            try
+            {
+                await using var connection = await ConnectAsync(stop).ConfigureAwait(false);
+                attempt = 0;
+                _options.Metrics?.ConnectorOnline(_options.ServerAddress, connectedBefore);
+                connectedBefore = true;
+                var closing = await ServeAsync(connection, stop).ConfigureAwait(false);
+                if (!stop.IsCancellationRequested) _options.Metrics?.ConnectorFailed(_options.ServerAddress, closing?.Code ?? FleetErrorCodes.ConnectionClosed);
+                if (closing?.Code == FleetErrorCodes.Revoked)
+                {
+                    SetState(FleetConnectorState.Revoked, closing);
+                    return;
+                }
+
+                SetState(FleetConnectorState.Offline, closing ?? new FleetError(FleetErrorCodes.ConnectionClosed, FleetErrorHints.Reconnect, "The connection closed."));
+                wait = Backoff(attempt++);
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (FleetHandshakeException exception)
+            {
+                var error = exception.Error;
+                _options.Metrics?.ConnectorFailed(_options.ServerAddress, error.Code);
+                switch (error.Code)
+                {
+                    case FleetErrorCodes.Revoked:
+                        SetState(FleetConnectorState.Revoked, error);
+                        return;
+                    case FleetErrorCodes.PendingApproval:
+                        SetState(FleetConnectorState.PendingApproval, error);
+                        wait = _options.PendingApprovalRetry;
+                        break;
+                    case FleetErrorCodes.Unauthenticated:
+                        SetState(FleetConnectorState.Unauthenticated, error);
+                        wait = _options.MaximumBackoff;
+                        break;
+                    case FleetErrorCodes.ServerBusy when error.RetryAfterSeconds is > 0:
+                        SetState(FleetConnectorState.Offline, error);
+                        wait = TimeSpan.FromSeconds(Math.Min(error.RetryAfterSeconds.Value, 3600));
+                        break;
+                    default:
+                        SetState(FleetConnectorState.Offline, error);
+                        wait = Backoff(attempt++);
+                        break;
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !stop.IsCancellationRequested)
+            {
+                // A connection that fails, an answer that does not read, an outbox that cannot be written: the connector
+                // stays alive and tries again, so that a fault of one attempt never ends the publications of the instance.
+                if (exception is not (IOException or TimeoutException or System.Net.WebSockets.WebSocketException or HttpRequestException or FleetException)
+                    && LogManager.IsInitialized)
+                    _logger.Warn(exception, $"The control connection to {FleetServerAddress.Format(_options.ServerAddress)} failed");
+                _options.Metrics?.ConnectorFailed(_options.ServerAddress, FleetErrorCodes.TransportError);
+                SetState(FleetConnectorState.Offline, new FleetError(FleetErrorCodes.TransportError, FleetErrorHints.Reconnect, exception.Message));
+                wait = Backoff(attempt++);
+            }
+
+            try { await Task.Delay(wait, _options.TimeProvider, stop).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+        }
+    }
+
+    private async Task<FleetConnection> ConnectAsync(CancellationToken stop)
+    {
+        var address = FleetServerAddress.ControlAddress(_options.ServerAddress);
+        var transport = _options.ConnectTransport is { } connect
+            ? await connect(address, stop).ConfigureAwait(false)
+            : await FleetWebSocketTransport.ConnectAsync(address, socket => FleetServerCertificates.Configure(socket, _options.CertificatePin), stop).ConfigureAwait(false);
+        FleetWelcome welcome;
+        try
+        {
+            welcome = await FleetHandshake.ConnectAsync(transport, new FleetHandshakeClientOptions
+            {
+                Protocol = new FleetProtocolRange(1, 1),
+                Client = _options.Client,
+                ResumeCursors = JsonSerializer.SerializeToElement(_outbox.Cursors with { Statistics = _statistics?.Acked ?? 0 },
+                    FleetServerJsonContext.Default.FleetPublicationCursors),
+            }, new Signer(_options.Identity), stop).ConfigureAwait(false);
+        }
+        catch
+        {
+            await transport.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+
+        FleetPublicationCursors? cursors = null;
+        try { cursors = welcome.Cursors?.Deserialize(FleetServerJsonContext.Default.FleetPublicationCursors); }
+        catch (JsonException) { /* A welcome without cursors of ours: the server holds nothing of this device. */ }
+        _outbox.Resume(cursors);
+        // A server that does not announce statistics is never sent any: an older server, or one that keeps none.
+        _statisticsServed = _statistics is not null && welcome.Features?.Contains(FleetStatisticsMethods.Feature, StringComparer.Ordinal) == true;
+        if (_statisticsServed) _statistics!.Resume(cursors?.Statistics ?? 0);
+        Volatile.Write(ref _keysReadAt, 0);
+        var connection = new FleetConnection(transport, FleetConnectionOptions.FromPolicy(welcome.Policy));
+        _heartbeat = TimeSpan.FromMilliseconds(Math.Clamp(welcome.Policy.HeartbeatMilliseconds, 1_000, 120_000));
+        return connection;
+    }
+
+    // One connection: events in, publications out, until it closes or the connector stops. Gives the error of a connection.closing.
+    private async Task<FleetError?> ServeAsync(FleetConnection connection, CancellationToken stop)
+    {
+        FleetError? closing = null;
+        connection.SetEventHandler((fleetEvent, _) =>
+        {
+            switch (fleetEvent.Event)
+            {
+                case FleetServerMethods.ConnectionClosing:
+                    try { closing = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetError); }
+                    catch (JsonException) { closing = new FleetError(FleetErrorCodes.ConnectionClosed); }
+                    break;
+                case FleetServerMethods.DirectoryChanged:
+                    try
+                    {
+                        if (fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetDirectoryChange) is { } change) ApplyDirectory(change);
+                    }
+                    catch (JsonException) { /* A change of a newer server this one does not read. */ }
+                    break;
+                case FleetServerMethods.RelayIncoming:
+                    FleetRelayIncoming? incoming = null;
+                    try { incoming = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetRelayIncoming); }
+                    catch (JsonException) { /* An offer this device does not read lapses. */ }
+                    if (incoming is { RelayId.Length: > 0 }) Track(Task.Run(() => AnswerRelayAsync(connection, incoming, stop), CancellationToken.None));
+                    break;
+                case FleetServerMethods.TelemetrySettings when _options.TelemetrySettings is { } receive:
+                    FleetSignedTelemetrySettings? settings = null;
+                    try { settings = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetSignedTelemetrySettings); }
+                    catch (JsonException) { /* A setting this device does not read is not applied. */ }
+                    // Verified beside the reader of the connection (the check reads the device list from the server), one at a time.
+                    if (settings is { Payload.Length: > 0 }) QueueTelemetry(receive, settings, stop);
+                    break;
+                case FleetServerMethods.UpdateInstruction when _options.UpdateInstruction is { } instruct:
+                    FleetUpdateInstruction? instruction = null;
+                    try { instruction = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetUpdateInstruction); }
+                    catch (JsonException) { /* An instruction this node does not read installs nothing. */ }
+                    // Verified beside the reader of the connection: the check reads the device list from the server.
+                    if (instruction is { CampaignId.Length: > 0 }) QueueUpdate(() => instruct(instruction, stop), stop);
+                    break;
+                case FleetServerMethods.UpdateCancel when _options.UpdateCancel is { } cancel:
+                    FleetUpdateCancel? cancelled = null;
+                    try { cancelled = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetUpdateCancel); }
+                    catch (JsonException) { /* Not read: the campaign goes on. */ }
+                    if (cancelled is { CampaignId.Length: > 0 }) QueueUpdate(() => cancel(cancelled, stop), stop);
+                    break;
+                case FleetServerMethods.UpdatePolicy when _options.UpdatePolicy is { } receivePolicy:
+                    FleetSignedUpdateDocument? policy = null;
+                    try { policy = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetSignedUpdateDocument); }
+                    catch (JsonException) { /* A policy this node does not read changes nothing. */ }
+                    // In the order of the instructions: a policy that arrives first takes away what it no longer allows.
+                    if (policy is { Payload.Length: > 0 }) QueueUpdate(() => receivePolicy(policy, stop), stop);
+                    break;
+                case FleetAutomationMethods.Assigned:
+                    OnAutomationsAssigned(fleetEvent, stop);
+                    break;
+                case FleetAutomationMethods.Run:
+                    OnAutomationRun(fleetEvent, stop);
+                    break;
+                case FleetHookMethods.Event:
+                    OnHookEvent(fleetEvent, stop);
+                    break;
+                case FleetAutomationMethods.TakeOver:
+                    OnAutomationTakeOver(fleetEvent, stop);
+                    break;
+                case Protocol.Api.FleetSecretMethods.Changed:
+                    _options.SecretsChanged?.Invoke();
+                    break;
+                case Protocol.Api.FleetBudgetMethods.Changed:
+                case Protocol.Api.FleetBudgetMethods.NotificationsChanged:
+                    _options.BudgetsChanged?.Invoke();
+                    break;
+                case Protocol.Api.FleetAccessMethods.Changed:
+                    RefreshAccess(stop);
+                    // Who signs the policy follows the access document.
+                    RefreshPolicy(stop);
+                    break;
+                case FleetPolicyMethods.Changed:
+                    RefreshPolicy(stop);
+                    break;
+            }
+
+            return ValueTask.CompletedTask;
+        });
+        connection.Start();
+        Volatile.Write(ref _connection, connection);
+        try
+        {
+            SetState(FleetConnectorState.Online, null);
+            if (_options.WatchDirectory) await WatchDirectoryAsync(connection, stop).ConfigureAwait(false);
+            // Where this node stands in a campaign, again on each connection: the server may have missed the last report.
+            if (_options.UpdateReport?.Invoke() is { } report) await SendUpdateReportAsync(connection, report, stop).ConfigureAwait(false);
+            // The runs of the automations this server gave, again on each connection: the server may have missed some.
+            OnAutomationsOnline(stop);
+            // The access document, again on each connection: a version signed while this device was away applies now.
+            RefreshAccess(stop);
+            // The policy and its kill switch too.
+            RefreshPolicy(stop);
+
+            var lastPresence = DateTimeOffset.MinValue;
+            var lastRead = DateTimeOffset.MinValue;
+            var dirty = true;
+            while (!stop.IsCancellationRequested && connection.State == FleetConnectionState.Open)
+            {
+                var now = _options.TimeProvider.GetUtcNow();
+                if (dirty || now - lastRead >= _options.PollInterval)
+                {
+                    var active = await PublishAsync(connection, stop).ConfigureAwait(false);
+                    lastRead = _options.TimeProvider.GetUtcNow();
+                    dirty = false;
+                    if (now - lastPresence >= _heartbeat || active != _activeSessions)
+                    {
+                        await SendPresenceAsync(connection, active, stop).ConfigureAwait(false);
+                        lastPresence = now;
+                    }
+                }
+                else if (now - lastPresence >= _heartbeat)
+                {
+                    await SendPresenceAsync(connection, _activeSessions, stop).ConfigureAwait(false);
+                    lastPresence = now;
+                }
+
+                var next = Min(_heartbeat - (now - lastPresence), _options.PollInterval - (now - lastRead));
+                var woken = await WaitAsync(connection, next, stop).ConfigureAwait(false);
+                if (woken)
+                {
+                    // Changes come in bursts (a turn writes many records): gathered for a moment, then read once.
+                    try { await Task.Delay(_options.PublishDelay, _options.TimeProvider, stop).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { break; }
+                    _wake.Reader.TryRead(out _);
+                    dirty = true;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is FleetConnectionClosedException or IOException or TimeoutException or System.Net.WebSockets.WebSocketException)
+        {
+            // The connection closed under a request: its completion says why.
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+            await CloseQuietlyAsync(connection).ConfigureAwait(false);
+            throw;
+        }
+        finally
+        {
+            Volatile.Write(ref _connection, null);
+        }
+
+        if (stop.IsCancellationRequested) await CloseQuietlyAsync(connection).ConfigureAwait(false);
+        var completed = await connection.Completion.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        return closing ?? (completed.IsClean ? null : new FleetError(completed.Code, FleetErrorHints.Reconnect, completed.Message));
+    }
+
+    // An offered relay, answered beside the reader of the connection: accepted when this device serves relayed
+    // channels, declined otherwise. The handler owns the stream once it opened.
+    private async Task AnswerRelayAsync(FleetConnection connection, FleetRelayIncoming incoming, CancellationToken stop)
+    {
+        try
+        {
+            if (_options.AcceptRelay is not { } accept)
+            {
+                await connection.SendRequestAsync(FleetServerMethods.RelayClose, new FleetRelayClose(incoming.RelayId, "declined"), FleetServerJsonContext.Default.FleetRelayClose,
+                    FleetServerJsonContext.Default.FleetError, null, stop).ConfigureAwait(false);
+                return;
+            }
+
+            var ticket = await connection.SendRequestAsync(FleetServerMethods.RelayAccept, new FleetRelayRef(incoming.RelayId), FleetServerJsonContext.Default.FleetRelayRef,
+                FleetServerJsonContext.Default.FleetRelayTicket, null, stop).ConfigureAwait(false);
+            if (ticket is null) return;
+            var stream = await FleetRelayStreams.ConnectAsync(_options.ServerAddress, ticket, _options.Identity, _options.TimeProvider, _options.CertificatePin, stop).ConfigureAwait(false);
+            if (_options.WrapRelayStream is { } wrap) stream = wrap(stream);
+            await accept(incoming, stream, stop).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is FleetException or FleetConnectionClosedException or IOException or TimeoutException
+            or System.Net.WebSockets.WebSocketException or HttpRequestException or InvalidOperationException or OperationCanceledException)
+        {
+            if (LogManager.IsInitialized) _logger.Info($"The relay {incoming.RelayId} from {incoming.From} was not served: {exception.Message}");
+        }
+    }
+
+    private void QueueTelemetry(Func<FleetSignedTelemetrySettings, CancellationToken, Task> receive, FleetSignedTelemetrySettings settings, CancellationToken stop)
+    {
+        Task next;
+        lock (_gate)
+        {
+            var previous = _telemetryTail;
+            _telemetryTail = next = Task.Run(async () =>
+            {
+                await previous.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                await ReceiveTelemetryAsync(receive, settings, stop).ConfigureAwait(false);
+            }, CancellationToken.None);
+        }
+
+        Track(next);
+    }
+
+    // The update instructions and cancellations of the server are taken one at a time, in the order they came: the
+    // node checks each against the last one it accepted, which two at once could both pass.
+    private void QueueUpdate(Func<Task> receive, CancellationToken stop)
+    {
+        Task next;
+        lock (_gate)
+        {
+            var previous = _updateTail;
+            _updateTail = next = Task.Run(async () =>
+            {
+                await previous.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                await ReceiveUpdateAsync(receive, stop).ConfigureAwait(false);
+            }, CancellationToken.None);
+        }
+
+        Track(next);
+    }
+
+    /// <summary>Reports where this node stands in a campaign of this server, when it is connected.</summary>
+    /// <param name="report">The report.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>Whether the server received it; false while offline (the report is sent again on the next connection).</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="report"/> is null.</exception>
+    public async Task<bool> ReportUpdateAsync(FleetUpdateReport report, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        if (Volatile.Read(ref _connection) is not { State: FleetConnectionState.Open } connection) return false;
+        try
+        {
+            await SendUpdateReportAsync(connection, report, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (exception is FleetException or FleetConnectionClosedException or IOException or TimeoutException
+            or System.Net.WebSockets.WebSocketException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static Task SendUpdateReportAsync(FleetConnection connection, FleetUpdateReport report, CancellationToken cancellationToken)
+        => connection.SendRequestAsync(FleetServerMethods.UpdateReport, JsonSerializer.SerializeToElement(report, FleetServerJsonContext.Default.FleetUpdateReport), null,
+            cancellationToken);
+
+    private async Task ReceiveUpdateAsync(Func<Task> receive, CancellationToken stop)
+    {
+        try
+        {
+            await receive().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or FleetServerException or FleetDeviceListException
+            or UnauthorizedAccessException or OperationCanceledException or FleetException)
+        {
+            if (LogManager.IsInitialized) _logger.Warn($"The update asked by {FleetServerAddress.Format(_options.ServerAddress)} was not taken: {exception.Message}");
+        }
+    }
+
+    private async Task ReceiveTelemetryAsync(Func<FleetSignedTelemetrySettings, CancellationToken, Task> receive, FleetSignedTelemetrySettings settings, CancellationToken stop)
+    {
+        try
+        {
+            await receive(settings, stop).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or FleetServerException or FleetDeviceListException
+            or UnauthorizedAccessException or OperationCanceledException)
+        {
+            if (LogManager.IsInitialized) _logger.Warn($"The telemetry setting of {FleetServerAddress.Format(_options.ServerAddress)} was not applied: {exception.Message}");
+        }
+    }
+
+    private void Track(Task relay)
+    {
+        lock (_gate) _relays.Add(relay);
+        _ = relay.ContinueWith(done =>
+        {
+            lock (_gate) _relays.Remove(done);
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
+
+    // Reads the source and sends what the server lacks: the inventory when it changed, then the facts by batches. Gives how many published sessions run.
+    private async Task<int> PublishAsync(FleetConnection connection, CancellationToken stop)
+    {
+        if (_options.Source is not { } source) return 0;
+        var inventory = await source.ReadInventoryAsync(stop).ConfigureAwait(false);
+        if (_outbox.Inventory(inventory) is { } publication)
+        {
+            var ack = await connection.SendRequestAsync(FleetServerMethods.InventoryPublish, publication.Publication, FleetServerJsonContext.Default.FleetInventoryPublish,
+                FleetServerJsonContext.Default.FleetPublishAck, null, stop).ConfigureAwait(false);
+            if (ack is not null) _outbox.InventoryAcknowledged(ack.Ack, publication.Publication.Sequence, publication.Hash);
+        }
+
+        // The person of a session is told to the server of their organization only: another one has its own people with these ids.
+        var organization = Devices.Current?.OrganizationId;
+        var all = (await source.ReadSessionsAsync(stop).ConfigureAwait(false))
+            .Select(session => session.PersonOrganizationId is { } of && of != organization ? session with { PersonId = null, PersonOrganizationId = null } : session).ToArray();
+        var sessions = all.Where(IsPublished).ToArray();
+        await ReadKeysAsync(sessions, stop).ConfigureAwait(false);
+        // A session published before and not now (made Private, its space unlinked) has its facts taken back; a session
+        // gone from the instance (deleted, moved away) keeps them, as statistics keep the facts of deleted sessions.
+        var withdrawals = _outbox.Withdrawals(all.Where(session => !IsPublished(session)).Select(static session => session.SessionId), MaxFactsPerBatch);
+        if (withdrawals.Count > 0)
+        {
+            var withdrawn = await connection.SendRequestAsync(FleetServerMethods.FactsWithdraw, new FleetFactsWithdraw(withdrawals),
+                FleetServerJsonContext.Default.FleetFactsWithdraw, FleetServerJsonContext.Default.FleetFactsWithdrawResult, null, stop).ConfigureAwait(false);
+            if (withdrawn is not null)
+            {
+                _outbox.Withdrawn(withdrawals);
+                Withdrawn?.Invoke(this, withdrawn);
+            }
+        }
+
+        _outbox.Retain([.. sessions.Select(static session => session.SessionId)]);
+        var first = true;
+        while (!stop.IsCancellationRequested)
+        {
+            var pending = _outbox.Pending(sessions, MaxFactsPerBatch, KeyOf, SignPersonOf);
+            if (first) _options.Metrics?.Backlog(_options.ServerAddress, pending.Count);
+            first = false;
+            if (pending.Count == 0) break;
+            var batch = _outbox.Batch(pending);
+            var result = await connection.SendRequestAsync(FleetServerMethods.FactsPublish, batch, FleetServerJsonContext.Default.FleetFactsPublish,
+                FleetServerJsonContext.Default.FleetFactsPublishResult, null, stop).ConfigureAwait(false);
+            if (result is null) break;
+            _outbox.Acknowledged(result);
+            _options.Metrics?.FactsPublished(_options.ServerAddress, result.Applied, result.Unchanged, result.Stale.Count);
+            if (result.Stale.Count > 0) _logger.Warn($"The server refused the facts of {result.Stale.Count} session(s) as stale: another machine owns them now.");
+            Published?.Invoke(this, result);
+        }
+
+        try
+        {
+            await PublishStatisticsAsync(connection, all, sessions, stop).ConfigureAwait(false);
+        }
+        catch (FleetException exception) when (exception is not FleetConnectionClosedException)
+        {
+            // A refusal of the server (a set it does not take, a method it lacks) stops the statistics of this connection, never
+            // the connection: presence and the facts of sessions go on, and the next connection tries the statistics again.
+            _statisticsServed = false;
+            if (LogManager.IsInitialized)
+                _logger.Warn($"The statistics were not published to {FleetServerAddress.Format(_options.ServerAddress)}: {exception.Error.Code} {exception.Message}");
+        }
+
+        var active = sessions.Count(static session => session.State == FleetSessionStates.Running);
+        return active;
+    }
+
+    // The statistics of the sessions published, as a set per session: read again when the revision of its facts, its epoch or
+    // its project changed, and sent when its set changed. The sessions no longer published have their sets taken back; Private
+    // sessions and those of spaces not linked to this server never had one. A session moved to another machine keeps its set:
+    // what this machine counted of it is this machine's, whoever owns the session now, and is still sent when it changed
+    // before the move but was not published yet.
+    private async Task PublishStatisticsAsync(FleetConnection connection, IReadOnlyList<FleetLocalSession> all, IReadOnlyList<FleetLocalSession> published,
+        CancellationToken stop)
+    {
+        if (_options.Statistics is not { } source || _statistics is not { } outbox || !_statisticsServed) return;
+        if (_options.Source is { } sessions && await sessions.ReadRetainedSessionsAsync(stop).ConfigureAwait(false) is { Count: > 0 } retained)
+        {
+            all = [.. all, .. retained];
+            published = [.. published, .. retained.Where(IsPublished)];
+        }
+
+        var withdrawals = outbox.Withdrawals(all.Where(session => !IsPublished(session)).Select(static session => session.SessionId), MaxStatisticsSetsPerBatch);
+        if (withdrawals.Count > 0)
+        {
+            var withdrawn = await connection.SendRequestAsync(FleetStatisticsMethods.Withdraw, new FleetStatisticsWithdraw(withdrawals),
+                FleetStatisticsJsonContext.Default.FleetStatisticsWithdraw, FleetStatisticsJsonContext.Default.FleetStatisticsWithdrawResult, null, stop).ConfigureAwait(false);
+            if (withdrawn is not null)
+            {
+                outbox.Withdrawn(withdrawals);
+                StatisticsWithdrawn?.Invoke(this, withdrawn);
+            }
+        }
+
+        outbox.Retain([.. published.Select(static session => session.SessionId)]);
+        var revisions = await source.ReadRevisionsAsync(stop).ConfigureAwait(false);
+        var sets = new List<FleetStatisticsSet>();
+        var rows = 0;
+        foreach (var session in published.OrderBy(static session => session.UpdatedAt))
+        {
+            if (!revisions.TryGetValue(session.SessionId, out var revision)) continue;
+            // The project travels as a blind index of the key of the session's space: without a key yet, it waits with the titles.
+            var projectKey = KeyOf(session) is { } key && session.ProjectIdentity is { Length: > 0 } identity ? FleetProjectKeys.Of(key, identity) : null;
+            // The space travels as the opaque id the server knows it by, which the budgets of a space count by.
+            var spaceKey = KeyOf(session)?.Grant?.SpaceId;
+            if (!outbox.NeedsRows(session.SessionId, revision, session.Epoch, projectKey, spaceKey)) continue;
+            var read = await source.ReadRowsAsync(session.SessionId, _options.StatisticsFromQuarter, stop).ConfigureAwait(false);
+            if (read.Count > MaxStatisticsRowsPerSet)
+            {
+                if (_statisticsTooLarge.Add(session.SessionId) && LogManager.IsInitialized)
+                    _logger.Warn($"The statistics of the session {session.SessionId} have {read.Count} rows, more than {MaxStatisticsRowsPerSet}: they are not published.");
+                continue;
+            }
+
+            if (outbox.Record(session.SessionId, revision, session.Epoch, projectKey, read, spaceKey) is not { } set) continue;
+            if (sets.Count > 0 && (sets.Count >= MaxStatisticsSetsPerBatch || rows + set.Rows.Count > MaxStatisticsRowsPerBatch))
+            {
+                await SendStatisticsAsync(connection, outbox, sets, stop).ConfigureAwait(false);
+                sets.Clear();
+                rows = 0;
+            }
+
+            sets.Add(set);
+            rows += set.Rows.Count;
+        }
+
+        if (sets.Count > 0) await SendStatisticsAsync(connection, outbox, sets, stop).ConfigureAwait(false);
+        outbox.SaveIfChanged();
+    }
+
+    private async Task SendStatisticsAsync(FleetConnection connection, FleetStatisticsOutbox outbox, IReadOnlyList<FleetStatisticsSet> sets, CancellationToken stop)
+    {
+        var batch = outbox.Batch(sets);
+        var result = await connection.SendRequestAsync(FleetStatisticsMethods.Publish, batch, FleetStatisticsJsonContext.Default.FleetStatisticsPublish,
+            FleetStatisticsJsonContext.Default.FleetStatisticsPublishResult, null, stop).ConfigureAwait(false);
+        if (result is null) return;
+        outbox.Acknowledged(result);
+        if (result.Stale.Count > 0) _logger.Warn($"The server refused the statistics of {result.Stale.Count} session(s) as stale: their epoch is older than the one it holds.");
+        StatisticsPublished?.Invoke(this, result);
+    }
+
+    private bool IsPublished(FleetLocalSession session) => (!session.IsPrivate || RequiresFacts) && _options.PublishesSpace(session.SpaceId);
+
+    // On a machine of the organization (a team machine, as its signed access document says), a policy that requires the
+    // facts of its spaces publishes those of Private sessions too: their facts, never their content.
+    private bool RequiresFacts => Policy?.Current?.Rules.PublishFacts == true && Access?.Current?.Machines.ContainsKey(_options.Identity.DeviceId) == true;
+
+    /// <summary>Gets whether a space of this instance is linked to the server: its work follows the policy of the server's organization.</summary>
+    /// <param name="spaceId">The space; null for the default one.</param>
+    /// <returns>Whether it is linked.</returns>
+    public bool LinksSpace(string? spaceId) => _options.PublishesSpace(spaceId);
+
+    // The key that seals the metadata of a session: the one of its space, or none yet; on a machine of a team or of the organization,
+    // the one of the space of the person who started it there, and none without such a person (its person is of this server's
+    // organization only).
+    private FleetMetadataKey? KeyOf(FleetLocalSession session)
+        => _options.MetadataKeys?.CurrentFor(session.SpaceId, session.PersonOrganizationId is { } of && of == Devices.Current?.OrganizationId ? session.PersonId : null);
+
+    // This machine's signature that the person of a session, of this server's organization, started it here: what a device that
+    // opens a grant of its content verifies, so that the server cannot make the session another person's.
+    private string? SignPersonOf(FleetLocalSession session)
+        => session.PersonId is { } person && Devices.Current?.OrganizationId is { } organization
+            ? System.Buffers.Text.Base64Url.EncodeToString(_options.Identity.SignData(FleetSessionPersons.GetSignedBytes(organization, _options.Identity.DeviceId, session.SessionId, person)))
+            : null;
+
+    // The keys of the spaces published, read again when due, sooner while a space has none. A failure leaves the keys known
+    // before (titles wait without one): facts go on.
+    private async Task ReadKeysAsync(IReadOnlyList<FleetLocalSession> published, CancellationToken stop)
+    {
+        if (_options.MetadataKeys is not { } keys) return;
+        IReadOnlyCollection<string> spaces = _options.LinkedSpaces?.Invoke()
+            ?? [.. published.Select(static session => string.IsNullOrWhiteSpace(session.SpaceId) ? SpaceDescriptor.DefaultId : session.SpaceId).Distinct(StringComparer.Ordinal)];
+        // The spaces the person's machines publish have a key too, whether this instance links them or not: their titles and
+        // projects are sealed with it. Linking alone decides which sessions of this instance are published.
+        if (_options.MachineSpaces?.Invoke() is { Count: > 0 } machineSpaces) spaces = [.. spaces.Union(machineSpaces, StringComparer.Ordinal)];
+        var now = _options.TimeProvider.GetUtcNow();
+        // On a machine of a team or of the organization, a session lacks a key while its person has none here yet; one without a
+        // person never gets one.
+        var lacking = Access?.Current?.IsSharedMachine(_options.Identity.DeviceId) == true
+            ? published.Any(session => session.PersonOrganizationId is not null && session.PersonId is not null && KeyOf(session) is null)
+            : spaces.Any(space => keys.CurrentFor(space) is null);
+        var due = lacking ? TimeSpan.FromSeconds(30) : _options.KeyRefreshInterval;
+        if (now.UtcTicks - Volatile.Read(ref _keysReadAt) < due.Ticks) return;
+        Volatile.Write(ref _keysReadAt, now.UtcTicks);
+        // Taken before the read: what asked for a read before it started is told once it ends.
+        var asked = Interlocked.Exchange(ref _keysRead, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+        try
+        {
+            await keys.RefreshAsync(spaces, stop).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (!stop.IsCancellationRequested && exception is FleetServerException or FleetDeviceListException or InvalidDataException
+            or HttpRequestException or System.Security.Cryptography.CryptographicException or TaskCanceledException)
+        {
+            if (LogManager.IsInitialized) _logger.Warn($"The metadata keys of {FleetServerAddress.Format(_options.ServerAddress)} could not be read: {exception.Message}");
+        }
+        finally
+        {
+            asked.TrySetResult();
+        }
+    }
+
+    private async Task SendPresenceAsync(FleetConnection connection, int active, CancellationToken stop)
+    {
+        _activeSessions = active;
+        await connection.SendRequestAsync(FleetServerMethods.PresenceUpdate,
+            JsonSerializer.SerializeToElement(new FleetPresenceUpdate(active > 0 ? "busy" : "active", active, _options.UpdateReport?.Invoke(), ReadHealth()),
+                FleetServerJsonContext.Default.FleetPresenceUpdate),
+            null, stop).ConfigureAwait(false);
+    }
+
+    // The problems of the machine for its heartbeat; a probe that fails says nothing rather than that all is well.
+    private IReadOnlyList<Protocol.Api.FleetHealthProblem>? ReadHealth()
+    {
+        if (_options.Health is not { } health) return null;
+        try
+        {
+            return health();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            if (LogManager.IsInitialized) _logger.Warn($"The health of the machine could not be read: {exception.Message}");
+            return null;
+        }
+    }
+
+    // Waits for a wake, the time given or the end of the connection; true when woken.
+    private async Task<bool> WaitAsync(FleetConnection connection, TimeSpan delay, CancellationToken stop)
+    {
+        if (delay <= TimeSpan.Zero) return false;
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(stop);
+        var wake = _wake.Reader.WaitToReadAsync(linked.Token).AsTask();
+        var timer = Task.Delay(delay, _options.TimeProvider, linked.Token);
+        var done = await Task.WhenAny(wake, timer, connection.Completion).ConfigureAwait(false);
+        await linked.CancelAsync().ConfigureAwait(false);
+        stop.ThrowIfCancellationRequested();
+        return done == wake && wake.IsCompletedSuccessfully;
+    }
+
+    private static async Task CloseQuietlyAsync(FleetConnection connection)
+    {
+        try { await connection.CloseAsync("stopping").ConfigureAwait(false); }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException or System.Net.WebSockets.WebSocketException or OperationCanceledException) { }
+    }
+
+    private TimeSpan Backoff(int attempt)
+    {
+        var ceiling = Math.Min(_options.MaximumBackoff.TotalMilliseconds, _options.MinimumBackoff.TotalMilliseconds * Math.Pow(2, Math.Min(attempt, 16)));
+        // Jitter over the upper half, so that machines a restart disconnected together do not come back together.
+        return TimeSpan.FromMilliseconds(ceiling / 2 + Random.Shared.NextDouble() * ceiling / 2);
+    }
+
+    private static TimeSpan Min(TimeSpan left, TimeSpan right) => left < right ? left : right;
+
+    // The server starts the events before it reads the snapshot, and an event can arrive before or just after the
+    // answer: the events wait until the snapshot is set, then apply over it in order, so that an older snapshot never
+    // undoes a newer change (an update, a withdrawal) the server sent meanwhile.
+    private async Task WatchDirectoryAsync(FleetConnection connection, CancellationToken stop)
+    {
+        lock (_gate) _directoryPending = [];
+        try
+        {
+            var snapshot = await connection.SendRequestAsync(FleetServerMethods.DirectoryWatch, null, null, stop).ConfigureAwait(false);
+            if (snapshot?.Deserialize(FleetServerJsonContext.Default.FleetDirectorySnapshot) is not { } directory) return;
+            lock (_gate)
+            {
+                var view = FleetDirectoryView.From(directory);
+                foreach (var change in _directoryPending!) view = view.Apply(change);
+                Volatile.Write(ref _directory, view);
+                _directoryPending = null;
+            }
+
+            DirectoryChanged?.Invoke(this);
+        }
+        finally
+        {
+            List<FleetDirectoryChange>? pending;
+            lock (_gate)
+            {
+                pending = _directoryPending;
+                _directoryPending = null;
+            }
+
+            // A watch that gave no snapshot: what came meanwhile applies to the directory held.
+            foreach (var change in pending ?? []) ApplyDirectory(change);
+        }
+    }
+
+    private void ApplyDirectory(FleetDirectoryChange change)
+    {
+        lock (_gate)
+        {
+            if (_directoryPending is { } pending)
+            {
+                pending.Add(change);
+                return;
+            }
+
+            var current = Volatile.Read(ref _directory);
+            var next = current.Apply(change);
+            if (ReferenceEquals(next, current)) return;
+            Volatile.Write(ref _directory, next);
+        }
+
+        DirectoryChanged?.Invoke(this);
+    }
+
+    private void SetState(FleetConnectorState state, FleetError? error)
+    {
+        lock (_gate)
+        {
+            if (_state == state && Equals(_lastError, error)) return;
+            _state = state;
+            _lastError = error;
+        }
+
+        if (state != FleetConnectorState.Online) Log(state, error);
+        StateChanged?.Invoke(this);
+    }
+
+    private void Log(FleetConnectorState state, FleetError? error)
+    {
+        if (!LogManager.IsInitialized || state is FleetConnectorState.Connecting or FleetConnectorState.Stopped) return;
+        _logger.Info($"The control connection to {FleetServerAddress.Format(_options.ServerAddress)} is {state}: {error?.Code ?? "-"} {error?.Message ?? ""}");
+    }
+
+    /// <summary>The device proof of the hello, signed with the device key.</summary>
+    private sealed class Signer(DeviceIdentity identity) : IFleetHandshakeSigner
+    {
+        public string DeviceId => identity.DeviceId;
+
+        public ValueTask<string> SignAsync(FleetProofContext context, CancellationToken cancellationToken)
+            => ValueTask.FromResult(Base64Url.EncodeToString(identity.SignData(context.GetSignedBytes())));
+    }
+}
+
+/// <summary>The directory of an organization as a connector last heard it: machines, published sessions, presence.</summary>
+/// <param name="Machines">The machines, by device id.</param>
+/// <param name="Sessions">The published sessions, by session id.</param>
+/// <param name="Presence">The presence of the devices, by device id.</param>
+public sealed record FleetDirectoryView(
+    ImmutableDictionary<string, FleetDirectoryMachine> Machines,
+    ImmutableDictionary<string, FleetDirectorySession> Sessions,
+    ImmutableDictionary<string, FleetPresence> Presence)
+{
+    /// <summary>Gets an empty directory.</summary>
+    public static FleetDirectoryView Empty { get; } = new(ImmutableDictionary.Create<string, FleetDirectoryMachine>(StringComparer.Ordinal),
+        ImmutableDictionary.Create<string, FleetDirectorySession>(StringComparer.Ordinal), ImmutableDictionary.Create<string, FleetPresence>(StringComparer.Ordinal));
+
+    /// <summary>Gets whether a device is online.</summary>
+    /// <param name="deviceId">The device.</param>
+    /// <returns>Whether it holds a control connection, as the server last said.</returns>
+    public bool IsOnline(string deviceId) => Presence.TryGetValue(deviceId, out var presence) && presence.Online;
+
+    /// <summary>Gets how many times the server said an update campaign or the update policy changed since the watch began.</summary>
+    public long UpdatesRevision { get; init; }
+
+    /// <summary>
+    /// Gets the machines the server said were removed since the watch began: a revoked device never comes back (a machine that joins
+    /// again is a new device), so a change of one that a handler of the server sent late is passed over.
+    /// </summary>
+    public ImmutableHashSet<string> Removed { get; init; } = ImmutableHashSet.Create<string>(StringComparer.Ordinal);
+
+    /// <summary>Makes the directory of a snapshot of <c>directory.watch</c>.</summary>
+    /// <param name="snapshot">The snapshot.</param>
+    /// <returns>The directory.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    public static FleetDirectoryView From(FleetDirectorySnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var view = Empty;
+        foreach (var machine in snapshot.Machines ?? []) view = view with { Machines = view.Machines.SetItem(machine.DeviceId, machine) };
+        foreach (var session in snapshot.Sessions ?? []) view = view.Apply(new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Session, session.Fact.SessionId, Session: session));
+        foreach (var presence in snapshot.Presence ?? []) view = view with { Presence = view.Presence.SetItem(presence.DeviceId, presence) };
+        return view;
+    }
+
+    /// <summary>Applies a change; a session's facts replace those held only when newer (epoch, then version).</summary>
+    /// <param name="change">The change.</param>
+    /// <returns>The directory after it; this one when nothing changed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="change"/> is null.</exception>
+    public FleetDirectoryView Apply(FleetDirectoryChange change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        switch (change.Kind)
+        {
+            case FleetServerMethods.ChangeKinds.Machine or FleetServerMethods.ChangeKinds.Session or FleetServerMethods.ChangeKinds.Presence
+                when (change.Machine?.DeviceId ?? change.Session?.MachineId ?? change.Presence?.DeviceId) is { } device && Removed.Contains(device):
+                return this;
+            case FleetServerMethods.ChangeKinds.Machine when change.Machine is { } machine:
+                return this with { Machines = Machines.SetItem(machine.DeviceId, machine) };
+            case FleetServerMethods.ChangeKinds.Session when change.Session is { } session:
+                if (Sessions.TryGetValue(session.Fact.SessionId, out var held) && !IsNewer(session.Fact, held.Fact)) return this;
+                return this with { Sessions = Sessions.SetItem(session.Fact.SessionId, session) };
+            case FleetServerMethods.ChangeKinds.Presence when change.Presence is { } presence:
+                // A device the directory does not hold that goes offline says nothing new: a revoked machine, whose
+                // connection closes after it left, is not listed again by it.
+                if (!presence.Online && !Presence.ContainsKey(presence.DeviceId) && !Machines.ContainsKey(presence.DeviceId)) return this;
+                return this with { Presence = Presence.SetItem(presence.DeviceId, presence) };
+            case FleetServerMethods.ChangeKinds.MachineRemoved when !Removed.Contains(change.Id):
+                // A revoked machine leaves with what it published: nothing of it is listed as a machine any more, nor again.
+                return this with
+                {
+                    Removed = Removed.Add(change.Id),
+                    Machines = Machines.Remove(change.Id),
+                    Presence = Presence.Remove(change.Id),
+                    Sessions = Sessions.RemoveRange(Sessions.Where(pair => pair.Value.MachineId == change.Id).Select(static pair => pair.Key)),
+                };
+            case FleetServerMethods.ChangeKinds.Update:
+                // The campaigns are read from the REST API: the change only says when to read them again.
+                return this with { UpdatesRevision = UpdatesRevision + 1 };
+            case FleetServerMethods.ChangeKinds.SessionRemoved when Sessions.TryGetValue(change.Id, out var current):
+                // A removal names the facts it removed: newer facts, or those of another machine, stay.
+                if (change.Session is { } removed && (current.MachineId != removed.MachineId || IsNewer(current.Fact, removed.Fact))) return this;
+                return this with { Sessions = Sessions.Remove(change.Id) };
+            default:
+                return this;
+        }
+    }
+
+    private static bool IsNewer(FleetSessionFact fact, FleetSessionFact than) => fact.Epoch > than.Epoch || fact.Epoch == than.Epoch && fact.Version > than.Version;
+}

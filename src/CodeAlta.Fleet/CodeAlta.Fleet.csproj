@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- The device key is protected with DPAPI through LibraryImport on Windows. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.Fleet.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Node.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Server.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
+    <ProjectReference Include="..\CodeAlta.Fleet.Protocol\CodeAlta.Fleet.Protocol.csproj" />
+    <!-- The fleet's updates: nodes verify instructions with it, the desktop reads the hashes it signs. -->
+    <ProjectReference Include="..\CodeAlta.Fleet.Update\CodeAlta.Fleet.Update.csproj" />
+    <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
+    <!-- The statistics engine every host runs: machines publish the facts it keeps. -->
+    <ProjectReference Include="..\CodeAlta.Plugin.Statistics\CodeAlta.Plugin.Statistics.csproj" />
+  </ItemGroup>
+
+</Project>

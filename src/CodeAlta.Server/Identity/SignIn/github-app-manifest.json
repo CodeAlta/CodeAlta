@@ -1,0 +1,17 @@
+{
+  "name": "CodeAlta",
+  "url": "https://codealta.io",
+  "description": "Sign in to a CodeAlta Server with your GitHub account. CodeAlta Server reads only the id and the name of your account, once, and keeps no token; the app asks for no permission.",
+  "public": true,
+  "default_permissions": {},
+  "default_events": [],
+  "hook_attributes": {
+    "url": "https://codealta.io",
+    "active": false
+  },
+  "callback_urls": [
+    "http://127.0.0.1/callback"
+  ],
+  "request_oauth_on_install": false,
+  "setup_on_update": false
+}

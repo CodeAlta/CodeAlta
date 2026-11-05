@@ -194,6 +194,40 @@ The session gets the item's title, link and description. For a pull request it i
 
 **Runs with**, above the buttons, is the [Agent chip](workspace/prompt.md#agent-and-model) of the new session. With **Use the defaults** on, it takes the [default provider](model-providers/readme.md) and your settings; turn it off to choose the agent prompt, the model, the permission mode, review before commit and the sandbox. **More options** turns [sub-sessions](sessions/delegation.md#sessions-without-sub-sessions) off for the new session.
 
+### Branch name
+
+For an issue, tick **Own branch**, next to **Runs with**, to start the work on a new branch. A **Branch** field then shows the name CodeAlta proposes, such as `feature/12345-export-the-list-as-csv`; change it before you start, or click the reset button to get the proposal back.
+
+- **Start in a new worktree** creates the worktree on that branch. When the worktree is removed, the branch goes with it unless it holds commits of its own, as the `alta/` branches do (see [Worktrees](worktrees.md)).
+- **Start in a new session** moves the project folder to that branch first; changes that are not committed go along. It is refused while a session works in the project folder.
+- A name git refuses is shown in red, and a branch that already exists, also in another case, is refused.
+- Untick **Own branch** for a worktree on an `alta/` branch, or a session that stays on the branch of the project folder. The box keeps your choice for each project; until you choose, it is ticked when the project has a scheme in its files.
+
+The settings button next to the field opens **Branch name scheme**, which sets how the name is proposed:
+
+- **For me** or **For the team**: the file it writes, as for the views. Your scheme wins over the team's.
+- **Template**, with buttons that insert `{type}`, `{id}` and `{title}`, and **Longest title**.
+- A table of types or labels and the text of `{type}` for each; **All others** for the rest. **Add a type** adds a row, and the arrows move one: the first row that matches the type of the item, else one of its labels, wins. The table is hidden while the template has no `{type}`.
+- **Preview** shows the name for the item you are on. **Save** writes the scheme; **Remove from this file** takes it out, and the team's scheme or the default applies again; **Open file** opens the file in the code editor.
+
+The form writes the `[branch]` table of the same files as the views; you can also write it by hand. Your file wins over the team's, key by key; `[branch.types]` is taken whole. Click **Reload** after a change made by hand.
+
+```toml
+# <project>/.alta/issues.toml: the convention of the team
+[branch]
+template = "{type}/{id}-{title}"   # {type}, {id} and {title}
+title_length = 40                  # the longest {title}, cut at a whole word
+
+[branch.types]                     # the type or a label of the item -> {type}
+Bug = "fix"
+"*" = "feature"                    # every other item
+```
+
+- `{id}` is the number or key of the item, `{title}` its title in lower case, letters and digits only, joined with `-`.
+- Types and labels are compared without case, in the order of the rows: the first row that matches the type wins, else the first that matches a label. Without `*`, other items are `feature`.
+- Without a `[branch]` table, the proposal is `{type}/{id}-{title}` with bugs as `fix` and the rest as `feature`.
+- A mistake in the table, such as an unknown placeholder, is shown under the field with its file.
+
 You can start several items at once: each shows **Starting…** while its worktree is made. A ready session opens if you are still on that item; otherwise a notification offers it with **Show**.
 
 **Open on GitHub** (or the service's name) opens the item in your browser; **Copy link** copies its address.

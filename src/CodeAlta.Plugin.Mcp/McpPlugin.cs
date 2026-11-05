@@ -11,9 +11,6 @@ namespace CodeAlta.Plugin.Mcp;
 [Plugin("mcp", DisplayName = "MCP", Description = "Connects CodeAlta to configured Model Context Protocol servers.", Frontends = PluginFrontends.All | PluginFrontends.Cli)]
 public sealed partial class McpPlugin : PluginBase
 {
-    private const string ArgumentsJsonPropertyName = "arguments_json";
-    private const int MaxWrapperSchemaDescriptionChars = 2000;
-
     private readonly McpActivationState _activationState = new();
     // What every tool call, prompt build and run start reads: the configuration and the policy, read again when a file changed.
     private readonly McpConfigCache _configCache;
@@ -59,7 +56,8 @@ public sealed partial class McpPlugin : PluginBase
         ShowsApps = options.ShowsApps;
         LoadsSkills = options.LoadsSkills;
         ReadOnlyConfiguration = options.ReadOnlyConfiguration;
-        _connections = new McpSessionConnections(_configCache, options.ShowsApps, options.LoadsSkills);
+        // What the servers are given of the secrets of the store is masked by the host from then on.
+        _connections = new McpSessionConnections(_configCache, options.ShowsApps, options.LoadsSkills) { SecretIssued = MaskSecret };
         // What the presentation saves through it is read again at once by the runtime and the prompt.
         _managementService = new McpManagementService(home, _configCache, options.ShowsApps, options.LoadsSkills);
         _skills = options.LoadsSkills ? new McpSkillServices(new McpSkillApprovalStore(McpSkillApprovalStore.PathOf(home)), new McpSkillContentCache()) : null;
@@ -68,6 +66,22 @@ public sealed partial class McpPlugin : PluginBase
             _presentation = createPresentation(_managementService, _activationState)
                 ?? throw new InvalidOperationException("The MCP presentation factory returned null.");
         }
+    }
+
+    // Tells the host a value of a secret a server is given; nothing to tell before the plugin runs in a host.
+    private void MaskSecret(string value)
+    {
+        IPluginSecretService secrets;
+        try
+        {
+            secrets = Services.Secrets;
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+
+        secrets.Mask(value);
     }
 
     /// <summary>Gets whether the host shows the views of MCP Apps: the servers are told, and the calls of their tools carry their view.</summary>
@@ -532,26 +546,24 @@ public sealed partial class McpPlugin : PluginBase
         string? spaceId = null, Func<string?, CancellationToken, ValueTask<AgentProcessEnvironment>>? environment = null)
     {
         var description = CreateToolDescription(tool);
-        var useArgumentsJsonWrapper = RequiresArgumentsJsonWrapper(tool.InputSchema);
-        var inputSchema = useArgumentsJsonWrapper
-            ? CreateArgumentsJsonWrapperSchema(tool)
-            : tool.InputSchema.Clone();
+        // The schema of the server is sent as it is: a provider that cannot take part of it rewrites it in its request.
         return new AgentToolDefinition(
-            new AgentToolSpec(tool.Alias, description, inputSchema)
+            new AgentToolSpec(tool.Alias, description, tool.InputSchema.Clone())
             {
                 // A script calls it as mcp.<server>.<tool>, at the same time as its other calls, and receives its
                 // structured content when the server declares one.
                 Group = tool.Server,
                 ScriptName = tool.Name,
                 RunsInParallel = true,
-                OutputSchema = useArgumentsJsonWrapper ? null : tool.OutputSchema,
+                OutputSchema = tool.OutputSchema,
+                // What an automation pins an allowed tool to, besides the hash of its definition.
+                Version = tool.ServerVersion,
             },
             async (invocation, cancellationToken) => await InvokeDirectToolAsync(
                 tool.Server,
                 tool.Name,
                 projectPath,
                 home,
-                useArgumentsJsonWrapper,
                 connections,
                 invocation,
                 spaceId,
@@ -568,160 +580,6 @@ public sealed partial class McpPlugin : PluginBase
         catch (InvalidOperationException) { return AgentProcessEnvironment.Empty; }
         return (await identities.GetIdentityAsync(sessionId, cancellationToken).ConfigureAwait(false)).Environment;
     }
-
-    internal static bool RequiresArgumentsJsonWrapper(JsonElement schema)
-    {
-        if (schema.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        var hasProperties = schema.TryGetProperty("properties", out var properties) && properties.ValueKind == JsonValueKind.Object;
-        if (schema.TryGetProperty("required", out var required) && required.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in required.EnumerateArray())
-            {
-                if (item.ValueKind == JsonValueKind.String &&
-                    item.GetString() is { Length: > 0 } requiredName &&
-                    (!hasProperties || !properties.TryGetProperty(requiredName, out _)))
-                {
-                    return true;
-                }
-            }
-        }
-
-        if (schema.TryGetProperty("additionalProperties", out var additionalProperties) &&
-            (additionalProperties.ValueKind == JsonValueKind.True ||
-             additionalProperties.ValueKind == JsonValueKind.Object ||
-             additionalProperties.ValueKind == JsonValueKind.Array))
-        {
-            return true;
-        }
-
-        if (schema.TryGetProperty("patternProperties", out var patternProperties) && patternProperties.ValueKind == JsonValueKind.Object)
-        {
-            return true;
-        }
-
-        if (IsObjectSchema(schema) && (!hasProperties || !properties.EnumerateObject().Any()) && !HasClosedAdditionalProperties(schema))
-        {
-            return true;
-        }
-
-        foreach (var property in schema.EnumerateObject())
-        {
-            if (property.NameEquals("properties") && property.Value.ValueKind == JsonValueKind.Object)
-            {
-                foreach (var childProperty in property.Value.EnumerateObject())
-                {
-                    if (RequiresArgumentsJsonWrapper(childProperty.Value))
-                    {
-                        return true;
-                    }
-                }
-
-                continue;
-            }
-
-            if (property.NameEquals("items"))
-            {
-                if (RequiresArgumentsJsonWrapper(property.Value))
-                {
-                    return true;
-                }
-
-                continue;
-            }
-
-            if (property.NameEquals("anyOf") || property.NameEquals("oneOf") || property.NameEquals("allOf"))
-            {
-                if (property.Value.ValueKind == JsonValueKind.Array &&
-                    property.Value.EnumerateArray().Any(RequiresArgumentsJsonWrapper))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private static bool IsObjectSchema(JsonElement schema)
-    {
-        if (!schema.TryGetProperty("type", out var type))
-        {
-            return false;
-        }
-
-        return type.ValueKind switch
-        {
-            JsonValueKind.String => string.Equals(type.GetString(), "object", StringComparison.Ordinal),
-            JsonValueKind.Array => type.EnumerateArray().Any(static item =>
-                item.ValueKind == JsonValueKind.String && string.Equals(item.GetString(), "object", StringComparison.Ordinal)),
-            _ => false,
-        };
-    }
-
-    private static bool HasClosedAdditionalProperties(JsonElement schema)
-        => schema.TryGetProperty("additionalProperties", out var additionalProperties) && additionalProperties.ValueKind == JsonValueKind.False;
-
-    private static JsonElement CreateArgumentsJsonWrapperSchema(McpRuntimeTool tool)
-    {
-        var description = CreateArgumentsJsonWrapperDescription(tool);
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartObject();
-            writer.WriteString("type", "object");
-            writer.WriteStartObject("properties");
-            writer.WriteStartObject(ArgumentsJsonPropertyName);
-            writer.WriteString("type", "string");
-            writer.WriteString("description", description);
-            writer.WriteEndObject();
-            writer.WriteEndObject();
-            writer.WriteStartArray("required");
-            writer.WriteStringValue(ArgumentsJsonPropertyName);
-            writer.WriteEndArray();
-            writer.WriteBoolean("additionalProperties", false);
-            writer.WriteEndObject();
-        }
-
-        using var document = JsonDocument.Parse(stream.ToArray());
-        return document.RootElement.Clone();
-    }
-
-    private static string CreateArgumentsJsonWrapperDescription(McpRuntimeTool tool)
-    {
-        var schemaText = CreateRedactedSchemaText(tool.InputSchema);
-        if (schemaText.Length > MaxWrapperSchemaDescriptionChars)
-        {
-            schemaText = schemaText[..MaxWrapperSchemaDescriptionChars] + "…";
-        }
-
-        return "JSON object string containing the MCP tool arguments to pass through unchanged. " +
-               $"Use this compatibility wrapper because MCP tool '{tool.Name}' on server '{tool.Server}' uses a schema that cannot be faithfully represented as an OpenAI strict tool schema. " +
-               "The string value must parse to a JSON object matching the original MCP input schema. " +
-               "Original MCP input schema: " + schemaText;
-    }
-
-    private static string CreateRedactedSchemaText(JsonElement schema)
-        => JsonSerializer.Serialize(RedactSchemaValue(schema, propertyName: null));
-
-    private static object? RedactSchemaValue(JsonElement element, string? propertyName)
-        => element.ValueKind switch
-        {
-            JsonValueKind.Object => element.EnumerateObject().ToDictionary(
-                static property => property.Name,
-                property => RedactSchemaValue(property.Value, property.Name),
-                StringComparer.Ordinal),
-            JsonValueKind.Array => element.EnumerateArray().Select(item => RedactSchemaValue(item, propertyName)).ToArray(),
-            JsonValueKind.String => McpRedactor.RedactValue(propertyName, element.GetString()),
-            JsonValueKind.Number => element.Clone(),
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.Null => null,
-            _ => element.Clone(),
-        };
 
     private static void AppendServerList(
         StringBuilder builder,
@@ -775,14 +633,13 @@ public sealed partial class McpPlugin : PluginBase
         string tool,
         string? projectPath,
         McpHome home,
-        bool useArgumentsJsonWrapper,
         McpSessionConnections? connections,
         AgentToolInvocation invocation,
         string? spaceId,
         Func<string?, CancellationToken, ValueTask<AgentProcessEnvironment>>? environment,
         CancellationToken cancellationToken)
     {
-        if (!TryReadArguments(invocation.Arguments, useArgumentsJsonWrapper, out var arguments, out var error))
+        if (!TryReadObjectArguments(invocation.Arguments, out var arguments, out var error))
         {
             return new AgentToolResult(false, [new AgentToolResultItem.Text(error)], error);
         }
@@ -839,67 +696,6 @@ public sealed partial class McpPlugin : PluginBase
                 ? new AgentToolAppResult(server, tool, app.ResourceUri, app.StructuredContent, app.Meta, app.Content)
                 : null,
         };
-    }
-
-    private static bool TryReadArguments(JsonElement element, bool useArgumentsJsonWrapper, out IReadOnlyDictionary<string, object?> arguments, out string error)
-    {
-        if (useArgumentsJsonWrapper)
-        {
-            return TryReadWrappedArguments(element, out arguments, out error);
-        }
-
-        return TryReadObjectArguments(element, out arguments, out error);
-    }
-
-    private static bool TryReadWrappedArguments(JsonElement element, out IReadOnlyDictionary<string, object?> arguments, out string error)
-    {
-        if (element.ValueKind != JsonValueKind.Object)
-        {
-            arguments = new Dictionary<string, object?>(StringComparer.Ordinal);
-            error = $"MCP direct tool compatibility arguments must be a JSON object containing an '{ArgumentsJsonPropertyName}' string.";
-            return false;
-        }
-
-        if (!element.TryGetProperty(ArgumentsJsonPropertyName, out var argumentsJson))
-        {
-            arguments = new Dictionary<string, object?>(StringComparer.Ordinal);
-            error = $"MCP direct tool compatibility arguments must include an '{ArgumentsJsonPropertyName}' string.";
-            return false;
-        }
-
-        if (argumentsJson.ValueKind != JsonValueKind.String)
-        {
-            arguments = new Dictionary<string, object?>(StringComparer.Ordinal);
-            error = $"MCP direct tool compatibility argument '{ArgumentsJsonPropertyName}' must be a JSON string containing an object.";
-            return false;
-        }
-
-        var json = argumentsJson.GetString();
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            arguments = new Dictionary<string, object?>(StringComparer.Ordinal);
-            error = $"MCP direct tool compatibility argument '{ArgumentsJsonPropertyName}' must contain a JSON object.";
-            return false;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                arguments = new Dictionary<string, object?>(StringComparer.Ordinal);
-                error = $"MCP direct tool compatibility argument '{ArgumentsJsonPropertyName}' must parse to a JSON object.";
-                return false;
-            }
-
-            return TryReadObjectArguments(document.RootElement, out arguments, out error);
-        }
-        catch (JsonException ex)
-        {
-            arguments = new Dictionary<string, object?>(StringComparer.Ordinal);
-            error = $"MCP direct tool compatibility argument '{ArgumentsJsonPropertyName}' must contain valid JSON: {ex.Message}";
-            return false;
-        }
     }
 
     private static bool TryReadObjectArguments(JsonElement element, out IReadOnlyDictionary<string, object?> arguments, out string error)

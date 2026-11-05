@@ -26,7 +26,7 @@ A type your version of CodeAlta does not know, one a newer version added, leaves
 | `model` | Default model id. |
 | `reasoning_effort` | Default effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Each model offers its own values. |
 | `context_size` | Default [context size](readme.md#context-and-compaction), in input tokens, for the models that offer it. |
-| `api_key` / `api_key_env` | The API key, or the environment variable that holds it. Prefer `api_key_env`. |
+| `api_key` / `api_key_secret` / `api_key_env` | The API key, the [secret](../secrets.md) of this computer that holds it, or the environment variable that holds it, in this order. Prefer `api_key_secret` or `api_key_env`. |
 | `api_url` | Endpoint. Azure OpenAI, Codex and Copilot require HTTPS, except on localhost. |
 | `network_timeout_seconds` | Network timeout of `openai-chat`, `openai-responses`, `azure-openai`, `codex` and `llama-cpp`; 100 seconds when unset. |
 | `protocol_trace` | Traces the requests of the OpenAI, Codex and Copilot providers. |
@@ -108,7 +108,7 @@ The fields of the subscriptions take these values:
 | `supports_tool_result_images` | A tool result can carry an image. When `false`, the image goes in a user message after the tool results. By default only OpenAI's own Responses endpoints take images in tool results. |
 | `supports_cache_control` | Anthropic Messages requests carry the prompt-cache markers (on by default). Set `false` for a compatible endpoint that refuses them: it then caches nothing. |
 | `supports_tool_deferral` | Anthropic Messages requests can defer tools, so the model loads MCP tools on demand. By default only the Claude API does, for Claude 4.5 models and later. |
-| `supports_strict_tools` | Strict tool schemas are supported. |
+| `supports_strict_tools` | OpenAI requests send in strict mode the tools whose schema strict mode accepts; the model then gives every argument, `null` for one it leaves out. Off by default: tools are sent with their own schema. |
 | `thinking_format` | Name of the provider's thinking format. |
 | `max_tokens_field_name` | Body field of the output limit, such as `max_output_tokens` or `max_completion_tokens`. |
 | `reasoning_field_names` | Answer fields read as reasoning. |

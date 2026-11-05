@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MSTest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\CodeAlta.Server\CodeAlta.Server.csproj" />
+    <ProjectReference Include="..\CodeAlta.Fleet.Protocol\CodeAlta.Fleet.Protocol.csproj" />
+    <!-- The device keys of CodeAlta's devices, to check that the server derives the same ids and verifies their signatures. -->
+    <ProjectReference Include="..\CodeAlta.Fleet\CodeAlta.Fleet.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The machine of the service tests, which installs nothing: the same as the tests of altanode use. -->
+    <Compile Include="..\CodeAlta.Fleet.Update.Tests\FakeServiceMachine.cs" Link="FakeServiceMachine.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The registration of the CodeAlta GitHub App, run against a fake of GitHub. -->
+    <None Include="..\CodeAlta.Server\Identity\SignIn\register-github-app.ps1" Link="GitHubApp\register-github-app.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\CodeAlta.Server\Identity\SignIn\github-app-manifest.json" Link="GitHubApp\github-app-manifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

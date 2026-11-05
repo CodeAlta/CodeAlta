@@ -12,7 +12,7 @@
     <PackageVersion Include="DiffPlex" Version="1.9.0" />
     <PackageVersion Include="GitHub.Copilot.SDK" Version="1.0.26" />
     <PackageVersion Include="MinVer" Version="8.0.0" />
-    <PackageVersion Include="NeoAstra" Version="1.10.0" />
+    <PackageVersion Include="NeoAstra" Version="1.12.0" />
     <PackageVersion Include="MSTest" Version="4.5.1" />
     <PackageVersion Include="Markdig" Version="1.4.2" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
@@ -47,6 +47,10 @@
     <PackageVersion Include="XenoAtom.CommandLine.Terminal" Version="2.0.3" />
     <PackageVersion Include="XenoAtom.Logging.Terminal" Version="1.2.0" />
     <PackageVersion Include="XenoAtom.Glob" Version="1.0.1" />
+    <!-- CodeAlta Server's sign-in: OpenID Connect discovery and ID token validation (MIT). -->
+    <PackageVersion Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.23.0" />
+    <!-- The OpenAPI document of CodeAlta Server's REST API. -->
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13" />
     <!-- CodeAltaPluginPackageVersions:Start -->
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.13" />
     <PackageVersion Include="Microsoft.Extensions.AI.Abstractions" Version="10.11.0" />

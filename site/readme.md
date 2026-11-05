@@ -14,7 +14,7 @@ og_type: website
 </div>
 
 <section class="alta-hero" aria-labelledby="home-title">
-  <p class="alta-kicker">Open source · Local projects · Your choice of AI</p>
+  <p class="alta-kicker">Open source · Local &amp; distributed · Your choice of AI</p>
   <pre class="codealta-ascii-logo" role="img" aria-label="CodeAlta"><span class="logo-code">   ██████                  ██           </span><span class="logo-alta">     ██       ██    ██</span>
 <span class="logo-code">  ██░░░░██                ░██           </span><span class="logo-alta">    ████     ░██   ░██</span>
 <span class="logo-code"> ██    ░░    ██████       ░██   █████   </span><span class="logo-alta">   ██░░██    ░██  ██████   ██████</span>
@@ -31,11 +31,11 @@ alta</code></pre>
     </div>
     <p class="alta-install-note">Windows, macOS &amp; Linux · Requires <a href="https://dotnet.microsoft.com/en-us/download/dotnet/10.0">.NET 10</a> · <a href="#desktop-or-tui">Prefer a terminal?</a></p>
   </div>
-  <h1 class="alta-hero-title" id="home-title">Your agents. <span class="alta-gradient-text">One workspace.</span></h1>
-  <p class="alta-hero-lead">Run AI coding agents on your local projects, and follow them from your phone. Keep conversations, code, terminals and git changes together - with the models and tools you choose.</p>
+  <h1 class="alta-hero-title" id="home-title">Your agents. <span class="alta-gradient-text">One workspace.</span><br><span class="alta-gradient-text">One fleet.</span></h1>
+  <p class="alta-hero-lead">An agentic development environment, local and distributed. Run AI coding agents on your projects - on this computer, on your other machines or across a whole company - and follow them from your phone. Keep conversations, code, terminals and git changes together, with the models and tools you choose.</p>
   <div class="alta-hero-actions">
     <a href="{{site.basepath}}/docs/getting-started/" class="btn btn-primary"><i class="bi bi-rocket-takeoff" aria-hidden="true"></i> Get started</a>
-    <a href="#explore" class="btn btn-outline-secondary">Explore the workspace <i class="bi bi-arrow-down" aria-hidden="true"></i></a>
+    <a href="#fleet" class="btn btn-outline-secondary">See the fleet in action <i class="bi bi-arrow-down" aria-hidden="true"></i></a>
     <a href="https://github.com/CodeAlta/CodeAlta" class="alta-github-link"><i class="bi bi-github" aria-hidden="true"></i> View on GitHub</a>
   </div>
   <div class="alta-trust-row">
@@ -44,6 +44,26 @@ alta</code></pre>
     <span><i class="bi bi-code-slash" aria-hidden="true"></i> BSD-2-Clause licensed</span>
   </div>
   <p class="alta-privacy-note">CodeAlta does not send usage analytics to its developers.</p>
+</section>
+
+<section class="alta-home-section alta-fleet" id="fleet" aria-labelledby="fleet-title">
+  <div class="alta-section-head">
+    <span class="alta-kicker">CodeAlta Fleet</span>
+    <h2 id="fleet-title">From your laptop<br>to your whole company.</h2>
+    <p>Run sessions on your other computers, move them from one machine to another, and bring your team and its machines together around a server you run. Start with one computer: each step is optional.</p>
+  </div>
+  <figure class="alta-fleet-live">
+    <img src="{{site.basepath}}/img/fleet-in-action.svg" alt="CodeAlta Fleet in action: your desktop and Bea's laptop connect to CodeAlta Server, which runs no agent and reads no conversation. Sessions travel encrypted end to end to a Mac mini, also paired directly with your desktop, and to a build box of team Infra. A session moves from the Mac mini to the build box with its history. A cloud runner asks to join and is approved on your desktop when it shows the same six words. The rules signed by your devices reach every machine, which checks them before it acts" width="1600" height="900" loading="lazy">
+  </figure>
+  <div class="alta-fleet-grid">
+    <a href="{{site.basepath}}/docs/fleet/sessions/#move-a-session"><i class="bi bi-arrow-left-right" aria-hidden="true"></i><strong>Move a session, mid-task</strong><span>Send a session to another machine and it goes on there: its conversation, its commits and its changes go with it. Bring it back the same way.</span></a>
+    <a href="{{site.basepath}}/docs/fleet/sessions/"><i class="bi bi-pc-display" aria-hidden="true"></i><strong>Run on any machine</strong><span>Start a session on the Mac that runs your iOS tests or the box with the GPU, and run automations where they fit. Read, answer and steer it from CodeAlta Desktop.</span></a>
+    <a href="{{site.basepath}}/docs/fleet/machines/"><i class="bi bi-link-45deg" aria-hidden="true"></i><strong>Pair in a minute</strong><span>Add a machine over SSH or with a pairing link. Your computers talk directly, encrypted end to end: no account, no server.</span></a>
+    <a href="{{site.basepath}}/docs/fleet/server/"><i class="bi bi-hdd-network" aria-hidden="true"></i><strong>A server that cannot read</strong><span>Each machine keeps one outgoing connection to CodeAlta Server, so you reach it from anywhere without opening a port. The server relays sessions encrypted end to end: it runs no agent and reads no conversation.</span></a>
+    <a href="{{site.basepath}}/docs/fleet/policies-and-audit/"><i class="bi bi-patch-check" aria-hidden="true"></i><strong>Rules your devices sign</strong><span>Who may do what is signed by your devices and checked by every machine before it acts. A kill switch stops them all at once; the audit log records who did what.</span></a>
+    <a href="{{site.basepath}}/docs/fleet/people-and-access/"><i class="bi bi-people" aria-hidden="true"></i><strong>Ready for your team</strong><span>Invite people who sign in with Microsoft, Google, GitHub, a passkey or your company's sign-in. Share team machines, cap spending with budgets, give machines secrets and see the statistics of all of them.</span></a>
+  </div>
+  <p class="alta-fleet-more"><a href="{{site.basepath}}/docs/fleet/">Discover CodeAlta Fleet <i class="bi bi-arrow-right" aria-hidden="true"></i></a></p>
 </section>
 
 <section class="alta-explore" id="explore" aria-labelledby="explore-title">

@@ -1874,7 +1874,7 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 .ide-shell:has(.window-brand-tag) { --brand-room: calc(344px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); }
 .ide-shell .workspace-shell:has(> .window-controls) { --titlebar-inset-end: 138px; }
 /* In a very narrow window the mark ends where the actions of the title bar start: its buttons that have no room fold into its menu. */
-.ide-shell .workspace-shell { --brand-width: min(var(--brand-room), calc(100vw - var(--titlebar-inset-end) - var(--window-actions-width) - var(--space-switch-width, 0px) - var(--plugin-buttons-width, 0px))); }
+.ide-shell .workspace-shell { --brand-width: min(var(--brand-room), calc(100vw - var(--titlebar-inset-end) - var(--window-actions-width) - var(--space-switch-width, 0px) - var(--plugin-buttons-width, 0px) - var(--fleet-stop-width, 0px))); }
 .window-brand { grid-area: brand; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 0 6px 0 calc(11px + var(--neoastra-titlebar-inset-left, 0px)); overflow: hidden; background: var(--panel); white-space: nowrap; }
 /* The box of the rail takes the room the mark leaves: what does not fit folds into its "…" menu (ActivityRail.tsx). */
 /* Nothing of the rail is clipped but by the mark itself: the focus ring of its buttons goes past their box. */
@@ -1888,7 +1888,7 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 .window-brand .activity-rail > .bp6-popover-target > .bp6-button.bp6-active { color: var(--text); }
 .activity-rail-dot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); pointer-events: none; }
 .bp6-menu-item .activity-rail-dot { position: static; display: inline-block; box-shadow: none; }
-.window-actions { position: absolute; z-index: 3; top: 0; right: var(--titlebar-inset-end); display: flex; align-items: center; justify-content: flex-end; gap: 2px; width: calc(var(--window-actions-width) + var(--space-switch-width, 0px) + var(--plugin-buttons-width, 0px)); height: var(--titlebar-height); }
+.window-actions { position: absolute; z-index: 3; top: 0; right: var(--titlebar-inset-end); display: flex; align-items: center; justify-content: flex-end; gap: 2px; width: calc(var(--window-actions-width) + var(--space-switch-width, 0px) + var(--plugin-buttons-width, 0px) + var(--fleet-stop-width, 0px)); height: var(--titlebar-height); }
 .window-actions > .bp6-button { min-width: 28px; min-height: 28px; padding: 0; color: var(--muted); }
 .window-actions > .bp6-button:hover { color: var(--text); }
 /* Home, Documentation and theme take 28px each, plus their gaps; zoom adds 40px and another gap. Both reservations
@@ -1944,7 +1944,7 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 /* Session tabs: browser-style tabs resting on the content they select. */
 .ide-shell .flexlayout__tabset_tabbar_outer_top { height: 34px; padding: 0; align-items: stretch; border-bottom: 0; background: var(--panel); box-shadow: inset 0 -1px var(--line); font-size: 12px; }
 .ide-shell .flexlayout__tabset_tabbar_outer_top[data-neoastra-drag-region] { height: var(--titlebar-height); }
-.ide-shell .flexlayout__tabset_tabbar_outer_top[data-titlebar-end] { padding-right: calc(var(--titlebar-inset-end) + var(--window-actions-width) + var(--space-switch-width, 0px) + var(--plugin-buttons-width, 0px)); }
+.ide-shell .flexlayout__tabset_tabbar_outer_top[data-titlebar-end] { padding-right: calc(var(--titlebar-inset-end) + var(--window-actions-width) + var(--space-switch-width, 0px) + var(--plugin-buttons-width, 0px) + var(--fleet-stop-width, 0px)); }
 /* A pane too narrow for its tabs beside the controls of the title bar has them below the title row, which stays a drag region. */
 .ide-shell .flexlayout__tabset_tabbar_outer_top[data-titlebar-crowded] { height: calc(var(--titlebar-height) + 34px); padding: var(--titlebar-height) 0 0; }
 .ide-shell .flexlayout__tabset_tabbar_inner { align-items: stretch; }
@@ -1964,6 +1964,8 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 /* The new-session prompt of a scope, in a tab of its own that is not the one written in: showing the tab selects its scope. */
 .session-draft-placeholder { display: grid; place-content: center; justify-items: center; gap: 10px; height: 100%; color: var(--muted); font-size: 14px; }
 .session-tab-dirty { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+/* Where the channel of a remote session goes: a quiet word after its title. */
+.session-tab-channel { flex: none; color: var(--muted); font-size: 10px; line-height: 1; letter-spacing: .02em; opacity: .8; }
 .ide-shell .flexlayout__tab_button_trailing { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; color: var(--muted); }
 .ide-shell .flexlayout__tab_button_trailing:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
 .ide-shell .flexlayout__tab_toolbar { align-self: center; padding: 0 6px; }
@@ -2226,7 +2228,9 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 .bp6-overlay-backdrop { background-color: var(--scrim); }
 
 /* Toasts appear below the title bar, clear of the window controls. */
-.app-toaster.bp6-toast-container { padding-top: 46px; }
+.app-toaster.bp6-toast-container { padding-top: var(--app-toaster-top, 46px); }
+/* The popover of the toasts (appToaster.ts): only a layer, the toast container places them in the window. */
+.app-toaster-layer { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: transparent; overflow: visible; pointer-events: none; }
 
 /* Notes window: a title with its icon, icon actions, and text at the reading size of the timeline. */
 .notes-pane > header > .notes-title { display: inline-flex; grid-auto-flow: column; align-items: center; gap: 6px; color: var(--text); }
@@ -3282,6 +3286,14 @@ dialog.mcp-session-dialog:has(> .app-window) > .app-window > .app-window-body { 
 .find-in-page-count { flex: none; min-width: 52px; padding: 0 4px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
 .find-in-page-count[data-empty] { color: var(--red); }
 .find-in-page > .bp6-button { flex: none; min-width: 24px; min-height: 24px; padding: 0; }
+.session-find-loading { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; }
+/* Where the places are along the scrollbar, which still takes the mouse under them. They keep beside its thumb (see
+   `::-webkit-scrollbar-thumb`, 3px from each side), and only the place shown crosses it. */
+.find-in-page-ticks { position: fixed; z-index: 6; pointer-events: none; }
+.find-in-page-ticks > span { position: absolute; left: 0; width: 3px; height: 2px; background: #a8841f; }
+.find-in-page-ticks > span[data-current] { width: 100%; z-index: 1; height: 3px; background: #f0b726; }
+:root[data-theme="light"] .find-in-page-ticks > span { background: #d9a514; }
+:root[data-theme="light"] .find-in-page-ticks > span[data-current] { background: #a86400; }
 ::highlight(find-in-page) { background-color: #5c4a14; }
 ::highlight(find-in-page-current) { background-color: #b07d0e; color: #fff; }
 :root[data-theme="light"] ::highlight(find-in-page) { background-color: #f5df9a; }

@@ -166,6 +166,18 @@ export const externalEditors = Object.freeze({ list: unavailable, set: unavailab
 export const cloudSessions = Object.freeze({ readiness: unavailable, start: unavailable, startState: unavailable, cancelStart: unavailable, bringHere: unavailable,
   details: unavailable, send: unavailable, continueHere: unavailable });
 export const mcpHost = Object.freeze({ status: unavailable, setEnabled: unavailable, setTailnet: unavailable });
+export const secrets = Object.freeze({ list: async () => ({ status: "unavailable", protection: null, secrets: [], variables: [] }),
+  setSecret: async () => ({ status: "unavailable", message: null }), rotateSecret: async () => ({ status: "unavailable", message: null }),
+  deleteSecret: async () => ({ status: "unavailable", message: null }), setVariable: async () => ({ status: "unavailable", message: null }),
+  deleteVariable: async () => ({ status: "unavailable", message: null }) });
+export const machines = Object.freeze({ list: async () => ({ status: "unavailable", hostEpoch: null, machines: [] }), refresh: async () => ({ status: "unavailable", hostEpoch: null, machines: [] }),
+  previewPairing: unavailable, pair: unavailable, forget: unavailable, newSession: unavailable, newSessionChoices: unavailable, watch: async () => (async function* () { })(),
+  moveSettings: unavailable, setReceiveMoves: unavailable, movePreview: unavailable, moveSession: unavailable });
+export const fleetServer = Object.freeze({ status: async () => ({ status: "unavailable", servers: [], deviceId: null, words: null }),
+  create: unavailable, join: unavailable, leave: unavailable, createToken: unavailable, devices: unavailable, approve: unavailable, revoke: unavailable,
+  linkSpace: unavailable, directory: async () => ({ status: "unavailable", linkId: null, url: null, organization: null, connection: null, machines: [], sessions: [] }),
+  telemetry: unavailable, setTelemetry: unavailable, updates: unavailable, startUpdate: unavailable, cancelUpdate: unavailable, setUpdatePolicy: unavailable,
+  statistics: async () => ({ status: "unavailable", view: null, message: null }), watch: async () => (async function* () { })() });
 // A browser preview neither measures nor edits the user's real profile.
 export const storage = Object.freeze({
   readSettings: async () => ({ status: "unavailable", rootPath: null, settings: null, error: null }),
@@ -227,7 +239,8 @@ export const localSearch = Object.freeze({ query: async () => ({ status: "unavai
 // The demo has no repository whose issues could be read.
 export const issues = Object.freeze({ sources: async () => ({ status: "unavailable", sources: [] }), list: unavailable, read: unavailable, start: unavailable, openLink: unavailable });
 export const markdownLinks = Object.freeze({ open: async () => ({ status: "unavailable", hostEpoch: "" }),
-  image: async () => ({ status: "unavailable", hostEpoch: "", mediaType: null, base64: null, fullPath: null }), reveal: async () => ({ status: "unavailable", hostEpoch: "" }) });
+  image: async () => ({ status: "unavailable", hostEpoch: "", mediaType: null, base64: null, fullPath: null }), reveal: async () => ({ status: "unavailable", hostEpoch: "" }),
+  path: async () => ({ status: "unavailable", hostEpoch: "", fullPath: null }), openExternal: async () => ({ status: "unavailable", hostEpoch: "" }) });
 // The demo has no host to keep the instructions for a pull request.
 // The identity of a space needs a host that keeps spaces.
 export const spaceIdentity = Object.freeze({ get: async () => ({ status: "unavailable", message: null, identity: null, usual: null }),
@@ -304,13 +317,16 @@ export const sessionUserInput = Object.freeze({ cancel: unavailable, list: empty
 export const settings = Object.freeze({ catalog: async () => ({ status: "unavailable", settings: [] }), get: async () => ({ status: "unavailable", value: null, source: null, message: null, choices: null }),
   set: async () => ({ status: "unavailable", value: null, previous: null, message: null }), reportWindow: async () => ({ status: "unavailable" }), watch: unavailable });
 
+const demoAttribution = Object.freeze({ status: "unavailable", coAuthor: true, coAuthorTrailer: "", defaultCoAuthorTrailer: "", externalWriting: true,
+  externalWritingInstruction: "", defaultExternalWritingInstruction: "", message: null });
+
 // The demo has no host configuration file: the editor reports itself unavailable.
 export const globalConfig = Object.freeze({
   read: async () => ({ status: "unavailable", content: null, revision: null }),
   reviewSettings: async () => ({ status: "unavailable", beforeCommit: false }),
   saveReviewSettings: async () => ({ status: "unavailable", beforeCommit: false }),
-  commitSettings: async () => ({ status: "unavailable", coAuthor: true }),
-  saveCommitSettings: async () => ({ status: "unavailable", coAuthor: true }),
+  attributionSettings: async () => demoAttribution,
+  saveAttributionSettings: async () => demoAttribution,
   promptSuggestionSettings: async () => ({ status: "unavailable", enabled: true }),
   savePromptSuggestionSettings: async () => ({ status: "unavailable", enabled: true }),
   codeModeSettings: async () => ({ status: "unavailable", mode: null, modes: [], scopes: [] }),
@@ -321,6 +337,7 @@ export const globalConfig = Object.freeze({
   save: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   providers: async () => ({ status: "unavailable", revision: null, defaultProvider: null, providers: [], providerTypes: [], reasoningEfforts: [], typeDefaults: [], builtIn: [] }),
   saveProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
+  keepKeyAsSecret: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   deleteProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   addBuiltInProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   sessionTitles: async () => ({ status: "unavailable", mode: null }),

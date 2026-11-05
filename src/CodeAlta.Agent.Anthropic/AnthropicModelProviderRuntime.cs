@@ -115,11 +115,12 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
             (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken),
             configureOptions: ConfigureOptions,
-            // The results of parallel tool calls go out in one user message, then the markers go on that message.
+            // The results of parallel tool calls go out in one user message, then the markers go on that message. A tool
+            // schema with a choice at its root, which the API refuses, is merged first.
             prepareRequest: (request, messages, options) => MarkCacheBreakpoints(
                 request,
                 AnthropicToolResultMessages.MergeConsecutive(messages),
-                MarkDeferredTools(provider, request, options),
+                MarkDeferredTools(provider, request, AnthropicToolSchemas.MergeRootChoices(options)),
                 provider.PromptCacheTtl),
             classifyFailure: ClassifyFailure,
             promptCacheLifetime: provider.HonorsPromptCacheTtl ? provider.PromptCacheTtl : null,

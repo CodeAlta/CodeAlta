@@ -1,0 +1,304 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900" role="img" aria-labelledby="title desc">
+  <title id="title">CodeAlta Fleet in action</title>
+  <desc id="desc">Your desktop and Bea's laptop connect to CodeAlta Server, which reaches the machines that run sessions: a Mac mini also paired directly with your desktop, a build box of team Infra, and a cloud runner that asks to join and is approved when it shows the same six words as your desktop. A session moves from the Mac mini to the build box, its history with it. Sessions travel encrypted end to end, relayed by the server or directly; the rules signed by your devices reach every machine, which checks them before it acts.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0f1f"/>
+      <stop offset="1" stop-color="#150c33"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00d1ff"/>
+      <stop offset=".55" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#a855f7"/>
+    </linearGradient>
+    <radialGradient id="glow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#4f46e5" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#4f46e5" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="spark" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".35" stop-color="#7fe7ff"/>
+      <stop offset="1" stop-color="#00d1ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="spark2" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".35" stop-color="#d8b4fe"/>
+      <stop offset="1" stop-color="#a855f7" stop-opacity="0"/>
+    </radialGradient>
+
+    <symbol id="laptop" viewBox="0 0 200 132">
+      <rect x="20" y="2" width="160" height="104" rx="10" fill="#0f1530" stroke="url(#edge)" stroke-width="3"/>
+      <path d="M2 112 H198 L186 128 H14 Z" fill="#1c2347" stroke="#3b4380" stroke-width="2" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="node" viewBox="0 0 180 92">
+      <rect x="3" y="3" width="174" height="74" rx="18" fill="#121937" stroke="url(#edge)" stroke-width="3"/>
+      <rect x="40" y="80" width="100" height="8" rx="4" fill="#1c2347"/>
+    </symbol>
+    <symbol id="server" viewBox="0 0 176 206">
+      <rect x="3" y="3" width="170" height="200" rx="24" fill="#121937" stroke="url(#edge)" stroke-width="3"/>
+      <g stroke="#3b4380" stroke-width="3" stroke-linecap="round">
+        <path d="M88 96 L88 52 M88 96 L130 120 M88 96 L46 120 M88 96 L88 140"/>
+      </g>
+      <g fill="#26305e" stroke="#4f46e5" stroke-width="2.5">
+        <circle cx="88" cy="46" r="9"/><circle cx="136" cy="123" r="9"/><circle cx="40" cy="123" r="9"/><circle cx="88" cy="146" r="9"/>
+      </g>
+      <circle cx="88" cy="96" r="24" fill="#1b2350" stroke="#00d1ff" stroke-width="3"/>
+      <circle cx="88" cy="96" r="9" fill="#00d1ff"/>
+      <g fill="#26305e">
+        <rect x="30" y="174" width="116" height="6" rx="3"/>
+        <rect x="30" y="186" width="80" height="6" rx="3"/>
+      </g>
+    </symbol>
+    <symbol id="doc" viewBox="0 0 64 80">
+      <path d="M4 4 H44 L60 20 V76 H4 Z" fill="#161d40" stroke="#b4c0ff" stroke-width="3" stroke-linejoin="round"/>
+      <rect x="13" y="28" width="30" height="5" rx="2.5" fill="#3b4380"/>
+      <rect x="13" y="39" width="38" height="5" rx="2.5" fill="#3b4380"/>
+      <circle cx="44" cy="60" r="12" fill="#a855f7"/>
+      <path d="M38 60 L43 65 L51 55" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="check" viewBox="0 0 44 44">
+      <circle cx="22" cy="22" r="20" fill="#08261f" stroke="#2dd4bf" stroke-width="2.5"/>
+      <path d="M13 22 L19 28 L31 16" fill="none" stroke="#2dd4bf" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="lock" viewBox="0 0 40 40">
+      <circle cx="20" cy="20" r="18" fill="#1b0b4a" stroke="#00d1ff" stroke-width="2"/>
+      <path d="M14 18 V15 a6 6 0 0 1 12 0 V18" fill="none" stroke="#e6e9f5" stroke-width="2.4" stroke-linecap="round"/>
+      <rect x="12" y="18" width="16" height="12" rx="3" fill="#e6e9f5"/>
+    </symbol>
+    <symbol id="session" viewBox="0 0 72 48">
+      <rect x="2" y="2" width="68" height="44" rx="12" fill="#2a1a5e" stroke="#a855f7" stroke-width="3"/>
+      <rect x="14" y="13" width="34" height="6" rx="3" fill="#d8b4fe"/>
+      <rect x="14" y="25" width="44" height="6" rx="3" fill="#7c6bd6"/>
+      <rect x="14" y="35" width="24" height="4" rx="2" fill="#7c6bd6"/>
+    </symbol>
+
+    <style>
+      text { font-family: "Segoe UI", Inter, system-ui, -apple-system, sans-serif; }
+      .label { font-size: 26px; font-weight: 600; fill: #f2f4ff; }
+      .sub { font-size: 21px; fill: #8f99bd; }
+      .tag { font-size: 20px; fill: #7fe7ff; }
+      .tagp { font-size: 20px; fill: #d8b4fe; }
+      .wire { stroke: #4f46e5; stroke-width: 3; fill: none; opacity: .75; }
+      .direct { stroke: #00d1ff; stroke-width: 3; stroke-dasharray: 4 12; stroke-linecap: round; fill: none; opacity: .8; }
+      .arc { stroke: #a855f7; stroke-width: 3; stroke-dasharray: 4 12; stroke-linecap: round; fill: none; opacity: .7; }
+      .row { fill: #26305e; }
+      .word { font-size: 19px; font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; fill: #e6e9f5; }
+
+      /* Sessions at work: the bars of each screen fill and empty. */
+      .work { transform-box: fill-box; transform-origin: left center; animation: work 3.2s ease-in-out infinite; }
+      .work.d1 { animation-delay: -.8s; } .work.d2 { animation-delay: -1.6s; } .work.d3 { animation-delay: -2.4s; }
+      @keyframes work { 0%, 100% { transform: scaleX(.35); } 50% { transform: scaleX(1); } }
+      .led { animation: led 2.4s ease-in-out infinite; }
+      @keyframes led { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+
+      /* A session relayed by the server, encrypted end to end: your desktop to the build box, and its answer back. */
+      .pkt, .sdoc { opacity: 0; }
+      .relay { animation: relay 6s linear infinite; }
+      @keyframes relay {
+        0% { transform: translate(362px, 340px); opacity: 0; } 4% { opacity: 1; }
+        28% { transform: translate(712px, 400px); } 34% { transform: translate(888px, 403px); }
+        60% { transform: translate(1160px, 442px); opacity: 1; } 64%, 100% { transform: translate(1160px, 442px); opacity: 0; }
+      }
+      .answer { animation: answer 6s linear infinite; animation-delay: -3s; }
+      @keyframes answer {
+        0% { transform: translate(1160px, 452px); opacity: 0; } 4% { opacity: 1; }
+        30% { transform: translate(888px, 413px); } 36% { transform: translate(712px, 410px); }
+        60% { transform: translate(362px, 350px); opacity: 1; } 64%, 100% { transform: translate(362px, 350px); opacity: 0; }
+      }
+      /* Bea's session goes the same way. */
+      .bea { animation: bea 6s linear infinite; animation-delay: -1.5s; }
+      @keyframes bea {
+        0% { transform: translate(328px, 655px); opacity: 0; } 4% { opacity: 1; }
+        28% { transform: translate(712px, 470px); } 34% { transform: translate(888px, 410px); }
+        60% { transform: translate(1160px, 448px); opacity: 1; } 64%, 100% { transform: translate(1160px, 448px); opacity: 0; }
+      }
+      /* A paired machine is reached directly. */
+      .dir { animation: dir 4s linear infinite; animation-delay: -.5s; }
+      @keyframes dir {
+        0% { transform: translate(362px, 280px); opacity: 0; } 6% { opacity: 1; }
+        70% { transform: translate(1160px, 202px); opacity: 1; } 76%, 100% { transform: translate(1160px, 202px); opacity: 0; }
+      }
+
+      /* What your devices sign reaches every machine, which checks it. */
+      .s0, .s1, .s2, .ok { animation-duration: 8s; animation-iteration-count: infinite; animation-timing-function: ease-in-out; }
+      .s0 { animation-name: s0; } .s1 { animation-name: s1; } .s2 { animation-name: s2; } .ok { animation-name: ok; }
+      @keyframes s0 { 0% { transform: translate(362px, 330px); opacity: 0; } 4% { opacity: 1; } 22% { transform: translate(712px, 393px); opacity: 1; } 25%, 100% { transform: translate(712px, 393px); opacity: 0; } }
+      @keyframes s1 { 0%, 24% { transform: translate(888px, 396px); opacity: 0; } 27% { opacity: 1; } 46% { transform: translate(1160px, 196px); opacity: 1; } 50%, 100% { transform: translate(1160px, 196px); opacity: 0; } }
+      @keyframes s2 { 0%, 24% { transform: translate(888px, 396px); opacity: 0; } 27% { opacity: 1; } 46% { transform: translate(1160px, 436px); opacity: 1; } 50%, 100% { transform: translate(1160px, 436px); opacity: 0; } }
+      .ok { opacity: 0; transform-box: fill-box; transform-origin: center; }
+      @keyframes ok { 0%, 46% { opacity: 0; transform: scale(.4); } 52% { opacity: 1; transform: scale(1.15); } 56%, 84% { opacity: 1; transform: scale(1); } 92%, 100% { opacity: 0; transform: scale(1); } }
+
+      /* A session moves from the Mac mini to the build box, its history with it. */
+      .move { animation: move 12s linear infinite; }
+      @keyframes move {
+        0%, 20% { transform: translate(1384px, 202px); opacity: 0; }
+        22% { transform: translate(1420px, 212px); opacity: 1; }
+        26.7% { transform: translate(1480px, 228px); } 31.3% { transform: translate(1524px, 272px); }
+        36% { transform: translate(1540px, 332px); } 40.7% { transform: translate(1524px, 392px); }
+        45.3% { transform: translate(1480px, 436px); } 50% { transform: translate(1420px, 452px); opacity: 1; }
+        54%, 100% { transform: translate(1384px, 442px); opacity: 0; }
+      }
+      .moveout { animation: moveout 12s ease-in-out infinite; }
+      @keyframes moveout { 0%, 20% { opacity: 1; } 24%, 92% { opacity: .15; } 98%, 100% { opacity: 1; } }
+      .movein { opacity: 0; animation: movein 12s ease-in-out infinite; }
+      @keyframes movein { 0%, 50% { opacity: 0; } 54%, 92% { opacity: 1; } 98%, 100% { opacity: 0; } }
+      .movetag { opacity: 0; animation: movetag 12s ease-in-out infinite; }
+      @keyframes movetag { 0%, 18% { opacity: 0; } 22%, 56% { opacity: 1; } 62%, 100% { opacity: 0; } }
+
+      /* A new machine joins: it asks, shows six words, you approve them on your desktop, it connects and gets rules and work. */
+      .join { animation: join 16s ease-in-out infinite; }
+      @keyframes join { 0%, 8% { opacity: 0; } 13%, 44% { opacity: .55; } 50%, 94% { opacity: 1; } 100% { opacity: 0; } }
+      .askcard { opacity: 0; animation: askcard 16s ease-in-out infinite; }
+      @keyframes askcard { 0%, 15% { opacity: 0; transform: translateY(12px); } 19%, 44% { opacity: 1; transform: translateY(0); } 48%, 100% { opacity: 0; transform: translateY(0); } }
+      .approve { animation: approve 16s step-end infinite; }
+      @keyframes approve { 0%, 38% { fill: #4f46e5; } 39%, 100% { fill: #00b8e6; } }
+      .newtag { animation: newtag 16s step-end infinite; }
+      @keyframes newtag { 0%, 46% { opacity: 1; } 47%, 100% { opacity: 0; } }
+      .ontag, .runnerwork { opacity: 0; animation: ontag 16s step-end infinite; }
+      @keyframes ontag { 0%, 46% { opacity: 0; } 47%, 100% { opacity: 1; } }
+      .joinwire { stroke-dasharray: 420; stroke-dashoffset: 420; animation: joinwire 16s ease-out infinite; }
+      @keyframes joinwire { 0%, 44% { stroke-dashoffset: 420; } 52%, 94% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: 420; } }
+      .s3 { animation: s3 16s ease-in-out infinite; }
+      @keyframes s3 { 0%, 62% { transform: translate(888px, 396px); opacity: 0; } 63.5% { opacity: 1; } 73% { transform: translate(1160px, 676px); opacity: 1; } 75%, 100% { transform: translate(1160px, 676px); opacity: 0; } }
+      .ok3 { opacity: 0; transform-box: fill-box; transform-origin: center; animation: ok3 16s ease-out infinite; }
+      @keyframes ok3 { 0%, 73% { opacity: 0; transform: scale(.4); } 76% { opacity: 1; transform: scale(1.15); } 78%, 90% { opacity: 1; transform: scale(1); } 93%, 100% { opacity: 0; transform: scale(1); } }
+      .torunner { animation: torunner 16s linear infinite; }
+      @keyframes torunner { 0%, 76% { transform: translate(888px, 410px); opacity: 0; } 77% { opacity: 1; } 88% { transform: translate(1160px, 682px); opacity: 1; } 90%, 100% { transform: translate(1160px, 682px); opacity: 0; } }
+
+      @media (prefers-reduced-motion: reduce) {
+        * { animation: none !important; }
+        .joinwire { stroke-dashoffset: 0; }
+        .newtag { opacity: 0; }
+        .ontag, .runnerwork, .ok, .ok3, .movetag { opacity: 1; }
+      }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" rx="28" fill="url(#bg)"/>
+  <ellipse cx="800" cy="440" rx="760" ry="380" fill="url(#glow)"/>
+
+  <!-- Every device keeps one outgoing connection to the server; a paired machine is also reached directly. -->
+  <path class="wire" d="M362 340 L712 400"/>
+  <path class="wire" d="M328 655 L712 470"/>
+  <path class="wire" d="M888 403 L1160 202"/>
+  <path class="wire" d="M888 403 L1160 442"/>
+  <path class="wire joinwire" d="M888 403 L1160 682"/>
+  <path class="direct" d="M362 280 L1160 202"/>
+  <path class="arc" d="M1420 212 A120 120 0 0 1 1420 452"/>
+  <text class="tag" x="760" y="224" text-anchor="middle" transform="rotate(-5.6 760 224)">paired · direct</text>
+  <text class="tag" x="530" y="398" text-anchor="middle" transform="rotate(9.7 530 398)">relayed · encrypted end to end</text>
+  <g class="movetag">
+    <text class="tagp" x="1480" y="338" text-anchor="end">move to machine</text>
+    <text class="sub" x="1480" y="362" text-anchor="end" font-size="18">history included</text>
+  </g>
+
+  <!-- Your desktop -->
+  <g transform="translate(60 250)">
+    <use href="#laptop" width="300" height="198"/>
+    <g transform="translate(60 22)">
+      <circle cx="10" cy="12" r="7" fill="#2dd4bf" class="led"/>
+      <rect class="row" x="28" y="5" width="140" height="14" rx="7"/><rect class="work d1" x="28" y="5" width="140" height="14" rx="7" fill="#4f46e5"/>
+      <circle cx="10" cy="46" r="7" fill="#00d1ff" class="led"/>
+      <rect class="row" x="28" y="39" width="112" height="14" rx="7"/><rect class="work d2" x="28" y="39" width="112" height="14" rx="7" fill="#4f46e5"/>
+      <circle cx="10" cy="80" r="7" fill="#a855f7" class="led"/>
+      <rect class="row" x="28" y="73" width="128" height="14" rx="7"/>
+      <circle cx="10" cy="114" r="7" fill="#2dd4bf" class="led"/>
+      <rect class="row" x="28" y="107" width="96" height="14" rx="7"/>
+    </g>
+    <text class="label" x="150" y="240" text-anchor="middle">Your desktop</text>
+    <text class="sub" x="150" y="270" text-anchor="middle">CodeAlta Desktop</text>
+  </g>
+
+  <!-- Bea, a teammate -->
+  <g transform="translate(80 590)">
+    <use href="#laptop" width="240" height="158"/>
+    <g transform="translate(46 18)">
+      <circle cx="8" cy="10" r="6" fill="#a855f7" class="led"/>
+      <rect class="row" x="22" y="4" width="110" height="12" rx="6"/><rect class="work d3" x="22" y="4" width="110" height="12" rx="6" fill="#4f46e5"/>
+      <circle cx="8" cy="38" r="6" fill="#2dd4bf" class="led"/>
+      <rect class="row" x="22" y="32" width="86" height="12" rx="6"/>
+    </g>
+    <text class="label" x="120" y="192" text-anchor="middle">Bea, your teammate</text>
+  </g>
+
+  <!-- The server -->
+  <g transform="translate(712 300)">
+    <use href="#server" width="176" height="206"/>
+    <circle cx="28" cy="28" r="7" fill="#2dd4bf" class="led"/>
+    <text class="label" x="88" y="246" text-anchor="middle">CodeAlta Server</text>
+    <text class="sub" x="88" y="276" text-anchor="middle">runs no agent</text>
+    <text class="sub" x="88" y="302" text-anchor="middle">reads no conversation</text>
+  </g>
+
+  <!-- Machines -->
+  <g transform="translate(1160 146)">
+    <use href="#node" width="250" height="128"/>
+    <circle cx="44" cy="56" r="9" fill="#2dd4bf" class="led"/>
+    <rect class="row" x="74" y="38" width="140" height="11" rx="5.5"/><rect class="work d1" x="74" y="38" width="140" height="11" rx="5.5" fill="#00d1ff"/>
+    <g class="moveout"><rect x="74" y="60" width="100" height="11" rx="5.5" fill="#a855f7"/></g>
+    <text class="label" x="125" y="160" text-anchor="middle">Mac mini</text>
+    <use class="ok" href="#check" x="-22" y="-16" width="48" height="48"/>
+  </g>
+  <g transform="translate(1160 386)">
+    <use href="#node" width="250" height="128"/>
+    <circle cx="44" cy="56" r="9" fill="#2dd4bf" class="led"/>
+    <rect class="row" x="74" y="30" width="140" height="11" rx="5.5"/><rect class="work d2" x="74" y="30" width="140" height="11" rx="5.5" fill="#00d1ff"/>
+    <rect class="row" x="74" y="50" width="120" height="11" rx="5.5"/><rect class="work d3" x="74" y="50" width="120" height="11" rx="5.5" fill="#4f46e5"/>
+    <rect class="movein" x="74" y="70" width="100" height="11" rx="5.5" fill="#a855f7"/>
+    <text class="label" x="125" y="160" text-anchor="middle">Build box</text>
+    <text class="sub" x="125" y="188" text-anchor="middle">team Infra · gpu</text>
+    <use class="ok" href="#check" x="-22" y="-16" width="48" height="48"/>
+  </g>
+  <g class="join" transform="translate(1160 626)">
+    <use href="#node" width="250" height="128"/>
+    <circle cx="44" cy="56" r="9" fill="#2dd4bf" class="led"/>
+    <rect class="row" x="74" y="42" width="140" height="11" rx="5.5"/>
+    <rect class="row" x="74" y="62" width="90" height="11" rx="5.5"/>
+    <rect class="work d2 runnerwork" x="74" y="42" width="140" height="11" rx="5.5" fill="#00d1ff"/>
+    <text class="label" x="125" y="160" text-anchor="middle">Cloud runner</text>
+    <text class="tagp newtag" x="125" y="190" text-anchor="middle">asks to join…</text>
+    <text class="tag ontag" x="125" y="190" text-anchor="middle">approved · online</text>
+    <use class="ok3" href="#check" x="-22" y="-16" width="48" height="48"/>
+  </g>
+
+  <!-- The approval on your desktop: the same six words on both sides. -->
+  <g class="askcard">
+    <g transform="translate(60 44)">
+      <path d="M150 178 L166 196 L182 178" fill="#1b2350" stroke="#4f46e5" stroke-width="2" stroke-linejoin="round"/>
+      <rect width="484" height="180" rx="16" fill="#1b2350" stroke="#4f46e5" stroke-width="2"/>
+      <rect x="140" y="170" width="52" height="12" fill="#1b2350"/>
+      <text x="22" y="40" font-size="23" font-weight="600" fill="#f2f4ff">Cloud runner asks to join</text>
+      <text x="22" y="72" font-size="19" fill="#b4c0ff">Approve if it shows the same six words:</text>
+      <g class="word">
+        <rect x="22" y="88" width="68" height="30" rx="7" fill="#26305e"/><text x="56" y="109" text-anchor="middle">cloud</text>
+        <rect x="96" y="88" width="68" height="30" rx="7" fill="#26305e"/><text x="130" y="109" text-anchor="middle">snail</text>
+        <rect x="170" y="88" width="68" height="30" rx="7" fill="#26305e"/><text x="204" y="109" text-anchor="middle">ferry</text>
+        <rect x="244" y="88" width="68" height="30" rx="7" fill="#26305e"/><text x="278" y="109" text-anchor="middle">bread</text>
+        <rect x="318" y="88" width="68" height="30" rx="7" fill="#26305e"/><text x="352" y="109" text-anchor="middle">amber</text>
+        <rect x="392" y="88" width="68" height="30" rx="7" fill="#26305e"/><text x="426" y="109" text-anchor="middle">pilot</text>
+      </g>
+      <rect class="approve" x="340" y="132" width="120" height="34" rx="8"/>
+      <text x="400" y="155" text-anchor="middle" font-size="19" font-weight="600" fill="#ffffff">Approve</text>
+      <text x="310" y="155" text-anchor="end" font-size="19" fill="#8f99bd">Deny</text>
+    </g>
+  </g>
+
+  <!-- Travelling: sessions, signed documents, and a session that moves. -->
+  <g class="pkt relay"><circle r="18" fill="url(#spark)"/><use href="#lock" x="-12" y="-36" width="24" height="24"/></g>
+  <g class="pkt answer"><circle r="16" fill="url(#spark2)"/></g>
+  <g class="pkt bea"><circle r="16" fill="url(#spark2)"/><use href="#lock" x="-12" y="-34" width="24" height="24"/></g>
+  <g class="pkt dir"><circle r="16" fill="url(#spark)"/></g>
+  <g class="pkt torunner"><circle r="16" fill="url(#spark)"/><use href="#lock" x="-12" y="-34" width="24" height="24"/></g>
+  <g class="sdoc s0"><use href="#doc" x="-20" y="-50" width="40" height="50"/></g>
+  <g class="sdoc s1"><use href="#doc" x="-17" y="-44" width="34" height="42"/></g>
+  <g class="sdoc s2"><use href="#doc" x="-17" y="-44" width="34" height="42"/></g>
+  <g class="sdoc s3"><use href="#doc" x="-17" y="-44" width="34" height="42"/></g>
+  <g class="pkt move"><use href="#session" x="-36" y="-24" width="72" height="48"/></g>
+
+  <!-- Legend -->
+  <g transform="translate(60 858)" font-size="21" fill="#c9cfe6">
+    <circle cx="10" cy="-7" r="9" fill="url(#spark)"/><text x="30" y="0">a session, encrypted end to end</text>
+    <use href="#doc" x="372" y="-26" width="22" height="28"/><text x="404" y="0">who may do what, signed by your devices</text>
+    <use href="#check" x="842" y="-24" width="26" height="26"/><text x="878" y="0">checked by each machine before it acts</text>
+  </g>
+</svg>

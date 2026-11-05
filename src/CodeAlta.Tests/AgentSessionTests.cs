@@ -2127,6 +2127,55 @@ public sealed partial class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_TryWithdrawSteerAsync_TakesBackOnlyWhatTheRunHasNotTaken()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-withdraw");
+        var state = CreateState("session-withdraw");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        var firstTurnStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstTurn = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        static AgentTurnResponse Answer(string text) => new() { AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text(text)]) };
+
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                async (_, _, cancellationToken) =>
+                {
+                    firstTurnStarted.TrySetResult();
+                    await releaseFirstTurn.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    return Answer("First answer.");
+                },
+                (_, _, _) => Task.FromResult(Answer("Second answer."))),
+            CreateOptions(provider, temp.Path));
+
+        var send = session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Initial prompt") });
+        await firstTurnStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await session.SteerAsync(new AgentSteerOptions { Input = AgentInput.Text("Forget this."), WithdrawalId = "first" }).ConfigureAwait(false);
+        await session.SteerAsync(new AgentSteerOptions { Input = AgentInput.Text("Keep this."), WithdrawalId = "second" }).ConfigureAwait(false);
+
+        Assert.IsTrue(await session.TryWithdrawSteerAsync("first").ConfigureAwait(false));
+        Assert.IsFalse(await session.TryWithdrawSteerAsync("first").ConfigureAwait(false), "It was taken back already.");
+        Assert.IsFalse(await session.TryWithdrawSteerAsync("unknown").ConfigureAwait(false));
+
+        releaseFirstTurn.TrySetResult();
+        await send.ConfigureAwait(false);
+
+        Assert.IsFalse(await session.TryWithdrawSteerAsync("second").ConfigureAwait(false), "The run gave it to the model.");
+        var users = (await session.GetHistoryAsync().ConfigureAwait(false)).OfType<AgentContentCompletedEvent>().Where(static evt => evt.Kind == AgentContentKind.User).Select(static evt => evt.Content).ToArray();
+        CollectionAssert.AreEqual(new[] { "Initial prompt", "Keep this." }, users);
+    }
+
+    [TestMethod]
     public async Task AgentSession_SteerAsync_QueuesPendingInputIntoSameRun()
     {
         using var temp = TestTempDirectory.Create();

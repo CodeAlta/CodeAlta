@@ -12,13 +12,13 @@ import { AutomationOriginLabel } from "./AutomationOrigin";
 
 const never = () => assert.fail("rendering must not act");
 const trigger = (type: string, change: Partial<AutomationTriggerItem> = {}): AutomationTriggerItem =>
-  ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, ...change });
+  ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null, ...change });
 const item = (id: string, change: Partial<AutomationItem> = {}): AutomationItem => ({
   id, name: `Automation ${id}`, enabled: true, prompt: "Do the thing.", projectId: "p", projectName: "Alpha", projectFolder: "/p", storeProjectId: null, file: "/home/config.toml",
-  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, ...change,
+  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, publishTo: null, placement: null, autonomy: null, ...change,
 });
 const run = (id: string, change: Partial<AutomationRunItem> = {}): AutomationRunItem =>
-  ({ id, automationId: "a", name: "Nightly", sessionId: null, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "daily", detail: null, status: "completed", message: null, ...change });
+  ({ id, automationId: "a", name: "Nightly", sessionId: null, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "daily", detail: null, status: "completed", message: null, machineId: null, reply: null, output: null, calls: null, ...change });
 const projects: WorkspaceProject[] = [{ id: "p", name: "Alpha", path: "/p", archived: false }];
 const session = (id: string): WorkspaceSession => ({
   messageCount: null, automationId: "a", worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, archived: false, archivedAt: null, spaceId: null, createdAt: null, id, title: "Nightly", fullTitle: "Nightly", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "p",
@@ -87,6 +87,30 @@ test("a card says what starts its automation, where it runs and what it waits fo
   assert.match(html, /Your automations<span class="count">7<\/span>/);
 });
 
+test("a card of an automation that runs on a paired machine names the machine, and what kept it from being copied", () => {
+  const placed = (state: string, message: string | null) => ({ machineId: "mini", machineName: "Mac mini", state, message, copiedAt: null });
+  const html = render({ items: [
+    item("copied", { name: "On the mini", runsOn: "mini", publishTo: null, placement: placed("copied", null), triggers: [trigger("daily", { at: ["09:00"] })] }),
+    item("refused", { name: "Refused", runsOn: "mini", publishTo: null, placement: placed("failed", "Mac mini does not let this computer give it automations."), triggers: [trigger("daily", { at: ["09:00"] })] }),
+    item("waiting", { name: "Moved", runsOn: "mini", publishTo: null, placement: placed("waiting", "It waits until Laptop takes away its copy."), triggers: [trigger("daily", { at: ["09:00"] })] }),
+    item("back", { name: "Back here", runsOn: null, publishTo: null, placement: placed("waiting", "It waits until Mac mini takes away its copy."), triggers: [trigger("daily", { at: ["09:00"] })] }),
+  ] });
+  const [copied, refused, waiting, back] = cards(html);
+  // Back on this computer while the machine it left is away: it waits the same way, and runs nowhere else.
+  assert.match(back, /class="automation-card-state" title="It waits until Mac mini takes away its copy\."[^>]*>Waits for the machine it left</);
+  assert.match(back, /<span class="bp6-button-text">Start anyway…<\/span>/);
+  assert.doesNotMatch(back, /automation-chip[^>]*>[\s\S]*<span>On /);
+  for (const locale of locales.filter(locale => locale !== "en")) assert.notEqual(translate(locale, "Start it on this computer now?"), "Start it on this computer now?", locale);
+  // Moved while the machine it left is away: it says so, and the user may start it anyway, after a question that says both may run it.
+  assert.match(waiting, /class="automation-card-state" title="It waits until Laptop takes away its copy\."[^>]*>Waits for the machine it left</);
+  assert.match(waiting, /<span class="bp6-button-text">Start anyway…<\/span>/);
+  assert.doesNotMatch(copied, /Start anyway/);
+  for (const locale of locales) assert.ok(translate(locale, "Start it on {machine} now?", { machine: "M" }).includes("M"), locale);
+  assert.match(copied, /automation-chip[^>]*>[\s\S]*<span>On Mac mini<\/span>/);
+  assert.match(copied, /class="automation-card-state"[^>]*>On Mac mini</, "Its machine fires its schedule: this computer shows where it runs.");
+  assert.match(refused, /class="automation-card-state" data-problem="true"[^>]*>Mac mini does not let this computer give it automations\.</);
+});
+
 test("an automation that came with its project waits for the user, who allows it from its card", () => {
   const html = render({ items: [
     item("shared", { name: "Shared", allowed: false, storeProjectId: "p", triggers: [trigger("daily", { at: ["09:00"] })] }),
@@ -137,6 +161,28 @@ test("the recent runs name their automation and open their session while it exis
   assert.match(second, /^"failed"><div class="automation-run">[\s\S]*<span>Failed · Daily · No model\.<\/span>/);
   assert.match(third, /^"muted"><div class="automation-run">[\s\S]*<strong>Automation<\/strong><span>Skipped · Daily · The previous run was still in progress\.<\/span>/);
   assert.match(render({ items: [item("a")] }), /Recent runs<\/h4><p class="automation-empty">No run yet\.<\/p>/);
+});
+
+test("a run of another machine opens its session from the run, also before this window lists it", () => {
+  const html = render({ items: [item("a")], runs: [run("r1", { sessionId: "remote-s", machineId: "mini" }), run("r2", { sessionId: "gone" })] });
+  const [remote, local] = html.split("<li data-tone=").slice(1);
+  assert.match(remote, /^"ok"><button type="button" class="automation-run" title="Open the session">/);
+  assert.match(local, /^"ok"><div class="automation-run">/, "a session of this computer that no longer exists does not open");
+});
+
+test("a run that waits for a person offers to take it over, and a try lists the calls it recorded, in every language", () => {
+  const runs = [run("r1", { status: "waiting", sessionId: "s1" }), run("r2", { status: "waiting", sessionId: "remote-s", machineId: "mini" }),
+    run("r3", { trigger: "try", calls: ["jira_comment {\"issue\":\"PLAT-7\"}"] })];
+  const html = render({ items: [item("a")], runs }, { sessions: [session("s1")] });
+  const [local, remote, tried] = html.split("<li data-tone=").slice(1);
+  assert.match(local, /^"running">[\s\S]*<span>Waits for you · Daily<\/span>[\s\S]*The run waits for you: answer it in its session, or take it over\.[\s\S]*>Take over</);
+  assert.match(remote, /open its session on its machine to answer it\.[\s\S]*>Take over</);
+  assert.doesNotMatch(tried, /Take over/);
+  assert.match(tried, /class="automation-run-calls"><li title="jira_comment \{&quot;issue&quot;:&quot;PLAT-7&quot;\}">Recorded, not made: jira_comment/);
+  for (const locale of locales) {
+    const shown = render({ items: [item("a")], runs: [runs[0]] }, { sessions: [session("s1")], locale });
+    assert.ok(shown.includes(translate(locale, "Take over")) && shown.includes(translate(locale, "Waits for you")), locale);
+  }
 });
 
 test("what could not be read as an automation is listed with its file", () => {

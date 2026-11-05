@@ -45,7 +45,7 @@ test("what protects the user is read only for agents", () => {
   const protectedIds = ["permissions.default_mode", "permissions.created_sessions", "permissions.confirm_session_delete", "permissions.confirm_project_archive",
     "permissions.confirm_plugin_stop", "tools.disabled", "review.before_commit", "sandbox.all_sessions", "code_mode.mode", "mcp_host.server", "mcp_host.tailnet",
     "general.reconnect_remote_control", "storage.clear_scratchpad_on_startup", "storage.session_retention.enabled", "storage.session_retention.amount",
-    "storage.session_retention.unit", "search.semantic", "search.model"];
+    "storage.session_retention.unit", "search.semantic", "search.model", "external_writing.attribution", "external_writing.instruction"];
   for (const id of protectedIds) assert.equal(builtInSettings.find(entry => entry.id === id)?.agents, "read", `${id} is changed by the user alone`);
 });
 

@@ -29,7 +29,13 @@ public sealed class DesktopArchitectureTests
                 Assert.IsTrue(reference.Name is "CodeAlta.Catalog" or "CodeAlta.Agent" or "CodeAlta.Hosting" or "CodeAlta.Orchestration" or "CodeAlta.LiveTool" or "CodeAlta.Plugins" or "CodeAlta.Plugins.Abstractions" or "CodeAlta.Plugin.Mcp" or "CodeAlta.Plugin.Git" or "CodeAlta.Plugin.Jira" or "CodeAlta.Plugin.Statistics"
                     or "CodeAlta.Plugin.Mobile" or "CodeAlta.Plugin.Browser" or "CodeAlta.Plugin.Acp" or "CodeAlta.Acp" or "CodeAlta.Plugin.CodexCli" or "CodeAlta.CodexAppServer" or "CodeAlta.NativeEngines" or "CodeAlta.Search"
                     // The desktop executable is also the sandbox worker of its sessions (--sandbox-worker).
-                    or "CodeAlta.Sandbox", reference.Name);
+                    or "CodeAlta.Sandbox"
+                    // The automation engine, which CodeAlta Node runs too.
+                    or "CodeAlta.Automations"
+                    // The sessions of the paired machines, through the client of their node API.
+                    or "CodeAlta.Fleet" or "CodeAlta.Fleet.Protocol"
+                    // The update of the fleet: the hashes of the feed an owner's computer signs, and why a feed was refused.
+                    or "CodeAlta.Fleet.Update", reference.Name);
             Assert.AreNotEqual("altatui", reference.Name);
         }
     }

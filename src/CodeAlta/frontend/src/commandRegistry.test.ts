@@ -54,6 +54,12 @@ test("caret and typing keys stay with text fields and only navigate outside text
   assert.deepEqual(resolveCommandKey(key("ArrowUp", { altKey: true }), false, "prompt"), { command: null, chord: false, handled: false });
   assert.equal(resolveCommandKey(ctrl("f"), false, "none").command, "searchSessions");
   assert.equal(resolveCommandKey(ctrl("f"), false, "prompt").handled, false);
+  // Ctrl+Shift+F searches the sessions from the prompt too, where Ctrl+F finds in the session.
+  for (const focus of ["none", "prompt", "text"] as const) {
+    assert.equal(resolveCommandKey(key("F", { ctrlKey: true, shiftKey: true }), false, focus, false).command, "searchSessions", focus);
+    assert.equal(resolveCommandKey(key("f", { metaKey: true, shiftKey: true }), false, focus, true).command, "searchSessions", focus);
+  }
+  assert.equal(resolveCommandKey(ctrl("f"), false, "none", true).command, "searchSessions", "Ctrl+F on macOS, as before.");
   assert.equal(resolveCommandKey(key("F2"), false, "text").handled, false);
   for (const typed of ["a", "?", "/", "Enter", "Escape", "ArrowDown"])
     assert.equal(resolveCommandKey(key(typed), false, "prompt").handled, false, typed);
@@ -86,6 +92,9 @@ test("help lists bindings then typed hints", () => {
   const help = commandDefinitions.find(command => command.id === "help")!;
   assert.deepEqual(commandKeys(help), ["F1", "?"]);
   assert.deepEqual(commandKeys(commandDefinitions.find(command => command.id === "send")!), ["Enter"]);
+  const find = commandDefinitions.find(command => command.id === "findInSession")!;
+  assert.deepEqual(commandKeys(find, false), ["Ctrl+F"]);
+  assert.deepEqual(commandKeys(find, true), ["Cmd+F"], "A hint names the gesture of the platform.");
 });
 
 test("the commands a search finds come with their score: nothing typed lists them all as they are registered", () => {
@@ -147,9 +156,20 @@ test("a session is forked and rewound by commands of the session, found by what 
   assert.equal(names("/rewind")[0], "rewind");
   for (const word of ["branch", "duplicate", "copy", "clone"]) assert.ok(names(word).includes("fork"), word);
   for (const word of ["undo", "roll back", "revert"]) assert.ok(names(word).includes("rewind"), word);
-  // Neither has a key: both open a window that says what they do before anything is done.
-  assert.equal(fork.keys, undefined);
+  // A fork has the key of the row of a session, from anywhere: it opens a window that says what it does before
+  // anything is done. Not Ctrl+Shift+F, which searches the files of the code editor.
+  assert.deepEqual(fork.keys, ["Ctrl+Shift+B"]);
   assert.equal(rewind.keys, undefined);
+});
+
+test("a session is forked and archived with Ctrl and Shift from the prompt as from anywhere, never with a letter alone (#322)", () => {
+  for (const mac of [false, true]) for (const focus of ["prompt", "text", "none"] as const) {
+    assert.equal(resolveCommandKey(ctrl("B", { shiftKey: true }), false, focus, mac).command, "fork", `${focus} ${mac}`);
+    assert.equal(resolveCommandKey(ctrl("A", { shiftKey: true }), false, focus, mac).command, "archiveSession", `${focus} ${mac}`);
+    for (const typed of ["a", "A", "f", "F"]) assert.equal(resolveCommandKey(key(typed), false, focus, mac).handled, false, typed);
+  }
+  const archive = commandDefinitions.find(command => command.id === "archiveSession")!;
+  assert.deepEqual([archive.name, archive.category, archive.keys], ["archive", "Session", ["Ctrl+Shift+A"]]);
 });
 
 test("zoom takes the keys of a browser, with or without Shift for the plus key", () => {

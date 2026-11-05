@@ -74,7 +74,9 @@ export const spaces = {
       const joins = request.join?.includes(item.id), leaves = request.leave?.includes(item.id);
       if (joins || leaves) listed[index] = { ...item, projectIds: [...item.projectIds.filter(id => id !== request.projectId), ...(joins ? [request.projectId!] : [])] };
     }
-    return done();
+    // A move of its sessions from the default space finds one at work, which stays.
+    if (request.sessionsFrom === "default") return { ...await done(), movedSessions: 2, leftSessions: [{ sessionId: "busy", title: "Busy session" }], sessionsStatus: "ok" };
+    return request.sessionsFrom ? { ...await done(), movedSessions: 1, leftSessions: [], sessionsStatus: "ok" } : done();
   },
   shown: async (request: SpaceShownRequest) => { fixture.shown.push(request.id ?? ""); return done(); },
   assignments: async () => (fixture.assignmentReads++, { status: "ok", providers: [{ key: "claude-business", spaces: ["work"] }, { key: "claude-home", spaces: ["default"] }],

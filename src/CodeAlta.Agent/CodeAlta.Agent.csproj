@@ -15,7 +15,11 @@
     <InternalsVisibleTo Include="CodeAlta.Agent.Mistral" />
     <InternalsVisibleTo Include="CodeAlta.Agent.OpenAI" />
     <InternalsVisibleTo Include="CodeAlta.Agent.Xai" />
+    <!-- The automation engine: StagedFileReplacement for the configuration files it writes while others read them. -->
+    <InternalsVisibleTo Include="CodeAlta.Automations" />
     <InternalsVisibleTo Include="CodeAlta.Catalog" />
+    <!-- The fleet: StagedFileReplacement for the files of its fleet folder, which a scanner may hold a moment after they are written. -->
+    <InternalsVisibleTo Include="CodeAlta.Fleet" />
     <InternalsVisibleTo Include="CodeAlta.Orchestration" />
     <InternalsVisibleTo Include="CodeAlta.Orchestration.Tests" />
     <!-- The sandbox worker: the shell of the tools and the serialization of tool calls and permission requests. -->

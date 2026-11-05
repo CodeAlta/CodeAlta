@@ -7,8 +7,10 @@ import { isExcluded, searchEnabled } from "../search/localSearchHub";
 import { useLocalSearch } from "../search/localSearchContext";
 import { useShellLanguage } from "../shellLanguage";
 import type { SpaceProject } from "./SpaceDialog";
+import { joinedSessions } from "./sessionSpaceMove";
 import type { SpaceSectionProps } from "./spaceSection";
 import { maximumSpaceDescription, maximumSpaceName, spaceBrand, spaceColors, spaceNameProblem } from "./spaces";
+import { SpaceServerField } from "../fleet/SpaceServerField";
 
 /**
  * The section "General" of the page of a space: its name, its icon, its color and what it is for, each saved
@@ -63,6 +65,7 @@ export function SpaceGeneral({ space, spaces, hub, canEdit, busy, run }: SpaceSe
         onChange={event => { const value = event.currentTarget.checked; setSearchSaving(true);
           void search.hub!.setExcluded("space", space.id, !value).finally(() => setSearchSaving(false)); }} />
     </Field>}
+    <SpaceServerField spaceId={space.id} epoch={hub.hostEpoch()} disabled={disabled} />
   </Card>;
 }
 
@@ -88,7 +91,7 @@ export function SpaceProjects({ space, hub, canEdit, busy, run, projects }: Spac
           leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} onChange={event => setFilter(event.target.value)} />}
         <div className="space-project-checks" role="group" aria-label={t("Projects of {name}", { name: space.name })}>
           {listed.map(project => <Checkbox key={project.id} checked={members.has(project.id)} disabled={!canEdit || busy} title={project.path}
-            onChange={event => { const join = event.currentTarget.checked; void run(() => hub.assign(project.id, join ? [space.id] : [], join ? [] : [space.id])); }}>
+            onChange={event => { const join = event.currentTarget.checked; void run(() => hub.assign(project.id, join ? [space.id] : [], join ? [] : [space.id], joinedSessions(space.id, join))); }}>
             <span className="space-project-name">{project.name}</span><span className="space-project-path">{project.path}</span></Checkbox>)}
           {listed.length === 0 && <p className="bp6-text-muted">{t(projects.length ? "No project matches." : "No project yet.")}</p>}
         </div>

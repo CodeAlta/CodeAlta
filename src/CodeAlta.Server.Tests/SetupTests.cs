@@ -1,0 +1,233 @@
+using System.Net;
+using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
+using CodeAlta.Server.Api;
+using CodeAlta.Server.Hosting;
+using CodeAlta.Server.Identity;
+using CodeAlta.Server.Services;
+using CodeAlta.Server.Storage;
+
+namespace CodeAlta.Server.Tests;
+
+[TestClass]
+public sealed class SetupTests
+{
+    [TestMethod]
+    public async Task TheOwnerSetsTheServerUpWithTheCodeAndBecomesItsFirstController()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        var health = await server.SendAsync(null, HttpMethod.Get, "/api/v1/server/health");
+        Assert.IsFalse(health.Read<ServerHealthDto>().SetUp);
+
+        var setup = await server.SetUpAsync(owner);
+        Assert.AreEqual(("Alex", PersonRoles.Owner), (setup.Owner.DisplayName, setup.Owner.Role));
+        Assert.AreEqual((owner.DeviceId, FleetDeviceKinds.Controller, "approved", setup.Owner.Id), (setup.Device.Id, setup.Device.Kind, setup.Device.Status, setup.Device.OwnerId));
+        Assert.IsTrue((await server.SendAsync(null, HttpMethod.Get, "/api/v1/server/health")).Read<ServerHealthDto>().SetUp);
+
+        // The code is gone: it worked once.
+        Assert.IsFalse(File.Exists(server.Server.Paths.SetupCodePath));
+        using var other = new TestDevice("Other");
+        var again = await server.SendAsync(other, HttpMethod.Post, "/api/v1/setup",
+            new SetupRequest("ABCD-EFGH-JKMN-PQRS", "Mallory", other.Name, other.PublicKey, other.FirstEntry(server.Clock.Now)));
+        Assert.AreEqual((HttpStatusCode.Conflict, CoordinatorErrorCodes.AlreadySetUp), (again.Status, again.Code));
+
+        // The owner's device now calls the API; the device list starts with its own entry.
+        var organization = await server.SendAsync(owner, HttpMethod.Get, "/api/v1/organization");
+        Assert.AreEqual(HttpStatusCode.OK, organization.Status, organization.Body.ToString());
+        Assert.AreEqual(setup.Organization.Id, organization.Read<OrganizationDto>().Id);
+        var list = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/device-list")).Read<ListResponse<DeviceListEntryDto>>();
+        Assert.AreEqual(1, list.Items.Count);
+        var audit = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit")).Read<ListResponse<AuditRecordDto>>();
+        Assert.AreEqual("server.setup", audit.Items.Single().Action);
+    }
+
+    [TestMethod]
+    public async Task AServerRefusesPlainHttpBeyondTheLoopbackUnlessForced()
+    {
+        // Every interface (0.0.0.0, [::], *, +), an address of the network and a host name (which Kestrel binds on every
+        // interface) are checked by the rule alone: a test never hands them to a server that could bind them.
+        foreach (var url in new[] { "http://0.0.0.0:0", "http://[::]:0", "http://*:0", "http://+:0", "http://192.168.1.20:0", "http://fleet.example:0" })
+        {
+            var refused = Assert.ThrowsExactly<ArgumentException>(() => ServerBindings.Require([url], allowInsecureHttp: false), url);
+            StringAssert.Contains(refused.Message, ServerBindings.AllowInsecureHttpOption, url);
+        }
+
+        foreach (var url in new[] { "http://127.0.0.1:2586", "http://[::1]:2586", "http://localhost:2586", "https://0.0.0.0:443" })
+            ServerBindings.Require([url], allowInsecureHttp: false);
+        ServerBindings.Require(["http://0.0.0.0:2586"], allowInsecureHttp: true);
+
+        // The start applies the rule before it binds anything. Its address is of TEST-NET-1, which no machine has: a start
+        // that did not apply it would fail to bind there, never open a port beyond the loopback.
+        RequireNotOfThisMachine(NotOfThisMachine);
+        using var root = new TempDirectory();
+        var start = await Assert.ThrowsExactlyAsync<ArgumentException>(() => CoordinatorServer.StartAsync(new CoordinatorServerOptions
+        {
+            DataRoot = root.Path, Urls = [$"http://{NotOfThisMachine}:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+        }));
+        StringAssert.Contains(start.Message, ServerBindings.AllowInsecureHttpOption);
+    }
+
+    // An address of TEST-NET-1 (RFC 5737): what a test gives a server where an address beyond the loopback is needed, so
+    // that code which wrongly takes it fails to bind instead of listening on a network of the machine.
+    private const string NotOfThisMachine = "192.0.2.1";
+
+    private static void RequireNotOfThisMachine(string address)
+    {
+        if (System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+            .SelectMany(static network => network.GetIPProperties().UnicastAddresses).Any(unicast => unicast.Address.ToString() == address))
+            Assert.Inconclusive($"{address} is an address of this machine: the test would bind beyond the loopback.");
+    }
+
+    [TestMethod]
+    public async Task KestrelSettingsOfTheEnvironmentDoNotOpenPlainHttpToOtherMachines()
+    {
+        // Kestrel__Endpoints__Http__Url in the environment, or Kestrel:Endpoints in an appsettings.json: Kestrel would take them over --urls.
+        // The endpoint of the test is of TEST-NET-1: a server that took it would fail to bind, never open a port beyond the
+        // loopback, whatever the code under test does. A test never binds every interface (0.0.0.0, [::], *, +).
+        RequireNotOfThisMachine(NotOfThisMachine);
+        using var root = new TempDirectory();
+        await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+        {
+            DataRoot = root.Path, Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+            HostConfiguration = new Dictionary<string, string?> { ["Kestrel:Endpoints:Http:Url"] = $"http://{NotOfThisMachine}:0" },
+        });
+        CollectionAssert.AreEqual(new[] { "127.0.0.1" }, server.Addresses.Select(static address => address.Host).ToArray(), "the server listens where --urls says only");
+    }
+
+    [TestMethod]
+    public async Task BehindATrustedProxyACallerOfAnotherMachineDoesNotSetTheServerUp()
+    {
+        await using var server = await ServerFixture.StartAsync(configure: options => new CoordinatorServerOptions
+        {
+            DataRoot = options.DataRoot, Urls = options.Urls, TimeProvider = options.TimeProvider, ConfigureLogging = options.ConfigureLogging,
+            EnvironmentVariable = options.EnvironmentVariable, TrustedProxies = ["127.0.0.1", "::1"],
+        });
+        using var owner = new TestDevice("Desktop");
+        var request = new SetupRequest(server.SetupCode, "Alex", owner.Name, owner.PublicKey, owner.FirstEntry(server.Clock.Now));
+        var remote = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/setup", request, tamper: message => message.Headers.Add("X-Forwarded-For", "198.51.100.7"));
+        Assert.AreEqual((HttpStatusCode.Forbidden, CoordinatorErrorCodes.SetupNotLocal), (remote.Status, remote.Code), "the proxy forwards a caller of another machine");
+        var local = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/setup", request);
+        Assert.AreEqual(HttpStatusCode.Created, local.Status, local.Body.ToString());
+    }
+
+    [TestMethod]
+    public async Task AWrongCodeIsRefusedAndFiveDropTheCode()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        var code = server.SetupCode;
+        for (var attempt = 1; attempt <= SetupCodeStore.MaxFailedAttempts; attempt++)
+        {
+            var wrong = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/setup",
+                new SetupRequest("WRONG-CODE-" + attempt, "Alex", owner.Name, owner.PublicKey, owner.FirstEntry(server.Clock.Now)));
+            Assert.AreEqual((HttpStatusCode.Unauthorized, CoordinatorErrorCodes.SetupCodeInvalid), (wrong.Status, wrong.Code));
+        }
+
+        // The right code no longer works: altaserver setup-code makes a new one.
+        var late = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/setup",
+            new SetupRequest(code, "Alex", owner.Name, owner.PublicKey, owner.FirstEntry(server.Clock.Now)));
+        Assert.AreEqual(CoordinatorErrorCodes.SetupCodeInvalid, late.Code);
+
+        var renewed = server.GetService<SetupCodeStore>().Create(TimeSpan.FromMinutes(30));
+        var setup = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/setup",
+            new SetupRequest(renewed.Code.ToLowerInvariant().Replace("-", " ", StringComparison.Ordinal), "Alex", owner.Name, owner.PublicKey, owner.FirstEntry(server.Clock.Now)));
+        Assert.AreEqual(HttpStatusCode.Created, setup.Status, "The code reads in any case, with spaces in place of its dashes.");
+    }
+
+    [TestMethod]
+    public async Task AnExpiredCodeIsRefused()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        var code = server.SetupCode;
+        server.Clock.Advance(TimeSpan.FromMinutes(31));
+        var expired = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/setup",
+            new SetupRequest(code, "Alex", owner.Name, owner.PublicKey, owner.FirstEntry(server.Clock.Now)));
+        Assert.AreEqual((HttpStatusCode.Gone, CoordinatorErrorCodes.SetupCodeExpired), (expired.Status, expired.Code));
+        Assert.AreEqual(410, expired.Body.GetProperty("status").GetInt32(), "The refusal is a problem details document.");
+    }
+
+    [TestMethod]
+    public async Task SetupIsAcceptedOnlyFromTheLoopback()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        var setup = server.GetService<SetupService>();
+        var request = new SetupRequest(server.SetupCode, "Alex", owner.Name, owner.PublicKey, owner.FirstEntry(server.Clock.Now));
+        var signed = Sign(owner, server.Clock, "/api/v1/setup");
+        foreach (var address in new[] { "192.168.1.20", "100.64.0.7", "::ffff:10.0.0.3", "2001:db8::1" })
+        {
+            var refused = await Assert.ThrowsExactlyAsync<CoordinatorException>(() => setup.SetUpAsync(request, signed, ServerFixture.Origin(address), CancellationToken.None));
+            Assert.AreEqual(CoordinatorErrorCodes.SetupNotLocal, refused.Code);
+        }
+
+        // The code still waits: a refusal for the address does not use it.
+        var accepted = await setup.SetUpAsync(request, signed, ServerFixture.Origin("::1"), CancellationToken.None);
+        Assert.AreEqual(owner.DeviceId, accepted.Device.Id);
+    }
+
+    [TestMethod]
+    public async Task TheFirstEntryMustBeSignedByTheDeviceAndAddItAsAController()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var stranger = new TestDevice("Stranger");
+        var signedByStranger = stranger.SignEntry(new FleetDeviceListEntryPayload(1, null, 1, null, FleetDeviceListOperations.Add, owner.DeviceId, owner.PublicKey,
+            FleetDeviceKinds.Controller, null, owner.DeviceId, server.Clock.Now));
+        var badSignature = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/setup",
+            new SetupRequest(server.SetupCode, "Alex", owner.Name, owner.PublicKey, signedByStranger));
+        Assert.AreEqual((HttpStatusCode.BadRequest, CoordinatorErrorCodes.EntrySignatureInvalid), (badSignature.Status, badSignature.Code));
+
+        var asNode = owner.SignEntry(new FleetDeviceListEntryPayload(1, null, 1, null, FleetDeviceListOperations.Add, owner.DeviceId, owner.PublicKey,
+            FleetDeviceKinds.Node, null, owner.DeviceId, server.Clock.Now));
+        var wrongKind = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/setup", new SetupRequest(server.SetupCode, "Alex", owner.Name, owner.PublicKey, asNode));
+        Assert.AreEqual(CoordinatorErrorCodes.EntryInvalid, wrongKind.Code);
+
+        // The request itself must be signed by the key it registers.
+        var signedByOther = await server.SendAsync(stranger, HttpMethod.Post, "/api/v1/setup",
+            new SetupRequest(server.SetupCode, "Alex", owner.Name, owner.PublicKey, owner.FirstEntry(server.Clock.Now)));
+        Assert.AreEqual(CoordinatorErrorCodes.SignatureInvalid, signedByOther.Code);
+        Assert.IsFalse((await server.SendAsync(null, HttpMethod.Get, "/api/v1/server/health")).Read<ServerHealthDto>().SetUp);
+    }
+
+    [TestMethod]
+    public async Task TheServerMakesACodeAtItsFirstStartOnlyAndOneServerUsesADataRoot()
+    {
+        using var root = new TempDirectory();
+        var clock = new TestClock(DateTimeOffset.UtcNow);
+        await using (var server = await ServerFixture.StartAsync(root, clock))
+        {
+            Assert.IsNotNull(server.Server.SetupCode);
+            Assert.AreEqual(server.SetupCode, new SetupCodeStore(server.Server.Paths.SetupCodePath, clock).GetCurrent()!.Code, "altaserver setup-code prints the same code.");
+            Assert.IsTrue(CoordinatorServer.IsRunning(server.Server.Paths));
+            Assert.AreEqual(Environment.ProcessId, CoordinatorServer.ReadState(server.Server.Paths)!.ProcessId);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => CoordinatorServer.StartAsync(new CoordinatorServerOptions
+            {
+                DataRoot = root.Path,
+                Urls = ["http://127.0.0.1:0"],
+                ConfigureLogging = static _ => { },
+            }));
+            using var owner = new TestDevice("Desktop");
+            await server.SetUpAsync(owner);
+        }
+
+        var paths = new ServerPaths(root.Path);
+        Assert.IsFalse(CoordinatorServer.IsRunning(paths));
+        Assert.IsNull(CoordinatorServer.ReadState(paths));
+        var restarted = await CoordinatorServer.StartAsync(new CoordinatorServerOptions { DataRoot = root.Path, Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { } });
+        await using (restarted)
+        {
+            Assert.IsNull(restarted.SetupCode, "A server with an owner makes no setup code.");
+        }
+    }
+
+    private static SignedRequestData Sign(TestDevice device, TestClock clock, string path)
+    {
+        var time = clock.Now.ToUnixTimeMilliseconds();
+        var nonce = FleetSignedRequest.CreateNonce();
+        var hash = FleetSignedRequest.HashBody([]);
+        return new SignedRequestData("POST", path, device.DeviceId, time.ToString(System.Globalization.CultureInfo.InvariantCulture), nonce,
+            device.Sign(FleetSignedRequest.GetSignedBytes("POST", path, time, nonce, hash, device.DeviceId)), hash);
+    }
+}

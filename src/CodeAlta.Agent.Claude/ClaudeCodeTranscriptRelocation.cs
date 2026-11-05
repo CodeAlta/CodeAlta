@@ -254,6 +254,147 @@ public static class ClaudeCodeTranscriptRelocation
     }
 
     /// <summary>
+    /// Copies the transcript the CLI started in a working directory finds, with its companion folder, into a folder of
+    /// a session bundle, for another machine: <c>&lt;id&gt;.jsonl</c> and <c>&lt;id&gt;/</c>. The profile is not changed.
+    /// </summary>
+    /// <param name="configRoot">The configuration folder of Claude Code.</param>
+    /// <param name="cliSessionId">The identifier of the conversation of the CLI.</param>
+    /// <param name="workingDirectory">The working directory the CLI ran in.</param>
+    /// <param name="destination">The folder the copy goes to; created when missing.</param>
+    /// <param name="cancellationToken">Cancels the copy.</param>
+    /// <returns>
+    /// <see cref="ClaudeCodeTranscriptRelocationStatus.Moved"/> when it was copied (its <see cref="ClaudeCodeTranscriptRelocationResult.TargetPath"/>
+    /// is the copy); <see cref="ClaudeCodeTranscriptRelocationStatus.NothingToMove"/>, <see cref="ClaudeCodeTranscriptRelocationStatus.Ambiguous"/>
+    /// or <see cref="ClaudeCodeTranscriptRelocationStatus.Failed"/> otherwise, with nothing left in the destination.
+    /// </returns>
+    /// <exception cref="ArgumentException">An argument is blank, or the identifier is not a plain file name.</exception>
+    /// <exception cref="OperationCanceledException">The copy was canceled.</exception>
+    public static async Task<ClaudeCodeTranscriptRelocationResult> ExportAsync(string configRoot, string cliSessionId, string workingDirectory,
+        string destination, CancellationToken cancellationToken)
+    {
+        ValidateSessionId(cliSessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+        var folderName = ClaudeCodeProjectFolders.GetFolderName(workingDirectory);
+        var fileName = cliSessionId + TranscriptExtension;
+        var undo = new Stack<Action>();
+        try
+        {
+            var sources = FindSources(ClaudeCodeProjectFolders.GetProjectsFolder(configRoot), folderName, folderName, fileName);
+            if (sources.Count == 0) return new ClaudeCodeTranscriptRelocationResult(ClaudeCodeTranscriptRelocationStatus.NothingToMove);
+            if (sources.Count > 1)
+            {
+                return new ClaudeCodeTranscriptRelocationResult(ClaudeCodeTranscriptRelocationStatus.Ambiguous,
+                    Message: $"The conversation {cliSessionId} is in several folders of Claude Code: {string.Join(", ", sources)}.");
+            }
+
+            if (!Directory.Exists(destination))
+            {
+                Directory.CreateDirectory(destination);
+                undo.Push(() => Directory.Delete(destination));
+            }
+
+            var target = Path.Combine(destination, fileName);
+            await CopyFileAsync(sources[0], target, undo, cancellationToken).ConfigureAwait(false);
+            await MergeFolderAsync(Path.Combine(Path.GetDirectoryName(sources[0])!, cliSessionId), Path.Combine(destination, cliSessionId), undo, cancellationToken)
+                .ConfigureAwait(false);
+            undo.Clear();
+            return new ClaudeCodeTranscriptRelocationResult(ClaudeCodeTranscriptRelocationStatus.Moved, sources[0], target);
+        }
+        catch (Exception ex) when (IsFileSystemError(ex))
+        {
+            Rollback(undo);
+            return new ClaudeCodeTranscriptRelocationResult(ClaudeCodeTranscriptRelocationStatus.Failed,
+                Message: $"The conversation {cliSessionId} of Claude Code could not be copied: {ex.Message}");
+        }
+        catch
+        {
+            Rollback(undo);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Places a transcript copied by <see cref="ExportAsync"/> on another machine into the folder of the working
+    /// directory the CLI will run in, so that <c>--resume</c> finds it. A copy already there is kept when it is the same
+    /// or longer, and set aside otherwise, as a relocation does.
+    /// </summary>
+    /// <param name="configRoot">The configuration folder of Claude Code.</param>
+    /// <param name="cliSessionId">The identifier of the conversation of the CLI.</param>
+    /// <param name="source">The folder of the copy.</param>
+    /// <param name="workingDirectory">The working directory the CLI will run in.</param>
+    /// <param name="cancellationToken">Cancels the copy; what was copied is removed.</param>
+    /// <returns>What was done; the copy in <paramref name="source"/> is left as it is.</returns>
+    /// <exception cref="ArgumentException">An argument is blank, or the identifier is not a plain file name.</exception>
+    /// <exception cref="OperationCanceledException">The copy was canceled.</exception>
+    public static async Task<ClaudeCodeTranscriptRelocationResult> ImportAsync(string configRoot, string cliSessionId, string source,
+        string workingDirectory, CancellationToken cancellationToken)
+    {
+        ValidateSessionId(cliSessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(source);
+        var fileName = cliSessionId + TranscriptExtension;
+        var sourceFile = Path.Combine(source, fileName);
+        if (!File.Exists(sourceFile)) return new ClaudeCodeTranscriptRelocationResult(ClaudeCodeTranscriptRelocationStatus.NothingToMove);
+        var targetFolder = Path.Combine(ClaudeCodeProjectFolders.GetProjectsFolder(configRoot), ClaudeCodeProjectFolders.GetFolderName(workingDirectory));
+        var target = Path.Combine(targetFolder, fileName);
+        var targetCompanion = Path.Combine(targetFolder, cliSessionId);
+        var undo = new Stack<Action>();
+        try
+        {
+            string? backup = null;
+            if (File.Exists(target))
+            {
+                if (await HaveSameContentAsync(sourceFile, target, cancellationToken).ConfigureAwait(false))
+                {
+                    await MergeFolderAsync(Path.Combine(source, cliSessionId), targetCompanion, undo, cancellationToken).ConfigureAwait(false);
+                    undo.Clear();
+                    return new ClaudeCodeTranscriptRelocationResult(ClaudeCodeTranscriptRelocationStatus.AlreadyThere, sourceFile, target);
+                }
+
+                if (new FileInfo(sourceFile).Length <= new FileInfo(target).Length)
+                {
+                    return new ClaudeCodeTranscriptRelocationResult(ClaudeCodeTranscriptRelocationStatus.AlreadyThere, sourceFile, target,
+                        Message: "The folder of the new working directory had a longer copy of the conversation: it was kept.");
+                }
+            }
+
+            if (!Directory.Exists(targetFolder))
+            {
+                Directory.CreateDirectory(targetFolder);
+                undo.Push(() => Directory.Delete(targetFolder));
+            }
+
+            var temporary = target + ".tmp";
+            File.Delete(temporary);
+            await CopyFileAsync(sourceFile, temporary, undo, cancellationToken).ConfigureAwait(false);
+            if (File.Exists(target))
+            {
+                // The copy that comes holds more: the one here is set aside beside itself.
+                var stamp = DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+                backup = UniquePath(target + ".bak-" + stamp);
+                MoveFile(target, backup, undo);
+                if (Directory.Exists(targetCompanion)) MoveDirectory(targetCompanion, UniquePath(targetCompanion + ".bak-" + stamp), undo);
+            }
+
+            await MergeFolderAsync(Path.Combine(source, cliSessionId), targetCompanion, undo, cancellationToken).ConfigureAwait(false);
+            MoveFile(temporary, target, undo);
+            undo.Clear();
+            return new ClaudeCodeTranscriptRelocationResult(ClaudeCodeTranscriptRelocationStatus.Moved, sourceFile, target, backup,
+                backup is null ? null : $"The folder of the new working directory had a shorter copy of the conversation: it was set aside as {backup}.");
+        }
+        catch (Exception ex) when (IsFileSystemError(ex))
+        {
+            Rollback(undo);
+            return new ClaudeCodeTranscriptRelocationResult(ClaudeCodeTranscriptRelocationStatus.Failed, sourceFile,
+                Message: $"The conversation {cliSessionId} of Claude Code could not be placed: {ex.Message}");
+        }
+        catch
+        {
+            Rollback(undo);
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Tells whether the CLI started in a working directory finds the transcript of a conversation: the folder of the
     /// directory is looked at first, as the CLI does, then the other folders (links and junctions to one folder are one).
     /// </summary>

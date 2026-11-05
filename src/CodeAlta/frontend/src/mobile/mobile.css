@@ -152,7 +152,12 @@ footer { display: flex; align-items: center; justify-content: center; gap: .4rem
 .detail-meta { display: block; overflow: visible; margin: 0 .25rem .625rem; color: var(--muted); font-size: .75rem; line-height: 1.5; }
 .detail-meta:empty { display: none; }
 .msg.pending { border-style: dashed; }
-.msg.pending .msg-label { font-style: italic; }
+.msg.pending .msg-label { font-style: italic; display: flex; align-items: center; gap: .25rem; }
+/* What takes a prompt back while it waits: buttons a thumb can reach, at the end of its label. */
+.pending-actions { display: flex; gap: .25rem; margin-left: auto; font-style: normal; }
+.pending-edit, .pending-delete { display: grid; place-items: center; width: 40px; height: 40px; margin: -6px 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: inherit; font-size: 1.0625rem; cursor: pointer; }
+.pending-delete:hover, .pending-delete:focus-visible { color: var(--red); }
+.pending-edit:focus-visible, .pending-delete:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .detail-head .icon-btn { flex: none; color: var(--muted); }
 .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
 /* As .timeline-message on the desktop: 1px border, radius 4px, padding 6px 12px and an 8% tint of the card color. */
@@ -174,10 +179,41 @@ footer { display: flex; align-items: center; justify-content: center; gap: .4rem
 .act-chevron { color: var(--muted); font-size: .875rem; transition: transform .15s; } .activity[data-expanded="true"] .act-chevron { transform: rotate(90deg); }
 .working .act-toggle { cursor: default; padding-left: 1.4rem; }
 .act-body { display: flex; flex-direction: column; gap: .375rem; min-width: 0; margin: 0 .5rem .5rem 1.5rem; padding-left: .625rem; border-left: 1px solid var(--line); }
-.tool-row { --tool-tone: var(--muted); display: flex; align-items: center; gap: .5rem; min-width: 0; font: .8125rem var(--code-font); color: var(--muted); }
+.tool-call { min-width: 0; }
+.tool-row { --tool-tone: var(--muted); display: flex; align-items: center; gap: .5rem; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; font: .8125rem var(--code-font); color: var(--muted); text-align: start; }
+button.tool-row { cursor: pointer; min-height: 2.25rem; }
+button.tool-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
+.tool-subject { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A path too long for its line loses the end of its folders first, then the end of the name of its file. */
+.tool-path { display: flex; }
+.tool-path-folders, .tool-path-file { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Not a small share of the shrinking: a fraction of a pixel less is enough to cut the name, with the folders still long. */
+.tool-path-file { flex-shrink: 0; max-width: 100%; }
+/* What a call does, read when its row opens: long texts scroll inside, never the page. */
+.tool-detail { display: flex; flex-direction: column; gap: .25rem; min-width: 0; margin: 0 0 .5rem 1.375rem; font-size: .75rem; color: var(--muted); }
+.tool-fact { display: flex; gap: .5rem; min-width: 0; align-items: baseline; }
+.tool-fact:has(> .tool-copy) { padding-block: .4375rem; }
+.tool-fact-label { flex: none; font-weight: 600; }
+/* A long press takes the whole value, not the word under the finger. */
+.tool-fact code { min-width: 0; color: var(--text); font-family: var(--code-font); overflow-wrap: anywhere; -webkit-user-select: all; user-select: all; }
+.tool-fact code.tool-bad { color: var(--red); }
+.tool-section { display: flex; align-items: center; min-height: 2rem; font-weight: 600; }
+/* Small and quiet, with room for a finger: rows are as tall as the button, so that two buttons never overlap. */
+.tool-copy { flex: none; align-self: flex-start; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 2rem; margin: 0 -.25rem 0 auto; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted); font-size: .875rem; cursor: pointer; }
+.tool-fact > .tool-copy { margin-block: -.4375rem; }
+.tool-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tool-copy[data-state="copied"] { color: var(--green); } .tool-copy[data-state="failed"] { color: var(--red); }
+.tool-note.tool-bad { color: var(--red); }
+.tool-text { margin: 0; max-height: 16rem; overflow: auto; padding: .375rem .5rem; border: 1px solid var(--line); border-radius: 4px; color: var(--text); font: .75rem/1.4 var(--code-font); white-space: pre; }
+/* The few lines of an output: a tap reads it all. Lines too long for the box are cut: they wrap in the full-screen view. */
+.tool-output { display: flex; flex-direction: column; gap: .375rem; width: 100%; min-width: 0; min-height: 44px; padding: .375rem .5rem; border: 1px solid var(--line); border-radius: 4px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.tool-output:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tool-output-text { display: block; overflow: hidden; font: .75rem/1.4 var(--code-font); white-space: pre; }
+.tool-output-more { color: var(--accent); font-size: .75rem; font-weight: 600; }
+.tool-note { margin: 0; }
 .tool-row[data-phase="completed"] { --tool-tone: var(--green); } .tool-row[data-phase="failed"] { --tool-tone: var(--red); }
 .tool-row:is([data-phase="started"], [data-phase="progressed"]) { --tool-tone: var(--accent); }
-.tool-row strong { min-width: 0; color: var(--tool-tone); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-row strong { flex: none; max-width: 60%; min-width: 0; color: var(--tool-tone); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--tool-tone); }
 .tool-phase { flex: none; margin-left: auto; font-size: .75rem; }
 
@@ -390,6 +426,15 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .approval-detail { margin: 0; color: var(--muted); font-size: .8125rem; line-height: 1.45; overflow-wrap: anywhere; }
 .approval-folder { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .75rem; }
 .approval-reason { max-height: 16vh; overflow: auto; }
+.waiting { display: grid; gap: .5rem; margin-bottom: .75rem; }
+.waiting-card { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; padding: .625rem .75rem; border: 1px solid color-mix(in srgb, var(--yellow) 55%, var(--line)); border-radius: 12px; background: var(--panel); }
+.waiting-line { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; margin: 0; font-size: .875rem; line-height: 1.4; overflow-wrap: anywhere; }
+.waiting-line .ico { flex: none; color: var(--yellow); }
+.waiting-line .ico svg { width: 16px; height: 16px; }
+.waiting-card > .ask-note { flex-basis: 100%; margin: 0; }
+.approval-takeover { display: flex; align-items: center; gap: .625rem; padding-top: .5rem; border-top: 1px solid var(--line); }
+.approval-takeover > p { flex: 1; min-width: 0; }
+.approval-takeover > button { flex: none; }
 .approval-warning { margin: 0; color: var(--red); font-size: .8125rem; line-height: 1.45; overflow-wrap: anywhere; }
 .approval-actions { display: flex; align-items: center; justify-content: flex-end; gap: .5rem; min-width: 0; }
 .approval-actions button { min-width: 6.5rem; min-height: 44px; justify-content: center; }
@@ -686,7 +731,9 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .wf-step-title, .wf-session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wf-step-title small { color: var(--muted); }
 .wf-call { min-height: 1.75rem; }
-.wf-call .wf-step-title { font-family: var(--code-font); }
+.wf-call .wf-step-title { flex: 0 1 auto; font-family: var(--code-font); }
+.wf-call .tool-subject { color: var(--muted); font-family: var(--code-font); font-size: .75rem; }
+.wf-call .wf-step-time { margin-left: auto; }
 .wf-call[data-state="failed"] .wf-step-title { color: var(--red); }
 .wf-step-time { flex: none; color: var(--muted); font-size: .75rem; font-variant-numeric: tabular-nums; }
 .wf-section { margin-top: .25rem; color: var(--muted); font-size: .6875rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
@@ -710,5 +757,14 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .img-viewer-failed { color: #abb3bf; }
 .img-viewer-step { position: absolute; bottom: calc(16px + env(safe-area-inset-bottom)); background: rgba(255,255,255,.1); border-radius: 999px; }
 .img-viewer-prev { left: calc(16px + var(--safe-left)); } .img-viewer-next { right: calc(16px + var(--safe-right)); }
+/* The output of a tool call, full screen: it wraps, so that a line is read without going sideways. */
+.output-viewer { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
+.output-viewer-bar { display: flex; align-items: center; gap: .5rem; min-height: 56px; padding: calc(6px + env(safe-area-inset-top)) calc(8px + var(--safe-right)) 6px calc(16px + var(--safe-left)); border-bottom: 1px solid var(--line); }
+.output-viewer-title { display: flex; flex: 1; align-items: baseline; gap: .5rem; min-width: 0; font-size: .875rem; }
+.output-viewer-title strong { flex: none; }
+.output-viewer-stage { flex: 1; min-height: 0; overflow: auto; padding: .5rem calc(12px + var(--safe-right)) calc(12px + env(safe-area-inset-bottom)) calc(12px + var(--safe-left)); }
+.output-viewer-text { margin: .5rem 0; font: .75rem/1.4 var(--code-font); white-space: pre-wrap; overflow-wrap: anywhere; }
+.output-viewer-note { margin: .5rem 0; color: var(--muted); font-size: .8125rem; }
+.output-viewer-note:empty { display: none; }
 /* A table scrolls sideways in its message: its cells keep their words whole, as the rest of the message does not. */
 .markdown-content :is(th, td) { min-width: 4ch; overflow-wrap: normal; word-break: normal; }

@@ -9,7 +9,7 @@ import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
 
 /** Whether an agent prompt has spaces of its own: one of a project follows the spaces of its project. */
 export const promptHasSpaces = (entry: Pick<AgentPromptEntry, "kind" | "scope">) =>
-  entry.kind === "Agent" && entry.scope !== "Project" && entry.scope !== "CopilotProject";
+  entry.kind === "Agent" && entry.scope !== "Project" && entry.scope !== "CopilotProject" && entry.scope !== "ClaudeProject";
 
 /** Stable list identity of a prompt: its kind, where it is kept and its id. */
 export const promptIdentity = (entry: Pick<AgentPromptEntry, "kind" | "scope" | "id">) => scopedKey(`${entry.kind}:${entry.scope}`, entry.id);

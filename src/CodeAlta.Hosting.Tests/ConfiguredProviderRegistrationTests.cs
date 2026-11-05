@@ -329,8 +329,80 @@ public sealed class ConfiguredProviderRegistrationTests
             AgentTransportKind.OpenAIChatCompletions, "alibaba", null));
     }
 
+    [TestMethod]
+    [DataRow("anthropic")]
+    [DataRow("openai-responses")]
+    public void AKeyOfASecret_RegistersTheProvider_AndAMissingSecretLeavesItOut(string providerType)
+    {
+        var stateRoot = NewStateRoot();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(stateRoot);
+        var variable = "CODEALTA_TEST_KEY_" + Guid.NewGuid().ToString("N");
+        Environment.SetEnvironmentVariable(variable, "key-of-the-environment");
+        try
+        {
+            var bySecret = CreateDefinition(providerType);
+            bySecret.ApiKey = null;
+            bySecret.ApiKeySecret = "FIXTURE_KEY";
+            bySecret.ApiKeyEnv = variable;
+            Assert.IsFalse(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(bySecret, stateRoot, null, out _, out _),
+                "A secret that is named but not set leaves the provider out, even when api_key_env has a value.");
+
+            var byReference = CreateDefinition(providerType);
+            byReference.ApiKey = "${secret:FIXTURE_KEY}";
+            Assert.IsFalse(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(byReference, stateRoot, null, out _, out _));
+
+            store.SetSecret("FIXTURE_KEY", "key-of-the-secret", "tests");
+            Assert.IsTrue(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(bySecret, stateRoot, null, out var descriptor, out _));
+            Assert.AreEqual("fixture", descriptor.ProviderId.Value);
+            Assert.IsTrue(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(byReference, stateRoot, null, out _, out _));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, null);
+            store.Delete();
+        }
+    }
+
+    [TestMethod]
+    public void ClaudeCode_StartsItsCliWithTheSecretsItsEnvNames_AndNotWithoutThem()
+    {
+        var stateRoot = NewStateRoot();
+        var definition = CreateDefinition("claude-code");
+        definition.ApiKey = null;
+        definition.Env = new() { ["CLAUDE_CODE_OAUTH_TOKEN"] = "${secret:CLAUDE_TOKEN}" };
+
+        Assert.IsFalse(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(definition, stateRoot, null, out _, out _));
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(stateRoot);
+        try
+        {
+            store.SetSecret("CLAUDE_TOKEN", "oauth-token-value", "tests");
+            Assert.IsTrue(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(definition, stateRoot, null, out _, out _));
+        }
+        finally
+        {
+            store.Delete();
+        }
+    }
+
     private static string NewStateRoot()
         => Path.Combine(Path.GetTempPath(), "CodeAlta.Hosting.Tests", Guid.NewGuid().ToString("N"));
+
+    [TestMethod]
+    public void TheKeyAProviderIsGiven_IsTheOneToldToTheMasking_AsItIsGiven()
+    {
+        var stateRoot = NewStateRoot();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(stateRoot);
+        // A key kept with spaces around it: the provider is given it without them.
+        store.SetSecret("FIXTURE_KEY", "  key-of-the-secret-0123456789  ", "tests");
+        var told = new List<string>();
+        var registry = new ModelProviderRegistry { SecretIssued = told.Add };
+        var definition = CreateDefinition("openai-responses");
+        definition.ApiKey = null;
+        definition.ApiKeySecret = "FIXTURE_KEY";
+
+        Assert.AreEqual(1, ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(registry, [definition], stateRoot).Count);
+        CollectionAssert.Contains(told, "key-of-the-secret-0123456789", "what the masking is told is the key the provider is given");
+    }
 
     private static CodeAltaProviderDocument CreateDefinition(string providerType)
         => new()

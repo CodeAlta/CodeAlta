@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Worktrees;
+using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
@@ -40,16 +41,62 @@ internal sealed partial class WorkspaceService
     private Task<WorkspaceMoveSessionResponse>? _moveWork;
     private bool _sessionsClosed;
 
-    internal WorkspaceService(CodeAltaHost host, string epoch, GitWorktreeService? worktrees = null) : this(host.WorkspaceReads, host.ProjectCatalog, epoch)
+    internal WorkspaceService(CodeAltaHost host, string epoch, GitWorktreeService? worktrees = null)
+        : this(new SessionHostRegistry(new LocalSessionHost(host)), host, epoch, worktrees) { }
+
+    /// <summary>
+    /// Creates the service of the window over the hosts of the sessions: the list, the history windows and the creation
+    /// of sessions go through them; the catalog commands (rename, delete, move, archive, fork, import) still go to the
+    /// host of this process.
+    /// </summary>
+    /// <param name="hosts">The hosts of the sessions.</param>
+    /// <param name="host">The host of this process.</param>
+    /// <param name="epoch">The host epoch that requests must name.</param>
+    /// <param name="worktrees">The git worktrees new sessions can work in, or null.</param>
+    /// <param name="locations">
+    /// The repositories of the projects of this computer, which put a session of a paired machine under the project of the
+    /// same repository; null to match the projects of the machines by id and name only.
+    /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="hosts"/> or <paramref name="host"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="epoch"/> is not a canonical epoch.</exception>
+    internal WorkspaceService(SessionHostRegistry hosts, CodeAltaHost host, string epoch, GitWorktreeService? worktrees = null,
+        CodeAlta.Catalog.SessionMoves.RepositoryLocationCache? locations = null)
+        : this(host.WorkspaceReads, host.ProjectCatalog, epoch)
     {
+        ArgumentNullException.ThrowIfNull(hosts);
+        // The list of the host of this process, with the sessions the paired machines last listed.
+        var local = hosts.Local;
+        _readAllSessions = local.ReadSnapshotAsync;
+        _remoteHosts = () => [.. hosts.Remotes.OfType<CodeAlta.Desktop.Fleet.RemoteSessionHost>()];
+        var projected = ProjectedSnapshot(local.ReadSnapshotAsync);
+        // A session this process gave to a paired machine (a move) gives its row to the one that machine lists.
+        Func<string, bool> movedAway = id => host.RuntimeService.Relinquishments.Read(id) is { IsRelinquished: true };
+        _read = async token =>
+        {
+            var snapshot = await projected(token).ConfigureAwait(false);
+            CodeAlta.Desktop.Fleet.RemoteSessionHost[] remotes = [.. hosts.Remotes.OfType<CodeAlta.Desktop.Fleet.RemoteSessionHost>()];
+            if (remotes.Length == 0) return snapshot;
+            // A remote session goes under the project of this catalog in the same repository: the repositories of the
+            // projects here are read when a machine lists sessions in projects that name theirs.
+            var located = locations is null ? static _ => null
+                : await ReadLocalLocationsAsync(snapshot, remotes, locations, token).ConfigureAwait(false);
+            return WithRemoteSessions(snapshot, remotes, located, movedAway);
+        };
+        // A history window is read from the host of its session; its cursor goes back to that host only.
+        _readHistory = (sessionId, cursor, token) => hosts.Resolve(sessionId).ReadHistoryPageAsync(sessionId, cursor, token);
+        _readHistoryTail = (sessionId, cursor, token) => hosts.Resolve(sessionId).ReadHistoryTailPageAsync(sessionId, cursor, token);
+        _readTimeline = (sessionId, cursor, token) => hosts.Resolve(sessionId).ReadTimelinePageAsync(sessionId, cursor, token);
+        _readTimelineTail = (sessionId, stamp, token) => hosts.Resolve(sessionId).ReadTimelineTailAsync(sessionId, stamp, token);
+        _readHistorySource = (revision, start, end, offset, token) => hosts.Resolve(revision.SessionId).ReadHistorySourceAsync(revision, start, end, offset, token);
         _sessionProviders = host.ModelProviderRegistry;
         _defaultProvider = new(host.CatalogOptions);
-        _createSession = (project, provider, title, space, mode, options) => host.Commands.CreateDraftSessionAsync(project, provider, title, null, null, space, mode, null, null, options);
+        // A new session is created on the host of this process, the only one the page creates sessions on for now.
+        _createSession = (project, provider, title, space, mode, options) => local.CreateSessionAsync(project, provider, title, null, space, mode, options);
         _sessionSpaces = host.SpaceCatalog;
         _worktrees = worktrees;
-        _createInWorktree = (project, provider, title, folder, space, mode, options) => host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder, space, mode, null, null, options);
-        _newSessionPermissionModes = host.Commands.GetNewSessionPermissionModes;
-        _draftPrompts = host.Commands.GetDraftPromptsAsync;
+        _createInWorktree = (project, provider, title, folder, space, mode, options) => local.CreateSessionAsync(project, provider, title, folder, space, mode, options);
+        _newSessionPermissionModes = local.GetNewSessionPermissionModes;
+        _draftPrompts = local.GetDraftPromptsAsync;
         _renameSession = host.Commands.RenameSessionAsync;
         _deleteSession = host.Commands.DeleteCatalogSessionAsync;
         _sessionsAtWork = host.Commands.ReadSessionsAtWorkAsync;

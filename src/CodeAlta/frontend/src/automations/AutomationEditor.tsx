@@ -1,16 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { TriggerIcon } from "./TriggerIcon";
 import { Button, ButtonGroup, Callout, FormGroup, HTMLSelect, InputGroup, Menu, MenuItem, NumericInput, PopoverNext, SegmentedControl, Switch, TextArea } from "@blueprintjs/core";
-import type { AutomationScriptItem, AutomationTriggerItem, WorkspaceProject } from "#neoastra";
+import type { AutomationPublishTarget, AutomationScriptItem, AutomationTriggerItem, WorkspaceProject } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
+import { machineState } from "../machines/machines";
+import { useMachines, useRemoteChoices } from "../machines/RunOnChip";
+import { machineRunProviders, onMachine } from "../machines/machineProviderNames";
 import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
 import { sessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import { useShellLanguage } from "../shellLanguage";
 import type { RunProvider } from "../workItems/runsWith";
-import { dayName, formProblem, formSettings, inputOf, isSchedule as schedule, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumTriggers, needsProject,
+import { dayName, formProblem, formSettings, inputOf, isIntegration, isSchedule as schedule, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumTriggers, needsProject,
   newTrigger, scriptArgumentsTemplate, sessionSettingsOf, triggerLabel, triggerTone, triggerTypes, weekDays, type AutomationForm, type TriggerType } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
+import { IntegrationTriggerFields, type IntegrationContext } from "./IntegrationTriggerFields";
+import { AutonomyFields } from "./AutonomyFields";
 
 const hours = [1, 2, 3, 4, 6, 8, 12];
 
@@ -47,11 +52,13 @@ function Times({ value, disabled, onChange }: { value: readonly string[]; disabl
   </span>;
 }
 
-export function TriggerRow({ hub, trigger, chat, disabled, onChange, onRemove }: {
+export function TriggerRow({ hub, trigger, chat, disabled, onChange, onRemove, context }: {
   hub: AutomationsHub; trigger: AutomationTriggerItem;
   /** Whether the automation runs in no project: its command then runs in the home folder. */
   chat: boolean;
   disabled: boolean; onChange: (value: AutomationTriggerItem) => void; onRemove: () => void;
+  /** Around a trigger of another tool: where the automation runs and whether it is saved as shown; null outside the editor. */
+  context?: IntegrationContext | null;
 }) {
   const { t, locale } = useShellLanguage();
   const set = (change: Partial<AutomationTriggerItem>) => onChange({ ...trigger, ...change });
@@ -96,6 +103,7 @@ export function TriggerRow({ hub, trigger, chat, disabled, onChange, onRemove }:
         <option value="trusted">{t("by a member")}</option><option value="anyone">{t("by anyone")}</option>
       </HTMLSelect>}
       {schedule(trigger) && <TriggerPreview hub={hub} trigger={trigger} />}
+      {isIntegration(trigger.type) && trigger.integration && context && <IntegrationTriggerFields hub={hub} trigger={trigger} context={context} disabled={disabled} onChange={onChange} />}
     </div>
     <Button variant="minimal" size="small" disabled={disabled} icon={<AppIcon name="trash" size={14} />} aria-label={t("Remove this trigger")} title={t("Remove this trigger")} onClick={onRemove} />
   </li>;
@@ -147,12 +155,32 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
   const [problem, setProblem] = useState<string | null>(null);
   const name = useRef<HTMLInputElement>(null);
   const edit = (change: Partial<AutomationForm>) => { setForm(current => ({ ...current, ...change })); setProblem(null); };
+  // A try runs the automation as it is saved: the form must still show it so.
+  const unchanged = useMemo(() => JSON.stringify(form) === JSON.stringify(initial), [form, initial]);
   const project = projects.find(candidate => candidate.id === form.projectId);
+  // The machines this computer reaches: paired ones, and those of a linked server, which gets the automation sealed for them.
+  const reachable = useMachines(epoch);
+  // Placed on a machine, it runs with a provider of that machine: the chip lists the machine's providers and models, named as it names them.
+  // A machine reached through a server answers too, through the relay: an automation needs no permission to start sessions there.
+  const machine = useRemoteChoices(epoch, form.runsOn, null, undefined, true).choices;
+  const machineProviders = form.runsOn ? machineRunProviders(machine) : null;
+  const runProviders = machineProviders ?? providers;
   // An automation runs in the space of its project when it is in one, else in the default space: the host reads its catalogs there.
-  const api = useMemo(() => epoch ? sessionSettingsApi(epoch, project?.id ?? null, project?.path ?? null, null) : null, [epoch, project?.id, project?.path]);
+  const api = useMemo(() => {
+    const base = epoch ? sessionSettingsApi(epoch, project?.id ?? null, project?.path ?? null, null) : null;
+    return base && form.runsOn && machine && machineProviders ? onMachine(base, form.runsOn, machine) : base;
+  }, [epoch, project?.id, project?.path, form.runsOn, machine]);
   const settings = sessionSettingsOf(form);
-  const choices = useSessionSettingsChoices(api, providers, null, settings);
+  const choices = useSessionSettingsChoices(api, runProviders, null, settings);
   const [kind, setKind] = useState<"prompt" | "script">(initial.script ? "script" : "prompt");
+  // Whom it may be published to on the server of its machine: the team of the machine, the organization, beside the person.
+  const [targets, setTargets] = useState<readonly AutomationPublishTarget[]>([]);
+  useEffect(() => {
+    if (!form.runsOn) { setTargets([]); return; }
+    const abort = new AbortController();
+    void hub.publishTargets(form.runsOn, abort.signal).then(value => { if (!abort.signal.aborted) setTargets(value); });
+    return () => abort.abort();
+  }, [hub, form.runsOn]);
   const [scripts, setScripts] = useState<readonly AutomationScriptItem[]>([]);
   // The scripts of the project it runs in come first, then yours.
   useEffect(() => {
@@ -206,6 +234,25 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
             <SegmentedControl size="small" value={form.storeInProject ? "project" : "user"} disabled={busy} onValueChange={value => edit({ storeInProject: value === "project" })}
               options={[{ value: "user", label: t("My configuration") }, { value: "project", label: t("The project") }]} />
           </FormGroup>}
+          {/* Another machine runs it while this computer is closed: offered once one is paired or listed by a server, for an automation of yours. */}
+          {!form.storeInProject && (reachable.length > 0 || form.runsOn) && <FormGroup label={t("Runs on")} labelFor="automation-machine">
+            <HTMLSelect id="automation-machine" fill value={form.runsOn ?? ""} disabled={busy} onChange={event => edit({ runsOn: event.target.value || null, publishTo: null })}>
+              <option value="">{t("This computer")}</option>
+              {form.runsOn && !reachable.some(machine => machine.id === form.runsOn) && <option value={form.runsOn}>{t("Unavailable machine")}</option>}
+              {reachable.map(machine => <option key={machine.id} value={machine.id}>
+                {machineState(machine) === "online" ? machine.name : t("{machine} (offline)", { machine: machine.name })}</option>)}
+            </HTMLSelect>
+          </FormGroup>}
+          {/* On a machine of a team the person maintains, or of the organization: whose automation it is, which then runs as their service identity. */}
+          {!form.storeInProject && form.runsOn && (targets.length > 0 || form.publishTo) && <FormGroup label={t("Publish to")} labelFor="automation-publish"
+            helperText={form.publishTo ? t("It runs as a service identity, with account credentials only.") : undefined}>
+            <HTMLSelect id="automation-publish" fill value={form.publishTo ?? ""} disabled={busy} onChange={event => edit({ publishTo: event.target.value || null })}>
+              <option value="">{t("Me")}</option>
+              {form.publishTo && !targets.some(target => target.scope === form.publishTo) && <option value={form.publishTo}>{t("Unavailable team or organization")}</option>}
+              {targets.map(target => <option key={target.scope} value={target.scope}>
+                {target.scope === "organization" ? target.name : t("Team {name}", { name: target.name })}</option>)}
+            </HTMLSelect>
+          </FormGroup>}
         </div>
         <FormGroup label={t("Starts")}>
           <ul className="automation-triggers">
@@ -213,6 +260,7 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
               <span className="automation-trigger-icon" data-file-tone="muted"><AppIcon name="hand" size={15} /></span>
               <div className="automation-trigger-fields"><span>{t("When you run it")}</span></div></li>}
             {form.triggers.map((trigger, index) => <TriggerRow key={index} hub={hub} trigger={trigger} chat={!form.projectId} disabled={busy}
+              context={{ projectId: form.projectId, runsOn: form.runsOn, prompt: form.prompt, savedId: form.id, saved: unchanged, index }}
               onChange={value => edit({ triggers: form.triggers.map((other, at) => at === index ? value : other) })}
               onRemove={() => edit({ triggers: form.triggers.filter((_, at) => at !== index) })} />)}
           </ul>
@@ -229,8 +277,9 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
         </FormGroup> : <ScriptFields scripts={scripts} form={form} disabled={busy} edit={edit} />}
         {/* What its sessions run with: the Agent chip of the composer, and its form. */}
         <FormGroup label={t("Runs with")} className="automation-runs-with">
-          <SessionSettingsChip id="automation" providers={providers} choices={choices} value={settings} disabled={busy} onChange={next => edit(formSettings(next))} />
+          <SessionSettingsChip id="automation" providers={runProviders} choices={choices} value={settings} disabled={busy} onChange={next => edit(formSettings(next))} />
         </FormGroup>
+        <AutonomyFields autonomy={form.autonomy} permissionMode={form.permissionMode || null} disabled={busy} onChange={autonomy => edit({ autonomy })} />
         <div className="automation-editor-switches">
           <Switch checked={form.enabled} disabled={busy} label={t("Enabled")} onChange={event => edit({ enabled: event.currentTarget.checked })} />
           {form.triggers.length > 0 && <Switch checked={form.catchUp} disabled={busy} label={t("Catch up on what was missed while CodeAlta was closed")}

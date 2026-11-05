@@ -9,12 +9,14 @@ import { welcomeLogo } from "./welcomeLogo";
 
 const noChrome: ComposerChromeValue = {};
 
-export function NewSessionWorkspace({ project, worktree = false, cloud = false, preferredHeight, onHeight, chrome, starting, worktreeStatus, children }: {
+export function NewSessionWorkspace({ project, worktree = false, cloud = false, machine = null, preferredHeight, onHeight, chrome, starting, worktreeStatus, children }: {
   project?: WorkspaceProject; preferredHeight?: number; onHeight: (height: number | undefined) => void; children: ReactNode;
   /** The next session of the project works in a new git worktree, not in the folder of the project. */
   worktree?: boolean;
   /** The next session of the project runs in the cloud, with Claude Code. */
   cloud?: boolean;
+  /** The name of the paired machine the next session runs on; null for this computer. */
+  machine?: string | null;
   /** Shown around the composer: the working folder, the MCP status. */
   chrome?: ComposerChromeValue;
   /** A session starts here: what the host does to create it, in the place of the welcome. */
@@ -31,7 +33,8 @@ export function NewSessionWorkspace({ project, worktree = false, cloud = false, 
         <div className="blank-project-logo" role="img" aria-label="CodeAlta">
           <LogoWord text={logo.code} /><LogoWord text={logo.alta} className="logo-alta" />
         </div>
-        <p className="welcome-subtitle">{project ? cloud ? t("Next session will run in the cloud, from {project}.", { project: project.name })
+        <p className="welcome-subtitle">{machine ? t("Next session will start on {machine}.", { machine })
+          : project ? cloud ? t("Next session will run in the cloud, from {project}.", { project: project.name })
           : worktree ? t("Next session will start in {project}, in a new git worktree.", { project: project.name })
           : t("Next session will start in {project} from folder {folder}.", { project: project.name, folder: project.path })
           : t("Ready for a new chat, in no project.")}</p>

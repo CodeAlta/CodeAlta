@@ -1,4 +1,4 @@
-import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, LatestEventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, Session, SessionChoices, SessionPage } from "./contract";
+import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, LatestEventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, QueuePage, Session, SessionChoices, SessionPage, TakeOverResult, ToolCallDetail, ToolOutputPage, ToolOutputPlace, UnqueueResult, UnsteerResult, WaitingPage, WaitingRun } from "./contract";
 
 /** What the page says when the server no longer knows this phone. */
 export const signedOutMessage = "This phone is no longer connected: scan the QR code of the Mobile tab again.";
@@ -159,6 +159,23 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     /** Sends a prompt; a send or a queue carries what was chosen of the session (a steer takes nothing). Files go with a send. */
     prompt: (id: string, text: string, mode: PromptMode, selection: PromptSelection = {}, attachments: readonly PromptAttachment[] = []) =>
       command<ActionResult>(`${session(id)}/prompt`, { text, mode, ...(attachments.length ? { attachments } : {}), ...(mode === "steer" ? {} : selection) }),
+    /** The prompts that wait in the queue of the session. */
+    queue: (id: string) => call<QueuePage>("GET", `${session(id)}/queue`),
+    /** Removes a prompt from the queue, unless the session is taking it. */
+    unqueue: (id: string, itemId: string) => command<UnqueueResult>(`${session(id)}/queue/${encodeURIComponent(itemId)}/remove`),
+    /** Takes back a steered prompt, unless the run gave it to the model. */
+    unsteer: (id: string, withdrawalId: string) => command<UnsteerResult>(`${session(id)}/steer/${encodeURIComponent(withdrawalId)}/withdraw`),
+    /** One tool call, whole; `since` is the sequence number before its first event. */
+    tool: (id: string, activityId: string, since?: number) => call<ToolCallDetail>("GET", `${session(id)}/tools/${encodeURIComponent(activityId)}${since === undefined ? "" : `?since=${since}`}`),
+    /** A page of the output of a tool call. */
+    toolOutput: (id: string, activityId: string, since: number | undefined, place: ToolOutputPlace) => {
+      const query = new URLSearchParams();
+      if (since !== undefined) query.set("since", String(since));
+      if (place.offset !== undefined) query.set("offset", String(place.offset));
+      if (place.before !== undefined) query.set("before", String(place.before));
+      const search = query.toString();
+      return call<ToolOutputPage>("GET", `${session(id)}/tools/${encodeURIComponent(activityId)}/output${search ? `?${search}` : ""}`);
+    },
     abort: (id: string) => command<ActionResult>(`${session(id)}/abort`),
     archive: (id: string) => command<ActionResult>(`${session(id)}/archive`),
     restore: (id: string) => command<ActionResult>(`${session(id)}/restore`),
@@ -169,6 +186,13 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     /** What the session asks permission for; an answer that did not reach it says why in its result, not as an error. */
     permissions: (id: string) => call<ApprovalPage>("GET", `${session(id)}/permissions`),
     resolvePermission: (id: string, answer: ApprovalAnswer) => call<ApprovalResult>("POST", `${session(id)}/permissions/resolve`, answer),
+    /** Takes over the run of the automation that started the session, while it waits for the person. */
+    takeOver: (id: string) => call<TakeOverResult>("POST", `${session(id)}/takeover`, {}),
+    /** The runs that wait for the person, of this computer and of the machines of their servers. */
+    waiting: () => call<WaitingPage>("GET", "/api/automations/waiting"),
+    /** Takes a run that waits over; one of a machine of a server is signed by the computer for the person. */
+    takeOverRun: (run: WaitingRun) => call<TakeOverResult>("POST", "/api/automations/takeover",
+      run.machineId ? { runId: run.runId, machineId: run.machineId, automationId: run.automationId } : { runId: run.runId }),
     diagram: (body: Readonly<{ svg: string; background?: string; text?: string; dark?: boolean }>) => call<{ url?: string }>("POST", "/api/diagrams", body),
   };
 }

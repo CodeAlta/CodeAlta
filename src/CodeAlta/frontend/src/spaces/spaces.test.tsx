@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import type { SpaceChangeResponse, SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { SpaceAvailable } from "./SpaceAvailable";
 import { SpacePage } from "./SpacePage";
 import type { AvailableResource, ResourceLists } from "./spaceResources";
 import { ownResources, readSpacePageLink, spaceCardSummary, spacePageLink, spaceSectionStatus } from "./spaceSummary";
 import { dropChange, movedOrder, SpaceSettings } from "./SpaceSettings";
+import { joinedSessions, sessionsNotice } from "./sessionSpaceMove";
 import { SpaceActivityBar, SpaceSwitch } from "./SpaceViews";
 import { archivedInView, defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, waitingSubSessions, restoreShownSpace, sameSpaces, scopeSnapshot,
   sessionHome, sessionSpaces, spaceActivities, spaceBrand, spaceCalls, spaceChatCounts, spaceNameProblem, spaceQuiet, spaceShows, spaceStorageKey, spaceView, spaceViewKey, subSessionsAtWork, viewLists } from "./spaces";
@@ -219,18 +220,27 @@ test("a name must be given, short enough, and not the name of another space", ()
   assert.deepEqual(spaceBrand({ icon: "no-such-icon", color: "red" }), { icon: null, symbol: undefined, color: undefined });
 });
 
-test("dropping a project on a space adds it, moves it or copies it, and dropping it on the list removes it", () => {
+test("dropping a project on a space adds it, moves it or copies it, and dropping it on the list removes it, its sessions with it", () => {
   const members = (id: string) => id === "work" ? ["a", "b"] : id === "personal" ? ["b"] : [];
-  assert.deepEqual(dropChange({ projectId: "c", from: null }, "work", members, false), { join: ["work"], leave: [] });
-  assert.equal(dropChange({ projectId: "a", from: null }, "work", members, false), null, "It is in that space already.");
-  assert.deepEqual(dropChange({ projectId: "a", from: "work" }, "personal", members, false), { join: ["personal"], leave: ["work"] });
-  assert.deepEqual(dropChange({ projectId: "a", from: "work" }, "personal", members, true), { join: ["personal"], leave: [] });
+  // From the list: the sessions of the default space go with it.
+  assert.deepEqual(dropChange({ projectId: "c", from: null }, "work", members, false), { join: ["work"], leave: [], sessions: { from: "default", to: "work" } });
+  assert.deepEqual(dropChange({ projectId: "c", from: null }, "work", members, true), { join: ["work"], leave: [], sessions: null }, "A copy moves no session.");
+  // Dropped again onto a space it is in already: it gathers there its sessions of the default space; a copy does nothing.
+  assert.deepEqual(dropChange({ projectId: "a", from: null }, "work", members, false), { join: [], leave: [], sessions: { from: "default", to: "work" } });
+  assert.equal(dropChange({ projectId: "a", from: null }, "work", members, true), null);
+  // From a space to another: the sessions of the first one go; with Ctrl it is in both, and none moves.
+  assert.deepEqual(dropChange({ projectId: "a", from: "work" }, "personal", members, false), { join: ["personal"], leave: ["work"], sessions: { from: "work", to: "personal" } });
+  assert.deepEqual(dropChange({ projectId: "a", from: "work" }, "personal", members, true), { join: ["personal"], leave: [], sessions: null });
   // Moved onto a space that has it already: it only leaves the one it came from.
-  assert.deepEqual(dropChange({ projectId: "b", from: "work" }, "personal", members, false), { join: [], leave: ["work"] });
+  assert.deepEqual(dropChange({ projectId: "b", from: "work" }, "personal", members, false), { join: [], leave: ["work"], sessions: { from: "work", to: "personal" } });
   assert.equal(dropChange({ projectId: "b", from: "work" }, "personal", members, true), null);
   assert.equal(dropChange({ projectId: "a", from: "work" }, "work", members, false), null);
-  assert.deepEqual(dropChange({ projectId: "a", from: "work" }, null, members, false), { join: [], leave: ["work"] });
+  // Back on the list: the sessions of the space it leaves go to the default one.
+  assert.deepEqual(dropChange({ projectId: "a", from: "work" }, null, members, false), { join: [], leave: ["work"], sessions: { from: "work", to: "default" } });
   assert.equal(dropChange({ projectId: "a", from: null }, null, members, false), null);
+  // The checkbox of a space page and the × of a card move them as the drags from and back to the list do.
+  assert.deepEqual(joinedSessions("work", true), { from: "default", to: "work" });
+  assert.deepEqual(joinedSessions("work", false), { from: "work", to: "default" });
   const spaces = readSpaces([item("default"), item("one"), item("two"), item("three")]);
   assert.deepEqual(movedOrder(spaces, "two", -1), ["two", "one", "three"]);
   assert.deepEqual(movedOrder(spaces, "two", 1), ["one", "three", "two"]);
@@ -239,19 +249,36 @@ test("dropping a project on a space adds it, moves it or copies it, and dropping
   assert.equal(movedOrder(spaces, "default", 1), null);
 });
 
+test("the page says which sessions stayed behind when a project moved, why none could move, or how many went", () => {
+  const t = (key: string) => key === "Untitled session" ? "Untitled" : `t:${key}`;
+  assert.equal(sessionsNotice(undefined, t), null, "No session was to move.");
+  assert.equal(sessionsNotice({ moved: 0, left: [], status: "ok" }, t), null, "None was in the space it left.");
+  assert.deepEqual(sessionsNotice({ moved: 3, left: [], status: "ok" }, t), { intent: "success", values: { count: 3 },
+    key: "{count} sessions moved with the project. Their next turn uses the providers, tools and identity of their new space." });
+  assert.equal(sessionsNotice({ moved: 1, left: [], status: "ok" }, t)?.key,
+    "1 session moved with the project. Its next turn uses the providers, tools and identity of its new space.");
+  assert.deepEqual(sessionsNotice({ moved: 2, left: [{ sessionId: "a", title: "Busy" }, { sessionId: "b", title: "" }], status: "ok" }, t), { intent: "warning",
+    values: { count: 2 }, detail: "Busy, Untitled", key: "{count} sessions are at work and stayed in their space. Move them with Move to space… once they are idle." });
+  assert.equal(sessionsNotice({ moved: 0, left: [{ sessionId: "a", title: "Busy" }], status: "ok" }, t)?.key,
+    "1 session is at work and stayed in its space. Move it with Move to space… once it is idle.");
+  assert.deepEqual(sessionsNotice({ moved: 0, left: [], status: "busy" }, t), { intent: "warning",
+    key: "The project changed space, but its sessions did not: move them with Move to space…", detail: "t:Another change of sessions is in progress. Try again when it ends." });
+});
+
 test("the hub lists the spaces once, follows what the host says, and says what each space does only with more than one space", async () => {
   let listed = [item("default", ["a"])];
   let sessions = [doing("s1", "a", { running: true })];
   const calls: string[] = [];
   const events: ((event: { kind: string; spaceId: string | null }) => void)[] = [];
-  const ok = async () => ({ status: "ok", message: null, space: null, movedSessions: 0 });
+  const ok = async () => ({ status: "ok", message: null, space: null, movedSessions: 0, leftSessions: null, sessionsStatus: null });
+  let moving: SpaceChangeResponse | null = null;
   const api: SpacesApi = {
     list: async () => { calls.push("list"); return { status: "ok", spaces: listed }; },
     activity: async () => { calls.push("activity"); return { status: "ok", sessions, truncated: false }; },
     watch: async () => { calls.push("watch"); return (async function* () { while (true) yield await new Promise<{ kind: string; spaceId: string | null }>(resolve => events.push(resolve)); })(); },
-    create: async request => { calls.push(`create ${request.name}`); listed = [...listed, item("work", [...(request.projectIds ?? [])])]; return { status: "ok", message: null, space: item("work"), movedSessions: 0 }; },
-    update: ok, delete: async () => ({ status: "invalid", message: "The default space holds every project and cannot be deleted.", space: null, movedSessions: 0 }),
-    assign: async request => { calls.push(`assign ${request.projectId} +${request.join} -${request.leave}`); return ok(); }, reorder: ok,
+    create: async request => { calls.push(`create ${request.name}`); listed = [...listed, item("work", [...(request.projectIds ?? [])])]; return { status: "ok", message: null, space: item("work"), movedSessions: 0, leftSessions: null, sessionsStatus: null }; },
+    update: ok, delete: async () => ({ status: "invalid", message: "The default space holds every project and cannot be deleted.", space: null, movedSessions: 0, leftSessions: null, sessionsStatus: null }),
+    assign: async request => { calls.push(`assign ${request.projectId} +${request.join} -${request.leave} ${request.sessionsFrom}>${request.sessionsTo}`); return moving ?? ok(); }, reorder: ok,
     shown: async request => { calls.push(`shown ${request.id}`); return ok(); },
     assignments: async () => ({ status: "ok", providers: [], mcpServers: [{ key: "Atlassian", spaces: ["work"] }], plugins: [], skills: [], prompts: [] }),
     assignResource: async request => { calls.push(`assignResource ${request.kind} ${request.key} ${request.spaces}`); return ok(); },
@@ -307,9 +334,15 @@ test("the hub lists the spaces once, follows what the host says, and says what e
 
   const refused = await hub.remove("default");
   assert.deepEqual([refused.ok, refused.status, refused.message], [false, "invalid", "The default space holds every project and cannot be deleted."]);
-  await hub.assign("a", ["personal"], ["work"]);
+  const plain = await hub.assign("a", ["personal"], ["work"]);
   hub.shown("work");
-  assert.equal(calls.includes("assign a +personal -work"), true);
+  assert.equal(calls.includes("assign a +personal -work null>null"), true);
+  assert.equal(plain.sessions, undefined, "A change that moves no session says nothing of them.");
+  // With its sessions: the hub asks the host to move them, and says what came of them.
+  moving = { status: "ok", message: null, space: null, movedSessions: 2, leftSessions: [{ sessionId: "s1", title: "Busy" }], sessionsStatus: "ok" };
+  const carried = await hub.assign("a", ["work"], ["personal"], { from: "personal", to: "work" });
+  assert.equal(calls.includes("assign a +work -personal personal>work"), true);
+  assert.deepEqual(carried.sessions, { moved: 2, left: [{ sessionId: "s1", title: "Busy" }], status: "ok" });
   // The hub keeps the spaces of the resources with the spaces, and changes them through the host.
   assert.deepEqual(resourceSpaces(hub.getSnapshot().assignments, "mcp", "atlassian"), ["work"]);
   assert.equal((await hub.assignResource("skill", "terraform", ["work", "default"])).ok, true);
@@ -331,7 +364,7 @@ test("the hub tells the host the tabs of the page, again after a lost watch, and
   let sessions = [doing("s1", "a")];
   // Each watch ends when the test says so, as a watch the host lost.
   const watches: { push: (event: { kind: string; spaceId: string | null } | null) => void }[] = [];
-  const ok = async () => ({ status: "ok", message: null, space: null, movedSessions: 0 });
+  const ok = async () => ({ status: "ok", message: null, space: null, movedSessions: 0, leftSessions: null, sessionsStatus: null });
   const api: SpacesApi = {
     list: async () => ({ status: "ok", spaces: [item("default", ["a"])] }),
     activity: async () => { calls.push("activity"); return { status: "ok", sessions, truncated: false }; },

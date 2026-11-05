@@ -291,7 +291,7 @@ public sealed partial class PluginRuntimeManager
                         new DiscoveredPluginType { Type = builtIn.ResolvePluginType(), Descriptor = descriptor },
                         sourcePackage: null,
                         loadContext: null,
-                        new PluginActivationOptions { HostInfo = _hostInfo!, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = Interlocked.Increment(ref _activationGeneration), BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments },
+                        new PluginActivationOptions { HostInfo = _hostInfo!, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = Interlocked.Increment(ref _activationGeneration), BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments, Secrets = Secrets },
                         CancellationToken.None)
                     .ConfigureAwait(false);
                 diagnostics.AddRange(activation.Diagnostics);
@@ -498,7 +498,7 @@ public sealed partial class PluginRuntimeManager
                     discovered,
                     package,
                     load.LoadContext,
-                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = Interlocked.Increment(ref _activationGeneration), ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments },
+                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = Interlocked.Increment(ref _activationGeneration), ApplicationDatabase = ApplicationDatabase, SpaceAssignments = ReadSpaceAssignments, Secrets = Secrets },
                     cancellationToken)
                 .ConfigureAwait(false);
             if (activation.ActivePlugin is not null)

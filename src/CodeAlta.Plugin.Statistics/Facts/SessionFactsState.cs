@@ -24,8 +24,11 @@ internal sealed class SessionFactsState
     /// Version 8 counts an <c>alta mcp skill activate</c> as a use of a skill of its MCP server (<c>mcp:&lt;server&gt;</c>).
     /// Version 9 counts the runs of scripts of Code Mode from their records, the calls scripts make, the <c>exec</c> calls of a
     /// run, <c>exec</c> and <c>wait</c> as tools of their own kind, and the run of the script that started a session.
+    /// Version 10 counts the start and the time of a run, until its first request reports its model, under the model that request
+    /// reports (an alias, or what it stood for in an earlier turn, until then). Version 11 takes that model from a request of the
+    /// conversation only, never from a compaction, and moves all the time a run counted before it, however many quarter hours.
     /// </summary>
-    public const int CurrentVersion = 9;
+    public const int CurrentVersion = 11;
 
     /// <summary>The number of runs whose end is remembered, so that a late record of a run that ended does not open it again.</summary>
     public const int MaxClosedRuns = 32;
@@ -50,6 +53,13 @@ internal sealed class SessionFactsState
 
     /// <summary>The number of runs of scripts without an end that are remembered.</summary>
     public const int MaxOpenScripts = 64;
+
+    /// <summary>
+    /// The number of times a journal is read again from its start because a move it did not know changed which records are the work
+    /// of this machine. One reading takes every move it meets, so a second one is enough unless the journal grows while it is read.
+    /// There is no limit on the moves themselves: the state holds one entry for each move record of the journal.
+    /// </summary>
+    public const int MaxRestartReadings = 64;
 
     /// <summary>Gets or sets the version of the facts this state belongs to.</summary>
     public int Version { get; set; } = CurrentVersion;
@@ -153,6 +163,12 @@ internal sealed class SessionFactsState
     /// </summary>
     public InheritedRecordsState? Inherited { get; set; }
 
+    /// <summary>
+    /// Gets or sets the moves of the session to another machine its journal holds, which tell the records this machine wrote from
+    /// those it brought. Null for a session that never moved: every record is its own.
+    /// </summary>
+    public MovedSessionState? Moved { get; set; }
+
     /// <summary>Gets or sets the runs of scripts that started and have not ended, oldest first.</summary>
     public List<OpenScriptState> OpenScripts { get; set; } = [];
 
@@ -198,6 +214,81 @@ internal sealed class SessionFactsState
             return new SessionFactsState { Version = 0 };
         }
     }
+}
+
+/// <summary>
+/// The moves of a session between machines, in the order of its journal. A machine counts the records it wrote: the journal it holds
+/// is the one of the machine its last move went to, the records before the first move were written by the machine that move came
+/// from, and those after a move by the machine it went to. A machine is known by its device id, which a rename does not change;
+/// a move written before the ids were recorded names the machines only, and those names are compared instead.
+/// </summary>
+internal sealed class MovedSessionState
+{
+    /// <summary>Gets or sets the moves the journal holds, as far as it was read, oldest first.</summary>
+    public List<MoveState> Moves { get; set; } = [];
+
+    /// <summary>Gets or sets the number of moves the reading met: the records it reads are those after the last of them.</summary>
+    public int Met { get; set; }
+
+    /// <summary>Gets a value indicating whether the records the reading is at are the work of the machine that holds the journal.</summary>
+    [JsonIgnore]
+    public bool IsOwn
+    {
+        get
+        {
+            if (Met >= Moves.Count)
+            {
+                return true;
+            }
+
+            var holder = Moves[^1];
+            return Met == 0
+                ? MoveState.SameMachine(Moves[0].FromDevice, Moves[0].From, holder.ToDevice, holder.To)
+                : MoveState.SameMachine(Moves[Met - 1].ToDevice, Moves[Met - 1].To, holder.ToDevice, holder.To);
+        }
+    }
+
+    /// <summary>Gets the moves without the reading: what a reading of the journal from its start is given.</summary>
+    /// <returns>The copy.</returns>
+    public MovedSessionState Known() => new() { Moves = [.. Moves] };
+}
+
+/// <summary>A move of a session between machines.</summary>
+internal sealed class MoveState
+{
+    /// <summary>Gets or sets the identifier of the move.</summary>
+    public string MoveId { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the name of the machine the session came from.</summary>
+    public string? From { get; set; }
+
+    /// <summary>Gets or sets the name of the machine the session went to.</summary>
+    public string? To { get; set; }
+
+    /// <summary>Gets or sets the device id of the machine the session came from; null for a move written before the ids were recorded.</summary>
+    public string? FromDevice { get; set; }
+
+    /// <summary>Gets or sets the device id of the machine the session went to; null for a move written before the ids were recorded.</summary>
+    public string? ToDevice { get; set; }
+
+    /// <summary>Gets a value indicating whether the move says which machine the session went to.</summary>
+    [JsonIgnore]
+    public bool KnowsTarget => !string.IsNullOrEmpty(ToDevice) || To is not null;
+
+    /// <summary>
+    /// Tells whether two ways of naming a machine are the same machine: by device id when both have one (a machine renamed between two
+    /// moves keeps its id), otherwise by name (a move written before the ids were recorded). A machine that is not named at all is
+    /// never the same as another.
+    /// </summary>
+    /// <param name="deviceA">The device id of the first, or null.</param>
+    /// <param name="nameA">The name of the first, or null.</param>
+    /// <param name="deviceB">The device id of the second, or null.</param>
+    /// <param name="nameB">The name of the second, or null.</param>
+    /// <returns><see langword="true"/> when they are the same machine.</returns>
+    public static bool SameMachine(string? deviceA, string? nameA, string? deviceB, string? nameB)
+        => !string.IsNullOrEmpty(deviceA) && !string.IsNullOrEmpty(deviceB)
+            ? string.Equals(deviceA, deviceB, StringComparison.Ordinal)
+            : nameA is not null && string.Equals(nameA, nameB, StringComparison.Ordinal);
 }
 
 /// <summary>
@@ -304,6 +395,49 @@ internal sealed class OpenRunState
 
     /// <summary>Gets or sets the <c>exec</c> calls of the run.</summary>
     public long ExecCalls { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether a request of the run reported the model it ran.</summary>
+    public bool ModelReported { get; set; }
+
+    /// <summary>
+    /// Gets or sets the time of the run counted before a request of the run reported its model, under the model in force then: it
+    /// goes on the model that request reports, with the start of the run.
+    /// </summary>
+    public List<UnreportedTimeState> Unreported { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the run counted time in more quarter hours before its model was reported than
+    /// <see cref="Unreported"/> keeps: then nothing of the run moves, so that it stays on one model.
+    /// </summary>
+    public bool UnreportedOverflow { get; set; }
+}
+
+/// <summary>
+/// Active time of a run counted before a request of the run reported its model, in a stretch of quarter hours under one model: its
+/// first and its last quarter hour, and those between them, which are whole.
+/// </summary>
+internal sealed class UnreportedTimeState
+{
+    /// <summary>Gets or sets the first quarter hour.</summary>
+    public int Quarter { get; set; }
+
+    /// <summary>Gets or sets the last quarter hour; the first one for a stretch of one.</summary>
+    public int LastQuarter { get; set; }
+
+    /// <summary>Gets or sets the milliseconds of the last quarter hour, when it is not the first.</summary>
+    public long LastMilliseconds { get; set; }
+
+    /// <summary>Gets or sets the provider it was counted under.</summary>
+    public string Provider { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the model it was counted under.</summary>
+    public string Model { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the effort it was counted under.</summary>
+    public string Effort { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the milliseconds of the first quarter hour.</summary>
+    public long Milliseconds { get; set; }
 }
 
 /// <summary>A run of a script of Code Mode that started and has not ended, with what it did so far.</summary>

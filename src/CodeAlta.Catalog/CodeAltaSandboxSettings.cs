@@ -56,6 +56,10 @@ public sealed class CodeAltaSandboxProfileDocument
     /// <summary>Gets or sets whether a command may be asked to run outside the sandbox: <c>ask</c> or <c>never</c>.</summary>
     [JsonPropertyName("outside")]
     public string? Outside { get; set; }
+
+    /// <summary>Gets or sets whether its sessions may start or drive work on other machines: <c>allow</c> or <c>never</c>.</summary>
+    [JsonPropertyName("fleet")]
+    public string? Fleet { get; set; }
 }
 
 /// <summary>The <c>[sandbox]</c> settings of the user, read from <c>~/.alta/config.toml</c> only.</summary>
@@ -95,6 +99,7 @@ public sealed record CodeAltaSandboxSettings(string? AllSessions, IReadOnlyList<
 /// <param name="Env">The names of the variables of the user's environment it receives.</param>
 /// <param name="McpServers">The MCP servers its sessions may use.</param>
 /// <param name="Outside">Whether a command may be asked to run outside the sandbox: <c>ask</c> or <c>never</c>.</param>
+/// <param name="Fleet">Whether its sessions may start or drive work on other machines: <c>allow</c> or <c>never</c>.</param>
 public sealed record CodeAltaSandboxProfileSettings(
     string Name,
     string? Extends = null,
@@ -106,12 +111,14 @@ public sealed record CodeAltaSandboxProfileSettings(
     IReadOnlyList<int>? LocalPorts = null,
     IReadOnlyList<string>? Env = null,
     IReadOnlyList<string>? McpServers = null,
-    string? Outside = null)
+    string? Outside = null,
+    string? Fleet = null)
 {
     internal static CodeAltaSandboxProfileSettings From(string name, CodeAltaSandboxProfileDocument document)
         => new(name, CodeAltaSandboxSettings.Text(document.Extends), List(document.Write), List(document.Read), List(document.Deny),
             CodeAltaSandboxSettings.Text(document.Network)?.ToLowerInvariant(), List(document.Hosts), document.LocalPorts is null ? null : [.. document.LocalPorts],
-            List(document.Env), List(document.McpServers), CodeAltaSandboxSettings.Text(document.Outside)?.ToLowerInvariant());
+            List(document.Env), List(document.McpServers), CodeAltaSandboxSettings.Text(document.Outside)?.ToLowerInvariant(),
+            CodeAltaSandboxSettings.Text(document.Fleet)?.ToLowerInvariant());
 
     internal CodeAltaSandboxProfileDocument ToDocument() => new()
     {
@@ -125,6 +132,7 @@ public sealed record CodeAltaSandboxProfileSettings(
         Env = Env is null ? null : [.. Env],
         McpServers = McpServers is null ? null : [.. McpServers],
         Outside = CodeAltaSandboxSettings.Text(Outside),
+        Fleet = CodeAltaSandboxSettings.Text(Fleet),
     };
 
     private static IReadOnlyList<string>? List(List<string>? values)

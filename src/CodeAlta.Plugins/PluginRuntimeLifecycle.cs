@@ -207,6 +207,9 @@ public sealed record PluginActivationOptions
     /// <summary>Gets the application database the plugins get their tables from, or <see langword="null"/> for a host without one.</summary>
     public IApplicationDatabase? ApplicationDatabase { get; init; }
 
+    /// <summary>Gets the masking the plugins tell the secrets they give out (<see cref="IPluginServices.Secrets"/>); null for that of the host services.</summary>
+    public IPluginSecretService? Secrets { get; init; }
+
     /// <summary>Gets the explicitly composed built-in factory; source plugins retain type-based activation.</summary>
     internal Func<PluginBase>? BuiltInFactory { get; init; }
 
@@ -322,7 +325,10 @@ public sealed class PluginRuntimeActivator
                 database,
                 PluginContributionRegistry.PluginIdOf(discoveredType.Descriptor.RuntimeKey, sourcePackage?.PackageId),
                 options.SpaceAssignments,
-                builtIn: sourcePackage is null);
+                builtIn: sourcePackage is null)
+            {
+                SecretsOverride = options.Secrets,
+            };
             dependencies.Add(services);
             var context = new PluginRuntimeContext
             {

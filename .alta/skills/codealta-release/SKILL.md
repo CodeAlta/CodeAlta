@@ -261,11 +261,11 @@ background job; it takes 15 to 25 minutes.
 
 ## 12. NuGet packages
 
-The release publishes the tool packages `CodeAlta`, `CodeAlta.Tui` and `CodeAlta.Cli` (`altacli`, since 2.1.0) and
-one package per runtime of each (six for the desktop, eight for the TUI and for altacli with `linux-musl-*`): 25 in
-all. They appear one after the other over about twenty minutes (up to an hour), the tool packages first.
+The release publishes the tool packages `CodeAlta`, `CodeAlta.Tui`, `CodeAlta.Cli` (`altacli`, since 2.1.0) and
+`CodeAlta.Node` (`altanode`, since 4.0.0) and one package per runtime of each (six for the desktop, eight for the TUI,
+altacli and altanode with `linux-musl-*`): 34 in all. They appear one after the other over about twenty minutes (up to an hour), the tool packages first.
 `release.py nuget X.Y.Z`, started as a background job, waits until each lists `X.Y.Z` on nuget.org; it reads the
-runtimes from the `<RuntimeIdentifiers>` of the three projects, so a runtime added there is checked too.
+runtimes from the `<RuntimeIdentifiers>` of the four projects, so a runtime added there is checked too.
 
 ## 13. Report
 

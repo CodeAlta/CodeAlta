@@ -2,7 +2,7 @@ import { Button, HTMLSelect } from "@blueprintjs/core";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { createPortal } from "react-dom";
 import { AttachMenu, AttachMenuItems, PromptImageAttachments } from "./PromptImageAttachments";
-import { pickFolder } from "./folderPicker";
+import { folderPickNotice, folderTitle, pickFolder } from "./folderPicker";
 import { folderLink } from "./projectReferences";
 import { insertIssueReferences } from "./issueReferences";
 import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
@@ -45,6 +45,7 @@ import { createPromptHistory, noPromptRecall, recallPrompt } from "./promptHisto
 import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
 import { useProviderName } from "./ProviderIcon";
+import { sessionProviderName } from "./machines/machineProviderNames";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { adaptiveChoice, adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierLabels, tierStore, useTiers, type TierName } from "./modelTiers";
@@ -1025,11 +1026,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const selected = pending?.request.selection ?? (activeChoices ? selection ?? activeChoices.current : null);
   const selectionDisabled = loadingChoices || !activeChoices?.current || invalidEpoch || !!pending;
   // The provider as Settings names it ("Claude Business"): the configuration's name, else the one the host gives the
-  // provider of the session, else its key.
+  // provider of the session, else its key. A session of another machine runs with a provider of that machine: the
+  // name that machine gives it, never the one of a provider of this computer that has the same key.
   const configuredProviderName = useProviderName(selected?.providerKey);
-  const selectedProviderName = configuredProviderName
-    ?? (selected?.providerKey && selected.providerKey === activeChoices?.current?.providerKey ? activeChoices.providerName : null)
-    ?? selected?.providerKey ?? t("session provider");
+  const selectedProviderName = sessionProviderName(selected?.providerKey, activeChoices, configuredProviderName) ?? t("session provider");
   const spaceProblem = activeChoices?.providerOutsideSpace
     ? t("{provider} is not available in the space of this session: choose another provider to send.", { provider: activeChoices.providerName ?? activeChoices.current?.providerKey ?? t("session provider") })
     : activeChoices?.providerUnavailable
@@ -1388,11 +1388,17 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   }
   // A folder of the session's folder is a project reference, as with `@`; a chat has no project to resolve one in.
   const folderRoot = referenceScope ? sessionFolder ?? referenceScope.projectPath : null;
+  const addFolders = (paths: readonly string[]) => addLinks(paths.flatMap(path => {
+    const link = folderLink(path, folderRoot);
+    return link ? [linkAttachment("folder", folderTitle(path), link)] : [];
+  }));
   async function addFolder() {
     if (pending || invalidEpoch || !capability.canMutate()) return;
     const pick = await pickFolder(desktopShell.pickFolder, t("Add a folder to the prompt"), sessionFolder ?? referenceScope?.projectPath ?? null);
-    const link = pick.status === "ok" ? folderLink(pick.path, folderRoot) : null;
-    if (pick.status === "ok" && link) addLinks([linkAttachment("folder", pick.path.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) || pick.path, link)]);
+    if (pick.status === "ok") { addFolders([pick.path]); return; }
+    // A desktop without a folder dialog, or a dialog that failed, is never silent.
+    const notice = folderPickNotice(pick);
+    if (notice) showToast({ message: t(notice), intent: "warning", icon: "warning-sign", timeout: 8000 });
   }
   const attachIssues = (issues: readonly { number: number; url: string; title: string }[]) => addLinks(issues.flatMap(issue => {
     const link = insertIssueReferences("", 0, 0, [issue])?.text;
@@ -1470,6 +1476,8 @@ ${value}` : value);
         navigator.platform.startsWith("Mac"))) { event.preventDefault(); event.stopPropagation(); }
       } }}
     onDropFiles={!pending && !invalidEpoch ? (files, origin) => void attachFiles(files, origin, false) : null}
+    attachedBytes={attachmentBytes(images)}
+    onDropFolders={!pending && !invalidEpoch ? addFolders : null}
     options={<><AttachMenu id={`attach-files-${sessionId}`} disabled={!!pending || invalidEpoch} {...attachActions} />
       <ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy} openRequest={selectionOpenRequest} notice={spaceProblem}
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",

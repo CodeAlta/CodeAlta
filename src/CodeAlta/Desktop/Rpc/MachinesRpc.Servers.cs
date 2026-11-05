@@ -1,0 +1,89 @@
+using CodeAlta.Desktop.Fleet;
+using CodeAlta.Fleet.Client;
+using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.NodeApi;
+using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Server;
+using NeoAstra.Rpc;
+
+namespace CodeAlta.Desktop.Rpc;
+
+/// <summary>
+/// Add a machine this computer manages to its server: this computer makes a one-time enrollment code, the machine
+/// enrolls with it from itself (<c>control.servers.join</c>), and this computer approves the key it pinned for the machine,
+/// as an execution node — the person checks nothing by hand, and the six words are shown.
+/// </summary>
+internal sealed partial class MachinesService
+{
+    /// <summary>Gets the address of a server this computer is linked to, by the id of its link; null when unknown.</summary>
+    internal Func<string, string?>? ServerAddress { get; set; }
+
+    /// <summary>Gets what makes a one-time enrollment code at a server, by the id of its link.</summary>
+    internal Func<string, CancellationToken, Task<string>>? CreateJoinCode { get; set; }
+
+    /// <summary>
+    /// Gets what approves a machine at a server, by the id of its link and the fingerprint of the key pairing pinned for the
+    /// machine: the approval signs that key only, as an execution node.
+    /// </summary>
+    internal Func<string, DeviceFingerprint, CancellationToken, Task>? ApproveDevice { get; set; }
+
+    /// <summary>
+    /// Gets the key to approve for a machine that joined a server: the one pairing pinned, when the device the machine says
+    /// it enrolled is that key's; null otherwise (another key, or a machine not paired), and nothing is approved.
+    /// </summary>
+    /// <param name="machine">The machine, as this computer paired with it.</param>
+    /// <param name="joined">What the machine answered.</param>
+    /// <returns>The fingerprint of the key to approve, or null.</returns>
+    internal static DeviceFingerprint? ServerDevice(PairedMachine machine, FleetServerJoinResult joined)
+        => !machine.Fingerprint.IsEmpty && string.Equals(DeviceIdentity.DeviceIdOf(machine.Fingerprint), joined.DeviceId, StringComparison.Ordinal) ? machine.Fingerprint : null;
+
+    /// <summary>Has a machine this computer manages join a server this computer owns, and approves it there.</summary>
+    [NeoRpcMethod("joinServer")]
+    public async Task<MachineJoinServerResult> JoinServerAsync(MachineJoinServerRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null, null);
+        if (request!.MachineId is not { Length: > 0 and <= 64 } id || request.LinkId is not { Length: > 0 and <= 64 } linkId) return new("invalid_request", null, null, null);
+        if (_fleet!.Find(id) is not { } host) return new("not_found", null, null, null);
+        if (ServerAddress?.Invoke(linkId) is not { } url || CreateJoinCode is not { } code || ApproveDevice is not { } approve) return new("server_not_found", null, null, null);
+        FleetServerJoinResult joined;
+        try
+        {
+            var token = await code(linkId, cancellationToken).ConfigureAwait(false);
+            joined = await host.ManageAsync((client, cancellation) => client.JoinServerAsync(new FleetServerJoinParams(url, token, host.Machine.Name), cancellation),
+                changes: true, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException) { return new(RemoteSessionHost.Describe(host.State), null, null, null); }
+        catch (FleetException exception) { return new(Code(exception), null, null, exception.Error.Message); }
+        catch (FleetServerException exception) { return new("server_refused", null, null, exception.Message); }
+        catch (Exception exception) when (exception is IOException or TimeoutException or HttpRequestException) { return new(RemoteSessionHost.MachineOfflineCode, null, null, exception.Message); }
+
+        // The device approved is the machine this computer paired with, by the whole key pinned for it, as a node: never the
+        // id, the words or the class the machine answers, so that a machine that was taken over brings no controller in.
+        if (ServerDevice(host.Machine, joined) is not { } key)
+            return new("approve_failed", joined.Name, null, "The machine enrolled another key than the one this computer paired with: nothing was approved.");
+        var words = key.ToShortWords();
+        try
+        {
+            await approve(linkId, key, cancellationToken).ConfigureAwait(false);
+        }
+        catch (FleetServerException exception) { return new("approve_failed", joined.Name, words, exception.Message); }
+        catch (FleetDeviceListException exception) { return new("approve_failed", joined.Name, words, exception.Message); }
+        catch (HttpRequestException exception) { return new("approve_failed", joined.Name, words, exception.Message); }
+
+        Changed();
+        return new("ok", joined.Name, words, null);
+    }
+}
+
+/// <summary>A machine to add to a server.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="MachineId">The machine, which this computer manages.</param>
+/// <param name="LinkId">The server, by the id of this computer's link to it.</param>
+internal sealed record MachineJoinServerRequest(string ExpectedEpoch, string MachineId, string LinkId);
+
+/// <summary>The outcome of adding a machine to a server.</summary>
+/// <param name="Status"><c>ok</c>, <c>not_manager</c>, <c>offline</c>, <c>server_refused</c>, <c>approve_failed</c>, or the code the machine answered.</param>
+/// <param name="Name">The name of the machine at the server.</param>
+/// <param name="Words">The six words of its key.</param>
+/// <param name="Message">What went wrong.</param>
+internal sealed record MachineJoinServerResult(string Status, string? Name, string? Words, string? Message);

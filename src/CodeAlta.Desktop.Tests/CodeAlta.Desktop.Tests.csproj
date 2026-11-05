@@ -9,6 +9,9 @@
     <PackageReference Include="MSTest" />
     <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
     <ProjectReference Include="../CodeAlta/CodeAlta.csproj" />
+    <!-- A CodeAlta Server of the test process, for the fleetServer service. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../CodeAlta.Server/CodeAlta.Server.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj" />
     <ProjectReference Include="../CodeAlta.Tests.TinyMcpServer/CodeAlta.Tests.TinyMcpServer.csproj" />
   </ItemGroup>
@@ -17,6 +20,10 @@
     <Compile Include="../CodeAlta.Tests/LinkFreeTempDirectory.cs" Link="LinkFreeTempDirectory.cs" />
     <!-- The journals of the synthetic sessions that the statistics read. -->
     <Compile Include="../CodeAlta.Plugin.Statistics.Tests/JournalBuilder.cs" Link="Statistics/JournalBuilder.cs" />
+    <!-- The OpenID Connect provider of a company, in the test process, for sign-in end to end. -->
+    <Compile Include="../CodeAlta.Server.Tests/SignIn/FakeOidcProvider.cs" Link="SignIn/FakeOidcProvider.cs" />
+    <!-- GitHub's device flow, in the test process, for sign-in with GitHub end to end. -->
+    <Compile Include="../CodeAlta.Server.Tests/SignIn/FakeGitHubDeviceFlow.cs" Link="SignIn/FakeGitHubDeviceFlow.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- The synthetic corpus and the queries of the evaluation of search. -->

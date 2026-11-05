@@ -1,0 +1,109 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <PackAsTool>true</PackAsTool>
+    <RootNamespace>CodeAlta.Server</RootNamespace>
+    <PackageId>CodeAlta.Server</PackageId>
+    <AssemblyName>altaserver</AssemblyName>
+    <ToolCommandName>altaserver</ToolCommandName>
+
+    <!-- Not Native AOT (doc/fleet/server.md, stack): the OpenID Connect authentication it will need is not supported
+         under AOT. Contracts are source-generated all the same. -->
+    <RuntimeIdentifiers>linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;win-x64;win-arm64;osx-arm64;osx-x64</RuntimeIdentifiers>
+    <PublishSelfContained>false</PublishSelfContained>
+    <!-- Precompiled code in each runtime's package: the application starts without compiling its methods first. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <ApplicationIcon>..\..\img\alta.ico</ApplicationIcon>
+    <Description>CodeAlta Server: the coordinator of a CodeAlta fleet. It knows the people, devices and machines of an organization, which are online, and the facts of the sessions they publish; it runs no agent and reads no session content. Start it with altaserver run.</Description>
+    <PackageTags>agentic;ai;coding-agent;fleet;coordinator;server</PackageTags>
+    <PackageReadmeFile>readme.md</PackageReadmeFile>
+    <PackageIcon>CodeAlta.png</PackageIcon>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageProjectUrl>https://github.com/CodeAlta/CodeAlta</PackageProjectUrl>
+    <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../../img/CodeAlta.png" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)../../readme.md" Pack="true" PackagePath="/" />
+    <EmbeddedResource Include="Storage/Sqlite/Migrations/*.sql" LogicalName="CodeAlta.Server.Storage.Sqlite.Migrations.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <!-- Sign-in (doc/fleet/identity.md): the discovery documents, keys and ID tokens of the providers people sign in with (MIT). -->
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
+    <!-- Its own traces, metrics and logs, and ASP.NET Core's, over OTLP when a collector is named (doc/fleet/observability.md). -->
+    <PackageReference Include="OpenTelemetry" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="XenoAtom.CommandLine" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The server references the protocol and the self-update only, never the agent runtime: ArchitectureGuardrailTests checks it. -->
+    <ProjectReference Include="..\CodeAlta.Fleet.Protocol\CodeAlta.Fleet.Protocol.csproj" />
+    <ProjectReference Include="..\CodeAlta.Fleet.Update\CodeAlta.Fleet.Update.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The OTLP export shared with altanode, as source: the server references no CodeAlta library but the protocol. -->
+    <Compile Include="..\Shared\FleetTelemetry\FleetOtlpPipeline.cs" Link="Telemetry\FleetOtlpPipeline.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.Server.Tests" />
+  </ItemGroup>
+
+  <!--
+    The Google client of CodeAlta sign-in is not in the source (PublicSignInClients): the build writes it into a generated
+    file from CODEALTA_SIGNIN_GOOGLE_CLIENT_ID and CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET, secrets of the repository's CI.
+    A build without them, or with a value of unexpected characters, writes placeholders: Google is then not offered.
+  -->
+  <PropertyGroup>
+    <_CodeAltaGoogleClientId Condition="'$(CODEALTA_SIGNIN_GOOGLE_CLIENT_ID)' != '' and $([System.Text.RegularExpressions.Regex]::IsMatch('$(CODEALTA_SIGNIN_GOOGLE_CLIENT_ID)', '^[A-Za-z0-9._-]+$')) and '$(CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET)' != '' and $([System.Text.RegularExpressions.Regex]::IsMatch('$(CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET)', '^[A-Za-z0-9._-]+$'))">$(CODEALTA_SIGNIN_GOOGLE_CLIENT_ID)</_CodeAltaGoogleClientId>
+    <_CodeAltaGoogleClientSecret Condition="'$(_CodeAltaGoogleClientId)' != ''">$(CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET)</_CodeAltaGoogleClientSecret>
+    <_CodeAltaGoogleClientId Condition="'$(_CodeAltaGoogleClientId)' == ''">codealta-register-google-client-id</_CodeAltaGoogleClientId>
+    <_CodeAltaGoogleClientSecret Condition="'$(_CodeAltaGoogleClientSecret)' == ''">codealta-register-google-desktop-client-secret</_CodeAltaGoogleClientSecret>
+  </PropertyGroup>
+
+  <Target Name="_CodeAltaWritePublicSignInBuild" BeforeTargets="CoreCompile;BeforeCompile">
+    <!-- In the target, where the build has set its intermediate folder: never next to the source. -->
+    <PropertyGroup>
+      <_CodeAltaSignInBuildFile>$([System.IO.Path]::Combine('$(ProjectDir)', '$(IntermediateOutputPath)', 'PublicSignInBuild.g.cs'))</_CodeAltaSignInBuildFile>
+    </PropertyGroup>
+    <Error Condition="'$(IntermediateOutputPath)' == ''" Text="The intermediate folder of the build is not set: the sign-in values are never written next to the source." />
+    <ItemGroup>
+      <_CodeAltaSignInBuildLine Include="// &lt;auto-generated/&gt; Written by CodeAlta.Server.csproj from the CI secrets of CodeAlta sign-in." />
+      <_CodeAltaSignInBuildLine Include="namespace CodeAlta.Server.Identity.SignIn%3B" />
+      <_CodeAltaSignInBuildLine Include="internal static class PublicSignInBuild" />
+      <_CodeAltaSignInBuildLine Include="{" />
+      <_CodeAltaSignInBuildLine Include="    internal const string GoogleClientId = &quot;$(_CodeAltaGoogleClientId)&quot;%3B" />
+      <_CodeAltaSignInBuildLine Include="    internal const string GoogleClientSecret = &quot;$(_CodeAltaGoogleClientSecret)&quot;%3B" />
+      <_CodeAltaSignInBuildLine Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_CodeAltaSignInBuildFile)" Lines="@(_CodeAltaSignInBuildLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Remove="$(_CodeAltaSignInBuildFile)" />
+      <Compile Include="$(_CodeAltaSignInBuildFile)" />
+      <FileWrites Include="$(_CodeAltaSignInBuildFile)" />
+    </ItemGroup>
+  </Target>
+</Project>

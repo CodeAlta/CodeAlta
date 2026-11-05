@@ -89,6 +89,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private string? _firstPromptTitle;
     // The assistant texts that stream now, by content: a title or next prompt tag is never shown, not even in part.
     private readonly Dictionary<(string? Attempt, string Content), AgentSessionTitleTag.Filter> _titleFilters = [];
+    // The masking of the texts that stream now, by content, with the attempt whose deltas they are.
+    private readonly Dictionary<(AgentRunId? Run, AgentContentKind Kind, string Content), (string? Attempt, AgentSecretTextStream Text)> _maskedStreams = [];
     private readonly List<AgentEvent> _history;
     private readonly List<AgentConversationMessage> _conversation;
     // For a session read again without all of its journal: the events before _history, read when needed; null when
@@ -168,6 +170,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     /// agent): the session reads the limits of its model there when the runtime had no model of the provider yet.
     /// </summary>
     internal IModelProviderModelCatalog? ModelCatalog { get; init; }
+
+    /// <summary>
+    /// Masks the secrets of the machine in the results of the tools and the events of the session, before the model,
+    /// the journal, the telemetry or the user see them; null masks nothing.
+    /// </summary>
+    internal AgentSecretMasker? SecretMasker { get; init; }
 
     // earlierHistory: what the journal holds before history, for a session read again without all of it.
     internal AgentSession(
@@ -390,6 +398,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             var updated = update(_summary);
             if (ReferenceEquals(updated, _summary)) return;
+            // A title or a summary is made of what the user or the model wrote: it is listed here and on the machines that watch the session.
+            if (SecretMasker is { } masker && (masker.Contains(updated.Title) || masker.Contains(updated.Summary)))
+            {
+                updated = updated with { Title = masker.MaskText(updated.Title), Summary = masker.MaskText(updated.Summary) };
+            }
+
             _summary = updated;
             if (persist) await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
         }
@@ -589,7 +603,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     {
         if (!_disposed && AgentPromptSuggestionEvent.Normalize(suggestion) is { } text)
         {
-            Publish(new AgentPromptSuggestionEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, text));
+            Publish(Masked(new AgentPromptSuggestionEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, text)));
         }
     }
 
@@ -597,9 +611,18 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     {
         if (!_disposed)
         {
-            Publish(new AgentBackgroundTasksEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, tasks, ended));
+            // The description and the summary of a task are what the agent wrote of the command it runs.
+            Publish(Masked(new AgentBackgroundTasksEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, tasks, ended)));
         }
     }
+
+    // An event told and never recorded is masked as those the journal keeps: it is shown, and watched from other machines.
+    private AgentEvent Masked(AgentEvent @event) => SecretMasker is { } masker ? masker.MaskEvents([@event])[0] : @event;
+
+    // A request is read by the person who answers it, in this window or on another computer, as the call is shown in the
+    // timeline: with the secrets masked. The decision goes back by its interaction id, and no decision reads its command.
+    private AgentPermissionRequestHandler MaskedPermissions(AgentPermissionRequestHandler handler)
+        => SecretMasker is null ? handler : (request, token) => handler(Masked(request) as AgentPermissionRequest ?? request, token);
 
     private void Publish(AgentEvent @event)
     {
@@ -686,6 +709,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         finally
         {
             EndRunTrace(trace, failure);
+            ForgetMaskedStreams(run.Id);
             run.Finish = FinishRunAsync(run, admitted, options.RunLifecycle, callerRegistration, failure);
             try { await run.Finish.ConfigureAwait(false); }
             catch (Exception cleanup)
@@ -767,7 +791,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             };
             await _store.UpsertStateAsync(_state, linkedCts.Token).ConfigureAwait(false);
 
-            var permissionRequestHandler = options.OnPermissionRequest ?? _options.OnPermissionRequest;
+            var permissionRequestHandler = MaskedPermissions(options.OnPermissionRequest ?? _options.OnPermissionRequest);
             var userInputRequestHandler = options.OnUserInputRequest ?? _options.OnUserInputRequest;
             // A provider that runs tools itself answers its own permission prompts and questions through the run.
             var providerToolHost = _turnExecutor as IAgentProviderToolHost;
@@ -1167,6 +1191,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             result = CreateToolExecutionFailureResult(toolCall.Name, ex);
         }
 
+        // A secret of the machine a tool wrote is masked before the model, the journal or the user see it.
+        result = SecretMasker?.MaskResult(result) ?? result;
+
         // The calls its script made are in the journal before the call itself ends there.
         await WriteNestedRecordsAsync().ConfigureAwait(false);
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -1391,6 +1418,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             result = CreateToolExecutionFailureResult(name, ex);
         }
 
+        result = SecretMasker?.MaskResult(result) ?? result;
         string? diff = null;
         if (callChanges is not null)
         {
@@ -1439,6 +1467,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     // follow: one write for many calls instead of one for each start and each end.
     private void AppendNestedRecords(IReadOnlyList<AgentEvent> events)
     {
+        // The arguments of the call and the diff of the files it changed hold what the call read and wrote, as its output does.
+        if (SecretMasker is { } masker)
+        {
+            events = masker.MaskEvents(events);
+        }
+
         AddToHistory(events);
         bool first;
         lock (_nestedRecordsGate)
@@ -1613,6 +1647,29 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
             _pendingSteerInputs.Enqueue(options);
             return activeRunId;
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> TryWithdrawSteerAsync(string withdrawalId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(withdrawalId);
+        using var operation = EnterOperation();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        // Under the gate the run takes the inputs with: an input is taken back here or given to the model there, never both.
+        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var kept = _pendingSteerInputs.Where(steer => !string.Equals(steer.WithdrawalId, withdrawalId, StringComparison.Ordinal)).ToArray();
+            if (kept.Length == _pendingSteerInputs.Count) return false;
+            _pendingSteerInputs.Clear();
+            foreach (var steer in kept) _pendingSteerInputs.Enqueue(steer);
+            return true;
         }
         finally
         {
@@ -2234,7 +2291,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             DisabledTools = _options.DisabledBuiltInTools,
             WriteGuard = _options.WriteGuard,
             CommandGuard = _options.CommandGuard,
-            // The whole of a long output goes beside the journal, and goes with the session.
+            // The whole of a long output goes beside the journal, and goes with the session: it is saved masked.
+            SecretMasker = SecretMasker,
             ResolveToolOutputDirectoryAsync = _store is IAgentSessionAttachmentStore attachments
                 ? async cancellationToken => await attachments.GetAttachmentDirectoryAsync(SessionId, cancellationToken).ConfigureAwait(false) is { } folder
                     ? Path.Combine(folder, AgentBuiltInToolOptions.ToolOutputFolderName)
@@ -3029,6 +3087,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private void RemoveTransientDraftDeltas(string attemptId)
     {
         ForgetTitleFilters(attemptId);
+        ForgetMaskedStreams(attemptId: attemptId);
         lock (_historyGate)
         {
             _historyDeltaCount -= _history.RemoveAll(@event => @event is AgentContentDeltaEvent delta &&
@@ -3356,6 +3415,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             return;
         }
 
+        // What a tool or an agent that runs its own tools wrote, what the model answered: no secret is kept, journaled or shown,
+        // not even one split between two deltas.
+        if (SecretMasker is { } masker)
+        {
+            events = masker.MaskEvents(MaskStreams(masker, events));
+        }
+
         // Whatever compacts the conversation (the session or its provider), the model no longer has the files it read.
         if (events.Any(static @event => @event is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.CompactionStarted or AgentSessionUpdateKind.CompactionCompleted }))
         {
@@ -3371,6 +3437,66 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         foreach (var @event in events)
         {
             Publish(@event);
+        }
+    }
+
+    // The deltas of a content are masked as one text: a delta gives what can be shown, and holds back its end that could
+    // begin a secret until the next delta of that content, or its completed content, tells. A delta that gives nothing is
+    // not shown; what was held back is shown, masked, in a delta just before the completed content.
+    private IReadOnlyList<AgentEvent> MaskStreams(AgentSecretMasker masker, IReadOnlyList<AgentEvent> events)
+    {
+        List<AgentEvent>? masked = null;
+        lock (_maskedStreams)
+        {
+            if (_maskedStreams.Count == 0 && masker.IsEmpty) return events;
+            for (var index = 0; index < events.Count; index++)
+            {
+                var @event = events[index];
+                AgentEvent? before = null;
+                AgentEvent? replacement = @event;
+                if (@event is AgentContentDeltaEvent delta)
+                {
+                    var key = (delta.RunId, delta.Kind, delta.ContentId);
+                    var attempt = TryGetDraftAttemptId(delta.Details, out var attemptId) ? attemptId : null;
+                    // A delta of another attempt starts the text again: what the discarded draft held back is not part of it.
+                    if (!_maskedStreams.TryGetValue(key, out var stream) || !string.Equals(stream.Attempt, attempt, StringComparison.Ordinal))
+                    {
+                        stream = (attempt, masker.CreateStream());
+                        _maskedStreams[key] = stream;
+                    }
+
+                    var shown = stream.Text.Write(delta.Delta);
+                    replacement = shown.Length == 0 ? null : ReferenceEquals(shown, delta.Delta) ? delta : delta with { Delta = shown };
+                }
+                else if (@event is AgentContentCompletedEvent completed && _maskedStreams.Remove((completed.RunId, completed.Kind, completed.ContentId), out var ended)
+                    && ended.Text.Flush() is { Length: > 0 } rest)
+                {
+                    before = new AgentContentDeltaEvent(ProviderId, SessionId, completed.Timestamp, completed.RunId, completed.Kind, completed.ContentId,
+                        completed.ParentActivityId, rest);
+                }
+
+                if (masked is null && before is null && ReferenceEquals(replacement, @event)) continue;
+                masked ??= [.. events.Take(index)];
+                if (before is not null) masked.Add(before);
+                if (replacement is not null) masked.Add(replacement);
+            }
+        }
+
+        return masked ?? events;
+    }
+
+    // Forgets the masking of the texts of a run that ended, or of an attempt whose draft is discarded: their contents are complete or gone.
+    private void ForgetMaskedStreams(AgentRunId? runId = null, string? attemptId = null)
+    {
+        lock (_maskedStreams)
+        {
+            foreach (var (key, stream) in _maskedStreams.ToArray())
+            {
+                if ((runId is not null && key.Run == runId) || (attemptId is not null && string.Equals(stream.Attempt, attemptId, StringComparison.Ordinal)))
+                {
+                    _maskedStreams.Remove(key);
+                }
+            }
         }
     }
 

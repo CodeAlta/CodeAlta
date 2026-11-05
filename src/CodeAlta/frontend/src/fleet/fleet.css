@@ -1,0 +1,151 @@
+/* Settings > Fleet > Server, the server of a space, and the Fleet canvas. */
+.fleet-server-list { display: grid; gap: 10px; max-width: 820px; }
+.fleet-server-card { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 8px 10px; display: grid; gap: 8px; }
+/* The name keeps room for itself: in a narrow window the buttons of the card go under it. */
+.fleet-server-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.fleet-server-head > .fleet-server-main { flex: 1 1 220px; }
+.fleet-server-icon { color: var(--muted); display: inline-flex; }
+.fleet-server-card[data-connection="online"] .fleet-server-icon { color: var(--green); }
+.fleet-server-main { min-width: 0; display: grid; gap: 2px; }
+.fleet-server-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fleet-server-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-server-details, .fleet-server-problem { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-server-confirm { max-width: 300px; padding: 10px 12px; display: grid; gap: 6px; }
+.fleet-server-confirm p { margin: 0; }
+.fleet-server-empty { margin-top: 32px; }
+.fleet-server-key { max-width: 820px; margin-top: 12px; font-size: 12px; }
+.fleet-server-devices { display: grid; gap: 6px; padding-left: 28px; }
+.fleet-device-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.fleet-device-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 0; color: var(--muted); }
+.fleet-device-row[data-status="pending"] { color: inherit; }
+.fleet-device-main { min-width: 0; display: grid; gap: 4px; }
+.fleet-device-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fleet-device-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.fleet-device-words { display: flex; flex-wrap: wrap; gap: 4px; }
+.fleet-device-actions { display: inline-flex; gap: 6px; }
+.fleet-device-confirm .fleet-device-words { margin: 2px 0 4px; }
+.fleet-server-pending-words { display: grid; gap: 4px; margin-top: 4px; }
+.fleet-server-recovery { display: grid; gap: 6px; padding-left: 28px; }
+.fleet-server-recovery-row { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.fleet-server-recovery-row > span:first-of-type { color: var(--text); font-weight: 500; }
+.fleet-server-recovery-spacer { flex: 1; }
+.fleet-recovery-dialog { width: min(560px, calc(100vw - 32px)); }
+.fleet-recovery-dialog p { margin: 0 0 10px; }
+.fleet-recovery-words { list-style: none; counter-reset: word; margin: 0 0 12px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 10px; }
+.fleet-recovery-words li { counter-increment: word; display: flex; align-items: center; gap: 6px; font-family: var(--font-mono, monospace); }
+.fleet-recovery-words li::before { content: counter(word); min-width: 1.6em; text-align: right; color: var(--muted); font-size: 11px; }
+.fleet-recovery-check { max-width: 260px; }
+.fleet-server-form { display: grid; gap: 12px; }
+.fleet-server-form > label:not(.bp6-control) { display: grid; gap: 4px; }
+.fleet-token-dialog p { margin: 0 0 8px; }
+.fleet-token-field { display: grid; gap: 4px; margin: 0 0 10px; }
+.fleet-server-spaces { display: grid; gap: 4px; padding-left: 28px; }
+.fleet-server-spaces p { margin: 0 0 0 22px; }
+.fleet-server-spaces-head { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.fleet-server-spaces-head > strong { color: var(--text); font-weight: 500; }
+.fleet-server-spaces-list { display: flex; flex-wrap: wrap; gap: 2px 16px; margin-left: 22px; }
+.fleet-server-spaces-list .bp6-control { margin: 0; }
+.fleet-token-field > span { font-weight: 600; }
+.fleet-token-code input { font-family: var(--code-font, ui-monospace, monospace); font-size: 15px; letter-spacing: 0.04em; }
+.fleet-server-telemetry { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding-left: 28px; color: var(--muted); }
+.fleet-telemetry-main { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.fleet-telemetry-main strong { color: var(--text); font-weight: 500; }
+.fleet-telemetry-summary { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-telemetry-dialog { width: min(600px, calc(100vw - 32px)); }
+.fleet-telemetry-choices { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px; }
+.fleet-telemetry-choices label { display: grid; gap: 4px; }
+.fleet-telemetry-signals, .fleet-telemetry-headers { display: grid; gap: 4px; justify-items: start; }
+.fleet-telemetry-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) auto; gap: 6px; width: 100%; }
+.fleet-server-updates { display: grid; gap: 6px; padding-left: 28px; color: var(--muted); }
+.fleet-updates-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
+.fleet-updates-summary { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-campaign { display: grid; gap: 4px; padding-left: 23px; }
+.fleet-campaign-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--text); }
+.fleet-campaign-machines { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 12px; }
+.fleet-campaign-machines li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fleet-campaign-message { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.fleet-update-dialog, .fleet-policy-dialog { width: min(560px, calc(100vw - 32px)); }
+.fleet-update-machines { display: grid; gap: 2px; justify-items: start; }
+
+.fleet-canvas { height: 100%; overflow: auto; padding: 20px 24px; display: grid; align-content: start; gap: 16px; }
+.fleet-canvas-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+.fleet-canvas-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.fleet-canvas-title h1 { margin: 0; font-size: 20px; font-weight: 600; }
+.fleet-canvas-title .muted-text { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-canvas-summary { display: flex; gap: 16px; font-size: 13px; color: var(--muted); }
+.fleet-canvas-summary strong { color: var(--text); font-weight: 600; }
+.fleet-canvas-waiting { color: var(--text); }
+.fleet-canvas-archived { margin: 0 0 0 auto; }
+.fleet-canvas-machines { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
+.fleet-machine { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 10px 12px; display: grid; gap: 8px; align-content: start; }
+.fleet-machine[data-online="false"] { opacity: 0.8; }
+.fleet-machine-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.fleet-machine-icon { color: var(--muted); display: inline-flex; }
+.fleet-machine[data-online="true"] .fleet-machine-icon { color: var(--green); }
+.fleet-machine-main { min-width: 0; display: grid; gap: 2px; }
+.fleet-machine-title { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.fleet-machine-open { all: unset; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-machine-open:hover strong, .fleet-machine-open:focus-visible strong { text-decoration: underline; }
+.fleet-machine-open:focus-visible { outline: 2px solid var(--accent, #2d72d2); outline-offset: 2px; border-radius: 3px; }
+.fleet-machine-details, .fleet-machine-count { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A computer can hold hundreds of sessions: its list scrolls, so the cards of the other machines stay in view. */
+.fleet-sessions-list { max-height: 330px; overflow-y: auto; }
+.fleet-sessions { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.fleet-sessions td { padding: 3px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
+.fleet-sessions td:first-child { width: 110px; }
+.fleet-session-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-session-title { font-weight: 500; }
+.fleet-session-time { width: 120px; white-space: nowrap; }
+/* Room for its icon and Open in any system font (macOS needs 73 px) and longer words of other languages. */
+.fleet-session-open { width: 104px; text-align: right; white-space: nowrap; }
+
+/* Create my server: the machines this computer manages, each added to the new server. */
+.create-server-dialog { width: min(620px, calc(100vw - 32px)); }
+.create-server-machines { margin-top: 12px; display: grid; gap: 6px; }
+.create-server-machines h3 { margin: 0; font-size: 13px; }
+.create-server-machines p { margin: 0; }
+.create-server-machines ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.create-server-machines li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.create-server-joined { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; justify-content: flex-end; }
+
+/* The Fleet button of the title bar: a mark counts the devices that wait for an approval. */
+.fleet-approvals-icon { position: relative; display: inline-flex; }
+.fleet-approvals-mark { position: absolute; top: -6px; right: -8px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; box-sizing: border-box;
+  font-size: 9.5px; line-height: 14px; font-weight: 700; text-align: center; color: #fff; background: var(--orange, #c87619); }
+.fleet-approvals-button[data-waiting="true"] .fleet-approvals-icon > svg { color: var(--orange, #c87619); }
+.fleet-approval-toast { display: grid; gap: 6px; }
+.fleet-approval-words { display: flex; flex-wrap: wrap; gap: 4px; }
+.fleet-approval-words .bp6-tag { font-family: var(--bp-typography-family-mono); }
+.fleet-approval-actions { display: flex; gap: 6px; }
+
+/* Join an organization: its four steps in a row, then the step at hand. */
+.join-organization-dialog { width: min(600px, calc(100vw - 32px)); }
+.join-organization-steps { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.join-organization-steps li { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
+.join-organization-steps li[data-state="current"] { color: inherit; font-weight: 600; }
+.join-organization-step-mark { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 9px; font-size: 11px;
+  border: 1px solid var(--line); }
+.join-organization-steps li[data-state="current"] .join-organization-step-mark { border-color: var(--accent, #2d72d2); color: var(--accent, #2d72d2); }
+.join-organization-steps li[data-state="done"] .join-organization-step-mark { border-color: var(--green); color: var(--green); }
+.join-organization-spaces .bp6-control { margin-bottom: 6px; }
+.join-organization-methods { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 10px; }
+.join-organization-methods.muted-text { flex-direction: row; align-items: center; gap: 8px; }
+.fleet-sign-in-code p { margin: 0 0 6px; }
+.fleet-sign-in-code-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.fleet-sign-in-confirm-methods { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.fleet-server-sign-in { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: start; gap: 8px; padding-left: 28px; color: var(--muted); }
+.fleet-sign-in-main { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.fleet-sign-in-main strong { color: var(--text); font-weight: 500; }
+.fleet-sign-in-main .bp6-callout { flex-basis: 100%; }
+.fleet-sign-in-summary { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.fleet-sign-in-logins { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; font-size: 12px; }
+.fleet-sign-in-login { position: relative; display: inline-flex; }
+.fleet-sign-in-login-remove:disabled { cursor: default; opacity: 0.3; }
+.fleet-sign-in-dialog { width: min(560px, calc(100vw - 32px)); }
+.fleet-sign-in-groups { display: grid; gap: 6px; justify-items: start; }
+.fleet-sign-in-group { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; width: 100%; }
+.join-organization-setup { margin-top: 6px; }
+.sign-in-method-icon { flex: none; }
+.fleet-sign-in-method-label { display: inline-flex; align-items: center; gap: 6px; }
+.fleet-sign-in-methods { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 12px; }
+.create-server-reach .bp6-control { margin-bottom: 4px; }

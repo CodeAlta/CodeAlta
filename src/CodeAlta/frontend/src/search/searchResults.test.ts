@@ -1,8 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceProject, WorkspaceSession, WorkspaceSnapshot, WorkspaceClaudeCodeConversation } from "#neoastra";
-import { categoryLimit, fieldsScore, flatResults, groupPreview, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups, searchClaudeCodeConversations,
+import { categoryCounts, categoryLimit, fieldsScore, flatResults, groupPreview, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups, searchClaudeCodeConversations,
   wordScore, type SearchGroup, type SearchResult } from "./searchResults";
+
+test("a category not searched yet does not say it found nothing, and keeps its number once it was searched for that text", () => {
+  const zero: Record<SearchGroup, number> = { sessions: 0, conversations: 0, projects: 0, files: 0, commands: 0, settings: 0, skills: 0, docs: 0, tools: 0, archived: 0 };
+  const memory = { query: "", counts: new Map<SearchGroup, number>() };
+  const hostGroups: readonly SearchGroup[] = ["files", "conversations", "docs", "tools"];
+  const local = (group: SearchGroup) => !hostGroups.includes(group);
+  const first = categoryCounts(memory, "review", { ...zero, sessions: 2 }, local);
+  assert.equal(first.sessions, 2);
+  assert.equal(first.commands, 0, "What the page ranks itself is known at once, and a true zero stays a zero.");
+  for (const group of hostGroups) assert.equal(first[group], null, `${group} was not asked for yet`);
+  // The reader goes to Conversations, which asks the host, then comes back: the number stays.
+  const asked = categoryCounts(memory, "review", { ...zero, sessions: 2, conversations: 5 }, group => local(group) || group === "conversations");
+  assert.equal(asked.conversations, 5);
+  assert.equal(asked.docs, null);
+  assert.equal(categoryCounts(memory, "review", { ...zero, sessions: 2 }, local).conversations, 5);
+  // Another text knows nothing of the first one.
+  assert.equal(categoryCounts(memory, "reviews", { ...zero, sessions: 1 }, local).conversations, null);
+});
 
 const project = (id: string, name: string, path = `C:\\code\\${name}`, archived = false): WorkspaceProject => ({ id, name, path, archived });
 const session = (id: string, projectId: string | null, title: string, updatedAt: string, parentSessionId: string | null = null): WorkspaceSession => ({

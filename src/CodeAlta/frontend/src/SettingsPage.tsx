@@ -80,7 +80,7 @@ export function SettingsPage({ className, label, group, title, description, acti
       </div>
     </header>
     {notice && <Callout intent={notice.intent} compact role={notice.intent === "success" ? "status" : "alert"}>
-      {t(notice.key)}{notice.detail && <div className="config-editor-diagnostic">{notice.detail}</div>}</Callout>}
+      {t(notice.key, notice.values)}{notice.detail && <div className="config-editor-diagnostic">{notice.detail}</div>}</Callout>}
     {children}
   </main>;
 }

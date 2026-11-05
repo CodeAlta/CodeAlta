@@ -169,6 +169,37 @@ public sealed class MobileServerTests
     }
 
     [TestMethod]
+    public async Task WhatTakesBackAPrompt_AndReadsAToolCall_IsAuthenticatedAndScopedToItsSession()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.Client.GetAsync("/api/sessions/a/queue")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.Client.GetAsync("/api/sessions/a/tools/call-1")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.Client.GetAsync("/api/sessions/a/tools/call-1/output")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.PostAsync("/api/sessions/a/queue/queue-1/remove", new JsonObject())).StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.PostAsync("/api/sessions/a/steer/steer-1/withdraw", new JsonObject())).StatusCode);
+        await fixture.SignInAsync();
+        fixture.Alta.Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session queued a", new JsonObject { ["type"] = "alta.session.queued.item", ["queueItemId"] = "queue-1", ["kind"] = "queue", ["prompt"] = "Then the docs" })
+            .Answer("session unqueue a queue-1", new JsonObject { ["type"] = "alta.session.unqueued", ["status"] = "removed" })
+            .Answer("session unsteer a steer-1", new JsonObject { ["type"] = "alta.session.unsteered", ["withdrawn"] = true })
+            .Answer("session tool a call-1", new JsonObject { ["type"] = "alta.session.tool", ["name"] = "Bash", ["command"] = "git status", ["output"] = "a page", ["outputOffset"] = 7 });
+
+        Assert.AreEqual("queue-1", (string?)JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/a/queue"))!["items"]![0]!["id"]);
+        Assert.AreEqual("git status", (string?)JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/a/tools/call-1?since=41"))!["command"]);
+        CollectionAssert.IsSubsetOf(new[] { "--since", "41" }, fixture.Alta.CallsOf("session tool a call-1").Single());
+        Assert.AreEqual(7, (int)JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/a/tools/call-1/output?since=41&offset=7"))!["outputOffset"]!);
+        CollectionAssert.IsSubsetOf(new[] { "--since", "41", "--output-offset", "7" }, fixture.Alta.CallsOf("session tool a call-1").Last());
+        Assert.AreEqual("removed", (string?)JsonNode.Parse(await (await fixture.PostAsync("/api/sessions/a/queue/queue-1/remove", new JsonObject())).Content.ReadAsStringAsync())!["status"]);
+        Assert.IsTrue((bool)JsonNode.Parse(await (await fixture.PostAsync("/api/sessions/a/steer/steer-1/withdraw", new JsonObject())).Content.ReadAsStringAsync())!["withdrawn"]!);
+
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/unknown/queue")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/unknown/tools/call-1")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/unknown/tools/call-1/output")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.PostAsync("/api/sessions/unknown/queue/queue-1/remove", new JsonObject())).StatusCode);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.PostAsync("/api/sessions/unknown/steer/steer-1/withdraw", new JsonObject())).StatusCode);
+    }
+
+    [TestMethod]
     public async Task ThePermissionRequestsOfASession_AreReadAndAnswered_AsTheWindowAnswersThem()
     {
         await using var fixture = await Fixture.StartAsync();
@@ -225,6 +256,68 @@ public sealed class MobileServerTests
         Assert.AreEqual((false, "uncertain"), ((bool)waiting["ok"]!, (string?)waiting["status"]));
         fixture.Permissions.Hold.SetResult();
         fixture.Permissions.Hold = null;
+    }
+
+    [TestMethod]
+    public async Task ARunThatWaitsForThePerson_IsSaidWithItsRequest_AndTakenOverFromThePhone()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        await fixture.SignInAsync();
+        fixture.Alta.Answer("session status known", FakeAlta.Status("known", "p1", "personal"));
+        fixture.Permissions.Pending["known"] = [new PluginPermissionRequest { RequestId = Guid.NewGuid().ToString(), Kind = "commandExecution", Command = "kubectl rollout undo", WorkingDirectory = "C:/ops" }];
+        JsonObject Run(string status) => new() { ["type"] = "alta.automation.run", ["id"] = "run-1", ["automationId"] = "a1", ["name"] = "Diagnosis", ["status"] = status, ["sessionId"] = "known" };
+
+        // A session no automation started says nothing of one.
+        fixture.Alta.Answer("automation current", (_, _) => FakeAlta.Transcript(0, new JsonObject { ["type"] = "alta.automation.none" }));
+        Assert.IsNull(JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/known/permissions"))!["automation"]);
+
+        // Its run waits for the person: the page says so with the request, and the phone takes it over for the user.
+        fixture.Alta.Answer("automation current", Run("waiting"));
+        var page = JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/known/permissions"))!;
+        Assert.AreEqual(("run-1", "Diagnosis", true), ((string?)page["automation"]!["runId"], (string?)page["automation"]!["name"], (bool)page["automation"]!["waiting"]!));
+        CollectionAssert.AreEqual(new[] { "automation", "current", "--session", "known" }, fixture.Alta.CallsOf("automation current").Last());
+        fixture.Alta.Answer("automation takeover run-1", new JsonObject { ["type"] = "alta.automation.takenOver", ["runId"] = "run-1", ["sessionId"] = "known" });
+        var taken = JsonNode.Parse(await (await fixture.PostAsync("/api/sessions/known/takeover", new JsonObject())).Content.ReadAsStringAsync())!;
+        Assert.AreEqual((true, (string?)null), ((bool)taken["ok"]!, (string?)taken["error"]));
+        Assert.AreEqual(1, fixture.Alta.CallsOf("automation takeover run-1").Length);
+        Assert.IsTrue(fixture.Alta.Options.Last()?.OnBehalfOfUser, "the phone takes it over for the user");
+
+        // A run that does not wait is not taken over; a refusal is said; a session the phone does not see is unknown.
+        fixture.Alta.Answer("automation current", Run("running"));
+        Assert.IsFalse((bool)JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/known/permissions"))!["automation"]!["waiting"]!);
+        var idle = JsonNode.Parse(await (await fixture.PostAsync("/api/sessions/known/takeover", new JsonObject())).Content.ReadAsStringAsync())!;
+        Assert.AreEqual((false, "This run waits for nobody."), ((bool)idle["ok"]!, (string?)idle["error"]));
+        fixture.Alta.Answer("automation current", Run("waiting"));
+        fixture.Alta.Answer("automation takeover run-1", (_, _) => FakeAlta.Transcript(1, new JsonObject { ["type"] = "alta.error", ["message"] = "The machine did not take the request." }));
+        var refused = JsonNode.Parse(await (await fixture.PostAsync("/api/sessions/known/takeover", new JsonObject())).Content.ReadAsStringAsync())!;
+        Assert.AreEqual((false, "The machine did not take the request."), ((bool)refused["ok"]!, (string?)refused["error"]));
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.PostAsync("/api/sessions/unknown/takeover", new JsonObject())).StatusCode);
+    }
+
+    [TestMethod]
+    public async Task TheRunsThatWaitForThePerson_AreListed_AndATeamRunOfAServerMachineIsTakenOverFromThePhone()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        await fixture.SignInAsync();
+        fixture.Alta.Answer("automation waiting", new JsonObject
+        {
+            ["type"] = "alta.automation.waiting", ["runId"] = "run-9", ["automationId"] = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77", ["name"] = null, ["machineId"] = "node-1",
+            ["machine"] = "Build box", ["sessionId"] = null, ["since"] = "2026-11-04T12:00:00+00:00",
+        });
+        var page = JsonNode.Parse(await fixture.Client.GetStringAsync("/api/automations/waiting"))!;
+        Assert.AreEqual(("run-9", "node-1", "Build box"), ((string?)page["runs"]![0]!["runId"], (string?)page["runs"]![0]!["machineId"], (string?)page["runs"]![0]!["machine"]));
+
+        fixture.Alta.Answer("automation takeover", new JsonObject { ["type"] = "alta.automation.takenOver", ["runId"] = "run-9" });
+        var taken = JsonNode.Parse(await (await fixture.PostAsync("/api/automations/takeover",
+            new JsonObject { ["runId"] = "run-9", ["machineId"] = "node-1", ["automationId"] = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77" })).Content.ReadAsStringAsync())!;
+        Assert.AreEqual((true, (string?)null), ((bool)taken["ok"]!, (string?)taken["error"]));
+        CollectionAssert.AreEqual(new[] { "automation", "takeover", "run-9", "--machine", "node-1", "--automation", "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77" },
+            fixture.Alta.CallsOf("automation takeover").Single(), "the computer signs it for the person");
+        Assert.IsTrue(fixture.Alta.Options.Last()?.OnBehalfOfUser);
+        var half = JsonNode.Parse(await (await fixture.PostAsync("/api/automations/takeover", new JsonObject { ["runId"] = "run-9", ["machineId"] = "node-1" })).Content.ReadAsStringAsync())!;
+        Assert.IsFalse((bool)half["ok"]!, "a machine without its automation names no run");
+        Assert.AreEqual(1, fixture.Alta.CallsOf("automation takeover").Length);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await new HttpClient { BaseAddress = fixture.Client.BaseAddress }.GetAsync("/api/automations/waiting")).StatusCode);
     }
 
     [TestMethod]
@@ -471,6 +564,19 @@ public sealed class MobileServerTests
         Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/a/linked-images/8/0")).StatusCode, "Another record than the answer asked for.");
     }
 
+    [TestMethod]
+    public void LinkedImages_NeverNameAnotherComputer()
+    {
+        // Only parsed, never opened: opening one is what would send the credentials of the user to that computer. FileLinkTests
+        // has every form of such a path; these show that a picture goes through that rule.
+        foreach (var target in (string[])["//server/share/a.png", @"\\server\share\a.png", @"\??\UNC\server\share\a.png", "%5C%5Cserver%5Cshare%5Ca.png", "file://server/share/a.png"])
+        {
+            Assert.IsEmpty(MobileTimeline.LinkedImages($"![a](<{target}>)"), target);
+            Assert.IsEmpty(MobileTimeline.LinkedImages($"![a]({target})"), target);
+            Assert.IsNull(MobileImages.Locate(target, Path.GetFullPath("/start")), target);
+        }
+    }
+
     private sealed class TempFolder : IDisposable
     {
         internal string Path { get; } = Directory.CreateTempSubdirectory("mobile-images-").FullName;
@@ -528,7 +634,7 @@ public sealed class MobileServerTests
                 Port = port, Access = access, Hosts = () => ["desk.tail1234.ts.net:2584"], Files = files, Sessions = sessions,
                 // An answer the session takes long to take is said pending at once: no test waits the seconds of a phone.
                 Api = new MobileApi(alta, sessions), Asks = new MobileAsks(asks, sessions, TimeSpan.FromMilliseconds(50)),
-                Permissions = new MobilePermissions(permissions, sessions, TimeSpan.FromMilliseconds(50)), Live = live, Logger = XenoAtom.Logging.LogManager.GetLogger("mobile-tests"),
+                Permissions = new MobilePermissions(permissions, sessions, TimeSpan.FromMilliseconds(50), alta), Live = live, Logger = XenoAtom.Logging.LogManager.GetLogger("mobile-tests"),
             });
             await server.StartAsync(default);
             var client = new HttpClient(new HttpClientHandler { UseCookies = true }) { BaseAddress = new Uri($"http://127.0.0.1:{port}") };

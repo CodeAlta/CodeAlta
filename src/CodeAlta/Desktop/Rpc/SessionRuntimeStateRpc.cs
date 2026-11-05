@@ -1,4 +1,5 @@
 using System.Globalization;
+using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 
@@ -16,6 +17,15 @@ internal sealed class SessionRuntimeStateService
 
     internal SessionRuntimeStateService(SessionRuntimeService runtime, string hostEpoch)
         : this(runtime.GetCurrentStateAsync, hostEpoch) { _observe = runtime.ObserveOwnedStateAsync; }
+
+    /// <summary>Creates the service over the hosts of the sessions: each read goes to the host of its session.</summary>
+    internal SessionRuntimeStateService(SessionHostRegistry hosts, string hostEpoch)
+        : this((sessionId, token) => hosts.Resolve(sessionId).ReadRuntimeStateAsync(sessionId, token), hostEpoch)
+    {
+        ArgumentNullException.ThrowIfNull(hosts);
+        _observe = (sessionId, createdAt, scope, projectId, projectPath, token)
+            => hosts.Resolve(sessionId).ObserveRuntimeStateAsync(sessionId, createdAt, scope, projectId, projectPath, token);
+    }
 
     internal SessionRuntimeStateService(Func<string, DateTimeOffset, string, string?, string?, CancellationToken, Task<OwnedRuntimeObservation>> observe, string hostEpoch)
         : this((_, _) => throw new InvalidOperationException("Only scoped observation is configured."), hostEpoch) { _observe = observe; }

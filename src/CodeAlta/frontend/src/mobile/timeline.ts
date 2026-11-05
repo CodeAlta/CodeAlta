@@ -1,5 +1,5 @@
 import { thoughtHeadline } from "../timelineActivity/activityText";
-import type { ActivityFacts, EventImage, TimelineEvent } from "./contract";
+import type { ActivityFacts, EventImage, QueuedPrompt, TimelineEvent, ToolOutputPage, ToolOutputPlace } from "./contract";
 import { hostPromptOf, type HostPrompt } from "./hostPrompt";
 import { foldWorkflows, type WorkflowRun } from "./workflowRun";
 
@@ -15,19 +15,67 @@ export type MessageBlock = Readonly<{
 }>;
 /** A thought of the agent, inside an activity. */
 export type ThoughtRow = Readonly<{ type: "thought"; key: string; text: string; at: string | null }>;
-/** A tool call, inside an activity: its last phase and the times of its first and last events. */
-export type ToolRow = Readonly<{ type: "tool"; key: string; title: string; phase: string; at: string | null; end: string | null; activityId?: string }>;
+/**
+ * A tool call, inside an activity: its last phase, the times of its first and last events, what it works on when its events
+ * say, and the sequence number of its first event, from which the phone reads it when it opens.
+ */
+export type ToolRow = Readonly<{ type: "tool"; key: string; title: string; phase: string; at: string | null; end: string | null; activityId?: string; subject?: string; seq?: number }>;
 /** An image a tool gave the model during an activity: a saved copy of the session. */
 export type ToolImage = Readonly<{ key: string; title: string; id: string }>;
 /**
  * The work between two messages, folded into one line that opens on its rows. The images its tools gave the model and the
- * runs of the scripts its calls ran (Code Mode's `exec`) show under that line, folded or not; the calls a script made are
- * the script's, listed on the card of its run, not rows of their own.
+ * runs of the scripts its calls ran (Code Mode's `exec`) that ran steps, started sessions or presented something show under
+ * that line, folded or not; a run that only made calls is in the place of its call, and folds with it. The calls a script
+ * made are the script's, listed on the card of its run, not rows of their own.
  */
 export type ActivityBlock = Readonly<{ kind: "activity"; key: string; rows: readonly (ThoughtRow | ToolRow)[]; images?: readonly ToolImage[]; workflows?: readonly WorkflowRun[] }>;
 /** A run of a script whose call the timeline does not hold: a card of its own. */
 export type WorkflowBlock = Readonly<{ kind: "workflow"; key: string; run: WorkflowRun }>;
 export type TimelineBlock = MessageBlock | ActivityBlock | WorkflowBlock;
+
+/**
+ * What a call works on as a path: its folders, and the name of its file with the separator before it. Null for what is
+ * not one, such as a command. A wrong guess costs nothing: the row shows the same text, and only the part it cuts first differs.
+ */
+export function subjectPath(subject: string): { folders: string; file: string } | null {
+  if (/\s/u.test(subject) && !/^(?:[A-Za-z]:[\\/]|[\\/]|~[\\/]|\.{1,2}[\\/])/u.test(subject)) return null;
+  const last = Math.max(subject.lastIndexOf("/"), subject.lastIndexOf("\\"));
+  return last > 0 && last < subject.length - 1 ? { folders: subject.slice(0, last), file: subject.slice(last) } : null;
+}
+
+// The lines of an output its row shows.
+const outputPreviewLines = 5;
+
+/**
+ * The lines of an output a tool row shows: the last ones of what a command printed, the first ones of anything else.
+ * `whole` says that they are all of it, so that there is nothing more to open.
+ */
+export function outputPreview(output: string, length: number, fromEnd: boolean): { text: string; whole: boolean } {
+  const lines = output.replace(/\r\n/gu, "\n").replace(/\n+$/u, "").split("\n");
+  const kept = fromEnd ? lines.slice(-outputPreviewLines) : lines.slice(0, outputPreviewLines);
+  return { text: kept.join("\n"), whole: lines.length <= outputPreviewLines && output.length >= length };
+}
+
+/** The most of an output a copy reads, in characters: it comes a page at a time, and the phone holds all of it at once. */
+export const outputCopyLimit = 1_000_000;
+
+/** Reads a whole output for a copy, from its first page to its last. It fails rather than give a part of it. */
+export async function readWholeOutput(read: (place: ToolOutputPlace) => Promise<ToolOutputPage>, length: number): Promise<string> {
+  const parts: string[] = [];
+  let offset = 0, total = length;
+  for (;;) {
+    if (total > outputCopyLimit) throw new Error(`this output has ${total.toLocaleString()} characters, too many to copy.`);
+    const page = await read({ offset });
+    if (page.error) throw new Error(page.error);
+    const next = (page.outputOffset ?? offset) + (page.output?.length ?? 0);
+    if (!page.output || next <= offset) throw new Error("the output was not read to its end.");
+    parts.push(page.output);
+    offset = next;
+    // An output still growing has more than when the copy started.
+    total = page.outputLength ?? total;
+    if (offset >= total) return parts.join("");
+  }
+}
 
 /** Whether an event is a thought: `assistant.reasoning`, `assistant.reasoningSummary` (or `reasoning.*`). */
 export const isThought = (kind: string): boolean => kind.startsWith("assistant.reasoning") || kind.startsWith("reasoning.");
@@ -108,14 +156,16 @@ export function foldEvents(events: readonly TimelineEvent[]): TimelineBlock[] {
     const index = run.tools.get(id);
     if (index === undefined) {
       run.tools.set(id, run.rows.length);
-      run.rows.push({ type: "tool", key: `c${id}`, title: event.text?.trim() || parts[1] || "tool", phase, at: event.at, end: event.at, ...(event.activityId ? { activityId: event.activityId } : {}) });
+      run.rows.push({ type: "tool", key: `c${id}`, title: event.text?.trim() || parts[1] || "tool", phase, at: event.at, end: event.at, seq: event.seq,
+        ...(event.activityId ? { activityId: event.activityId } : {}), ...(event.subject ? { subject: event.subject } : {}) });
       if (event.activityId) {
         owners.set(event.activityId, run);
         if (scriptCalls.has(event.activityId)) for (const item of runs) if (item.callId === event.activityId && !placed.has(item.runId)) { run.workflows.push(item); placed.add(item.runId); }
       }
     } else {
       const tool = run.rows[index] as ToolRow;
-      run.rows[index] = { ...tool, phase, end: event.at ?? tool.end, title: tool.title === (parts[1] || "tool") && event.text?.trim() ? event.text.trim() : tool.title };
+      run.rows[index] = { ...tool, phase, end: event.at ?? tool.end, title: tool.title === (parts[1] || "tool") && event.text?.trim() ? event.text.trim() : tool.title,
+        ...(!tool.subject && event.subject ? { subject: event.subject } : {}) };
     }
   }
   close();
@@ -126,6 +176,7 @@ export function foldEvents(events: readonly TimelineEvent[]): TimelineBlock[] {
 export function activityFacts(block: ActivityBlock, live: boolean): ActivityFacts & { state: "running" | "done" | "failed" } {
   let headline: string | null = null, thoughts = 0, tools = 0, succeeded = 0, failed = 0, running = 0, start = NaN, end = NaN;
   const names: string[] = [];
+  let current: string | null = null;
   const note = (iso: string | null) => {
     const at = Date.parse(iso ?? "");
     if (!Number.isFinite(at)) return;
@@ -137,15 +188,17 @@ export function activityFacts(block: ActivityBlock, live: boolean): ActivityFact
     tools++; note(row.at); note(row.end);
     if (row.phase === "completed") succeeded++;
     else if (row.phase === "failed") failed++;
-    else if (row.phase !== "canceled") running++;
+    else if (row.phase !== "canceled") { running++; current = row.subject ? `${row.title} · ${row.subject}` : null; }
     if (names.length < 3 && !names.includes(row.title)) names.push(row.title);
   }
   if (!live) { failed += running; running = 0; }
   return {
     state: live ? "running" : failed > 0 ? "failed" : "done",
     headline: headline ?? (tools > 0 ? (live ? "Calling tools…" : "Called tools") : (live ? "Working…" : "Worked")),
-    names: headline === null && names.length ? names.join(", ") : null,
+    // What the running tool works on says more than the names of the tools.
+    names: headline === null && names.length && !(live && current) ? names.join(", ") : null,
     thoughts, tools, succeeded, failed, running,
+    current: live ? current : null,
     startedAt: Number.isFinite(start) ? new Date(start).toISOString() : null,
     endedAt: Number.isFinite(end) ? new Date(end).toISOString() : null,
   };
@@ -159,7 +212,7 @@ export function blockVersion(block: TimelineBlock, live: boolean, open: boolean)
   if (block.kind === "message") return block.key;
   if (block.kind === "workflow") return `${block.key}|${block.run.version}`;
   const runs = (block.workflows ?? []).map(run => `${run.runId}:${run.version}`).join(",");
-  return `${block.rows.map(row => row.type === "tool" ? `${row.key}:${row.phase}` : row.key).join(",")}|${block.images?.length ?? 0}|${runs}|${live}|${open}`;
+  return `${block.rows.map(row => row.type === "tool" ? `${row.key}:${row.phase}:${row.subject ?? ""}` : row.key).join(",")}|${block.images?.length ?? 0}|${runs}|${live}|${open}`;
 }
 
 /** What drawing the timeline again does to each block: keep its element, draw it again in place, or add it. */
@@ -182,8 +235,39 @@ export function planTimeline(drawn: ReadonlyMap<string, string>, blocks: readonl
 export const liveBlock = (blocks: readonly TimelineBlock[], index: number, busy: boolean): boolean =>
   busy && index === blocks.length - 1 && blocks[index].kind === "activity";
 
-/** A prompt the session accepted that its timeline does not hold yet: a steered one only reaches the journal later. */
-export type PendingPrompt = Readonly<{ key: string; text: string; mode: "send" | "steer" | "queue"; sentAt: number; after: number; attachments?: readonly MessageAttachment[] }>;
+/**
+ * A prompt the session accepted that its timeline does not hold yet: a steered one only reaches the journal later. While it
+ * waits it can be taken back, by the id that names it in the queue of the session or in its run; a steered prompt `taken`
+ * was found to be with the agent, and can no longer be.
+ */
+export type PendingPrompt = Readonly<{
+  key: string; text: string; mode: "send" | "steer" | "queue"; sentAt: number; after: number; attachments?: readonly MessageAttachment[];
+  queueId?: string; withdrawalId?: string; taken?: boolean;
+}>;
+
+/** Whether a pending prompt can still be taken back. */
+export const canWithdraw = (prompt: PendingPrompt): boolean => !prompt.taken && (!!prompt.queueId || !!prompt.withdrawalId);
+
+/**
+ * The pending prompts of a session once its queue is read: the queue says which prompts wait, so a queued prompt it no longer
+ * holds goes (its message comes, or it was removed elsewhere), one the phone sent takes its id when its answer has not come
+ * yet, and one the phone does not know (queued before a reload, or from the computer) comes. What was removed from this page
+ * stays gone, whatever a read that was on its way says.
+ */
+export function withQueue(pending: readonly PendingPrompt[], items: readonly QueuedPrompt[], removed: ReadonlySet<string>, after: number): PendingPrompt[] {
+  const waiting = items.filter(item => !removed.has(item.id));
+  const known = new Set(pending.map(prompt => prompt.queueId).filter(id => !!id));
+  const fresh = waiting.filter(item => !known.has(item.id));
+  const kept = pending.filter(prompt => !prompt.queueId || waiting.some(item => item.id === prompt.queueId)).map(prompt => {
+    if (prompt.queueId || prompt.mode === "steer") return prompt;
+    const index = fresh.findIndex(item => item.text.trim() === prompt.text.trim());
+    return index < 0 ? prompt : { ...prompt, mode: "queue" as const, queueId: fresh.splice(index, 1)[0].id };
+  });
+  return [...kept, ...fresh.map((item): PendingPrompt => ({
+    key: `q${item.id}`, text: item.text, mode: "queue", sentAt: Date.parse(item.at ?? "") || Date.now(), after, queueId: item.id,
+    ...(item.files?.length ? { attachments: item.files.map(file => ({ title: file.title, mediaType: file.mediaType ?? "application/octet-stream" })) } : {}),
+  }))];
+}
 
 /** How long a prompt waits for its message once the session is idle: then the journal had time to write it. */
 export const pendingGrace = 30_000;
@@ -197,7 +281,8 @@ export function stillPending(pending: readonly PendingPrompt[], events: readonly
   return pending.filter(prompt => {
     const match = events.find(event => event.kind === "user.message" && event.seq > prompt.after && !used.has(event.seq) && (event.text ?? "").trim() === prompt.text.trim());
     if (match) { used.add(match.seq); return false; }
-    return busy || now - prompt.sentAt < pendingGrace;
+    // The queue says when a queued prompt no longer waits.
+    return !!prompt.queueId || busy || now - prompt.sentAt < pendingGrace;
   });
 }
 

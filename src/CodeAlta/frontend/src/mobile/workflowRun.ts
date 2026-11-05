@@ -14,8 +14,8 @@ export type WorkflowStep = Readonly<{ id: string; title: string; state: Workflow
 /** A session a run started, which a tap opens. */
 export type WorkflowSession = Readonly<{ sessionId: string; title: string | null; stepId: string | null; state: WorkflowState; durationMs: number | null }>;
 
-/** A call the script made (a tool, `alta`): its title, its last phase and the times of its first and last events. */
-export type WorkflowCall = Readonly<{ key: string; title: string; phase: string; at: string | null; end: string | null }>;
+/** A call the script made (a tool, `alta`): its title, what it works on when its events say, its last phase and the times of its first and last events. */
+export type WorkflowCall = Readonly<{ key: string; title: string; subject?: string; phase: string; at: string | null; end: string | null }>;
 
 /** What a running script waits for: the answer of an `ask()`, the approval of one of its calls, or the end of a `sleep()`. */
 export type WorkflowWait = Readonly<{ kind: "question" | "approval" | "sleep"; stepId: string | null; text: string | null; until: string | null }>;
@@ -55,6 +55,20 @@ type Instance = { id: string; state: WorkflowState; durationMs: number | null; s
 export const isWorkflowEvent = (event: Pick<TimelineEvent, "kind">): boolean => event.kind.startsWith("workflow.");
 
 const ended = (state: WorkflowState) => state === "completed" || state === "failed" || state === "canceled" || state === "interrupted";
+
+/**
+ * Whether a run has a card of its own under the line of its activity, as the desktop's workflow block: it ran steps,
+ * started sessions or presented something to the user. A run that only made calls is a step of its activity: its card
+ * is in the place of its call, and folds with it.
+ */
+export const hasRunBlock = (run: WorkflowRun): boolean => run.steps.length > 0 || run.sessions.length > 0 || run.presented.length > 0;
+
+/**
+ * The runs an activity shows under its line: those with a card of their own, folded or not; folded, also those that
+ * still go on (what the turn does now, or waits for). The others are in the activity, in the place of their call.
+ */
+export const runsUnderLine = (runs: readonly WorkflowRun[], open: boolean): WorkflowRun[] =>
+  runs.filter(run => hasRunBlock(run) || (!open && !ended(run.state)));
 
 /** The state a record names: `cancelled` and `stopped` are canceled; an unknown end is a failure. */
 export function workflowState(status: string | null | undefined, fallback: WorkflowState = "completed"): WorkflowState {
@@ -100,10 +114,11 @@ function callsByParent(events: readonly TimelineEvent[]): Map<string, { calls: W
     const index = parent.index.get(id);
     if (index === undefined) {
       parent.index.set(id, parent.calls.length);
-      parent.calls.push({ key: `c${id}`, title: event.text?.trim() || name, phase, at: event.at, end: event.at });
+      parent.calls.push({ key: `c${id}`, title: event.text?.trim() || name, phase, at: event.at, end: event.at, ...(event.subject ? { subject: event.subject } : {}) });
     } else {
       const call = parent.calls[index];
-      parent.calls[index] = { ...call, phase, end: event.at ?? call.end, title: call.title === name && event.text?.trim() ? event.text.trim() : call.title };
+      parent.calls[index] = { ...call, phase, end: event.at ?? call.end, title: call.title === name && event.text?.trim() ? event.text.trim() : call.title,
+        ...(!call.subject && event.subject ? { subject: event.subject } : {}) };
     }
   }
   return parents;

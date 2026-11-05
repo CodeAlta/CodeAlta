@@ -6,7 +6,8 @@ namespace CodeAlta.Orchestration.Runtime.SystemPrompts;
 
 /// <summary>
 /// Discovers file-backed CodeAlta agent prompts from built-in, user-global, and project-local prompt roots, and
-/// the custom agents of GitHub Copilot (<c>.github/agents</c>, <c>~/.copilot/agents</c>) beside them.
+/// the custom agents of GitHub Copilot (<c>.github/agents</c>, <c>~/.copilot/agents</c>) and the subagents of Claude Code
+/// (<c>.claude/agents</c>, <c>~/.claude/agents</c>) beside them.
 /// </summary>
 public sealed class AgentPromptCatalog
 {
@@ -36,7 +37,7 @@ public sealed class AgentPromptCatalog
         var roots = ResolveRoots(query);
         var prompts = EnumeratePromptRoots(roots)
             .SelectMany(static root => LoadAgentPromptResources(root))
-            .OrderBy(static prompt => prompt.SourceKind.IsCopilot())
+            .OrderBy(static prompt => prompt.SourceKind.IsExternal())
             .ThenBy(static prompt => prompt.Precedence)
             .ThenBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static prompt => prompt.SourcePath, StringComparer.OrdinalIgnoreCase)
@@ -103,7 +104,7 @@ public sealed class AgentPromptCatalog
         var chains = LoadChains(ResolveRoots(query));
         return chains.Values
             .Select(chain => ComposeEffectivePrompt(chain, Linearize(chains, chain.Applied[^1].PromptName, chain.Inherits)))
-            .OrderBy(static prompt => prompt.IsCopilot)
+            .OrderBy(static prompt => prompt.IsExternal)
             .ThenBy(static prompt => prompt.Precedence)
             .ThenBy(static prompt => prompt.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
@@ -267,8 +268,8 @@ public sealed class AgentPromptCatalog
 
     private static IEnumerable<GlobalPromptRoot> EnumeratePromptRoots(SystemPromptContentRoots roots)
     {
-        // The custom agents of GitHub Copilot come first: a prompt of CodeAlta with the same id replaces one.
-        foreach (var (kind, precedence, folder) in CopilotAgentFiles.Folders(roots))
+        // The agents of GitHub Copilot and Claude Code come first: a prompt of CodeAlta with the same id replaces one.
+        foreach (var (kind, precedence, folder) in ExternalAgentFiles.Folders(roots))
         {
             yield return new GlobalPromptRoot(kind, precedence, folder);
         }
@@ -309,9 +310,9 @@ public sealed class AgentPromptCatalog
 
     private static IEnumerable<LoadedAgentPromptResource> LoadAgentPromptResources(GlobalPromptRoot root)
     {
-        if (root.SourceKind.IsCopilot())
+        if (root.SourceKind.IsExternal())
         {
-            foreach (var agent in CopilotAgentFiles.ReadAll(root.Path))
+            foreach (var agent in ExternalAgentFiles.ReadAll(root.SourceKind, root.Path))
             {
                 yield return new LoadedAgentPromptResource(agent.Id, agent.Name, agent.Description, null, agent.Body, root.SourceKind, root.Precedence,
                     agent.Path, HashText(agent.Body), PromptCompositionMode.Replace);
@@ -735,6 +736,12 @@ public enum AgentPromptSourceKind
 
     /// <summary>The prompt is a custom agent of GitHub Copilot of the project (<c>.github/agents</c>).</summary>
     CopilotProject,
+
+    /// <summary>The prompt is a subagent of Claude Code of the user (<c>~/.claude/agents</c>).</summary>
+    ClaudeUser,
+
+    /// <summary>The prompt is a subagent of Claude Code of the project (<c>.claude/agents</c>).</summary>
+    ClaudeProject,
 }
 
 /// <summary>Questions about a <see cref="AgentPromptSourceKind"/>.</summary>
@@ -742,6 +749,15 @@ public static class AgentPromptSourceKindExtensions
 {
     /// <summary>Gets whether the prompt is a custom agent of GitHub Copilot.</summary>
     public static bool IsCopilot(this AgentPromptSourceKind kind) => kind is AgentPromptSourceKind.CopilotUser or AgentPromptSourceKind.CopilotProject;
+
+    /// <summary>Gets whether the prompt is a subagent of Claude Code.</summary>
+    public static bool IsClaude(this AgentPromptSourceKind kind) => kind is AgentPromptSourceKind.ClaudeUser or AgentPromptSourceKind.ClaudeProject;
+
+    /// <summary>
+    /// Gets whether the prompt is the agent of another tool (GitHub Copilot, Claude Code), which CodeAlta reads and does
+    /// not write, and which every prompt of CodeAlta with the same id replaces.
+    /// </summary>
+    public static bool IsExternal(this AgentPromptSourceKind kind) => kind.IsCopilot() || kind.IsClaude();
 }
 
 /// <summary>
@@ -796,6 +812,12 @@ public sealed record AgentPromptDescriptor(
 
     /// <summary>Gets a value indicating whether the prompt is a custom agent of GitHub Copilot, which CodeAlta reads and does not write.</summary>
     public bool IsCopilot => SourceKind.IsCopilot();
+
+    /// <summary>Gets a value indicating whether the prompt is a subagent of Claude Code, which CodeAlta reads and does not write.</summary>
+    public bool IsClaude => SourceKind.IsClaude();
+
+    /// <summary>Gets a value indicating whether the prompt is the agent of another tool (GitHub Copilot, Claude Code), which CodeAlta reads and does not write.</summary>
+    public bool IsExternal => SourceKind.IsExternal();
 
     /// <summary>
     /// Gets the ids of the agent prompts this one inherits (<c>inherit</c> of its front matter), with those of the files

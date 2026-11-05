@@ -325,6 +325,11 @@ internal sealed class PluginRuntimeServices : IPluginServices
 
     public IPluginIdentityService Identity => _inner.Identity;
 
+    // The masking of the runtime when it has one (the host attaches its own to it); else that of the host services.
+    public IPluginSecretService Secrets => SecretsOverride ?? _inner.Secrets;
+
+    internal IPluginSecretService? SecretsOverride { get; init; }
+
     public IPluginSpaceService Spaces { get; }
 
     public IPluginAppFileService AppFiles => _inner.AppFiles;

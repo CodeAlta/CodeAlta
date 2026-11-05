@@ -42,6 +42,8 @@ script_args = '{"limit": 10}'
 
 An agent creates one with `alta automation create --name "PR review" --trigger pull_request@opened --script review-pr`, and gives the arguments with `--script-args '{"lenses": ["security"]}'`. The script and its arguments are checked as a run checks them.
 
+An automation an agent creates is disabled, and an agent enables none: what runs by itself is turned on by you, in the **Automations** tab. An agent can still run one now, disable or delete one.
+
 ## What its sessions run with
 
 **Runs with** is the [Agent chip](workspace/prompt.md#agent-and-model) of the prompt: click it for the same form, with the agent prompt, the provider, the model, the reasoning effort, the [permission mode](workspace/prompt.md#permission-modes), [review before commit](reviews.md#review-before-commit) and the [sandbox](sessions/sandbox.md).
@@ -73,6 +75,11 @@ sub_sessions = false
 | Pull request | When a pull request is opened, or when it receives commits. |
 | Jira issue | When an issue of the Jira project is created, or when it is updated. A project with [several Jira projects](plugins/jira.md#several-jira-projects) watches all of them. |
 | Command | When a command that CodeAlta keeps running ends with success. |
+| Jira version | When a version of a Jira project is released. |
+| Jira query | When an issue starts to match a JQL query, or changes while it matches. |
+| Slack | When the app is mentioned in a channel, or when a message is posted there. |
+| incident.io | When incident.io declares or updates an incident ([a hook of a server](fleet/operations.md#receive-events-of-other-tools)). |
+| Webhook | When another tool pushes a signed event ([a hook of a server](fleet/operations.md#receive-events-of-other-tools)). |
 
 An automation can have several triggers. Times are read on the clock of your computer.
 
@@ -99,6 +106,50 @@ triggers = [
 ]
 ```
 
+### Jira, Slack and incident.io
+
+These triggers read another tool with an account of yours: no project is needed.
+
+- Keep their tokens in [Settings > Secrets](secrets.md) and type the name of the secret in the trigger: the configuration holds `${secret:NAME}`, never the token. A token written in the file is refused.
+- **Set up** under the trigger says what to create in the tool. **Test the connection** checks the tokens; **Show a sample event** reads the latest event and shows the prompt the session would get; **Try it on this event** runs the saved automation once on it.
+- Turn on **Write the answer back where the event came from** to post the last answer of the session as a comment on the Jira issue, a reply in the Slack thread or an item on the incident's timeline. A try keeps the answer on its run instead.
+- Jira is looked at every five minutes, with the API token of an account (`id.atlassian.com`). Slack is reached over Socket Mode: the app needs an app-level token and a bot token, and nothing connects to your computer. Slack spreads the events of an app among the machines connected with it, so an app listens on one machine at a time: give each machine that runs Slack triggers its own app; a machine that finds its app connected elsewhere says so under the trigger and waits. A Slack trigger on every message leaves alone what people write in a thread it answered; turn on **Also start on people's replies in the threads it answered** to follow them too. incident.io and webhooks push their events to a [hook of a server](fleet/operations.md#receive-events-of-other-tools), for a machine of that server.
+- What the event says reaches the session as someone else's text: the title, the message or the incident, read again from its tool, and for a webhook only the fields you list.
+
+```toml
+triggers = [
+  { type = "jira_query", site = "https://acme.atlassian.net", email = "bot@acme.com", token = "${secret:JIRA_TOKEN}", jql = "project = PLAT AND labels = triage", reply = true },
+  { type = "slack", event = "mention", channel = "C0123ABCDEF", app_token = "${secret:SLACK_APP}", bot_token = "${secret:SLACK_BOT}", reply = true },
+]
+```
+
+## Decide what it does without you
+
+An automation runs unattended. Turn on **Autonomy** in the editor to decide what its runs do without a person; the machine that runs them enforces it, whatever the prompt says.
+
+- Its runs read freely. A command or an edit follows the permission mode of its sessions, which must be one that asks: one that allows everything is refused. Any other tool, such as one of an MCP server or a plugin, waits for your approval unless it is listed in **Tools it calls by itself**.
+- Its sessions hand prompts, reminders and jobs only to the sessions of the same run, and start or move no session on another machine: none of these would be checked.
+- **Calls in an hour, at most** stops those tools after that many calls, all runs together: the next call waits for you.
+- A run that waits for you says **Waits for you** in its list of runs, and in its session you answer as for any session. **Minutes an approval waits** stops the run once that time is over, or keeps it waiting. Leave it empty to wait as long as it takes.
+- **Take over** on a run that waits opens its session and makes it yours: nothing stops it any more, and what it asks waits for you. The [phone](plugins/mobile.md) offers it too, under the request of the run.
+- **Try it (dry run)** runs it once, a script too, but the tools it calls by itself are not called: each call is recorded on the run instead, under **Recorded, not made**. One that runs on another machine is tried there: the calls are in the session of the run on that machine.
+
+```toml
+autonomy = { allowed_tools = ["k8s_restart_pod"], max_calls_per_hour = 3, approval_timeout = 30, on_timeout = "stop", approvers = "owner" }
+```
+
+In the configuration file, a tool it calls by itself can say more than its name:
+
+- **A pin**: `hash` is the hash of the definition of the tool (its name, description and parameters), and `version` the version its MCP server reports. A try says both for each tool it calls. A call of a tool whose definition or version changed since you pinned it waits for you. A pin is of what the tool says it is, not of its code: keep the MCP servers of a machine that runs automations installed and updated by you only.
+- **Bounds**: the values an argument may take, or its `min` and `max`. A call outside them waits for you.
+- **Preconditions**: another tool it allows, which reads the target first, called with the arguments it names; its answer must contain what it `expect`s. When it does not, the call is not made, also after you approved it.
+
+```toml
+autonomy = { allowed_tools = ["k8s_get_deployment", { name = "k8s_restart_pod", hash = "sha256:…", version = "1.4.2", bounds = { namespace = ["shop"], replicas = { min = 1, max = 5 } }, preconditions = [{ tool = "k8s_get_deployment", arguments = ["namespace", "name"], expect = "available" }] }] }
+```
+
+The approvals go to the owner of the automation: you, or on a [server](fleet/sessions.md#run-your-automations-on-it) the team that owns it and the people granted to approve it. There, a run that waits comes to them as a message too. Choose **The person on call of its team** (`approvers = "oncall"`) to ask only who of the team is [on call](fleet/people-and-access.md#teams-and-team-machines) now. To read who is on call from incident.io, PagerDuty or Opsgenie instead, add to its autonomy in the file `oncall = { source = "pagerduty", schedule = "<schedule id>", token = "${secret:NAME}" }` (`source` is `incident_io`, `pagerduty` or `opsgenie`, with `region = "eu"` for Opsgenie in Europe). The machine reads the schedule with that secret when a run starts, and again each time the run waits for an approval, before the approval is sent. The person it names then is asked if they answer the approvals of the automation; when it names nobody or does not answer, the rotation of the team is.
+
 ## Follow the runs
 
 <figure class="alta-figure my-4">
@@ -107,16 +158,16 @@ triggers = [
 </figure>
 
 - A session started by an automation has a bolt in the sidebar. Its first card, **Automation**, is the prompt the automation sent: it names the automation, which you open with a click, and what started the run.
-- In the **Automations** tab, select an automation to see its runs. Click a run to open its session.
+- In the **Automations** tab, select an automation to see its runs. Click a run to open its session. A run started by another tool says what was done with its answer.
 - The switch of an automation turns its triggers off. The **Running** switch at the top turns off the triggers of all of them. **Run now** always works.
 
 ## Good to know
 
-- Automations run while CodeAlta Desktop is open, also when it [stays in the notification area](desktop-and-tui.md#runs-in-the-background).
+- Automations run while CodeAlta Desktop is open, also when it [stays in the notification area](desktop-and-tui.md#runs-in-the-background). One set to run on a paired machine (**Runs on**) runs there while this computer is closed: see [Run your automations on it](fleet/sessions.md#run-your-automations-on-it). On a machine of a team or of the organization, **Publish to** gives it to them: see [Automations of a team](fleet/people-and-access.md#automations-of-a-team).
 - What was due while CodeAlta was closed is skipped. Turn on **Catch up on what was missed while CodeAlta was closed** in an automation to run it at the next start.
 - An automation is stored in **My configuration** (`~/.alta/config.toml`) or in **The project** (`.alta/config.toml` of its folder), which you can commit to share it with your team.
 - An automation that came with a project, written by someone else, waits until you read its prompt and click **Allow**. It asks again when its prompt, triggers or what its sessions run with change, including the command of a trigger.
-- An agent can list, create and run automations. Ask in your own words, for example:
+- An agent can list, create and run automations; one it creates waits, disabled, until you enable it. Ask in your own words, for example:
 
 ```text
 Create an automation that reviews the open pull requests every morning at 9.

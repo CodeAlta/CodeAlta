@@ -31,6 +31,7 @@
   </Folder>
   <Folder Name="/libs/">
     <Project Path="CodeAlta.Acp/CodeAlta.Acp.csproj" />
+    <Project Path="CodeAlta.Automations/CodeAlta.Automations.csproj" />
     <Project Path="CodeAlta.Agent.Anthropic/CodeAlta.Agent.Anthropic.csproj" />
     <Project Path="CodeAlta.Agent.Claude/CodeAlta.Agent.Claude.csproj" />
     <Project Path="CodeAlta.NativeEngines/CodeAlta.NativeEngines.csproj" />
@@ -43,8 +44,11 @@
     <Project Path="CodeAlta.Agent.OpenAI/CodeAlta.Agent.OpenAI.csproj" />
     <Project Path="CodeAlta.Agent/CodeAlta.Agent.csproj" />
     <Project Path="CodeAlta.Catalog/CodeAlta.Catalog.csproj" />
+    <Project Path="CodeAlta.Fleet/CodeAlta.Fleet.csproj" />
     <Project Path="CodeAlta.CodeMode/CodeAlta.CodeMode.csproj" />
     <Project Path="CodeAlta.CodexAppServer/CodeAlta.CodexAppServer.csproj" />
+    <Project Path="CodeAlta.Fleet.Protocol/CodeAlta.Fleet.Protocol.csproj" />
+    <Project Path="CodeAlta.Fleet.Update/CodeAlta.Fleet.Update.csproj" />
     <Project Path="CodeAlta.Hosting/CodeAlta.Hosting.csproj" />
     <Project Path="CodeAlta.LiveTool/CodeAlta.LiveTool.csproj" />
     <Project Path="CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" />
@@ -65,20 +69,27 @@
     <Project Path="CodeAlta/CodeAlta.csproj" />
     <Project Path="CodeAlta.Tui/CodeAlta.Tui.csproj" />
     <Project Path="CodeAlta.Cli/CodeAlta.Cli.csproj" />
+    <Project Path="CodeAlta.Node/CodeAlta.Node.csproj" />
+    <Project Path="CodeAlta.Server/CodeAlta.Server.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="CodeAlta.Browser.Tests/CodeAlta.Browser.Tests.csproj" />
     <Project Path="CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj" />
     <Project Path="CodeAlta.Catalog.Tests/CodeAlta.Catalog.Tests.csproj" />
+    <Project Path="CodeAlta.Fleet.Tests/CodeAlta.Fleet.Tests.csproj" />
     <Project Path="CodeAlta.Cli.Tests/CodeAlta.Cli.Tests.csproj" />
     <Project Path="CodeAlta.CodeMode.Tests/CodeAlta.CodeMode.Tests.csproj" />
+    <Project Path="CodeAlta.Fleet.Protocol.Tests/CodeAlta.Fleet.Protocol.Tests.csproj" />
+    <Project Path="CodeAlta.Fleet.Update.Tests/CodeAlta.Fleet.Update.Tests.csproj" />
     <Project Path="CodeAlta.Hosting.Tests/CodeAlta.Hosting.Tests.csproj" />
+    <Project Path="CodeAlta.Node.Tests/CodeAlta.Node.Tests.csproj" />
     <Project Path="CodeAlta.Orchestration.Tests/CodeAlta.Orchestration.Tests.csproj" />
     <Project Path="CodeAlta.Plugin.Mobile.Tests/CodeAlta.Plugin.Mobile.Tests.csproj" />
     <Project Path="CodeAlta.Plugin.Statistics.Tests/CodeAlta.Plugin.Statistics.Tests.csproj" />
     <Project Path="CodeAlta.Plugins.Abstractions.Tests/CodeAlta.Plugins.Abstractions.Tests.csproj" />
     <Project Path="CodeAlta.Plugins.Tests/CodeAlta.Plugins.Tests.csproj" />
     <Project Path="CodeAlta.Sandbox.Tests/CodeAlta.Sandbox.Tests.csproj" />
+    <Project Path="CodeAlta.Server.Tests/CodeAlta.Server.Tests.csproj" />
     <Project Path="CodeAlta.Tests/CodeAlta.Tests.csproj" />
     <Project Path="CodeAlta.Tests.LockProbe/CodeAlta.Tests.LockProbe.csproj" />
     <Project Path="CodeAlta.Tests.TinyMcpServer/CodeAlta.Tests.TinyMcpServer.csproj" />

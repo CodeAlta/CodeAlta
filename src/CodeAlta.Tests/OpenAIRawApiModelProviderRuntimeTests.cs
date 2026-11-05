@@ -511,6 +511,94 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.IsFalse(parameters.TryGetProperty("additionalProperties", out _), "Non-strict providers must keep the original schema instead of strict-normalizing it.");
     }
 
+    // An MCP tool with an allOf (#324) and a simple tool, for the requests of the tool schemas below.
+    private static AgentToolDefinition[] CreateToolsOfOneMcpServer()
+        =>
+        [
+            new AgentToolDefinition(
+                new AgentToolSpec("mcp__vercel__aggregate_events", "Aggregates events.", JsonDocument.Parse(AgentToolsTests.VercelAggregateEventsSchema).RootElement.Clone()),
+                static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("ok")]))),
+            new AgentToolDefinition(
+                new AgentToolSpec(
+                    "inspect_file",
+                    "Inspect a file.",
+                    JsonDocument.Parse("""{"type":"object","properties":{"path":{"type":"string"},"limit":{"type":"integer"}},"required":["path"]}""").RootElement.Clone()),
+                static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("ok")]))),
+        ];
+
+    [TestMethod]
+    [DataRow(false, DisplayName = "Default profile")]
+    [DataRow(true, DisplayName = "Strict tools allowed")]
+    public async Task OpenAIResponsesTurnExecutor_SendsAToolSchemaStrictModeRefusesWithoutStrictMode(bool allowStrictTools)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateAssistantResponseUpdate(responseId: "response-tools", modelId: "gpt-test", text: "Answer.", reasoningText: "Thinking.", encryptedReasoning: null)],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+            Profile = allowStrictTools ? new AgentProviderProfile { SupportsStrictTools = true } : null,
+        });
+
+        _ = await executor.ExecuteTurnAsync(CreateTurnRequest() with { Tools = CreateToolsOfOneMcpServer() }, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var body = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        var tools = body.RootElement.GetProperty("tools").EnumerateArray().ToDictionary(static tool => tool.GetProperty("name").GetString()!);
+        // The Responses API makes a function strict when the flag is absent.
+        var aggregate = tools["mcp__vercel__aggregate_events"];
+        Assert.IsFalse(aggregate.GetProperty("strict").GetBoolean());
+        using (var original = JsonDocument.Parse(AgentToolsTests.VercelAggregateEventsSchema))
+        {
+            Assert.AreEqual(JsonSerializer.Serialize(original.RootElement), JsonSerializer.Serialize(aggregate.GetProperty("parameters")));
+        }
+
+        var inspect = tools["inspect_file"];
+        Assert.AreEqual(allowStrictTools, inspect.GetProperty("strict").GetBoolean());
+        var limit = inspect.GetProperty("parameters").GetProperty("properties").GetProperty("limit");
+        // Strict mode makes an optional argument nullable; without it, the schema is the tool's own.
+        Assert.AreEqual(allowStrictTools ? "[\"integer\",\"null\"]" : "\"integer\"", limit.GetProperty("type").GetRawText());
+    }
+
+    [TestMethod]
+    [DataRow(false, DisplayName = "Default profile")]
+    [DataRow(true, DisplayName = "Strict tools allowed")]
+    public async Task OpenAIChatTurnExecutor_SendsAToolSchemaStrictModeRefusesWithoutStrictMode(bool allowStrictTools)
+    {
+        var chatClient = new RecordingOpenAIChatClient(
+        [
+            OpenAIChatModelFactory.StreamingChatCompletionUpdate(
+                completionId: "chatcmpl-tools",
+                contentUpdate: [ChatMessageContentPart.CreateTextPart("OK")],
+                model: "gpt-test"),
+        ]);
+        var executor = new OpenAIChatTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ChatClientFactory = _ => chatClient,
+            Profile = allowStrictTools ? new AgentProviderProfile { SupportsStrictTools = true } : null,
+        });
+
+        _ = await executor.ExecuteTurnAsync(CreateChatTurnRequest() with { Tools = CreateToolsOfOneMcpServer() }, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var tools = chatClient.Requests.Single().Options!.Tools.ToDictionary(static tool => tool.FunctionName);
+        var aggregate = tools["mcp__vercel__aggregate_events"];
+        Assert.IsNull(aggregate.FunctionSchemaIsStrict);
+        using (var original = JsonDocument.Parse(AgentToolsTests.VercelAggregateEventsSchema))
+        using (var sent = JsonDocument.Parse(aggregate.FunctionParameters.ToString()))
+        {
+            Assert.AreEqual(JsonSerializer.Serialize(original.RootElement), JsonSerializer.Serialize(sent.RootElement));
+        }
+
+        var inspect = tools["inspect_file"];
+        Assert.AreEqual(allowStrictTools ? true : null, inspect.FunctionSchemaIsStrict);
+        using var inspectSchema = JsonDocument.Parse(inspect.FunctionParameters.ToString());
+        Assert.AreEqual(
+            allowStrictTools ? "[\"integer\",\"null\"]" : "\"integer\"",
+            inspectSchema.RootElement.GetProperty("properties").GetProperty("limit").GetProperty("type").GetRawText());
+    }
+
     // OpenRouter reports a failure after the start of the stream inside it, after HTTP 200: the turn fails with the kind
     // of its code instead of ending as an answer cut short.
     [TestMethod]

@@ -72,6 +72,8 @@ const clearRequests: unknown[] = [];
 const renameRequests: unknown[] = [];
 const projectRenames: Array<{ request: { displayName: string }; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
 const deleteRequests: unknown[] = [];
+// The archives of sessions asked for: none is answered, the session stays as it is.
+const sessionArchives: Array<{ expectedHostEpoch: string; sessionId: string; withChildren: boolean }> = [];
 const mutationReplies: Array<{ kind: "rename" | "delete"; resolve: (value: unknown) => void }> = [];
 type CreateRequest = { expectedHostEpoch: string; scope: string; projectId: string | null; projectPath: string | null; title: string | null; providerId: string | null };
 const creates: Array<{ request: CreateRequest; resolve: (value: unknown) => void }> = [];
@@ -117,7 +119,7 @@ function navigationHistory(request: HistoryRequest): HistoryResponse {
       tool: null, files: null, images: null, details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false })) };
 }
 Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceReads, usageReads, probes, clearRequests,
-  renameRequests, projectRenames, deleteRequests, creates, snapshots, snapshotCalls, catalog, historyCalls,
+  renameRequests, projectRenames, deleteRequests, sessionArchives, creates, snapshots, snapshotCalls, catalog, historyCalls,
   displayCalls, displayCleanup, notesCalls, lateDisplayAttempts, reminderReads, reminderSaves, reminderDetails, reminderSaveLists, projectNameReads, referenceReads,
   reminderEvidence: () => reminderTrace.map(({ signal, ...entry }) => ({ ...entry, aborted: signal?.aborted ?? null })),
   displayEvidence: () => displayAttempts.map(({ signal, ...attempt }) => ({ ...attempt, aborted: signal.aborted })),
@@ -234,7 +236,8 @@ export const workspace = { snapshot: async () => {
       sourcePath: "/fixture/catalog/project.md", revision: "A".repeat(64), archived: request.expectedArchived }),
   renameProject: (request: { displayName: string }) => new Promise((resolve, reject) => projectRenames.push({ request, resolve, reject })), createSession: (request: CreateRequest) => new Promise(resolve => creates.push({ request, resolve })),
   renameSession: (request: unknown) => { renameRequests.push(request); return new Promise(resolve => mutationReplies.push({ kind: "rename", resolve })); },
-  deleteSession: (request: unknown) => { deleteRequests.push(request); return new Promise(resolve => mutationReplies.push({ kind: "delete", resolve })); } };
+  deleteSession: (request: unknown) => { deleteRequests.push(request); return new Promise(resolve => mutationReplies.push({ kind: "delete", resolve })); },
+  archiveSession: (request: { expectedHostEpoch: string; sessionId: string; withChildren: boolean }) => { sessionArchives.push(request); return new Promise(() => {}); } };
 export const configuration = { snapshot: async () => ({ providers: [
   { id: "fixture", name: "Fixture", enabled: true }, { id: "alternate", name: "Alternate", enabled: true },
   { id: "disabled", name: "Disabled", enabled: false }], providerRuntimeAvailable: owned(), plugins: [], pluginRuntimeAvailable: false }) };

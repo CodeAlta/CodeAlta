@@ -6,12 +6,13 @@ import { usePluginMenuEntries } from "../pluginButtons/pluginMenu";
 import { ProviderBrandsContext, ProviderIcon, useProviderBrand } from "../ProviderIcon";
 import { SessionTabMenu, type SessionMenuEntry } from "../SessionTabMenu";
 import type { SessionHierarchyRow } from "../sessionHierarchy";
-import { isSessionContextKey, isSessionDeleteKey, sessionRowShortcut, type SessionAction } from "../sessionRowActions";
+import { isSessionContextKey, isSessionDeleteKey, sessionRowGesture, sessionRowShortcut, type SessionAction } from "../sessionRowActions";
 import { KeyGesture } from "../KeyGesture";
 import { plainTitle } from "../sessionTitle";
 import { providerHasRemoteControl } from "../remoteControl";
 import { openElsewhereEntries } from "../claudeCodeOpen/openElsewhereEntries";
 import { useShellLanguage } from "../shellLanguage";
+import { sessionRowProviderName } from "../machines/machineProviderNames";
 import { sessionEntries, type SessionListEntry } from "./sessionTree";
 import type { SessionRowDrag } from "./sessionDrag";
 import { SessionLinkRow, SessionOriginLine } from "./sessionFamily";
@@ -46,7 +47,7 @@ export function SessionRowTitle({ session, depth, diagnostic, subAgents, twist, 
   const { t } = useShellLanguage();
   const automated = !!session.automationId;
   const logo = useProviderBrand(session.providerKey);
-  const provider = useContext(ProviderBrandsContext).get(session.providerKey?.toLowerCase() ?? "")?.name ?? session.providerKey;
+  const provider = sessionRowProviderName(session, useContext(ProviderBrandsContext).get(session.providerKey?.toLowerCase() ?? "")?.name);
   // The logo of its provider tells the sessions apart at a glance. A session of a provider of no known brand
   // keeps the icon of a session.
   return <>{twist && <span className="tree-twist session-twist" title={t(twist.collapsed ? "Show the sub-agents" : "Hide the sub-agents")}
@@ -58,7 +59,20 @@ export function SessionRowTitle({ session, depth, diagnostic, subAgents, twist, 
     <span className="session-icon session-provider" data-file-tone={logo.icon || logo.symbol ? undefined : "purple"} title={provider ?? undefined}>
       <ProviderIcon providerKey={session.providerKey} size={13} fallback="assistant" /></span>
     <span className="session-title">{diagnostic && <span aria-hidden="true">⚠ </span>}{plainTitle(session.title)}</span>
+    {session.machineId && <MachineChip session={session} />}
     <SubAgentBadge count={(subAgents ?? 0) + (childrenElsewhere?.length ?? 0)} elsewhere={childrenElsewhere?.length ?? 0} /></>;
+}
+
+/** The machine a session runs on, after its title: its name, or the name of its project there under the row of its machine. */
+export function MachineChip({ session }: { session: Pick<WorkspaceSession, "machineId" | "machineName" | "remoteProject" | "remoteState" | "projectId"> }) {
+  const { t } = useShellLanguage();
+  const name = session.machineName ?? session.machineId ?? "";
+  // Under the row of its machine, the chip names its project there, which the machine does not share with this computer.
+  const grouped = session.projectId?.startsWith("machine:") ?? false;
+  const label = grouped ? session.remoteProject : name;
+  if (!label) return null;
+  return <span className="session-machine-chip" data-state={session.remoteState ?? undefined} title={t("Runs on {name}", { name })}>
+    {!grouped && <AppIcon name="remote" size={10} />}<span>{label}</span></span>;
 }
 
 /** What follows the listed sub-agents of a session when it has more, or lists more than at first. */
@@ -135,7 +149,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
       const twist = sessionTwist(entry, tree.toggle);
       const shown = menu?.id === session.id ? menu : null;
       const allowed = shown ? access(session) : null;
-      return <div className={`session-row${shown ? " menu-open" : ""}`} key={session.id} data-family-id={session.id} data-rename-keys {...drag?.(session)}
+      return <div className={`session-row${shown ? " menu-open" : ""}`} key={session.id} data-family-id={session.id} data-rename-keys data-session-keys {...drag?.(session)}
         onContextMenu={event => {
           if ((event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
           event.preventDefault();
@@ -143,8 +157,9 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
         }}
         onKeyDown={event => {
           const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
-          // Delete, Backspace, F2, F and A on a row do what the same entries of its menu do; the row keeps F2 from
-          // Rename Project (data-rename-keys).
+          // Delete, Backspace, F2 and the keys of Fork Session and Archive Session on a row do what the same entries of
+          // its menu do, for its session; the row keeps F2 from Rename Project (data-rename-keys) and the other keys from
+          // their commands (data-session-keys).
           if (isSessionDeleteKey(event, composing) && event.target === event.currentTarget.firstElementChild) {
             event.preventDefault(); event.stopPropagation();
             if (access(session).delete) onAction(session, "delete");
@@ -173,14 +188,14 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
           items={[
             { key: "open", label: t("Open session"), icon: "open", onSelect: () => onAction(session, "open") },
             { key: "rename", label: t("Rename…"), icon: "edit", endNode: <KeyGesture gesture="F2" />, disabled: !allowed.rename, onSelect: () => onAction(session, "rename") },
-            { key: "fork", label: t("Fork…"), icon: "branch", endNode: <KeyGesture gesture="F" />, disabled: !allowed.fork, onSelect: () => onAction(session, "fork") },
+            { key: "fork", label: t("Fork…"), icon: "branch", endNode: <KeyGesture gesture={sessionRowGesture("fork")} />, disabled: !allowed.fork, onSelect: () => onAction(session, "fork") },
             ...(providerHasRemoteControl(brands.get(session.providerKey?.toLowerCase() ?? "")?.type)
               ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !allowed["remote-control"], onSelect: () => onAction(session, "remote-control") }] : []),
             ...openElsewhereEntries(t, session, brands.get(session.providerKey?.toLowerCase() ?? "")?.type, allowed, action => onAction(session, action)),
             ...(actionEntries?.(session) ?? []),
             ...(global ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !allowed.move, onSelect: () => onAction(session, "move") }]),
             ...(spaces ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !allowed.space, onSelect: () => onAction(session, "space") }] : []),
-            { key: "archive", label: archiveAsks?.(session) ? t("Archive…") : t("Archive"), icon: "archive", endNode: <KeyGesture gesture="A" />, disabled: !allowed.archive, onSelect: () => onAction(session, "archive") },
+            { key: "archive", label: archiveAsks?.(session) ? t("Archive…") : t("Archive"), icon: "archive", endNode: <KeyGesture gesture={sessionRowGesture("archive")} />, disabled: !allowed.archive, onSelect: () => onAction(session, "archive") },
             { key: "delete", label: deleteAsks ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, endNode: <KeyGesture gesture="Delete" />, disabled: !allowed.delete, onSelect: () => onAction(session, "delete") },
             ...(menuEntries?.(session) ?? []),
             ...pluginEntries,

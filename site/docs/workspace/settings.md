@@ -135,9 +135,10 @@ Your schemes are files in `~/.alta/color-schemes/`, which you can copy, share or
 - **Language**: **Auto**, English, Spanish, French, German, Japanese or Simplified Chinese.
 - **Welcome page**: whether the [welcome page](readme.md#welcome-page) opens at startup and is animated.
 - **Startup and closing**: turn [Remote Control](prompt.md#remote-control) back on at startup, what closing the main window does (see [Close or keep running](readme.md#close-or-keep-running)), and **Keep computer awake when CodeAlta is running**.
+- **Notifications**: what tells you that a session is done or waits for you while CodeAlta is in the background (see [Done or waiting](readme.md#done-or-waiting)).
 - **External editor**: see [External editor](code.md#external-editor).
 
-**Sessions** has **Session titles** (see [Session titles](../sessions/readme.md#session-titles)), **Suggest the next prompt** (see [Prompt suggestions](../sessions/readme.md#prompt-suggestions)), **Review changes before commit** (see [Review before commit](../reviews.md#review-before-commit)), **Add CodeAlta as co-author** (see [CodeAlta as co-author](../sessions/readme.md#codealta-as-co-author)) and [Single tab for sessions](readme.md#single-tab-for-sessions).
+**Sessions** has **Session titles** (see [Session titles](../sessions/readme.md#session-titles)), **Suggest the next prompt** (see [Prompt suggestions](../sessions/readme.md#prompt-suggestions)), **Review changes before commit** (see [Review before commit](../reviews.md#review-before-commit)), **Add CodeAlta as co-author** and the **Co-author line** (see [CodeAlta as co-author](../sessions/readme.md#codealta-as-co-author)), **Say that CodeAlta wrote it** and its **Instruction to agents** (see [What agents write elsewhere](../sessions/readme.md#what-agents-write-elsewhere)) and [Single tab for sessions](readme.md#single-tab-for-sessions).
 
 **Windows** is described in [Windows](readme.md#windows), and **Speech** in [Speech](../speech.md).
 
@@ -227,7 +228,7 @@ Open the prompt manager with `Ctrl+G Ctrl+H` or `/prompt` (**Settings > Agent pr
 
 Open it with `Ctrl+G Ctrl+K` or `/skills`. CodeAlta finds Agent Skills `SKILL.md` packages in your folders and the project's. Inspect them, create one with **New skill**, and enable or disable each for every project (`~/.alta/config.toml`) or the selected one (`.alta/config.toml`). A disabled skill is not offered to models. To use a skill yourself, see [Use a skill](readme.md#use-a-skill).
 
-CodeAlta comes with built-in skills: `codealta-plugin-runtime` to write [plugins](../plugins/developers.md), `document-conversion` to read PDF and Office documents, and `ultra-profiler` to profile the CPU of a .NET or native application with [Ultra](https://github.com/xoofx/ultra), run with `dotnet dnx` of the .NET SDK 10 or later.
+CodeAlta comes with built-in skills: `codealta-plugin-runtime` to write [plugins](../plugins/developers.md), `codealta-fleet` to let agents use your [machines](../fleet/sessions.md#let-agents-use-the-fleet), `document-conversion` to read PDF and Office documents, and `ultra-profiler` to profile the CPU of a .NET or native application with [Ultra](https://github.com/xoofx/ultra), run with `dotnet dnx` of the .NET SDK 10 or later.
 
 A folder of skills can hold symbolic links, for example to a library of skills shared with other tools: CodeAlta finds the skills where the links lead, offers them to agents and sees a change made there; a broken link is skipped. Skills management lists them, shows their details with a **Linked** tag and switches them on or off, but does not edit or remove a skill through a link: change it where the link leads.
 

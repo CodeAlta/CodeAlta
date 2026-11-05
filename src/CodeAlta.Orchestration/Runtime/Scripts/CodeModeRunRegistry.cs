@@ -78,6 +78,12 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     public Func<string, CancellationToken, ValueTask<string?>>? ResultFolder { get; set; }
 
     /// <summary>
+    /// Gets or sets what masks the secrets of the machine in a result kept whole in a file, which goes with its session as
+    /// the text of the result does; null masks nothing.
+    /// </summary>
+    public CodeAlta.Agent.Runtime.AgentSecretMasker? SecretMasker { get; set; }
+
+    /// <summary>
     /// Formats the result of a run as its session reads it (<see cref="CodeModeResultFormatter"/>), keeping the whole result in
     /// a file the text names when it is longer than the text gives. The file is written once per run.
     /// </summary>
@@ -135,11 +141,13 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         {
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, $"script-{run.Id}-result{whole.FileExtension}");
-            await File.WriteAllTextAsync(path, whole.Text).ConfigureAwait(false);
+            var masker = SecretMasker;
+            await File.WriteAllTextAsync(path, masker is null ? whole.Text : whole.FileExtension == ".json" ? masker.MaskJson(whole.Text) : masker.MaskText(whole.Text))
+                .ConfigureAwait(false);
             // A long text of lines in a JSON result is on one line of its file: it is also kept alone, to read by line.
             foreach (var part in CodeModeResultFormatter.TextParts(whole))
             {
-                await File.WriteAllTextAsync(CodeModeResultFormatter.TextPartPath(path, part), part.Text).ConfigureAwait(false);
+                await File.WriteAllTextAsync(CodeModeResultFormatter.TextPartPath(path, part), masker?.MaskText(part.Text) ?? part.Text).ConfigureAwait(false);
             }
 
             return path;
@@ -608,9 +616,27 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     /// <exception cref="OperationCanceledException">The wait for the turn was cancelled.</exception>
     public async Task<IDisposable> WaitForUserAsync(CodeModeRunHandle run, string kind, string? stepId, string? message, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(kind);
+        var turn = await ReserveUserTurnAsync(run, cancellationToken).ConfigureAwait(false);
+        turn.Start(kind, stepId, message);
+        return turn;
+    }
+
+    /// <summary>
+    /// Takes the turn of a question of a run to the user, in the order the calls are made: a call made before another
+    /// gets its turn before it, whatever it does before showing its question. The card of the run says that it waits once
+    /// <see cref="CodeModeUserTurn.Start"/> is called; disposing the turn gives it to the next question.
+    /// </summary>
+    /// <param name="run">The run.</param>
+    /// <param name="cancellationToken">Stops waiting for the turn.</param>
+    /// <returns>The turn, held until it is disposed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="run"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The wait for the turn was cancelled.</exception>
+    public async Task<CodeModeUserTurn> ReserveUserTurnAsync(CodeModeRunHandle run, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(run);
         // From now on the run waits for the user, its turn among the questions included: exec does not count that time.
+        // The semaphore queues its waiters in the order they come, and this wait is entered before any other await.
         run.WaitForUser(true);
         try
         {
@@ -622,26 +648,7 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
             throw;
         }
 
-        run.Record(AgentWorkflowEventKind.WaitStarted, record => record with { Status = kind, StepId = stepId, Message = message });
-        return new WaitEnd(() =>
-        {
-            run.Record(AgentWorkflowEventKind.WaitEnded, record => record with { Status = kind, StepId = stepId });
-            run.Questions.Release();
-            run.WaitForUser(false);
-        });
-    }
-
-    private sealed class WaitEnd(Action end) : IDisposable
-    {
-        private int _ended;
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _ended, 1) == 0)
-            {
-                end();
-            }
-        }
+        return new CodeModeUserTurn(run);
     }
 
     /// <summary>Finds a run of any session, running or ended a short while ago.</summary>
@@ -856,6 +863,51 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         {
             if (_heldForTurn.TryRemove(run.Id, out _)) run.Hold?.Dispose();
         }
+    }
+}
+
+/// <summary>
+/// The turn of one question of a run to the user (an <c>ask()</c> of its script, or the approval of one of its calls),
+/// taken by <see cref="CodeModeRunRegistry.ReserveUserTurnAsync"/>. The card of the run says that it waits from
+/// <see cref="Start"/> until the turn is disposed, which gives the turn to the next question.
+/// </summary>
+public sealed class CodeModeUserTurn : IDisposable
+{
+    private readonly CodeModeRunHandle _run;
+    private string? _kind;
+    private string? _stepId;
+    private int _ended;
+
+    internal CodeModeUserTurn(CodeModeRunHandle run) => _run = run;
+
+    /// <summary>Shows on the card of the run that it waits for the user, until the turn is disposed.</summary>
+    /// <param name="kind">What it waits for: <c>question</c> or <c>approval</c>.</param>
+    /// <param name="stepId">The step that asks, or null.</param>
+    /// <param name="message">The question, or null.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="kind"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The turn was already started.</exception>
+    /// <exception cref="ObjectDisposedException">The turn was disposed.</exception>
+    public void Start(string kind, string? stepId, string? message)
+    {
+        ArgumentNullException.ThrowIfNull(kind);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _ended) != 0, this);
+        if (Interlocked.CompareExchange(ref _kind, kind, null) is not null) throw new InvalidOperationException("The turn of the question was already started.");
+        _stepId = stepId;
+        _run.Record(AgentWorkflowEventKind.WaitStarted, record => record with { Status = kind, StepId = stepId, Message = message });
+    }
+
+    /// <summary>Ends the wait shown on the card, if it was started, and gives the turn to the next question.</summary>
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _ended, 1) != 0) return;
+        if (Volatile.Read(ref _kind) is { } kind)
+        {
+            var stepId = _stepId;
+            _run.Record(AgentWorkflowEventKind.WaitEnded, record => record with { Status = kind, StepId = stepId });
+        }
+
+        _run.Questions.Release();
+        _run.WaitForUser(false);
     }
 }
 

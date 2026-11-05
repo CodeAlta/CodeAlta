@@ -76,21 +76,22 @@ code_width = draw.textlength("Code", font=name)
 text(banner, (x + 104 * S, 52 * S), "Code", name, (255, 255, 255))
 text(banner, (x + 104 * S + code_width, 52 * S), "Alta", name, [(122, 232, 255), CYAN, INDIGO, PURPLE])
 
-# The tagline of the home page and what CodeAlta Desktop holds.
+# The tagline of the home page and what CodeAlta holds.
 title = font("segoeuib.ttf", 50)
-text(banner, (x, 176 * S), "Your agents.", title, (255, 255, 255))
-text(banner, (x, 236 * S), "One workspace.", title, [CYAN, (99, 102, 241), PURPLE])
-text(banner, (x, 320 * S), "Sessions  ·  Workflows  ·  Sandbox  ·  On your phone", font("segoeui.ttf", 20), (176, 198, 222))
+text(banner, (x, 156 * S), "Your agents.", title, (255, 255, 255))
+text(banner, (x, 214 * S), "One workspace.", title, [CYAN, (99, 102, 241), PURPLE])
+text(banner, (x, 272 * S), "One fleet.", title, [(99, 102, 241), PURPLE])
+text(banner, (x, 350 * S), "Sessions  ·  Workflows  ·  Machines  ·  Teams", font("segoeui.ttf", 20), (176, 198, 222))
 
 # The command that installs CodeAlta Desktop, in a box of its own.
 draw = ImageDraw.Draw(banner)
 mono = font("CascadiaMono.ttf", 21)
 command = "dotnet tool install -g CodeAlta"
 box_right = round(x + 44 * S + draw.textlength(command, font=mono) + 22 * S)
-draw.rounded_rectangle((x, 376 * S, box_right, 432 * S), 12 * S, fill=(16, 30, 46, 235), outline=(98, 128, 160, 120), width=S)
-draw.text((x + 20 * S, 391 * S), "$", font=mono, fill=(45, 212, 191))
-draw.text((x + 44 * S, 391 * S), command, font=mono, fill=(236, 243, 252))
-draw.text((x, 452 * S), "Also in your terminal: CodeAlta TUI and altacli", font=font("segoeui.ttf", 17), fill=(132, 152, 176))
+draw.rounded_rectangle((x, 400 * S, box_right, 456 * S), 12 * S, fill=(16, 30, 46, 235), outline=(98, 128, 160, 120), width=S)
+draw.text((x + 20 * S, 415 * S), "$", font=mono, fill=(45, 212, 191))
+draw.text((x + 44 * S, 415 * S), command, font=mono, fill=(236, 243, 252))
+draw.text((x, 474 * S), "Also: CodeAlta TUI, altacli, CodeAlta Node and Server", font=font("segoeui.ttf", 17), fill=(132, 152, 176))
 draw.text((x, 556 * S), "codealta.io", font=font("segoeuisl.ttf", 23), fill=(158, 182, 208))
 
 output = sys.argv[1] if len(sys.argv) > 1 else "site/img/alta-banner.png"

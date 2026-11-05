@@ -88,7 +88,7 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     done("stepsDeclared", 5, declared),
     done("stepStarted", 6, { stepId: "research" }),
     done("sessionStarted", 6, { stepId: "research", childSessionId: "s-redis", title: "Research: Redis" }),
-    event("activity.toolcall.started", "read_file", 7, { activityId: "inner-1", parentId: "exec-1" }),
+    event("activity.toolcall.started", "read_file", 7, { activityId: "inner-1", parentId: "exec-1", subject: "C:/dev2/stride-sdsl-corpus/sources/shaders/Stride.Shaders.Parsers/Upgrade/ShaderDataUpgrader.cs" }),
     event("activity.toolcall.completed", "read_file", 8, { activityId: "inner-1", parentId: "exec-1" }),
     done("sessionEnded", 40, { childSessionId: "s-redis", status: "completed", durationMs: 34_000 }),
     done("stepEnded", 41, { stepId: "research", status: "completed", durationMs: 35_000 }),
@@ -258,6 +258,23 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     // The calls of the script, after its steps and sessions.
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.wf-card .wf-call')].map(c => [c.dataset.state, c.querySelector('.wf-step-title').textContent, c.querySelector('.wf-step-time').textContent])"),
       [["completed", "read_file", "1s"]]);
+    // What a call reads, on its line: a long path loses the end of its folders, never the name of its file.
+    assert.deepEqual(await evaluate(`(() => {
+      const subject = document.querySelector('.wf-card .wf-call .tool-subject');
+      const file = subject.querySelector('.tool-path-file'), folders = subject.querySelector('.tool-path-folders');
+      // scrollWidth rounds to a whole pixel, and a fraction of a pixel less is enough to cut the name: its box is compared with what its text takes.
+      const probe = file.cloneNode(true);
+      probe.style.cssText = 'position: absolute; visibility: hidden; flex: none; max-width: none; overflow: visible';
+      subject.append(probe);
+      const needed = probe.getBoundingClientRect().width;
+      probe.remove();
+      const whole = file.getBoundingClientRect().width >= needed;
+      // A name too long for the line is cut itself, and stays in the line.
+      subject.style.maxWidth = '60px';
+      const cut = [file.getBoundingClientRect().width <= 60, subject.scrollWidth <= subject.clientWidth];
+      subject.style.maxWidth = '';
+      return [subject.textContent, file.textContent, whole, folders.scrollWidth > folders.clientWidth, subject.scrollWidth <= subject.clientWidth, cut];
+    })()`), ["C:/dev2/stride-sdsl-corpus/sources/shaders/Stride.Shaders.Parsers/Upgrade/ShaderDataUpgrader.cs", "/ShaderDataUpgrader.cs", true, true, true, [true, true]]);
     assert.deepEqual(await texts(".wf-card .wf-section"), ["Sessions", "Calls"]);
     await theme("light");
     await evaluate(`document.querySelector('.msg-user').scrollIntoView({ block: "start" })`);
@@ -308,6 +325,15 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.wf-card .wf-step')].map(s => s.dataset.state)"), ["completed", "waiting", "pending"]);
     // A script that declares no step says the call it is at, and once it ended, how many calls it made; open, it lists them.
     assert.equal(await evaluate("document.querySelector('.wf-card[data-run=run-c3] .wf-sub').textContent"), '▸ grep "ttl" src');
+    // Folded, a script that only made calls folds with its activity once it ended; one that goes on stays under the line (#323).
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.activity > .act-extras .wf-card')].map(card => card.dataset.run)"), ["run-b2", "run-c3"]);
+    assert.equal(await evaluate("document.querySelector('.wf-card[data-run=run-c4]')"), null, "the ended script folds with its activity");
+    await click(".activity .act-toggle");
+    await waitFor(`document.querySelector(".activity > .act-body .wf-card[data-run=run-c4]")`, "the ended script in the place of its call");
+    // Open, such a script is in the place of its call; a run with steps keeps its card under the line, and its call is a row.
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.activity > .act-body > *')].map(e => e.dataset.run ?? e.querySelector('strong')?.textContent)"),
+      ["exec", "run-c3", "run-c4"]);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.activity > .act-extras .wf-card')].map(card => card.dataset.run)"), ["run-b2"]);
     assert.match(await evaluate<string>("document.querySelector('.wf-card[data-run=run-c4] .wf-sub').textContent"), /^Done · 2s · 1 call$/);
     await click(".wf-card[data-run=run-c3] .wf-head");
     await waitFor(`document.querySelectorAll(".wf-card[data-run=run-c3] .wf-call").length === 2`, "the calls of the script");
@@ -317,6 +343,11 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     await click(".wf-card[data-run=run-c4] .wf-head");
     await waitFor(`document.querySelector(".wf-card[data-run=run-c4] .wf-call")`, "the call of the ended script");
     assert.equal(await evaluate("document.querySelector('.wf-card[data-run=run-c4] .wf-call').dataset.state"), "failed");
+    await shot("t2-open-script-calls.png");
+    await click(".activity .act-toggle");
+    await waitFor(`!document.querySelector(".activity > .act-body")`, "the activity folded again");
+    assert.equal(await evaluate("document.querySelector('.wf-card[data-run=run-c4]')"), null, "folded again, the ended script is gone with its activity");
+    assert.equal(await evaluate("document.querySelector('.wf-card[data-run=run-c3]').getAttribute('data-state')"), "running", "the script that goes on stays");
     await evaluate(`document.querySelector('.wf-card[data-run=run-c3]').scrollIntoView({ block: "center" })`);
     await shot("t2-script-calls.png");
     await noOverflow("t2");

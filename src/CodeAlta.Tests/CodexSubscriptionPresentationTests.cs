@@ -37,7 +37,7 @@ public sealed class CodexSubscriptionPresentationTests
         };
 
         var signedIn = ConfiguredProviderLogin.FromCodex(credential);
-        Assert.AreEqual(new ProviderLoginStatus(true, "Workspace", null, null), signedIn);
+        Assert.AreEqual(new ProviderLoginStatus(true, "Workspace", null, null) { Renews = true }, signedIn);
         Assert.IsFalse(signedIn.ToString().Contains("must-not-escape", StringComparison.Ordinal));
 
         // Sign-out keeps the registration and clears its tokens.

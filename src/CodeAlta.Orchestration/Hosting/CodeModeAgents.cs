@@ -60,6 +60,7 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         HeadlessSession? session = null;
         try
         {
+            if (request.Machine is not null) return await RunRemoteAsync(parentSessionId, request, clock, cancellationToken).ConfigureAwait(false);
             var (opened, refusal, warning) = await OpenCoreAsync(parentSessionId, request, state, cancellationToken).ConfigureAwait(false);
             if (opened is null) return refusal! with { Warning = warning };
             session = opened;
@@ -78,6 +79,9 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(parentSessionId);
         ArgumentNullException.ThrowIfNull(request);
+        if (request.Machine is not null)
+            return new CodeModeAgentResult(null, false, "refused", null, "session() keeps sessions of this machine: start a session of another machine with agent(prompt, { machine }).",
+                SessionUsageTotals.None, TimeSpan.Zero);
         var state = _runs.GetOrAdd(request.RunId, static _ => new RunState());
         var (opened, refusal, warning) = await OpenCoreAsync(parentSessionId, request, state, cancellationToken).ConfigureAwait(false);
         if (opened is null) return refusal! with { Warning = warning };
@@ -224,6 +228,91 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         return (new KeptSession(created) { Worktree = worktree }, null, warning);
 
         static (KeptSession?, CodeModeAgentResult?, string?) Refused(string message) => (null, new(null, false, "refused", null, message, SessionUsageTotals.None, TimeSpan.Zero), null);
+    }
+
+    // A session of another machine (doc/fleet/orchestration.md, "Workflows across machines"): it gets at most what the
+    // script's session has, the machine decides, and its answer comes back to the script through the deliveries.
+    private async Task<CodeModeAgentResult> RunRemoteAsync(string parentSessionId, CodeModeAgentRequest request, Stopwatch clock, CancellationToken cancellationToken)
+    {
+        var runtime = _host.RuntimeService;
+        if (runtime.RemoteChildren is not { } remote) return Refused("This computer reaches no other machine: leave `machine` out.");
+        var parent = await runtime.TryGetResumableSessionAsync(parentSessionId, cancellationToken).ConfigureAwait(false);
+        if (parent is null) return Refused($"The session '{parentSessionId}' that runs the script is not known.");
+        var options = await runtime.GetSessionOptionsAsync(parentSessionId, cancellationToken).ConfigureAwait(false);
+        if (!options.SubSessions) return Refused(SessionRuntimeService.SubSessionsOffMessage);
+        if (options.Private) return Refused("This session is Private: nothing of it reaches another machine.");
+        if (request.Worktree || request.Tier is not null)
+            return Refused("Where a session of another machine works, and its tiers, are that machine's: leave `worktree` and `tier` out with `machine`.");
+        if (request.Schema is { } asked && StructuredAnswer.Inspect(asked) is { Count: > 0 } problems) return Refused(SchemaRefusal(problems));
+        if (request.Sandbox is { } sandboxAsked && await RefuseSandboxAsync(parentSessionId, sandboxAsked, cancellationToken).ConfigureAwait(false) is { } sandboxRefusal)
+            return Refused(sandboxRefusal);
+        // The fleet is never a way out of a sandbox: the child is at least as confined as the script's session, by its own
+        // sandbox, or by the one asked when it has none, as this computer resolves it; a profile without the fleet starts nothing.
+        var floor = await runtime.GetFleetFloorAsync(parentSessionId, cancellationToken).ConfigureAwait(false);
+        if (floor.Refusal is { } fleetRefusal) return Refused(fleetRefusal);
+        var (sandbox, confinement) = floor.IsSandboxed ? (floor.Sandbox, floor.Confinement)
+            : (request.Sandbox, request.Sandbox is { } askedSandbox ? runtime.ResolveSandboxConfinement(askedSandbox) : null);
+        if (sandbox is not null && confinement is null) return Refused($"This computer has no sandbox profile '{sandbox}' that can be used: leave `sandbox` out, or name one of its profiles.");
+        var disabled = (await runtime.GetDisabledToolsAsync(parentSessionId, cancellationToken).ConfigureAwait(false))
+            .Union(runtime.GetDisabledToolPatterns(parentSessionId), StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal).ToArray();
+        string? provider = null, model = null;
+        if (request.ModelRef is { } modelRef)
+        {
+            var reference = modelRef.Split('@')[0];
+            var colon = reference.IndexOf(':', StringComparison.Ordinal);
+            (provider, model) = colon < 0 ? (reference, null) : (reference[..colon], reference[(colon + 1)..]);
+        }
+
+        var created = await remote.CreateAsync(new RemoteChildRequest(parentSessionId, request.Machine!)
+        {
+            Prompt = request.Schema is { } schema ? request.Prompt + StructuredAnswer.Instruction(schema) : request.Prompt,
+            Global = parent.ProjectRef is null,
+            Title = request.Title,
+            SpaceId = parent.SpaceId ?? "default",
+            ProviderKey = provider,
+            ModelId = model,
+            ReasoningEffort = request.Effort?.ToString(),
+            AgentPromptId = request.AgentPromptId,
+            DisabledTools = disabled,
+            PermissionMode = floor.PermissionMode,
+            Sandbox = sandbox,
+            Confinement = confinement,
+            SubSessions = request.SubSessions,
+            ForScript = true,
+        }, cancellationToken).ConfigureAwait(false);
+        if (created.Status != "created" || created.SessionId is not { } childId)
+            return Refused(created.Code == "guarded" ? created.Message ?? "This session is guarded: it starts no session on another machine."
+                : $"{created.MachineName ?? request.Machine} refused the session ({created.Code}): {created.Message}");
+        _host.CodeModeRuns.Record(request.RunId, AgentWorkflowEventKind.SessionStarted, record => record with
+        {
+            ChildSessionId = childId,
+            StepId = request.StepId,
+            Title = request.Title ?? $"on {created.MachineName}",
+            ProviderKey = created.ProviderKey,
+        });
+        var answer = await remote.WaitForAnswerAsync(childId, request.Timeout, cancellationToken).ConfigureAwait(false);
+        string? value = null;
+        var status = answer.Status;
+        var failure = answer.Failure;
+        if (request.Schema is { } expected && status == "completed")
+        {
+            var (json, errors) = StructuredAnswer.Check(answer.Answer, expected);
+            if (json is null) (status, failure) = ("failed", $"The answer does not match the schema: {string.Join(" ", errors)}");
+            value = json;
+        }
+
+        _host.CodeModeRuns.Record(request.RunId, AgentWorkflowEventKind.SessionEnded, record => record with
+        {
+            ChildSessionId = childId,
+            StepId = request.StepId,
+            Status = status,
+            Message = status == "completed" ? null : failure,
+            DurationMs = (long)clock.Elapsed.TotalMilliseconds,
+        });
+        return new CodeModeAgentResult(childId, status == "completed", status, answer.Answer, status == "completed" ? null : failure ?? $"The session ended: {status}.",
+            SessionUsageTotals.None, clock.Elapsed) { Value = value };
+
+        static CodeModeAgentResult Refused(string message) => new(null, false, "refused", null, message, SessionUsageTotals.None, TimeSpan.Zero);
     }
 
     // A child takes the tools its parent does without by the command line of its run (the patterns of OpenChildAsync),

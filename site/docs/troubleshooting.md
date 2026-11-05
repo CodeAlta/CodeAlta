@@ -163,6 +163,10 @@ A busy session puts the prompt in its waiting list instead of sending it.
 
 When the desktop app cannot read a page of a session's history, the session file is left untouched. The desktop [logs](#open-logs) have a `CodeAlta.Desktop.History` warning with the session id and the error: include it in your report.
 
+### A project is missing from the list
+
+A warning names a project file that cannot be read: its project is left out of the lists, and the other projects and sessions are listed. The file is under `~/.alta/projects/`. A Windows path written by hand needs single quotes (`path: 'C:\Users\me\code'`) or doubled backslashes between double quotes. Fix the file, or remove it.
+
 ### Context is too large
 
 Open the context usage with `Ctrl+G Ctrl+U`. Press `Ctrl+F11` to compact an idle session. If compaction keeps missing its target, check the size of attached files and the [context limits of the model](model-providers/configuration.md#model-metadata-overrides).

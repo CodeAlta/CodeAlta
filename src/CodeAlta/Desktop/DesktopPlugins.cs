@@ -102,6 +102,8 @@ internal static class DesktopPlugins
         if (browser is not null) builtIns = [.. builtIns, BrowserDefinition(browser, PluginFrontends.Desktop)];
         // The landing page is the window's: the terminal application has no such plugin.
         builtIns = [.. builtIns, DesktopLandingPlugin.Definition()];
+        // The console of the fleet: its canvases are the window's.
+        builtIns = [.. builtIns, Fleet.DesktopFleetPlugin.Definition()];
         // The mobile view is the window's too: a phone connects to the desktop application.
         builtIns = [.. builtIns, MobileDefinition];
         if (search is not null) builtIns = [.. builtIns, Search.DesktopSearchPlugin.Definition(search)];

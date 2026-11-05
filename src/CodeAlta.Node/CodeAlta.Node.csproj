@@ -1,0 +1,82 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <PackAsTool>true</PackAsTool>
+    <RootNamespace>CodeAlta.Node</RootNamespace>
+    <PackageId>CodeAlta.Node</PackageId>
+    <AssemblyName>altanode</AssemblyName>
+    <ToolCommandName>altanode</ToolCommandName>
+
+    <!-- Enable AOT analyzers -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <RuntimeIdentifiers>linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;win-x64;win-arm64;osx-arm64;osx-x64</RuntimeIdentifiers>
+    <PublishSelfContained>false</PublishSelfContained>
+    <!-- Precompiled code in each runtime's package: the application starts without compiling its methods first. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <ApplicationIcon>..\..\img\alta.ico</ApplicationIcon>
+    <Description>CodeAlta Node: the headless CodeAlta host for always-on machines, build machines and cloud VMs. It owns a CodeAlta profile, runs its sessions without a window, and is driven from CodeAlta Desktop. Start it with altanode run.</Description>
+    <PackageTags>agentic;ai;coding-agent;llm;mcp;headless;node;service</PackageTags>
+    <PackageReadmeFile>readme.md</PackageReadmeFile>
+    <PackageIcon>CodeAlta.png</PackageIcon>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageProjectUrl>https://github.com/CodeAlta/CodeAlta</PackageProjectUrl>
+    <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../../img/CodeAlta.png" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)../../readme.md" Pack="true" PackagePath="/" />
+    <!-- The user guide of the site, for the agents: they answer questions about CodeAlta from it. Its pages only: the
+         pictures show the windows of the other applications. They are read beside the application: Pack="false" keeps
+         the copies NuGet adds for content files out of the package. -->
+    <Content Include="../../site/docs/**/*.md" Link="content/user-guide/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Pack="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="XenoAtom.CommandLine" />
+    <PackageReference Include="XenoAtom.Logging" />
+    <!-- Its traces, metrics and logs over OTLP when a collector is named (doc/fleet/observability.md). -->
+    <PackageReference Include="OpenTelemetry" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The OTLP export shared with altaserver, as source: the server references no CodeAlta library but the protocol. -->
+    <Compile Include="../Shared/FleetTelemetry/FleetOtlpPipeline.cs" Link="Telemetry/FleetOtlpPipeline.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
+    <ProjectReference Include="..\CodeAlta.Automations\CodeAlta.Automations.csproj" />
+    <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
+    <ProjectReference Include="..\CodeAlta.Fleet\CodeAlta.Fleet.csproj" />
+    <ProjectReference Include="..\CodeAlta.Fleet.Update\CodeAlta.Fleet.Update.csproj" />
+    <ProjectReference Include="..\CodeAlta.Hosting\CodeAlta.Hosting.csproj" />
+    <ProjectReference Include="..\CodeAlta.LiveTool\CodeAlta.LiveTool.csproj" />
+    <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.Acp\CodeAlta.Plugin.Acp.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.CodexCli\CodeAlta.Plugin.CodexCli.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.Git\CodeAlta.Plugin.Git.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.Jira\CodeAlta.Plugin.Jira.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.Mcp\CodeAlta.Plugin.Mcp.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.Statistics\CodeAlta.Plugin.Statistics.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugins\CodeAlta.Plugins.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.Node.Tests" />
+  </ItemGroup>
+</Project>

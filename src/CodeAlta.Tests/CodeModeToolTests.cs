@@ -73,6 +73,37 @@ public sealed class CodeModeToolTests
     }
 
     [TestMethod]
+    public async Task Exec_KeepsALongResultWhole_WithTheSecretsOfTheMachineMasked()
+    {
+        const string secret = "sk-exec-5e0d1c9b3a";
+        using var root = TestTempDirectory.Create();
+        var folder = Path.Combine(root.Path, "tool-output");
+        await using var runs = new CodeModeRunRegistry(null)
+        {
+            ResultFolder = (_, _) => ValueTask.FromResult<string?>(folder),
+            SecretMasker = new CodeAlta.Agent.Runtime.AgentSecretMasker(() => [secret]),
+        };
+        var (exec, _) = Create(root.Path, runs, sourceFolder: Path.Combine(root.Path, "sources"));
+
+        // The script builds the secret: its source holds none.
+        var result = await InvokeAsync(exec, """
+            // @exec: {"max_output_tokens": 300}
+            const key = "sk-exec-" + "5e0d1c9b3a";
+            return { lines: Array.from({ length: 400 }, (_, i) => `line ${i} ${key}`).join("\n") };
+            """, new FakeTools());
+
+        Assert.IsTrue(result.Success, Text(result));
+        var files = Directory.GetFiles(folder);
+        Assert.IsNotEmpty(files);
+        foreach (var file in files)
+        {
+            var text = File.ReadAllText(file);
+            Assert.IsFalse(text.Contains(secret, StringComparison.Ordinal), $"{Path.GetFileName(file)} holds the secret.");
+            StringAssert.Contains(text, "line 399 ***");
+        }
+    }
+
+    [TestMethod]
     public void Exec_HasARawTextForm_WithTheGrammarOfCodex_AndKeepsItsJsonForm()
     {
         using var root = TestTempDirectory.Create();

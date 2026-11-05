@@ -5,8 +5,8 @@ using System.Text.Json;
 using System.Threading.Channels;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Automations;
 using CodeAlta.Catalog;
-using CodeAlta.Desktop.Automations;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
@@ -22,6 +22,87 @@ public sealed class AutomationHostTests
     private const string Epoch = "11111111-1111-4111-8111-111111111111";
     private static readonly DateTimeOffset Noon = new(2026, 10, 6, 12, 0, 0, TimeSpan.Zero);
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+
+    [TestMethod]
+    public async Task Rpc_KeepsEverySettingOfATriggerOfAnotherTool_AndTestsItsConnection()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var slack = new AutomationTriggerItem("slack", 0, 1, [], [], null, "message", "trusted", null, null)
+        {
+            Integration = new AutomationIntegrationItem(null, null, null, null, null, "${secret:SLACK_APP}", "${secret:SLACK_BOT}", "C0123ABCDEF", "deploy", null, null, null, null, null, [], true),
+        };
+        var saved = await fixture.Rpc.SaveAsync(new(Epoch, Input("Deploys") with { Triggers = [slack] }, null), default);
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+
+        var listed = (await fixture.Rpc.ListAsync(new(Epoch), default)).Items.Single(item => item.Id == saved.Id).Triggers.Single();
+        Assert.AreEqual(("slack", "message"), (listed.Type, listed.Event));
+        Assert.AreEqual(slack.Integration, listed.Integration! with { Fields = slack.Integration!.Fields });
+        // A token written in clear is refused with the reason, before anything is written.
+        var leaky = slack with { Integration = slack.Integration! with { BotToken = "xoxb-1-real-token" } };
+        var refused = await fixture.Rpc.SaveAsync(new(Epoch, Input("Leaky") with { Triggers = [leaky] }, null), default);
+        Assert.AreEqual("refused", refused.Status);
+        StringAssert.Contains(refused.Message, "${secret:NAME}");
+        // This fixture's engine watches no other tool: the test says so, the sample too.
+        var test = await fixture.Rpc.TestTriggerAsync(new(Epoch, null, slack, null, null), default);
+        Assert.AreEqual(("refused", "This host does not watch other tools."), (test.Status, test.Message));
+        Assert.AreEqual("refused", (await fixture.Rpc.SampleEventAsync(new(Epoch, null, slack, "x", null), default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Rpc.TryRunAsync(new("other", saved.Id!, 0, null), default)).Status);
+        Assert.AreEqual("refused", (await fixture.Rpc.CreateHookAsync(new(Epoch, "node-1", "webhook", null), default)).Status, "no server reaches that machine");
+        var address = await fixture.Rpc.HookAddressAsync(new(Epoch, "node-1", "abcdefghijklmnopqrstuvwxyz"), default);
+        Assert.AreEqual(("refused", (string?)null), (address.Status, address.Url));
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.HookAddressAsync(new(Epoch, "node-1", "../../etc"), default)).Status);
+        // A take-over names a run in progress of an automation with autonomy: none is, so it is refused with why.
+        Assert.AreEqual("stale_epoch", (await fixture.Rpc.TakeOverAsync(new("other", saved.Id!, "run-1"), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.TakeOverAsync(new(Epoch, saved.Id!, "run\n1"), default)).Status);
+        Assert.AreEqual("not_found", (await fixture.Rpc.TakeOverAsync(new(Epoch, "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d79", "run-1"), default)).Status);
+        var taken = await fixture.Rpc.TakeOverAsync(new(Epoch, saved.Id!, "run-1"), default);
+        Assert.AreEqual(("refused", (string?)null), (taken.Status, taken.SessionId));
+        StringAssert.Contains(taken.Message, "not in progress");
+    }
+
+    [TestMethod]
+    public async Task TakeOver_IsAPersonsCommand_ThatAPluginRunsForTheUser()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var agent = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1", SourceProjectId = fixture.Project.Id };
+        foreach (var caller in new[] { agent, AltaCallerIdentity.Cli, agent with { OnBehalfOfUser = true } })
+        {
+            var refused = await fixture.Run(["automation", "takeover", "run-1"], caller: caller);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, refused.Code, refused.Text);
+            StringAssert.Contains(refused.Text, "automation.needsPerson");
+        }
+
+        var user = AltaCallerIdentity.Cli with { OnBehalfOfUser = true };
+        var unknown = await fixture.Run(["automation", "takeover", "run-1"], caller: user);
+        Assert.AreEqual(AltaExitCodes.NotFound, unknown.Code, unknown.Text);
+        Assert.AreEqual(AltaExitCodes.Usage, (await fixture.Run(["automation", "takeover"], caller: user)).Code);
+        Assert.AreEqual(AltaExitCodes.Usage, (await fixture.Run(["automation", "takeover", "run-1", "--machine", "node-1"], caller: user)).Code, "a machine goes with its automation");
+        var remote = await fixture.Run(["automation", "takeover", "run-1", "--machine", "node-1", "--automation", "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77"], caller: user);
+        StringAssert.Contains(remote.Text, "reached from no fleet", "without a fleet, a run of a machine of a server is not taken over");
+        var waiting = await fixture.Run(["automation", "waiting"], caller: user);
+        Assert.AreEqual((AltaExitCodes.Success, 0), (waiting.Code, Of(waiting.Records, "alta.automation.waiting").Length));
+    }
+
+    [TestMethod]
+    public async Task Show_SaysWhatTheRunsOfAnAutomationDoWithoutAPerson()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var autonomy = new AutomationAutonomyItem(["k8s_restart_pod"], 3, 30, "wait", "owner");
+        var saved = await fixture.Rpc.SaveAsync(new(Epoch, Input("Diagnosis") with { Autonomy = autonomy }, null), default);
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        var plain = await fixture.Rpc.SaveAsync(new(Epoch, Input("Plain"), null), default);
+        // The schedule of an on-call tool goes to the file and back through the page, with its approvers.
+        var onCall = new AutomationOnCallItem("pagerduty", "PSCHED", "${secret:PD}", null);
+        var paged = await fixture.Rpc.SaveAsync(new(Epoch, Input("Paged") with { Autonomy = autonomy with { Approvers = "oncall", OnCall = onCall } }, null), default);
+        Assert.AreEqual("ok", paged.Status, paged.Message);
+        Assert.AreEqual(onCall, (await fixture.Rpc.ListAsync(new(Epoch), default)).Items.Single(item => item.Id == paged.Id).Autonomy!.OnCall);
+
+        var shown = (await fixture.One("alta.automation", "automation", "show", saved.Id!)).GetProperty("autonomy");
+        Assert.AreEqual("k8s_restart_pod", shown.GetProperty("allowedTools")[0].GetString());
+        Assert.AreEqual((3, 30, "wait", "owner"), (shown.GetProperty("maxCallsPerHour").GetInt32(), shown.GetProperty("approvalTimeout").GetInt32(),
+            shown.GetProperty("onTimeout").GetString(), shown.GetProperty("approvers").GetString()));
+        Assert.IsFalse((await fixture.One("alta.automation", "automation", "show", plain.Id!)).TryGetProperty("autonomy", out var none) && none.ValueKind != JsonValueKind.Null);
+    }
 
     [TestMethod]
     public async Task Rpc_Lists_Saves_AndMovesAnAutomationBetweenTheFiles()
@@ -261,10 +342,13 @@ public sealed class AutomationHostTests
             "--model", "codex:gpt@low", "--catch-up", "--content", "Review what changed today.");
         var id = Text(created, "id")!;
         Assert.IsTrue(AutomationDefinition.IsId(id));
-        Assert.AreEqual(("Nightly review", "True", "project", fixture.Project.Id, fixture.GlobalPath, "codex:gpt@low"),
+        // An agent creates it disabled: a person enables it.
+        Assert.AreEqual(("Nightly review", "False", "project", fixture.Project.Id, fixture.GlobalPath, "codex:gpt@low"),
             (Text(created, "name"), Text(created, "enabled"), Text(created, "runsIn"), Text(created, "projectId"), Text(created, "file"), Text(created, "model")));
         CollectionAssert.AreEqual(new[] { "daily@23:00", "issue@opened+anyone" }, created.GetProperty("triggers").EnumerateArray().Select(static value => value.GetString()).ToArray());
-        Assert.AreEqual(Noon.AddHours(11), created.GetProperty("nextRunAt").GetDateTimeOffset());
+        Assert.IsFalse(created.TryGetProperty("nextRunAt", out var due) && due.ValueKind != JsonValueKind.Null, "A disabled automation is not due.");
+        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "enable", id], caller: AltaCallerIdentity.Cli)).Code);
+        Assert.AreEqual(Noon.AddHours(11), (await fixture.One("alta.automation", "automation", "show", id)).GetProperty("nextRunAt").GetDateTimeOffset());
         Assert.IsTrue(fixture.Service.Snapshot.Find(id)!.Definition.CatchUp);
 
         // In the file of its project, from stdin, disabled, as a chat.
@@ -364,7 +448,9 @@ public sealed class AutomationHostTests
         var disabled = await fixture.One("alta.automation.changed", "automation", "disable", id);
         Assert.AreEqual((id, "False"), (Text(disabled, "id"), Text(disabled, "enabled")));
         Assert.IsFalse(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
-        Assert.AreEqual("True", Text(await fixture.One("alta.automation.changed", "automation", "enable", id), "enabled"));
+        StringAssert.Contains((await fixture.Run(["automation", "enable", id])).Text, "automation.needsPerson", "An agent enables none.");
+        var enabled = await fixture.Run(["automation", "enable", id], caller: AltaCallerIdentity.Cli);
+        Assert.AreEqual("True", Text(Of(enabled.Records, "alta.automation.changed").Single(), "enabled"));
         Assert.IsTrue(fixture.Service.Snapshot.Find(shared) is { Definition.Enabled: false }, "Another automation is not touched.");
 
         Assert.AreEqual(id, Text(await fixture.One("alta.automation.deleted", "automation", "delete", id), "id"));
@@ -447,7 +533,7 @@ public sealed class AutomationHostTests
         var id = (await review.Rpc.SaveAsync(new(Epoch, input, null), default)).Id!;
         var enable = await review.Run(["automation", "enable", id]);
         Assert.AreEqual(AltaExitCodes.PolicyDenied, enable.Code, enable.Text);
-        StringAssert.Contains(enable.Text, "automation.commandDenied");
+        StringAssert.Contains(enable.Text, "automation.needsPerson", "An agent enables none, a command trigger or not.");
         Assert.IsFalse(review.Service.Snapshot.Find(id)!.Definition.Enabled);
         Assert.AreEqual("ok", (await review.Rpc.SetEnabledAsync(new(Epoch, id, true), default)).Status);
         review.Service.Tick(Noon);
@@ -480,8 +566,12 @@ public sealed class AutomationHostTests
         Assert.AreEqual(AltaExitCodes.PolicyDenied, enable.Code, enable.Text);
         StringAssert.Contains(enable.Text, "automation.commandDenied");
         Assert.IsFalse(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
+        // Another session passes the review of its commands, and is told a person enables it: a person does.
         var other = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "another-session", SourceProjectId = fixture.Project.Id };
-        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "enable", id], caller: other)).Code);
+        var byOther = await fixture.Run(["automation", "enable", id], caller: other);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, byOther.Code, byOther.Text);
+        StringAssert.Contains(byOther.Text, "automation.needsPerson");
+        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "enable", id], caller: AltaCallerIdentity.Cli)).Code);
         Assert.IsTrue(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
         Assert.AreEqual("False", Text(await fixture.One("alta.automation.changed", "automation", "disable", id), "enabled"));
     }
@@ -533,7 +623,19 @@ public sealed class AutomationHostTests
             var created = await fixture.Run(["automation", "create", "--name", "Compatible", "--chat", "--disabled", "--trigger", "daily@09:00", "--content", "Work."], caller: caller);
             Assert.AreEqual(AltaExitCodes.Success, created.Code, created.Text);
             var id = Text(Of(created.Records, "alta.automation.created").Single(), "id")!;
-            Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "enable", id], caller: caller)).Code);
+            var enable = await fixture.Run(["automation", "enable", id], caller: caller);
+            if (noSession)
+            {
+                Assert.AreEqual(AltaExitCodes.Success, enable.Code, enable.Text);
+            }
+            else
+            {
+                // An agent enables none, whatever its mode: a person does.
+                Assert.AreEqual(AltaExitCodes.PolicyDenied, enable.Code, enable.Text);
+                StringAssert.Contains(enable.Text, "automation.needsPerson");
+                Assert.AreEqual("ok", (await fixture.Rpc.SetEnabledAsync(new(Epoch, id, true), default)).Status);
+            }
+
             // Reaching a deliberately refusing fake proves admission without executing a session or command.
             fixture.Runner.Refuse = "Controlled runner refusal.";
             var run = await fixture.Run(["automation", "run", id], caller: caller);
@@ -542,6 +644,36 @@ public sealed class AutomationHostTests
             Assert.AreEqual(1, fixture.Runner.Starts.Count);
             Assert.AreEqual(0, fixture.Commands.Count);
         }, sessionPermissionModes: modes, inherit: () => inherit, review: () => review);
+
+    [TestMethod]
+    public Task AnAgent_CreatesAnAutomationDisabled_AndEnablesNone_APersonEnablesIt()
+        => WithPermissionCallerAsync(SessionPermissionModes.Bypass, async (fixture, host, caller) =>
+        {
+            // What would run unattended stays disabled until a person enables it (doc/fleet/access-control.md), even for a
+            // session that bypasses permissions.
+            var created = await fixture.Run(["automation", "create", "--name", "Nightly", "--chat", "--trigger", "daily@23:00", "--content", "Work."], caller: caller);
+            Assert.AreEqual(AltaExitCodes.Success, created.Code, created.Text);
+            var record = Of(created.Records, "alta.automation.created").Single();
+            var id = Text(record, "id")!;
+            Assert.AreEqual("False", Text(record, "enabled"));
+            StringAssert.Contains(Text(record, "note"), "A person enables it");
+            Assert.IsFalse(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
+
+            var enable = await fixture.Run(["automation", "enable", id], caller: caller);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, enable.Code, enable.Text);
+            StringAssert.Contains(enable.Text, "automation.needsPerson");
+            Assert.IsFalse(fixture.Service.Snapshot.Find(id)!.Definition.Enabled, "Nothing is enabled.");
+
+            // The person enables it: from the window, or with alta from no session.
+            Assert.AreEqual("ok", (await fixture.Rpc.SetEnabledAsync(new(Epoch, id, true), default)).Status);
+            Assert.IsTrue(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
+            Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "disable", id], caller: caller)).Code, "An agent still disables one.");
+            Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "enable", id], caller: AltaCallerIdentity.Cli)).Code);
+            Assert.IsTrue(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
+            var byPerson = await fixture.Run(["automation", "create", "--name", "By the person", "--chat", "--trigger", "daily@09:00", "--content", "Work."], caller: AltaCallerIdentity.Cli);
+            Assert.AreEqual("True", Text(Of(byPerson.Records, "alta.automation.created").Single(), "enabled"));
+            Assert.AreEqual(0, fixture.Runner.Starts.Count);
+        });
 
     [TestMethod]
     public Task WhatASessionCanUse_ListsThePluginsOfItsSpaceThatAreTurnedOn_AlsoWhenNoPluginRuns()
@@ -876,6 +1008,144 @@ public sealed class AutomationHostTests
             var workspace = new WorkspaceService(host, Epoch);
             await workspace.CloseSessionsAsync();
             await workspace.CloseImportsAsync();
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task Runner_GuardsTheToolsOfARunWithAutonomyWhileItWorks_AndRefusesAModeThatAllowsEverything(bool approvesEverything)
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-automation-autonomy-").FullName;
+        try
+        {
+            var global = Path.Combine(root, "global");
+            var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home");
+            var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            var provider = new RunnerProvider();
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                AutoApproveOwnedPermissions = approvesEverything,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => new RunnerRuntime(provider)),
+            });
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            var runner = new AutomationRunner(host);
+            var entry = new AutomationEntry(new("0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d79", "Diagnosis")
+            {
+                Prompt = "Diagnose the incident.", Autonomy = new AutomationAutonomy { AllowedTools = ["k8s_restart_pod"] },
+            }, new AutomationSource(Path.Combine(global, "config.toml"), null, null), project.Id, project.ProjectPath, null);
+
+            var start = await runner.StartAsync(entry, "run-1", entry.Definition.Prompt, null, dryRun: false, default);
+
+            if (approvesEverything)
+            {
+                StringAssert.Contains(start.Problem, "permission mode that asks");
+                Assert.IsNull(start.Completion);
+                Assert.IsNull(host.ToolGuards.Find(start.SessionId!));
+            }
+            else
+            {
+                Assert.IsNull(start.Problem);
+                await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+                Assert.AreSame(start.Guard, host.ToolGuards.Find(start.SessionId!), "the guard is the session's from its first tool call");
+                Assert.IsFalse(start.Guard!.DryRun);
+                provider.Release.SetResult();
+                Assert.AreEqual(AutomationRun.Completed, (await start.Completion!.WaitAsync(Patience)).Status);
+                Assert.IsNull(host.ToolGuards.Find(start.SessionId!), "it leaves with the run");
+            }
+
+            var workspace = new WorkspaceService(host, Epoch);
+            await workspace.CloseSessionsAsync();
+            await workspace.CloseImportsAsync();
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [TestMethod]
+    public async Task Runner_TheGuardOfARunWithAutonomy_StaysWithItsSession_FollowsItsChildren_AndOutlivesARestart()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-automation-guard-").FullName;
+        try
+        {
+            var global = Path.Combine(root, "global");
+            var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home");
+            var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            var provider = new RunnerProvider();
+            CodeAltaHostOptions Options() => new()
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => new RunnerRuntime(provider)),
+            };
+            var entry = new AutomationEntry(new("0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d79", "Diagnosis")
+            {
+                Prompt = "Diagnose the incident.", Autonomy = new AutomationAutonomy { AllowedTools = ["k8s_restart_pod"] },
+            }, new AutomationSource(Path.Combine(global, "config.toml"), null, null), null, null, null);
+            string sessionId, childId, plainId;
+            await using (var host = await CodeAltaHost.CreateAsync(Options()))
+            {
+                var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+                entry = entry with { ProjectId = project.Id, ProjectPath = project.ProjectPath };
+                var runner = new AutomationRunner(host);
+                var start = await runner.StartAsync(entry, "run-1", entry.Definition.Prompt, null, dryRun: false, default);
+                Assert.IsNull(start.Problem);
+                sessionId = start.SessionId!;
+                await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+                // A child the run starts while it works is checked by the guard of the run itself.
+                childId = (await host.Commands.CreateDraftSessionAsync(project, provider.Descriptor, "Child", new AltaActorProvenance
+                {
+                    Kind = AltaActorProvenance.WorkflowKind, SourceSessionId = sessionId, CreatedAt = DateTimeOffset.UtcNow,
+                }, null, null, null, null, null, null)).SessionId;
+                plainId = (await host.Commands.CreateDraftSessionAsync(project, provider.Descriptor, "Plain", null, null, null, null, null, null, null)).SessionId;
+                Assert.AreSame(start.Guard, await host.ToolGuards.FindAsync(childId, default), "a child of the run is checked by the guard of the run");
+                Assert.IsNull(await host.ToolGuards.FindAsync(plainId, default));
+                provider.Release.SetResult();
+                Assert.AreEqual(AutomationRun.Completed, (await start.Completion!.WaitAsync(Patience)).Status);
+
+                // Once its prompt is answered, a later turn of the session (a reminder, a job, a queued prompt) is checked still.
+                var later = await host.ToolGuards.FindAsync(sessionId, default);
+                Assert.IsInstanceOfType<AutomationRunGuard>(later, "the session keeps a guard after its first turn");
+                Assert.IsNotNull(await host.ToolGuards.FindAsync(childId, default));
+                // Nobody can be asked in this host: the call that would wait for a person is not made.
+                Assert.IsNotNull(await host.ToolGuards.CheckAsync(sessionId, new AgentToolSpec("deploy_everything", "Deploys.", default), default, null,
+                    new CancellationTokenSource(TimeSpan.FromSeconds(2)).Token).AsTask().ContinueWith(static task => task.IsCanceled ? "waits for a person" : task.Result),
+                    "a tool the automation does not allow is not called without a person");
+                var workspace = new WorkspaceService(host, Epoch);
+                await workspace.CloseSessionsAsync();
+                await workspace.CloseImportsAsync();
+            }
+
+            // After a restart, the session and its child are resumed with the guard of the automation that started them.
+            await using (var host = await CodeAltaHost.CreateAsync(Options()))
+            {
+                var runner = new AutomationRunner(host);
+                Assert.IsInstanceOfType<AutomationRunGuard>(await host.ToolGuards.FindAsync(sessionId, default));
+                Assert.IsInstanceOfType<AutomationRunGuard>(await host.ToolGuards.FindAsync(childId, default));
+                Assert.IsNull(await host.ToolGuards.FindAsync(plainId, default));
+                // What the automation is now decides: a try stays a try, from the run it records.
+                runner.Origin = (_, _) => (entry, true);
+                Assert.IsTrue(((AutomationRunGuard)(await host.ToolGuards.FindAsync(childId, default))!).DryRun);
+                var workspace = new WorkspaceService(host, Epoch);
+                await workspace.CloseSessionsAsync();
+                await workspace.CloseImportsAsync();
+            }
         }
         finally
         {

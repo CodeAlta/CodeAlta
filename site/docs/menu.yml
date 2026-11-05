@@ -5,6 +5,7 @@ doc:
   - {path: principles.md, title: "<i class='bi bi-compass' aria-hidden='true'></i> Principles"}
   - {path: benchmark.md, title: "<i class='bi bi-speedometer2' aria-hidden='true'></i> Harness Benchmark"}
   - {path: model-providers/readme.md, title: "<i class='bi bi-cpu' aria-hidden='true'></i> Model Providers", folder: true}
+  - {path: secrets.md, title: "<i class='bi bi-key' aria-hidden='true'></i> Secrets and Variables"}
   - {path: model-tiers.md, title: "<i class='bi bi-layers' aria-hidden='true'></i> Model Tiers"}
   - {path: prompts.md, title: "<i class='bi bi-chat-square-text' aria-hidden='true'></i> Agent Prompts"}
   - {path: workspace/readme.md, title: "<i class='bi bi-display' aria-hidden='true'></i> Workspace", folder: true}
@@ -16,6 +17,7 @@ doc:
   - {path: work-items.md, title: "<i class='bi bi-list-check' aria-hidden='true'></i> Work Items"}
   - {path: bookmarks.md, title: "<i class='bi bi-bookmark' aria-hidden='true'></i> Bookmarks"}
   - {path: automations.md, title: "<i class='bi bi-lightning-charge' aria-hidden='true'></i> Automations"}
+  - {path: fleet/readme.md, title: "<i class='bi bi-pc-display-horizontal' aria-hidden='true'></i> Fleet", folder: true}
   - {path: command-line.md, title: "<i class='bi bi-terminal' aria-hidden='true'></i> Command Line"}
   - {path: search.md, title: "<i class='bi bi-search' aria-hidden='true'></i> Search"}
   - {path: speech.md, title: "<i class='bi bi-mic' aria-hidden='true'></i> Speech to Prompt"}

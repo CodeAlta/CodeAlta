@@ -1,0 +1,209 @@
+using System.Text.Json;
+using CodeAlta.Fleet.Protocol;
+using CodeAlta.Server.Control;
+using CodeAlta.Server.Storage;
+
+namespace CodeAlta.Server.Services;
+
+/// <summary>
+/// What machines publish over their control connection: their inventory and the facts of their sessions. Only the
+/// allow-list is kept (<c>doc/fleet/security-and-privacy.md</c>, what the server sees): the contracts carry no title,
+/// project or path, and the sealed metadata stays opaque text.
+/// </summary>
+public sealed class PublicationService
+{
+    /// <summary>The most facts in one batch.</summary>
+    public const int MaxFactsPerBatch = 500;
+
+    /// <summary>The largest sealed metadata of a session, in characters.</summary>
+    public const int MaxSealedMetadataLength = 64 * 1024;
+
+    private const int MaxIdLength = 128;
+    private const int MaxTextLength = 128;
+    private const int MaxListItems = 64;
+
+    private readonly ICoordinatorStore _store;
+    private readonly DirectoryHub _directory;
+    private readonly TimeProvider _time;
+
+    /// <summary>Initializes a new instance of the <see cref="PublicationService"/> class.</summary>
+    /// <param name="store">The store.</param>
+    /// <param name="directory">Where changes are announced.</param>
+    /// <param name="time">The clock.</param>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
+    public PublicationService(ICoordinatorStore store, DirectoryHub directory, TimeProvider time)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(directory);
+        ArgumentNullException.ThrowIfNull(time);
+        _store = store;
+        _directory = directory;
+        _time = time;
+    }
+
+    /// <summary>Gets the instruments of the publications; null for none.</summary>
+    public Telemetry.ServerMetrics? Metrics { get; init; }
+
+    /// <summary>Keeps the inventory of a machine and announces it when it changed.</summary>
+    /// <param name="device">The device of the machine.</param>
+    /// <param name="publication">The publication.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The acknowledged sequence.</returns>
+    /// <exception cref="CoordinatorException">The inventory does not read (<see cref="CoordinatorErrorCodes.PublicationInvalid"/>).</exception>
+    public Task<FleetPublishAck> PublishInventoryAsync(DeviceRecord device, FleetInventoryPublish? publication, CancellationToken cancellationToken)
+        => CountedAsync("inventory", () => PublishInventoryCoreAsync(device, publication, cancellationToken));
+
+    private async Task<FleetPublishAck> PublishInventoryCoreAsync(DeviceRecord device, FleetInventoryPublish? publication, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        if (publication?.Inventory is not { } inventory || publication.Sequence <= 0) throw Invalid("inventory.publish needs a sequence from 1 and an inventory.");
+        // Written again from the contract: what the device sent beyond it is not kept.
+        var kept = new FleetMachineInventory(Text(inventory.Name, "name", required: true)!, Text(inventory.Os, "os", required: true)!,
+            Text(inventory.Architecture, "architecture"), Text(inventory.AppVersion, "appVersion"), List(inventory.Capabilities, "capabilities"),
+            List(inventory.Labels, "labels"), List(inventory.Providers, "providers"), List(inventory.AccountProviders, "accountProviders"));
+        var now = _time.GetUtcNow();
+        var machine = new MachineRecord(device.Id, device.OrganizationId, JsonSerializer.Serialize(kept, FleetServerJsonContext.Default.FleetMachineInventory),
+            publication.Sequence, now);
+        // A node renamed (altanode run --name) is listed by its new name in the devices too, as on the canvas: the name of its newest inventory.
+        var name = device.Kind == FleetDeviceKinds.Node && kept.Name.Trim() is { Length: > 0 and <= SetupService.MaxNameLength } trimmed && !trimmed.Any(char.IsControl)
+            ? trimmed : null;
+        var result = await _store.PublishInventoryAsync(machine, name, cancellationToken).ConfigureAwait(false);
+        if (result.Applied && !await RevokedAsync(device, cancellationToken).ConfigureAwait(false))
+        {
+            _directory.PublishFrom(device.OrganizationId, device.Id, [new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Machine, device.Id,
+                Machine: new FleetDirectoryMachine(device.Id, device.Kind, kept, now))]);
+        }
+
+        return new FleetPublishAck(result.Ack);
+    }
+
+    // A handler in flight when its device was revoked keeps what it wrote (no directory lists a revoked machine) but announces
+    // nothing: the watchers heard that the machine left, and a late change of it would list it again.
+    private async Task<bool> RevokedAsync(DeviceRecord device, CancellationToken cancellationToken)
+        => (await _store.GetDeviceAsync(device.Id, cancellationToken).ConfigureAwait(false))?.Status is null or DeviceStatuses.Revoked;
+
+    /// <summary>Keeps the facts of the sessions of a machine and announces those that changed.</summary>
+    /// <param name="device">The device of the machine.</param>
+    /// <param name="publication">The publication.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The acknowledged sequence and what happened to the facts.</returns>
+    /// <exception cref="CoordinatorException">A fact does not read (<see cref="CoordinatorErrorCodes.PublicationInvalid"/>).</exception>
+    public Task<FleetFactsPublishResult> PublishFactsAsync(DeviceRecord device, FleetFactsPublish? publication, CancellationToken cancellationToken)
+        => CountedAsync("facts", () => PublishFactsCoreAsync(device, publication, cancellationToken));
+
+    private async Task<FleetFactsPublishResult> PublishFactsCoreAsync(DeviceRecord device, FleetFactsPublish? publication, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        if (publication?.Facts is not { } facts || publication.Sequence <= 0) throw Invalid("facts.publish needs a sequence from 1 and facts.");
+        if (facts.Count > MaxFactsPerBatch) throw Invalid($"facts.publish takes at most {MaxFactsPerBatch} facts.");
+        var now = _time.GetUtcNow();
+        var records = new List<SessionRecord>(facts.Count);
+        foreach (var fact in facts)
+        {
+            if (fact is null) throw Invalid("A fact cannot be null.");
+            if (fact.Epoch < 0 || fact.Version < 0) throw Invalid("The epoch and the version of a fact cannot be negative.");
+            if (fact.SealedMetadata is { Length: > MaxSealedMetadataLength }) throw Invalid($"The sealed metadata of a session is at most {MaxSealedMetadataLength} characters.");
+            var counts = fact.Counts ?? new FleetSessionCounts();
+            if (counts.Turns < 0 || counts.ToolCalls < 0 || counts.InputTokens < 0 || counts.OutputTokens < 0) throw Invalid("The counts of a session cannot be negative.");
+            records.Add(new SessionRecord(Text(fact.SessionId, "sessionId", required: true, MaxIdLength)!, device.OrganizationId, device.Id, fact.Epoch, fact.Version,
+                Text(fact.State, "state", required: true)!, fact.CreatedAt, fact.UpdatedAt, Text(fact.ProviderType, "providerType"), Text(fact.Model, "model"),
+                counts.Turns, counts.ToolCalls, counts.InputTokens, counts.OutputTokens, fact.SealedMetadata, now, Text(fact.PersonId, "personId", required: false, MaxIdLength))
+            {
+                // Relayed as the machine signed it, for the devices that open a grant of the session to verify; the server reads nothing of it.
+                PersonSignature = fact.PersonId is null ? null : Text(fact.PersonSignature, "personSignature", required: false, MaxIdLength),
+            });
+        }
+
+        var result = await _store.PublishSessionFactsAsync(device.Id, publication.Sequence, records, cancellationToken).ConfigureAwait(false);
+        var announce = !await RevokedAsync(device, cancellationToken).ConfigureAwait(false);
+        var announced = new List<FleetDirectoryChange>();
+        int applied = 0, unchanged = 0;
+        var stale = new List<string>();
+        foreach (var (record, outcome) in result.Outcomes)
+        {
+            switch (outcome)
+            {
+                case SessionFactOutcome.Applied:
+                    applied++;
+                    if (announce) announced.Add(new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Session, record.Id, Session: record.ToDirectory()));
+                    break;
+                case SessionFactOutcome.Unchanged:
+                    unchanged++;
+                    break;
+                default:
+                    stale.Add(record.Id);
+                    break;
+            }
+        }
+
+        // Announced together, unless the machine was revoked meanwhile: then the revoke lists what it removes after them, or they go unsent.
+        if (announced.Count > 0) _directory.PublishFrom(device.OrganizationId, device.Id, announced);
+        Metrics?.Facts(applied, unchanged, stale.Count);
+        return new FleetFactsPublishResult(result.Ack, applied, unchanged, stale);
+    }
+
+    /// <summary>
+    /// Deletes the facts of sessions a machine no longer publishes (made Private, or their space unlinked): those it owns,
+    /// audited in the same transaction, and announced as removed to the watchers of the directory.
+    /// </summary>
+    /// <param name="device">The device of the machine.</param>
+    /// <param name="withdrawal">The withdrawal.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The sessions whose facts were deleted.</returns>
+    /// <exception cref="CoordinatorException">The withdrawal does not read (<see cref="CoordinatorErrorCodes.PublicationInvalid"/>).</exception>
+    public Task<FleetFactsWithdrawResult> WithdrawFactsAsync(DeviceRecord device, FleetFactsWithdraw? withdrawal, CancellationToken cancellationToken)
+        => CountedAsync("withdraw", () => WithdrawFactsCoreAsync(device, withdrawal, cancellationToken));
+
+    private async Task<FleetFactsWithdrawResult> WithdrawFactsCoreAsync(DeviceRecord device, FleetFactsWithdraw? withdrawal, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        if (withdrawal?.SessionIds is not { } ids) throw Invalid("facts.withdraw needs the ids of sessions.");
+        if (ids.Count > MaxFactsPerBatch) throw Invalid($"facts.withdraw takes at most {MaxFactsPerBatch} sessions.");
+        var checkedIds = ids.Select(id => Text(id, "sessionIds", required: true, MaxIdLength)!).ToArray();
+        var audit = new AuditEntry("session.withdraw", AuditEntry.Success, device.OwnerPersonId, device.Id, device.Id, null, null);
+        var removed = await _store.WithdrawSessionFactsAsync(device.Id, checkedIds, audit, cancellationToken).ConfigureAwait(false);
+        foreach (var session in removed)
+        {
+            // The removal names the facts it removed, so that a watcher never removes newer facts it got first.
+            _directory.Publish(device.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.SessionRemoved, session.Id, Session: session.ToDirectory()));
+        }
+
+        return new FleetFactsWithdrawResult([.. removed.Select(static session => session.Id)]);
+    }
+
+    private async Task<T> CountedAsync<T>(string kind, Func<Task<T>> publish)
+    {
+        try
+        {
+            var result = await publish().ConfigureAwait(false);
+            Metrics?.Publication(kind, null);
+            return result;
+        }
+        catch (CoordinatorException exception)
+        {
+            Metrics?.Publication(kind, exception.Code);
+            throw;
+        }
+    }
+
+    private static string? Text(string? value, string field, bool required = false, int maxLength = MaxTextLength)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            if (required) throw Invalid($"{field} is required.");
+            return null;
+        }
+
+        if (value.Length > maxLength || value.Any(char.IsControl)) throw Invalid($"{field} is at most {maxLength} characters, without control characters.");
+        return value;
+    }
+
+    private static IReadOnlyList<string>? List(IReadOnlyList<string>? values, string field)
+    {
+        if (values is null) return null;
+        if (values.Count > MaxListItems) throw Invalid($"{field} has at most {MaxListItems} items.");
+        return values.Select(value => Text(value, field, required: true)!).ToArray();
+    }
+
+    private static CoordinatorException Invalid(string message) => CoordinatorException.BadRequest(CoordinatorErrorCodes.PublicationInvalid, message);
+}

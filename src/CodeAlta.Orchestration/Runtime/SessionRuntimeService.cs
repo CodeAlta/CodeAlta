@@ -819,7 +819,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         if (!Identities.IsEnabled) return SessionIdentity.Usual;
         if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated) return entry.Identity;
         return await GetSessionSpaceAsync(sessionId, cancellationToken).ConfigureAwait(false) is { } record
-            ? await Identities.ResolveAsync(record.SpaceId, record.ProjectId, cancellationToken).ConfigureAwait(false)
+            ? await Identities.ResolveAsync(record.SpaceId, record.ProjectId, sessionId, record.ParentSessionId, cancellationToken).ConfigureAwait(false)
             : SessionIdentity.Usual;
     }
 
@@ -1942,6 +1942,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         if (_transitions.TryGetValue(session.SessionId, out var transition))
             return new CoordinatorPreparation(null, transition);
         _entries.TryGetValue(session.SessionId, out var existing);
+        // What the host requires the session to do without, also after a restart that lost what was set on it: an attachment
+        // that does not do without it is not reused.
+        await RequireHostToolPatternsAsync(session, actorCancellationToken).ConfigureAwait(false);
         // A session that runs in the cloud has no conversation here to attach: a prompt, a queue, a compaction or Remote
         // Control of it is refused until it is brought back.
         if (existing is null && await RunsInCloudAsync(session, actorCancellationToken).ConfigureAwait(false))
@@ -2138,6 +2141,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             }
         }
         var agentPromptUsage = ResolveAgentPromptUsage(instructions.PromptBundle, project?.ProjectPath);
+        // The provider the session would run with, as the host allows it to this session (a node: account credentials only for
+        // the sessions of an unattended run), at every attachment: a change of provider, a tier or a fallback, a child.
+        if (ProviderGate is { } providerGate
+            && await providerGate(session, options.ProviderKey ?? options.ProviderId.Value, cancellationToken).ConfigureAwait(false) is { } providerRefused)
+            throw new InvalidOperationException(providerRefused);
         // Read with the instructions, which expand the same patterns into the built-in tools the session does without.
         var toolPatterns = GetDisabledToolPatterns(session.SessionId);
         var providerProviderId = new ModelProviderId(options.ProviderId.Value);
@@ -2152,7 +2160,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var tools = options.Tools;
         // The identity of the space of the session as it is now: the session keeps it until it attaches again,
         // whatever the window shows and whatever is changed in the space meanwhile.
-        var identity = await Identities.ResolveAsync(session.SpaceId, session.ProjectRef, cancellationToken).ConfigureAwait(false);
+        var identity = await Identities.ResolveAsync(session.SpaceId, session.ProjectRef, session.SessionId, session.ParentSessionId, cancellationToken).ConfigureAwait(false);
         // What the programs of the session start with: the identity of its space, and the variables that name the session.
         var processEnvironment = SessionProcessEnvironment.WithMarkers(identity.Environment, session.SessionId,
             options.ProviderKey ?? session.ResolvedProviderKey, options.Model, options.ReasoningEffort);
@@ -4828,6 +4836,16 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             return;
         }
 
+        // The gate admits the prompt now that its turn would start (it may wait: the item stays submitting, so no other
+        // drain takes it); one it refuses fails without reaching the model, and the next one is tried.
+        if (QueuedRunGate is { } gate && await AdmitQueuedAsync(gate, sessionId, work).ConfigureAwait(false) is { } refused)
+        {
+            try { await MarkQueuedPromptFailedAsync(work.Entry, work.Prompt.QueueItemId, refused, DateTimeOffset.UtcNow).ConfigureAwait(false); }
+            finally { work.Use.Dispose(); }
+            await TryDrainNextQueuedPromptAsync(sessionId, existingActor).ConfigureAwait(false);
+            return;
+        }
+
         // The run of a queued prompt (the result of a child session or of a background job) can ask, like a send.
         var askExecution = CreateRunAskExecution(sessionId, work.Entry.Attachment.Cancellation.Token);
         try
@@ -5134,11 +5152,31 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         try
         {
+            // The parent of a session an agent of another machine started runs there: its node keeps the answer for it.
+            if (notification.ParentMachineId is not null)
+            {
+                await RouteToRemoteParentAsync(notification).ConfigureAwait(false);
+                return;
+            }
+
+            if (!await DeliverParentNotificationCoreAsync(notification).ConfigureAwait(false))
+                PublishParentNotificationWarning(notification.SourceSessionId, $"Parent session '{notification.ParentSessionId}' was not found for automatic child-session notification.");
+        }
+        catch (Exception ex) when (!OwnedProviderEventForwarding.HasRetention(ex)
+            && (ex is not OperationCanceledException || _disposed))
+        {
+            PublishParentNotificationWarning(notification.SourceSessionId, $"Automatic parent notification failed without affecting the child session: {ex.Message}");
+        }
+    }
+
+    // Steers the parent's run, else queues the notification for its next turn. False when the parent is not found.
+    private async Task<bool> DeliverParentNotificationCoreAsync(ParentNotificationWork notification)
+    {
+        {
             var parent = await TryResolveSessionForParentDeliveryAsync(notification.ParentSessionId, CancellationToken.None).ConfigureAwait(false);
             if (parent is null)
             {
-                PublishParentNotificationWarning(notification.SourceSessionId, $"Parent session '{notification.ParentSessionId}' was not found for automatic child-session notification.");
-                return;
+                return false;
             }
 
             var prompt = BuildParentPeerAgentMessage(parent, notification);
@@ -5169,7 +5207,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                             CancellationToken.None)
                         .ConfigureAwait(false);
                     await PersistPromptProvenanceAsync(parent, runId.Value, queued: false, SessionPromptProvenance.ParentNotifyKind, prompt, submittedBy, CancellationToken.None).ConfigureAwait(false);
-                    return;
+                    return true;
                 }
                 catch (Exception ex) when (!OwnedProviderEventForwarding.HasRetention(ex))
                 {
@@ -5179,11 +5217,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
             await QueuePromptOwnedBodyAsync(parent, prompt, SessionPromptProvenance.ParentNotifyKind, submittedBy, images: null, CancellationToken.None).ConfigureAwait(false);
             await TryDrainNextQueuedPromptAsync(parent.SessionId).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (!OwnedProviderEventForwarding.HasRetention(ex)
-            && (ex is not OperationCanceledException || _disposed))
-        {
-            PublishParentNotificationWarning(notification.SourceSessionId, $"Automatic parent notification failed without affecting the child session: {ex.Message}");
+            return true;
         }
     }
 
@@ -5413,7 +5447,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         [CodeAlta delegated-agent message]
         Source session: {notification.SourceSessionId}
         Source agent/session: {notification.SourceAgentId}
-        Source project: {notification.SourceProjectId ?? "unknown"}
+        Source project: {notification.SourceProjectId ?? "unknown"}{(notification.SourceMachineName is { } machine ? Environment.NewLine + "Source machine: " + machine : "")}
         Target session: {parent.SessionId}
         Kind: {notification.Kind}
         Reply requested: false
@@ -6460,7 +6494,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 Body: body,
                 RunId: runId,
                 ContentId: contentId,
-                CorrelationId: "auto-parent-" + Guid.NewGuid().ToString("N"));
+                CorrelationId: "auto-parent-" + Guid.NewGuid().ToString("N"),
+                ParentMachineId: CreatedBy?.SourceMachineId);
 
         private static bool ShouldTrackRunId(AgentEvent @event)
         {
@@ -6517,7 +6552,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         string Body,
         string? RunId,
         string ContentId,
-        string CorrelationId);
+        string CorrelationId,
+        string? ParentMachineId = null,
+        string? SourceMachineName = null);
 
     private sealed class EventProjector
     {

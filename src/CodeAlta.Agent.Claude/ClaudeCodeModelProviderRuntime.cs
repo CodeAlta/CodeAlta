@@ -6,7 +6,7 @@ namespace CodeAlta.Agent.Claude;
 /// <summary>
 /// Model provider that runs CodeAlta sessions through the Claude Code CLI the user installed and signed in to.
 /// </summary>
-public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime, IAgentSessionRelocationProvider
+public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime, IAgentSessionRelocationProvider, IAgentSessionTransferProvider
 {
     /// <summary>The provider type of the configuration (<c>type = "claude-code"</c>).</summary>
     public const string ProviderType = "claude-code";
@@ -215,5 +215,44 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime,
         return result.IsAtTarget || result.Status == ClaudeCodeTranscriptRelocationStatus.NothingToMove
             ? result.Message
             : $"The conversation of Claude Code stayed with the old folder ({result.Status}): {result.Message}";
+    }
+
+    /// <summary>
+    /// Copies the transcript the CLI keeps of the conversation of a session into a session bundle, for another machine.
+    /// </summary>
+    /// <inheritdoc />
+    public async Task<(bool Copied, string? Warning)> ExportSessionAsync(AgentSessionState state, string workingDirectory, string destination,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+        if (ClaudeCodeTranscriptRelocation.ReadCliSessionId(state.ProviderState) is not { } cliSessionId) return (false, null);
+        var result = await ClaudeCodeTranscriptRelocation.ExportAsync(_options.ResolveConfigRoot(), cliSessionId, workingDirectory, destination, cancellationToken)
+            .ConfigureAwait(false);
+        return result.Status switch
+        {
+            ClaudeCodeTranscriptRelocationStatus.Moved => (true, null),
+            ClaudeCodeTranscriptRelocationStatus.NothingToMove => (false, null),
+            _ => (false, $"The conversation of Claude Code stays on this machine ({result.Status}): {result.Message}"),
+        };
+    }
+
+    /// <summary>
+    /// Places the transcript of the CLI a session bundle carries in the folder of the working directory of the session
+    /// on this machine, so that <c>--resume</c> started there finds it.
+    /// </summary>
+    /// <inheritdoc />
+    public async Task<string?> ImportSessionAsync(AgentSessionState state, string source, string workingDirectory, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentException.ThrowIfNullOrWhiteSpace(source);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        if (ClaudeCodeTranscriptRelocation.ReadCliSessionId(state.ProviderState) is not { } cliSessionId) return null;
+        var result = await ClaudeCodeTranscriptRelocation.ImportAsync(_options.ResolveConfigRoot(), cliSessionId, source, workingDirectory, cancellationToken)
+            .ConfigureAwait(false);
+        return result.IsAtTarget || result.Status == ClaudeCodeTranscriptRelocationStatus.NothingToMove
+            ? result.Message
+            : $"The conversation of Claude Code could not be placed ({result.Status}): {result.Message}";
     }
 }

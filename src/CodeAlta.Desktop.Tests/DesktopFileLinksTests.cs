@@ -11,92 +11,6 @@ public sealed class DesktopFileLinksTests
     private static readonly char Separator = Path.DirectorySeparatorChar;
 
     [TestMethod]
-    [DataRow("src/Program.cs", "src/Program.cs", null, null)]
-    [DataRow("src/Program.cs#L42", "src/Program.cs", 42, null)]
-    [DataRow("src/Program.cs#L42C7", "src/Program.cs", 42, 7)]
-    [DataRow("src/Program.cs#L42-L50", "src/Program.cs", 42, null)]
-    [DataRow("src/Program.cs#42", "src/Program.cs", 42, null)]
-    [DataRow("src/Program.cs#heading", "src/Program.cs", null, null)]
-    [DataRow("src/Program.cs:42", "src/Program.cs", 42, null)]
-    [DataRow("src/Program.cs:42:7", "src/Program.cs", 42, 7)]
-    [DataRow("src/Program.cs:42-50", "src/Program.cs", 42, null)]
-    [DataRow("src/Program.cs:0", "src/Program.cs", null, null)]
-    [DataRow("README.md:3", "README.md", 3, null)]
-    [DataRow("src%5CProgram.cs", "src/Program.cs", null, null)]
-    [DataRow("my%20notes/a%20b.md", "my notes/a b.md", null, null)]
-    [DataRow("caf%C3%A9.md", "café.md", null, null)]
-    [DataRow("../other/a.cs", "../other/a.cs", null, null)]
-    [DataRow("/src/Program.cs#L3", "/src/Program.cs", 3, null)]
-    [DataRow("~/.alta/config.toml", "~/.alta/config.toml", null, null)]
-    public void ATarget_IsReadAsAPathAndThePlaceInTheFile(string target, string path, int? line, int? column)
-    {
-        Assert.IsTrue(DesktopFileLink.TryParse(target, out var link), target);
-        Assert.AreEqual(path.Replace('/', Separator), link.Path);
-        Assert.AreEqual(line, link.Line);
-        Assert.AreEqual(column, link.Column);
-        Assert.IsFalse(link.IsAddress);
-    }
-
-    [TestMethod]
-    public void ATarget_NamesADriveOrAnAddressOfAFile_AsTheSystemWritesThem()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            foreach (var target in new[] { "C:/code/a.cs:12", "C:%5Ccode%5Ca.cs:12", "/C:/code/a.cs#L12", "c:/code/a.cs#L12" })
-            {
-                Assert.IsTrue(DesktopFileLink.TryParse(target, out var link), target);
-                Assert.AreEqual(@"C:\code\a.cs", link.Path, ignoreCase: true);
-                Assert.AreEqual(12, link.Line);
-            }
-
-            Assert.IsTrue(DesktopFileLink.TryParse("file:///C:/code/my%20report.html#L4", out var address));
-            Assert.AreEqual(@"C:\code\my report.html", address.Path);
-            Assert.IsTrue(address.IsAddress);
-            Assert.AreEqual(4, address.Line);
-            // A stream of a file, and a path that depends on the current folder of a drive.
-            Assert.IsFalse(DesktopFileLink.TryParse("C:/code/a.cs:stream", out _));
-            Assert.IsFalse(DesktopFileLink.TryParse("C:a.cs", out _));
-            Assert.IsFalse(DesktopFileLink.TryParse("file:///code/a.cs", out _));
-        }
-        else
-        {
-            Assert.IsTrue(DesktopFileLink.TryParse("file:///home/me/my%20report.html", out var address));
-            Assert.AreEqual("/home/me/my report.html", address.Path);
-            Assert.IsTrue(address.IsAddress);
-            Assert.IsTrue(DesktopFileLink.TryParse("notes/a:b.md", out var named));
-            Assert.AreEqual("notes/a:b.md", named.Path);
-        }
-    }
-
-    [TestMethod]
-    [DataRow(null)]
-    [DataRow("")]
-    [DataRow("#L10")]
-    [DataRow(" src/a.cs")]
-    [DataRow("src/a.cs\n")]
-    [DataRow("src/a%0A.cs")]
-    [DataRow("//server/share/a.cs")]
-    [DataRow("%5C%5Cserver%5Cshare%5Ca.cs")]
-    [DataRow("//?/C:/code/a.cs")]
-    [DataRow("//./pipe/a")]
-    [DataRow("file://server/share/a.cs")]
-    [DataRow("file:////server/share/a.cs")]
-    [DataRow("mailto:someone@example.invalid")]
-    [DataRow("javascript:alert(1)")]
-    [DataRow("vscode://file/C:/code/a.cs")]
-    [DataRow("app://codealta/index.html")]
-    [DataRow("https://user:secret@example.invalid/")]
-    public void ATarget_ThatIsNoFileOfThisComputer_IsNotRead(string? target)
-        => Assert.IsFalse(DesktopFileLink.TryParse(target, out _), target);
-
-    [TestMethod]
-    public void ATarget_LongerThanTheLimit_IsNotRead()
-    {
-        Assert.IsTrue(DesktopFileLink.TryParse(new string('a', DesktopFileLink.MaximumLength), out _));
-        Assert.IsFalse(DesktopFileLink.TryParse(new string('a', DesktopFileLink.MaximumLength + 1), out _));
-    }
-
-    [TestMethod]
     public async Task ARelativeLinkOfASession_OpensTheFileInTheEditorOfItsProject()
     {
         using var fixture = await Fixture.CreateAsync();
@@ -314,6 +228,70 @@ public sealed class DesktopFileLinksTests
     }
 
     [TestMethod]
+    public async Task TheFullPathOfALink_IsGiven_WhetherOrNotTheFileIsThere()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var file = fixture.Write(fixture.ProjectPath, "src/Program.cs", "text");
+        var service = new MarkdownLinksService(Epoch, _ => true, fixture.Links);
+
+        var reply = await service.PathAsync(new(Epoch, "src/Program.cs#L3", "session"), default);
+        Assert.AreEqual(("ok", file), (reply.Status, reply.FullPath));
+        Assert.AreEqual(Path.Combine(fixture.ProjectPath, "src", "missing.cs"), (await service.PathAsync(new(Epoch, "src/missing.cs", "session"), default)).FullPath);
+        // A path from the root of the project, as a site writes it, is a file of the project while no such file of the disk is there.
+        Assert.AreEqual(Path.Combine(fixture.ProjectPath, "src", "missing.cs"), (await service.PathAsync(new(Epoch, "/src/missing.cs", "session"), default)).FullPath);
+        // An address names its file on the disk, whether or not the file is there: never one of the project.
+        var deleted = Path.Combine(fixture.Root, "elsewhere", "deleted.md");
+        Assert.AreEqual(("ok", deleted), Fields(await service.PathAsync(new(Epoch, new Uri(deleted).AbsoluteUri, "session"), default)));
+        Assert.AreEqual("not_found", await fixture.OpenAsync(new Uri(deleted).AbsoluteUri, session: "session"));
+        Assert.AreEqual(("not_found", null), Fields(await service.PathAsync(new(Epoch, "src/Program.cs"), default)));
+        Assert.AreEqual(("invalid_request", null), Fields(await service.PathAsync(new(Epoch, "mailto:someone@example.invalid", "session"), default)));
+        Assert.AreEqual(("stale_epoch", null), Fields(await service.PathAsync(new("4b0a7c1e-52c9-4f0b-8a55-6d0c2f9e1b77", "src/Program.cs", "session"), default)));
+        Assert.AreEqual(("invalid_request", null), Fields(await new MarkdownLinksService(Epoch, _ => true).PathAsync(new(Epoch, "src/Program.cs", "session"), default)));
+
+        static (string, string?) Fields(MarkdownLinkPathResponse response) => (response.Status, response.FullPath);
+    }
+
+    [TestMethod]
+    public async Task TheFileOfALink_OpensInTheExternalEditor_InTheFolderThatHoldsIt()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var inProject = fixture.Write(fixture.ProjectPath, "src/Program.cs", "text");
+        var worktree = Path.Combine(fixture.Root, "worktree");
+        var inWorktree = fixture.Write(worktree, "a.cs", "text");
+        var alone = fixture.Write(fixture.Root, "elsewhere/notes.txt", "text");
+        fixture.SessionFolders["worktree-session"] = worktree;
+        var editor = fixture.Write(fixture.Root, "editor.exe", "");
+        var started = new List<string>();
+        var service = new MarkdownLinksService(Epoch, _ => true, new DesktopFileLinks(fixture.Projects, new DiskFolders(), new DesktopEditorView(),
+            (sessionId, _) => ValueTask.FromResult(fixture.SessionFolders.GetValueOrDefault(sessionId)), fixture.Files.RootAsync, _ => true, fixture.Root)
+        {
+            ExternalEditors = new ExternalEditors(() => new ExternalEditorChoice(ExternalEditors.CustomId, editor, "{folder} {file}:{line}"), ExternalEditorEnvironment.Current(),
+                start => { started.Add(string.Join('|', start.ArgumentList)); return true; }),
+        });
+
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, "src/Program.cs#L42", "session"), default)).Status);
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, "a.cs", "worktree-session"), default)).Status);
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, inProject, "worktree-session"), default)).Status);
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, alone), default)).Status);
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, "src", "session"), default)).Status);
+        CollectionAssert.AreEqual(new[]
+        {
+            $"{fixture.ProjectPath}|{inProject}:42",
+            $"{worktree}|{inWorktree}:1",
+            $"{fixture.ProjectPath}|{inProject}:1",
+            $"{Path.GetDirectoryName(alone)}|{alone}:1",
+            $"{Path.Combine(fixture.ProjectPath, "src")}",
+        }, started);
+
+        started.Clear();
+        Assert.AreEqual("not_found", (await service.OpenExternalAsync(new(Epoch, "src/missing.cs", "session"), default)).Status);
+        Assert.AreEqual("invalid_request", (await service.OpenExternalAsync(new(Epoch, "mailto:someone@example.invalid", "session"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await service.OpenExternalAsync(new("4b0a7c1e-52c9-4f0b-8a55-6d0c2f9e1b77", "src/Program.cs", "session"), default)).Status);
+        Assert.AreEqual(0, started.Count);
+        Assert.AreEqual("unavailable", (await new MarkdownLinksService(Epoch, _ => true, fixture.Links).OpenExternalAsync(new(Epoch, "src/Program.cs", "session"), default)).Status);
+    }
+
+    [TestMethod]
     public void AFolderOfTheDisk_KeepsItsId_AndTheOldestIsForgotten()
     {
         var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "CodeAlta-disk-folders-" + Guid.NewGuid().ToString("N"))).FullName;
@@ -380,7 +358,7 @@ public sealed class DesktopFileLinksTests
 
         public async Task<string> OpenAsync(string target, string? session = null, string? project = null, string? directory = null)
         {
-            Assert.IsTrue(DesktopFileLink.TryParse(target, out var link), target);
+            Assert.IsTrue(FileLink.TryParse(target, out var link), target);
             return await Links.OpenAsync(link, session, project, directory, default);
         }
 

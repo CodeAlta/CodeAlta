@@ -469,6 +469,9 @@ public sealed class DesktopShellTests
         Assert.IsFalse(plist.Contains("CFBundleVersion", StringComparison.Ordinal));
         Assert.IsTrue(plist.StartsWith("<?xml", StringComparison.Ordinal));
         Assert.IsFalse(plist.Contains('\r'));
+        // The Local Network prompt Fleet meets (servers and nodes on the LAN) says why; CodeAlta browses no Bonjour service.
+        StringAssert.Contains(plist, "<key>NSLocalNetworkUsageDescription</key><string>CodeAlta connects to your Fleet servers and machines on the local network");
+        Assert.IsFalse(plist.Contains("NSBonjourServices", StringComparison.Ordinal));
         // A property list is XML: it must parse.
         _ = System.Xml.Linq.XDocument.Parse(plist);
 

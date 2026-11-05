@@ -48,6 +48,33 @@ public sealed partial class OwnedSessionCommandService
         }
     }
 
+    /// <summary>
+    /// Gives the sessions of a project that are in one space another space: what moving the project from a space to
+    /// another does with them. A session in the default space is one that records it, or a space that no longer
+    /// exists; a session created before sessions had a space counts when the project was in no other space. Sessions
+    /// in any other space stay. A session and the sessions it started in that space move together: when one of them is
+    /// at work (as <see cref="MoveSessionToSpaceAsync"/> would refuse it), they are all left, and the result lists
+    /// them as skipped.
+    /// </summary>
+    /// <param name="projectId">The project whose sessions move.</param>
+    /// <param name="fromSpaceId">The space they leave.</param>
+    /// <param name="toSpaceId">The space they go to.</param>
+    /// <returns>The sessions that moved, those that were left, and their titles.</returns>
+    /// <exception cref="ArgumentException">The project is blank, a space is not the identifier of a space, or the two spaces are the same.</exception>
+    public Task<OwnedSessionSpaceMoveResult> MoveProjectSessionsAsync(string projectId, string fromSpaceId, string toSpaceId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        if (!SpaceDescriptor.IsValidId(fromSpaceId)) throw new ArgumentException($"'{fromSpaceId}' is not the identifier of a space.", nameof(fromSpaceId));
+        if (!SpaceDescriptor.IsValidId(toSpaceId)) throw new ArgumentException($"'{toSpaceId}' is not the identifier of a space.", nameof(toSpaceId));
+        if (string.Equals(fromSpaceId, toSpaceId, StringComparison.Ordinal)) throw new ArgumentException("The sessions already are in that space.", nameof(toSpaceId));
+        lock (_gate)
+        {
+            if (_closed || _retained) return Task.FromResult(OwnedSessionSpaceMoveResult.Refused("closed"));
+            if (_deleteWork is not null) return Task.FromResult(OwnedSessionSpaceMoveResult.Refused("busy"));
+            return Reserve(() => _runtime.MoveOwnedProjectSessionsAsync(projectId, fromSpaceId, toSpaceId, OwnerBusyOrAsking));
+        }
+    }
+
     private bool OwnerBusyOrAsking(string member)
     {
         lock (_gate) return IsOwnerBusy(member) || Asks.List(member).Head is not null;

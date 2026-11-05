@@ -66,6 +66,10 @@ button.stats-chip-text:focus-visible { outline: 2px solid var(--accent); outline
 .stats-tabs > .bp6-tab-panel { flex: 1; min-height: 0; margin: 0; overflow: auto; }
 .stats-page { min-width: 0; padding-bottom: 8px; }
 .stats-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; padding: 12px 14px 16px; }
+/* The scope of the canvas of the application (this machine, my fleet) and the bar of the fleet's period. */
+.stats-scope, .stats-fleet-bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px 0; }
+.stats-fleet-name { display: inline-flex; flex-direction: column; min-width: 0; }
+.stats-fleet-detail { font-size: 11px; color: var(--muted); }
 .stats-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 12px; padding: 14px 14px 0; }
 .stats-data-updated { margin: 12px 14px 0; color: var(--muted); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
 .stats-data-updated + .stats-tiles { padding-top: 8px; }

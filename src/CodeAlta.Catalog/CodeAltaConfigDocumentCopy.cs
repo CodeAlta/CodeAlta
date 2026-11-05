@@ -54,7 +54,10 @@ internal static class CodeAltaConfigDocumentCopy
                 : null,
             Sessions = document.Sessions is { } sessions ? new CodeAltaSessionSettingsDocument { Title = sessions.Title, PromptSuggestions = sessions.PromptSuggestions } : null,
             Review = document.Review is { } review ? new CodeAltaReviewSettingsDocument { BeforeCommit = review.BeforeCommit } : null,
-            Commits = document.Commits is { } commits ? new CodeAltaCommitSettingsDocument { CoAuthor = commits.CoAuthor } : null,
+            Commits = document.Commits is { } commits ? new CodeAltaCommitSettingsDocument { CoAuthor = commits.CoAuthor, CoAuthorTrailer = commits.CoAuthorTrailer } : null,
+            ExternalWriting = document.ExternalWriting is { } external
+                ? new CodeAltaExternalWritingSettingsDocument { Attribution = external.Attribution, Instruction = external.Instruction }
+                : null,
             Speech = document.Speech is { } speech
                 ? new CodeAltaSpeechSettingsDocument { Enabled = speech.Enabled, Model = speech.Model, Send = speech.Send }
                 : null,
@@ -104,6 +107,7 @@ internal static class CodeAltaConfigDocumentCopy
                         Env = Copy(profile.Env),
                         McpServers = Copy(profile.McpServers),
                         Outside = profile.Outside,
+                        Fleet = profile.Fleet,
                     }),
                 }
                 : null,
@@ -130,6 +134,7 @@ internal static class CodeAltaConfigDocumentCopy
         ContextSize = provider.ContextSize,
         ApiKey = provider.ApiKey,
         ApiKeyEnv = provider.ApiKeyEnv,
+        ApiKeySecret = provider.ApiKeySecret,
         ApiUrl = provider.ApiUrl,
         NetworkTimeoutSeconds = provider.NetworkTimeoutSeconds,
         Command = provider.Command,

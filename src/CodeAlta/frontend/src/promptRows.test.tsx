@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { AgentPromptEntry } from "#neoastra";
-import { PromptRows } from "./PromptRows";
+import { PromptRows, promptHasSpaces } from "./PromptRows";
 import { locales, translate } from "./localization";
 import { ShellLanguageContext } from "./shellLanguage";
 
@@ -37,4 +37,10 @@ test("a list without prompts shows nothing, and a page that opens no editor has 
   const closed = rows([prompt("reviewer", "Global")], { open: false });
   assert.ok(closed.includes("<strong>reviewer</strong>") && !closed.includes("<button"), closed);
   assert.match(rows([prompt("reviewer", "Global")], { disabled: true }), /<button[^>]*disabled=""/);
+});
+
+test("an agent of a project, of CodeAlta, GitHub Copilot or Claude Code, follows the spaces of its project", () => {
+  for (const scope of ["Global", "CopilotGlobal", "ClaudeGlobal", "BuiltIn"]) assert.ok(promptHasSpaces({ kind: "Agent", scope }), scope);
+  for (const scope of ["Project", "CopilotProject", "ClaudeProject"]) assert.ok(!promptHasSpaces({ kind: "Agent", scope }), scope);
+  assert.ok(!promptHasSpaces({ kind: "System", scope: "Global" }));
 });

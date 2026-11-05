@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Tools;
 
 namespace CodeAlta.Agent.Claude;
 
@@ -468,7 +469,12 @@ internal sealed partial class ClaudeCodeSession
                         writer.WritePropertyName("inputSchema");
                         if (definition.Spec.InputSchema.ValueKind == JsonValueKind.Object)
                         {
-                            definition.Spec.InputSchema.WriteTo(writer);
+                            // Claude Code merges a choice at the root of a schema (which the Anthropic API refuses) only
+                            // behind a gate of its own, and otherwise skips the tool: it gets the schema merged.
+                            var inputSchema = AgentToolRootChoices.TryMerge(definition.Spec.InputSchema, out var merged)
+                                ? merged
+                                : definition.Spec.InputSchema;
+                            inputSchema.WriteTo(writer);
                         }
                         else
                         {

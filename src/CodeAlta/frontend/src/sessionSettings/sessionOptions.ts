@@ -25,11 +25,11 @@ export function sessionOptionsOf(options: SessionOptionsChoice | null | undefine
  */
 export function changedSessionOptions(options: SessionOptionsChoice | null | undefined, model?: ModelContextSizes | null): number {
   const value = sessionOptionsOf(options);
-  return (value.subSessions ? 0 : 1) + (value.contextSize && model?.contextSizes?.includes(value.contextSize) ? 1 : 0);
+  return (value.subSessions ? 0 : 1) + (value.contextSize && model?.contextSizes?.includes(value.contextSize) ? 1 : 0) + (value.private ? 1 : 0);
 }
 
 /** What a choice records: null for the defaults, so that a session without a choice records nothing. */
 export function storedSessionOptions(options: SessionOptionsChoice | null | undefined): SessionOptionsChoice | null {
-  return options && (!options.subSessions || options.contextSize)
-    ? { subSessions: options.subSessions, ...(options.contextSize ? { contextSize: options.contextSize } : {}) } : null;
+  return options && (!options.subSessions || options.contextSize || options.private)
+    ? { subSessions: options.subSessions, ...(options.contextSize ? { contextSize: options.contextSize } : {}), ...(options.private ? { private: true } : {}) } : null;
 }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 
@@ -8,7 +9,8 @@ namespace CodeAlta.Desktop.Rpc;
 
 // Owned-mode renderer data only. No catalog lookup, provider work, commands or original event reader.
 [NeoRpcService("display", Version = 1)]
-internal sealed class SessionDisplayService(RuntimeDisplayProjection display, string hostEpoch, TimeSpan minimumInterval)
+internal sealed class SessionDisplayService(Func<string, CancellationToken, IAsyncEnumerable<RuntimeDisplayReplacement>> observe, string hostEpoch,
+    TimeSpan minimumInterval)
 {
     internal const int MaximumItemBytes = 256 * 1024;
     internal const int LabelCharacters = 256;
@@ -20,6 +22,19 @@ internal sealed class SessionDisplayService(RuntimeDisplayProjection display, st
 
     public SessionDisplayService(RuntimeDisplayProjection display, string hostEpoch)
         : this(display, hostEpoch, DefaultMinimumInterval) { }
+
+    public SessionDisplayService(RuntimeDisplayProjection display, string hostEpoch, TimeSpan minimumInterval)
+        : this(display.ObserveSessionAsync, hostEpoch, minimumInterval) { }
+
+    /// <summary>Creates the service over the hosts of the sessions: each observation goes to the host of its session.</summary>
+    public SessionDisplayService(SessionHostRegistry hosts, string hostEpoch)
+        : this(Route(hosts), hostEpoch, DefaultMinimumInterval) { }
+
+    private static Func<string, CancellationToken, IAsyncEnumerable<RuntimeDisplayReplacement>> Route(SessionHostRegistry hosts)
+    {
+        ArgumentNullException.ThrowIfNull(hosts);
+        return (sessionId, token) => hosts.Resolve(sessionId).ObserveDisplayAsync(sessionId, token);
+    }
 
     [NeoRpcMethod("observe")]
     public NeoRpcChannel<SessionDisplayItem> Observe(SessionDisplayRequest request, CancellationToken cancellationToken)
@@ -41,7 +56,7 @@ internal sealed class SessionDisplayService(RuntimeDisplayProjection display, st
         }
         cancellationToken.ThrowIfCancellationRequested();
         // An observation of the one session: the commits of the other sessions do not wake it.
-        await using var observation = display.ObserveSessionAsync(request.SessionId, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        await using var observation = observe(request.SessionId, cancellationToken).GetAsyncEnumerator(cancellationToken);
         var first = true;
         // What it last sent says whether a replacement holds anything new for its reader: the counters of the whole
         // projection change it too.

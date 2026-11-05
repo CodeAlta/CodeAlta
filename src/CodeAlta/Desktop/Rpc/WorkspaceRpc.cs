@@ -28,14 +28,25 @@ internal sealed partial class WorkspaceService
         _readTimelineTail = reads.ReadTimelineTailAsync;
         _readHistorySource = reads.ReadHistorySourceAsync;
         _readAllSessions = reads.ReadSnapshotAsync;
-        _read = async token =>
+        _read = ProjectedSnapshot(reads.ReadSnapshotAsync);
+    }
+
+    // The snapshot of the page from the one of a host: the sessions whose folder exists, with their worktrees.
+    private static Func<CancellationToken, Task<WorkspaceSnapshot>> ProjectedSnapshot(Func<CancellationToken, Task<CodeAlta.Orchestration.Runtime.OwnedWorkspaceSnapshot>> read)
+        => async token =>
         {
-            var actual = reads.ReadSnapshotAsync(token);
+            var actual = read(token);
             var snapshot = await actual.ConfigureAwait(false);
             var (projects, sessions) = WithExistingFolders(snapshot.Projects, snapshot.Sessions, Directory.Exists);
-            return ProjectSnapshot(projects, sessions, snapshot.SessionHeaders, DescribeWorktreesOnce());
+            return ProjectSnapshot(projects, sessions, snapshot.SessionHeaders, DescribeWorktreesOnce())
+                with { UnreadableProjectFiles = UnreadableFiles(snapshot.UnreadableProjects) };
         };
-    }
+
+    // The project files the snapshot skipped, for the window to say so; a few, each path bounded as the others.
+    internal static string[]? UnreadableFiles(IReadOnlyList<UnreadableProjectFile> unreadable)
+        => unreadable.Count == 0 ? null
+            : [.. unreadable.Select(static file => file.SourcePath).Where(static path => path.Length <= 4096 && !path.Any(char.IsControl))
+                .Order(StringComparer.Ordinal).Take(20)];
 
     internal WorkspaceService(string? catalogRoot)
     {
@@ -313,8 +324,23 @@ internal sealed partial class WorkspaceService
 
 internal sealed record WorkspaceRequest;
 internal sealed record WorkspaceSnapshot(bool Configured, WorkspaceProject[] Projects, WorkspaceSession[] Sessions,
-    bool ProjectsTruncated, bool SessionsTruncated, bool DisplayTextTruncated);
-internal sealed record WorkspaceProject(string Id, string Name, string Path, bool Archived);
+    bool ProjectsTruncated, bool SessionsTruncated, bool DisplayTextTruncated)
+{
+    // The project files of the catalog that could not be read, so their projects are not listed; absent when there is none.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? UnreadableProjectFiles { get; init; }
+}
+internal sealed record WorkspaceProject(string Id, string Name, string Path, bool Archived)
+{
+    // The machine a project that stands for a paired machine groups the sessions of (its sessions of no project of this
+    // catalog); absent for a project of the catalog.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineId { get; init; }
+
+    // The state of that machine: "online", "connecting", "offline" or "unauthorized"; absent for a project of the catalog.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineState { get; init; }
+}
 internal sealed record WorkspaceSession(string Id, string Title, string? WorkspacePath, string? ProviderKey, DateTimeOffset UpdatedAt,
     string FullTitle, bool FullTitleTruncated, string? ParentSessionId, string? ScopeKind, string? ProjectId, string? LineageIssue,
     DateTimeOffset? CreatedAt, int? MessageCount = null, string? AutomationId = null,
@@ -339,6 +365,30 @@ internal sealed record WorkspaceSession(string Id, string Title, string? Workspa
     // The cloud session the session runs as, or ran as before it was brought back; absent for any other session.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public WorkspaceSessionCloud? Cloud { get; init; }
+
+    // The paired machine that runs the session; absent for a session of this computer.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineId { get; init; }
+
+    // The name of that machine.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineName { get; init; }
+
+    // Where the channel to that machine goes while it is online: direct, or relayed by a server.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineChannel { get; init; }
+
+    // What the session of that machine did when it was listed: working, waiting or idle.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RemoteState { get; init; }
+
+    // The name of its project on that machine.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RemoteProject { get; init; }
+
+    // The name of its provider as that machine names it: a provider of the same key here may be another one.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineProviderName { get; init; }
 }
 
 /// <summary>What the Explorer shows of the cloud session a session runs as, or ran as.</summary>

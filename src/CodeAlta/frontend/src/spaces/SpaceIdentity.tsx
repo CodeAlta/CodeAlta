@@ -4,7 +4,8 @@ import { desktopShell, spaceIdentity, type IdentityCheckLine, type SpaceCliProfi
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { BrandIcon, type BrandIconName } from "../BrandIcon";
-import { pickFolder } from "../folderPicker";
+import { folderPickNotice, pickFolder } from "../folderPicker";
+import { showToast } from "../appToaster";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 import type { SpaceSectionProps } from "./spaceSection";
@@ -131,7 +132,10 @@ export function SpaceIdentity({ space, hub, canEdit, run, api = spaceIdentity }:
   const usualSigning = usual?.signingFormat ? `${t("Usual")} (${usual.signingFormat})` : t("Usual");
   async function browse() {
     const picked = await pickFolder(desktopShell.pickFolder, t("GitHub profile folder"), github.configDir.trim() || usual?.gitHubFolder || null);
-    if (picked.status === "ok") choose("github", { configDir: picked.path });
+    if (picked.status === "ok") { choose("github", { configDir: picked.path }); return; }
+    // A desktop without a folder dialog, or a dialog that failed, is never silent: the path can still be typed.
+    const notice = folderPickNotice(picked, "type");
+    if (notice) showToast({ message: t(notice), intent: "warning", icon: "warning-sign", timeout: 8000 });
   }
   async function copy(text: string) {
     try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* Nothing was copied: the command stays to select. */ }

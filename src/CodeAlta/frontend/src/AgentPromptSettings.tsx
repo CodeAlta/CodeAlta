@@ -3,6 +3,7 @@ import { Button, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Me
 import { agentPrompts, startPrompts, type AgentPromptDocument, type AgentPromptEntry } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
+import { ClaudeTag, claudePromptScope } from "./ClaudeTag";
 import { CopilotTag, copilotPromptScope } from "./CopilotTag";
 import { PromptRows, promptHasSpaces, promptIdentity as identity } from "./PromptRows";
 import { CodeEditor } from "./monaco/CodeEditor";
@@ -140,9 +141,10 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
         </CardList>
         {start.detail ?? (form ? <Section className="settings-editor-form prompt-settings-form settings-split-detail" title={selected === added ? t("New prompt") : entry?.name || form.id}
           subtitle={`${t(form.kind === "System" ? "System prompt" : "Agent prompt")} · ${form.id || "…"}`}
-          rightElement={reading ? <ActivitySpinner size={14} /> : readOnly ? copilotPromptScope(document?.scope ?? "") ? <CopilotTag /> : <Tag minimal round>{t("Built-in")}</Tag> : undefined}>
+          rightElement={reading ? <ActivitySpinner size={14} /> : readOnly ? copilotPromptScope(document?.scope ?? "") ? <CopilotTag /> : claudePromptScope(document?.scope ?? "") ? <ClaudeTag />
+            : <Tag minimal round>{t("Built-in")}</Tag> : undefined}>
           {document?.file && selected !== added && <SectionCard className="settings-editor-file">
-            <SettingsFileLocation path={document.file} readOnly={readOnly && !copilotPromptScope(document.scope)} platform={files.platform} disabled={busy}
+            <SettingsFileLocation path={document.file} readOnly={readOnly && !copilotPromptScope(document.scope) && !claudePromptScope(document.scope)} platform={files.platform} disabled={busy}
               onOpen={files.open ? () => files.open!({ kind: "prompt", scope: document.scope, id: document.id, part: document.kind }) : undefined}
               onReveal={() => files.reveal({ kind: "prompt", scope: document.scope, id: document.id, part: document.kind })} /></SectionCard>}
           <SectionCard className="settings-editor-fields">

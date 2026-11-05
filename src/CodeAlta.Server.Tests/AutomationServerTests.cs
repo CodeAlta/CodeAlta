@@ -1,0 +1,395 @@
+using System.Net;
+using System.Text.Json;
+using System.Threading.Channels;
+using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
+
+namespace CodeAlta.Server.Tests;
+
+/// <summary>
+/// The automations a person gives their machines through the server: a version signed by a controller device of that
+/// person, sealed for the machine, stored once and never replaced by one that is not newer, delivered to the machine
+/// now or when it connects, and acknowledged; the due times claimed once whatever the machine, and the runs reported.
+/// </summary>
+[TestClass]
+public sealed class AutomationServerTests
+{
+    private const string Id = "daily-1";
+
+    public TestContext TestContext { get; set; } = null!;
+
+    [TestMethod]
+    public async Task AVersionIsStoredAsSigned_AndDeliveredToItsMachine_NowAndOnReconnect()
+    {
+        await using var fixture = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("laptop");
+        using var node = new TestDevice("node");
+        var (setup, _) = await fixture.SetUpWithNodeAsync(owner, node);
+        var organization = setup.Organization.Id;
+
+        var delivered = Channel.CreateUnbounded<FleetSignedAutomationVersion>();
+        var (connection, welcome) = await ConnectNodeAsync(fixture, node, delivered);
+        CollectionAssert.Contains(welcome.Features!.ToList(), FleetAutomationMethods.Feature);
+
+        var first = Sign(owner, Version(organization, node.DeviceId, 1));
+        var put = await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}", new PutAutomationRequest(first));
+        Assert.AreEqual(HttpStatusCode.OK, put.Status, put.Body.ToString());
+        var stored = put.Read<AutomationDto>();
+        Assert.AreEqual((Id, node.DeviceId, 1L, true, AutomationDeliveryState.Pending), (stored.Id, stored.MachineId, stored.Number, stored.Enabled, stored.State));
+        CollectionAssert.AreEqual(new[] { "hourly" }, stored.Triggers.ToArray());
+        Assert.AreEqual(first, await NextAsync(delivered), "the machine gets the version as signed");
+
+        // The machine took it.
+        await connection.SendRequestAsync(FleetAutomationMethods.Ack, JsonSerializer.SerializeToElement(
+            new FleetAutomationAcks([new FleetAutomationAck(Id, 1, true, null)]), FleetAutomationServerJsonContext.Default.FleetAutomationAcks));
+        Assert.AreEqual(AutomationDeliveryState.Applied, (await ListAsync(fixture, owner)).Single().State);
+
+        // Offline, the machine gets the newer version when it connects again; the same or an older one is refused.
+        await connection.DisposeAsync();
+        await WaitOfflineAsync(fixture, node.DeviceId);
+        var second = Sign(owner, Version(organization, node.DeviceId, 2) with { Enabled = false });
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}", new PutAutomationRequest(second))).Status);
+        var again = await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}", new PutAutomationRequest(second));
+        Assert.AreEqual((HttpStatusCode.Conflict, "automation.conflict"), (again.Status, again.Code));
+        var older = await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}", new PutAutomationRequest(first));
+        Assert.AreEqual(HttpStatusCode.Conflict, older.Status);
+        Assert.AreEqual((2L, false, AutomationDeliveryState.Pending), ((await ListAsync(fixture, owner)).Single() is var listed ? (listed.Number, listed.Enabled, listed.State) : default));
+
+        var later = Channel.CreateUnbounded<FleetSignedAutomationVersion>();
+        var (reconnected, _) = await ConnectNodeAsync(fixture, node, later);
+        await using (reconnected)
+        {
+            Assert.AreEqual(second, await NextAsync(later));
+            // A refusal is kept with its reason, and the version is not sent again.
+            await reconnected.SendRequestAsync(FleetAutomationMethods.Ack, JsonSerializer.SerializeToElement(
+                new FleetAutomationAcks([new FleetAutomationAck(Id, 2, false, "the signature does not hold")]), FleetAutomationServerJsonContext.Default.FleetAutomationAcks));
+            var refused = (await ListAsync(fixture, owner)).Single();
+            Assert.AreEqual((AutomationDeliveryState.Refused, "the signature does not hold"), (refused.State, refused.Message));
+        }
+    }
+
+    [TestMethod]
+    public async Task OnlyAControllerOfTheMachinesPersonGivesIt_AVersionItSignedSealed()
+    {
+        await using var fixture = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("laptop");
+        using var node = new TestDevice("node");
+        var (setup, _) = await fixture.SetUpWithNodeAsync(owner, node);
+        var organization = setup.Organization.Id;
+        var version = Version(organization, node.DeviceId, 1);
+
+        async Task<ApiAnswer> PutAsync(TestDevice caller, FleetSignedAutomationVersion signed, string id = Id)
+            => await fixture.SendAsync(caller, HttpMethod.Put, $"/api/v1/automations/{id}", new PutAutomationRequest(signed));
+
+        var byNode = await PutAsync(node, Sign(node, version));
+        Assert.AreEqual(HttpStatusCode.Forbidden, byNode.Status, "a node gives no automation");
+        var tampered = Sign(owner, version);
+        Assert.AreEqual("automation.invalid", (await PutAsync(owner, tampered with { Payload = tampered.Payload.Replace("hourly", "minute", StringComparison.Ordinal) })).Code);
+        StringAssert.Contains((await PutAsync(owner, Sign(owner, version with { SignerDeviceId = node.DeviceId }))).Body.ToString(), "name the device that signs");
+        StringAssert.Contains((await PutAsync(owner, Sign(owner, version with { Sealed = null, Definition = "[automations.daily-1]" }))).Body.ToString(), "never in clear");
+        StringAssert.Contains((await PutAsync(owner, Sign(owner, version with { OrganizationId = "another" }))).Body.ToString(), "organization of the server");
+        StringAssert.Contains((await PutAsync(owner, Sign(owner, version), "other-id")).Body.ToString(), "another automation than the path");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await PutAsync(owner, Sign(owner, version with { MachineId = "no-such-machine" }))).Status);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await PutAsync(owner, Sign(owner, version with { MachineId = owner.DeviceId }))).Status, "a controller device is no machine");
+        Assert.AreEqual(0, (await ListAsync(fixture, owner)).Count, "nothing refused was stored");
+        Assert.AreEqual(HttpStatusCode.OK, (await PutAsync(owner, Sign(owner, version))).Status);
+    }
+
+    [TestMethod]
+    public async Task ADueTimeRunsOnce_WhateverTheMachine_AndRunsAreReported()
+    {
+        await using var fixture = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("laptop");
+        using var node = new TestDevice("node");
+        using var other = new TestDevice("other");
+        var (setup, _) = await fixture.SetUpWithNodeAsync(owner, node);
+        var organization = setup.Organization.Id;
+        var pending = await fixture.EnrollAsync(owner, other);
+        var entry = await fixture.NextEntryAsync(owner, FleetDeviceListOperations.Add, pending.Id, other.PublicKey, FleetDeviceKinds.Node, setup.Owner.Id, organization);
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{pending.Id}/approve", new DeviceListChangeRequest(entry))).Status);
+
+        var (connection, _) = await ConnectNodeAsync(fixture, node, Channel.CreateUnbounded<FleetSignedAutomationVersion>());
+        await using var _1 = connection;
+        // Without a version for it, the machine claims nothing through the server.
+        Assert.IsFalse((await ClaimAsync(connection, "run-1", "hourly@2026-11-03T10:00:00Z")).Granted);
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}",
+            new PutAutomationRequest(Sign(owner, Version(organization, node.DeviceId, 1))))).Status);
+
+        Assert.IsTrue((await ClaimAsync(connection, "run-1", "hourly@2026-11-03T10:00:00Z")).Granted);
+        Assert.IsTrue((await ClaimAsync(connection, "run-1", "hourly@2026-11-03T10:00:00Z")).Granted, "the same run asks again");
+        StringAssert.Contains((await ClaimAsync(connection, "run-2", "hourly@2026-11-03T10:00:00Z")).Message, "another run of this machine");
+
+        // The automation moves to the other machine: the time the first one took is not run again there.
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}",
+            new PutAutomationRequest(Sign(owner, Version(organization, other.DeviceId, 2))))).Status);
+        var (second, _) = await ConnectNodeAsync(fixture, other, Channel.CreateUnbounded<FleetSignedAutomationVersion>());
+        await using var _2 = second;
+        var taken = await ClaimAsync(second, "run-9", "hourly@2026-11-03T10:00:00Z", number: 2);
+        Assert.IsFalse(taken.Granted);
+        StringAssert.Contains(taken.Message, node.DeviceId);
+        Assert.IsTrue((await ClaimAsync(second, "run-10", "hourly@2026-11-03T11:00:00Z", number: 2)).Granted);
+
+        // The runs, as facts: the claimed one ended, one by hand, and one of an automation the server does not hold, which is ignored.
+        var now = fixture.Clock.Now;
+        await connection.SendRequestAsync(FleetAutomationMethods.Runs, JsonSerializer.SerializeToElement(new FleetAutomationRunFacts([
+            new FleetAutomationRunFact("run-1", Id, 1, "hourly", "completed", now, now.AddMinutes(2)) { SessionId = "s1", InputTokens = 1200, OutputTokens = 80, Cost = 0.25, CostUnit = "AI credits" },
+            new FleetAutomationRunFact("run-3", Id, 1, "manual", "failed", now.AddMinutes(3), now.AddMinutes(3)) { Message = "No provider\nis configured." },
+            new FleetAutomationRunFact("run-4", "of-the-profile", 1, "manual", "completed", now, now),
+        ]), FleetAutomationServerJsonContext.Default.FleetAutomationRunFacts));
+        // The second machine cannot rewrite a run of the first one.
+        await second.SendRequestAsync(FleetAutomationMethods.Runs, JsonSerializer.SerializeToElement(new FleetAutomationRunFacts([
+            new FleetAutomationRunFact("run-1", Id, 2, "hourly", "failed", now, now)]), FleetAutomationServerJsonContext.Default.FleetAutomationRunFacts));
+
+        // Only the schedules changed: they come alone; the server keeps them for what it holds for that machine.
+        var due = new DateTimeOffset(2026, 11, 3, 11, 0, 0, TimeSpan.Zero);
+        await second.SendRequestAsync(FleetAutomationMethods.Runs, JsonSerializer.SerializeToElement(new FleetAutomationRunFacts([]) { Schedules = [new FleetAutomationSchedule(Id, due)] },
+            FleetAutomationServerJsonContext.Default.FleetAutomationRunFacts));
+        var byMachine = (await ListAsync(fixture, owner)).ToDictionary(static item => item.MachineId);
+        Assert.AreEqual((due, (DateTimeOffset?)null), (byMachine[other.DeviceId].NextDue, byMachine[node.DeviceId].NextDue));
+
+        var runs = await fixture.SendAsync(owner, HttpMethod.Get, $"/api/v1/automations/{Id}/runs");
+        Assert.AreEqual(HttpStatusCode.OK, runs.Status, runs.Body.ToString());
+        var list = runs.Read<AutomationRunListDto>().Runs;
+        Assert.AreEqual("run-3,run-10,run-1", string.Join(',', list.Select(static run => run.RunId)));
+        var first = list.Single(static run => run.RunId == "run-1");
+        Assert.AreEqual(("completed", node.DeviceId, "hourly@2026-11-03T10:00:00Z", "s1"), (first.Status, first.MachineId, first.Occurrence, first.SessionId));
+        Assert.AreEqual((1200L, 80L, 0.25, "AI credits"), (first.InputTokens, first.OutputTokens, first.Cost, first.CostUnit));
+        Assert.AreEqual("No provider is configured.", list.Single(static run => run.RunId == "run-3").Message);
+        Assert.AreEqual(AutomationRunStatus.Claimed, list.Single(static run => run.RunId == "run-10").Status);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.SendAsync(owner, HttpMethod.Get, "/api/v1/automations/of-the-profile/runs")).Status);
+    }
+
+    [TestMethod]
+    public async Task ARunAskedByHand_IsPassedSignedToTheMachineOnline_AndRefusedOtherwise()
+    {
+        await using var fixture = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("laptop");
+        using var node = new TestDevice("node");
+        var (setup, _) = await fixture.SetUpWithNodeAsync(owner, node);
+        var organization = setup.Organization.Id;
+        FleetSignedAutomationRunRequest Request(TestDevice signer, string run = "run-7")
+        {
+            var text = FleetAutomationRunRequestDocuments.Serialize(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, organization, Id, node.DeviceId, run,
+                signer.DeviceId, signer.PublicKey, fixture.Clock.Now));
+            return new FleetSignedAutomationRunRequest(text, signer.Sign(FleetAutomationRunRequestDocuments.GetSignedBytes(text)));
+        }
+
+        async Task<ApiAnswer> RunAsync(FleetSignedAutomationRunRequest request) => await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/run",
+            new RunAutomationRequest(request));
+
+        Assert.AreEqual(HttpStatusCode.NotFound, (await RunAsync(Request(owner))).Status, "the server holds no such automation for the machine");
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}",
+            new PutAutomationRequest(Sign(owner, Version(organization, node.DeviceId, 1))))).Status);
+        var offline = await RunAsync(Request(owner));
+        Assert.AreEqual((HttpStatusCode.Conflict, "automation.conflict"), (offline.Status, offline.Code), "a machine offline gets no run");
+
+        var asked = Channel.CreateUnbounded<FleetSignedAutomationRunRequest>();
+        var (connection, _) = await fixture.ConnectAsync(node, connection => connection.SetEventHandler((fleetEvent, _) =>
+        {
+            if (fleetEvent.Event == FleetAutomationMethods.Run)
+                asked.Writer.TryWrite(fleetEvent.Payload!.Value.Deserialize(FleetAutomationRunRequestJsonContext.Default.FleetSignedAutomationRunRequest)!);
+            return ValueTask.CompletedTask;
+        }));
+        await using var _1 = connection;
+        var request = Request(owner);
+        var accepted = await RunAsync(request);
+        Assert.AreEqual(HttpStatusCode.Accepted, accepted.Status, accepted.Body.ToString());
+        Assert.AreEqual(("run-7", "requested", node.DeviceId), (accepted.Read<AutomationRunDto>().RunId, accepted.Read<AutomationRunDto>().Status, accepted.Read<AutomationRunDto>().MachineId));
+        Assert.AreEqual(request, await NextAsync(asked), "the machine gets the request as signed");
+
+        // A request the caller did not sign, or that names another signer, is refused.
+        StringAssert.Contains((await RunAsync(request with { Payload = request.Payload.Replace("run-7", "run-8", StringComparison.Ordinal) })).Body.ToString(), "does not verify");
+        StringAssert.Contains((await RunAsync(Request(node))).Body.ToString(), "does not verify");
+    }
+
+    [TestMethod]
+    public async Task ARunThatWaits_IsToldToItsOwnerOnce_AndATakeOverIsPassedSignedToTheMachine()
+    {
+        await using var fixture = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("laptop");
+        using var node = new TestDevice("node");
+        var (setup, _) = await fixture.SetUpWithNodeAsync(owner, node);
+        var organization = setup.Organization.Id;
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}",
+            new PutAutomationRequest(Sign(owner, Version(organization, node.DeviceId, 1))))).Status);
+        var asked = Channel.CreateUnbounded<FleetSignedAutomationRunRequest>();
+        var (connection, _) = await fixture.ConnectAsync(node, connection => connection.SetEventHandler((fleetEvent, _) =>
+        {
+            if (fleetEvent.Event == FleetAutomationMethods.TakeOver)
+                asked.Writer.TryWrite(fleetEvent.Payload!.Value.Deserialize(FleetAutomationRunRequestJsonContext.Default.FleetSignedAutomationRunRequest)!);
+            return ValueTask.CompletedTask;
+        }));
+        await using var _1 = connection;
+
+        // The run waits for an approval, reported twice: its owner is told once, with no content of the run.
+        var now = fixture.Clock.Now;
+        for (var report = 0; report < 2; report++)
+        {
+            await connection.SendRequestAsync(FleetAutomationMethods.Runs, JsonSerializer.SerializeToElement(new FleetAutomationRunFacts([
+                new FleetAutomationRunFact("run-9", Id, 1, "incident_io", "waiting", now, null) { SessionId = "s9" },
+            ]), FleetAutomationServerJsonContext.Default.FleetAutomationRunFacts));
+        }
+
+        var notifications = await fixture.SendAsync(owner, HttpMethod.Get, "/api/v1/notifications");
+        Assert.AreEqual(HttpStatusCode.OK, notifications.Status, notifications.Body.ToString());
+        var approval = notifications.Body.GetProperty("notifications").EnumerateArray().Where(static item => item.GetProperty("kind").GetString() == FleetNotificationKinds.Approval).ToArray();
+        Assert.AreEqual(1, approval.Length, notifications.Body.ToString());
+        Assert.AreEqual((Id, node.DeviceId), (approval[0].GetProperty("subject").GetString(), approval[0].GetProperty("machineId").GetString()));
+
+        FleetSignedAutomationRunRequest TakeOver(string? action, string run = "run-9")
+        {
+            var text = FleetAutomationRunRequestDocuments.Serialize(new FleetAutomationRunRequest(FleetAutomationRunRequest.VersionFor(action), organization, Id, node.DeviceId, run,
+                owner.DeviceId, owner.PublicKey, fixture.Clock.Now) { Action = action });
+            return new FleetSignedAutomationRunRequest(text, owner.Sign(FleetAutomationRunRequestDocuments.GetSignedBytes(text)));
+        }
+
+        // The person is told the run is theirs only once its machine says it took it over; refused, they are told why; without an
+        // answer, that it was asked.
+        fixture.GetService<CodeAlta.Server.Services.FleetAutomationService>().TakeOverAnswerWait = TimeSpan.FromMilliseconds(500);
+        async Task<FleetAutomationTakeOverAck> AnswerAsync(bool accepted, string? message)
+        {
+            var answer = new FleetAutomationTakeOverAck(Id, "run-9", accepted, message);
+            await connection.SendRequestAsync(FleetAutomationMethods.TakeOverAck, JsonSerializer.SerializeToElement(answer, FleetAutomationServerJsonContext.Default.FleetAutomationTakeOverAck));
+            return answer;
+        }
+
+        var request = TakeOver(FleetAutomationRunRequest.TakeOverAction);
+        var asking = fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-9/takeover", new RunAutomationRequest(request));
+        Assert.AreEqual(request, await NextAsync(asked), "the machine gets the take-over as signed");
+        await AnswerAsync(true, null);
+        var taken = await asking;
+        Assert.AreEqual(HttpStatusCode.Accepted, taken.Status, taken.Body.ToString());
+        Assert.AreEqual(FleetAutomationRunRequest.TakeOverAction, taken.Read<AutomationRunDto>().Status, "taken over, as its machine says");
+
+        var refusing = fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-9/takeover", new RunAutomationRequest(TakeOver(FleetAutomationRunRequest.TakeOverAction)));
+        await NextAsync(asked);
+        await AnswerAsync(false, "no run of this automation with autonomy is in progress with this id");
+        var refusedTakeOver = await refusing;
+        Assert.AreEqual(HttpStatusCode.Conflict, refusedTakeOver.Status, refusedTakeOver.Body.ToString());
+        StringAssert.Contains(refusedTakeOver.Body.ToString(), "no run of this automation with autonomy is in progress");
+
+        var unanswered = await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-9/takeover", new RunAutomationRequest(TakeOver(FleetAutomationRunRequest.TakeOverAction)));
+        await NextAsync(asked);
+        Assert.AreEqual(HttpStatusCode.Accepted, unanswered.Status, unanswered.Body.ToString());
+        Assert.AreEqual(AutomationRunDto.TakeOverRequested, unanswered.Read<AutomationRunDto>().Status, "asked, not confirmed: the machine did not say");
+        // A request to run is not a take-over, nor the other way round, nor one for another run than the path.
+        StringAssert.Contains((await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-9/takeover", new RunAutomationRequest(TakeOver(null)))).Body.ToString(),
+            "does not take a run over");
+        StringAssert.Contains((await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/run", new RunAutomationRequest(request))).Body.ToString(),
+            "sent to its run");
+        // A try is a run, asked of the machine as a dry run.
+        var tryRun = TakeOver(FleetAutomationRunRequest.TryAction, "run-10");
+        Assert.IsFalse(tryRun.Payload.Contains("takeover", StringComparison.Ordinal));
+        var tried = await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/run", new RunAutomationRequest(tryRun));
+        Assert.IsTrue(tried.Status is HttpStatusCode.Accepted or HttpStatusCode.OK, tried.Body.ToString());
+        StringAssert.Contains((await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-8/takeover", new RunAutomationRequest(request))).Body.ToString(),
+            "another automation or run");
+        // A request to run reads as before: no action is written.
+        Assert.IsFalse(TakeOver(null).Payload.Contains("action", StringComparison.Ordinal));
+        // A run the machine did not report for this automation is not forwarded: the take-over is bound to the run of the automation it names.
+        var other = await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-of-another/takeover",
+            new RunAutomationRequest(TakeOver(FleetAutomationRunRequest.TakeOverAction, "run-of-another")));
+        Assert.AreEqual(HttpStatusCode.NotFound, other.Status, other.Body.ToString());
+    }
+
+    [TestMethod]
+    public async Task ARemovalIsAVersionToo_AndTheServerForgetsItOnceTheMachineTookItAway()
+    {
+        await using var fixture = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("laptop");
+        using var node = new TestDevice("node");
+        var (setup, _) = await fixture.SetUpWithNodeAsync(owner, node);
+        var organization = setup.Organization.Id;
+        var delivered = Channel.CreateUnbounded<FleetSignedAutomationVersion>();
+        var (connection, _) = await ConnectNodeAsync(fixture, node, delivered);
+        await using var _1 = connection;
+
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}",
+            new PutAutomationRequest(Sign(owner, Version(organization, node.DeviceId, 1))))).Status);
+        await NextAsync(delivered);
+        var delete = $"/api/v1/automations/{Id}?machine={node.DeviceId}";
+        Assert.AreEqual(HttpStatusCode.Conflict, (await fixture.SendAsync(owner, HttpMethod.Delete, delete)).Status, "the machine still holds it");
+
+        var removal = Sign(owner, Version(organization, node.DeviceId, 2) with { Removed = true, Sealed = null });
+        var put = await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}", new PutAutomationRequest(removal));
+        Assert.AreEqual(HttpStatusCode.OK, put.Status, put.Body.ToString());
+        Assert.IsTrue(put.Read<AutomationDto>().Removed);
+        Assert.AreEqual(removal, await NextAsync(delivered));
+        Assert.AreEqual(HttpStatusCode.Conflict, (await fixture.SendAsync(owner, HttpMethod.Delete, delete)).Status, "not taken away yet");
+        await connection.SendRequestAsync(FleetAutomationMethods.Ack, JsonSerializer.SerializeToElement(
+            new FleetAutomationAcks([new FleetAutomationAck(Id, 2, true, null)]), FleetAutomationServerJsonContext.Default.FleetAutomationAcks));
+        var forgotten = await fixture.SendAsync(owner, HttpMethod.Delete, delete);
+        Assert.AreEqual(HttpStatusCode.OK, forgotten.Status, forgotten.Body.ToString());
+        Assert.AreEqual(0, forgotten.Read<AutomationListDto>().Automations.Count);
+        Assert.AreEqual(0, (await ListAsync(fixture, owner)).Count);
+    }
+
+    private static class AutomationDeliveryState
+    {
+        public const string Pending = "pending";
+        public const string Applied = "applied";
+        public const string Refused = "refused";
+    }
+
+    private static class AutomationRunStatus
+    {
+        public const string Claimed = "claimed";
+    }
+
+    private static FleetAutomationVersion Version(string organization, string machine, long number)
+        => new(FleetAutomationVersion.CurrentVersion, organization, Id, number, machine, false, true, ["hourly"], null, null, "{\"sealed\":\"for the machine\"}",
+            string.Empty, string.Empty, DateTimeOffset.UtcNow);
+
+    // Signs as the device, naming it as the signer unless the version names another one.
+    private static FleetSignedAutomationVersion Sign(TestDevice device, FleetAutomationVersion version)
+    {
+        var named = version with
+        {
+            SignerDeviceId = version.SignerDeviceId is { Length: > 0 } signer ? signer : device.DeviceId,
+            SignerKey = version.SignerKey is { Length: > 0 } key ? key : device.PublicKey,
+        };
+        var text = FleetAutomationVersionDocuments.Serialize(named);
+        return new FleetSignedAutomationVersion(text, device.Sign(FleetAutomationVersionDocuments.GetSignedBytes(text)));
+    }
+
+    private static async Task<(FleetConnection Connection, FleetWelcome Welcome)> ConnectNodeAsync(ServerFixture fixture, TestDevice node,
+        Channel<FleetSignedAutomationVersion> delivered)
+        => await fixture.ConnectAsync(node, connection => connection.SetEventHandler((fleetEvent, _) =>
+        {
+            if (fleetEvent.Event == FleetAutomationMethods.Assigned)
+            {
+                foreach (var version in fleetEvent.Payload!.Value.Deserialize(FleetAutomationServerJsonContext.Default.FleetAutomationDelivery)!.Versions)
+                    delivered.Writer.TryWrite(version);
+            }
+
+            return ValueTask.CompletedTask;
+        }));
+
+    private static async Task<FleetAutomationClaimResult> ClaimAsync(FleetConnection connection, string runId, string occurrence, long number = 1)
+        => (await connection.SendRequestAsync(FleetAutomationMethods.Claim, new FleetAutomationClaimRequest(Id, number, occurrence, runId, DateTimeOffset.UtcNow.AddMinutes(5)),
+            FleetAutomationServerJsonContext.Default.FleetAutomationClaimRequest, FleetAutomationServerJsonContext.Default.FleetAutomationClaimResult))!;
+
+    private static async Task<IReadOnlyList<AutomationDto>> ListAsync(ServerFixture fixture, TestDevice owner)
+    {
+        var answer = await fixture.SendAsync(owner, HttpMethod.Get, "/api/v1/automations");
+        Assert.AreEqual(HttpStatusCode.OK, answer.Status, answer.Body.ToString());
+        return answer.Read<AutomationListDto>().Automations;
+    }
+
+    private static async Task<T> NextAsync<T>(Channel<T> channel)
+    {
+        using var timeout = new CancellationTokenSource(Waits.Hang);
+        return await channel.Reader.ReadAsync(timeout.Token);
+    }
+
+    private static async Task WaitOfflineAsync(ServerFixture fixture, string deviceId)
+    {
+        var presence = fixture.GetService<Control.PresenceRegistry>();
+        var deadline = DateTime.UtcNow + Waits.Hang;
+        while (presence.IsOnline(deviceId))
+        {
+            if (DateTime.UtcNow > deadline) Assert.Fail("The machine stayed online.");
+            await Task.Delay(20);
+        }
+    }
+}

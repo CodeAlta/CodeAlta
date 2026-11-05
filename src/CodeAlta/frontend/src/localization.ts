@@ -1,7 +1,9 @@
 import { landingMessages } from "./landing/messages";
 import { statisticsMessages } from "./statistics/messages";
 import { worktreeMessages } from "./worktrees/messages";
+import { issueBranchMessages } from "./issues/branchMessages";
 import { documentationMessages } from "./documentation/messages";
+import { findInSessionMessages } from "./findInPage/messages";
 import { bookmarkMessages } from "./bookmarks/messages";
 import { storageMessages } from "./storage/messages";
 import { sessionBranchMessages } from "./sessionBranch/messages";
@@ -16,6 +18,9 @@ import { codeModeSettingsMessages } from "./codeModeSettingsMessages";
 import { scriptCardMessages } from "./scriptCard/messages";
 import { resumeCardMessages } from "./resumeCard/messages";
 import { scriptAutomationMessages } from "./automations/scriptAutomationMessages";
+import { automationPlacementMessages } from "./automations/placementMessages";
+import { automationIntegrationMessages } from "./automations/integrationMessages";
+import { automationAutonomyMessages } from "./automations/autonomyMessages";
 import { workflowMessages } from "./workflows/messages";
 import { claudeCliMessages } from "./claudeCli/messages";
 import { pluginProviderMessages } from "./pluginProviders/messages";
@@ -28,6 +33,7 @@ import { skillFolderMessages } from "./skillFolderMessages";
 import { promptSurfaceMessages } from "./promptSurface/messages";
 import { externalEditorMessages } from "./externalEditors/messages";
 import { windowMessages } from "./windows/messages";
+import { turnAlertMessages } from "./turnAlertMessages";
 import { fontMessages } from "./fonts/messages";
 import { timelineActivityMessages } from "./timelineActivity/messages";
 import { localSearchMessages } from "./search/localSearchMessages";
@@ -51,6 +57,18 @@ import { mcpSessionMessages } from "./mcpSession/messages";
 import { cloudSessionMessages } from "./cloudSessions/messages";
 import { settingsSearchMessages } from "./settings/messages";
 import { startPromptMessages } from "./startPrompts/messages";
+import { machineMessages } from "./machines/messages";
+import { machineManageMessages } from "./machines/manageMessages";
+import { addMachineMessages } from "./machines/addMachineMessages";
+import { createServerMessages } from "./fleet/createServerMessages";
+import { secretMessages } from "./secrets/messages";
+import { fleetMessages } from "./fleet/messages";
+import { fleetSecretMessages } from "./fleet/secretsMessages";
+import { fleetBudgetMessages } from "./fleet/budgetsMessages";
+import { fleetAccessMessages } from "./fleet/access/accessMessages";
+import { fleetAuditMessages } from "./fleet/audit/auditMessages";
+import { fleetPoliciesMessages } from "./fleet/policies/policiesMessages";
+import { signInMessages } from "./fleet/signInMessages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -598,6 +616,13 @@ export const messages = dictionary({
   "Local image edit refused. Use a supported image and a writable owned draft; original attachments are retained.": ["Edición rechazada. Usa una imagen compatible y un borrador propio editable; se conservan los adjuntos.", "Modification refusée. Utilisez une image compatible et un brouillon détenu modifiable ; les pièces jointes sont conservées.", "Bildänderung abgelehnt. Unterstütztes Bild und bearbeitbaren eigenen Entwurf verwenden; Anhänge bleiben erhalten.", "画像の編集を拒否しました。対応する画像と編集可能な所有下書きを使用してください。元の添付は保持されます。", "图像编辑被拒绝。请使用受支持的图片和可写的自有草稿；原始附件仍然保留。"],
   "Draft edited...": ["Borrador editado...", "Brouillon modifié...", "Entwurf bearbeitet...", "下書きを編集しました...", "草稿已编辑..."],
   "Save image title": ["Guardar título de imagen", "Enregistrer le titre de l’image", "Bildtitel speichern", "画像タイトルを保存", "保存图片标题"],
+  "No folder dialog is available on this desktop: drop the folder on the prompt instead.": ["No hay ningún cuadro de diálogo de carpetas en este escritorio: suelta la carpeta en el mensaje.", "Aucune boîte de dialogue de dossier n’est disponible sur ce bureau : déposez plutôt le dossier sur l’invite.", "Auf diesem Desktop ist kein Ordnerdialog verfügbar: Ziehen Sie den Ordner stattdessen auf die Eingabe.", "このデスクトップではフォルダーのダイアログを使用できません。代わりにフォルダーをプロンプトにドロップしてください。", "此桌面上没有可用的文件夹对话框：请将文件夹拖放到提示中。"],
+  "No folder dialog is available on this desktop: type the path of the folder instead.": ["No hay ningún cuadro de diálogo de carpetas en este escritorio: escribe la ruta de la carpeta.", "Aucune boîte de dialogue de dossier n’est disponible sur ce bureau : saisissez plutôt le chemin du dossier.", "Auf diesem Desktop ist kein Ordnerdialog verfügbar: Geben Sie stattdessen den Pfad des Ordners ein.", "このデスクトップではフォルダーのダイアログを使用できません。代わりにフォルダーのパスを入力してください。", "此桌面上没有可用的文件夹对话框：请输入文件夹的路径。"],
+  "The folder dialog could not be shown.": ["No se pudo mostrar el cuadro de diálogo de carpetas.", "La boîte de dialogue de dossier n’a pas pu être affichée.", "Der Ordnerdialog konnte nicht angezeigt werden.", "フォルダーのダイアログを表示できませんでした。", "无法显示文件夹对话框。"],
+  "No file dialog is available on this desktop: drop the files on the prompt or paste them instead.": ["No hay ningún cuadro de diálogo de archivos en este escritorio: suelta los archivos en el mensaje o pégalos.", "Aucune boîte de dialogue de fichiers n’est disponible sur ce bureau : déposez plutôt les fichiers sur l’invite ou collez-les.", "Auf diesem Desktop ist kein Dateidialog verfügbar: Ziehen Sie die Dateien stattdessen auf die Eingabe oder fügen Sie sie ein.", "このデスクトップではファイルのダイアログを使用できません。代わりにファイルをプロンプトにドロップするか貼り付けてください。", "此桌面上没有可用的文件对话框：请将文件拖放到提示中或粘贴文件。"],
+  "The file dialog could not be shown.": ["No se pudo mostrar el cuadro de diálogo de archivos.", "La boîte de dialogue de fichiers n’a pas pu être affichée.", "Der Dateidialog konnte nicht angezeigt werden.", "ファイルのダイアログを表示できませんでした。", "无法显示文件对话框。"],
+  "Could not attach {name}: the attachments of a prompt are limited to {size} MB in all.": ["No se pudo adjuntar {name}: los adjuntos de un mensaje están limitados a {size} MB en total.", "Impossible de joindre {name} : les pièces jointes d’un message sont limitées à {size} Mo au total.", "{name} konnte nicht angehängt werden: Die Anhänge einer Nachricht sind auf insgesamt {size} MB begrenzt.", "{name} を添付できませんでした：1 つのプロンプトの添付は合計 {size} MB までです。", "无法附加 {name}：一条提示的附件总共限制为 {size} MB。"],
+  "Could not read the dropped file {name}.": ["No se pudo leer el archivo soltado {name}.", "Impossible de lire le fichier déposé {name}.", "Die abgelegte Datei {name} konnte nicht gelesen werden.", "ドロップされたファイル {name} を読み取れませんでした。", "无法读取拖放的文件 {name}。"],
   "Could not read {name}: a folder cannot be attached.": ["No se pudo leer {name}: no se puede adjuntar una carpeta.", "Impossible de lire {name} : un dossier ne peut pas être joint.", "{name} konnte nicht gelesen werden: Ein Ordner kann nicht angehängt werden.", "{name} を読み取れませんでした：フォルダーは添付できません。", "无法读取 {name}：无法附加文件夹。"],
   "Attach": ["Adjuntar", "Joindre", "Anhängen", "添付", "附加"],
   "Add files or photos": ["Añadir archivos o fotos", "Ajouter des fichiers ou des photos", "Dateien oder Fotos hinzufügen", "ファイルまたは写真を追加", "添加文件或照片"],
@@ -1150,6 +1175,7 @@ export const messages = dictionary({
   "Copy image": ["Copiar imagen", "Copier l’image", "Bild kopieren", "画像をコピー", "复制图片"],
   "Image copied": ["Imagen copiada", "Image copiée", "Bild kopiert", "画像をコピーしました", "图片已复制"],
   "Image options": ["Opciones de imagen", "Options de l’image", "Bildoptionen", "画像のオプション", "图片选项"],
+  "Link options": ["Opciones del enlace", "Options du lien", "Link-Optionen", "リンクのオプション", "链接选项"],
   "Working folder": ["Carpeta de trabajo", "Dossier de travail", "Arbeitsordner", "作業フォルダー", "工作文件夹"],
   "Branch {branch}": ["Rama {branch}", "Branche {branch}", "Branch {branch}", "ブランチ {branch}", "分支 {branch}"],
   "Detached at {branch}": ["Separado en {branch}", "Détaché sur {branch}", "Losgelöst bei {branch}", "{branch} でデタッチ", "分离于 {branch}"],
@@ -1304,6 +1330,9 @@ export const messages = dictionary({
   "The update did not complete. Run the command in a terminal.": ["La actualización no se completó. Ejecuta el comando en un terminal.", "La mise à jour n’a pas abouti. Exécutez la commande dans un terminal.", "Das Update wurde nicht abgeschlossen. Führen Sie den Befehl in einem Terminal aus.", "更新は完了しませんでした。ターミナルでコマンドを実行してください。", "更新未完成。请在终端中运行该命令。"],
   "CodeAlta runs on .NET {version}, which can make it crash. Update .NET 10 to {minimum} or later.": ["CodeAlta se ejecuta en .NET {version}, que puede hacer que se cierre inesperadamente. Actualiza .NET 10 a {minimum} o posterior.", "CodeAlta s’exécute sur .NET {version}, qui peut le faire planter. Mettez à jour .NET 10 vers {minimum} ou une version ultérieure.", "CodeAlta läuft auf .NET {version}, wodurch es abstürzen kann. Aktualisieren Sie .NET 10 auf {minimum} oder neuer.", "CodeAlta は .NET {version} で動作しており、クラッシュする可能性があります。.NET 10 を {minimum} 以降に更新してください。", "CodeAlta 运行在 .NET {version} 上，可能会因此崩溃。请将 .NET 10 更新到 {minimum} 或更高版本。"],
   "Download .NET": ["Descargar .NET", "Télécharger .NET", ".NET herunterladen", ".NET をダウンロード", "下载 .NET"],
+  // A project file of the catalog that cannot be read: its project is left out of the lists.
+  "The project file {file} cannot be read, so its project is not listed.": ["No se puede leer el archivo de proyecto {file}, así que su proyecto no aparece.", "Le fichier de projet {file} ne peut pas être lu, et son projet n’est pas listé.", "Die Projektdatei {file} kann nicht gelesen werden, daher wird ihr Projekt nicht aufgeführt.", "プロジェクト ファイル {file} を読み取れないため、そのプロジェクトは表示されません。", "无法读取项目文件 {file}，因此未列出其项目。"],
+  "These project files cannot be read, so their projects are not listed: {files}": ["No se pueden leer estos archivos de proyecto, así que sus proyectos no aparecen: {files}", "Ces fichiers de projet ne peuvent pas être lus, et leurs projets ne sont pas listés : {files}", "Diese Projektdateien können nicht gelesen werden, daher werden ihre Projekte nicht aufgeführt: {files}", "次のプロジェクト ファイルを読み取れないため、それらのプロジェクトは表示されません: {files}", "无法读取以下项目文件，因此未列出其项目：{files}"],
   "The update could not be started. Run the command in a terminal.": ["No se pudo iniciar la actualización. Ejecuta el comando en un terminal.", "La mise à jour n’a pas pu démarrer. Exécutez la commande dans un terminal.", "Das Update konnte nicht gestartet werden. Führen Sie den Befehl in einem Terminal aus.", "更新を開始できませんでした。ターミナルでコマンドを実行してください。", "无法启动更新。请在终端中运行该命令。"],
   "Open settings": ["Abrir configuración", "Ouvrir les paramètres", "Einstellungen öffnen", "設定を開く", "打开设置"],
   "Copy project name": ["Copiar nombre del proyecto", "Copier le nom du projet", "Projektnamen kopieren", "プロジェクト名をコピー", "复制项目名称"],
@@ -1712,6 +1741,13 @@ export const messages = dictionary({
   "Commits": ["Commits", "Commits", "Commits", "コミット", "提交"],
   "Add CodeAlta as co-author": ["Añadir CodeAlta como coautor", "Ajouter CodeAlta comme coauteur", "CodeAlta als Mitautor eintragen", "CodeAlta を共同作成者として追加する", "将 CodeAlta 添加为共同作者"],
   "Agents end the message of each commit with a Co-authored-by line for CodeAlta, beside the lines their provider adds.": ["Los agentes terminan el mensaje de cada commit con una línea Co-authored-by para CodeAlta, junto a las líneas que añade su proveedor.", "Les agents terminent le message de chaque commit par une ligne Co-authored-by pour CodeAlta, à côté des lignes qu'ajoute leur fournisseur.", "Agenten beenden die Nachricht jedes Commits mit einer Co-authored-by-Zeile für CodeAlta, neben den Zeilen, die ihr Anbieter hinzufügt.", "エージェントは各コミットのメッセージの末尾に、プロバイダーが追加する行と並べて CodeAlta の Co-authored-by 行を付けます。", "代理会在每个提交消息的末尾加上 CodeAlta 的 Co-authored-by 行，与其提供方添加的行并列。"],
+  "Co-author line": ["Línea de coautor", "Ligne de coauteur", "Mitautor-Zeile", "共同作成者の行", "共同作者行"],
+  "The trailer agents add, such as Co-authored-by: Name <email>. Empty for the one of CodeAlta.": ["El trailer que añaden los agentes, como Co-authored-by: Nombre <email>. Vacío para el de CodeAlta.", "Le trailer qu'ajoutent les agents, comme Co-authored-by: Nom <email>. Vide pour celui de CodeAlta.", "Der Trailer, den Agenten hinzufügen, etwa Co-authored-by: Name <email>. Leer für den von CodeAlta.", "エージェントが追加するトレーラー（例: Co-authored-by: Name <email>）。空欄なら CodeAlta のものを使います。", "代理添加的 trailer，例如 Co-authored-by: Name <email>。留空则使用 CodeAlta 的。"],
+  "Comments and messages": ["Comentarios y mensajes", "Commentaires et messages", "Kommentare und Nachrichten", "コメントとメッセージ", "评论和消息"],
+  "Say that CodeAlta wrote it": ["Indicar que lo escribió CodeAlta", "Dire que CodeAlta l'a écrit", "Angeben, dass CodeAlta es geschrieben hat", "CodeAlta が書いたことを示す", "注明由 CodeAlta 撰写"],
+  "When an agent writes a pull request comment, an issue, a chat message or an email for you, it ends the text with a line saying that it comes from CodeAlta.": ["Cuando un agente escribe por usted un comentario de pull request, una incidencia, un mensaje de chat o un correo, termina el texto con una línea que dice que viene de CodeAlta.", "Quand un agent écrit pour vous un commentaire de pull request, une issue, un message de chat ou un e-mail, il termine le texte par une ligne qui dit qu'il vient de CodeAlta.", "Wenn ein Agent für Sie einen Pull-Request-Kommentar, ein Issue, eine Chatnachricht oder eine E-Mail schreibt, beendet er den Text mit einer Zeile, die sagt, dass er von CodeAlta stammt.", "エージェントがあなたの代わりにプルリクエストのコメント、Issue、チャットのメッセージ、メールを書くとき、それが CodeAlta によるものだと示す行で本文を締めくくります。", "代理替您撰写拉取请求评论、Issue、聊天消息或电子邮件时，会在文末加上一行，说明内容来自 CodeAlta。"],
+  "Instruction to agents": ["Instrucción para los agentes", "Instruction aux agents", "Anweisung an die Agenten", "エージェントへの指示", "给代理的指示"],
+  "What agents are told about that line, on one line. Empty for the one of CodeAlta.": ["Lo que se indica a los agentes sobre esa línea, en una sola línea. Vacío para la de CodeAlta.", "Ce qui est dit aux agents de cette ligne, sur une seule ligne. Vide pour celle de CodeAlta.", "Was den Agenten über diese Zeile gesagt wird, in einer Zeile. Leer für die von CodeAlta.", "その行についてエージェントに伝える指示（1 行）。空欄なら CodeAlta のものを使います。", "就该行告诉代理的内容，写在一行内。留空则使用 CodeAlta 的。"],
   "Session tabs": ["Pestañas de las sesiones", "Onglets des sessions", "Sitzungs-Tabs", "セッションのタブ", "会话标签页"],
   "Single tab for sessions": ["Una sola pestaña para las sesiones", "Un seul onglet pour les sessions", "Ein einziger Tab für Sitzungen", "セッションを 1 つのタブで表示", "会话共用一个标签页"],
   "A session you open takes the place of the one shown.": ["La sesión que abre ocupa el lugar de la que se muestra.", "La session que vous ouvrez prend la place de celle qui est affichée.", "Eine Sitzung, die Sie öffnen, tritt an die Stelle der angezeigten.", "開いたセッションは、表示中のセッションと入れ替わります。", "您打开的会话会取代当前显示的会话。"],
@@ -2577,6 +2613,17 @@ export const messages = dictionary({
   "Put the card away. The task stays in Work items.": ["Guarda la tarjeta. La tarea sigue en Elementos de trabajo.", "Range la carte. La tâche reste dans Éléments de travail.", "Die Karte wegräumen. Die Aufgabe bleibt in Arbeitselemente.", "カードをしまいます。タスクは作業項目に残ります。", "收起卡片。任务仍保留在工作项中。"],
   "Put away": ["Guardar", "Ranger", "Wegräumen", "しまう", "收起"],
   "Put the proposals away": ["Guardar las propuestas", "Ranger les propositions", "Vorschläge wegräumen", "提案をしまう", "收起提议"],
+  "Place the proposals": ["Colocar las propuestas", "Placer les propositions", "Vorschläge platzieren", "提案の位置", "放置提议"],
+  "Place the proposals around Notes. You can also drag them onto an arrow.": ["Coloca las propuestas alrededor de las notas. También puedes arrastrarlas sobre una flecha.",
+    "Placez les propositions autour des notes. Vous pouvez aussi les faire glisser sur une flèche.", "Vorschläge um die Notizen herum platzieren. Du kannst sie auch auf einen Pfeil ziehen.",
+    "提案をノートの周りに配置します。矢印の上にドラッグすることもできます。", "将提议放在笔记周围。也可以将其拖到箭头上。"],
+  "Drag onto an arrow around Notes to place the proposals there.": ["Arrastra sobre una flecha alrededor de las notas para colocar allí las propuestas.",
+    "Faites glisser sur une flèche autour des notes pour y placer les propositions.", "Auf einen Pfeil um die Notizen ziehen, um die Vorschläge dort zu platzieren.",
+    "ノートの周りの矢印にドラッグすると、そこに提案を配置します。", "拖到笔记周围的箭头上，即可将提议放在那里。"],
+  "Left of Notes": ["A la izquierda de las notas", "À gauche des notes", "Links von den Notizen", "ノートの左", "笔记左侧"],
+  "Right of Notes": ["A la derecha de las notas", "À droite des notes", "Rechts von den Notizen", "ノートの右", "笔记右侧"],
+  "Above Notes": ["Encima de las notas", "Au-dessus des notes", "Über den Notizen", "ノートの上", "笔记上方"],
+  "Below Notes": ["Debajo de las notas", "Sous les notes", "Unter den Notizen", "ノートの下", "笔记下方"],
   "Read the plan": ["Leer el plan", "Lire le plan", "Plan lesen", "計画を読む", "阅读计划"],
   "Show in Work items": ["Mostrar en Elementos de trabajo", "Afficher dans Éléments de travail", "In Arbeitselemente anzeigen", "作業項目で表示", "在工作项中显示"],
   "Keep the plan for later. It stays in Work items.": ["Conserva el plan para más tarde. Sigue en Elementos de trabajo.", "Garde le plan pour plus tard. Il reste dans Éléments de travail.", "Den Plan für später aufheben. Er bleibt in Arbeitselemente.", "計画を後回しにします。作業項目に残ります。", "将计划留待以后。它仍保留在工作项中。"],
@@ -2714,6 +2761,7 @@ export const messages = dictionary({
   "No language matches.": ["Ningún lenguaje coincide.", "Aucun langage ne correspond.", "Keine Sprache passt.", "一致する言語がありません。", "没有匹配的语言。"],
   "Start a new file": ["Empezar un archivo nuevo", "Commencer un nouveau fichier", "Eine neue Datei beginnen", "新しいファイルを始める", "开始一个新文件"],
   "From the GitHub Copilot layout": ["Del diseño de GitHub Copilot", "De la disposition GitHub Copilot", "Aus dem GitHub-Copilot-Layout", "GitHub Copilot のレイアウトから", "来自 GitHub Copilot 布局"],
+  "From the Claude Code layout": ["Del diseño de Claude Code", "De la disposition Claude Code", "Aus dem Claude-Code-Layout", "Claude Code のレイアウトから", "来自 Claude Code 布局"],
   "Usage": ["Uso", "Utilisation", "Nutzung", "使用量", "用量"],
   "Subscription usage": ["Uso de la suscripción", "Utilisation de l'abonnement", "Nutzung des Abonnements", "サブスクリプションの使用量", "订阅用量"],
   "5-hour limit": ["Límite de 5 horas", "Limite de 5 heures", "5-Stunden-Limit", "5 時間の上限", "5 小时限额"],
@@ -2851,7 +2899,21 @@ export const messages = dictionary({
   ...landingMessages,
   ...statisticsMessages,
   ...worktreeMessages,
+  ...machineMessages,
+  ...machineManageMessages,
+  ...addMachineMessages,
+  ...createServerMessages,
+  ...secretMessages,
+  ...fleetMessages,
+  ...fleetSecretMessages,
+  ...fleetBudgetMessages,
+  ...fleetAccessMessages,
+  ...fleetAuditMessages,
+  ...fleetPoliciesMessages,
+  ...signInMessages,
+  ...issueBranchMessages,
   ...documentationMessages,
+  ...findInSessionMessages,
   ...storageMessages,
   ...sessionBranchMessages,
   ...sessionChildrenMessages,
@@ -2866,6 +2928,9 @@ export const messages = dictionary({
   ...scriptCardMessages,
   ...resumeCardMessages,
   ...scriptAutomationMessages,
+  ...automationIntegrationMessages,
+  ...automationAutonomyMessages,
+  ...automationPlacementMessages,
   ...workflowMessages,
   ...claudeCliMessages,
   ...pluginProviderMessages,
@@ -2878,6 +2943,7 @@ export const messages = dictionary({
   ...promptSurfaceMessages,
   ...externalEditorMessages,
   ...windowMessages,
+  ...turnAlertMessages,
   ...fontMessages,
   ...timelineActivityMessages,
   ...skillSearchMessages,

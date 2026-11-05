@@ -207,7 +207,8 @@ Prompts are files under `prompts/` roots with precedence built-in (`content/prom
 < project (`<project>/.alta/prompts/`): `system/<id>.system-prompt.md` for invariant host behavior and
 `agents/<id>.prompt.md` for selectable agent prompts. A later file replaces an earlier one with the same id, or extends
 it with `mode: append`; an agent prompt can `inherit:` others (depth-first, at most 16). GitHub Copilot custom agents
-(`.github/agents/*.agent.md`) are read-only agent prompts below the built-in ones.
+(`.github/agents/*.agent.md`) and Claude Code subagents (`.claude/agents/**/*.md`), of the project and of the user, are
+read-only agent prompts below the built-in ones.
 
 `SystemPromptBuilder` composes the system message and the developer instructions: system prompt, agent prompt body,
 runtime context (date, platform, space, model tiers, commit trailer), tool guidance, skills, and project context
@@ -376,6 +377,10 @@ its own database. Two rules keep one writer per session across processes:
   for good (after its retirement) and no hold is left. A frontend says what it shows (`SetShownSessions`); from then
   on a session it does not show is detached once it has had nothing to do for a while (no run, queue, job, background
   task, pending agent prompt or remote control), so a closed tab lets another process continue the session.
+- **Moves.** A session given to another machine (`SessionMoveService`) is frozen while it moves and relinquished once
+  the move is committed, by a file beside its lease (`<id>.moved`). The checks of the lease (`HoldForWrite`, the claim of
+  an attachment) read it once the lease is held, so every writer of the sessions folder, the command line included,
+  refuses the session (`session_in_use`) and it stays read-only here.
 - **Following.** A host that owns the database of its state root (`FollowExternalSessions`: Desktop, TUI) runs
   `ExternalSessionFollower`: it projects the sessions the command line names in markers, then deletes the markers;
   it follows the sessions another process holds, projecting their journals again as they grow (the head, the tail and

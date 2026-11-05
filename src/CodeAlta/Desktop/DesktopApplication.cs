@@ -78,7 +78,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 
     private static int RunWithCapture(DesktopLaunchOptions options, Func<DesktopLaunchOptions, DesktopLogCapture?, int> run)
     {
-        var capture = DesktopLogging.Initialize(options.DataRoot, LoggingSettingsOf(options), out var flushPending);
+        // The secrets of the machine never land in the log: their values are masked in its file and its rows.
+        var masker = options.CatalogRoot is { } secretsRoot ? new CodeAlta.Agent.Runtime.AgentSecretMasker(new CodeAlta.Catalog.Secrets.LocalSecretStore(secretsRoot).GetSecretValues) : null;
+        var capture = DesktopLogging.Initialize(options.DataRoot, LoggingSettingsOf(options), masker, out var flushPending);
         var result = 1;
         try
         {
@@ -312,7 +314,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ReminderService? reminders = null;
         DesktopSessionRetention? retention = null;
         DesktopBookmarks? bookmarkLife = null;
+        Fleet.DesktopFleet? fleet = null;
+        Fleet.DesktopFleetServers? fleetServers = null;
+        Fleet.DesktopNode? desktopNode = null;
+        Fleet.DesktopRemoteChildren? remoteChildren = null;
         Automations.AutomationService? automations = null;
+        Fleet.DesktopAutomationPlacement? placement = null;
         DesktopChangesView? changesView = null;
         DesktopEditorView? editorView = null;
         Terminals.DesktopTerminals? terminals = null;
@@ -343,9 +350,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         DesktopKeepAwake? keepAwake = null;
         DesktopExitSignals? exitSignals = null;
         DesktopUiWatchdog? uiWatchdog = null;
+        // The files dropped on the windows where the page does not get them.
+        var fileDrops = new DesktopFileDrops();
+        IDisposable? fileDropsLifetime = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null, instanceLifetime = null;
         IAsyncDisposable? uiLifetime = null;
         IAsyncDisposable? sessionTaskbarProgress = null;
+        IAsyncDisposable? sessionTurnAlerts = null;
         var bodyFailed = false;
         try
         {
@@ -569,6 +580,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await CloseStepAsync(closing, "MCP server", async () => { if (mcp is not null) await mcp.DisposeAsync(); }); // No client starts a command on a host that is closing.
                 await CloseStepAsync(closing, "session retention", async () => { if (retention is not null) await retention.DisposeAsync(); }); // Join original archive/retirement work before releasing its owners.
                 await CloseStepAsync(closing, "bookmarks", () => { bookmarkLife?.Dispose(); return ValueTask.CompletedTask; });
+                await CloseStepAsync(closing, "placed automations", async () => { if (placement is not null) await placement.DisposeAsync(); }); // What was copied runs on its machines.
+                await CloseStepAsync(closing, "remote children", async () => { if (remoteChildren is not null) await remoteChildren.DisposeAsync(); }); // Their answers wait on their machines.
+                await CloseStepAsync(closing, "paired machines", async () => { if (fleet is not null) await fleet.DisposeAsync(); }); // Their channels close; their sessions go on where they run.
+                await CloseStepAsync(closing, "paired computers", async () => { if (desktopNode is not null) await desktopNode.DisposeAsync(); }); // The computers paired with this one see it offline.
+                await CloseStepAsync(closing, "servers", async () => { if (fleetServers is not null) await fleetServers.DisposeAsync(); }); // Their control connections close; the servers see this computer offline.
                 await CloseStepAsync(closing, "sessions", async () => { if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync()); });
                 await CloseStepAsync(closing, "automations", async () => { if (automations is not null) await automations.DisposeAsync(); }); // Nothing more is started; sessions end with the host.
                 await CloseStepAsync(closing, "terminals", async () => { if (terminals is not null) await terminals.CloseAsync(); }); // The programs of the terminals end with the application.
@@ -608,6 +624,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // other desktops do not wait for their entry.
             await chrome.ApplyWindowIconAsync(window, OperatingSystem.IsMacOS() && (await entry).IconChanged);
             shell.Dialogs = chrome.Services.Dialogs;
+            // Where NeoAstra takes the files dropped from the file manager away from the page, the page is told of them.
+            fileDropsLifetime = fileDrops.Follow(chrome.Services.DragDrop, shell.NotifyDrop, DesktopFileDrops.PageGetsDrops,
+                label => OperatingSystem.IsWindows() && application.TryGetView(label, out var dropped) && dropped?.Window is { } owner ? owner.ScaleFactor : 1,
+                () => shell.Zoom / 100d);
             await shell.StartTrayAsync(chrome.Services, options.Developer);
             await shell.StartApplicationMenuAsync(chrome.Services, options.Developer);
             instanceLifetime = await AcquireInstanceAsync(application, options);
@@ -632,7 +652,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             view.ProcessFailed += (_, _) => retention?.ProtectionRpc.InvalidatePage();
             view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
             // The files attached to a prompt are chosen with the dialog of the system.
-            view.FileChooserRequested = request => DesktopFileChooser.ChooseAsync(window, shell.Dialogs, request);
+            view.FileChooserRequested = request => DesktopFileChooser.ChooseAsync(window, shell.Dialogs, request,
+                problem => shell.NotifyDialogProblem(Windows.DesktopWindows.MainLabel, "files", problem));
             // The page records the microphone for speech to prompt, and only while that is turned on.
             view.PermissionRequested = request => ValueTask.FromResult(DecidePermission(request, speech?.IsMicrophoneAllowed() == true));
             // The start-up screen first, then the window: it appears with the logo on its theme, never empty.
@@ -753,10 +774,32 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // A session whose background job runs is at work too: exiting ends the command.
             shell.RunningSessions = host.RuntimeService.CountSessionsAtWork;
             sessionTaskbarProgress = DesktopWindowsTaskbarProgress.StartIfAvailable(window, chrome.Services.WindowPolish, host.RuntimeService);
+            // A question a session asked, a command to review, a form to fill, a conversation open elsewhere.
+            // A send of the fleet a budget holds until its owner continues it waits for a person too.
+            ValueTask<IReadOnlyList<string>> SessionsWaitingAsync() => host.ListSessionsWaitingForPersonAsync();
+            // A session that is done or waits for the user while the application is in the background: a notification,
+            // which opens the session, and the mark of the application, until a window has the focus again.
+            sessionTurnAlerts = new DesktopTurnAlerts(new DesktopTurnAlertSurface(window, chrome.Services, host.RuntimeService,
+                async _ => await SessionsWaitingAsync(), () => shell.TurnAlerts, () => windows.AnyFocused,
+                DesktopTurnAlertSurface.CanNotify(OperatingSystem.IsMacOS() ? DesktopIntegration.MacRunningBundleIdentifier() : null)), DesktopTurnAlerts.Period);
+            chrome.Services.Notifications.Activated += (_, activation) =>
+            {
+                if (DesktopTurnAlerts.SessionOf(activation) is { } notifiedSession) shell.ShowSession(notifiedSession);
+            };
             shell.HasWorkspace = true;
             if (!closeRequested.Task.IsCompleted)
             {
                 var epoch = Guid.NewGuid().ToString("D");
+                // The hosts of the sessions the window shows: the host of this process, and one per paired machine, which the
+                // fleet of the instance adds and removes.
+                var sessionHosts = new SessionHosts.SessionHostRegistry(new SessionHosts.LocalSessionHost(host));
+                // The paired machines, the sessions agents start on them and the CodeAlta Servers of this instance: wired here,
+                // started once the window shows the application, with no key and no network for a profile that stays local.
+                var fleetStartup = Fleet.DesktopFleetStartup.Create(host, sessionHosts, Environment.MachineName, DesktopCommandLine.Version);
+                fleet = fleetStartup.Fleet;
+                remoteChildren = fleetStartup.RemoteChildren;
+                fleetServers = fleetStartup.Servers;
+                desktopNode = fleetStartup.Node;
                 // The bookmarks of the sessions of this instance, in its database. A bookmarked session is kept by the
                 // retention of sessions, which deletes nothing before the bookmarks were read.
                 var bookmarks = new CodeAlta.Catalog.Bookmarks.BookmarkService(host.ApplicationDatabase,
@@ -766,7 +809,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The git worktrees sessions can work in: created with a session, listed and removed from the changes of a project.
                 var worktreeConfig = new CodeAltaConfigStore(host.CatalogOptions);
                 var worktrees = new CodeAlta.Catalog.Worktrees.GitWorktreeService(host.CatalogOptions, worktreeConfig);
-                workspace = new WorkspaceService(host, epoch, worktrees);
+                workspace = new WorkspaceService(sessionHosts, host, epoch, worktrees, fleet.Locations);
                 // The work the first page does not need waits until the window shows the application.
                 var shown = new DesktopStartupGate();
                 workspace.Served = shown.WorkspaceServed;
@@ -778,14 +821,17 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     journalStore.RebuildProgress = null;
                     Mark("application shown, the work after the start begins");
                 }, TaskScheduler.Default);
-                operations = new SessionOperationsService(host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
+                // The paired machines are reached once the window shows the application.
+                _ = shown.Shown.ContinueWith(_ => fleetStartup.StartRemoteChildren(), TaskScheduler.Default);
+                _ = shown.Shown.ContinueWith(_ => fleetStartup.StartAsync(CancellationToken.None), TaskScheduler.Default).Unwrap();
+                operations = new SessionOperationsService(sessionHosts, host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
                 if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
                 // The reviews of the user: comments on plans, files and changes, kept per checkout in the state folder.
                 var reviewService = new CodeAlta.Catalog.Reviews.ReviewService(host.CatalogOptions.StateRoot);
                 workspace.ProjectDeleted = projectId => reviewService.DeleteProject(projectId);
                 // A session that reviews before commit may commit the work tree its last review approved.
                 host.RuntimeService.Reviews = reviewService;
-                asks = new SessionAsksService(host.Commands.Asks, epoch, reviewService, host.ProjectCatalog);
+                asks = new SessionAsksService(sessionHosts, epoch, reviewService, host.ProjectCatalog);
                 pluginAsks.Attach(host.Commands.Asks, asks, epoch);
                 pluginPermissions.Attach(host.RuntimeService.Permissions);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, host.RuntimeService, epoch, host.RetentionProtection);
@@ -808,6 +854,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 spaceView.OpenSessionsChanged += host.RuntimeService.SetShownSessions;
                 // A session another process wrote, runs or released: the windows read the sessions again.
                 if (host.ExternalSessions is { } externalSessions) externalSessions.Changed += (_, _) => spaceView.NotifySessionsChanged();
+                // A paired machine that changes its sessions or its state: the windows read the sessions again.
+                fleet.Changed += spaceView.NotifySessionsChanged;
                 canvases?.Attach(host.PluginRuntime, () => spaceView.ShownSpaceId);
                 // The project the catalog lists for a folder; null for none.
                 async Task<string?> ProjectIdOfAsync(string projectPath, CancellationToken token)
@@ -845,7 +893,28 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // A command runs with the identity of the space its runs go to (AutomationRunner): the space of its project.
                     new Automations.ShellAutomationCommands(projectId => host.Identities.ResolveAsync(null, projectId).GetAwaiter().GetResult().Environment),
                     // An automation that runs a script is allowed with the script as the library holds it.
-                    entry => entry.Definition.Script is { } script ? host.CodeModeScripts.FindHash(script, entry.ProjectPath) : null);
+                    entry => entry.Definition.Script is { } script ? host.CodeModeScripts.FindHash(script, entry.ProjectPath) : null)
+                {
+                    // Jira and Slack, with the secrets of this computer, while the desktop runs; the hooks of a server go to its machines.
+                    Integrations = Automations.AutomationIntegrationOptions.ForHost(host.CatalogOptions.GlobalRoot),
+                };
+                // An automation of the user can run on a paired machine: it is copied there, and runs there while this
+                // computer is closed. A profile that placed none makes no call and creates no key.
+                var placedFleet = fleet;
+                // A machine of an organization this computer is not paired with gets it through its server, sealed for it.
+                var placedServers = fleetServers;
+                placement = new Fleet.DesktopAutomationPlacement(automations, fleet.Find, host.CatalogOptions.FleetRoot, () => placedFleet.DeviceId, placedFleet.SignAutomation)
+                {
+                    ServerRoute = placedServers is null ? null : placedServers.AutomationRoute,
+                    SignRun = placedFleet.SignAutomationRun,
+                    // Pausing every automation pauses those on machines too; a developer instance starts paused and leaves them.
+                    PausesPlaced = !options.Developer,
+                };
+                automations.Placement = placement;
+                // An automation of a team another maintainer gave is opened here in the editor, recorded as given at its version.
+                if (placedServers is not null) placedServers.Handover = new Fleet.DesktopAutomationHandover(automations, token => host.ProjectCatalog.LoadAsync(token)) { Placement = placement };
+                fleet.Changed += placement.Poke;
+                if (placedServers is not null) placedServers.Changed += placement.Poke;
                 // A host that has the user review the commands of its sessions lets no session type in a terminal, nor
                 // give an automation a command to run.
                 // A host that started its plugins builds one again while it runs, and tells the page when it did. Building
@@ -905,7 +974,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 };
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
-                    new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
+                    new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions, placement,
+                        fleetServers is { } waitingServers ? waitingServers.WaitingRunsAsync : null), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
                     // A command a session starts in the background, what it types in a terminal, the command it gives an
                     // automation and the plugin it builds are reviewed by nobody: only a session whose requests are all
                     // approved does any of it. A caller that is no session (a client of the MCP server) has the policy
@@ -916,7 +986,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     },
                     // The tabs plugins provide: only a host that started its plugins has them.
                     canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search, reviewService,
-                    new RuntimeAltaReviewPolicy(host.RuntimeService), new Windows.DesktopAltaWindows(windows), desktopSettings);
+                    new RuntimeAltaReviewPolicy(host.RuntimeService), new Windows.DesktopAltaWindows(windows), desktopSettings,
+                    // `alta session move`: the sessions of this computer and of its paired machines go from one to another.
+                    fleet?.Moves is { } fleetMoves ? new Fleet.DesktopAltaMachineMoves(fleetMoves, fleet, host) : null,
+                    // `alta fleet`: the machines, the servers, the moves and where the automations run, as the window shows them.
+                    fleet is null ? null : new Fleet.DesktopAltaFleet(fleet, fleet.Moves?.MachineName ?? Environment.MachineName, DesktopCommandLine.Version)
+                    {
+                        Servers = fleetServers, Moves = fleet.Moves, Automations = automations, Placement = placement, Host = host,
+                    });
                 search.AttachCommands(altaCommands);
                 search.AttachSettings(desktopSettings);
                 projectOpening.Attach(async arguments => await altaCommands.InvokeAsync(arguments).ConfigureAwait(false));
@@ -941,6 +1018,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 browserHost.Activated = sessionId => uiSessions.Set(sessionId, active: false);
                 uiSessions.Activated = browserHost.ReleaseTools;
                 automations.Start();
+                placement.Start();
                 workspacePrepared.TrySetResult();
                 {
                     // Leave room for ordinary pasted images and their base64/JSON overhead.
@@ -976,7 +1054,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         RememberAppearance = RememberAppearance, ProviderSetup = NeedsProviderSetup(configStore), Closing = closing,
                     });
-                    builder.AddDesktopShellService(new DesktopShellService(shell) { ForceExitHost = () => ForceExit(closing) });
+                    builder.AddDesktopShellService(new DesktopShellService(shell) { ForceExitHost = () => ForceExit(closing), Drops = fileDrops });
                     // The windows: which one a page is, the tabs it holds, the tabs it moves or drags to another one.
                     builder.AddWindowsService(new WindowsService(windows, () => application.GetWindowCapability(NeoWindowCapability.Placement).IsSupported));
                     builder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot!));
@@ -984,6 +1062,44 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     appUpdate ??= StartAppUpdate();
                     builder.AddAppUpdateService(appUpdate);
                     builder.AddWorkspaceService(workspace);
+                    var machinesService = fleet is null ? new MachinesService() : MachinesService.Create(fleet, epoch, host.ProjectCatalog);
+                    // This computer as a machine of the person's other computers: visible to them, its pairing links and its paired computers.
+                    machinesService.Node = desktopNode;
+                    if (fleet is not null && fleetServers is not null)
+                    {
+                        // A machine this computer manages joins a server this computer owns, and is approved here.
+                        machinesService.ServerAddress = linkId => fleetServers.Connections.FirstOrDefault(connection => connection.Link.Id == linkId)?.Link.ShareableUrl;
+                        // A machine of a team or of the organization lets in who its signed access document names.
+                        machinesService.OwnerOfMachine = fleetServers.OwnerOfMachineAsync;
+                        // The names of the people a machine lets in, from the servers this computer is linked to.
+                        machinesService.PersonNames = async token =>
+                        {
+                            var names = new Dictionary<string, string>(StringComparer.Ordinal);
+                            foreach (var connection in fleetServers.Connections)
+                            {
+                                var people = await fleetServers.AccessCallAsync(connection.Link.Id, static (client, inner) => client.ListPeopleAsync(inner), token).ConfigureAwait(false);
+                                foreach (var person in people.Items.Where(static person => person.Status == CodeAlta.Fleet.Protocol.FleetPersonStatuses.Active))
+                                    names[person.Id] = person.DisplayName;
+                            }
+
+                            return names;
+                        };
+                        machinesService.CreateJoinCode = async (linkId, token) => (await fleetServers.CreateEnrollmentTokenAsync(linkId, TimeSpan.FromMinutes(10),
+                            "Added from CodeAlta Desktop", token).ConfigureAwait(false)).Token;
+                        machinesService.ApproveDevice = async (linkId, machine, token) => await fleetServers.ApproveMachineAsync(linkId, machine, token).ConfigureAwait(false);
+                    }
+
+                    builder.AddMachinesService(machinesService);
+                    // A secret set here is masked at once in the sessions of the host.
+                    builder.AddSecretsService(new SecretsService(new CodeAlta.Catalog.Secrets.LocalSecretStore(host.CatalogOptions.GlobalRoot), epoch,
+                        () => host.AgentHub.SecretMasker?.Refresh()));
+                    builder.AddFleetServerService(fleetServers is null ? new FleetServerService() : new FleetServerService(fleetServers, epoch)
+                    {
+                        Spaces = host.SpaceCatalog, IsPaired = machineId => fleet?.Find(machineId) is { IsPaired: true },
+                        IsReachable = machineId => fleet?.Find(machineId) is not null, Fleet = fleet,
+                        PersonName = CodeAlta.Desktop.Fleet.PersonName.ReadOnce(),
+                        ChooseSavePath = shell.ChooseSavePathAsync,
+                    });
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime, new DesktopDefaultProvider(host.CatalogOptions), host.CatalogOptions)
                     {
                         PluginProviderTypes = pluginProviderTypes,
@@ -995,6 +1111,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         // The file may change the levels of the log: they are taken at once.
                         Saved = applicationLogs.Reload,
+                        SecretChanged = () => host.AgentHub.SecretMasker?.Refresh(),
                         ProviderStates = () => host.ModelProviderInitializationService.CurrentStates,
                         Spaces = host.SpaceCatalog,
                         SessionSpace = (sessionId, token) => host.RuntimeService.GetSessionSpaceAsync(sessionId, token),
@@ -1052,20 +1169,21 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
                     builder.AddSessionRetentionProtectionService(retention.ProtectionRpc);
-                    builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch, host.CodeModeScripts));
+                    builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch, host.CodeModeScripts, placement)
+                    {
+                        PublishTargets = fleetServers is { } publishing ? publishing.PublishTargetsAsync : null,
+                        TeamAutomations = fleetServers is { } teams ? teams.TeamAutomationsAsync : null,
+                        OpenTeamAutomation = fleetServers is { } opening ? opening.OpenTeamAutomationAsync : null,
+                    });
                     var pullRequestPrompts = new CodeAlta.Catalog.PullRequests.PullRequestPromptCatalog(host.CatalogOptions);
                     builder.AddPullRequestPromptsService(new PullRequestPromptsService(pullRequestPrompts, host.ProjectCatalog, epoch));
                     var startPrompts = new CodeAlta.Catalog.StartPrompts.StartPromptCatalog(host.CatalogOptions);
                     builder.AddStartPromptsService(new StartPromptsService(startPrompts, host.ProjectCatalog, epoch));
-                    builder.AddSpacesService(new SpacesService(host.SpaceCatalog, spaceView, host.RuntimeService.ListOverview, async () =>
-                    {
-                        // A question a session asked, a command to review, a form to fill, a conversation open elsewhere.
-                        var reviews = await host.RuntimeService.Permissions.ListWaitingSessionsAsync();
-                        var held = await host.RuntimeService.ConversationHolds.ListWaitingSessionsAsync();
-                        return [.. host.Commands.Asks.ListWaitingSessions(), .. reviews, .. held];
-                    }, epoch, id => host.Commands.MoveSpaceChatsAsync(id, CodeAlta.Catalog.SpaceDescriptor.DefaultId)) {
+                    builder.AddSpacesService(new SpacesService(host.SpaceCatalog, spaceView, host.RuntimeService.ListOverview, SessionsWaitingAsync, epoch, id => host.Commands.MoveSpaceChatsAsync(id, CodeAlta.Catalog.SpaceDescriptor.DefaultId)) {
                         Fallbacks = () => host.Commands.LastFallbacks,
+                        MoveProjectSessions = host.Commands.MoveProjectSessionsAsync,
                         HeldElsewhere = () => host.ExternalSessions?.Held ?? [],
+                        RemoteSessions = () => fleet is { } machines ? [.. machines.Hosts.SelectMany(static machine => machine.Listing.Sessions.Select(session => (machine.MachineId!, session)))] : [],
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
                         SessionResources = new DesktopSessionResources(host, roots.Home, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay, browser: browserHost)).ReadAsync,
                     });
@@ -1151,6 +1269,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
                     {
                         GuidePage = (file, anchor) => documentation.FindPage(file) is { } page && documentationView.Show(page, anchor),
+                        ExternalEditors = externalEditors,
                     }));
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch, changesView));
                     // The window of the worktrees also names the sessions that record each checkout, and opens the code editor on one.
@@ -1168,7 +1287,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         () => host.ModelProviderInitializationService.CurrentStates, terminals, worktrees, epoch));
                     builder.AddMcpHostService(new McpHostService(mcp, McpTools, epoch));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
-                    builder.AddToolCallsService(new ToolCallsService(host.WorkspaceReads, host.RuntimeService.ToolOutput, epoch) { Jobs = host.RuntimeService.Jobs });
+                    builder.AddToolCallsService(new ToolCallsService(sessionHosts, epoch));
                     builder.AddMcpAppsService(new McpAppsService(host.WorkspaceReads.ReadHistoryRecordAsync,
                         () => host.PluginRuntime?.ActivePlugins.Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugin.Mcp.McpPlugin>().FirstOrDefault(), mcpAppViews, epoch)
                     {
@@ -1191,13 +1310,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddPluginUiService(pluginCommands);
                     builder.AddCanvasesService(canvases is null ? new CanvasesService() : new CanvasesService(canvases, epoch));
                     builder.AddDocumentationService(new DocumentationService(documentation, epoch, documentationView, new DocumentationAsker(host, documentation, () => spaceView.ShownSpaceId), shell.NotifySessionsChanged));
-                    builder.AddSessionUserInputService(new SessionUserInputService(host.RuntimeService.Permissions, epoch, options.EnableOwnedUserInput));
-                    builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
-                    builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
+                    builder.AddSessionUserInputService(new SessionUserInputService(sessionHosts, epoch, options.EnableOwnedUserInput));
+                    builder.AddSessionDisplayService(new SessionDisplayService(sessionHosts, epoch));
+                    builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(sessionHosts, epoch));
                     builder.AddSessionUsageService(new SessionUsageService(host.RuntimeService, host.WorkspaceReads, epoch));
                     // A request exists only for a send that was reviewed: it stays readable and answerable after the
                     // setting is turned off, until that send ends.
-                    builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, static () => true)
+                    builder.AddSessionPermissionsService(new SessionPermissionsService(sessionHosts, epoch, static () => true)
                     {
                         // The skill of an MCP server a session asks to load, read for the user on the connection of that session.
                         ReadSkill = async (sessionId, server, uri, token) =>
@@ -1231,7 +1350,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                             DesktopWindowFocus.Follow(secondary, secondaryView, application.Dispatcher);
                             secondaryView.NavigationRequested = request => ValueTask.FromResult(DecideNavigation(request));
                             secondaryView.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
-                            secondaryView.FileChooserRequested = request => DesktopFileChooser.ChooseAsync(secondary, shell.Dialogs, request);
+                            secondaryView.FileChooserRequested = request => DesktopFileChooser.ChooseAsync(secondary, shell.Dialogs, request,
+                                problem => shell.NotifyDialogProblem(secondaryView.ViewLabel ?? Windows.DesktopWindows.MainLabel, "files", problem));
                             secondaryView.PermissionRequested = request => ValueTask.FromResult(DecidePermission(request, speech?.IsMicrophoneAllowed() == true));
                         }
                         windows.Attach(new Windows.DesktopWindowServices(environment, chrome, rpc, () => appearances.Latest, () => shell.Zoom / 100d, ConfigureSecondaryView));
@@ -1299,6 +1419,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(chromeLifetime);
             GC.KeepAlive(environmentLifetime);
             GC.KeepAlive(sessionTaskbarProgress);
+            GC.KeepAlive(sessionTurnAlerts);
             GC.KeepAlive(window);
             GC.KeepAlive(desktopWindows);
             return; // No native-resource disposal, lease release or ForceShutdown on this path.
@@ -1307,13 +1428,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         keepAwake?.Dispose();
         exitSignals?.Dispose();
         uiWatchdog?.Dispose();
+        fileDropsLifetime?.Dispose();
         // The secondary windows are kept for the next start, then closed without asking their pages: their views and
         // bindings end before the RPC host does.
         if (desktopWindows is not null) await desktopWindows.SaveAndCloseForExitAsync();
         // The placement of the window for the next start, written while the window is still there.
         if (windowState is not null) await windowState.DisposeAsync();
         var nativeFailed = false;
-        foreach (var resource in new[] { uiLifetime, bindingLifetime, viewLifetime, rpcLifetime, instanceLifetime, sessionTaskbarProgress, chromeLifetime, environmentLifetime })
+        foreach (var resource in new[] { uiLifetime, bindingLifetime, viewLifetime, rpcLifetime, instanceLifetime, sessionTaskbarProgress, sessionTurnAlerts, chromeLifetime, environmentLifetime })
         {
             if (resource is null) continue;
             try
@@ -1335,6 +1457,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(chromeLifetime);
             GC.KeepAlive(environmentLifetime);
             GC.KeepAlive(sessionTaskbarProgress);
+            GC.KeepAlive(sessionTurnAlerts);
             GC.KeepAlive(window);
             GC.KeepAlive(desktopWindows);
             return;
@@ -1501,6 +1624,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddSpacesService(new SpacesService());
             builder.AddLabelsService(new LabelsService());
             builder.AddSpaceIdentityService(new SpaceIdentityService());
+            builder.AddSecretsService(new SecretsService());
             builder.AddPromptImagesService(new PromptImagesService());
             builder.AddToolCallsService(new ToolCallsService());
             builder.AddMcpAppsService(new McpAppsService());

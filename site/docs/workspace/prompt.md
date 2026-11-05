@@ -173,6 +173,7 @@ The timeline shows:
 | --- | --- |
 | `F3` / `F4` | Previous / next message |
 | `Ctrl+F3` / `Ctrl+F4` | First message / back to the bottom |
+| `Ctrl+F` (`Cmd+F` on macOS) | [Find in the session](../search.md#find-in-a-session), with every match marked and counted (desktop) |
 | Arrows, `Page Up`, `Page Down`, `Home`, `End` | Scroll, after a click in the timeline (desktop) |
 
 CodeAlta Desktop opens a session on its latest messages; earlier turns load as you scroll up. **Load all messages**, at the top, loads them all; **Stop** keeps what was loaded.

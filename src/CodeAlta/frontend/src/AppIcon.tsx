@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react";
 import {
+  KeyRound,
   Sigma,
   House,
   Orbit,
@@ -287,6 +288,7 @@ const icons = {
   rewind: Undo2,
   worktree: Trees,
   remote: RadioTower,
+  computer: Monitor,
   cloud: Cloud,
   smartphone: Smartphone,
   themeDark: Moon,
@@ -316,6 +318,7 @@ const icons = {
   arrowRight: ArrowRight,
   inherit: Layers,
   sandbox: Box,
+  secret: KeyRound,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof icons;

@@ -99,6 +99,30 @@ public sealed class CodeModeQuestionsTests
     }
 
     [TestMethod]
+    public async Task TheQuestionsOfARun_AreAsked_InTheOrderTheScriptAskedThem()
+    {
+        var (root, _, host, driver, session) = await CreateAsync();
+        await using var scope = root;
+        await using var closing = driver;
+        var release = new TaskCompletionSource();
+        var run = StartRun(host, session.SessionId, release);
+
+        // Asked at once (as with Promise.all): each takes its turn when it is asked, before the checks that wait.
+        var questions = Enumerable.Range(1, 8).Select(index => $"Question {index}?").ToArray();
+        var asked = questions.Select(question => host.CodeModeQuestions.AskAsync(new(session.SessionId, run.Id, question), CancellationToken.None)).ToArray();
+        foreach (var question in questions)
+        {
+            var head = await HeadAsync(host, session.SessionId, question);
+            await host.Commands.Asks.AnswerAsync(new OwnedAskAction(Guid.NewGuid(), head.Handle, [new AltaAskAnswer { QuestionIndex = 0, FreeformText = question }]), CancellationToken.None);
+        }
+
+        var answers = await Task.WhenAll(asked).WaitAsync(Hang);
+        CollectionAssert.AreEqual(questions, answers.Select(static answer => answer.Answer).ToArray());
+        release.SetResult();
+        await run.Completion.WaitAsync(Hang);
+    }
+
+    [TestMethod]
     public async Task ADismissedQuestion_IsCancelled_AndAStoppedRunWithdrawsItsQuestion()
     {
         var (root, _, host, driver, session) = await CreateAsync();

@@ -175,13 +175,53 @@ internal sealed class SpacesService
         }
     }
 
-    /// <summary>Makes a project join spaces and leave others, in one edit of its file.</summary>
+    /// <summary>The most sessions left behind that an answer names.</summary>
+    internal const int MaximumLeftSessions = 32;
+
+    /// <summary>
+    /// Makes a project join spaces and leave others, in one edit of its file. With <c>sessionsFrom</c> and
+    /// <c>sessionsTo</c>, its sessions in the first space then go to the second one, as a drag of the project between
+    /// spaces asks: <c>movedSessions</c> says how many did, <c>leftSessions</c> names the ones at work that stayed,
+    /// and <c>sessionsStatus</c> is the status of that move when none of them could move at all.
+    /// </summary>
     [NeoRpcMethod("assign")]
-    public Task<SpaceChangeResponse> AssignAsync(SpaceAssignRequest request, CancellationToken cancellationToken)
+    public async Task<SpaceChangeResponse> AssignAsync(SpaceAssignRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return ChangeAsync(request.ExpectedEpoch, () => _catalog!.AssignAsync(request.ProjectId ?? string.Empty, request.Join, request.Leave, cancellationToken));
+        var projectId = request.ProjectId ?? string.Empty;
+        var moves = request.SessionsFrom is not null || request.SessionsTo is not null;
+        var assigned = await ChangeAsync(request.ExpectedEpoch, async () =>
+        {
+            // The sessions are checked before the project changes: a request that cannot move them changes nothing.
+            if (moves && (!SpaceDescriptor.IsValidId(request.SessionsFrom) || !SpaceDescriptor.IsValidId(request.SessionsTo)
+                || string.Equals(request.SessionsFrom, request.SessionsTo, StringComparison.Ordinal)))
+                return new SpaceChange(SpaceChangeStatus.Invalid, Message: "The spaces the sessions move between are not valid.");
+            if (moves && await _catalog!.GetAsync(request.SessionsTo!, cancellationToken).ConfigureAwait(false) is null)
+                return new SpaceChange(SpaceChangeStatus.NotFound, Message: $"No space has the id '{request.SessionsTo}'.");
+            return await _catalog!.AssignAsync(projectId, request.Join, request.Leave, cancellationToken).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+        if (assigned.Status != "ok" || !moves) return assigned;
+        if (MoveProjectSessions is not { } move) return assigned with { SessionsStatus = "unconfigured" };
+        try
+        {
+            // The project changed spaces: its sessions follow it even when the page stops waiting.
+            var moved = await move(projectId, request.SessionsFrom!, request.SessionsTo!).ConfigureAwait(false);
+            var left = moved.Skipped.Take(MaximumLeftSessions)
+                .Select(id => new SpaceLeftSession(id, Cut(moved.Titles.TryGetValue(id, out var title) ? title : string.Empty, 256))).ToArray();
+            return assigned with { MovedSessions = moved.Moved.Count, LeftSessions = left, SessionsStatus = moved.Status };
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Some journals may already have been rewritten: the lists say where each session is.
+            return assigned with { SessionsStatus = "move_unconfirmed" };
+        }
     }
+
+    /// <summary>
+    /// Gets what gives the sessions of a project in one space another space (the project, the space they leave, the
+    /// space they go to); null where nothing moves them.
+    /// </summary>
+    internal Func<string, string, string, Task<OwnedSessionSpaceMoveResult>>? MoveProjectSessions { get; init; }
 
     /// <summary>Puts the spaces in the order given.</summary>
     [NeoRpcMethod("reorder")]
@@ -385,6 +425,25 @@ internal sealed class SpacesService
                     : null,
                 RestoredForRunAt = Restored(session) ? session.RestoredForRunAt!.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture) : null,
             });
+        // The sessions agents of this computer started on other machines, at work or waiting for the user: shown under
+        // their parent here, so that a question or a permission request there reaches the person where they are.
+        var local = runs.GroupBy(static session => session.SessionId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
+        // A session a person started there, which no session here is the parent of, is listed when it waits for the person:
+        // a question or a command to allow there is answered from here too.
+        var remote = (RemoteSessions?.Invoke() ?? [])
+            .Where(value => value.Session.ParentSessionId is { } parent
+                ? local.ContainsKey(parent) && value.Session.State is "working" or "waiting"
+                : value.Session.State == "waiting")
+            .Select(value => new SpaceSessionActivity(value.Session.Id,
+                // Listed under the project of its parent's repository, or under its machine when its parent is a chat or it has none.
+                value.Session.ProjectId is null || value.Session.ParentSessionId is null ? WorkspaceService.MachineScopePrefix + value.MachineId
+                    : local[value.Session.ParentSessionId].ProjectId ?? WorkspaceService.MachineScopePrefix + value.MachineId,
+                Cut(value.Session.Title, 256), value.Session.State == "working", 0, false, value.Session.State == "waiting",
+                value.Session.ParentSessionId is { } above ? [above, .. Ancestors(above, parents)] : [],
+                SpaceDescriptor.IsValidId(value.Session.SpaceId) ? value.Session.SpaceId : null))
+            .OrderByDescending(static activity => activity.Waiting).ToArray();
+        own = [.. remote.Where(static activity => activity.Waiting), .. own, .. remote.Where(static activity => !activity.Waiting)];
         // The sessions another process runs or shows: read-only here while it holds them.
         var ownIds = sessions.Select(static session => session.SessionId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var elsewhere = (HeldElsewhere?.Invoke() ?? []).Where(hold => !ownIds.Contains(hold.SessionId))
@@ -400,6 +459,9 @@ internal sealed class SpacesService
 
     /// <summary>Gets the sessions another process holds now; none when null.</summary>
     internal Func<IReadOnlyList<ExternalSessionHold>>? HeldElsewhere { get; init; }
+
+    /// <summary>Gets the sessions the paired machines last listed, with their machine; none when null.</summary>
+    internal Func<IReadOnlyList<(string MachineId, CodeAlta.Fleet.NodeApi.FleetSessionSummary Session)>>? RemoteSessions { get; init; }
 
     /// <summary>How long a fallback of a session is listed with its activity.</summary>
     internal static readonly TimeSpan RecentFallback = TimeSpan.FromMinutes(10);
@@ -637,8 +699,15 @@ internal sealed record SpaceUpdateRequest(string ExpectedEpoch, string? Id, stri
 /// <summary>Names a space to delete.</summary>
 internal sealed record SpaceDeleteRequest(string ExpectedEpoch, string? Id);
 
-/// <summary>Names the spaces a project joins and leaves.</summary>
-internal sealed record SpaceAssignRequest(string ExpectedEpoch, string? ProjectId, IReadOnlyList<string>? Join, IReadOnlyList<string>? Leave);
+/// <summary>Names the spaces a project joins and leaves, and the spaces its sessions move between.</summary>
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="ProjectId">The project.</param>
+/// <param name="Join">The spaces it joins.</param>
+/// <param name="Leave">The spaces it leaves.</param>
+/// <param name="SessionsFrom">The space whose sessions of the project move once it changed spaces; null when none move.</param>
+/// <param name="SessionsTo">The space they move to; null when none move.</param>
+internal sealed record SpaceAssignRequest(string ExpectedEpoch, string? ProjectId, IReadOnlyList<string>? Join, IReadOnlyList<string>? Leave,
+    string? SessionsFrom = null, string? SessionsTo = null);
 
 /// <summary>The identifiers of the spaces, first to last.</summary>
 internal sealed record SpaceReorderRequest(string ExpectedEpoch, IReadOnlyList<string>? Ids);
@@ -653,8 +722,18 @@ internal sealed record SpaceShownRequest(string ExpectedEpoch, string? Id);
 /// <param name="Status">How the change ended.</param>
 /// <param name="Message">What was wrong, for a change that was not made.</param>
 /// <param name="Space">The space after the change, without its projects; null when the change names none.</param>
-/// <param name="MovedSessions">For a deletion, how many chats of the space went to the default space.</param>
-internal sealed record SpaceChangeResponse(string Status, string? Message, SpaceItem? Space, int MovedSessions = 0);
+/// <param name="MovedSessions">For a deletion, how many chats of the space went to the default space; for an assignment
+/// that moves sessions, how many sessions of the project changed space.</param>
+/// <param name="LeftSessions">For an assignment that moves sessions, the ones at work that stayed where they were.</param>
+/// <param name="SessionsStatus">For an assignment that moves sessions, <c>ok</c>, or why none could move (see
+/// <see cref="WorkspaceMoveToSpaceResponse"/>); null when none were to move.</param>
+internal sealed record SpaceChangeResponse(string Status, string? Message, SpaceItem? Space, int MovedSessions = 0,
+    IReadOnlyList<SpaceLeftSession>? LeftSessions = null, string? SessionsStatus = null);
+
+/// <summary>A session that stayed in its space when its project moved, because it was at work.</summary>
+/// <param name="SessionId">The session.</param>
+/// <param name="Title">Its title; empty when its journal names none.</param>
+internal sealed record SpaceLeftSession(string SessionId, string Title);
 
 /// <summary>The sessions a page has a tab of.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>

@@ -70,13 +70,16 @@ A folder you add with the `+` of the Explorer, or with [Open project](workspace/
 Drag projects to choose the spaces they are in:
 
 {.table}
-| Drag a project | What happens |
-|---|---|
-| From the list onto a card | The project joins that space. |
-| From a card onto another card | The project moves to the other space. With `Ctrl` or `Alt` held, it stays in both. |
-| From a card back to the list | The project leaves that space. |
+| Drag a project | What happens | Its sessions |
+|---|---|---|
+| From the list onto a card | The project joins that space. | Those in Default move to that space. |
+| From a card onto another card | The project moves to the other space. | Those in the first space move to the other one. |
+| The same with `Ctrl` or `Alt` held | The project stays in both. | None move. |
+| From a card back to the list | The project leaves that space. | Those in that space move to Default. |
 
-The `×` of a project on a card also removes it. A card has **Show**, and arrows that move the space up or down the list.
+Sessions in any other space stay where they are, so a project can keep its sessions in several spaces. Dragging a project from the list onto a space it is already in gathers there its sessions left in Default. A session that runs or waits for an answer stays too: the page names it, and you move it with [Move to space…](#move-a-session) once it is idle. A session that moved uses the setup of its new space from its next turn.
+
+The `×` of a project on a card also removes it, as a drag back to the list does, and the checkboxes of **Projects** on the page of a space add and remove projects the same way, sessions included. A card has **Show**, and arrows that move the space up or down the list.
 
 Click a card to open the page of its space. Each tab of the page says what its section sets:
 
@@ -210,7 +213,8 @@ A profile has a **Name** (such as `azure`), its **Variables**, and optionally a 
 
 - `~` at the start of a value, or of each path of a list such as `KUBECONFIG`, is your home folder.
 - `${env:NAME}` is the value of a variable of CodeAlta's environment. When that variable is not set, the tool keeps its own value, and **Check** and **Session info** say so.
-- A variable named like a secret (token, password, secret or API key, such as `AWS_SECRET_ACCESS_KEY`) takes only `${env:NAME}`. A name ending in `FILE`, `PATH`, `DIR` or `HOME` takes a path.
+- `${secret:NAME}` and `${var:NAME}` are a [secret or a variable](secrets.md) of this computer. When one is not set, the tool keeps its own value, and **Check** says which.
+- A variable named like a secret (token, password, secret or API key, such as `AWS_SECRET_ACCESS_KEY`) takes only `${secret:NAME}` or `${env:NAME}`. A name ending in `FILE`, `PATH`, `DIR` or `HOME` takes a path.
 - Git and GitHub variables (`GIT_AUTHOR_NAME`, `GIT_SSH_COMMAND`, `GH_CONFIG_DIR`…) are set by their cards, not by a profile.
 - Two profiles of a space cannot set the same variable.
 

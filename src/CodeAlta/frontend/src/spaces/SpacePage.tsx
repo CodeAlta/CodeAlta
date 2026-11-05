@@ -9,6 +9,7 @@ import { SpaceAvailable, type ResourcePage } from "./SpaceAvailable";
 import type { SpaceProject } from "./SpaceDialog";
 import { SpaceGeneral, SpaceProjects } from "./SpaceGeneral";
 import { SpaceIdentity } from "./SpaceIdentity";
+import { sessionsNotice } from "./sessionSpaceMove";
 import { SpaceNewSessions } from "./SpaceNewSessions";
 import type { ResourceLists } from "./spaceResources";
 import type { SpaceSectionProps } from "./spaceSection";
@@ -58,7 +59,7 @@ export function SpacePage({ hub, space, spaces, projects, chats, shown, activity
     if (!alive.current) return outcome;
     setBusy(false);
     const failure = outcome.ok ? null : settingsFailure(outcome.status, outcome.message) ?? { key: "The operation did not complete." as const, intent: "danger" as const };
-    setNotice(failure ?? (said ? { key: "Saved.", intent: "success" } : null));
+    setNotice(failure ?? sessionsNotice(outcome.sessions, t) ?? (said ? { key: "Saved.", intent: "success" } : null));
     return outcome;
   }
 
@@ -121,7 +122,7 @@ export function SpacePage({ hub, space, spaces, projects, chats, shown, activity
       })}
     </div>
     {notice && <Callout intent={notice.intent} compact role={notice.intent === "success" ? "status" : "alert"}>
-      {t(notice.key)}{notice.detail && <div className="config-editor-diagnostic">{notice.detail}</div>}</Callout>}
+      {t(notice.key, notice.values)}{notice.detail && <div className="config-editor-diagnostic">{notice.detail}</div>}</Callout>}
     <div className="space-sections" role="tabpanel" id={`space-${space.id}-panel`} aria-labelledby={`space-${space.id}-tab-${current}`}>
       {current === "general" && <SpaceGeneral {...props} />}
       {current === "projects" && <SpaceProjects {...props} projects={projects} />}

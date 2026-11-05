@@ -20,13 +20,14 @@ test("Appearance, General and Permissions preferences each have exactly one home
     schemes={{ colorScheme: defaultColorScheme, setColorScheme: noop, shownScheme: colorSchemeOf(defaultColorScheme), variant: "darker",
       customSchemes: [], library, preview: createAppearancePreview(), platform: null }} />);
   const general = renderToStaticMarkup(<GeneralSettings remoteControl={{ reconnect: true, set: noop }}
-    closing={{ behavior: "keep", platform: "windows", set: noop }} keepAwake={{ on: true, set: noop }} />);
+    closing={{ behavior: "keep", platform: "windows", set: noop }} keepAwake={{ on: true, set: noop }}
+    turnAlerts={{ mode: "all", platform: "windows", set: noop }} />);
   const permissions = renderToStaticMarkup(<PermissionSettings permissions={null} confirms={{ sessionDelete: false, projectArchive: false, pluginStop: false, set: noop }} />);
   const homes = [
     [appearance, ["Theme", "Darker dark theme", "Color scheme", "Sort projects", "Recent session display count (1–50)",
       "Sub-agent display count (1–50)", "Collapse desktop project rail", "Width of the conversation", "Entry appearance", "Changes are shown", "Code font", "Prompt font"]],
     [general, ["Language", "Show the welcome page at startup", "Animate the welcome page", "Turn Remote Control back on when CodeAlta starts", "When the window is closed",
-      "Keep computer awake when CodeAlta is running"]],
+      "Keep computer awake when CodeAlta is running", "When a session is done or waits for you"]],
     [permissions, ["Ask before deleting a session", "Ask before archiving a project"]],
   ] as const;
   for (const [home, labels] of homes) for (const label of labels) {
@@ -35,7 +36,7 @@ test("Appearance, General and Permissions preferences each have exactly one home
     for (const [other] of homes) if (home !== other) assert.equal([...other.matchAll(field)].length, 0, label);
   }
   for (const title of ["Theme and colors", "Fonts", "Explorer", "Conversation and changes"]) assert.ok(appearance.includes(`>${title}</h2>`));
-  for (const title of ["Language", "Welcome page", "Startup and closing"]) assert.ok(general.includes(`>${title}</h2>`));
+  for (const title of ["Language", "Welcome page", "Startup and closing", "Notifications"]) assert.ok(general.includes(`>${title}</h2>`));
   assert.match(permissions, /Agent permissions<\/h2>/);
   assert.match(permissions, /Confirmations<\/h2>/);
   assert.match(permissions.match(/<select[^>]*id="settings-permission-mode"[^>]*>/)![0], /disabled/);
@@ -47,8 +48,18 @@ test("Appearance, General and Permissions preferences each have exactly one home
 
 test("General leaves unavailable shell controls out without hiding local welcome preferences", () => {
   const general = renderToStaticMarkup(<GeneralSettings remoteControl={null} closing={null} keepAwake={null} />);
-  assert.doesNotMatch(general, /settings-reconnect-remote-control|settings-on-close|settings-keep-awake/);
+  assert.doesNotMatch(general, /settings-reconnect-remote-control|settings-on-close|settings-keep-awake|settings-turn-alerts/);
   assert.match(general, /settings-language/);
   assert.match(general, /settings-landing-startup/);
   assert.match(general, /settings-landing-animation/);
+});
+
+test("the alerts of the sessions name the mark of the application as each platform shows it", () => {
+  const choices = (platform: string, mode: "all" | "mark" | "off" = "all") => [...renderToStaticMarkup(<GeneralSettings turnAlerts={{ mode, platform, set: noop }} />)
+    .matchAll(/<option value="([a-z]+)"[^>]*>([^<]+)</g)].filter(match => ["all", "mark", "off"].includes(match[1])).map(match => `${match[1]}=${match[2]}`);
+  assert.deepEqual(choices("macos"), ["all=Notification and Dock badge", "mark=Dock badge only", "off=Off"]);
+  assert.deepEqual(choices("windows"), ["all=Notification and taskbar badge", "mark=Taskbar badge only", "off=Off"]);
+  assert.deepEqual(choices("linux"), ["all=Notification and launcher badge", "mark=Launcher badge only", "off=Off"]);
+  const off = renderToStaticMarkup(<GeneralSettings turnAlerts={{ mode: "off", platform: "macos", set: noop }} />);
+  assert.match(off, /CodeAlta does not tell you when a session is done or waits for you while it is in the background\./);
 });
