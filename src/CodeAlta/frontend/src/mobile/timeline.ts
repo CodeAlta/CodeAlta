@@ -42,6 +42,19 @@ export function subjectPath(subject: string): { folders: string; file: string } 
   return last > 0 && last < subject.length - 1 ? { folders: subject.slice(0, last), file: subject.slice(last) } : null;
 }
 
+// The lines of an output its row shows.
+const outputPreviewLines = 5;
+
+/**
+ * The lines of an output a tool row shows: the last ones of what a command printed, the first ones of anything else.
+ * `whole` says that they are all of it, so that there is nothing more to open.
+ */
+export function outputPreview(output: string, length: number, fromEnd: boolean): { text: string; whole: boolean } {
+  const lines = output.replace(/\r\n/gu, "\n").replace(/\n+$/u, "").split("\n");
+  const kept = fromEnd ? lines.slice(-outputPreviewLines) : lines.slice(0, outputPreviewLines);
+  return { text: kept.join("\n"), whole: lines.length <= outputPreviewLines && output.length >= length };
+}
+
 /** Whether an event is a thought: `assistant.reasoning`, `assistant.reasoningSummary` (or `reasoning.*`). */
 export const isThought = (kind: string): boolean => kind.startsWith("assistant.reasoning") || kind.startsWith("reasoning.");
 

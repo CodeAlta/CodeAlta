@@ -7,8 +7,17 @@ namespace CodeAlta.Plugin.Mobile;
 // take back, and one tool call whole (the timeline only says what a call works on).
 internal sealed partial class MobileApi
 {
-    /// <summary>The longest text of a tool call the phone reads: the start of its arguments and of its diff, the end of its output.</summary>
+    /// <summary>The longest text of a tool call the phone reads: the start of its arguments and of its diff.</summary>
     internal const int MaximumToolText = 12_000;
+
+    /// <summary>What the phone reads of an output with its call: enough for the few lines its row shows.</summary>
+    internal const int ToolOutputPreview = 2_000;
+
+    /// <summary>What the phone reads of an output at a time, in its full-screen view.</summary>
+    internal const int ToolOutputPage = 32_000;
+
+    // Each character of a page may take six in the JSON of its record.
+    private const int ToolOutputPageBytes = ToolOutputPage * 6 + 64 * 1024;
 
     // What a person queued, with `session queue` or a send while the session worked. Messages between agents and what the host
     // queues are not the phone's to take back.
@@ -62,7 +71,7 @@ internal sealed partial class MobileApi
     internal async Task<JsonObject?> ToolAsync(string id, string activityId, long? since, CancellationToken cancellationToken)
     {
         if (!IsId(activityId) || await sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is null) return null;
-        List<string> args = ["session", "tool", id, activityId, "--max-text", MaximumToolText.ToString(CultureInfo.InvariantCulture)];
+        List<string> args = ["session", "tool", id, activityId, "--max-text", MaximumToolText.ToString(CultureInfo.InvariantCulture), "--max-output", ToolOutputPreview.ToString(CultureInfo.InvariantCulture)];
         if (since is > 0) args.AddRange(["--since", since.Value.ToString(CultureInfo.InvariantCulture)]);
         var result = await MobileAlta.RunAsync(alta, args, null, cancellationToken).ConfigureAwait(false);
         if (result.OfType("alta.session.tool").FirstOrDefault() is not { } call) return Error(result.Error ?? "The tool call was not read.");
@@ -70,8 +79,38 @@ internal sealed partial class MobileApi
         // `error` says that the read failed, as in every answer: what the call reported is its `failure`.
         var answer = new JsonObject { ["error"] = null, ["failure"] = call["error"]?.DeepClone() };
         foreach (var name in (string[])["activityId", "kind", "phase", "name", "startedAt", "at", "command", "workingDirectory", "sessionFolder", "exitCode",
-            "arguments", "argumentsLength", "output", "outputLength", "diff", "diffLength", "readFiles", "modifiedFiles"])
+            "arguments", "argumentsLength", "output", "outputOffset", "outputLength", "diff", "diffLength", "readFiles", "modifiedFiles"])
             if (call[name] is { } value) answer[name] = value.DeepClone();
         return answer;
+    }
+
+    /// <summary>A page of the output of a tool call, read as the phone goes through it: the part that says the most, the page from a character, or the page before one.</summary>
+    /// <param name="id">The session.</param>
+    /// <param name="activityId">The id of the call.</param>
+    /// <param name="since">The sequence number before the first record of the call, so that the turns before it are not read.</param>
+    /// <param name="offset">The character the page starts from, when it follows a page the phone has.</param>
+    /// <param name="before">The character the page ends before, when it comes before a page the phone has.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The page, or null when the phone does not see the session or asks for no page.</returns>
+    internal async Task<JsonObject?> ToolOutputAsync(string id, string activityId, long? since, int? offset, int? before, CancellationToken cancellationToken)
+    {
+        if (!IsId(activityId) || offset < 0 || before <= 0 || await sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is null) return null;
+        var maximum = ToolOutputPage;
+        if (before is { } end)
+        {
+            offset = Math.Max(0, end - ToolOutputPage);
+            maximum = end - offset.Value;
+        }
+
+        // Only the output is used: the texts of the call are kept short.
+        List<string> args = ["session", "tool", id, activityId, "--max-text", "1", "--max-output", maximum.ToString(CultureInfo.InvariantCulture)];
+        if (offset is { } from) args.AddRange(["--output-offset", from.ToString(CultureInfo.InvariantCulture)]);
+        if (since is > 0) args.AddRange(["--since", since.Value.ToString(CultureInfo.InvariantCulture)]);
+        var result = await MobileAlta.RunLongAsync(alta, args, ToolOutputPageBytes, cancellationToken).ConfigureAwait(false);
+        if (result.OfType("alta.session.tool").FirstOrDefault() is not { } call) return Error(result.Error ?? "The output was not read.");
+        return new JsonObject
+        {
+            ["error"] = null, ["output"] = call["output"]?.DeepClone(), ["outputOffset"] = call["outputOffset"]?.DeepClone(), ["outputLength"] = call["outputLength"]?.DeepClone(),
+        };
     }
 }

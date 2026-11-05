@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { TimelineEvent } from "./contract";
 import {
-  activityFacts, appendEvents, blockTime, blockVersion, canWithdraw, clockTime, dayLabel, foldEvents, liveBlock, pendingBlock, pendingGrace, planTimeline, prependEvents, stillPending, subjectPath, withDays, withQueue,
+  activityFacts, appendEvents, blockTime, blockVersion, canWithdraw, clockTime, dayLabel, foldEvents, liveBlock, outputPreview, pendingBlock, pendingGrace, planTimeline, prependEvents, stillPending, subjectPath, withDays, withQueue,
   type ActivityBlock, type DayBlock, type MessageBlock, type PendingPrompt, type TimelineBlock,
 } from "./timeline";
 
@@ -15,6 +15,14 @@ test("a subject that is a path comes apart before the name of its file; anything
   assert.deepEqual(subjectPath("C:\\Users\\me\\Stride Projects\\a b.cs"), { folders: "C:\\Users\\me\\Stride Projects", file: "\\a b.cs" });
   assert.deepEqual(subjectPath("src/app.ts"), { folders: "src", file: "/app.ts" });
   for (const whole of ["dotnet build src/a.csproj -c Release", "a.txt", "login", "src/", "/root"]) assert.equal(subjectPath(whole), null, whole);
+});
+
+test("a row shows the first lines of a file and the last lines of a command, and says when they are all of the output", () => {
+  const seven = "1\n2\n3\n4\n5\n6\n7\n";
+  assert.deepEqual(outputPreview(seven, seven.length, false), { text: "1\n2\n3\n4\n5", whole: false });
+  assert.deepEqual(outputPreview(seven, seven.length, true), { text: "3\n4\n5\n6\n7", whole: false });
+  assert.deepEqual(outputPreview("1\r\n2\r\n", 6, true), { text: "1\n2", whole: true }, "the end of a file is no line of its own");
+  assert.deepEqual(outputPreview("1\n2", 9000, false), { text: "1\n2", whole: false }, "the part read holds few lines, not all of the output");
 });
 
 test("prompts, answers and errors stand alone; the work between them is one activity; turns and notices are not rows", () => {

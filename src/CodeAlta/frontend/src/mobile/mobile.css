@@ -197,6 +197,11 @@ button.tool-row:focus-visible { outline: 2px solid var(--accent); outline-offset
 .tool-fact code.tool-bad { color: var(--red); }
 .tool-section { margin-top: .25rem; font-weight: 600; }
 .tool-text { margin: 0; max-height: 16rem; overflow: auto; padding: .375rem .5rem; border: 1px solid var(--line); border-radius: 4px; color: var(--text); font: .75rem/1.4 var(--code-font); white-space: pre; }
+/* The few lines of an output: a tap reads it all. Lines too long for the box are cut: they wrap in the full-screen view. */
+.tool-output { display: flex; flex-direction: column; gap: .375rem; width: 100%; min-width: 0; min-height: 44px; padding: .375rem .5rem; border: 1px solid var(--line); border-radius: 4px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.tool-output:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tool-output-text { display: block; overflow: hidden; font: .75rem/1.4 var(--code-font); white-space: pre; }
+.tool-output-more { color: var(--accent); font-size: .75rem; font-weight: 600; }
 .tool-note { margin: 0; }
 .tool-row[data-phase="completed"] { --tool-tone: var(--green); } .tool-row[data-phase="failed"] { --tool-tone: var(--red); }
 .tool-row:is([data-phase="started"], [data-phase="progressed"]) { --tool-tone: var(--accent); }
@@ -735,5 +740,14 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .img-viewer-failed { color: #abb3bf; }
 .img-viewer-step { position: absolute; bottom: calc(16px + env(safe-area-inset-bottom)); background: rgba(255,255,255,.1); border-radius: 999px; }
 .img-viewer-prev { left: calc(16px + var(--safe-left)); } .img-viewer-next { right: calc(16px + var(--safe-right)); }
+/* The output of a tool call, full screen: it wraps, so that a line is read without going sideways. */
+.output-viewer { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
+.output-viewer-bar { display: flex; align-items: center; gap: .5rem; min-height: 56px; padding: calc(6px + env(safe-area-inset-top)) calc(8px + var(--safe-right)) 6px calc(16px + var(--safe-left)); border-bottom: 1px solid var(--line); }
+.output-viewer-title { display: flex; flex: 1; align-items: baseline; gap: .5rem; min-width: 0; font-size: .875rem; }
+.output-viewer-title strong { flex: none; }
+.output-viewer-stage { flex: 1; min-height: 0; overflow: auto; padding: .5rem calc(12px + var(--safe-right)) calc(12px + env(safe-area-inset-bottom)) calc(12px + var(--safe-left)); }
+.output-viewer-text { margin: .5rem 0; font: .75rem/1.4 var(--code-font); white-space: pre-wrap; overflow-wrap: anywhere; }
+.output-viewer-note { margin: .5rem 0; color: var(--muted); font-size: .8125rem; }
+.output-viewer-note:empty { display: none; }
 /* A table scrolls sideways in its message: its cells keep their words whole, as the rest of the message does not. */
 .markdown-content :is(th, td) { min-width: 4ch; overflow-wrap: normal; word-break: normal; }

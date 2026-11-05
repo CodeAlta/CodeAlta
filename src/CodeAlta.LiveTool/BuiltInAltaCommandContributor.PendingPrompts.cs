@@ -56,13 +56,16 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? sessionId = null, activityId = null;
         long? since = null;
         var maximum = DefaultToolText;
+        int? maximumOutput = null, outputOffset = null;
         var command = Leaf("tool", "Read one tool call of a session: what it runs, in which folder, and what it gave.");
         command.Add("<session-id>", "CodeAlta session id.", value => sessionId = value);
         command.Add("<activity-id>", "The activityId of the call, as `alta session events` gives it.", value => activityId = value);
         command.Add("since=", "Read only the events after this sequence number: the one before the first record of the call.", (long value) => since = value);
-        command.Add("max-text=", $"The most characters of each text: the start of the arguments and of the diff, the end of the output (default {DefaultToolText}).", (int value) => maximum = value);
-        command.Add(async (_, _) => await HandleSessionToolAsync(context, sessionId, activityId, since, maximum).ConfigureAwait(false));
-        AddHelpText(command, "Example: `alta session tool <session-id> <activity-id> --since 120 --max-text 8000`.");
+        command.Add("max-text=", $"The most characters of each text: the start of the arguments and of the diff, and a part of the output (default {DefaultToolText}).", (int value) => maximum = value);
+        command.Add("max-output=", "The most characters of the output, when it differs from --max-text.", (int value) => maximumOutput = value);
+        command.Add("output-offset=", "Read the output from this character, to go through a long one. Without it, a call that runs a command gives the end of its output and any other call the start.", (int value) => outputOffset = value);
+        command.Add(async (_, _) => await HandleSessionToolAsync(context, sessionId, activityId, since, maximum, maximumOutput ?? maximum, outputOffset).ConfigureAwait(false));
+        AddHelpText(command, "Example: `alta session tool <session-id> <activity-id> --since 120 --max-text 8000`. `outputOffset` and `outputLength` say which part of the output came.");
         return command;
     }
 
@@ -143,11 +146,13 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
-    private static async ValueTask<int> HandleSessionToolAsync(AltaCommandContext context, string? sessionId, string? activityId, long? since, int maximum)
+    private static async ValueTask<int> HandleSessionToolAsync(AltaCommandContext context, string? sessionId, string? activityId, long? since, int maximum, int maximumOutput, int? outputOffset)
     {
         if (string.IsNullOrWhiteSpace(sessionId)) return UsageError(context, "usage.missingSession", "Session id is required.", "alta session tool");
         if (string.IsNullOrWhiteSpace(activityId)) return UsageError(context, "usage.missingActivity", "The activity id of a tool call is required.", "alta session tool");
         if (maximum is <= 0 or > MaximumToolText) return UsageError(context, "usage.invalidLimit", $"--max-text must be from 1 to {MaximumToolText}.", "alta session tool");
+        if (maximumOutput is <= 0 or > MaximumToolText) return UsageError(context, "usage.invalidLimit", $"--max-output must be from 1 to {MaximumToolText}.", "alta session tool");
+        if (outputOffset < 0) return UsageError(context, "usage.invalidOffset", "--output-offset cannot be negative.", "alta session tool");
         if (since < 0) return UsageError(context, "usage.invalidSince", "--since cannot be negative.", "alta session tool");
         if (!context.TryGetRequired<SessionRuntimeService>(nameof(SessionRuntimeService), out var runtime)) return AltaExitCodes.ServiceUnavailable;
         var infoResult = await ResolveSessionInfoAsync(context, sessionId.Trim()).ConfigureAwait(false);
@@ -177,7 +182,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var (arguments, argumentsLength) = StartOf(call.Arguments, maximum);
         var (diff, diffLength) = StartOf(call.Diff, maximum);
         var (error, _) = StartOf(call.Error, maximum);
-        var (text, outputLength) = EndOf(call.Output, maximum);
+        var (text, outputStart, outputLength) = OutputOf(call.Output, call.Command is not null, outputOffset, maximumOutput);
         AltaJsonlWriter.WriteRecord(context.Stdout, new
         {
             type = "alta.session.tool",
@@ -198,6 +203,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             arguments,
             argumentsLength,
             output = text,
+            outputOffset = outputStart,
             outputLength,
             diff,
             diffLength,
@@ -219,6 +225,33 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (text.Length <= maximum) return (text, text.Length);
         return (text[..(char.IsHighSurrogate(text[maximum - 1]) ? maximum - 1 : maximum)], text.Length);
     }
+
+    // The part of an output that was asked for, else the part that says the most: the end of what a command printed,
+    // the start of anything else, such as a file it read.
+    private static (string? Text, int Offset, int Length) OutputOf(string? output, bool ranCommand, int? offset, int maximum)
+    {
+        if (output is null) return (null, 0, 0);
+        if (offset is { } asked)
+        {
+            var from = Math.Min(asked, output.Length);
+            // A limit that falls inside a pair moves before it, whichever side of the limit a read is on: two parts that meet lose nothing.
+            var start = BeforePair(output, from);
+            var end = BeforePair(output, maximum >= output.Length - from ? output.Length : from + maximum);
+            return (output[start..end], start, output.Length);
+        }
+
+        if (ranCommand)
+        {
+            var (tail, _) = EndOf(output, maximum);
+            return (tail, output.Length - (tail?.Length ?? 0), output.Length);
+        }
+
+        var (head, _) = StartOf(output, maximum);
+        return (head, 0, output.Length);
+    }
+
+    private static int BeforePair(string text, int index)
+        => index > 0 && index < text.Length && char.IsLowSurrogate(text[index]) && char.IsHighSurrogate(text[index - 1]) ? index - 1 : index;
 
     private static (string? Text, int Length) EndOf(string? text, int maximum)
     {

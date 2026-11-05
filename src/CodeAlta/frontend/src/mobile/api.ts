@@ -1,4 +1,4 @@
-import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, LatestEventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, QueuePage, Session, SessionChoices, SessionPage, ToolCallDetail, UnqueueResult, UnsteerResult } from "./contract";
+import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, LatestEventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, QueuePage, Session, SessionChoices, SessionPage, ToolCallDetail, ToolOutputPage, ToolOutputPlace, UnqueueResult, UnsteerResult } from "./contract";
 
 /** What the page says when the server no longer knows this phone. */
 export const signedOutMessage = "This phone is no longer connected: scan the QR code of the Mobile tab again.";
@@ -167,6 +167,15 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     unsteer: (id: string, withdrawalId: string) => command<UnsteerResult>(`${session(id)}/steer/${encodeURIComponent(withdrawalId)}/withdraw`),
     /** One tool call, whole; `since` is the sequence number before its first event. */
     tool: (id: string, activityId: string, since?: number) => call<ToolCallDetail>("GET", `${session(id)}/tools/${encodeURIComponent(activityId)}${since === undefined ? "" : `?since=${since}`}`),
+    /** A page of the output of a tool call. */
+    toolOutput: (id: string, activityId: string, since: number | undefined, place: ToolOutputPlace) => {
+      const query = new URLSearchParams();
+      if (since !== undefined) query.set("since", String(since));
+      if (place.offset !== undefined) query.set("offset", String(place.offset));
+      if (place.before !== undefined) query.set("before", String(place.before));
+      const search = query.toString();
+      return call<ToolOutputPage>("GET", `${session(id)}/tools/${encodeURIComponent(activityId)}/output${search ? `?${search}` : ""}`);
+    },
     abort: (id: string) => command<ActionResult>(`${session(id)}/abort`),
     archive: (id: string) => command<ActionResult>(`${session(id)}/archive`),
     restore: (id: string) => command<ActionResult>(`${session(id)}/restore`),

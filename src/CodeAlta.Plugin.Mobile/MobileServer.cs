@@ -165,6 +165,8 @@ internal sealed partial class MobileServer : IAsyncDisposable
         // One tool call, read when the phone opens it: the timeline only says what each call works on.
         api.MapGet("/sessions/{id}/tools/{activityId}", async (string id, string activityId, long? since, CancellationToken ct) =>
             Json(await _options.Api.ToolAsync(id, activityId, since, ct).ConfigureAwait(false)));
+        api.MapGet("/sessions/{id}/tools/{activityId}/output", async (string id, string activityId, long? since, int? offset, int? before, CancellationToken ct) =>
+            Json(await _options.Api.ToolOutputAsync(id, activityId, since, offset, before, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/abort", async (string id, CancellationToken ct) => Json(await _options.Api.AbortAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/archive", async (string id, CancellationToken ct) => Json(await _options.Api.ArchiveAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/restore", async (string id, CancellationToken ct) => Json(await _options.Api.RestoreAsync(id, ct).ConfigureAwait(false)));

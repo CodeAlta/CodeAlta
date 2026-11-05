@@ -30,11 +30,21 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     event("activity.toolcall.started", "Bash", { activityId: "call-1", subject: "dotnet build -c Release" }),
     event("activity.toolcall.started", "Grep", { activityId: "call-2" }),
     event("activity.toolcall.completed", "Grep", { activityId: "call-2" }),
+    event("activity.toolcall.started", "Read", { activityId: "call-3", subject: "C:\\work\\skills\\SKILL.md" }),
+    event("activity.toolcall.completed", "Read", { activityId: "call-3", subject: "C:\\work\\skills\\SKILL.md" }),
   ]);
   const longLine = "an output line that is much wider than the screen of a phone, ".repeat(6);
+  const numbered = (word: string, lines: number) => Array.from({ length: lines }, (_, index) => `${word} ${index + 1}`).join("\n");
+  // Three pages of the fixture server, and two.
+  const buildOutput = `${numbered("built", 4000)}\n${longLine}`;
+  server.state.toolOutputs.set("s1/call-1", buildOutput);
   server.state.tools.set("s1/call-1", {
-    name: "Bash", phase: "started", command: "dotnet build -c Release", sessionFolder: "C:\\work\\worktrees\\calm-otter", output: `${longLine}\nbuilding`, outputLength: 40_000, error: null,
+    name: "Bash", phase: "started", command: "dotnet build -c Release", sessionFolder: "C:\\work\\worktrees\\calm-otter",
+    output: buildOutput.slice(-2000), outputOffset: buildOutput.length - 2000, outputLength: buildOutput.length, error: null,
   });
+  const fileOutput = numbered("line", 2500);
+  server.state.toolOutputs.set("s1/call-3", fileOutput);
+  server.state.tools.set("s1/call-3", { name: "Read", phase: "completed", output: fileOutput.slice(0, 2000), outputOffset: 0, outputLength: fileOutput.length, error: null });
   // A prompt queued before this page opened, as after a reload of the phone.
   server.state.queues.set("s1", [{ id: "queue-old", text: "Queued before the reload", at: now, state: "queued" }]);
   const failures: string[] = [];
@@ -99,21 +109,75 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     const facts = await evaluate<string[]>('[...document.querySelectorAll(".tool-detail .tool-fact")].map(e => e.textContent)');
     assert.deepEqual(facts, ["FolderC:\\work\\worktrees\\calm-otter"], "the folder it works in");
     assert.deepEqual(await evaluate('[...document.querySelectorAll(".tool-detail .tool-section")].map(e => e.textContent)'), ["Command", "Output"]);
-    assert.match(await evaluate<string>('document.querySelector(".tool-detail .tool-note").textContent'), /^The last [\d,. ]+ of 40[,. ]?000 characters\.$/u, "says that only the end came");
     assert.equal(server.requests.filter(request => request.path.endsWith("/tools/call-1")).at(-1)?.query, `?since=1`, "from the first event of the call");
-    assert.equal(await evaluate("document.documentElement.scrollWidth <= window.innerWidth"), true, "a long line scrolls inside its box, never the page");
-    assert.equal(await evaluate('(() => { const output = [...document.querySelectorAll(".tool-detail .tool-text")].at(-1); return output.scrollWidth > output.clientWidth; })()'), true, "the output scrolls sideways");
+    assert.equal(await evaluate('document.querySelector(".tool-detail .tool-output-text").textContent'), `built 3997\nbuilt 3998\nbuilt 3999\nbuilt 4000\n${longLine}`, "the last lines of a command");
+    assert.match(await evaluate<string>('document.querySelector(".tool-detail .tool-output-more").textContent'), /^Read all [\d,. ]+ characters$/u);
+    assert.equal(await evaluate("document.documentElement.scrollWidth <= window.innerWidth"), true, "a long line stays inside its box, never wider than the page");
     await shot("tool-call");
+
+    // ---- A tap on those lines reads the output full screen, a page at a time, and Back closes it ----
+    const pagesOf = (call: string) => server.requests.filter(request => request.path.endsWith(`/tools/${call}/output`));
+    const shownText = () => evaluate<string>('document.querySelector(".output-viewer-text").textContent');
+    const isHidden = (selector: string) => evaluate<boolean>(`document.querySelector(${JSON.stringify(selector)}).hidden`);
+    const pageRead = async (length: number) => waitFor(`document.querySelector(".output-viewer-text")?.textContent.length === ${length} && !document.querySelector(".output-viewer-earlier").disabled`);
+    assert.equal(pagesOf("call-1").length, 0, "no page is read until the output is opened");
+    await evaluate('(() => { const open = document.querySelector(".tool-detail .tool-output"); open.focus(); open.click(); })()');
+    await pageRead(16_000);
+    assert.equal(pagesOf("call-1").at(-1)?.query, "?since=1", "where it says the most");
+    assert.equal(await shownText(), buildOutput.slice(-16_000));
+    assert.match(await evaluate<string>('document.querySelector(".output-viewer-title").textContent'), /^Bashdotnet build -c Release$/u, "says of which call");
+    assert.deepEqual([await isHidden(".output-viewer-earlier"), await isHidden(".output-viewer-later")], [false, true], "the end of a command: only what comes before is left");
+    assert.equal(await evaluate('(() => { const stage = document.querySelector(".output-viewer-stage"); return stage.scrollTop > 0 && stage.scrollTop + stage.clientHeight >= stage.scrollHeight - 2; })()'), true, "opens at the end");
+    assert.equal(await evaluate('(() => { const text = document.querySelector(".output-viewer-text"); return text.scrollWidth <= text.clientWidth && document.documentElement.scrollWidth <= window.innerWidth; })()'), true, "a long line wraps");
+    await shot("tool-output");
+    const fromBottom = () => evaluate<number>('(() => { const stage = document.querySelector(".output-viewer-stage"); return stage.scrollHeight - stage.scrollTop; })()');
+    const reading = await fromBottom();
+    await evaluate('document.querySelector(".output-viewer-earlier").click()');
+    await pageRead(32_000);
+    assert.equal(pagesOf("call-1").at(-1)?.query, `?since=1&before=${buildOutput.length - 16_000}`);
+    assert.equal(await shownText(), buildOutput.slice(-32_000), "what came before goes first");
+    assert.ok(Math.abs(await fromBottom() - reading) <= 2, "the text being read did not move");
+    await evaluate('document.querySelector(".output-viewer-earlier").click()');
+    await pageRead(buildOutput.length);
+    assert.equal(await shownText(), buildOutput, "the whole output, with nothing lost between its pages");
+    assert.equal(await isHidden(".output-viewer-earlier"), true, "nothing more before it");
+    const hash = await evaluate<string>("location.hash");
+    await evaluate("history.back()");
+    await waitFor('!document.querySelector(".output-viewer")');
+    assert.equal(await evaluate("location.hash"), hash, "Back closes the output and stays on the session");
+    assert.equal(await evaluate('document.activeElement.className'), "tool-output", "the keyboard goes back to what opened it");
     // What is open follows the call: once it ended, it says how.
     server.state.tools.set("s1/call-1", { name: "Bash", phase: "failed", command: "dotnet build -c Release", sessionFolder: "C:\\work\\worktrees\\calm-otter", exitCode: 1, failure: "It broke", output: "error CS0001", outputLength: 12, error: null });
     server.state.events.get("s1")!.push(event("activity.toolcall.failed", "Bash", { activityId: "call-1", subject: "dotnet build -c Release" }));
     server.push(running);
     await waitFor('[...document.querySelectorAll(".tool-detail .tool-fact")].some(e => e.textContent === "Exit code1")');
     assert.equal(await evaluate('document.querySelector(".tool-detail .tool-bad")?.textContent'), "1");
+    assert.equal(await evaluate('[...document.querySelectorAll(".tool-detail .tool-text")].at(-1).textContent'), "error CS0001", "an output these lines hold is only shown");
+    assert.equal(await evaluate('document.querySelector(".tool-detail .tool-output")'), null, "with nothing more to open");
     // A second tap folds it.
     await evaluate('document.querySelector("#timeline .tool-row[data-activity=call-1]").click()');
     await waitFor('!document.querySelector(".tool-detail")');
     assert.equal(await evaluate('document.querySelector("#timeline .tool-row[data-activity=call-1]").getAttribute("aria-expanded")'), "false");
+
+    // ---- A file opens at its start, and what comes after is read on demand ----
+    await evaluate('document.querySelector("#timeline .tool-row[data-activity=call-3]").click()');
+    await waitFor('document.querySelector(".tool-detail .tool-output-text")');
+    assert.equal(await evaluate('document.querySelector(".tool-detail .tool-output-text").textContent'), "line 1\nline 2\nline 3\nline 4\nline 5", "the first lines of a file");
+    await evaluate('document.querySelector(".tool-detail .tool-output").click()');
+    await pageRead(16_000);
+    assert.equal(await shownText(), fileOutput.slice(0, 16_000));
+    assert.deepEqual([await isHidden(".output-viewer-earlier"), await isHidden(".output-viewer-later")], [true, false], "the start of a file: only what comes after is left");
+    assert.equal(await evaluate('document.querySelector(".output-viewer-stage").scrollTop'), 0, "opens at the start");
+    assert.match(await evaluate<string>('document.querySelector(".output-viewer-title .tool-path-file").textContent'), /^\\SKILL\.md$/u);
+    await evaluate('document.querySelector(".output-viewer-later").click()');
+    await waitFor(`document.querySelector(".output-viewer-text").textContent.length === ${fileOutput.length}`);
+    assert.match(pagesOf("call-3").at(-1)?.query ?? "", /^\?since=\d+&offset=16000$/u, "the page after the one it has");
+    assert.equal(await shownText(), fileOutput);
+    assert.equal(await isHidden(".output-viewer-later"), true, "nothing more after it");
+    await evaluate('document.querySelector(".output-viewer-close").click()');
+    await waitFor('!document.querySelector(".output-viewer")');
+    await evaluate('document.querySelector("#timeline .tool-row[data-activity=call-3]").click()');
+    await waitFor('!document.querySelector(".tool-detail")');
 
     // ---- A prompt queued before the page opened shows, and can be deleted ----
     await waitFor(`${card("Queued before the reload")}`);

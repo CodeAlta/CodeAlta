@@ -57,6 +57,8 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     steers: new Set<string>(),
     /** The tool calls of the sessions, by `<session>/<activity id>`. */
     tools: new Map<string, ToolCallDetail>(),
+    /** The whole outputs of the tool calls, read a page at a time, by `<session>/<activity id>`. */
+    toolOutputs: new Map<string, string>(),
     /**
      * The images of the sessions, by `<session>/<image id>` for a saved copy and `<session>/linked/<seq>/<position>` for a
      * picture of the disk an answer shows; any other image is not found.
@@ -170,6 +172,15 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     }
     const steerPath = /^\/api\/sessions\/([^/]+)\/steer\/([^/]+)\/withdraw$/.exec(path);
     if (steerPath) return send(response, 200, { withdrawn: state.steers.delete(decodeURIComponent(steerPath[2])), error: null });
+    const outputPath = /^\/api\/sessions\/([^/]+)\/tools\/([^/]+)\/output$/.exec(path);
+    if (outputPath) {
+      const key = `${decodeURIComponent(outputPath[1])}/${decodeURIComponent(outputPath[2])}`, whole = state.toolOutputs.get(key);
+      if (whole === undefined) return send(response, 200, { error: "The output was not read." });
+      const page = 16_000, offset = url.searchParams.get("offset"), before = url.searchParams.get("before");
+      const start = before !== null ? Math.max(0, Number(before) - page) : offset !== null ? Number(offset) : state.tools.get(key)?.command ? Math.max(0, whole.length - page) : 0;
+      const end = before !== null ? Number(before) : Math.min(whole.length, start + page);
+      return send(response, 200, { output: whole.slice(start, end), outputOffset: start, outputLength: whole.length, error: null });
+    }
     const toolPath = /^\/api\/sessions\/([^/]+)\/tools\/([^/]+)$/.exec(path);
     if (toolPath) {
       const call = state.tools.get(`${decodeURIComponent(toolPath[1])}/${decodeURIComponent(toolPath[2])}`);

@@ -4,12 +4,13 @@
 // on a tap; what is open stays open while the page shows the session.
 import { activityDuration } from "../timelineActivity/activityText";
 import { plainResult } from "../workflows/scriptResult";
-import type { ToolCallDetail } from "./contract";
+import type { ToolCallDetail, ToolOutputPage, ToolOutputPlace } from "./contract";
 import { activityLine, el, icon } from "./dom";
 import { previewLine, type HostPrompt } from "./hostPrompt";
 import { linkedImageUrl, matchLinkedImages, savedImageUrl, splitFiles, type ImageItem } from "./imageModel";
 import type { ImageViewer } from "./imageViewer";
-import { activityFacts, canWithdraw, clockTime, subjectPath, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
+import type { OutputViewer } from "./outputViewer";
+import { activityFacts, canWithdraw, clockTime, outputPreview, subjectPath, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
 import { timelineIcon, type TimelineIconName } from "./timelineIcons";
 import type { WorkflowCall, WorkflowRun, WorkflowState } from "./workflowRun";
 
@@ -29,9 +30,12 @@ export type TimelineViewOptions = Readonly<{
   openSession: (id: string) => void;
   /** Reads a tool call, when its row opens. */
   readTool: (activityId: string, seq: number | undefined) => Promise<ToolCallDetail>;
+  /** Reads a page of the output of a tool call, in its full-screen view. */
+  readToolOutput: (activityId: string, seq: number | undefined, place: ToolOutputPlace) => Promise<ToolOutputPage>;
   /** Takes a pending prompt back, to forget it or to edit it in the composer. */
   withdraw: (key: string, then: "delete" | "edit") => void;
   viewer: ImageViewer;
+  outputViewer: OutputViewer;
 }>;
 
 const pendingLabels: Readonly<Record<PendingPrompt["mode"], string>> = { send: "You", steer: "You · steering", queue: "You · queued" };
@@ -322,9 +326,14 @@ export function createTimelineView(options: TimelineViewOptions) {
     const current = () => toolReads.get(activityId) === reading && open.has(toolKey(activityId));
     let content: Node[];
     try {
-      const call = await options.readTool(activityId, Number(row.dataset.seq) || undefined);
+      const seq = Number(row.dataset.seq) || undefined;
+      const call = await options.readTool(activityId, seq);
       if (!current()) return;
-      content = call.error ? [make("p", "tool-note", call.error)] : toolParts(call);
+      const caption = () => {
+        const subject = element.dataset.subject;
+        return [make("strong", null, call.name ?? "Output"), ...(subject ? [subjectElement(subject)] : [])];
+      };
+      content = call.error ? [make("p", "tool-note", call.error)] : toolParts(call, place => options.readToolOutput(activityId, seq, place), caption);
     } catch (error) {
       if (!current()) return;
       content = [make("p", "tool-note", error instanceof Error ? error.message : String(error))];
@@ -332,8 +341,22 @@ export function createTimelineView(options: TimelineViewOptions) {
     panel.replaceChildren(...content);
   }
 
+  // The few lines of an output, under its call; a tap on them reads it all, full screen. An output these lines hold is only shown.
+  function outputParts(call: ToolCallDetail, read: (place: ToolOutputPlace) => Promise<ToolOutputPage>, caption: () => Node[]): Node[] {
+    if (!call.output) return [];
+    const fromEnd = !!call.command, length = call.outputLength ?? call.output.length;
+    const preview = outputPreview(call.output, length, fromEnd);
+    const section = make("div", "tool-section", "Output");
+    if (preview.whole) return [section, make("pre", "tool-text", preview.text)];
+    const more = `Read all ${length.toLocaleString()} characters`;
+    const open = button("tool-output", more);
+    open.append(make("span", "tool-output-text", preview.text), make("span", "tool-output-more", more));
+    open.addEventListener("click", () => options.outputViewer.open(caption(), read, fromEnd));
+    return [section, open];
+  }
+
   // What a call does, each fact on its own line. Its long texts scroll, and say when only a part of them came.
-  function toolParts(call: ToolCallDetail): Node[] {
+  function toolParts(call: ToolCallDetail, readOutput: (place: ToolOutputPlace) => Promise<ToolOutputPage>, caption: () => Node[]): Node[] {
     const parts: Node[] = [];
     const fact = (label: string, value: string, className?: string) => {
       const line = make("div", "tool-fact");
@@ -354,7 +377,7 @@ export function createTimelineView(options: TimelineViewOptions) {
     text("Modified files", call.modifiedFiles?.join("\n"), undefined, "start");
     text("Read files", call.readFiles?.join("\n"), undefined, "start");
     text("Diff", call.diff, call.diffLength, "start");
-    text("Output", call.output, call.outputLength, "end");
+    parts.push(...outputParts(call, readOutput, caption));
     if (!parts.length) parts.push(make("p", "tool-note", "The call says nothing more yet."));
     return parts;
   }

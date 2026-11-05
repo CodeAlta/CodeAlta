@@ -378,11 +378,46 @@ public sealed class MobileSessionsTests
         Assert.AreEqual(("Bash", "git status", "C:/work/tree", 3, "it broke", "the end"),
             ((string?)call["name"], (string?)call["command"], (string?)call["workingDirectory"], (int)call["exitCode"]!, (string?)call["failure"], (string?)call["output"]));
         Assert.IsFalse(call.ContainsKey("correlationId"));
-        CollectionAssert.AreEqual(new[] { "session", "tool", "a", "call-1", "--max-text", "12000", "--since", "41" }, alta.CallsOf("session tool a call-1").Single());
+        CollectionAssert.AreEqual(new[] { "session", "tool", "a", "call-1", "--max-text", "12000", "--max-output", "2000", "--since", "41" }, alta.CallsOf("session tool a call-1").Single());
 
         Assert.IsNotNull((string?)(await api.ToolAsync("a", "call-2", null, default))!["error"]);
         Assert.IsNull(await api.ToolAsync("theirs", "call-1", null, default));
         Assert.IsNull(await api.ToolAsync("a", "--all", null, default));
+    }
+
+    [TestMethod]
+    public async Task ToolOutput_ReadsAPageAtATime_WhereThePhoneAsks_AndNothingElseOfTheCall()
+    {
+        var alta = new FakeAlta()
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session status theirs", FakeAlta.Status("theirs", "p1", "work"))
+            .Answer("session tool a call-1", new JsonObject
+            {
+                ["type"] = "alta.session.tool", ["name"] = "Bash", ["command"] = "git status", ["output"] = "a page", ["outputOffset"] = 8000, ["outputLength"] = 90000,
+            })
+            .Answer("session tool a call-2", (_, _) => FakeAlta.Transcript(3));
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces("personal"), new MobileLive()));
+        string[] Asked() => [.. alta.CallsOf("session tool a call-1").Last()];
+        const string Page = "32000";
+
+        var page = await api.ToolOutputAsync("a", "call-1", 41, null, null, default);
+        Assert.AreEqual(("a page", 8000, 90000), ((string?)page!["output"], (int)page["outputOffset"]!, (int)page["outputLength"]!));
+        Assert.IsNull((string?)page["error"]);
+        Assert.IsFalse(page.ContainsKey("command"));
+        CollectionAssert.AreEqual(new[] { "session", "tool", "a", "call-1", "--max-text", "1", "--max-output", Page, "--since", "41" }, Asked(), "Where the output says the most.");
+
+        await api.ToolOutputAsync("a", "call-1", null, 32000, null, default);
+        CollectionAssert.AreEqual(new[] { "session", "tool", "a", "call-1", "--max-text", "1", "--max-output", Page, "--output-offset", "32000" }, Asked(), "The page after the one it has.");
+        await api.ToolOutputAsync("a", "call-1", null, null, 40000, default);
+        CollectionAssert.AreEqual(new[] { "session", "tool", "a", "call-1", "--max-text", "1", "--max-output", Page, "--output-offset", "8000" }, Asked(), "The page before the one it has.");
+        await api.ToolOutputAsync("a", "call-1", null, null, 100, default);
+        CollectionAssert.AreEqual(new[] { "session", "tool", "a", "call-1", "--max-text", "1", "--max-output", "100", "--output-offset", "0" }, Asked(), "What is left before it, and no more.");
+
+        Assert.IsNotNull((string?)(await api.ToolOutputAsync("a", "call-2", null, null, null, default))!["error"]);
+        Assert.IsNull(await api.ToolOutputAsync("theirs", "call-1", null, null, null, default));
+        Assert.IsNull(await api.ToolOutputAsync("a", "--all", null, null, null, default));
+        Assert.IsNull(await api.ToolOutputAsync("a", "call-1", null, -1, null, default));
+        Assert.IsNull(await api.ToolOutputAsync("a", "call-1", null, null, 0, default));
     }
 
     [TestMethod]

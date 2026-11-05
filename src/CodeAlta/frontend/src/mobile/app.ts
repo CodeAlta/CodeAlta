@@ -28,6 +28,7 @@ import {
   activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, prependEvents, stillPending, withDays, withQueue, type DayBlock, type PendingPrompt, type TimelineBlock,
 } from "./timeline";
 import { createImageViewer } from "./imageViewer";
+import { createOutputViewer } from "./outputViewer";
 import { createTimelineView } from "./timelineView";
 
 /** Starts the phone page in a window whose document is `mobile.html`. */
@@ -334,9 +335,14 @@ export function startMobile(window: Window & typeof globalThis) {
     sessionTitle: id => sessions.view(id)?.title ?? null,
     openSession: id => { window.location.hash = `#/session/${encodeURIComponent(id)}`; },
     viewer: createImageViewer({ window }),
+    outputViewer: createOutputViewer({ window }),
     readTool: (activityId, seq) => {
       if (!detail.id) return Promise.reject(new Error("No session is open."));
       return api.tool(detail.id, activityId, seq === undefined ? undefined : Math.max(0, seq - 1));
+    },
+    readToolOutput: (activityId, seq, place) => {
+      if (!detail.id) return Promise.reject(new Error("No session is open."));
+      return api.toolOutput(detail.id, activityId, seq === undefined ? undefined : Math.max(0, seq - 1), place);
     },
     withdraw: (key, then) => void withdrawPrompt(key, then),
   });

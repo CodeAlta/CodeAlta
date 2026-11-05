@@ -273,13 +273,19 @@ export type ToolCallDetail = Readonly<{
   failure?: string | null;
   /** The start of its arguments. */
   arguments?: string | null; argumentsLength?: number;
-  /** The end of its output. */
-  output?: string | null; outputLength?: number;
+  /** A short part of its output: the end of what a command printed, the start of anything else. */
+  output?: string | null; outputOffset?: number; outputLength?: number;
   /** The start of its diff. */
   diff?: string | null; diffLength?: number;
   readFiles?: readonly string[]; modifiedFiles?: readonly string[];
   error: string | null;
 }>;
+
+/** Which page of an output to read: where it says the most, the page from a character, or the page before one. */
+export type ToolOutputPlace = Readonly<{ offset?: number; before?: number }>;
+
+/** A page of the output of a tool call, from its character `outputOffset` (`GET /api/sessions/<id>/tools/<activity id>/output`). */
+export type ToolOutputPage = Readonly<{ output?: string | null; outputOffset?: number; outputLength?: number; error: string | null }>;
 
 /** A question of an ask: answered with one of its choices, with text, or both. */
 export type AskQuestion = Readonly<{
