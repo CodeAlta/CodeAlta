@@ -2322,7 +2322,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             if (drop) void deliverHostDrop(drop, desktopShell.readDroppedFile).then(({ problems }) => {
               for (const problem of problems) showToast({ intent: "warning", icon: "warning-sign", timeout: 8000, message: problem.reason === "too_large"
                 ? translate(shownLocale.current, "Could not attach {name}: a file of 1 byte to {size} MB is required.", { name: problem.name, size: attachmentLimits.fileBytes / 1024 / 1024 })
-                : translate(shownLocale.current, "Could not read the dropped file {name}.", { name: problem.name }) });
+                : problem.reason === "over_total"
+                  ? translate(shownLocale.current, "Could not attach {name}: the attachments of a prompt are limited to {size} MB in all.", { name: problem.name, size: attachmentLimits.totalBytes / 1024 / 1024 })
+                  : translate(shownLocale.current, "Could not read the dropped file {name}.", { name: problem.name }) });
             });
           }
           // The file dialog a file input asked for could not be shown: the button would otherwise do nothing.

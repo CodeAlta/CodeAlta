@@ -19,10 +19,11 @@ test("a files-dropped notice is read only when it is well formed", () => {
 // A page of plain objects: a body with two panes, each with a transcript and a composer surface, and a dialog.
 function page({ hidden = false, onePane = false } = {}) {
   type Node = { name: string; classes: string[]; role?: string; children: Node[]; parentElement: Node | null; shown: boolean; isConnected: boolean;
+    dataset: Record<string, string>;
     events: CustomEvent[]; closest: (selector: string) => Node | null; matches: (selector: string) => boolean;
     querySelectorAll: (selector: string) => Node[]; getClientRects: () => { length: number }; dispatchEvent: (event: Event) => boolean };
   const make = (name: string, classes: string[], children: Node[] = [], role?: string): Node => {
-    const node: Node = { name, classes, role, children, parentElement: null, shown: true, isConnected: true, events: [],
+    const node: Node = { name, classes, role, children, parentElement: null, shown: true, isConnected: true, dataset: {}, events: [],
       matches: selector => selector === ".prompt-surface" ? classes.includes("prompt-surface") : selector.includes("dialog") ? role === "dialog" : false,
       closest: selector => { for (let current: Node | null = node; current; current = current.parentElement) if (current.matches(selector)) return current; return null; },
       querySelectorAll: selector => node.children.flatMap(child => [...(child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]),
@@ -91,4 +92,40 @@ test("a host drop where no composer is reads nothing", async () => {
   assert.deepEqual(await deliverHostDrop({ x: 0, y: 0, folders: [], files: [{ id: id(1), name: "a.txt", size: 1 }] },
     async ({ id: read }) => { reads.push(read); return {}; }, root), { delivered: false, problems: [] });
   assert.deepEqual(reads, []);
+});
+
+// A drop is read within what the prompt under it can still take (`data-attached-bytes` of its surface): the page never
+// holds more than the limit of a prompt, whatever the number of files dropped.
+test("a host drop reads its files within the total of the prompt, and says which were left out", async () => {
+  const { root, left } = page();
+  const mib = 1024 * 1024;
+  left.surface.dataset.attachedBytes = String(attachmentLimits.totalBytes - 4 * mib);
+  const content = (size: number) => btoa("a".repeat(size));
+  const replies: Record<string, unknown> = {
+    [id(1)]: { status: "ok", mediaType: "text/plain", base64: content(3 * mib) },
+    [id(3)]: { status: "ok", mediaType: "text/plain", base64: content(mib) },
+    [id(4)]: { status: "ok", mediaType: "text/plain", base64: content(10) },
+  };
+  const reads: string[] = [];
+  const result = await deliverHostDrop({ x: 1, y: 2, folders: [], files: [
+    { id: id(1), name: "three.txt", size: 3 * mib }, { id: id(2), name: "two.txt", size: 2 * mib },
+    { id: id(3), name: "one.txt", size: mib }, { id: id(4), name: "grew.txt", size: 0 }] },
+  async ({ id: read }) => { reads.push(read); return replies[read]; }, root);
+  assert.deepEqual(result.problems, [{ name: "two.txt", reason: "over_total" }, { name: "grew.txt", reason: "over_total" }]);
+  assert.deepEqual(reads, [id(1), id(3), id(4)], "A file larger than what is left is not read.");
+  const detail = left.surface.events[0].detail as HostDropDetail;
+  assert.deepEqual(detail.files.map(file => [file.name, file.size]), [["three.txt", 3 * mib], ["one.txt", mib]]);
+});
+
+test("a host drop of many large files reads only what one prompt takes", async () => {
+  const { root } = page();
+  const full = btoa("b".repeat(attachmentLimits.fileBytes));
+  const reads: string[] = [];
+  const files = Array.from({ length: 256 }, (_, n) => ({ id: id(n + 1), name: `part${n}.bin`, size: attachmentLimits.fileBytes }));
+  const result = await deliverHostDrop({ x: 1, y: 2, folders: [], files },
+    async ({ id: read }) => { reads.push(read); return { status: "ok", mediaType: "application/octet-stream", base64: full }; }, root);
+  const fit = Math.floor(attachmentLimits.totalBytes / attachmentLimits.fileBytes);
+  assert.equal(reads.length, fit);
+  assert.equal(result.problems.length, 256 - fit);
+  assert.ok(result.problems.every(problem => problem.reason === "over_total"));
 });

@@ -15,8 +15,11 @@ export type HostDropDetail = Readonly<{ files: File[]; folders: string[] }>;
 /** The event the composer surface under a host drop receives. */
 export const hostDropEvent = "codealta-host-drop";
 
-/** A dropped file that was not attached: larger than an attachment, or that the host could not read. */
-export type HostDropProblem = Readonly<{ name: string; reason: "too_large" | "unreadable" }>;
+/**
+ * A dropped file that was not attached: larger than an attachment, past what the prompt can still take in all, or that
+ * the host could not read.
+ */
+export type HostDropProblem = Readonly<{ name: string; reason: "too_large" | "over_total" | "unreadable" }>;
 
 type ReadDroppedFile = (request: { id: string }) => Promise<unknown>;
 
@@ -62,7 +65,9 @@ export function dropSurface(root: Document, x: number, y: number): HTMLElement |
 /**
  * Gives a host drop to the composer under its point: reads the content of each file from the host, then sends the
  * files and the folders to that composer's surface, which attaches them as it attaches a drop of the page and a folder
- * of Add folder…. A file larger than an attachment is not read.
+ * of Add folder…. A file larger than an attachment is not read, nor one larger than what the prompt can still take in
+ * all: what it holds already (`data-attached-bytes` of its surface) and the files read before it count, so that the page
+ * never holds more than one prompt takes, whatever the number of files dropped.
  * @returns Whether a composer was under the point, and the files that could not be attached.
  */
 export async function deliverHostDrop(drop: HostDrop, read: ReadDroppedFile, root: Document = document): Promise<{ delivered: boolean; problems: HostDropProblem[] }> {
@@ -70,12 +75,17 @@ export async function deliverHostDrop(drop: HostDrop, read: ReadDroppedFile, roo
   if (!target) return { delivered: false, problems: [] };
   const files: File[] = [];
   const problems: HostDropProblem[] = [];
+  let left = attachmentLimits.totalBytes - attachedBytes(target);
   for (const file of drop.files) {
     if (file.size > attachmentLimits.fileBytes) { problems.push({ name: file.name, reason: "too_large" }); continue; }
+    if (file.size > left) { problems.push({ name: file.name, reason: "over_total" }); continue; }
     const reply = await readReply(read, file.id);
     if (reply.status === "too_large") { problems.push({ name: file.name, reason: "too_large" }); continue; }
     const bytes = reply.status === "ok" && typeof reply.base64 === "string" ? decode(reply.base64) : null;
     if (!bytes) { problems.push({ name: file.name, reason: "unreadable" }); continue; }
+    // The file may have grown since it was dropped.
+    if (bytes.length > left) { problems.push({ name: file.name, reason: "over_total" }); continue; }
+    left -= bytes.length;
     const type = typeof reply.mediaType === "string" && reply.mediaType.length <= 128 ? reply.mediaType : "";
     files.push(new File([bytes], file.name, { type }));
   }
@@ -83,6 +93,12 @@ export async function deliverHostDrop(drop: HostDrop, read: ReadDroppedFile, roo
   if (files.length || drop.folders.length)
     target.dispatchEvent(new CustomEvent<HostDropDetail>(hostDropEvent, { detail: Object.freeze({ files, folders: [...drop.folders] }) }));
   return { delivered: true, problems };
+}
+
+// The bytes the prompt of a composer surface holds already, as the surface says them.
+function attachedBytes(target: HTMLElement): number {
+  const value = Number(target.dataset?.attachedBytes);
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 // The answer of `desktopShell.readDroppedFile`; a call that fails is a file that could not be read.

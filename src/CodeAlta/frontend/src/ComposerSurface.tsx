@@ -24,10 +24,15 @@ export type ComposerMore = Readonly<{ items: ReactNode; attention?: ComponentPro
 // (the MCP servers). Below: the Agent chip, the meters (sub-agents, context, prompt cache), the `⋯` menu and the
 // actions. The surface measures its own width (a split pane is narrower than the window): labels shorten, then
 // become icons, and at last the meters fold into the `⋯` menu, in that order.
-export function ComposerSurface({ status, busy = false, children, className, editor, expandedEditor, notice, options, subAgents, meters, more, onDropFiles, onDropFolders }: {
+export function ComposerSurface({ status, busy = false, children, className, editor, expandedEditor, notice, options, subAgents, meters, more, onDropFiles, onDropFolders, attachedBytes = 0 }: {
   status: ReactNode; busy?: boolean; children: ReactNode; className?: string;
   /** Takes the files dropped on the composer, from the file manager of the system; null where nothing can be attached. */
   onDropFiles?: ((files: File[], origin: HTMLElement) => void) | null;
+  /**
+   * The bytes the prompt holds already in attachments: a drop the host takes (`deliverHostDrop`) reads no more files
+   * than the prompt can still take in all.
+   */
+  attachedBytes?: number;
   /**
    * Takes the folders dropped on the composer, by their path, as Add folder… does: only where the host gets the drop
    * (Linux, Windows), the page never having the path of what it gets dropped. Null where nothing can be attached.
@@ -61,7 +66,7 @@ export function ComposerSurface({ status, busy = false, children, className, edi
     return () => element.removeEventListener(hostDropEvent, take);
   }, [element]);
   return <SurfaceDensityContext.Provider value={density}><section ref={setElement} className={`owned-session prompt-surface${className ? ` ${className}` : ""}`}
-    data-density={density} aria-label={t("Message composer")}
+    data-density={density} data-attached-bytes={attachedBytes} aria-label={t("Message composer")}
     onDragOverCapture={onDropFiles ? event => {
       if (!event.dataTransfer.types.includes("Files")) return;
       event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "copy"; dropping(event, true);

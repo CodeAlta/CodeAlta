@@ -13,7 +13,7 @@ import { folderPickNotice, folderTitle, pickFolder } from "./folderPicker";
 import { showToast } from "./appToaster";
 import { folderLink } from "./projectReferences";
 import { insertIssueReferences } from "./issueReferences";
-import { linkAttachment } from "./promptImages";
+import { attachmentBytes, linkAttachment } from "./promptImages";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
@@ -44,7 +44,9 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     /** What the prompt bar of a session that does not exist yet shows in place of a session's own facts. */
     surface?: { epoch: string; onOpenProviders: () => void; contextTokens: number | null } };
   localImages?: { paste: (event: ClipboardEvent<HTMLElement>) => void; attach: (files: File[], origin: HTMLElement) => void;
-    addLinks: (links: readonly ReturnType<typeof linkAttachment>[]) => void; attachments: ReactNode; invalidate: () => void };
+    addLinks: (links: readonly ReturnType<typeof linkAttachment>[]) => void; attachments: ReactNode; invalidate: () => void;
+    /** The attachments of the draft. */
+    images: readonly ReturnType<typeof linkAttachment>[] };
 }) {
   const { t } = useShellLanguage();
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
@@ -94,6 +96,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     notice={<>{localDraft?.notice}{!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}</>}
     options={localDraft && localImages ? <><AttachMenu id={`attach-files-${sessionId}`} disabled={localDraft.busy} onFiles={localImages.attach} {...attachActions} />{localDraft.options}</> : localDraft?.options}
     onDropFiles={localDraft && localImages && !localDraft.busy ? localImages.attach : null}
+    attachedBytes={localImages ? attachmentBytes(localImages.images) : 0}
     onDropFolders={localDraft && localImages && !localDraft.busy ? addFolders : null}
     meters={localDraft?.surface && <DraftUsage contextTokens={localDraft.surface.contextTokens} />}
     more={{ items: <>

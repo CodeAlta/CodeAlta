@@ -1476,6 +1476,7 @@ ${value}` : value);
         navigator.platform.startsWith("Mac"))) { event.preventDefault(); event.stopPropagation(); }
       } }}
     onDropFiles={!pending && !invalidEpoch ? (files, origin) => void attachFiles(files, origin, false) : null}
+    attachedBytes={attachmentBytes(images)}
     onDropFolders={!pending && !invalidEpoch ? addFolders : null}
     options={<><AttachMenu id={`attach-files-${sessionId}`} disabled={!!pending || invalidEpoch} {...attachActions} />
       <ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy} openRequest={selectionOpenRequest} notice={spaceProblem}
