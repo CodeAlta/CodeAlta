@@ -90,6 +90,19 @@ internal sealed class FleetHeldSends
         lock (_gate) return [.. Load().Values.OrderBy(static send => send.HeldAt)];
     }
 
+    /// <summary>
+    /// Reads, at one time, the sends that wait and open now, and the runs of every send held, those this machine cannot open now
+    /// included: a send another reader opens after it is among the runs held, never taken for one that is not there.
+    /// </summary>
+    public FleetHeldSendsSnapshot Snapshot()
+    {
+        lock (_gate)
+        {
+            var opened = Load();
+            return new FleetHeldSendsSnapshot([.. opened.Values.OrderBy(static send => send.HeldAt)], [.. _written.Keys.Union(opened.Keys, StringComparer.Ordinal)]);
+        }
+    }
+
     /// <summary>Keeps a send that waits, written before the node says it waits.</summary>
     /// <exception cref="IOException">It could not be written.</exception>
     /// <exception cref="CodeAlta.Catalog.Secrets.SecretStoreUnavailableException">The protected store of the machine cannot protect it.</exception>
@@ -267,6 +280,11 @@ internal sealed class FleetHeldSends
         _written = written;
     }
 }
+
+/// <summary>The sends held at one time (<see cref="FleetHeldSends.Snapshot"/>).</summary>
+/// <param name="Opened">The sends that wait and open now, the oldest first.</param>
+/// <param name="HoldIds">The runs of every send held (<see cref="FleetHeldSend.HoldId"/>), those that do not open now included.</param>
+internal sealed record FleetHeldSendsSnapshot(IReadOnlyList<FleetHeldSend> Opened, IReadOnlyCollection<string> HoldIds);
 
 /// <summary>Thrown when the node holds as many sends as it keeps: the send is refused, none already held is evicted.</summary>
 internal sealed class FleetHeldSendsFullException : InvalidOperationException

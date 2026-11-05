@@ -44,7 +44,7 @@ public sealed partial class FleetNodeService
 
     // The sends a budget holds, kept across restarts; created with the service.
     private FleetHeldSends HeldSends => LazyInitializer.EnsureInitialized(ref _heldSends, () => new FleetHeldSends(Path.Combine(_host.CatalogOptions.FleetRoot, "held-sends.json"),
-        new CodeAlta.Catalog.Secrets.LocalSecretStore(_host.CatalogOptions.GlobalRoot)));
+        _options.HeldSendsProtection ?? new CodeAlta.Catalog.Secrets.LocalSecretStore(_host.CatalogOptions.GlobalRoot)));
 
     private FleetHeldSends? _heldSends;
 
@@ -146,25 +146,32 @@ public sealed partial class FleetNodeService
     private readonly ConcurrentDictionary<string, byte> _resumedHolds = new(StringComparer.Ordinal);
 
     // Takes again the sends a budget held when the node stopped: each asks the same hold, and is sent once admitted. Those this
-    // machine cannot open now stay held, are reported, and are tried again until they open.
+    // machine cannot open now stay held, are reported, and are tried again until they open. Done once every send held at a reading
+    // was taken again: one another reader opened meanwhile (the waiting sessions read the sends too) is still to be taken.
     private async Task ResumeHeldSendsAsync()
     {
         while (true)
         {
-            await ResumeOpenedHeldSendsAsync().ConfigureAwait(false);
-            int blocked;
-            try { blocked = HeldSends.Blocked; }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { blocked = 0; }
-            if (blocked == 0 || Volatile.Read(ref _disposed) != 0) return;
-            LogWarn($"{blocked} held prompts cannot be opened now (the protected store of the machine is away): they stay held, and are tried again.");
+            FleetHeldSendsSnapshot held;
+            try { held = HeldSends.Snapshot(); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                LogInfo($"The held prompts were not taken again: {exception.Message}");
+                return;
+            }
+
+            await ResumeOpenedHeldSendsAsync(held.Opened).ConfigureAwait(false);
+            var waiting = held.HoldIds.Count(holdId => !_resumedHolds.ContainsKey(holdId));
+            if (waiting == 0 || Volatile.Read(ref _disposed) != 0) return;
+            LogWarn($"{waiting} held prompts cannot be opened now (the protected store of the machine is away): they stay held, and are tried again.");
             await Task.Delay(BlockedHeldSendsRetry).ConfigureAwait(false);
             if (Volatile.Read(ref _disposed) != 0) return;
         }
     }
 
-    private async Task ResumeOpenedHeldSendsAsync()
+    private async Task ResumeOpenedHeldSendsAsync(IReadOnlyList<FleetHeldSend> opened)
     {
-        foreach (var held in HeldSends.List())
+        foreach (var held in opened)
         {
             if (!_resumedHolds.TryAdd(held.HoldId, 0)) continue;
             try

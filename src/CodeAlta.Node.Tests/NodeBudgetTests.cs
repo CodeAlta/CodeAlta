@@ -291,6 +291,76 @@ public sealed class NodeBudgetTests
     }
 
     [TestMethod]
+    public async Task AHeldSendAnotherReaderOpensWhileTheSendsAreTakenAgain_IsTakenAgainToo()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var provider = new ScriptedNodeProvider();
+        var node = await NodeHost.StartAsync(root.Options() with { ConfigureModelProviders = provider.Register }, token);
+        CodeAlta.Fleet.NodeApi.FleetNodeService? service = null;
+        try
+        {
+            var open = await node.Host.Commands.CreateDraftSessionAsync(null, provider.Descriptor, "Open");
+            var blocked = await node.Host.Commands.CreateDraftSessionAsync(null, provider.Descriptor, "Blocked");
+            var protector = new SelectiveProtector();
+            var protection = new CodeAlta.Catalog.Secrets.LocalSecretStore(node.Host.CatalogOptions.GlobalRoot, protector);
+            var file = Path.Combine(node.Host.CatalogOptions.FleetRoot, "held-sends.json");
+            var sends = new CodeAlta.Fleet.NodeApi.FleetHeldSends(file, protection);
+            sends.Add(new CodeAlta.Fleet.NodeApi.FleetHeldSend("send-open", open.SessionId, "The open work.", null, "nonce-open", null, null, null, null, DateTimeOffset.UtcNow));
+            sends.Add(new CodeAlta.Fleet.NodeApi.FleetHeldSend("send-blocked", blocked.SessionId, "The blocked work.", null, "nonce-blocked", null, null, null, null,
+                DateTimeOffset.UtcNow.AddSeconds(1)));
+
+            // At the restart, the second send does not open (the protected store is away for it): only the first is taken at once.
+            protector.Blocks = static text => text.Contains("blocked", StringComparison.Ordinal);
+            var admitted = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            service = new CodeAlta.Fleet.NodeApi.FleetNodeService(new CodeAlta.Fleet.NodeApi.FleetNodeServiceOptions
+            {
+                Host = node.Host, Identity = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "node-key")),
+                TrustedDevices = new TrustedDeviceStore(Path.Combine(root.Root, "trusted"), TimeProvider.System), Name = "test-node",
+                HeldSendsProtection = protection,
+                AdmitBudget = (run, _, _) =>
+                {
+                    admitted.Enqueue(run.RunId);
+                    if (run.RunId == "send-open")
+                    {
+                        // While the first is taken again, the store comes back and another reader (the sessions that wait) opens the second.
+                        protector.Blocks = static _ => false;
+                        CollectionAssert.Contains(node.Host.HeldSends!().ToList(), blocked.SessionId);
+                    }
+
+                    return Task.FromResult(FleetBudgetAdmission.Admitted);
+                },
+            }) { BlockedHeldSendsRetry = TimeSpan.FromMilliseconds(200) };
+            service.ResumeHeldSends();
+
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            while (!admitted.Contains("send-blocked") && DateTime.UtcNow < deadline) await Task.Delay(50, token);
+            CollectionAssert.AreEquivalent(new[] { "send-open", "send-blocked" }, admitted.ToArray(), "the send another reader opened is taken again too, once");
+        }
+        finally
+        {
+            if (service is not null) await service.DisposeAsync();
+            await node.DisposeAsync();
+        }
+    }
+
+    // A protected store that cannot open the values a test says, as one away for them.
+    private sealed class SelectiveProtector : CodeAlta.Catalog.Secrets.ISecretProtector
+    {
+        public Func<string, bool> Blocks { get; set; } = static _ => false;
+
+        public string Kind => CodeAlta.Catalog.Secrets.SecretProtectionKinds.File;
+
+        public byte[] Protect(ReadOnlySpan<byte> value) => [.. value.ToArray().Reverse()];
+
+        public byte[] Unprotect(ReadOnlySpan<byte> protectedValue)
+        {
+            byte[] value = [.. protectedValue.ToArray().Reverse()];
+            return Blocks(System.Text.Encoding.UTF8.GetString(value)) ? throw new CodeAlta.Catalog.Secrets.SecretStoreUnavailableException("away") : value;
+        }
+    }
+
+    [TestMethod]
     public async Task ALinksFileThatDoesNotRead_AdmitsNoRun_BeforeItsFirstReloadAndBetweenReloads()
     {
         var token = TestContext.CancellationToken;
