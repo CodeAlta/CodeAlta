@@ -122,6 +122,30 @@ public sealed class FleetSecretsTests
     }
 
     [TestMethod]
+    public async Task AMachineWithdrawn_IsNotGivenTheNextVersion_WhenTheServerListsItsOldCopyAgain()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var set = await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "GRAFANA_TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), Token, false,
+            [fleet.NodeKey.DeviceId, fleet.OtherKey.DeviceId], CancellationToken.None);
+        var otherCopy = (await fleet.HeldAsync(fleet.OtherKey)).Secrets.Single().Copy!;
+        await fleet.Manager.WithdrawAsync(set.Id, fleet.OtherKey.DeviceId, CancellationToken.None);
+        Assert.AreEqual(Token, await fleet.OpenHeldAsync(fleet.NodeKey, "GRAFANA_TOKEN"), "the machines that keep it still open it");
+
+        // The server lists the withdrawn machine as a holder again, with the copy a controller device genuinely gave it before.
+        var store = (IFleetSecretStore)fleet.Server.GetService<ICoordinatorStore>();
+        var organization = (await fleet.NodeListAsync()).OrganizationId!;
+        var current = (await fleet.Manager.ListAsync(CancellationToken.None)).Secrets.Single(secret => secret.Id == set.Id);
+        await store.AddFleetSecretCopiesAsync(organization, set.Id, current.Version, [new FleetSecretCopyRecord(set.Id, fleet.OtherKey.DeviceId, current.Version, otherCopy,
+            fleet.DesktopKey.DeviceId, DateTimeOffset.UtcNow)], new AuditEntry("test.forge", AuditEntry.Success, null, null, null, null, null));
+
+        // The rotation seals the new value for the machines a controller device gave the current version to: not the one withdrawn.
+        var rotated = await fleet.Manager.RotateAsync(set.Id, "rotated-value", CancellationToken.None);
+        CollectionAssert.DoesNotContain(rotated.Holders.ToArray(), fleet.OtherKey.DeviceId, "a machine withdrawn does not get the next version");
+        Assert.IsFalse((await fleet.HeldAsync(fleet.OtherKey)).Secrets.Any(secret => secret.Id == set.Id));
+        Assert.AreEqual("rotated-value", await fleet.OpenHeldAsync(fleet.NodeKey, "GRAFANA_TOKEN"));
+    }
+
+    [TestMethod]
     public async Task AMachineAllowedLater_GetsItsCopy_WhenAControllerOfThePersonGivesIt()
     {
         await using var fleet = await SecretsFixture.StartAsync();
@@ -139,7 +163,10 @@ public sealed class FleetSecretsTests
         Assert.AreEqual(HttpStatusCode.Forbidden, byNode.Status);
         await fleet.Manager.WithdrawAsync(set.Id, fleet.OtherKey.DeviceId, CancellationToken.None);
         Assert.AreEqual(0, (await fleet.HeldAsync(fleet.OtherKey)).Secrets.Count);
-        CollectionAssert.AreEqual(new[] { "secret.set", "secret.grant", "secret.grant", "secret.withdraw" }, (await fleet.AuditAsync("secret.")).Select(static record => record.Action).ToArray());
+        // Withdrawn, the value is sealed again as its next version for the machines that keep it.
+        CollectionAssert.AreEqual(new[] { "secret.set", "secret.grant", "secret.grant", "secret.withdraw", "secret.rotate" },
+            (await fleet.AuditAsync("secret.")).Select(static record => record.Action).ToArray());
+        Assert.AreEqual(Token, await fleet.OpenHeldAsync(fleet.NodeKey, "GRAFANA_TOKEN"));
     }
 
     [TestMethod]

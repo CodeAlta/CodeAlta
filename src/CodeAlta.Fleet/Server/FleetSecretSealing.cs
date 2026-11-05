@@ -291,6 +291,32 @@ public static class FleetSecretSealing
     }
 
     /// <summary>
+    /// Seals the value of the copy this controller device holds again, as the next version of its binding, for the devices
+    /// given: a machine withdrawn is left out, and the grants it was given are of an older version, which no rotation takes.
+    /// </summary>
+    /// <param name="own">The copy of this device.</param>
+    /// <param name="binding">What the server lists the value as now.</param>
+    /// <param name="next">The binding of the next version.</param>
+    /// <param name="recipients">The devices of the next version.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <param name="access">The access document as this device verified it; null for none.</param>
+    /// <param name="signer">The key of this controller device.</param>
+    /// <returns>The copies of the next version.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="access"/> is null.</exception>
+    /// <exception cref="ArgumentException">The next binding is not a newer version of the same value, or the devices do not hold (<see cref="Seal(string, FleetSecretBinding, IReadOnlyList{FleetDeviceListMember}, FleetDeviceListState, FleetAccessState?, DeviceIdentity)"/>).</exception>
+    /// <exception cref="InvalidDataException">The copy of this device does not open.</exception>
+    public static IReadOnlyList<FleetSecretCopyDto> Reseal(string own, FleetSecretBinding binding, FleetSecretBinding next, IReadOnlyList<FleetDeviceListMember> recipients,
+        FleetDeviceListState list, FleetAccessState? access, DeviceIdentity signer)
+    {
+        ArgumentNullException.ThrowIfNull(own);
+        ArgumentNullException.ThrowIfNull(binding);
+        ArgumentNullException.ThrowIfNull(next);
+        if (next.SecretId != binding.SecretId || next.Version <= binding.Version) throw new ArgumentException("The value is sealed again as a newer version of itself.", nameof(next));
+        if (!TryOpen(own, binding, signer, list, null, out var value, out var reason)) throw new InvalidDataException($"The copy of this device does not open: {reason}.");
+        return Seal(value, next, recipients, list, access, signer);
+    }
+
+    /// <summary>
     /// Gives a device allowed later its copy of the current version, from the copy this controller device holds: the key
     /// is wrapped to that device with a grant this device signs; the value is not sealed again.
     /// </summary>

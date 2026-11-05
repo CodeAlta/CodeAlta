@@ -170,20 +170,39 @@ public sealed class FleetSecretsManager
         return await client.AddSecretCopiesAsync(id, new AddFleetSecretCopiesRequest(held.Version, [copy]), cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Takes a machine's copy of a value away: it does not get the value at its next run.</summary>
+    /// <summary>
+    /// Takes a machine's copy of a value away: it does not get the value at its next run. The value is sealed again as its next
+    /// version for the machines that keep it, from the copy of this device: the grant the machine withdrawn was given is of an
+    /// older version, so that a server that lists it again as a holder does not make a rotation give it the next value.
+    /// </summary>
     /// <param name="id">The id of the value.</param>
     /// <param name="machineId">The machine.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The value as the server holds it now.</returns>
-    /// <exception cref="ArgumentException">An id is empty.</exception>
+    /// <exception cref="ArgumentException">An id is empty, or this device is not a controller device of the list.</exception>
+    /// <exception cref="KeyNotFoundException">No value of the person has this id.</exception>
+    /// <exception cref="InvalidDataException">The copy of this device does not open: the copy is taken away, the value is not sealed again.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
     /// <exception cref="FleetServerException">The server refused it.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<FleetSecretDto> WithdrawAsync(string id, string machineId, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
         ArgumentException.ThrowIfNullOrEmpty(machineId);
+        var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        var person = PersonOf(list);
         using var client = Client();
-        return await client.RemoveSecretCopyAsync(id, machineId, cancellationToken).ConfigureAwait(false);
+        await client.RemoveSecretCopyAsync(id, machineId, cancellationToken).ConfigureAwait(false);
+        var held = await FindAsync(client, id, cancellationToken).ConfigureAwait(false);
+        var own = held.Copy ?? throw new InvalidDataException("This device holds no copy of the value to seal again.");
+        var access = Access?.Invoke();
+        var binding = FleetSecretBinding.Of(held);
+        var kept = FleetSecretSealing.GrantedHolders(held, list, access).Intersect(held.Holders, StringComparer.Ordinal)
+            .Where(holder => !string.Equals(holder, machineId, StringComparison.Ordinal));
+        var copies = FleetSecretSealing.Reseal(own, binding, binding with { Version = held.Version + 1 }, FleetSecretSealing.Recipients(list, access, person, kept)
+            .Where(member => !string.Equals(member.DeviceId, machineId, StringComparison.Ordinal)).ToArray(), list, access, _devices.Identity);
+        return await client.PutSecretAsync(id, new SetFleetSecretRequest(held.Kind, held.Name, held.Scope, held.Version + 1, held.HostOnly, copies), cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Reads a variable back from the copy sealed for this device; a secret is never read back.</summary>
