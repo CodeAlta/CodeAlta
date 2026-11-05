@@ -172,7 +172,8 @@ public sealed class FleetBudgetGate
                 var scope = ScopeOf(link, list, access, run);
                 // A run of a space linked to the server whose key is not read yet (a start, its connector reads the keys later) is not one
                 // of no space: while budgets of spaces or projects are kept, it waits for that key, never runs as if they did not cover it.
-                if (scope.SpaceKey is null && link.Keys is not null && link.LinksSpace?.Invoke(run.SpaceId) == true && KeepsBudgetsOfSpaces(link, state, list, access))
+                if (scope.SpaceKey is null && link.Keys is not null && link.LinksSpace?.Invoke(run.SpaceId) == true && TakesSpaceKey(link, list, access, run)
+                    && KeepsBudgetsOfSpaces(link, state, list, access))
                 {
                     if (await WaitForSpaceKeyAsync(link, list, access, run, held, cancellationToken).ConfigureAwait(false) is not { } scoped)
                         return new FleetBudgetAdmission("The key of the space of the run could not be read, which its budgets need: the run does not start.", continued);
@@ -210,6 +211,15 @@ public sealed class FleetBudgetGate
         }
 
         return continued.Count == 0 ? FleetBudgetAdmission.Admitted : new FleetBudgetAdmission(null, continued);
+    }
+
+    // Whether the scope of a run takes the key of a space once read (ScopeOf): on a machine of its person, always; on a machine of a team
+    // or of the organization, only for work of a person of this server's organization whose keys the machine holds. Work of nobody
+    // there (an automation, local work) never takes one, so never waits for one.
+    private static bool TakesSpaceKey(FleetBudgetLink link, FleetDeviceListState list, FleetAccessState? access, FleetBudgetRun run)
+    {
+        if (!list.Members.TryGetValue(link.Devices.Identity.DeviceId, out var machine) || !FleetAccessState.IsSharedMachine(access, machine)) return true;
+        return run.PersonOrganizationId is { } of && of == list.OrganizationId && run.PersonId is { } person && FleetAccessState.HoldsKeysOf(access, machine, person);
     }
 
     // Whether a link keeps budgets of spaces or projects, which the key of the space of a run names it for: a removed one holds nothing.
