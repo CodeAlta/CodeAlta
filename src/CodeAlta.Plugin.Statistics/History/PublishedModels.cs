@@ -25,7 +25,8 @@ internal static class PublishedModels
         var byProvider = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (var row in rows)
         {
-            if (row.Family == ToolFamily || Find(row, ModelKey) is not { } model) continue;
+            // A row that counts nothing names no model the session used.
+            if (row.Family == ToolFamily || Find(row, ModelKey) is not { } model || row.Measures.All(static measure => measure.Value == 0)) continue;
             var provider = Find(row, ProviderKey) ?? string.Empty;
             Add(byQuarter, (provider, row.Quarter), model);
             Add(byProvider, provider, model);

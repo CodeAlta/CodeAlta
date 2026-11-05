@@ -55,7 +55,10 @@ internal sealed partial class StatisticsStore
                 var measures = family.Measures;
                 var columns = string.Join(", ", keys.Select(static key => key.Name).Concat(measures.Select(static measure => measure.Name)));
                 var order = string.Join(", ", new[] { "q" }.Concat(keys.Select(static key => key.Name)));
-                rows.AddRange(sql.Query($"SELECT q, {columns} FROM {family.TableName(Prefix, RollupLevel.Quarter)} WHERE session_id = @p0 AND q >= @p1 ORDER BY {order}",
+                // A row a later correction took back to zero (a run's start moved from its alias to the model its request named) says nothing:
+                // it is not published, and its model is not one the session used.
+                var counted = string.Join(" OR ", measures.Select(static measure => $"{measure.Name} <> 0"));
+                rows.AddRange(sql.Query($"SELECT q, {columns} FROM {family.TableName(Prefix, RollupLevel.Quarter)} WHERE session_id = @p0 AND q >= @p1 AND ({counted}) ORDER BY {order}",
                     reader =>
                     {
                         var keyValues = new KeyValuePair<string, string>[keys.Length];
