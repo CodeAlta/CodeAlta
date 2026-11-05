@@ -91,19 +91,26 @@ internal sealed class NodeScopeProviders
     // Opens the keys a server gives this machine. A version this machine never installed from the link opens only when the
     // device that signed its copy is still a controller device of the list as this machine holds it now: a device removed since
     // cannot give a new version, another endpoint, against the entry of the list it signed at. The version installed holds as
-    // it was given.
+    // it was given, and only as it was given: the same version with another definition or another key is held to the authority
+    // of now, as a new one, so that a device removed since cannot change it either.
     internal IReadOnlyList<(ScopeProviderDto Provider, string Key)> Open(string linkId, IReadOnlyList<ScopeProviderKeyDto> keys, FleetDeviceListState list, FleetAccessState access)
     {
-        var installed = ReadApplied().GetValueOrDefault(linkId)?.Applied ?? new Dictionary<string, long>(StringComparer.Ordinal);
+        var link = ReadApplied().GetValueOrDefault(linkId) ?? new ScopeProvidersOfLink();
         var opened = new List<(ScopeProviderDto Provider, string Key)>();
         foreach (var key in keys)
         {
             try
             {
                 // The copy is signed over the definition: what is installed is what the maintainer sealed, not what the server says.
-                var known = installed.TryGetValue(key.Provider.Id, out var version) && version == key.Provider.Version;
-                opened.Add((key.Provider, FleetProviderKeys.Open(key.Sealed, key.Wrapped, list.OrganizationId ?? string.Empty, key.Provider.Id, key.Provider.Version,
-                    FleetProviderDefinition.Of(key.Provider), _identity, list, access, signedNow: !known)));
+                var provider = key.Provider;
+                var known = link.Applied.TryGetValue(provider.Id, out var version) && version == provider.Version;
+                var definition = FleetProviderDefinition.Of(provider);
+                var apiKey = FleetProviderKeys.Open(key.Sealed, key.Wrapped, list.OrganizationId ?? string.Empty, provider.Id, provider.Version, definition, _identity, list, access,
+                    signedNow: !known);
+                if (known && !(link.Accepted.TryGetValue(provider.Id, out var pinned) && string.Equals(pinned, Pin(provider, apiKey), StringComparison.Ordinal)))
+                    apiKey = FleetProviderKeys.Open(key.Sealed, key.Wrapped, list.OrganizationId ?? string.Empty, provider.Id, provider.Version, definition, _identity, list, access,
+                        signedNow: true);
+                opened.Add((provider, apiKey));
             }
             catch (InvalidDataException exception)
             {
@@ -163,6 +170,7 @@ internal sealed class NodeScopeProviders
                 ApiKeySecret = SecretName(provider.Id), Enabled = true,
             });
             kept[provider.Id] = provider.Version;
+            link.Accepted[provider.Id] = Pin(provider, key);
             link.Removed.Remove(provider.Id);
         }
 
@@ -171,6 +179,7 @@ internal sealed class NodeScopeProviders
             definitions.RemoveAll(definition => string.Equals(definition.ProviderKey, gone, StringComparison.OrdinalIgnoreCase));
             _secrets.DeleteSecret(SecretName(gone));
             link.Removed[gone] = Math.Max(version, link.Removed.GetValueOrDefault(gone));
+            link.Accepted.Remove(gone);
             changed.Add(gone);
         }
 
@@ -182,6 +191,13 @@ internal sealed class NodeScopeProviders
         if (changed.Count > 0) ProvidersChanged?.Invoke(changed);
         return [.. kept.Keys];
     }
+
+    // What a version installed was given as: its version, its whole definition and its key, hashed under a domain of their own,
+    // so that the file of the link keeps no key.
+    private static string Pin(ScopeProviderDto provider, string apiKey)
+        => provider.Version.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + FleetProviderDefinition.Of(provider).Digest() + ":"
+            + System.Buffers.Text.Base64Url.EncodeToString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+                "codealta-provider-credential/1\n" + provider.Id + "\n" + provider.Version.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\n" + apiKey)));
 
     // Whether a provider given differs from the one this machine runs: new, another definition, or another key (a rotation).
     private bool Differs(CodeAltaProviderDocument? existing, ScopeProviderDto provider, string key)
@@ -234,6 +250,12 @@ internal sealed class ScopeProvidersOfLink
 
     /// <summary>Gets or sets the version each provider taken away had: it comes back only above it.</summary>
     public Dictionary<string, long> Removed { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Gets or sets what each version installed was given as (its definition and its key, hashed): the same version given again
+    /// otherwise is taken only from a device that signs now.
+    /// </summary>
+    public Dictionary<string, string> Accepted { get; set; } = new(StringComparer.Ordinal);
 }
 
 [System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)]

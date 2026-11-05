@@ -238,7 +238,7 @@ public sealed class SignInService : IDisposable
 
         var secretChanged = !string.Equals(secret, held.Secret, StringComparison.Ordinal);
         var document = new SignInSettingsDocument(enabled, company, request.RequireSso, request.RequireSso ? breakGlass : null,
-            ChangesCompanyAdmission(held.Document.Company, company, secretChanged) ? _time.GetUtcNow() : held.Document.CompanyChangedAt);
+            held.Document.CompanyGeneration + (ChangesCompanyAdmission(held.Document.Company, company, secretChanged) ? 1 : 0));
         // Changing the company sign-in is a dangerous action: the owner signed in again from this device a few minutes ago.
         // The confirmation is taken last, so that a change refused for another reason does not use it up.
         if (ChangesCompanySignIn(held.Document, document, secretChanged) && !IsConfirmed(request, actor, owner))
@@ -734,10 +734,10 @@ public sealed class SignInService : IDisposable
         for (var tries = 0; tries < 3 && outcome == LoginRemovalOutcome.SettingsChanged; tries++)
         {
             var settings = await ReadSettingsAsync(person.OrganizationId, cancellationToken).ConfigureAwait(false);
-            // A company account counts once it signed in under the company's settings as they are now: one of a provider or of
-            // accounts let in before may sign in no more. Settings kept before the change was recorded count from their last change.
+            // A company account counts once a sign-in judged by the company's settings as they are now let it in: one of a
+            // provider or of accounts let in before may sign in no more, whenever its sign-in completed.
             var rule = new WayInRemoval(settings.Version, UsableMethods(settings.Document, person.Id), person.Role == PersonRoles.Owner,
-                settings.Document.RequireSso && settings.Document.BreakGlassPersonId == person.Id, settings.Document.CompanyChangedAt ?? settings.UpdatedAt);
+                settings.Document.RequireSso && settings.Document.BreakGlassPersonId == person.Id, settings.Document.CompanyGeneration);
             outcome = login is not null
                 ? await _signIn.RemoveLoginAsync(login, rule, audit, cancellationToken).ConfigureAwait(false)
                 : await _signIn.RemovePasskeyAsync(passkey!, rule, audit, cancellationToken).ConfigureAwait(false);
@@ -810,11 +810,14 @@ public sealed class SignInService : IDisposable
         var now = _time.GetUtcNow();
         var groups = identity.Groups.Count == 0 ? null : JsonSerializer.Serialize(identity.Groups.ToArray(), SignInSettingsJsonContext.Default.StringArray);
         var name = Truncate(identity.Email ?? identity.Name ?? identity.Subject);
+        // A company account keeps the generation of the settings that judged this sign-in, read before the exchange with the
+        // provider: settings changed meanwhile do not make it one they let in.
+        long? generation = attempt.Method == FleetSignInMethods.Company ? settings.Document.CompanyGeneration : null;
         var existing = await _signIn.FindLoginAsync(attempt.OrganizationId, identity.Issuer, identity.Subject, cancellationToken).ConfigureAwait(false);
         if (attempt.Purpose == FleetSignInPurposes.Link)
         {
             var person = await _store.GetPersonAsync(attempt.LinkingPersonId!, cancellationToken).ConfigureAwait(false) ?? throw new InvalidOperationException("A link without its person.");
-            var login = new LoginRecord(attempt.OrganizationId, person.Id, attempt.Method, identity.Issuer, identity.Subject, identity.Email, name, groups, now, now);
+            var login = new LoginRecord(attempt.OrganizationId, person.Id, attempt.Method, identity.Issuer, identity.Subject, identity.Email, name, groups, now, now, generation);
             // The device is still an approved controller of the acting person, and a first way in still the first, in the same write.
             var outcome = await _signIn.LinkLoginAsync(login, new WayInAddition(attempt.DeviceId, attempt.FirstWayIn), new AuditEntry("sign_in.link", AuditEntry.Success, person.Id,
                 deviceId, attempt.Method, origin.SourceAddress, origin.RequestId), cancellationToken).ConfigureAwait(false);
@@ -835,7 +838,7 @@ public sealed class SignInService : IDisposable
         if (existing is not null)
         {
             var updated = existing with { Email = identity.Email ?? existing.Email, Name = name, Groups = groups ?? (attempt.Method == FleetSignInMethods.Company ? null : existing.Groups),
-                LastSignInAt = now };
+                LastSignInAt = now, CompanyGeneration = generation ?? existing.CompanyGeneration };
             await _signIn.UpdateLoginAsync(updated, cancellationToken).ConfigureAwait(false);
             var person = await _store.GetPersonAsync(existing.PersonId, cancellationToken).ConfigureAwait(false) ?? throw new InvalidOperationException("A login without its person.");
             return (person, updated);
@@ -846,7 +849,7 @@ public sealed class SignInService : IDisposable
             throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.NotLinked,
                 "No person of this organization linked this account: sign in on one of your devices and link it first.", cancellationToken).ConfigureAwait(false);
         var created = new PersonRecord(SetupService.NewId(), attempt.OrganizationId, Truncate(identity.Name ?? identity.Email ?? "Member"), PersonRoles.Member, now);
-        var first = new LoginRecord(attempt.OrganizationId, created.Id, attempt.Method, identity.Issuer, identity.Subject, identity.Email, name, groups, now, now);
+        var first = new LoginRecord(attempt.OrganizationId, created.Id, attempt.Method, identity.Issuer, identity.Subject, identity.Email, name, groups, now, now, generation);
         var held = await _signIn.CreatePersonWithLoginAsync(created, first, new AuditEntry("person.create", AuditEntry.Success, created.Id, deviceId, created.Id,
             origin.SourceAddress, origin.RequestId, "{\"by\":\"company\"}"), cancellationToken).ConfigureAwait(false);
         var holder = await _store.GetPersonAsync(held.PersonId, cancellationToken).ConfigureAwait(false) ?? throw new InvalidOperationException("A login without its person.");
@@ -1304,11 +1307,11 @@ public sealed class SignInService : IDisposable
 /// <param name="Company">The company's provider, or null.</param>
 /// <param name="RequireSso">Whether company sign-in is required.</param>
 /// <param name="BreakGlassPersonId">The owner who keeps a passkey while it is.</param>
-/// <param name="CompanyChangedAt">
-/// When the company's provider, client or the accounts it lets in last changed: a company account that has not signed in
-/// since is not known to sign in now. Null in settings kept before it was recorded.
+/// <param name="CompanyGeneration">
+/// The generation of what decides who company sign-in lets in (its provider, client, secret, domains and tenants), one
+/// more at each change of it: a company account counts as a way in only when its last sign-in was judged by this one.
 /// </param>
-internal sealed record SignInSettingsDocument(string[] Enabled, CompanyDocument? Company, bool RequireSso, string? BreakGlassPersonId, DateTimeOffset? CompanyChangedAt = null);
+internal sealed record SignInSettingsDocument(string[] Enabled, CompanyDocument? Company, bool RequireSso, string? BreakGlassPersonId, long CompanyGeneration = 0);
 
 /// <summary>The company's provider, as the store keeps it.</summary>
 /// <param name="Issuer">The issuer.</param>

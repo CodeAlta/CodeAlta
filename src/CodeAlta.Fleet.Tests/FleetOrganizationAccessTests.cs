@@ -153,7 +153,9 @@ public sealed class FleetOrganizationAccessTests
         // The pin was kept by an older version, without the version it verified; or it was damaged.
         var legacy = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(pin))!.AsObject();
         Assert.IsTrue(legacy.Remove("last"));
-        foreach (var kept in new[] { legacy.ToJsonString(), "{ \"root\": " })
+        // A pin that reads as JSON but holds no anchor (an empty root, no number, no tip, nothing) is no "never anchored" either.
+        foreach (var kept in new[] { legacy.ToJsonString(), "{ \"root\": ", "{\"root\":\"\",\"number\":1,\"tip\":\"h\"}", "{\"root\":\"r\",\"number\":0,\"tip\":\"h\"}",
+                     "{\"root\":\"r\",\"number\":1,\"tip\":\"\"}", "null", "{}", "" })
         {
             File.WriteAllText(pin, kept);
             var restarted = new FleetOrganizationAccess(devices, pin);
