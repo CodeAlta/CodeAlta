@@ -97,6 +97,11 @@ To move a session:
 3. Read what the move meets: a session at work moves once it is idle, a question waits for your answer, and the machine needs a project of the same git repository (**Clone the repository there** offers to make one).
 4. Click **Move**. The session opens where it runs now.
 
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-move.webp" alt="The Move to machine window of a SharpYaml session: Build box and Workstation, both online, Workstation chosen; its changes not committed move with it, it works in a worktree of its own of SharpYaml on the Workstation, its provider is not configured there, and its background jobs, reminders and terminals stay on this computer" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Move to machine says what goes with the session and what stays.</figcaption>
+</figure>
+
 Only a session of a project in a git repository with a remote moves. On the machine, it works in a worktree of its own, on its branch: its commits that are not pushed and its changes that are not committed go with it.
 
 What stays behind: its background jobs, reminders and terminals, and the files that look like secrets (the dialog names them). A move that a lost connection stopped goes on when the machine is back.
