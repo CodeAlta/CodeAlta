@@ -23,12 +23,20 @@ internal sealed record DesktopNodePairing(string Link, string Words, DateTimeOff
 /// person lets them pair with it, CodeAlta Desktop serves the node API over its own runtime, as <c>altanode</c> does, on a
 /// port of its own (<see cref="DefaultPort"/>, so that a node of the same machine keeps 2585). Another CodeAlta Desktop pairs
 /// with it from a link made here, exactly as with a node: it then sees, drives and starts its sessions, and moves sessions
-/// here when this computer lets it. Nothing listens and no key is made until the person turns it on (S1). On a computer of a
-/// Tailscale network, its name and address there come first in its links: a laptop away from home reaches it through the tailnet.
+/// here when this computer lets it. On a computer of a Tailscale network, its name and address there come first in its links:
+/// a laptop away from home reaches it through the tailnet.
 /// </summary>
 /// <remarks>
+/// <para>
+/// While the person lets their other computers reach it through the servers this computer is linked to
+/// (<see cref="ReachableThroughServers"/>), the same node API serves the channels those servers relay to it: the person's other
+/// devices of the organization list it with their machines, as a node, and reach it from anywhere without a port open here.
+/// Each way is off until the person turns it on: nothing listens, nothing is relayed and no key is made before (S1).
+/// </para>
+/// <para>
 /// The devices paired with this computer are kept in the fleet folder of its state root, beside the machines it paired
 /// with: the same key serves both ways. Its changes are made one at a time.
+/// </para>
 /// </remarks>
 internal sealed class DesktopNode : IAsyncDisposable
 {
@@ -52,6 +60,8 @@ internal sealed class DesktopNode : IAsyncDisposable
     private DeviceIdentity? _identity;
     private FleetNodeService? _service;
     private FleetDirectListener? _listener;
+    // Ends the relayed channels when the person no longer lets the servers reach this computer; null while they do not.
+    private CancellationTokenSource? _relays;
     private IReadOnlyList<string> _addresses = [];
     private string? _problem;
     private string? _tailnet;
@@ -96,8 +106,23 @@ internal sealed class DesktopNode : IAsyncDisposable
     /// <summary>Gets the name of this computer on its Tailscale network while it listens there; null otherwise.</summary>
     public string? TailnetName => Volatile.Read(ref _tailnet);
 
+    /// <summary>
+    /// Gets the policies of the servers of this computer, as it verified them: the work their relays or the paired computers start
+    /// here follows them, and a stop of the kill switch ends it. Null for none.
+    /// </summary>
+    public CodeAlta.Fleet.Server.FleetPolicyGuard? Policy { get; init; }
+
+    /// <summary>Gets the names of the servers this computer is linked to, whose relay can reach it; null for none.</summary>
+    public Func<IReadOnlyList<string>>? Servers { get; init; }
+
     /// <summary>Gets whether the person lets their other computers pair with this one (off until they turn it on).</summary>
     public bool Visible => Volatile.Read(ref _settings).Visible;
+
+    /// <summary>
+    /// Gets whether the person lets their other computers reach this one through the servers it is linked to (off until they
+    /// turn it on): it then serves the channels those servers relay to it, and says so to them.
+    /// </summary>
+    public bool ReachableThroughServers => Volatile.Read(ref _settings).ReachableThroughServers;
 
     /// <summary>Gets whether this computer listens for its paired computers now.</summary>
     public bool Listening => Volatile.Read(ref _listener) is not null;
@@ -117,16 +142,16 @@ internal sealed class DesktopNode : IAsyncDisposable
     /// <summary>Raised when this computer starts or stops listening, a computer paired with it, or a device changed.</summary>
     public event Action? Changed;
 
-    /// <summary>Listens when the person turned it on before.</summary>
+    /// <summary>Listens, and serves the relays of its servers, as the person turned them on before.</summary>
     /// <param name="cancellationToken">Cancels the start.</param>
     /// <returns>A task that completes once it listens, or once it is known that it does not.</returns>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (!Visible) return;
+        if (!Visible && !ReachableThroughServers) return;
         await _changes.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!_disposed && Visible) await StartCoreAsync().ConfigureAwait(false);
+            if (!_disposed) await ApplyCoreAsync().ConfigureAwait(false);
         }
         finally
         {
@@ -152,8 +177,7 @@ internal sealed class DesktopNode : IAsyncDisposable
             var settings = Volatile.Read(ref _settings) with { Visible = visible };
             WriteSettings(_settingsPath, settings);
             Volatile.Write(ref _settings, settings);
-            if (visible) await StartCoreAsync().ConfigureAwait(false);
-            else await StopCoreAsync().ConfigureAwait(false);
+            await ApplyCoreAsync().ConfigureAwait(false);
         }
         finally
         {
@@ -164,6 +188,100 @@ internal sealed class DesktopNode : IAsyncDisposable
     }
 
     /// <summary>
+    /// Lets the person's other computers reach this one through the servers it is linked to, or stops: it serves the channels
+    /// those servers relay to it, and its inventory says so, so that the person's other devices list it with their machines.
+    /// Turned off, the relayed channels close at once and new ones are declined.
+    /// </summary>
+    /// <param name="reachable">Whether the other computers may reach it through its servers.</param>
+    /// <param name="cancellationToken">Cancels the change.</param>
+    /// <returns>A task that completes once the change applies.</returns>
+    /// <exception cref="IOException">The setting cannot be written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The setting cannot be written.</exception>
+    /// <exception cref="ObjectDisposedException">The application is closing.</exception>
+    public async Task SetReachableThroughServersAsync(bool reachable, CancellationToken cancellationToken)
+    {
+        await _changes.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var settings = Volatile.Read(ref _settings) with { ReachableThroughServers = reachable };
+            WriteSettings(_settingsPath, settings);
+            Volatile.Write(ref _settings, settings);
+            await ApplyCoreAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _changes.Release();
+        }
+
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Serves a channel a server relays to this computer, from a device of its organization: while the person lets the servers
+    /// reach it, with the members of the organization as the connector of that server verifies them (the person's own devices
+    /// see, drive and start its sessions, as after a pairing); otherwise the relay is closed at once. Failures never escape.
+    /// </summary>
+    /// <param name="connector">The control connection of the server that relays.</param>
+    /// <param name="stream">The stream of the relay; this computer owns it.</param>
+    /// <param name="cancellationToken">Ends the channel.</param>
+    /// <returns>A task that completes once the channel closed.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public async Task ServeRelayedAsync(CodeAlta.Fleet.Server.FleetConnector connector, Stream stream, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connector);
+        ArgumentNullException.ThrowIfNull(stream);
+        var service = Volatile.Read(ref _service);
+        var relays = Volatile.Read(ref _relays);
+        if (service is null || relays is null || !ReachableThroughServers)
+        {
+            Log(false, "A channel a server relays was declined: this computer is not reachable through its servers.");
+            await stream.DisposeAsync().ConfigureAwait(false);
+            return;
+        }
+
+        CancellationTokenSource linked;
+        try
+        {
+            linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, relays.Token);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Turned off meanwhile.
+            await stream.DisposeAsync().ConfigureAwait(false);
+            return;
+        }
+
+        using (linked)
+        {
+            try
+            {
+                await service.ServeRelayedAsync(stream, connector, linked.Token).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                // The node API stopped under the channel: the person turned everything off, or the application closes.
+            }
+        }
+    }
+
+    /// <summary>Applies the policies of the servers to the work they or the paired computers started here: a stop ends it.</summary>
+    /// <param name="cancellationToken">Cancels before the next session is stopped.</param>
+    /// <returns>A task that completes once applied; a failure is logged.</returns>
+    public async Task ApplyPolicyAsync(CancellationToken cancellationToken)
+    {
+        if (Volatile.Read(ref _service) is not { } service) return;
+        try
+        {
+            await service.ApplyPolicyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
+        {
+            Log(true, $"The policy could not be applied to the work of the fleet here: {exception.Message}");
+        }
+    }
+
+    /// <summary>
     /// Makes a pairing link for another computer of the person, replacing the one that was open: it works once, for
     /// <see cref="LinkLifetime"/>, and gives the computer that redeems it what a pairing gives (view, drive, start).
     /// </summary>
@@ -171,7 +289,9 @@ internal sealed class DesktopNode : IAsyncDisposable
     /// <exception cref="InvalidOperationException">This computer does not listen.</exception>
     public DesktopNodePairing CreatePairing()
     {
-        var service = Volatile.Read(ref _service) ?? throw new InvalidOperationException("This computer does not listen: let your other computers pair with it first.");
+        // A link names where this computer listens: the node API alone, which its servers relay to, makes none.
+        if (Volatile.Read(ref _listener) is null || Volatile.Read(ref _service) is not { } service)
+            throw new InvalidOperationException("This computer does not listen: let your other computers pair with it first.");
         var (offer, outcome) = service.Pairing.CreateOffer(Name, Addresses, LinkLifetime);
         _ = outcome.ContinueWith(_ => Changed?.Invoke(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         return new DesktopNodePairing(offer.ToUri(), offer.Fingerprint.ToShortWords(), offer.ExpiresAt, offer.Addresses);
@@ -223,7 +343,9 @@ internal sealed class DesktopNode : IAsyncDisposable
         {
             if (_disposed) return;
             _disposed = true;
-            await StopCoreAsync().ConfigureAwait(false);
+            StopRelays();
+            await StopListeningCoreAsync().ConfigureAwait(false);
+            await StopServiceCoreAsync().ConfigureAwait(false);
             Volatile.Read(ref _identity)?.Dispose();
         }
         finally
@@ -232,23 +354,55 @@ internal sealed class DesktopNode : IAsyncDisposable
         }
     }
 
-    private async Task StartCoreAsync()
+    // Under the gate: the node API runs while either way is on, the listener while the person lets their computers pair, and
+    // the relayed channels are served while they let the servers reach this computer.
+    private async Task ApplyCoreAsync()
     {
-        if (_listener is not null) return;
-        Volatile.Write(ref _problem, null);
+        var settings = Volatile.Read(ref _settings);
+        if (!settings.ReachableThroughServers) StopRelays();
+        if (!settings.Visible) await StopListeningCoreAsync().ConfigureAwait(false);
+        if (!settings.Visible && !settings.ReachableThroughServers)
+        {
+            await StopServiceCoreAsync().ConfigureAwait(false);
+            return;
+        }
+
+        var service = EnsureService();
+        if (settings.ReachableThroughServers && _relays is null)
+        {
+            Volatile.Write(ref _relays, new CancellationTokenSource());
+            Log(false, "This computer serves the channels its servers relay from its other computers.");
+        }
+
+        if (settings.Visible) Listen(service);
+    }
+
+    private FleetNodeService EnsureService()
+    {
+        if (_service is { } running) return running;
         // The key of this computer, the one it pairs with its machines with: made now when it never paired.
         var identity = _identity ??= DeviceIdentity.LoadOrCreate(_fleetRoot);
         var service = new FleetNodeService(new FleetNodeServiceOptions
         {
             Host = _host, Identity = identity, TrustedDevices = _trusted, Name = Name, Version = _version,
             PairingAddresses = () => Volatile.Read(ref _addresses),
-        });
+        })
+        {
+            Policy = Policy,
+        };
+        Volatile.Write(ref _service, service);
+        return service;
+    }
+
+    private void Listen(FleetNodeService service)
+    {
+        if (_listener is not null) return;
+        Volatile.Write(ref _problem, null);
         var port = PortOverride ?? Volatile.Read(ref _settings).Port ?? DefaultPort;
         try
         {
             var listener = FleetDirectListener.Start(new IPEndPoint(ListenAddress, port), service.ServeAsync);
             Volatile.Write(ref _addresses, FleetListenAddresses.Describe(listener.LocalEndPoint));
-            Volatile.Write(ref _service, service);
             Volatile.Write(ref _listener, listener);
             Log(false, $"This computer listens for its paired computers on port {listener.LocalEndPoint.Port}.");
             // Found beside the start, which does not wait for Tailscale to answer.
@@ -256,24 +410,35 @@ internal sealed class DesktopNode : IAsyncDisposable
         }
         catch (SocketException exception)
         {
-            await service.DisposeAsync().ConfigureAwait(false);
             Volatile.Write(ref _problem, $"Port {port} cannot be opened: {exception.Message}");
             Log(true, $"This computer cannot listen for its paired computers on port {port}: {exception.Message}");
         }
     }
 
-    private async Task StopCoreAsync()
+    // The relayed channels end now; the next ones are declined until the person turns it on again.
+    private void StopRelays()
+    {
+        if (Interlocked.Exchange(ref _relays, null) is not { } relays) return;
+        relays.Cancel();
+        relays.Dispose();
+        Log(false, "This computer no longer serves the channels its servers relay.");
+    }
+
+    private async Task StopListeningCoreAsync()
     {
         var listener = Volatile.Read(ref _listener);
-        var service = Volatile.Read(ref _service);
         Volatile.Write(ref _listener, null);
-        Volatile.Write(ref _service, null);
         Volatile.Write(ref _addresses, []);
         Volatile.Write(ref _problem, null);
         Volatile.Write(ref _tailnet, null);
-        if (listener is not null) await listener.DisposeAsync().ConfigureAwait(false);
-        if (service is not null) await service.DisposeAsync().ConfigureAwait(false);
-        if (listener is not null) Log(false, "This computer no longer listens for its paired computers.");
+        if (listener is null) return;
+        await listener.DisposeAsync().ConfigureAwait(false);
+        Log(false, "This computer no longer listens for its paired computers.");
+    }
+
+    private async Task StopServiceCoreAsync()
+    {
+        if (Interlocked.Exchange(ref _service, null) is { } service) await service.DisposeAsync().ConfigureAwait(false);
     }
 
     // The name and the addresses of this computer on its tailnet go first: they answer at home and away alike. The listener
@@ -355,6 +520,9 @@ internal sealed record DesktopNodeSettings
 
     /// <summary>Gets the port it listens on; null for <see cref="DesktopNode.DefaultPort"/>.</summary>
     public int? Port { get; init; }
+
+    /// <summary>Gets whether the person lets their other computers reach this one through the servers it is linked to.</summary>
+    public bool ReachableThroughServers { get; init; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]

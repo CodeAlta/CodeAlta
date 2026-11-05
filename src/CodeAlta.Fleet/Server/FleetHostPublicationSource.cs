@@ -70,6 +70,12 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
     /// <summary>Gets or sets what tells whether a provider runs with the credentials of an account; null says nothing of it.</summary>
     public Func<ModelProviderDescriptor, bool>? IsAccountProvider { get; set; }
 
+    /// <summary>
+    /// Gets or sets the capabilities it offers now beside those it was made with, read at each publication (a desktop its person
+    /// lets be reached through its servers, <see cref="FleetMachineCapabilities.Reachable"/>); null for none.
+    /// </summary>
+    public Func<IReadOnlyList<string>>? MoreCapabilities { get; set; }
+
     /// <inheritdoc />
     public ValueTask<FleetMachineInventory> ReadInventoryAsync(CancellationToken cancellationToken)
     {
@@ -86,7 +92,8 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
                 .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Take(64)]
             : null;
         return ValueTask.FromResult(new FleetMachineInventory(_name, FleetChannelProtocol.OperatingSystemName,
-            RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(), _version, _capabilities,
+            RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(), _version,
+            MoreCapabilities?.Invoke() is { Count: > 0 } more ? [.. _capabilities.Union(more, StringComparer.Ordinal)] : _capabilities,
             // The labels its owner gave it, read at each publication: a change is published at the next one.
             FleetMachineLabels.Read(_host.CatalogOptions.FleetRoot) is { Count: > 0 } labels ? labels : null, providers, accounts));
     }

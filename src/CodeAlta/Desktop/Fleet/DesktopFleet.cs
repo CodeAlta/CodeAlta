@@ -343,9 +343,12 @@ internal sealed class DesktopFleet : IAsyncDisposable
             // The server refuses this device: it takes a person to change that, as a machine that refuses it.
             throw new DeviceAuthenticationException(DeviceAuthenticationFailure.ClientNotTrusted, exception.Message, exception);
         }
-        catch (Exception exception) when (exception is FleetServerException or HttpRequestException or InvalidDataException or CodeAlta.Fleet.Protocol.FleetDeviceListException or System.Net.WebSockets.WebSocketException)
+        catch (Exception exception) when (exception is FleetServerException or HttpRequestException or InvalidDataException or CodeAlta.Fleet.Protocol.FleetDeviceListException
+            or System.Net.WebSockets.WebSocketException or NotSupportedException)
         {
-            // The ways a relay fails that the host knows as a machine that does not answer: it tries again later.
+            // The ways a relay fails that the host knows as a machine that does not answer: it tries again later. A machine that
+            // closes the relay it accepted (a desktop whose person no longer lets the servers reach it) leaves the channel a stream
+            // that does not read (NotSupportedException).
             throw new IOException(exception.Message, exception);
         }
     }

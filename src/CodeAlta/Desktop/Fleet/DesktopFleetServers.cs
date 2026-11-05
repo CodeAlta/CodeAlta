@@ -64,6 +64,46 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// </summary>
     public Func<IReadOnlyCollection<string>>? MachineSpaces { get; set; }
 
+    /// <summary>
+    /// Gets or sets what serves a channel a server relays to this computer, with the connector of that server: this computer
+    /// as a machine of the person's other devices (<see cref="DesktopNode.ServeRelayedAsync"/>). Set before the connections
+    /// start; null declines every relay.
+    /// </summary>
+    public Func<FleetConnector, Stream, CancellationToken, Task>? AcceptRelay { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether this computer serves the channels its servers relay now, which its inventory says
+    /// (<see cref="FleetMachineCapabilities.Reachable"/>) so that the person's other devices list it with their machines; read at
+    /// each publication, published again soon after <see cref="Republish"/>. Null for never.
+    /// </summary>
+    public Func<bool>? Reachable { get; set; }
+
+    /// <summary>Raised when a server verified a newer version of its policy, and at the start with the versions kept.</summary>
+    public event Action? PolicyChanged;
+
+    /// <summary>Asks the connections to publish the inventory of this computer again soon: what it offers changed.</summary>
+    public void Republish() => Volatile.Read(ref _connections)?.Nudge();
+
+    /// <summary>
+    /// Gets whether a machine of a directory is one this computer reaches as a machine: a node, or a desktop of the same person
+    /// that serves the channels its servers relay (<see cref="FleetMachineCapabilities.Reachable"/>). Another person's desktop
+    /// is never one: it gives this person nothing.
+    /// </summary>
+    /// <param name="machine">The machine as the directory lists it.</param>
+    /// <param name="devices">The device list of the server, as this computer verified it; null before the first read.</param>
+    /// <param name="self">The device of this computer.</param>
+    /// <returns>Whether it is listed with the machines of this computer.</returns>
+    internal static bool IsMachine(FleetDirectoryMachine machine, FleetDeviceListState? devices, string? self)
+    {
+        ArgumentNullException.ThrowIfNull(machine);
+        if (machine.DeviceId == self) return false;
+        if (machine.Kind == FleetDeviceKinds.Node) return true;
+        return machine.Kind == FleetDeviceKinds.Controller && machine.Inventory.Capabilities?.Contains(FleetMachineCapabilities.Reachable, StringComparer.Ordinal) == true
+            && self is not null && devices is not null && devices.Members.TryGetValue(self, out var own) && own.OwnerId is { } person
+            && devices.Members.TryGetValue(machine.DeviceId, out var other) && other.Kind == FleetDeviceKinds.Controller && other.OwnerId == person
+            && !devices.Removed.Contains(machine.DeviceId);
+    }
+
     /// <summary>Gets the links and their connectors.</summary>
     public IReadOnlyList<FleetServerConnection> Connections
     {
@@ -88,7 +128,10 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
         return listing.FirstOrDefault(connector => connector!.Directory.IsOnline(machineId)) ?? listing.FirstOrDefault();
     }
 
-    /// <summary>Lists the nodes of the organizations of the servers this computer is connected to, but this computer.</summary>
+    /// <summary>
+    /// Lists the machines of the organizations of the servers this computer is connected to, but this computer: their nodes, and
+    /// the desktops of this computer's person that let the person's devices reach them (<see cref="IsMachine"/>).
+    /// </summary>
     /// <returns>Their device ids and names, once each.</returns>
     public IReadOnlyList<(string Id, string Name)> OrganizationMachines()
     {
@@ -97,8 +140,9 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
         foreach (var connector in Connections.Select(static connection => connection.Connector))
         {
             if (connector is not { State: FleetConnectorState.Online }) continue;
+            var devices = connector.Devices.Current;
             foreach (var machine in connector.Directory.Machines.Values)
-                if (machine.Kind == FleetDeviceKinds.Node && machine.DeviceId != self) machines.TryAdd(machine.DeviceId, machine.Inventory.Name);
+                if (IsMachine(machine, devices, self)) machines.TryAdd(machine.DeviceId, machine.Inventory.Name);
         }
 
         return [.. machines.Select(static pair => (pair.Key, pair.Value))];
@@ -820,7 +864,12 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
         }
 
         var identity = Identity();
-        _source = new FleetHostPublicationSource(_host, _deviceName, _version, ["sessions", "moves", "console"]);
+        _source = new FleetHostPublicationSource(_host, _deviceName, _version, ["sessions", "moves", "console"])
+        {
+            // This computer as a machine of the person's other devices, while the person lets them reach it.
+            MoreCapabilities = () => Reachable?.Invoke() == true ? [FleetMachineCapabilities.Reachable] : [],
+        };
+        var accept = AcceptRelay;
         _statistics = FleetHostStatisticsSource.ForHost(_host);
         var connections = new FleetServerConnections(new FleetServerConnectionsOptions
         {
@@ -835,8 +884,15 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             Configure = _configure,
             // A budget reached, a run that waits, a notification: the pages and the Fleet button read them again.
             BudgetsChanged = _ => OnChanged(),
-            // A newer policy, a stop of the kill switch or its lift: the banner and the pages read it again.
-            PolicyChanged = (_, _) => OnChanged(),
+            // A newer policy, a stop of the kill switch or its lift: the banner and the pages read it again, and the work the
+            // other devices started here follows it.
+            PolicyChanged = (_, _) =>
+            {
+                OnChanged();
+                PolicyChanged?.Invoke();
+            },
+            // The channels the servers relay from the person's other devices, served while the person lets them reach this computer.
+            AcceptRelay = accept is null ? null : (connector, _, stream, token) => accept(connector, stream, token),
             // An automation this person gave away and that its new owner took: off this computer, and so off its machines.
             AccessRead = linkId =>
             {

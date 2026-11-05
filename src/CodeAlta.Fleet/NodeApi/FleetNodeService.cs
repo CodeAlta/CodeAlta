@@ -252,6 +252,46 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         await ServeAsync(channel, false, trust, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Serves a stream a server relays to this machine (see <see cref="ServeRelayedAsync(Stream, IDeviceTrustPolicy, CancellationToken)"/>),
+    /// with the members of its organization as the connector of that server verifies them: its device list and its access document
+    /// are read again first, so that a device removed from it is refused at once; when the server does not answer, the versions
+    /// verified last decide, and a list that does not verify lets nobody in. Failures are logged; they never escape.
+    /// </summary>
+    /// <param name="stream">The stream of the relay; the node owns it.</param>
+    /// <param name="connector">The control connection of the server that relays.</param>
+    /// <param name="cancellationToken">Ends the channel.</param>
+    /// <returns>A task that completes once the channel closed.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public async Task ServeRelayedAsync(Stream stream, Server.FleetConnector connector, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(connector);
+        try
+        {
+            await connector.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+            await connector.Access.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is Server.FleetServerException or HttpRequestException or IOException or TaskCanceledException)
+        {
+            LogInfo($"The device list could not be read again: {exception.Message}");
+        }
+        catch (FleetAccessDocumentException exception)
+        {
+            // A document that does not verify changes nothing: the version verified before still decides.
+            LogWarn($"The access document was refused: {exception.Message}");
+        }
+        catch (FleetDeviceListException exception)
+        {
+            // A list that does not verify is no ground to trust anyone through this server.
+            LogWarn($"A relayed channel was refused: {exception.Message}");
+            await stream.DisposeAsync().ConfigureAwait(false);
+            return;
+        }
+
+        await ServeRelayedAsync(stream, connector.Trust, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Serves the node API on an authenticated channel until it closes.</summary>
     /// <param name="channel">The channel, not started.</param>
     /// <param name="fromThisMachine">Whether the channel comes from this machine: the node's own key is admitted only then.</param>

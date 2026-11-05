@@ -10,7 +10,8 @@ import { pairingWords } from "./machines";
 import type { DevicePermission } from "./machineManagement";
 
 /** The calls of the This computer section. */
-export type ThisComputerApi = Pick<typeof machines, "thisComputer" | "setVisible" | "createPairingLink" | "waitPairing" | "setThisComputerDevicePermission" | "revokeThisComputerDevice">;
+export type ThisComputerApi = Pick<typeof machines, "thisComputer" | "setVisible" | "setReachableThroughServers" | "createPairingLink" | "waitPairing"
+  | "setThisComputerDevicePermission" | "revokeThisComputerDevice">;
 
 /** What a computer paired with this one may be given here: what a desktop serves. */
 export const thisComputerPermissions: readonly DevicePermission[] = ["view", "drive", "start", "move"];
@@ -18,7 +19,8 @@ export const thisComputerPermissions: readonly DevicePermission[] = ["view", "dr
 /**
  * This computer as a machine of the person's other computers, at the top of Settings > Fleet > Machines: a switch lets
  * them pair with it, Pair another computer… shows the link and the six words to give the other computer, and the
- * computers paired with it are listed with what each may do here.
+ * computers paired with it are listed with what each may do here. Once it is linked to a server, another switch lets the
+ * person's other devices of that organization reach it through the server, without pairing.
  */
 export function ThisComputerSection({ epoch, api = machines, generation }: { epoch: string; api?: ThisComputerApi; generation: number }) {
   const [view, setView] = useState<ThisComputerView | null>(null);
@@ -45,6 +47,7 @@ export function ThisComputerSection({ epoch, api = machines, generation }: { epo
   return <>
     <ThisComputerBody view={view} busy={busy} problem={problem}
       onVisible={visible => void change(() => api.setVisible({ expectedEpoch: epoch, visible }, { timeoutMilliseconds: 30_000 }))}
+      onReachable={reachable => void change(() => api.setReachableThroughServers({ expectedEpoch: epoch, reachable }, { timeoutMilliseconds: 30_000 }))}
       onPair={() => setPairing(true)}
       onPermission={(device, permission, allowed) => void change(() => api.setThisComputerDevicePermission({ expectedEpoch: epoch, deviceId: device.id, permission, allowed }))}
       onRevoke={device => void change(() => api.revokeThisComputerDevice({ expectedEpoch: epoch, deviceId: device.id }))} />
@@ -56,8 +59,8 @@ export function ThisComputerSection({ epoch, api = machines, generation }: { epo
 }
 
 /** What the This computer section shows, from what the host said: the switch, where it is reached, and its paired computers. */
-export function ThisComputerBody({ view, busy, problem, onVisible, onPair, onPermission, onRevoke }: {
-  view: ThisComputerView; busy: boolean; problem?: MessageKey | null; onVisible: (visible: boolean) => void; onPair: () => void;
+export function ThisComputerBody({ view, busy, problem, onVisible, onReachable, onPair, onPermission, onRevoke }: {
+  view: ThisComputerView; busy: boolean; problem?: MessageKey | null; onVisible: (visible: boolean) => void; onReachable: (reachable: boolean) => void; onPair: () => void;
   onPermission: (device: MachineDeviceView, permission: DevicePermission, allowed: boolean) => void; onRevoke: (device: MachineDeviceView) => void;
 }) {
   const { t } = useShellLanguage();
@@ -74,6 +77,12 @@ export function ThisComputerBody({ view, busy, problem, onVisible, onPair, onPer
     </div>}
     {view.visible && !view.listening && <Callout compact intent="warning" role="alert">{t("This computer cannot listen for your other computers.")}
       {view.problem && <div className="muted-text">{view.problem}</div>}</Callout>}
+    {(view.servers.length > 0 || view.reachable) && <div className="this-computer-servers">
+      <Switch checked={view.reachable} disabled={busy} label={t("Let my other computers reach this one through my server")} onChange={event => onReachable(event.currentTarget.checked)} />
+      <p className="muted-text">{view.servers.length > 0
+        ? t("Your other computers linked to {servers} list this computer with their machines, and reach it from anywhere through the server, encrypted from end to end, while CodeAlta runs here. No port opens here.", { servers: view.servers.join(", ") })
+        : t("This computer is linked to no server now: nothing reaches it this way.")}</p>
+    </div>}
     {problem && <Callout compact intent="warning" role="alert">{t(problem)}</Callout>}
     {view.devices.length > 0 ? <>
       <h3>{t("Computers paired with this one")}</h3>

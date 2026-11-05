@@ -521,6 +521,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(MachineReceiveMovesRequest))]
 [JsonSerializable(typeof(ThisComputerView))]
 [JsonSerializable(typeof(ThisComputerVisibleRequest))]
+[JsonSerializable(typeof(ThisComputerReachableRequest))]
 [JsonSerializable(typeof(ThisComputerPairingLink))]
 [JsonSerializable(typeof(ThisComputerPairingOutcome))]
 [JsonSerializable(typeof(ThisComputerDevicePermissionRequest))]

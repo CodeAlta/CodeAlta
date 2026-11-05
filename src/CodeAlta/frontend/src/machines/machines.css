@@ -154,6 +154,8 @@
 .this-computer .bp6-switch { margin: 0; }
 .this-computer > h3 { margin: 6px 0 0; font-size: 13px; font-weight: 600; }
 .this-computer-reach { display: grid; gap: 4px; font-size: 12px; overflow-wrap: anywhere; }
+.this-computer-servers { display: grid; gap: 4px; margin-top: 6px; }
+.this-computer-servers > p { margin: 0; overflow-wrap: anywhere; }
 .pair-this-computer-steps { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 4px; }
 .pair-this-computer-copy { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .pair-this-computer-wait { display: flex; align-items: center; gap: 8px; margin: 0; }

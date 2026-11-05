@@ -163,6 +163,16 @@ public sealed record FleetMachineInventory(
     IReadOnlyList<string>? Providers = null,
     IReadOnlyList<string>? AccountProviders = null);
 
+/// <summary>The capabilities of an inventory (<see cref="FleetMachineInventory.Capabilities"/>) that other devices act on.</summary>
+public static class FleetMachineCapabilities
+{
+    /// <summary>
+    /// A device that is not a node, a CodeAlta Desktop, serves the node API on the channels its servers relay to it, because its
+    /// person lets them: the person's other devices list it with their machines. A node always does and does not say it.
+    /// </summary>
+    public const string Reachable = "reachable";
+}
+
 /// <summary>The parameters of <c>inventory.publish</c>.</summary>
 /// <param name="Sequence">The sequence of the publication on this device; an older or equal one is a no-op.</param>
 /// <param name="Inventory">The snapshot.</param>

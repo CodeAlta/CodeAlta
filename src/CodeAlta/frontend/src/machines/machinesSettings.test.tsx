@@ -36,9 +36,9 @@ test("a machine added through the server is one of the person's machines: listed
 });
 
 const thisComputer = (change: Partial<ThisComputerView> = {}): ThisComputerView => ({ status: "ok", visible: false, listening: false, name: "DESKTOP-ALEX", words: null,
-  port: 2586, addresses: [], tailnet: null, problem: null, devices: [], ...change });
+  port: 2586, addresses: [], tailnet: null, problem: null, devices: [], reachable: false, servers: [], ...change });
 const renderThisComputer = (view: ThisComputerView) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
-  createElement(ThisComputerBody, { view, busy: false, onVisible: never, onPair: never, onPermission: never, onRevoke: never })));
+  createElement(ThisComputerBody, { view, busy: false, onVisible: never, onReachable: never, onPair: never, onPermission: never, onRevoke: never })));
 
 test("this computer is reachable by nobody until the person lets their other computers pair with it, then offers a link and lists them", () => {
   const off = renderThisComputer(thisComputer());
@@ -58,4 +58,18 @@ test("this computer is reachable by nobody until the person lets their other com
   const blocked = renderThisComputer(thisComputer({ visible: true, listening: false, problem: "Port 2586 cannot be opened" }));
   assert.ok(blocked.includes(english("This computer cannot listen for your other computers.")), blocked);
   assert.ok(blocked.includes("Port 2586 cannot be opened"));
+});
+
+test("a computer linked to a server is reached through it only once the person lets their other computers do so, without pairing", () => {
+  const reach = english("Let my other computers reach this one through my server");
+  assert.ok(!renderThisComputer(thisComputer()).includes(reach), "no server, no such way");
+
+  const linked = renderThisComputer(thisComputer({ servers: ["Home"] }));
+  assert.ok(linked.includes(reach), linked);
+  assert.ok(/<input[^>]*type="checkbox"[^>]*>[^]*?Let my other computers reach this one through my server/.test(linked), "a switch");
+  assert.ok(linked.includes("Home"), "it names the server");
+  assert.ok(!linked.includes(english("Pair another computer…")), "no pairing link: the server reaches it");
+
+  const left = renderThisComputer(thisComputer({ reachable: true }));
+  assert.ok(left.includes(english("This computer is linked to no server now: nothing reaches it this way.")), "turned on, then the server left: it says so and can be turned off");
 });

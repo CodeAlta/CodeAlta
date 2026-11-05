@@ -48,6 +48,27 @@ internal sealed partial class MachinesService
         return View(Node, "ok");
     }
 
+    /// <summary>Lets the person's other computers reach this one through the servers it is linked to, or stops.</summary>
+    [NeoRpcMethod("setReachableThroughServers")]
+    public async Task<ThisComputerView> SetReachableThroughServersAsync(ThisComputerReachableRequest request, CancellationToken cancellationToken)
+    {
+        if (RefuseNode(request?.ExpectedEpoch) is { } refused) return ThisComputerView.Refused(refused);
+        try
+        {
+            await Node!.SetReachableThroughServersAsync(request!.Reachable, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return View(Node!, "write_failed");
+        }
+        catch (ObjectDisposedException)
+        {
+            return ThisComputerView.Refused("unavailable");
+        }
+
+        return View(Node, "ok");
+    }
+
     /// <summary>Makes a pairing link for another computer of the person, which it pastes in Add a machine… there.</summary>
     [NeoRpcMethod("createPairingLink")]
     public ThisComputerPairingLink CreatePairingLink(MachinesRequest request)
@@ -135,10 +156,24 @@ internal sealed partial class MachinesService
             devices = [];
         }
 
+        string[] servers;
+        try
+        {
+            servers = [.. node.Servers?.Invoke() ?? []];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            servers = [];
+        }
+
         return new ThisComputerView(status, node.Visible, node.Listening, node.Name, node.Words, node.Port, [.. node.Addresses], node.TailnetName, node.Problem,
             [.. devices.Select(static device => new MachineDeviceView(device.DeviceId, device.Name, device.Fingerprint.ToDisplayString(),
                 [.. DevicePermissionNames.Format(device.Permissions).Where(static name => ThisComputerPermissions.Contains(name, StringComparer.Ordinal))],
-                device.PairedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), null, 0, false))]);
+                device.PairedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), null, 0, false))])
+        {
+            Reachable = node.ReachableThroughServers,
+            Servers = servers,
+        };
     }
 }
 
@@ -156,6 +191,12 @@ internal sealed partial class MachinesService
 internal sealed record ThisComputerView(string Status, bool Visible, bool Listening, string? Name, string? Words, int Port, string[] Addresses, string? Tailnet,
     string? Problem, MachineDeviceView[] Devices)
 {
+    /// <summary>Gets whether the person lets their other computers reach this one through the servers it is linked to.</summary>
+    public bool Reachable { get; init; }
+
+    /// <summary>Gets the names of the servers this computer is linked to, whose relay reaches it then.</summary>
+    public string[] Servers { get; init; } = [];
+
     internal static ThisComputerView Refused(string status) => new(status, false, false, null, null, 0, [], null, null, []);
 }
 
@@ -163,6 +204,11 @@ internal sealed record ThisComputerView(string Status, bool Visible, bool Listen
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
 /// <param name="Visible">Whether they may.</param>
 internal sealed record ThisComputerVisibleRequest(string ExpectedEpoch, bool Visible);
+
+/// <summary>Lets the person's other computers reach this one through the servers it is linked to, or stops.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="Reachable">Whether they may.</param>
+internal sealed record ThisComputerReachableRequest(string ExpectedEpoch, bool Reachable);
 
 /// <summary>A pairing link made here for another computer of the person.</summary>
 /// <param name="Status"><c>ok</c>, <c>not_listening</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>

@@ -61,7 +61,20 @@ internal sealed class DesktopFleetStartup
         servers.Changed += () => _ = fleet.SyncOrganizationMachinesAsync(servers.OrganizationMachines(), CancellationToken.None);
         // This computer as a machine of the person's other computers: it listens only once the person turned it on.
         // On a Tailscale network, its links name it there first, so that a laptop away from home still reaches it.
-        var node = new DesktopNode(host, machineName, version, host.CatalogOptions.FleetRoot) { FindTailnet = Mcp.DesktopTailnet.FindAsync };
+        // Once the person lets them, the person's other devices of the organizations of its servers reach it through their
+        // relays too: the work they start here follows the policies of those servers.
+        var node = new DesktopNode(host, machineName, version, host.CatalogOptions.FleetRoot)
+        {
+            FindTailnet = Mcp.DesktopTailnet.FindAsync,
+            Policy = servers.Policy,
+            Servers = () => [.. servers.Connections.Where(static connection => connection.Link.State != CodeAlta.Fleet.Server.FleetServerLinkStates.Revoked)
+                .Select(static connection => connection.Link.OrganizationName ?? connection.Link.Url)],
+        };
+        servers.AcceptRelay = node.ServeRelayedAsync;
+        servers.Reachable = () => node.ReachableThroughServers;
+        servers.PolicyChanged += () => _ = node.ApplyPolicyAsync(CancellationToken.None);
+        // Turned on or off: the servers tell the person's other devices at once.
+        node.Changed += servers.Republish;
         return new DesktopFleetStartup(fleet, remoteChildren, servers, node);
     }
 

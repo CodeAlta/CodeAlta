@@ -118,6 +118,15 @@ The nodes of your server are reachable from CodeAlta Desktop without pairing and
 - The connection is encrypted from one computer to the other: the server passes it on without being able to read it, and records only who reached which machine, when and how much data went through.
 - Your own computers may see, drive and start sessions on your nodes, as a paired computer does. Other machines of the server may do nothing there yet.
 
+### Reach a CodeAlta Desktop through the server
+
+A computer of yours that runs CodeAlta Desktop and is connected to the server can be one of these machines too, without pairing and without opening a port. On that computer, open **Settings** > **Fleet** > **Machines** and, under **This computer**, turn on **Let my other computers reach this one through my server**. Your other computers connected to the same server then list it with their machines, marked **Through your server**: its sessions show in their Explorer, and they see, drive and start them as on a node.
+
+- **Your computers only.** Only your own computers of the server reach it; another person of the organization, an admin included, does not.
+- **While CodeAlta runs.** It is reached while CodeAlta Desktop runs there; once you quit it, your other computers see it offline.
+- **Off by default.** Turning it off closes the sessions opened through the server at once and refuses new ones. It is apart from **Let my other computers pair with this one**, which pairs computers directly ([Pair two CodeAlta Desktops](machines.md#pair-two-codealta-desktops)).
+- **The policies of the server apply.** A stop of the [kill switch](policies-and-audit.md#the-kill-switch) ends the work your other computers started there.
+
 ## The Fleet canvas
 
 The **Fleet** button of the title bar opens the **Fleet** canvas (`/fleet`): the machines of the server and their sessions, with their titles, as they change; without a server, the machines paired with this computer. Its **Settings** button opens **Settings** > **Fleet** > **Server**. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. The name of a machine this computer reaches opens its page. `altanode status` says whether the node is connected to its server.

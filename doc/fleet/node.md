@@ -177,8 +177,16 @@ with this one**, off by default): it serves the same node API as `altanode` over
 paired devices. Another desktop pairs with it from a link, exactly as with a node. Until it is turned on, it listens
 nowhere and makes no key (S1). On a Tailscale network its links name it on the tailnet first, so that a laptop away
 from home reaches it. When it exits, it is offline. A machine that must stay reachable runs `altanode`, and the desktop
-opens it in client mode ([architecture](architecture.md#the-desktop-one-session-host-abstraction)). Reaching a desktop
-through the relay of a server, as a machine of an organization, is not part of it yet.
+opens it in client mode ([architecture](architecture.md#the-desktop-one-session-host-abstraction)).
+
+A desktop linked to a server is reached through its relay too, once the person lets it be (**Let my other computers reach
+this one through my server**, off by default, apart from pairing): its control connection then serves the relayed channels
+with the same node API, trusting the members of the organization as a node does (the person's own controller devices get
+what a pairing gives), and its inventory names the capability `reachable`. The person's other desktops list a controller
+device with that capability, of the same person in the signed device list, with their machines; another person's desktop
+is never listed. Nothing listens on a port for it. Turned off, its relayed channels close and new relays are declined.
+The work started there follows the policies of its servers. A desktop runs no automation for others and takes no fleet
+update: those stay for nodes.
 
 ## Packaging
 

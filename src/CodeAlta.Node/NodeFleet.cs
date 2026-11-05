@@ -369,7 +369,7 @@ internal sealed class NodeServers : IAsyncDisposable
             Source = source,
             Statistics = statistics,
             Configure = configure,
-            AcceptRelay = service is null ? null : (connector, _, stream, token) => ServeRelayAsync(service, connector, stream, token),
+            AcceptRelay = service is null ? null : (connector, _, stream, token) => service.ServeRelayedAsync(stream, connector, token),
             TelemetrySettings = telemetry is null ? null : telemetry.AcceptAsync,
             Metrics = telemetry?.Metrics,
             Updates = updates,
@@ -525,35 +525,6 @@ internal sealed class NodeServers : IAsyncDisposable
         {
             if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Warn($"The access document could not be applied: {exception.Message}");
         }
-    }
-
-    // The device list is read again for each relay, so that a device removed from it is refused at once; when the server
-    // does not answer, the list last verified is kept.
-    private static async Task ServeRelayAsync(FleetNodeService service, Fleet.Server.FleetConnector connector, Stream stream, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await connector.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
-            await connector.Access.RefreshAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is Fleet.Server.FleetServerException or HttpRequestException or IOException or TaskCanceledException)
-        {
-            if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Info($"The device list could not be read again: {exception.Message}");
-        }
-        catch (Fleet.Protocol.FleetAccessDocumentException exception)
-        {
-            // A document that does not verify changes nothing: the version verified before still decides.
-            if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Warn($"The access document was refused: {exception.Message}");
-        }
-        catch (Fleet.Protocol.FleetDeviceListException exception)
-        {
-            // A list that does not verify is no ground to trust anyone through this server.
-            if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Warn($"A relayed channel was refused: {exception.Message}");
-            await stream.DisposeAsync().ConfigureAwait(false);
-            return;
-        }
-
-        await service.ServeRelayedAsync(stream, connector.Trust, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

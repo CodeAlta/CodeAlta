@@ -71,7 +71,8 @@ public sealed class FleetServerConnectionsOptions
 
     /// <summary>
     /// Gets what serves a relayed channel a server offers this instance, with the connector of that server (whose
-    /// <see cref="FleetConnector.Devices"/> say who its organization holds); null declines every relay (a desktop does).
+    /// <see cref="FleetConnector.Devices"/> say who its organization holds); null declines every relay. A desktop serves them while
+    /// its person lets the other devices reach it through its servers.
     /// </summary>
     public Func<FleetConnector, FleetRelayIncoming, Stream, CancellationToken, Task>? AcceptRelay { get; init; }
 
