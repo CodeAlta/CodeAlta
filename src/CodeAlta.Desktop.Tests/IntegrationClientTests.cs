@@ -200,6 +200,45 @@ public sealed class IntegrationClientTests
         socket.Dispose();
     }
 
+    // A refresh holds to one connection too: the new connection that Slack counts beside another is closed and opened again once
+    // the overlap is gone, never kept while two connections take the events of the app.
+    [TestMethod]
+    public async Task SlackSocketMode_ARefreshCountedBesideAnotherConnection_IsOpenedAgainOnceAlone()
+    {
+        var opened = 0;
+        var fake = new FakeToolServer().On(HttpMethod.Post, "/api/apps.connections.open", _ =>
+            (HttpStatusCode.OK, $$"""{"ok":true,"url":"wss://wss.slack.test/link/?ticket={{Interlocked.Increment(ref opened)}}"}"""));
+        using var http = new HttpClient(fake);
+        await using var sockets = new FakeSlackSockets();
+        var listener = new SlackSocketListener(new SlackClient(http, new Uri("https://slack.test/api/")), sockets.ConnectAsync);
+        var messages = System.Threading.Channels.Channel.CreateUnbounded<SlackMessage>();
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var running = listener.RunAsync("xapp-app", message => messages.Writer.WriteAsync(message).AsTask(), null, stop.Token);
+
+        var first = await sockets.Accepted.Reader.ReadAsync(stop.Token);
+        await FakeSlackSockets.SendAsync(first, """{"type":"hello","num_connections":1}""");
+        await FakeSlackSockets.SendAsync(first, """{"type":"disconnect","reason":"refresh_requested"}""");
+
+        // The new connection is counted beside another: it is closed.
+        var second = await sockets.Accepted.Reader.ReadAsync(stop.Token);
+        await FakeSlackSockets.SendAsync(second, """{"type":"hello","num_connections":2}""");
+        var buffer = new byte[1024];
+        Assert.AreEqual(System.Net.WebSockets.WebSocketMessageType.Close, (await second.ReceiveAsync(buffer, stop.Token)).MessageType, "two connections never take the events");
+        Assert.IsNull(listener.Problem, "an overlap of a refresh is not a problem");
+
+        // Alone again: it listens.
+        var third = await sockets.Accepted.Reader.ReadAsync(stop.Token);
+        await FakeSlackSockets.SendAsync(third, """{"type":"hello","num_connections":1}""");
+        await FakeSlackSockets.SendAsync(third, """{"envelope_id":"e1","type":"events_api","payload":{"team_id":"T1","event_id":"Ev1","event":{"type":"message","channel":"C0123ABCDEF","user":"U1","text":"deploy","ts":"1.0"}}}""");
+        Assert.AreEqual("Ev1", (await messages.Reader.ReadAsync(stop.Token)).EventId);
+        Assert.AreEqual(3, Volatile.Read(ref opened));
+        await stop.CancelAsync();
+        await running;
+        first.Dispose();
+        second.Dispose();
+        third.Dispose();
+    }
+
     [TestMethod]
     public async Task IncidentIo_ReadsTheIncidentAgain_AndAddsAnItemToItsTimeline()
     {

@@ -19,6 +19,47 @@ public sealed class FleetNodeApiTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
+    public async Task TheToolsThePolicyTurnsOffForWorkOfTheFleet_ReachEveryDescendant_AndALineageThatCannotBeFollowedIsRefused()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await NodeFixture.StartAsync(token);
+        var service = fixture.Fleet.Service;
+        var policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Rules = new FleetPolicyRules(ToolsOff: ["shell_command"]) };
+        Func<IEnumerable<Fleet.Server.FleetPolicySource>> sources = () => [new Fleet.Server.FleetPolicySource("https://fleet.example", policy, null, static _ => true)];
+        service.Policy = new Fleet.Server.FleetPolicyGuard(fixture.NodeIdentity.DeviceId, sources);
+        var commands = fixture.Node.Host.Commands;
+        var root = await commands.CreateDraftSessionAsync(null, fixture.Provider.Descriptor, "Remote work", null, null, null, null, null, null, null);
+        service.Work.Record(root.SessionId, null, "remote", DateTimeOffset.UtcNow);
+
+        // A session the work of the fleet started, many levels down: the tools stay off for it, as for the work itself.
+        var deep = root;
+        for (var level = 0; level < 40; level++)
+        {
+            deep = await commands.CreateDraftSessionAsync(null, fixture.Provider.Descriptor, $"Level {level}", new CodeAlta.Catalog.AltaActorProvenance
+            {
+                Kind = CodeAlta.Catalog.AltaActorProvenance.WorkflowKind, SourceSessionId = deep.SessionId, CreatedAt = DateTimeOffset.UtcNow,
+            }, null, null, null, null, null, null);
+        }
+
+        CollectionAssert.AreEqual(new[] { "shell_command" }, (await service.PolicyToolsOffAsync(deep, token))?.ToArray(), "a deep descendant of the work of the fleet");
+        var plain = await commands.CreateDraftSessionAsync(null, fixture.Provider.Descriptor, "Plain", null, null, null, null, null, null, null);
+        Assert.IsNull(await service.PolicyToolsOffAsync(plain, token), "a session of the person at the machine keeps its tools");
+
+        // A lineage too deep to follow to its start, or whose links make a cycle: whether the session is work of the fleet cannot be
+        // told, and it is not given the tools the policy may turn off.
+        var sessions = new Dictionary<string, CodeAlta.Catalog.SessionViewDescriptor>(StringComparer.Ordinal);
+        CodeAlta.Catalog.SessionViewDescriptor Linked(string id, string? parent) => sessions[id] = new CodeAlta.Catalog.SessionViewDescriptor { SessionId = id, ParentSessionId = parent };
+        Task<CodeAlta.Catalog.SessionViewDescriptor?> ParentOf(string id) => Task.FromResult(sessions.GetValueOrDefault(id));
+        var endless = Linked("s0", null);
+        for (var level = 1; level <= CodeAlta.Orchestration.Runtime.SessionToolGuards.MaximumLineageDepth; level++) endless = Linked("s" + level, endless.SessionId);
+        await Assert.ThrowsExactlyAsync<CodeAlta.Orchestration.Runtime.SessionLineageException>(async () => await FleetNodeService.WorkOfLineageAsync(endless, [], ParentOf, token));
+        Linked("a", "b");
+        var looped = Linked("b", "a");
+        await Assert.ThrowsExactlyAsync<CodeAlta.Orchestration.Runtime.SessionLineageException>(async () => await FleetNodeService.WorkOfLineageAsync(looped, [], ParentOf, token));
+        Assert.IsNull(await FleetNodeService.WorkOfLineageAsync(Linked("lone", "gone"), [], ParentOf, token), "a parent this machine does not have is the start");
+    }
+
+    [TestMethod]
     public async Task Viewer_PairsWithTheNode_ThenReadsAndDrivesItsSessions()
     {
         await using var fixture = await NodeFixture.StartAsync(TestContext.CancellationToken);

@@ -79,23 +79,26 @@ public sealed class FleetNodePeople
     private static bool Same(string? kept, string? organizationId) => string.Equals(kept, organizationId, StringComparison.Ordinal);
 
     // Binds the people and the requests kept before organizations were to the organization of the machine, once it is linked to
-    // exactly one, and keeps them so: from then on they are of that organization only, whatever the machine joins later.
+    // exactly one, and keeps them so: from then on they are of that organization only, whatever the machine joins later. A
+    // binding is taken only once it is written: one held in memory alone would be made again with another organization after a
+    // restart, so until the file takes it they stay nobody's, and get nothing.
     private void BindLegacy()
     {
         if (!_state.People.Any(static person => person.OrganizationId is null) && !_state.Asks.Any(static ask => ask.OrganizationId is null)) return;
         if (_soleOrganization?.Invoke() is not { } sole) return;
-        _state = _state with
+        var bound = _state with
         {
             People = [.. _state.People.Select(person => person.OrganizationId is null ? person with { OrganizationId = sole } : person)],
             Asks = [.. _state.Asks.Select(ask => ask.OrganizationId is null ? ask with { OrganizationId = sole } : ask)],
         };
         try
         {
-            Save();
+            Save(bound);
+            _state = bound;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // Bound in memory; written with the next change.
+            // Not kept: tried again at the next read of the people.
         }
     }
 
@@ -182,10 +185,12 @@ public sealed class FleetNodePeople
         }
     }
 
-    private void Save()
+    private void Save() => Save(_state);
+
+    private void Save(PeopleState state)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        FleetFiles.WriteAtomically(_path, JsonSerializer.SerializeToUtf8Bytes(_state, FleetNodePeopleJson.Default.PeopleState));
+        FleetFiles.WriteAtomically(_path, JsonSerializer.SerializeToUtf8Bytes(state, FleetNodePeopleJson.Default.PeopleState));
     }
 
     private static PeopleState Load(string path)

@@ -133,38 +133,56 @@ public sealed class FleetBudgetGate
         ArgumentNullException.ThrowIfNull(run);
         ArgumentException.ThrowIfNullOrWhiteSpace(run.RunId);
         var continued = new List<string>();
-        foreach (var link in _links())
+        // The budgets a hold let the run pass, by the version and the period it waited in: what the run passed is not asked again,
+        // and every other budget is checked again after each hold.
+        var passed = new HashSet<(string Link, string Budget, long Number, long Period)>();
+        while (true)
         {
-            var state = _states.GetOrAdd(link.LinkId, _ => LinkState.Load(link.StatePath));
-            await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
-            if (link.Devices.Current is not { } list)
+            var rescan = false;
+            foreach (var link in _links())
             {
-                // Budgets kept that this machine cannot verify now (its device list not read yet, the server away): the run waits for
-                // them, never runs as if none held it.
-                if (!state.Budgets().Any()) continue;
-                if (await WaitForDevicesAsync(link, run, held, cancellationToken).ConfigureAwait(false) is not { } verified)
-                    return new FleetBudgetAdmission("The budgets this machine keeps could not be verified: the run does not start.", continued);
-                list = verified;
-                held = null;
-            }
-            var access = link.Access?.Current;
-            var scope = ScopeOf(link, list, access, run);
-            foreach (var kept in state.Budgets())
-            {
-                // Kept once verified: a signer removed since takes no restriction away (FleetBudgetDocuments.TryVerifyKept).
-                if (!FleetBudgetDocuments.TryVerifyKept(kept.Signed, list, access, link.Devices.Identity.DeviceId, out var budget, out _) || !FleetBudgetDocuments.Covers(budget, scope))
-                    continue;
-                if (await CheckAsync(link, state, kept, budget, cancellationToken).ConfigureAwait(false) is not { } period) continue;
-                if (budget.Reached == FleetBudgetReachedActions.Stop)
+                var state = _states.GetOrAdd(link.LinkId, _ => LinkState.Load(link.StatePath));
+                await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
+                if (link.Devices.Current is not { } list)
                 {
-                    Log($"The run {run.RunId} does not start: the budget '{budget.Name}' is reached.");
-                    return new FleetBudgetAdmission($"The budget '{budget.Name}' is reached: the run does not start.", continued);
+                    // Budgets kept that this machine cannot verify now (its device list not read yet, the server away): the run waits
+                    // for them, never runs as if none held it.
+                    if (!state.Budgets().Any()) continue;
+                    if (await WaitForDevicesAsync(link, run, held, cancellationToken).ConfigureAwait(false) is not { } verified)
+                        return new FleetBudgetAdmission("The budgets this machine keeps could not be verified: the run does not start.", continued);
+                    list = verified;
+                    held = null;
                 }
 
-                var problem = await HoldAsync(link, state, budget, period, run, scope, held, cancellationToken).ConfigureAwait(false);
-                if (problem is not null) return new FleetBudgetAdmission(problem, continued);
-                continued.Add(budget.BudgetId);
+                var access = link.Access?.Current;
+                var scope = ScopeOf(link, list, access, run);
+                foreach (var kept in state.Budgets())
+                {
+                    // Kept once verified: a signer removed since takes no restriction away (FleetBudgetDocuments.TryVerifyKept).
+                    if (!FleetBudgetDocuments.TryVerifyKept(kept.Signed, list, access, link.Devices.Identity.DeviceId, out var budget, out _) || !FleetBudgetDocuments.Covers(budget, scope))
+                        continue;
+                    if (passed.Contains((link.LinkId, budget.BudgetId, budget.Number, FleetBudgetDocuments.PeriodOf(budget, _time.GetUtcNow()).StartQuarter))) continue;
+                    if (await CheckAsync(link, state, kept, budget, cancellationToken).ConfigureAwait(false) is not { } period) continue;
+                    if (budget.Reached == FleetBudgetReachedActions.Stop)
+                    {
+                        Log($"The run {run.RunId} does not start: the budget '{budget.Name}' is reached.");
+                        return new FleetBudgetAdmission($"The budget '{budget.Name}' is reached: the run does not start.", continued);
+                    }
+
+                    var problem = await HoldAsync(link, state, budget, period, run, scope, held, cancellationToken).ConfigureAwait(false);
+                    if (problem is not null) return new FleetBudgetAdmission(problem, continued);
+                    passed.Add((link.LinkId, budget.BudgetId, budget.Number, period.StartQuarter));
+                    if (!continued.Contains(budget.BudgetId)) continued.Add(budget.BudgetId);
+                    // While the run waited, the machine may have verified other budgets, or other versions of them: all decide
+                    // again, as for a new run, before it starts.
+                    rescan = true;
+                    break;
+                }
+
+                if (rescan) break;
             }
+
+            if (!rescan) break;
         }
 
         return continued.Count == 0 ? FleetBudgetAdmission.Admitted : new FleetBudgetAdmission(null, continued);

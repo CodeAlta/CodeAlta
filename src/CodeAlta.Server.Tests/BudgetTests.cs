@@ -433,6 +433,30 @@ public sealed class BudgetTests
         StringAssert.Contains((await stopped.WaitAsync(Patience, TestContext.CancellationToken)).Problem, "is reached");
     }
 
+    // A run held by one budget is checked against every budget again before it starts: one that stops runs, which the machine
+    // learned while the run waited, refuses it after the first is continued anyway.
+    [TestMethod]
+    public async Task AHeldRun_IsCheckedAgainstABudgetLearnedWhileItWaited()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        var spend = new FakeSpend { Spent = 100 };
+        await fleet.Manager.PutAsync(null, Settings(100), CancellationToken.None);
+        var gate = fleet.Gate(spend);
+        var held = new TaskCompletionSource();
+        var admission = gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), () => held.TrySetResult(), TestContext.CancellationToken);
+        await held.Task.WaitAsync(Patience, TestContext.CancellationToken);
+        var hold = await WaitForAsync(async () => (await fleet.Manager.ListHoldsAsync(CancellationToken.None)).Holds.FirstOrDefault(), TestContext.CancellationToken);
+
+        // A budget of the machine that stops its runs, reached too; then the first is continued anyway.
+        await fleet.Manager.PutAsync(null, Settings(100) with { Name = "Machine", ScopeKind = FleetBudgetScopeKinds.Machine, ScopeId = fleet.NodeKey.DeviceId,
+            Mode = FleetBudgetModes.Advisory, Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
+        gate.Changed();
+        await Task.Delay(TimeSpan.FromMilliseconds(300), TestContext.CancellationToken);
+        await fleet.Manager.ContinueAsync(hold.Id, CancellationToken.None);
+        gate.Changed();
+        StringAssert.Contains((await admission.WaitAsync(Patience, TestContext.CancellationToken)).Problem, "'Machine' is reached");
+    }
+
     // A Continue anyway is for the version of the budget the run started to wait under: once the machine verified a newer version
     // that still holds the run (a lower limit), a Continue anyway signed for the earlier one does not start it.
     [TestMethod]
