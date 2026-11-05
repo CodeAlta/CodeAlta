@@ -64,25 +64,27 @@ public sealed partial class FleetNodeService
             {
                 if (await _host.RuntimeService.TryGetRecoverableSessionAsync(held.SessionId).ConfigureAwait(false) is not { } session)
                 {
-                    HeldSends.Remove(held.RunId);
+                    HeldSends.Remove(held.HoldId);
                     continue;
                 }
 
-                var result = await WithinBudgetAsync(held.RunId, session, held.Title, held).ConfigureAwait(false);
-                LogInfo($"The held prompt {held.RunId} of the session {held.SessionId} was taken again after a restart ({result.Status}).");
+                var result = await WithinBudgetAsync(session, held.Title, held).ConfigureAwait(false);
+                LogInfo($"The held prompt {held.HoldId} of the session {held.SessionId} was taken again after a restart ({result.Status}).");
             }
             catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException or UnauthorizedAccessException)
             {
-                LogInfo($"The held prompt {held.RunId} of the session {held.SessionId} was not taken again: {exception.Message}");
+                LogInfo($"The held prompt {held.HoldId} of the session {held.SessionId} was not taken again: {exception.Message}");
             }
         }
     }
 
     // Sends a prompt once the budgets of the machine admit it: at once when they do, never when one stops it, and later when one
     // holds it (the answer says it waits; the send is made once its owner continues it anyway). A send held is kept before the
-    // answer says so: a restart takes it again, and its session waits for a person meanwhile.
-    private async Task<FleetCommandResult> WithinBudgetAsync(string runId, SessionViewDescriptor session, string? title, FleetHeldSend held)
+    // answer says so: a restart takes it again, and its session waits for a person meanwhile. The run the budgets admit is the
+    // one the hold is bound to (the session for the first prompt of a new one), asked again by the same after a restart.
+    private async Task<FleetCommandResult> WithinBudgetAsync(SessionViewDescriptor session, string? title, FleetHeldSend held)
     {
+        var runId = held.HoldId;
         Func<FleetCommandResult> send = () => SendHeld(held);
         if (_options.AdmitBudget is not { } admit || _budgetAdmitted.ContainsKey(runId)) return send();
         if (_budgetHolds.ContainsKey(runId)) return new FleetCommandResult(FleetBudgetCommandStatuses.Held, Code: FleetBudgetCommandStatuses.Held);

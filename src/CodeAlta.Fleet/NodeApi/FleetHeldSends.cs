@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 namespace CodeAlta.Fleet.NodeApi;
 
 /// <summary>A send of the node API that a budget holds until its owner continues it: what is sent then, kept across restarts.</summary>
-/// <param name="RunId">The run: the retry key of the send, which the hold is bound to.</param>
+/// <param name="RunId">The retry key of the send, which the runtime knows it by.</param>
 /// <param name="SessionId">The session.</param>
 /// <param name="Text">The prompt.</param>
 /// <param name="Title">What the run is, for the owner on this machine.</param>
@@ -16,7 +16,15 @@ namespace CodeAlta.Fleet.NodeApi;
 /// <param name="ReasoningEffort">The reasoning effort of the selection; null for the session's.</param>
 /// <param name="HeldAt">When it was held.</param>
 internal sealed record FleetHeldSend(string RunId, string SessionId, string Text, string? Title, string Nonce, string? ProviderKey, string? AgentPromptId, string? ModelId,
-    string? ReasoningEffort, DateTimeOffset HeldAt);
+    string? ReasoningEffort, DateTimeOffset HeldAt)
+{
+    /// <summary>Gets the run the budgets admit when it is not the retry key: the session, for the first prompt of a new session.</summary>
+    public string? BudgetRunId { get; init; }
+
+    /// <summary>Gets the run the hold is bound to, asked again with the same nonce after a restart.</summary>
+    [JsonIgnore]
+    public string HoldId => BudgetRunId ?? RunId;
+}
 
 /// <summary>
 /// The sends a budget holds (<c>doc/fleet/observability.md</c>, budgets and alerts), kept in the fleet folder of the node before
@@ -54,20 +62,20 @@ internal sealed class FleetHeldSends
     {
         lock (_gate)
         {
-            var sends = Load().SetItem(send.RunId, send);
-            while (sends.Count > MaximumKept) sends = sends.Remove(sends.Values.MinBy(static held => held.HeldAt)!.RunId);
+            var sends = Load().SetItem(send.HoldId, send);
+            while (sends.Count > MaximumKept) sends = sends.Remove(sends.Values.MinBy(static held => held.HeldAt)!.HoldId);
             Save(sends);
         }
     }
 
-    /// <summary>Forgets a send: sent, stopped, or of a session that is gone.</summary>
-    public void Remove(string runId)
+    /// <summary>Forgets a send by the run its hold is bound to (<see cref="FleetHeldSend.HoldId"/>): sent, stopped, or of a session that is gone.</summary>
+    public void Remove(string holdId)
     {
         lock (_gate)
         {
             var sends = Load();
-            if (!sends.ContainsKey(runId)) return;
-            try { Save(sends.Remove(runId)); }
+            if (!sends.ContainsKey(holdId)) return;
+            try { Save(sends.Remove(holdId)); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 // Taken again at the next start, where its retry key makes it a replay of what was sent.
@@ -82,7 +90,7 @@ internal sealed class FleetHeldSends
         {
             var read = JsonSerializer.Deserialize(File.ReadAllBytes(_path), FleetHeldSendsJsonContext.Default.ListFleetHeldSend) ?? [];
             known = read.Where(static send => send is { RunId.Length: > 0, SessionId.Length: > 0, Text.Length: > 0, Nonce.Length: > 0 })
-                .GroupBy(static send => send.RunId, StringComparer.Ordinal).ToImmutableDictionary(static group => group.Key, static group => group.Last(), StringComparer.Ordinal);
+                .GroupBy(static send => send.HoldId, StringComparer.Ordinal).ToImmutableDictionary(static group => group.Key, static group => group.Last(), StringComparer.Ordinal);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException)
         {

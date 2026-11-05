@@ -59,6 +59,45 @@ public sealed class FleetNodeBudgetQueueTests
     }
 
     [TestMethod]
+    public async Task TheHeldFirstPromptOfANewSession_AsksTheSameHoldAfterARestart()
+    {
+        var token = TestContext.CancellationToken;
+        var never = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = new ConcurrentQueue<FleetNodeBudgetRun>();
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, async (run, held, cancellation) =>
+        {
+            first.Enqueue(run);
+            held();
+            await never.Task.WaitAsync(cancellation).ConfigureAwait(false);
+            return FleetBudgetAdmission.Admitted;
+        });
+        await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Report", Prompt: "The first held work."), "create-first-held", token);
+        Assert.AreEqual(FleetBudgetCommandStatuses.Held, created.Send?.Status);
+        var asked = first.Single();
+        Assert.AreEqual(created.SessionId, asked.RunId, "the first run of a session is admitted as the session");
+
+        // After a restart the same run asks the same hold: the person who continues it continues this one, not another.
+        var resumed = new ConcurrentQueue<FleetNodeBudgetRun>();
+        var restarted = new FleetNodeService(new FleetNodeServiceOptions
+        {
+            Host = fixture.Host, Identity = fixture.NodeIdentity, TrustedDevices = new CodeAlta.Fleet.Identity.TrustedDeviceStore(Path.Combine(fixture.Root, "restarted"),
+                TimeProvider.System), Name = "test-node", Version = "1.0.0",
+            AdmitBudget = (run, _, _) => { resumed.Enqueue(run); return Task.FromResult(FleetBudgetAdmission.Admitted); },
+        });
+        try
+        {
+            await WaitUntilAsync(() => fixture.Provider.Prompts.Any(static prompt => prompt.Contains("The first held work.", StringComparison.Ordinal)), token);
+            var again = resumed.Single();
+            Assert.AreEqual((asked.RunId, asked.Nonce), (again.RunId, again.Nonce), "the restart asks the hold the first start asked");
+        }
+        finally
+        {
+            await restarted.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
     public async Task TheFirstPromptOfASessionInAnEnvironment_IsAdmittedToTheBudgetsToo()
     {
         var token = TestContext.CancellationToken;

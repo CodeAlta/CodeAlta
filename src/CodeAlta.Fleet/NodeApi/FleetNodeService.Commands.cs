@@ -91,8 +91,8 @@ public sealed partial class FleetNodeService
         {
             var selection = Selection(parameters.Selection, provider.ProviderId.Value, session.AgentPromptId);
             // The budgets of the machine admit the first run: it may wait for its owner, the creation does not.
-            send = await WithinBudgetAsync(session.SessionId, session, parameters.Title, HeldSendOf(retryKey, session.SessionId, prompt, parameters.Title, selection))
-                .ConfigureAwait(false);
+            send = await WithinBudgetAsync(session, parameters.Title,
+                HeldSendOf(retryKey, session.SessionId, prompt, parameters.Title, selection) with { BudgetRunId = session.SessionId }).ConfigureAwait(false);
         }
 
         return new FleetCreateSessionResult(session.SessionId, provider.ProviderId.Value, send);
@@ -121,8 +121,8 @@ public sealed partial class FleetNodeService
             {
                 var selection = Selection(parameters.Selection, provider.ProviderId.Value, session.AgentPromptId);
                 // Admitted to its environment, the first run is admitted to the budgets as any other: one may stop or hold it.
-                var sent = await WithinBudgetAsync(session.SessionId, session, parameters.Title, HeldSendOf(retryKey, session.SessionId, prompt, parameters.Title, selection))
-                    .ConfigureAwait(false);
+                var sent = await WithinBudgetAsync(session, parameters.Title,
+                    HeldSendOf(retryKey, session.SessionId, prompt, parameters.Title, selection) with { BudgetRunId = session.SessionId }).ConfigureAwait(false);
                 if (sent.Code == FleetBudgetCommandStatuses.Reached) LogInfo($"The first prompt of the session {session.SessionId} was stopped by a budget.");
             }
         }
@@ -197,7 +197,7 @@ public sealed partial class FleetNodeService
 
         var selection = Selection(parameters.Selection, session.ResolvedProviderKey, session.AgentPromptId);
         // A send the runtime knows already (a retry) is answered as it was; a new one starts a run the budgets admit first.
-        return await WithinBudgetAsync(retryKey, session, null, HeldSendOf(retryKey, session.SessionId, text, null, selection)).ConfigureAwait(false);
+        return await WithinBudgetAsync(session, null, HeldSendOf(retryKey, session.SessionId, text, null, selection)).ConfigureAwait(false);
     }
 
     private async Task<FleetQueueResult> QueueAsync(FleetNodeCall call, FleetQueueParams parameters, CancellationToken cancellationToken)
