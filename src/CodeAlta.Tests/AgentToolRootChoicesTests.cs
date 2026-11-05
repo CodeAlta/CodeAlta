@@ -47,7 +47,10 @@ public sealed class AgentToolRootChoicesTests
         Assert.AreEqual("object", schema.GetProperty("type").GetString(), text);
         var properties = schema.GetProperty("properties");
         CollectionAssert.AreEquivalent(new[] { "id", "kind", "key" }, properties.EnumerateObject().Select(static property => property.Name).ToArray(), text);
-        Assert.AreEqual("string", properties.GetProperty("key").GetProperty("type").GetString(), text);
+        // The first branch takes any other key, so that `key` may be anything there: its definition stays as a hint.
+        Assert.AreEqual("""{"anyOf":[{"type":"string"},{}]}""", properties.GetProperty("key").GetRawText(), text);
+        // The second branch is closed: `id` is a string wherever it is valid.
+        Assert.AreEqual("""{"type":"string"}""", properties.GetProperty("id").GetRawText(), text);
         // The two branches give the property two definitions: the merged one takes either value.
         CollectionAssert.AreEqual(
             new[] { "id", "key" },
@@ -70,8 +73,8 @@ public sealed class AgentToolRootChoicesTests
         AssertMergedChoice(merged);
         // The definitions stay for the references inside the properties.
         Assert.IsTrue(merged.TryGetProperty("$defs", out _));
-        // The root stays open: a branch that was closed only closed its own choice.
-        Assert.IsFalse(merged.TryGetProperty("additionalProperties", out _));
+        // The root stays open, as the first branch is: a branch that was closed only closed its own choice.
+        Assert.AreEqual(JsonValueKind.True, merged.GetProperty("additionalProperties").ValueKind);
     }
 
     [TestMethod]
@@ -131,6 +134,39 @@ public sealed class AgentToolRootChoicesTests
         StringAssert.Contains(merged.GetProperty("description").GetString(), "exactly one of");
     }
 
+    // {"id":"T-1"} is valid through the map: the merged schema must not make `id` an integer, nor close the root.
+    [TestMethod]
+    public void ABranchThatTakesOtherKeys_KeepsWhatItTakes_ForThePropertiesOfTheOtherBranches()
+    {
+        using var schema = JsonDocument.Parse(
+            """
+            {
+              "oneOf": [
+                { "type": "object", "properties": { "id": { "type": "integer" } }, "required": ["id"], "additionalProperties": false },
+                { "type": "object", "additionalProperties": { "type": "string" } },
+                { "type": "object", "properties": { "tag": { "type": "boolean" } }, "required": ["tag"], "additionalProperties": false,
+                  "patternProperties": { "^x-": { "type": "number" } } }
+              ]
+            }
+            """);
+
+        Assert.IsTrue(AgentToolRootChoices.TryMerge(schema.RootElement, out var merged));
+
+        var properties = merged.GetProperty("properties");
+        Assert.AreEqual("""{"anyOf":[{"type":"integer"},{"type":"string"},{"type":"number"}]}""", properties.GetProperty("id").GetRawText());
+        Assert.AreEqual("""{"anyOf":[{"type":"boolean"},{"type":"string"}]}""", properties.GetProperty("tag").GetRawText());
+        Assert.AreEqual("""{"anyOf":[{"type":"string"},{"type":"number"}]}""", merged.GetProperty("additionalProperties").GetRawText(),
+            "The keys the root does not declare take what any branch takes for them.");
+        Assert.IsFalse(merged.TryGetProperty("required", out _), "The map requires nothing.");
+
+        using var unconstrained = JsonDocument.Parse(
+            """{"anyOf":[{"properties":{"id":{"type":"integer"}},"required":["id"],"additionalProperties":false},{"type":"object"}]}""");
+        Assert.IsTrue(AgentToolRootChoices.TryMerge(unconstrained.RootElement, out merged));
+        Assert.AreEqual("""{"anyOf":[{"type":"integer"},{}]}""", merged.GetProperty("properties").GetProperty("id").GetRawText(),
+            "A branch that takes any key leaves `id` without a constraint.");
+        Assert.AreEqual(JsonValueKind.True, merged.GetProperty("additionalProperties").ValueKind);
+    }
+
     [TestMethod]
     public void ASchemaWithoutAChoiceAtItsRoot_IsLeftAsItIs()
     {
@@ -169,6 +205,8 @@ public sealed class AgentToolRootChoicesTests
         Assert.AreEqual("mcp__tracker__findIssue", (string?)tool["name"]);
         using var sent = JsonDocument.Parse(tool["input_schema"]!.ToJsonString());
         AssertMergedChoice(sent.RootElement);
+        // The merged root says it stays open (the SDK adds additionalProperties to a schema that has none).
+        Assert.AreEqual(JsonValueKind.True, sent.RootElement.GetProperty("additionalProperties").ValueKind, sent.RootElement.GetRawText());
     }
 
     private sealed class CapturingHandler(List<JsonNode> bodies, string stream) : HttpMessageHandler
