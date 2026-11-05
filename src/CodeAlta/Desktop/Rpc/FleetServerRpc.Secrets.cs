@@ -12,6 +12,9 @@ internal sealed partial class FleetServerService
 {
     private const int MaximumValue = 64 * 1024;
 
+    // The name shown for the environment of an approval this computer cannot verify, which it does not approve.
+    private const string UnverifiedEnvironment = "An environment this computer cannot verify";
+
     /// <summary>The secrets, variables, environments and approvals of this computer's person at a server.</summary>
     [NeoRpcMethod("secrets")]
     public async Task<FleetSecretsOverview> SecretsAsync(FleetServerLinkRequest request, CancellationToken cancellationToken)
@@ -39,14 +42,19 @@ internal sealed partial class FleetServerService
                 ? new FleetEnvironmentView(pair.Environment.Id, definition.Name, (int)Math.Min(definition.Number, int.MaxValue), [.. definition.Approvers], [.. definition.Approvers.Select(PersonName)],
                     [.. definition.MachineLabels], [.. definition.Automations], true)
                 : new FleetEnvironmentView(pair.Environment.Id, pair.Environment.Name, (int)Math.Min(pair.Environment.Version, int.MaxValue), [], [], [], [], false)).ToArray();
-            var approvers = read.Environments.Where(static pair => pair.Definition is not null)
-                .ToDictionary(static pair => pair.Environment.Id, static pair => pair.Definition!.Approvers, StringComparer.Ordinal);
-            var approvals = read.Approvals.Select(approval => new FleetApprovalView(approval.Id, approval.EnvironmentName, DeviceName(approval.MachineId), approval.RunId, approval.Title,
-                approval.Status, approval.RequestedAt, approval.Status == FleetApprovalStates.Pending && approvers.TryGetValue(approval.EnvironmentId, out var people)
-                    && people.Contains(read.PersonId, StringComparer.Ordinal)
-                    // Only a run its machine asked itself is approved: never one the server made up or changed.
-                    && read.Manager.Devices.Current is { } list && CodeAlta.Fleet.Server.FleetApprovalRequests.IsAskedBy(approval, list, out _),
-                CodeAlta.Fleet.Server.FleetSecretsManager.ReviewOf(approval))).ToArray();
+            // The environment of an approval is named by its definition as this computer verified it, at the version the machine asked:
+            // never by the name the server lists, which the person would otherwise review and sign.
+            var verified = read.Environments.Select(static pair => pair.Definition).OfType<FleetEnvironmentDefinition>().ToArray();
+            var approvals = read.Approvals.Select(approval =>
+            {
+                var environment = CodeAlta.Fleet.Server.FleetSecretsManager.VerifiedEnvironmentOf(approval, verified);
+                return new FleetApprovalView(approval.Id, environment?.Name ?? UnverifiedEnvironment, DeviceName(approval.MachineId), approval.RunId, approval.Title,
+                    approval.Status, approval.RequestedAt, approval.Status == FleetApprovalStates.Pending && environment is not null
+                        && environment.Approvers.Contains(read.PersonId, StringComparer.Ordinal)
+                        // Only a run its machine asked itself is approved: never one the server made up or changed.
+                        && read.Manager.Devices.Current is { } list && CodeAlta.Fleet.Server.FleetApprovalRequests.IsAskedBy(approval, list, out _),
+                    environment is null ? CodeAlta.Fleet.Server.FleetSecretsManager.ReviewOf(approval) : CodeAlta.Fleet.Server.FleetSecretsManager.ReviewOf(approval, environment));
+            }).ToArray();
             var spaces = Spaces is null ? [] : await Spaces.LoadAsync(cancellationToken).ConfigureAwait(false);
             var linked = read.ScopeNames;
             return new FleetSecretsOverview("ok", null, secrets, environmentViews, approvals,

@@ -272,6 +272,37 @@ public sealed class FleetSecretsManager
     }
 
     /// <summary>
+    /// Gives the environment of an approval as this device verified it: among the definitions it verified, the one of that
+    /// environment at the version the machine asked, not taken away. Its name is the one a person reviews, never the one the
+    /// server lists with the approval.
+    /// </summary>
+    /// <param name="approval">The approval.</param>
+    /// <param name="verified">The definitions this device verified.</param>
+    /// <returns>The definition; null when this device verified none of that environment and version.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static FleetEnvironmentDefinition? VerifiedEnvironmentOf(FleetApprovalDto approval, IEnumerable<FleetEnvironmentDefinition> verified)
+    {
+        ArgumentNullException.ThrowIfNull(approval);
+        ArgumentNullException.ThrowIfNull(verified);
+        return verified.FirstOrDefault(definition => !definition.Removed && definition.EnvironmentId == approval.EnvironmentId && definition.Number == approval.EnvironmentVersion);
+    }
+
+    /// <summary>
+    /// Gives what a person reviews of an approval (<see cref="ReviewOf(FleetApprovalDto)"/>), under the name of the environment
+    /// its definition, as this device verified it, gives.
+    /// </summary>
+    /// <param name="approval">The approval as it was shown.</param>
+    /// <param name="environment">The environment as this device verified it (<see cref="VerifiedEnvironmentOf"/>).</param>
+    /// <returns>The text, the same for the same approval.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static string ReviewOf(FleetApprovalDto approval, FleetEnvironmentDefinition environment)
+    {
+        ArgumentNullException.ThrowIfNull(approval);
+        ArgumentNullException.ThrowIfNull(environment);
+        return ReviewOf(approval with { EnvironmentName = environment.Name });
+    }
+
+    /// <summary>
     /// Gives what a person reviews of an approval, as a short text that the approval they click must still match: its id,
     /// the environment, its name and version, the machine, the run, the nonce, the automation and the title.
     /// </summary>
@@ -290,11 +321,12 @@ public sealed class FleetSecretsManager
     /// <summary>
     /// Approves the run a person reviewed, which waits for an environment: this device signs an approval bound to that
     /// environment and its version, the machine, the run and the nonce the machine chose, valid for <see cref="ApprovalLifetime"/>.
-    /// The approval is read again first and must be the one reviewed (<see cref="ReviewOf"/>): a server that answers another
-    /// run, machine or nonce for the same approval gets nothing signed.
+    /// The approval is read again first and must be the one reviewed (<see cref="ReviewOf(FleetApprovalDto, FleetEnvironmentDefinition)"/>): a server
+    /// that answers another run, machine or nonce for the same approval gets nothing signed. Its environment is the one this device
+    /// verifies, at the version the machine asked, and the name reviewed is the one that definition gives: never one the server lists.
     /// </summary>
     /// <param name="approvalId">The approval.</param>
-    /// <param name="reviewed">What the person reviewed of it (<see cref="ReviewOf"/> of the approval shown).</param>
+    /// <param name="reviewed">What the person reviewed of it (<see cref="ReviewOf(FleetApprovalDto, FleetEnvironmentDefinition)"/> of the approval shown).</param>
     /// <param name="cancellationToken">Cancels the calls.</param>
     /// <returns>The approval as the server holds it now.</returns>
     /// <exception cref="ArgumentException">An argument is empty, or this device is not a controller device of the list.</exception>
@@ -310,7 +342,12 @@ public sealed class FleetSecretsManager
         var person = PersonOf(list);
         using var client = Client();
         var asked = await client.GetApprovalAsync(approvalId, cancellationToken).ConfigureAwait(false);
-        if (asked.Id != approvalId || !string.Equals(ReviewOf(asked), reviewed, StringComparison.Ordinal))
+        var environments = await client.ListEnvironmentsAsync(cancellationToken).ConfigureAwait(false);
+        var verified = environments.Environments.Select(environment => FleetEnvironmentDocuments.TryVerify(environment.Signed, list, Access?.Invoke(), _devices.Identity.DeviceId,
+            out var definition, out _) ? definition : null).OfType<FleetEnvironmentDefinition>();
+        if (VerifiedEnvironmentOf(asked, verified) is not { } environment)
+            throw new InvalidDataException("The environment of the approval is not one this device verifies at the version the machine asked: nothing is signed.");
+        if (asked.Id != approvalId || !string.Equals(ReviewOf(asked, environment), reviewed, StringComparison.Ordinal))
             throw new InvalidDataException("The approval changed since it was shown: read the approvals again before approving.");
         // What the machine asked itself, never a request the server made up or changed.
         if (!FleetApprovalRequests.IsAskedBy(asked, list, out var notAsked)) throw new InvalidDataException($"The run is not one its machine asked: {notAsked}.");

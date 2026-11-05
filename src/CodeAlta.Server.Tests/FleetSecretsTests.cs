@@ -571,6 +571,28 @@ public sealed class FleetSecretsTests
     }
 
     [TestMethod]
+    public async Task AnApproval_IsReviewedUnderTheNameItsSignedDefinitionGives_NeverTheOneTheServerLists()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var list = await fleet.NodeListAsync();
+        var person = list.Members[fleet.DesktopKey.DeviceId].OwnerId!;
+        var production = await fleet.Manager.PutEnvironmentAsync("production", [person], [], [], false, CancellationToken.None);
+        using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        var nonce = FleetApprovalRequests.Nonce(fleet.NodeKey, list.OrganizationId!, production.Id, 1, "run-1", null);
+        var asked = await node.RequestApprovalAsync(production.Id, new RequestFleetApprovalRequest("run-1", nonce, 1, null, null));
+
+        // From the first listing on, the server labels the run of production as one of staging: what the person reviews is that label.
+        using var swap = new ApprovalSwapHandler { InnerHandler = new HttpClientHandler(), Swap = approval => approval with { EnvironmentName = "staging" } };
+        var manager = new FleetSecretsManager(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey,
+            Path.Combine(fleet.Root.Path, "desktop-link", FleetOrganizationDevices.PinFileName), swap));
+        var spoofed = (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single() with { EnvironmentName = "staging" };
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => manager.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(spoofed), CancellationToken.None),
+            "a review of the name the server made up signs nothing");
+        Assert.AreEqual(0, swap.Sent);
+        Assert.AreEqual(FleetApprovalStates.Pending, (await node.GetApprovalAsync(asked.Id)).Status);
+    }
+
+    [TestMethod]
     public async Task AnApproval_IsGivenOnlyForARunTheMachineAskedItself()
     {
         await using var fleet = await SecretsFixture.StartAsync();
