@@ -621,8 +621,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     // then those the fleet gave it for the environment, the project and the space of the session, never a
                     // host-only one; each use of a value of the fleet is recorded for the session.
                     ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog),
+                        // Each secret is masked from the moment it is given, before the processes of the session take it.
                         (identity, scope) => SpaceIdentityEnvironment.Create(identity, SecretReferenceResolver.ForScope(catalogOptions.GlobalRoot, scope, shell: true,
-                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null).Read,
+                                scope.RunId is { } run ? used => secretUses.Record(used, run) : null, secretMasker.Retain).Read,
                             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
                         new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles,
                         // An admission to an environment is kept across a restart of the host, bound to the rules and the approval that admitted it.
