@@ -113,7 +113,7 @@ public sealed class DocumentationRpcTests
         File.WriteAllText(Path.Combine(outside, "sessions.md"), "# Outside\n\nOutside-only sentinel.");
         File.WriteAllBytes(Path.Combine(outside, "img", "alta-desktop-home.webp"), [9, 8, 7]);
         var original = fixture.GuideRoot + ".indexed";
-        Directory.Move(fixture.GuideRoot, original);
+        MoveDirectory(fixture.GuideRoot, original);
         try
         {
             try { Directory.CreateSymbolicLink(fixture.GuideRoot, outside); }
@@ -134,7 +134,24 @@ public sealed class DocumentationRpcTests
         finally
         {
             if (Directory.Exists(fixture.GuideRoot)) Directory.Delete(fixture.GuideRoot);
-            Directory.Move(original, fixture.GuideRoot);
+            MoveDirectory(original, fixture.GuideRoot);
+        }
+    }
+
+    // Windows briefly refuses to move a folder whose files were just written while a scanner reads them: the move is tried again.
+    private static void MoveDirectory(string from, string to)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                Directory.Move(from, to);
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException && attempt < 40)
+            {
+                Thread.Sleep(50);
+            }
         }
     }
 

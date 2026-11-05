@@ -192,7 +192,7 @@ public sealed class ShippedDocumentationTests
         else File.WriteAllText(outsideFile, "# Outside\n\nOutside-only sentinel.");
 
         var original = replaced + ".indexed";
-        Directory.Move(replaced, original);
+        MoveDirectory(replaced, original);
         try
         {
             CreateDirectoryLink(replaced, outside);
@@ -209,12 +209,29 @@ public sealed class ShippedDocumentationTests
         finally
         {
             if (Directory.Exists(replaced)) Directory.Delete(replaced);
-            Directory.Move(original, replaced);
+            MoveDirectory(original, replaced);
         }
 
         // The same cached allowlist still works once the real directory is put back.
         if (image) CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, documentation.ReadImage(name)!.Content.ToArray());
         else StringAssert.Contains(documentation.ReadPage(name)!.ToMarkdown(), "The indexed page.");
+    }
+
+    // Windows briefly refuses to move a folder whose files were just written while a scanner reads them: the move is tried again.
+    private static void MoveDirectory(string from, string to)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                Directory.Move(from, to);
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException && attempt < 40)
+            {
+                Thread.Sleep(50);
+            }
+        }
     }
 
     [TestMethod]

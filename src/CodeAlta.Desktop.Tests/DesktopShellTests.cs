@@ -573,7 +573,26 @@ public sealed class DesktopShellTests
             Assert.IsTrue(Holds(bytes, "alta.exe"), "the target");
             Assert.IsTrue(Holds(bytes, DesktopIntegration.WindowsAppId), "the application identity");
         }
-        finally { Directory.Delete(root, recursive: true); }
+        finally { DeleteFolder(root); }
+    }
+
+    // The shell (an indexer, a scanner) opens a shortcut just written for a moment: the folder of the test is deleted once it
+    // lets it go, and a temporary folder is left behind rather than failing a test that passed.
+    private static void DeleteFolder(string folder)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                if (attempt == 40) return;
+                Thread.Sleep(50);
+            }
+        }
     }
 
     // Text in a shell link is stored in either width, at any offset.

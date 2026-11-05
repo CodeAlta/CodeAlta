@@ -145,13 +145,27 @@ public abstract class BrowserToolsTests
         StringAssert.Contains(outside.Text, "outside the folders");
     }
 
+    // A popup gets its tab a moment after the click that opens it: on a loaded machine the click answers first, and the next
+    // answer names the page it opened, as an agent sees it.
+    private static async Task<string> WaitForPopupAsync(BrowserSession session, string clickAnswer)
+    {
+        var answer = clickAnswer;
+        for (var attempt = 0; !answer.Contains("## Opened pages", StringComparison.Ordinal) && attempt < 100; attempt++)
+        {
+            await Task.Delay(100);
+            answer = await session.OkAsync("list_pages");
+        }
+
+        return answer;
+    }
+
     [TestMethod]
     public async Task LinksNavigateAndPopupsOpenPages()
     {
         await using var session = Host.NewSession();
         await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/form")}}"}""");
         var snapshot = await session.OkAsync("take_snapshot");
-        var popup = await session.OkAsync("click", $$"""{"uid":"{{BrowserToolTesting.Uid(snapshot, "link \"Open in a new tab\"")}}"}""");
+        var popup = await WaitForPopupAsync(session, await session.OkAsync("click", $$"""{"uid":"{{BrowserToolTesting.Uid(snapshot, "link \"Open in a new tab\"")}}"}"""));
         StringAssert.Contains(popup, "## Opened pages");
 
         var link = await session.OkAsync("click", $$"""{"uid":"{{BrowserToolTesting.Uid(snapshot, "link \"Go to the second page\"")}}"}""");
@@ -176,7 +190,7 @@ public abstract class BrowserToolsTests
         await using var session = Host.NewSession((url, _) => ValueTask.FromResult(url.AbsolutePath == "/second" ? "the user did not allow it." : null));
         await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/form")}}"}""");
         var snapshot = await session.OkAsync("take_snapshot");
-        await session.OkAsync("click", $$"""{"uid":"{{BrowserToolTesting.Uid(snapshot, "link \"Open in a new tab\"")}}"}""");
+        await WaitForPopupAsync(session, await session.OkAsync("click", $$"""{"uid":"{{BrowserToolTesting.Uid(snapshot, "link \"Open in a new tab\"")}}"}"""));
         await session.OkAsync("select_page", """{"pageId":2}""");
         foreach (var (tool, arguments) in new[] { ("take_snapshot", "{}"), ("take_screenshot", "{}"), ("list_console_messages", "{}"), ("evaluate_script", """{"function":"() => document.title"}""") })
         {
