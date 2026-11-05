@@ -93,6 +93,12 @@ internal sealed class DesktopFleet : IAsyncDisposable
     /// <summary>Gets the hosts of the paired machines, in the order they were paired.</summary>
     public IReadOnlyList<RemoteSessionHost> Hosts => Volatile.Read(ref _hosts);
 
+    /// <summary>Gives the ids of the spaces the machines of this computer publish to a server, as each said it last.</summary>
+    /// <returns>The ids, once each.</returns>
+    public IReadOnlyCollection<string> PublishedSpaces()
+        => [.. Hosts.SelectMany(static host => host.Listing.Info?.Spaces ?? []).Where(static space => space.Published && !string.IsNullOrWhiteSpace(space.Id))
+            .Select(static space => space.Id).Distinct(StringComparer.Ordinal)];
+
     /// <summary>Gets the device id of this computer, as its paired machines authenticate it.</summary>
     public string DeviceId => Identity().DeviceId;
 
@@ -167,8 +173,9 @@ internal sealed class DesktopFleet : IAsyncDisposable
     {
         preview = null;
         if (!PairingPayload.TryParse(link?.Trim(), DateTimeOffset.UtcNow, out var payload, out error)) return false;
+        // A machine reached through its server only has a host but no pairing to replace.
         preview = new FleetPairingPreview(payload.DeviceName, payload.DeviceId, payload.Fingerprint.ToShortWords(), payload.Addresses, payload.ExpiresAt,
-            Find(payload.DeviceId) is not null);
+            Find(payload.DeviceId) is { IsPaired: true });
         return true;
     }
 

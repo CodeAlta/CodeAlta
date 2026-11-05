@@ -93,6 +93,8 @@ export const fleetAuditMessages = {
     "スペースのキーをデバイスに付与", "将空间密钥给了设备"],
   "Opened a channel to a machine": ["Abrió un canal a una máquina", "A ouvert un canal vers une machine", "Hat einen Kanal zu einer Maschine geöffnet", "マシンへのチャネルを開いた",
     "打开了到机器的通道"],
+  "Closed a channel to a machine": ["Cerró un canal a una máquina", "A fermé un canal vers une machine", "Hat einen Kanal zu einer Maschine geschlossen", "マシンへのチャネルを閉じた",
+    "关闭了到机器的通道"],
   "Invited a person": ["Invitó a una persona", "A invité une personne", "Hat eine Person eingeladen", "ユーザーを招待", "邀请了一个人"],
   "Changed the role of a person": ["Cambió el rol de una persona", "A changé le rôle d’une personne", "Hat die Rolle einer Person geändert", "ユーザーのロールを変更", "更改了某人的角色"],
   "Deprovisioned a person": ["Dio de baja a una persona", "A désactivé une personne", "Hat eine Person deprovisioniert", "ユーザーのプロビジョニングを解除", "停用了某人"],

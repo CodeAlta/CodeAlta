@@ -295,7 +295,14 @@ public sealed record FleetPairRedeemResult(string NodeName, string NodeDeviceId,
 /// <summary>A space of the node.</summary>
 /// <param name="Id">Its id.</param>
 /// <param name="Name">Its name.</param>
-public sealed record FleetSpaceInfo(string Id, string Name);
+public sealed record FleetSpaceInfo(string Id, string Name)
+{
+    /// <summary>
+    /// Gets whether the node publishes the space to a server: a controller device of its person keeps a key of it, which seals its
+    /// titles and projects; false for a space the node keeps to itself, and from an older node, which does not say.
+    /// </summary>
+    public bool Published { get; init; }
+}
 
 /// <summary>A project of the node.</summary>
 /// <param name="Id">Its id.</param>

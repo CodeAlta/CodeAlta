@@ -10,7 +10,7 @@ export type AuditCategory = Readonly<{ id: string; label: MessageKey; actions: r
 export const auditCategories: readonly AuditCategory[] = Object.freeze([
   { id: "all", label: "Everything", actions: [] },
   { id: "sign-in", label: "Sign-in", actions: ["sign_in.", "passkey.", "server.setup"] },
-  { id: "devices", label: "Devices and machines", actions: ["device.", "enrollment_token.", "recovery_key.", "metadata_key.", "relay."] },
+  { id: "devices", label: "Devices and machines", actions: ["device.", "enrollment_token.", "recovery_key.", "metadata_key.", "relay.", "relay"] },
   { id: "access", label: "People and access", actions: ["person.", "team.", "grant.", "service_identity.", "owner.", "transfer.", "access.", "access_document."] },
   { id: "policies", label: "Policies and the kill switch", actions: ["policy.", "telemetry.", "update.policy."] },
   { id: "automations", label: "Automations", actions: ["automation.", "hook.", "environment."] },
@@ -127,6 +127,7 @@ export const actionLabels: Readonly<Record<string, MessageKey>> = Object.freeze(
   "metadata_key.create": "Made a key of a space",
   "metadata_key.wrap": "Gave a key of a space to devices",
   "relay.open": "Opened a channel to a machine",
+  "relay": "Closed a channel to a machine",
   "person.invite": "Invited a person",
   "person.role": "Changed the role of a person",
   "person.deprovision": "Deprovisioned a person",

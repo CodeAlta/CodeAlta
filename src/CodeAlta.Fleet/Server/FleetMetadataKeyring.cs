@@ -10,7 +10,7 @@ namespace CodeAlta.Fleet.Server;
 /// The metadata keys of the spaces of this device's person at one server (<c>doc/fleet/security-and-privacy.md</c>,
 /// keys): one key per space, with its epochs. It reads the copies wrapped to this device and takes those a controller
 /// device of its person signed (<see cref="FleetKeyWrap.Unwrap(string, string, int, string?, DeviceIdentity, FleetDeviceListState)"/>);
-/// on a controller device, it makes the key of a space this device links to the server when the person has none,
+/// on a controller device, it makes the key of a space this device links to the server, or that a machine of its person publishes, when the person has none,
 /// makes a new epoch of a space once a device was removed from the list after its key was given, and wraps the keys it
 /// holds to the person's devices that lack them. The devices and their keys come from the device list as the anchor of
 /// the link verified it (<see cref="FleetOrganizationDevices"/>), never from the server's tables.
@@ -146,7 +146,10 @@ public sealed class FleetMetadataKeyring
     /// Reads the keys again: the copies of this device, and on a controller device, makes the key of a space this device
     /// links when the person has none, a new epoch after a removal, and wraps the keys it holds to the person's devices that lack them.
     /// </summary>
-    /// <param name="spaces">The ids of the spaces on this device that publish to the server: only those get a key that seals.</param>
+    /// <param name="spaces">
+    /// The ids of the spaces that get a key that seals: those this device publishes to the server and, on a controller device, those the
+    /// machines of its person publish (it seals only the sessions it publishes).
+    /// </param>
     /// <param name="cancellationToken">Cancels the calls.</param>
     /// <returns>The keys that seal, by the id of their space on this device.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="spaces"/> is <see langword="null"/>.</exception>

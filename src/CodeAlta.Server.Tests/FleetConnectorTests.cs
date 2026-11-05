@@ -358,6 +358,39 @@ public sealed partial class FleetConnectorTests
     }
 
     [TestMethod]
+    public async Task AMachinePublishingASpaceTheControllerDoesNotLink_SealsItsTitles_AndTheControllersOwnSessionsOfItStayUnpublished()
+    {
+        await using var fleet = await FleetFixture.StartAsync();
+        var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey));
+        var nodeKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey));
+        // The desktop links its space "work" only; the node publishes its Default, which the desktop knows from the machine.
+        var desktopSource = new FakeSource();
+        desktopSource.Set(Session("d1", "default") with { Title = "My own default session" }, Session("d2", "work") with { Title = "Linked work" });
+        await using var desktop = new FleetConnector(new FleetConnectorOptions
+        {
+            ServerAddress = fleet.Server.BaseAddress, Identity = fleet.DesktopKey, OutboxPath = Path.Combine(fleet.Root.Path, "desktop-outbox.json"),
+            Client = new FleetClientInfo("desktop", "4.0.0", "windows"), Source = desktopSource, PublishesSpace = static space => space == "work",
+            LinkedSpaces = static () => ["work"], MachineSpaces = static () => ["default"], MetadataKeys = desktopKeys,
+            MinimumBackoff = TimeSpan.FromMilliseconds(100), MaximumBackoff = TimeSpan.FromMilliseconds(500), PublishDelay = TimeSpan.FromMilliseconds(20),
+            PollInterval = TimeSpan.FromMilliseconds(200),
+        });
+        desktop.Start();
+        // The desktop makes the key of the machine's space although it links only "work" (a node asks for keys every 30 seconds while it lacks one).
+        await WaitForAsync(() => Task.FromResult(desktopKeys.CurrentFor("default") is not null));
+        var nodeSource = new FakeSource();
+        nodeSource.Set(Session("n1", "default") with { Title = "Started from the desktop" });
+        await using var node = fleet.NodeConnector(nodeSource, static space => space is null or "default", keys: nodeKeys);
+        node.Start();
+
+        await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()).Any(static session => session.Id == "n1" && session.SealedMetadata is not null));
+        var listed = (await fleet.Desktop.ListSessionsAsync()).ToDictionary(static session => session.Id);
+        Assert.IsTrue(desktopKeys.TryOpen("n1", listed["n1"].SealedMetadata, out var opened), "the desktop opens the title of the machine's session");
+        Assert.AreEqual("Started from the desktop", opened!.Title);
+        await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()).Any(static session => session.Id == "d2"));
+        Assert.IsFalse((await fleet.Desktop.ListSessionsAsync()).Any(static session => session.Id == "d1"), "the desktop's own Default sessions stay unpublished");
+    }
+
+    [TestMethod]
     public async Task TwoSpacesMadeForOneSpaceOfThePersonConvergeOnTheFirstMade()
     {
         await using var fleet = await FleetFixture.StartAsync();

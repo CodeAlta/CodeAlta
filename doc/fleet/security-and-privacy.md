@@ -78,8 +78,11 @@ snapshot never grants a whole space.
 - The server knows a space only by an opaque id. Which space a key is for on the devices (the space's id there) is
   sealed with that key, so the devices of a person agree on it without the server learning it: a device that links a
   space takes the key of the space with the same id, and the first one made wins when two devices made one at once.
-  Only a controller device makes a space's key, so a node seals the titles of a space once a controller device of its
-  person linked a space of the same id. A space that is unlinked seals nothing more with its key.
+  Only a controller device makes a space's key: for the spaces it links, and for the spaces its person's machines publish,
+  which each machine names to it over their channel, whether or not the controller device links them. Making the key and
+  publishing are separate: linking alone decides which sessions of the controller device are published, and the key still
+  reaches only the devices and machines of its person (or what the signed access document gives a team or organization
+  machine). A space that is unlinked seals nothing more with its key.
 - Revoking someone's access rotates the keys they held (a new epoch); what they already read cannot be taken back,
   and deleting ciphertext at the server does not revoke copies a recipient made.
 - **The server's own secrets** are the few it must use itself: the client secret of the company's sign-in and the

@@ -45,6 +45,12 @@ public sealed class FleetServerConnectionsOptions
     /// <summary>Gets whether the connectors follow the directory of their organization (a desktop does).</summary>
     public bool WatchDirectory { get; init; }
 
+    /// <summary>
+    /// Gets the ids of the spaces the machines of this device's person publish, which a controller device keeps keys of without
+    /// publishing its own sessions of them (<see cref="FleetConnectorOptions.MachineSpaces"/>); null for none.
+    /// </summary>
+    public Func<IReadOnlyCollection<string>>? MachineSpaces { get; init; }
+
     /// <summary>Gets how often the file of the links is read again, for a link another command of the profile made (<c>altanode join</c>).</summary>
     public TimeSpan ReloadInterval { get; init; } = TimeSpan.FromSeconds(5);
 
@@ -374,6 +380,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
             StatisticsFromQuarter = FleetHostStatisticsSource.FirstQuarter(link.CreatedAt),
             PublishesSpace = linked.Contains,
             LinkedSpaces = () => linked.Ids,
+            MachineSpaces = _options.MachineSpaces,
             WatchDirectory = _options.WatchDirectory,
             Devices = devices,
             MetadataKeys = new FleetMetadataKeyring(devices),

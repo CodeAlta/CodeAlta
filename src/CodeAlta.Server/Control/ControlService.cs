@@ -273,11 +273,15 @@ public sealed class ControlService
             _directory.Watch(session);
             var organization = session.Device.OrganizationId;
             var devices = (await _store.ListDevicesAsync(organization, token).ConfigureAwait(false)).ToDictionary(static device => device.Id, StringComparer.Ordinal);
+            // A revoked device is no machine of the organization any more: neither it nor what it published is listed.
+            bool Revoked(string deviceId) => devices.TryGetValue(deviceId, out var device) && device.Status == DeviceStatuses.Revoked;
             var machines = (await _store.ListMachinesAsync(organization, token).ConfigureAwait(false))
+                .Where(machine => !Revoked(machine.DeviceId))
                 .Select(machine => machine.ToDirectory(devices.TryGetValue(machine.DeviceId, out var device) ? device.Kind : FleetDeviceKinds.Node))
                 .ToArray();
-            var sessions = (await _store.ListSessionsAsync(organization, token).ConfigureAwait(false)).Select(static record => record.ToDirectory()).ToArray();
-            var presence = _presence.List(organization).Select(static online => online.GetPresence()).ToArray();
+            var sessions = (await _store.ListSessionsAsync(organization, token).ConfigureAwait(false)).Where(record => !Revoked(record.MachineId))
+                .Select(static record => record.ToDirectory()).ToArray();
+            var presence = _presence.List(organization).Select(static online => online.GetPresence()).Where(online => !Revoked(online.DeviceId)).ToArray();
             var snapshot = new FleetDirectorySnapshot(machines, sessions, presence);
             // Each device sees what access lets it see (doc/fleet/access-control.md): the events that follow are filtered alike.
             if (_directory.Visibility is { } visibility) snapshot = await visibility.FilterAsync(session.Device, snapshot, token).ConfigureAwait(false);

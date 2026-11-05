@@ -100,6 +100,11 @@ public sealed class FleetNodeApiTests
         var ready = info.Providers.Single(provider => provider.Key == "scripted");
         Assert.IsTrue(ready.IsDefault, "The node says which provider a session that names none runs on.");
         Assert.IsTrue(ready.Models.Any(model => model.Id == ready.DefaultModelId), "A ready provider lists its models, its default one among them.");
+        // The node says which of its spaces it publishes to a server: a controller device of its person keeps their keys.
+        Assert.IsFalse(info.Spaces.Single(space => space.Id == CodeAlta.Catalog.SpaceDescriptor.DefaultId).Published);
+        await fixture.Node.Host.SpaceCatalog.UpdateSettingsAsync(CodeAlta.Catalog.SpaceDescriptor.DefaultId,
+            settings => settings with { Fleet = new CodeAlta.Catalog.SpaceFleet("https://fleet.example") }, token);
+        Assert.IsTrue((await client.GetInfoAsync(token)).Spaces.Single(space => space.Id == CodeAlta.Catalog.SpaceDescriptor.DefaultId).Published);
 
         var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Remote session"), "create-1", token);
         Assert.AreEqual("scripted", created.ProviderKey, "A session that names no provider runs on the default one of the node.");

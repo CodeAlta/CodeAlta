@@ -101,6 +101,12 @@ public static class FleetServerMethods
         /// </summary>
         public const string SessionRemoved = "session_removed";
 
+        /// <summary>
+        /// A machine that left the organization (its device was revoked): <see cref="FleetDirectoryChange.Id"/> names it, and
+        /// a watcher forgets it with its sessions and its presence.
+        /// </summary>
+        public const string MachineRemoved = "machine_removed";
+
         /// <summary>A device that came online, went offline or changed state.</summary>
         public const string Presence = "presence";
 

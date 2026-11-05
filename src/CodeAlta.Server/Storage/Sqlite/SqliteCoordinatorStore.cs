@@ -475,6 +475,16 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
     }
 
     /// <inheritdoc />
+    public ValueTask<bool> RenameNodeAsync(string deviceId, string name, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        return WriteAsync((connection, transaction) => Execute(connection, transaction,
+            "UPDATE devices SET name = $name WHERE id = $device AND kind = $kind AND name <> $name",
+            ("$device", deviceId), ("$name", name), ("$kind", FleetDeviceKinds.Node)) > 0, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public ValueTask<SessionFactsPublication> PublishSessionFactsAsync(string deviceId, long sequence, IReadOnlyList<SessionRecord> facts, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(deviceId);

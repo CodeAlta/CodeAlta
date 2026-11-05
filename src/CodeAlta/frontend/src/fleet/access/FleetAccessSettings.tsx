@@ -17,7 +17,7 @@ export type FleetAccessApi = Pick<typeof fleetServer, "status" | "access" | "inv
   | "decideProposal" | "prepareAccessDocument" | "signAccessDocument" | "accessReview" | "setOnCall" | "setScopeProvider" | "deleteScopeProvider">;
 type Result = Promise<{ status: string; message?: string | null }>;
 type Run = (call: () => Result, done?: MessageKey) => Promise<boolean>;
-type Context = { overview: FleetAccessOverview; api: FleetAccessApi; epoch: string; linkId: string; busy: boolean; run: Run };
+type Context = { overview: FleetAccessOverview; api: FleetAccessApi; epoch: string; linkId: string; busy: boolean; run: Run; refresh: () => void };
 
 /** How often people and access are read again while the page shows them. */
 const pollMilliseconds = 15_000;
@@ -84,7 +84,7 @@ function ServerAccess({ server, epoch, api, titled }: { server: FleetServerView;
     {problem ? <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>
       : <ActivitySpinner size={16} />}
   </section>;
-  const context: Context = { overview, api, epoch, linkId: server.id, busy, run };
+  const context: Context = { overview, api, epoch, linkId: server.id, busy, run, refresh: () => setGeneration(value => value + 1) };
   const showAdvanced = isAdvanced(overview) || advanced;
   const waiting = attention(overview);
   return <section className="fleet-secrets-server fleet-access-server settings-grid" aria-label={server.url}>
@@ -195,15 +195,18 @@ function People({ context }: { context: Context }) {
 /** The form of an invitation, then the code and the address the person joins with. */
 function Invite({ context, onClose }: { context: Context; onClose: () => void }) {
   const { t, locale } = useShellLanguage();
-  const { overview, api, epoch, linkId, busy } = context;
+  const { overview, api, epoch, linkId, busy, refresh } = context;
   const [name, setName] = useState("");
   const [role, setRole] = useState("member");
   const [invitation, setInvitation] = useState<{ token: string; url: string | null; expiresAt: string | null } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const submit = async () => {
     const result = await api.invitePerson({ expectedEpoch: epoch, linkId, name: name.trim(), role }, call);
-    if (result.status === "ok" && result.token) setInvitation({ token: result.token, url: result.serverUrl, expiresAt: result.expiresAt });
-    else setProblem(result.message ?? result.status);
+    if (result.status === "ok" && result.token) {
+      setInvitation({ token: result.token, url: result.serverUrl, expiresAt: result.expiresAt });
+      // The person invited is listed from now on.
+      refresh();
+    } else setProblem(result.message ?? result.status);
   };
   if (invitation) return <div className="fleet-secret-new fleet-access-invitation" role="status">
     <p>{t("Give {name} this code and the address of the server. On their computer: Settings > Fleet > Server > Join an organization…", { name: name.trim() })}</p>

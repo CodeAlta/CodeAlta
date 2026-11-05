@@ -15,7 +15,7 @@ namespace CodeAlta.Server.Services;
 /// </summary>
 public sealed class SetupService
 {
-    private const int MaxNameLength = 128;
+    internal const int MaxNameLength = 128;
 
     private readonly ICoordinatorStore _store;
     private readonly SetupCodeStore _codes;

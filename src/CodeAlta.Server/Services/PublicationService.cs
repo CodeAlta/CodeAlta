@@ -67,6 +67,9 @@ public sealed class PublicationService
         var result = await _store.PublishInventoryAsync(machine, cancellationToken).ConfigureAwait(false);
         if (result.Applied)
         {
+            // A node renamed (altanode run --name) is listed by its new name in the devices too, as on the canvas.
+            if (device.Kind == FleetDeviceKinds.Node && kept.Name.Trim() is { Length: > 0 and <= SetupService.MaxNameLength } name && !name.Any(char.IsControl))
+                await _store.RenameNodeAsync(device.Id, name, cancellationToken).ConfigureAwait(false);
             _directory.Publish(device.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Machine, device.Id,
                 Machine: new FleetDirectoryMachine(device.Id, device.Kind, kept, now)));
         }

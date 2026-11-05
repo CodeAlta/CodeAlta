@@ -57,6 +57,8 @@ const api: FleetAccessApi = {
     controller: true, spaces: [], recoveryKey: true, shareUrl: null, stop: null }], deviceId: "desktop", words: "apple river stone", personName: null }) as never,
   access: async () => overview,
   invitePerson: async request => { calls.push(JSON.stringify({ invite: { name: request.name, role: request.role } }));
+    // The server lists the person invited from then on.
+    overview = { ...overview, people: [...overview.people, person(request.name.toLowerCase(), request.name, request.role ?? "member", { joined: false, devices: 0 })] };
     return { status: "ok", message: null, token: "aet_example-code", expiresAt: "2026-11-07T09:00:00Z", serverUrl: "https://home.example" }; },
   setPersonRole: record("role") as never, deprovisionPerson: async request => { calls.push(JSON.stringify({ deprovision: { personId: request.personId,
     successorKind: request.successorKind, successorId: request.successorId } })); return { status: "ok", message: null, transferred: 1, notRevoked: [] }; },

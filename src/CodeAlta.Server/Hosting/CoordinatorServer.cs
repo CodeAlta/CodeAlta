@@ -502,6 +502,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             FirstWayInWindow = signIn.FirstWayInWindow,
             // A device approved or revoked: the computers of owners key their grants of sealed content again for the devices of the grantees.
             DevicesChanged = organization => provider.GetRequiredService<AccessService>().Changed(organization),
+            Directory = provider.GetRequiredService<DirectoryHub>(),
         });
         services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time) { Metrics = metrics });
         // A machine given to another person answers to its owner record: its keys, values, environments, budgets and hooks follow it.

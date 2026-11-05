@@ -15,6 +15,11 @@ internal sealed partial class StatisticsEngine : IStatisticsPublication
     {
         ArgumentException.ThrowIfNullOrEmpty(sessionId);
         if (!IsInitialized()) return [];
-        return await _store.ReadPublishedRowsAsync(sessionId, fromQuarter, cancellationToken).ConfigureAwait(false);
+        var rows = await _store.ReadPublishedRowsAsync(sessionId, fromQuarter, cancellationToken).ConfigureAwait(false);
+        if (rows.Count == 0) return rows;
+        // The names the provider reported for the models the session was given, which the state of its facts keeps.
+        var journal = await _store.GetJournalAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var aliases = journal is { State.Length: > 0 } ? Facts.SessionFactsState.FromUtf8Json(journal.State).ModelAliases : null;
+        return PublishedModels.Attribute(rows, aliases);
     }
 }

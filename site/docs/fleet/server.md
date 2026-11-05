@@ -102,7 +102,7 @@ On a new computer, click **Recover with the recovery key…** on the empty **Ser
 
 ## Choose what a server sees
 
-A space publishes to a server only when you choose it: **Spaces on this server** on the server's card, or **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server. Each space has a key of its own, so the titles of one space never open with the key of another.
+A space publishes to a server only when you choose it: **Spaces on this server** on the server's card, or **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server. Each space has a key of its own, so the titles of one space never open with the key of another. Your computer makes the key of a space your machines publish without linking that space itself: their sessions show their titles, and your own sessions of that space stay unpublished.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-fleet-server-card.webp" alt="The card of the server in Settings > Fleet > Server: the spaces on this server with Open source linked, the recovery key kept, the machines and this computer with their state, sign-in, telemetry and updates" loading="lazy">

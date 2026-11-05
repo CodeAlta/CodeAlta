@@ -34,6 +34,11 @@ test("at home the page shows people and machines, invites a person with a code, 
       ["https://home.example", "aet_example-code"]);
     await page.shot("fleet-access-invitation");
     assert.deepEqual((await page.evaluate(calls) as unknown[])[0], { invite: { name: "Dana", role: "member" } });
+    // The person invited is listed at once, not at the next read of the page (15 seconds) or after Reload.
+    assert.equal(await page.evaluate(`new Promise(resolve => { const end = Date.now() + 3000; (function check() {
+      if (document.querySelector('[data-person=Dana]')) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 30); })(); })`), true,
+      "the person invited is listed without a reload");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('[data-person=Dana] .fleet-secret-tags .bp6-tag')].map(tag => tag.textContent)`), ["Invited"]);
 
     await page.evaluate(`[...document.querySelectorAll('.fleet-access-footer label')].find(label => label.textContent.includes('Show teams')).click()`);
     await page.until(`[...document.querySelectorAll('h2')].some(title => title.textContent === 'Teams')`, "the teams under Advanced");

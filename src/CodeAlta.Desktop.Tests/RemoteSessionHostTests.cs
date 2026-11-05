@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.Desktop.Fleet;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Desktop.SessionHosts;
@@ -200,6 +201,39 @@ public sealed class RemoteSessionHostTests
 
         Assert.IsTrue(await fixture.Service.RevokeAsync(fixture.ViewerIdentity.DeviceId));
         await WaitForAsync(() => host.State == RemoteMachineState.Unauthorized, "the machine to refuse this device", token);
+    }
+
+    [TestMethod]
+    public async Task DesktopFleet_APairingLinkOfAMachineReachedThroughItsServerOnly_IsNotPairedAlready()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        var registry = new SessionHostRegistry(new SessionHostRegistryTests.RecordingSessionHost(null));
+        var fleetRoot = Path.Combine(fixture.ViewerFleetRoot, "..", "desktop-fleet");
+        await using var fleet = new DesktopFleet(fleetRoot, registry.TakeMembership(), "desktop",
+            static (machine, identity) => new RemoteSessionHost(machine, cancellation => FleetNodeClient.ConnectAsync(machine, identity, cancellation), Quick));
+        await fleet.SyncOrganizationMachinesAsync([(fixture.NodeIdentity.DeviceId, "test-node")], token);
+        Assert.IsNotNull(fleet.Find(fixture.NodeIdentity.DeviceId), "The server lists the machine: this computer reaches it through its relay.");
+
+        Assert.IsTrue(fleet.TryPreview(fixture.CreatePairingLink(), out var preview, out _));
+        Assert.IsFalse(preview.AlreadyPaired, "A machine reached through its server only is not paired: pairing does not replace a pairing.");
+    }
+
+    [TestMethod]
+    public async Task DesktopFleet_GivesTheSpacesItsMachinesPublish_ForTheirKeys()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        // The machine publishes its Default to a server; this computer links no space of its own.
+        await fixture.Host.SpaceCatalog.UpdateSettingsAsync(SpaceDescriptor.DefaultId, settings => settings with { Fleet = new SpaceFleet("https://fleet.example") }, token);
+        var registry = new SessionHostRegistry(new SessionHostRegistryTests.RecordingSessionHost(null));
+        var fleetRoot = Path.Combine(fixture.ViewerFleetRoot, "..", "desktop-fleet");
+        await using var fleet = new DesktopFleet(fleetRoot, registry.TakeMembership(), "desktop",
+            static (machine, identity) => new RemoteSessionHost(machine, cancellation => FleetNodeClient.ConnectAsync(machine, identity, cancellation), Quick));
+        Assert.AreEqual(0, fleet.PublishedSpaces().Count);
+        await fleet.PairAsync(fixture.CreatePairingLink(), token);
+
+        await WaitForAsync(() => fleet.PublishedSpaces().Contains(SpaceDescriptor.DefaultId), "the space the machine publishes", token);
     }
 
     [TestMethod]

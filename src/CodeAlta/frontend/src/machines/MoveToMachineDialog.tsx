@@ -19,7 +19,7 @@ export function MoveToMachineDialog({ epoch, session, api = machines, onClose, o
   onClose: () => void; onMoved: (result: MachineMoveResult, machine: string) => void;
 }) {
   const { t } = useShellLanguage();
-  const [listed, setListed] = useState<{ machines: readonly MachineView[]; here: string } | null>(null);
+  const [listed, setListed] = useState<{ machines: readonly MachineView[]; here: string | null } | null>(null);
   const [target, setTarget] = useState<string | null | undefined>(undefined);
   const [preview, setPreview] = useState<MachineMovePreview | null>(null);
   const [reading, setReading] = useState(false);
@@ -34,13 +34,13 @@ export function MoveToMachineDialog({ epoch, session, api = machines, onClose, o
     void Promise.all([api.list({ expectedEpoch: epoch }, { signal: abort.signal }), api.moveSettings({ expectedEpoch: epoch }, { signal: abort.signal })])
       .then(([list, settings]) => {
         if (abort.signal.aborted) return;
-        const here = settings.machineName ?? t("This computer");
-        setListed({ machines: list.machines, here });
-        const first = moveTargets({ machineId: session.machineId }, list.machines, here).find(value => value.state === "online");
-        setTarget(first ? first.id : undefined);
+        setListed({ machines: list.machines, here: settings.machineName });
+        // The first machine online is proposed once: a choice of the person stays.
+        const first = moveTargets({ machineId: session.machineId }, list.machines, "").find(value => value.state === "online");
+        setTarget(current => current !== undefined ? current : first ? first.id : undefined);
       }, () => { if (!abort.signal.aborted) setProblem({ key: "Machines unavailable" }); });
     return () => abort.abort();
-  }, [api, epoch, session.machineId, t]);
+  }, [api, epoch, session.machineId]);
 
   useEffect(() => {
     if (target === undefined) return;
@@ -56,7 +56,8 @@ export function MoveToMachineDialog({ epoch, session, api = machines, onClose, o
     return () => abort.abort();
   }, [api, epoch, session.id, session.machineId, target, reload]);
 
-  const targets = listed ? moveTargets(session, listed.machines, listed.here) : [];
+  const here = listed?.here ?? t("This computer");
+  const targets = listed ? moveTargets(session, listed.machines, here) : [];
   const chosen = targets.find(value => value.id === target);
   const toHere = target === null;
   const ready = !moving && moveReady(preview, toHere, clone);
@@ -115,7 +116,7 @@ export function MoveToMachineDialog({ epoch, session, api = machines, onClose, o
             onChange={event => setClone(event.currentTarget.checked)} />}</Callout>}
         {preview.targetWarnings.map(warning => <p key={warning} className="muted-text">{warning}</p>)}
         {preview.status === "ok" && <p className="muted-text">{t("Background jobs, reminders and terminals stay on {machine}.",
-          { machine: session.machineName ?? listed?.here ?? "" })}</p>}
+          { machine: session.machineName ?? here })}</p>}
       </section>}
       {moving && <div className="move-machine-progress" role="status"><ProgressBar intent="primary" />
         <span>{t("Moving the session to {machine}…", { machine: chosen?.name ?? "" })}</span></div>}
