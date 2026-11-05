@@ -22,8 +22,9 @@ public sealed record SignInSettingsRecord(string OrganizationId, string Settings
 /// <param name="Groups">The groups of the last sign-in, as a JSON array, or null; kept for the mapping of groups to roles (milestone 4).</param>
 /// <param name="CreatedAt">When it was linked.</param>
 /// <param name="LastSignInAt">When it last signed in, or null.</param>
+/// <param name="CompanyGeneration">For a company account, the generation of the company's settings that judged its last sign-in; null otherwise.</param>
 public sealed record LoginRecord(string OrganizationId, string PersonId, string Method, string Issuer, string Subject, string? Email, string Name, string? Groups,
-    DateTimeOffset CreatedAt, DateTimeOffset? LastSignInAt);
+    DateTimeOffset CreatedAt, DateTimeOffset? LastSignInAt, long? CompanyGeneration = null);
 
 /// <summary>A passkey of a person.</summary>
 /// <param name="CredentialId">The credential id, base64url.</param>
@@ -105,12 +106,12 @@ public enum LoginRemovalOutcome
 /// <param name="UsableMethods">The methods that sign the person in under them (company sign-in required leaves fewer).</param>
 /// <param name="KeepOwnersLastWayIn">Whether the person is an owner, who keeps a usable way in unless they have a recovery key.</param>
 /// <param name="KeepBreakGlassPasskey">Whether the person is the break-glass owner while company sign-in is required, who keeps a passkey.</param>
-/// <param name="CompanyValidSince">
-/// When the company's settings last changed what signs in: a company account counts only once it signed in since; null
-/// counts every one.
+/// <param name="CompanyGeneration">
+/// The generation of the company's settings now: a company account counts only when its last sign-in was judged by it;
+/// null counts every one.
 /// </param>
 public sealed record WayInRemoval(long SettingsVersion, IReadOnlyCollection<string> UsableMethods, bool KeepOwnersLastWayIn, bool KeepBreakGlassPasskey,
-    DateTimeOffset? CompanyValidSince = null);
+    long? CompanyGeneration = null);
 
 /// <summary>What happened to a change of the sign-in settings.</summary>
 public enum SignInSettingsWriteOutcome

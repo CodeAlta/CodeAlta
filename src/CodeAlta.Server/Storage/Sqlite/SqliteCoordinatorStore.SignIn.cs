@@ -5,7 +5,7 @@ namespace CodeAlta.Server.Storage.Sqlite;
 // Sign-in: its settings, the accounts linked to people and their passkeys (the migration "sign_in").
 public sealed partial class SqliteCoordinatorStore : ISignInStore
 {
-    private const string LoginColumns = "SELECT organization_id, person_id, method, issuer, subject, email, name, groups, created_at, last_sign_in_at FROM logins";
+    private const string LoginColumns = "SELECT organization_id, person_id, method, issuer, subject, email, name, groups, created_at, last_sign_in_at, company_generation FROM logins";
     private const string PasskeyColumns = "SELECT credential_id, organization_id, person_id, name, data, created_at, last_used_at FROM passkeys";
 
     /// <inheritdoc />
@@ -182,7 +182,7 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
         if (!rule.KeepOwnersLastWayIn) return LoginRemovalOutcome.Removed;
         var usable = QueryList(connection, transaction, LoginColumns + " WHERE person_id = $person", ReadLogin, ("$person", personId))
             .Count(other => rule.UsableMethods.Contains(other.Method) && !(login is not null && other.Issuer == login.Issuer && other.Subject == login.Subject)
-                && (other.Method != CodeAlta.Fleet.Protocol.Api.FleetSignInMethods.Company || rule.CompanyValidSince is not { } since || (other.LastSignInAt ?? other.CreatedAt) >= since))
+                && (other.Method != CodeAlta.Fleet.Protocol.Api.FleetSignInMethods.Company || rule.CompanyGeneration is not { } generation || other.CompanyGeneration == generation))
             + (rule.UsableMethods.Contains(CodeAlta.Fleet.Protocol.Api.FleetSignInMethods.Passkey) ? otherPasskeys : 0);
         if (usable > 0) return LoginRemovalOutcome.Removed;
         var recoveryKeys = QuerySingle(connection, transaction,
@@ -200,8 +200,10 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
     {
         ArgumentNullException.ThrowIfNull(login);
         return new ValueTask(WriteAsync((connection, transaction) => Execute(connection, transaction,
-            "UPDATE logins SET email = $email, name = $name, groups = $groups, last_sign_in_at = $at WHERE organization_id = $org AND issuer = $issuer AND subject = $subject",
-            ("$email", login.Email), ("$name", login.Name), ("$groups", login.Groups), ("$at", ToNullableTime(login.LastSignInAt)), ("$org", login.OrganizationId),
+            "UPDATE logins SET email = $email, name = $name, groups = $groups, last_sign_in_at = $at, company_generation = $generation " +
+            "WHERE organization_id = $org AND issuer = $issuer AND subject = $subject",
+            ("$email", login.Email), ("$name", login.Name), ("$groups", login.Groups), ("$at", ToNullableTime(login.LastSignInAt)), ("$generation", login.CompanyGeneration),
+            ("$org", login.OrganizationId),
             ("$issuer", login.Issuer), ("$subject", login.Subject)), cancellationToken).AsTask());
     }
 
@@ -283,14 +285,15 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
 
     private static void InsertLogin(SqliteConnection connection, SqliteTransaction transaction, LoginRecord login)
         => Execute(connection, transaction,
-            "INSERT INTO logins (organization_id, person_id, method, issuer, subject, email, name, groups, created_at, last_sign_in_at) " +
-            "VALUES ($org, $person, $method, $issuer, $subject, $email, $name, $groups, $created, $at)",
+            "INSERT INTO logins (organization_id, person_id, method, issuer, subject, email, name, groups, created_at, last_sign_in_at, company_generation) " +
+            "VALUES ($org, $person, $method, $issuer, $subject, $email, $name, $groups, $created, $at, $generation)",
             ("$org", login.OrganizationId), ("$person", login.PersonId), ("$method", login.Method), ("$issuer", login.Issuer), ("$subject", login.Subject),
-            ("$email", login.Email), ("$name", login.Name), ("$groups", login.Groups), ("$created", ToTime(login.CreatedAt)), ("$at", ToNullableTime(login.LastSignInAt)));
+            ("$email", login.Email), ("$name", login.Name), ("$groups", login.Groups), ("$created", ToTime(login.CreatedAt)), ("$at", ToNullableTime(login.LastSignInAt)),
+            ("$generation", login.CompanyGeneration));
 
     private static LoginRecord ReadLogin(SqliteDataReader reader)
         => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), GetNullableString(reader, 5), reader.GetString(6),
-            GetNullableString(reader, 7), FromTime(reader.GetInt64(8)), GetNullableTime(reader, 9));
+            GetNullableString(reader, 7), FromTime(reader.GetInt64(8)), GetNullableTime(reader, 9), reader.IsDBNull(10) ? null : reader.GetInt64(10));
 
     private static PasskeyRecord ReadPasskey(SqliteDataReader reader)
         => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), FromTime(reader.GetInt64(5)), GetNullableTime(reader, 6));
