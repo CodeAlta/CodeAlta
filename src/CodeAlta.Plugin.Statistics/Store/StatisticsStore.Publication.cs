@@ -9,8 +9,15 @@ internal sealed partial class StatisticsStore
     internal static IReadOnlyList<FactTable> PublishedFamilies { get; } = [FactTables.Activity, FactTables.Usage, FactTables.Cost, FactTables.Tools];
 
     /// <summary>
+    /// The version of what a publisher makes of the rows, part of each revision: a new one has every session published again once.
+    /// Version 2 puts the rows of a session on the models its provider reported (<see cref="PublishedModels"/>).
+    /// </summary>
+    internal const int PublicationVersion = 2;
+
+    /// <summary>
     /// Gets the revision of the facts of every session read: where its reading stopped, the version of the facts, the floor and the
-    /// first line it was read from. A saved catch-up changes it; reading the rows again only when it changed keeps a publisher cheap.
+    /// first line it was read from, and the version of the publication. A saved catch-up changes it; reading the rows again only when
+    /// it changed keeps a publisher cheap.
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the read.</param>
     /// <returns>The revisions by session.</returns>
@@ -21,7 +28,7 @@ internal sealed partial class StatisticsStore
             foreach (var (id, revision) in sql.Query(
                 $"SELECT session_id, read_offset, facts_version, floor_q, first_line_hash, deleted FROM {Table("journal")}",
                 static reader => (reader.GetString(0), string.Create(CultureInfo.InvariantCulture,
-                    $"{reader.GetInt64(1)}:{reader.GetInt64(2)}:{reader.GetInt64(3)}:{(reader.IsDBNull(4) ? 0 : reader.GetInt64(4))}:{reader.GetInt64(5)}"))))
+                    $"{reader.GetInt64(1)}:{reader.GetInt64(2)}:{reader.GetInt64(3)}:{(reader.IsDBNull(4) ? 0 : reader.GetInt64(4))}:{reader.GetInt64(5)}:p{PublicationVersion}"))))
             {
                 revisions[id] = revision;
             }

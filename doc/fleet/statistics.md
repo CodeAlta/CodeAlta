@@ -48,7 +48,10 @@ console queries them by scope.
 - A machine reads the rows of a session again only when the revision of its facts in the store changed (where its
   reading stopped, the version of the definitions, the floor), so publishing costs nothing while nothing is counted.
 - Published today: the families a fleet sums (`activity`, `usage`, `cost`, `tool`), keyed by provider, model and the
-  other keys of the family. The others (content, details, histograms, scripts) stay on the machine for now.
+  other keys of the family. The others (content, details, histograms, scripts) stay on the machine for now. The rows of a
+  session go on the models its provider reported, so that one run is on one model: an alias counted before the first
+  request named its model, and tool calls, which the facts keep without a model, when the session used one model of that
+  provider then.
 - **Generations**: a machine that lost its publication outbox (a new disk, a reinstall) starts a new publication
   generation; the server replaces everything that machine published before, instead of keeping old sets whose versions
   look newer.
