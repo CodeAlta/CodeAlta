@@ -190,8 +190,13 @@ public sealed class FleetNodePeople
     private void Save(PeopleState state)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        FleetFiles.WriteAtomically(_path, JsonSerializer.SerializeToUtf8Bytes(state, FleetNodePeopleJson.Default.PeopleState));
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(state, FleetNodePeopleJson.Default.PeopleState);
+        if (WriteFile is { } write) write(_path, bytes);
+        else FleetFiles.WriteAtomically(_path, bytes);
     }
+
+    /// <summary>Gets what writes the file of the people in place of an atomic replace; null for that. A test makes it fail.</summary>
+    internal Action<string, byte[]>? WriteFile { get; init; }
 
     private static PeopleState Load(string path)
     {
