@@ -133,29 +133,46 @@ public sealed class FleetBudgetGate
         ArgumentNullException.ThrowIfNull(run);
         ArgumentException.ThrowIfNullOrWhiteSpace(run.RunId);
         var continued = new List<string>();
-        foreach (var link in _links())
+        // The budgets a hold let the run pass, by the version and the period it waited in: what the run passed is not asked again,
+        // and every other budget is checked again after each hold.
+        var passed = new HashSet<(string Link, string Budget, long Number, long Period)>();
+        while (true)
         {
-            var state = _states.GetOrAdd(link.LinkId, _ => LinkState.Load(link.StatePath));
-            await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
-            if (link.Devices.Current is not { } list) continue;
-            var access = link.Access?.Current;
-            var scope = ScopeOf(link, list, access, run);
-            foreach (var kept in state.Budgets())
+            var rescan = false;
+            foreach (var link in _links())
             {
-                // Kept once verified: a signer removed since takes no restriction away (FleetBudgetDocuments.TryVerifyKept).
-                if (!FleetBudgetDocuments.TryVerifyKept(kept.Signed, list, access, link.Devices.Identity.DeviceId, out var budget, out _) || !FleetBudgetDocuments.Covers(budget, scope))
-                    continue;
-                if (await CheckAsync(link, state, kept, budget, cancellationToken).ConfigureAwait(false) is not { } period) continue;
-                if (budget.Reached == FleetBudgetReachedActions.Stop)
+                var state = _states.GetOrAdd(link.LinkId, _ => LinkState.Load(link.StatePath));
+                await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
+                if (link.Devices.Current is not { } list) continue;
+                var access = link.Access?.Current;
+                var scope = ScopeOf(link, list, access, run);
+                foreach (var kept in state.Budgets())
                 {
-                    Log($"The run {run.RunId} does not start: the budget '{budget.Name}' is reached.");
-                    return new FleetBudgetAdmission($"The budget '{budget.Name}' is reached: the run does not start.", continued);
+                    // Kept once verified: a signer removed since takes no restriction away (FleetBudgetDocuments.TryVerifyKept).
+                    if (!FleetBudgetDocuments.TryVerifyKept(kept.Signed, list, access, link.Devices.Identity.DeviceId, out var budget, out _) || !FleetBudgetDocuments.Covers(budget, scope))
+                        continue;
+                    if (passed.Contains((link.LinkId, budget.BudgetId, budget.Number, FleetBudgetDocuments.PeriodOf(budget, _time.GetUtcNow()).StartQuarter))) continue;
+                    if (await CheckAsync(link, state, kept, budget, cancellationToken).ConfigureAwait(false) is not { } period) continue;
+                    if (budget.Reached == FleetBudgetReachedActions.Stop)
+                    {
+                        Log($"The run {run.RunId} does not start: the budget '{budget.Name}' is reached.");
+                        return new FleetBudgetAdmission($"The budget '{budget.Name}' is reached: the run does not start.", continued);
+                    }
+
+                    var problem = await HoldAsync(link, state, budget, period, run, scope, held, cancellationToken).ConfigureAwait(false);
+                    if (problem is not null) return new FleetBudgetAdmission(problem, continued);
+                    passed.Add((link.LinkId, budget.BudgetId, budget.Number, period.StartQuarter));
+                    if (!continued.Contains(budget.BudgetId)) continued.Add(budget.BudgetId);
+                    // While the run waited, the machine may have verified other budgets, or other versions of them: all decide
+                    // again, as for a new run, before it starts.
+                    rescan = true;
+                    break;
                 }
 
-                var problem = await HoldAsync(link, state, budget, period, run, scope, held, cancellationToken).ConfigureAwait(false);
-                if (problem is not null) return new FleetBudgetAdmission(problem, continued);
-                continued.Add(budget.BudgetId);
+                if (rescan) break;
             }
+
+            if (!rescan) break;
         }
 
         return continued.Count == 0 ? FleetBudgetAdmission.Admitted : new FleetBudgetAdmission(null, continued);
