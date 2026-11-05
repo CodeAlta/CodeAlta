@@ -35,23 +35,23 @@ dotnet tool install -g CodeAlta.Cli
 altacli run "Fix the failing test"
 ```
 
-CodeAlta Node runs sessions on an always-on machine, a build machine or a cloud VM, driven from CodeAlta Desktop ([Fleet](https://codealta.io/docs/fleet/)):
+Launch the app from a project folder. On first launch it opens the provider setup: sign in with a Claude, ChatGPT or GitHub Copilot subscription, or add an API key.
+
+See [Getting Started](https://codealta.io/docs/getting-started/) for requirements and the first steps.
+
+For your [fleet](https://codealta.io/docs/fleet/), CodeAlta Node runs sessions and automations on an always-on machine, a build machine or a cloud VM, driven from CodeAlta Desktop; CodeAlta Desktop can also [install it over SSH](https://codealta.io/docs/fleet/machines/):
 
 ```sh
 dotnet tool install -g CodeAlta.Node
 altanode run
 ```
 
-CodeAlta Server brings your people and machines together, for you alone or a whole team ([CodeAlta Server](https://codealta.io/docs/fleet/server/)); CodeAlta Desktop can also create one for you over SSH:
+CodeAlta Server brings your people and machines together, for you alone or a whole team ([CodeAlta Server](https://codealta.io/docs/fleet/server/)); CodeAlta Desktop can also [create one for you](https://codealta.io/docs/fleet/server/#create-my-server) on this computer or over SSH:
 
 ```sh
 dotnet tool install -g CodeAlta.Server
 altaserver run
 ```
-
-Launch the app from a project folder. On first launch it opens the provider setup: sign in with a Claude, ChatGPT or GitHub Copilot subscription, or add an API key.
-
-See [Getting Started](https://codealta.io/docs/getting-started/) for requirements and the first steps.
 
 ## 🛰️ Fleet
 
@@ -63,10 +63,15 @@ CodeAlta is no longer one desktop: [Fleet](https://codealta.io/docs/fleet/) scal
 
 - **Move a session, mid-task**: [send a session to another machine](https://codealta.io/docs/fleet/sessions/#move-a-session) and it goes on there, with its conversation, its commits and its changes; bring it back the same way.
 - **Run on any machine**: start sessions on the Mac that runs your iOS tests or the box with the GPU, run automations where they fit, and read, answer and steer them from CodeAlta Desktop.
+- **Agents that use the fleet**: ask an agent to "run the iOS tests on a Mac that is free": it [picks a machine, starts a session there and gets its answer back](https://codealta.io/docs/fleet/sessions/#let-agents-use-the-fleet), moves sessions, places automations and reads the health of the fleet with `alta fleet`, within the limits each machine accepts.
 - **Your machines, no server**: [add a machine](https://codealta.io/docs/fleet/machines/) over SSH or with a pairing link; your computers talk directly, encrypted end to end.
 - **A server that cannot read**: [CodeAlta Server](https://codealta.io/docs/fleet/server/) reaches every machine from anywhere without opening a port; it relays sessions encrypted end to end, runs no agent and reads no conversation.
 - **Rules your devices sign**: who may do what is signed by your devices and checked by every machine; [a kill switch and an audit log](https://codealta.io/docs/fleet/policies-and-audit/) for the whole fleet.
 - **For teams**: [people and teams](https://codealta.io/docs/fleet/people-and-access/) who sign in with Microsoft, Google, GitHub, a passkey or your company's sign-in; team machines, budgets, secrets, updates and statistics of every machine.
+
+<p align="center">
+  <img src="site/img/alta-desktop-fleet-canvas.webp" alt="The Fleet canvas of CodeAlta Desktop: the server online, three machines online, and a card per machine (this computer, Build box with its labels gpu and always-on, Workstation) with their sessions" width="920">
+</p>
 
 ## ✨ Features
 
@@ -122,7 +127,7 @@ CodeAlta Desktop brings together:
 
 ## 📖 Documentation
 
-Visit the [website](https://codealta.io/) for the feature tour and [user guide](https://codealta.io/docs/getting-started/), including [model providers](https://codealta.io/docs/model-providers/) and [how Desktop and TUI compare](https://codealta.io/docs/desktop-and-tui/).
+Visit the [website](https://codealta.io/) for the feature tour and [user guide](https://codealta.io/docs/getting-started/), including [model providers](https://codealta.io/docs/model-providers/), [Fleet](https://codealta.io/docs/fleet/) for your machines and your team, and [how Desktop and TUI compare](https://codealta.io/docs/desktop-and-tui/).
 
 For architecture and contributor guidance, see the [developer documentation](doc/readme.md).
 
