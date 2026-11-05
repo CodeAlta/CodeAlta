@@ -175,6 +175,43 @@ public sealed class FleetSecretsTests
     }
 
     [TestMethod]
+    public async Task AMachineWithdrawn_IsNotGivenTheNextVersion_WhenTheServerAcknowledgesWithTheRecordOfBefore()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        using var replay = new ListingReplayHandler { InnerHandler = new HttpClientHandler() };
+        var controller = new FleetSecretsManager(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey,
+            Path.Combine(fleet.Root.Path, "desktop-link", FleetOrganizationDevices.PinFileName), replay))
+        {
+            Checkpoint = new FleetSecretControllerCheckpoint(Path.Combine(fleet.Root.Path, "desktop-link", FleetSecretControllerCheckpoint.FileName)),
+        };
+        var x = await controller.SetAsync(FleetSecretKinds.Secret, "GRAFANA_TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), Token, false,
+            [fleet.NodeKey.DeviceId, fleet.OtherKey.DeviceId], CancellationToken.None);
+        replay.Recording = true;
+        await controller.ListAsync(CancellationToken.None);
+        replay.Recording = false;
+        // The genuine record of version 1 of the value, as the server listed it then.
+        var before = System.Text.Json.JsonSerializer.Deserialize(replay.Recorded!, FleetSecretsApiJsonContext.Default.FleetSecretListDto)!.Secrets.Single(secret => secret.Id == x.Id);
+        replay.Acknowledgement = System.Text.Json.JsonSerializer.Serialize(before, FleetSecretsApiJsonContext.Default.FleetSecretDto);
+
+        // The server acknowledges the withdrawal (sealed again as version 2), then another value set for that machine, with that record.
+        try { await controller.WithdrawAsync(x.Id, fleet.OtherKey.DeviceId, CancellationToken.None); } catch (InvalidDataException) { }
+        try
+        {
+            await controller.SetAsync(FleetSecretKinds.Secret, "OTHER_TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), "other-value", false,
+                [fleet.OtherKey.DeviceId], CancellationToken.None);
+        }
+        catch (InvalidDataException) { }
+
+        // Then it answers the whole record of version 1 again: the rotation seals nothing of the next value for the machine withdrawn.
+        replay.Acknowledgement = null;
+        replay.Replaying = true;
+        try { await controller.RotateAsync(x.Id, "rotated-value", CancellationToken.None); } catch (Exception exception) when (exception is InvalidDataException or FleetServerException) { }
+        Assert.IsFalse(replay.Sealed.Any(body => body.Contains(fleet.OtherKey.DeviceId, StringComparison.Ordinal) && body.Contains("\"version\":2", StringComparison.Ordinal)
+                && body.Contains("GRAFANA_TOKEN", StringComparison.Ordinal)),
+            "what the server answers to a put is not what this device recorded: the machine stays withdrawn");
+    }
+
+    [TestMethod]
     public async Task AMachineAllowedLater_GetsItsCopy_WhenAControllerOfThePersonGivesIt()
     {
         await using var fleet = await SecretsFixture.StartAsync();
@@ -707,10 +744,20 @@ public sealed class FleetSecretsTests
 
         public System.Collections.Concurrent.ConcurrentQueue<string> Sealed { get; } = new();
 
+        // What the server answers to a value put, in place of what it stored; null answers what it stored.
+        public string? Acknowledgement { get; set; }
+
+        public string? Recorded => _recorded;
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri!.AbsolutePath;
             if (request.Method == HttpMethod.Put && request.Content is not null) Sealed.Enqueue(await request.Content.ReadAsStringAsync(cancellationToken));
+            if (request.Method == HttpMethod.Put && Acknowledgement is { } acknowledged)
+            {
+                await base.SendAsync(request, cancellationToken);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(acknowledged, Encoding.UTF8, "application/json") };
+            }
             var listing = request.Method == HttpMethod.Get && path.EndsWith("/api/v1/secrets", StringComparison.Ordinal);
             if (listing && Replaying && _recorded is { } body)
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
