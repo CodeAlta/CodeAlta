@@ -363,6 +363,28 @@ public static class FleetBudgetDocuments
     /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
     public static bool TryVerify(FleetSignedBudget? signed, FleetDeviceListState devices, FleetAccessState? access, string? machineId,
         [NotNullWhen(true)] out FleetBudgetDefinition? definition, [NotNullWhen(false)] out string? reason)
+        => TryVerifyCore(signed, devices, access, machineId, checkSigner: true, out definition, out reason);
+
+    /// <summary>
+    /// Verifies again a budget the machine verified when it kept it (<see cref="TryVerify(FleetSignedBudget?, FleetDeviceListState, FleetAccessState?, string?, out FleetBudgetDefinition?, out string?)"/>):
+    /// it is still of the organization of the machine and of a person whose budgets hold there, but its signer need not be in
+    /// the device list any more. A controller device removed since takes no restriction away: only a newer signed version of
+    /// the budget, a removal included, ends it.
+    /// </summary>
+    /// <param name="signed">The signed budget, as the machine kept it once it verified it.</param>
+    /// <param name="devices">The device list as the machine verified it.</param>
+    /// <param name="access">The access document as the machine verified it; null for none.</param>
+    /// <param name="machineId">The device of the machine that verifies.</param>
+    /// <param name="definition">The budget, when it still holds.</param>
+    /// <param name="reason">Why it does not, or null.</param>
+    /// <returns>Whether it still holds for the machine.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
+    public static bool TryVerifyKept(FleetSignedBudget? signed, FleetDeviceListState devices, FleetAccessState? access, string? machineId,
+        [NotNullWhen(true)] out FleetBudgetDefinition? definition, [NotNullWhen(false)] out string? reason)
+        => TryVerifyCore(signed, devices, access, machineId, checkSigner: false, out definition, out reason);
+
+    private static bool TryVerifyCore(FleetSignedBudget? signed, FleetDeviceListState devices, FleetAccessState? access, string? machineId, bool checkSigner,
+        [NotNullWhen(true)] out FleetBudgetDefinition? definition, [NotNullWhen(false)] out string? reason)
     {
         ArgumentNullException.ThrowIfNull(devices);
         definition = null;
@@ -372,10 +394,14 @@ public static class FleetBudgetDocuments
         // A machine of a team takes the budgets of its maintainers (FleetAccessState.HoldsValuesOf), never those of the person the device list names.
         if (string.IsNullOrEmpty(machineId) || !devices.Members.TryGetValue(machineId, out var self) || !FleetAccessState.HoldsValuesOf(access, self, read.PersonId))
             return Refuse("the budget is of another person than the owner of this machine", out reason);
-        if (!IsSigner(devices, read.SignerDeviceId, read.PersonId, out var signer))
-            return Refuse("the budget is not signed by a controller device of its person", out reason);
-        if (!signer.Key.Verify(GetSignedBytes(signed.Payload), signed.Signature))
-            return Refuse("the signature of the budget does not verify with the key the device list holds for its signer", out reason);
+        if (checkSigner)
+        {
+            if (!IsSigner(devices, read.SignerDeviceId, read.PersonId, out var signer))
+                return Refuse("the budget is not signed by a controller device of its person", out reason);
+            if (!signer.Key.Verify(GetSignedBytes(signed.Payload), signed.Signature))
+                return Refuse("the signature of the budget does not verify with the key the device list holds for its signer", out reason);
+        }
+
         definition = read;
         return true;
     }

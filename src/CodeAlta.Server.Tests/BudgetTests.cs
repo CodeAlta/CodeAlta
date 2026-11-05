@@ -336,6 +336,48 @@ public sealed class BudgetTests
         }
     }
 
+    // A controller device removed after it signed a budget takes no restriction away: the machine keeps enforcing the version
+    // it verified, after a restart too, until a newer signed version (a removal included) of another controller ends it.
+    [TestMethod]
+    public async Task ABudget_StaysEnforced_WhenTheDeviceThatSignedItIsRemoved()
+    {
+        var root = new TempDirectory();
+        var fleet = await BudgetFixture.StartAsync(root);
+        try
+        {
+            using var laptopKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "laptop"));
+            using (var desktop = new FleetServerClient(fleet.Server.BaseAddress, fleet.DesktopKey)
+                   { DeviceList = new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey, Path.Combine(root.Path, "desktop-link", FleetOrganizationDevices.PinFileName)) })
+            {
+                using (var laptop = new FleetServerClient(fleet.Server.BaseAddress, laptopKey)) await laptop.EnrollAsync((await desktop.CreateEnrollmentTokenAsync()).Token, "Laptop", FleetDeviceKinds.Controller);
+                await desktop.ApproveAsync(laptopKey.DeviceId, FleetDeviceKinds.Controller);
+            }
+
+            var spend = new FakeSpend { Spent = 100 };
+            var statePath = Path.Combine(root.Path, "node-budgets.json");
+            var gate = fleet.Gate(spend, statePath);
+            var budget = await fleet.Manager.PutAsync(null, Settings(100) with { Name = "Machine", ScopeKind = FleetBudgetScopeKinds.Machine, ScopeId = fleet.NodeKey.DeviceId,
+                Mode = FleetBudgetModes.Advisory, Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
+            StringAssert.Contains((await gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), TestContext.CancellationToken)).Problem, "is reached");
+
+            // The laptop removes the desktop, which signed the budget; the machine reads the new list, as after a restart.
+            var laptopDevices = new FleetOrganizationDevices(fleet.Server.BaseAddress, laptopKey, Path.Combine(root.Path, "laptop-link", FleetOrganizationDevices.PinFileName));
+            using (var laptop = new FleetServerClient(fleet.Server.BaseAddress, laptopKey) { DeviceList = laptopDevices }) await laptop.RevokeAsync(fleet.DesktopKey.DeviceId);
+            var restarted = fleet.Gate(spend, statePath);
+            StringAssert.Contains((await restarted.AdmitAsync(new FleetBudgetRun("run-2", null, null, null), TestContext.CancellationToken)).Problem, "is reached",
+                "a budget verified before its signer was removed still holds");
+
+            // A removal the laptop signs ends it.
+            await new FleetBudgetsManager(laptopDevices).RemoveAsync(budget.Id, CancellationToken.None);
+            Assert.IsNull((await restarted.AdmitAsync(new FleetBudgetRun("run-3", null, null, null), TestContext.CancellationToken)).Problem);
+        }
+        finally
+        {
+            await fleet.DisposeAsync();
+            root.Dispose();
+        }
+    }
+
     // A held run is released only by a signed decision or by its budget not being reached: a server that says the budget is
     // not found releases nothing.
     [TestMethod]

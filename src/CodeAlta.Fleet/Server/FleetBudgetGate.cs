@@ -132,7 +132,8 @@ public sealed class FleetBudgetGate
             var scope = ScopeOf(link, list, access, run);
             foreach (var kept in state.Budgets())
             {
-                if (!FleetBudgetDocuments.TryVerify(kept.Signed, list, access, link.Devices.Identity.DeviceId, out var budget, out _) || !FleetBudgetDocuments.Covers(budget, scope))
+                // Kept once verified: a signer removed since takes no restriction away (FleetBudgetDocuments.TryVerifyKept).
+                if (!FleetBudgetDocuments.TryVerifyKept(kept.Signed, list, access, link.Devices.Identity.DeviceId, out var budget, out _) || !FleetBudgetDocuments.Covers(budget, scope))
                     continue;
                 if (await CheckAsync(link, state, kept, budget, cancellationToken).ConfigureAwait(false) is not { } period) continue;
                 if (budget.Reached == FleetBudgetReachedActions.Stop)
@@ -246,7 +247,7 @@ public sealed class FleetBudgetGate
             await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
             // The machine keeps every budget it verified: one it no longer has is one it cannot tell, and the run waits.
             var kept = state.Budgets().FirstOrDefault(candidate => candidate.Id == budget.BudgetId);
-            if (kept is not null && link.Devices.Current is { } list && FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var current, out _))
+            if (kept is not null && link.Devices.Current is { } list && FleetBudgetDocuments.TryVerifyKept(kept.Signed, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var current, out _))
             {
                 // A new version decides again, as for a new run, never by itself: one that no longer covers the run, or that it is
                 // not reached under, starts it; one that stops refuses it; otherwise the run waits for its owner.
@@ -298,7 +299,8 @@ public sealed class FleetBudgetGate
             // What the server says is taken only as a newer version this machine verifies: what it leaves out, what does not
             // verify and an older version change nothing that the machine verified (a removal is a signed version too).
             if (link.Devices.Current is { } list)
-                state.Merge(listed, signed => FleetBudgetDocuments.TryVerify(signed, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var budget, out _) ? budget : null);
+                state.Merge(listed, signed => FleetBudgetDocuments.TryVerify(signed, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var budget, out _) ? budget : null,
+                    kept => FleetBudgetDocuments.TryVerifyKept(kept, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var budget, out _) ? budget : null);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested
             && exception is FleetServerException or HttpRequestException or OperationCanceledException or FleetDeviceListException)
@@ -370,7 +372,8 @@ public sealed class FleetBudgetGate
         /// (or the same, whose allowance and state the server updates). A budget the server leaves out, a version that does
         /// not verify, and an older one keep what is kept: only a newer signed version, a removal included, changes a budget.
         /// </summary>
-        public void Merge(IReadOnlyList<FleetMachineBudgetDto> budgets, Func<FleetSignedBudget?, FleetBudgetDefinition?> verify)
+        public void Merge(IReadOnlyList<FleetMachineBudgetDto> budgets, Func<FleetSignedBudget?, FleetBudgetDefinition?> verify,
+            Func<FleetSignedBudget?, FleetBudgetDefinition?> verifyKept)
         {
             lock (_gate)
             {
@@ -378,7 +381,8 @@ public sealed class FleetBudgetGate
                 {
                     if (verify(budget.Signed) is not { } incoming || incoming.BudgetId != budget.Id) continue;
                     var known = _budgets.GetValueOrDefault(budget.Id);
-                    var knownNumber = known is not null && verify(known.Signed) is { } held ? held.Number : (long?)null;
+                    // The version kept was verified when it was kept: its signer removed since, an older version still does not replace it.
+                    var knownNumber = known is not null && verifyKept(known.Signed) is { } held ? held.Number : (long?)null;
                     if (knownNumber > incoming.Number) continue;
                     // The allowance the server says, or more when this machine was given more since (a read raced a grant).
                     var period = FleetStatisticsFamilies.QuarterOf(budget.Usage.PeriodStart);
