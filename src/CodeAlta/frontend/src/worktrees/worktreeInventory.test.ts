@@ -148,6 +148,7 @@ test("what cannot be listed or opened is told in the words of the window", () =>
   assert.equal(t(inventoryFailure("stale_epoch")), "The host changed. Reload the window.");
   assert.equal(t(inventoryFailure("read_failed")), "The worktrees could not be listed.");
   assert.equal(editorFailure("worktree_missing", t), "The folder of this worktree is gone.");
+  assert.equal(editorFailure("file_missing", t), "This file is no longer in the worktree.");
   assert.equal(editorFailure("not_worktree", t), "The worktree is no longer there.");
   assert.equal(editorFailure("no_window", t), "The code editor could not be opened.");
   assert.equal(editorFailure("failed", t), "Git could not do it.");

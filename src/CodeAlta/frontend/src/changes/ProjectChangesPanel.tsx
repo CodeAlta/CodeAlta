@@ -13,7 +13,7 @@ import { ChangeBar, Counts } from "./ChangeCounts";
 import { useChangesPreferences } from "./changesPreferences";
 import { changeCommitsReply, changeContent, changeKeysAttribute, changeStep, changeContentNotice, changeFileName, changeFolder, changeHistoryHeight, changeLabel, changeLetter,
   changeListReply, changeListRows, changeListWidth, changeScopeKey, changesViewLabel, changesViews, changeTreeRows, commitLimitMaximum, commitPageSize, filterChanges,
-  orderChanges, projectRelativePath, selectedChange, type ChangeCommit, type ChangeCommits,
+  openablePath, orderChanges, selectedChange, type ChangeCommit, type ChangeCommits,
   type ChangeContent, type ChangedFile, type ChangeList, type ChangeRow, type ChangeScope } from "./projectChanges";
 import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
@@ -123,8 +123,11 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   visible: boolean;
   /** This tab is the one commands and the keyboard act on. */
   active: boolean; onActivate: () => void;
-  /** Opens a file of the project (a project-relative path) in an editor tab. */
-  onOpenFile: (path: string) => void;
+  /**
+   * Opens a file in an editor tab: a project-relative path of the folder of the project, or, for a worktree
+   * (`worktree` is its root), a path from that root.
+   */
+  onOpenFile: (path: string, worktree: string | null) => void;
   /**
    * The file an `alta diff show` asked for, and the checkout to show when one is named (null is the folder of
    * the project); a new object for each request.
@@ -384,7 +387,8 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   }));
   const stale = useRef(() => refresh.current());
   const openLatest = useRef(onOpenFile); openLatest.current = onOpenFile;
-  const open = useRef((path: string) => openLatest.current(path));
+  const worktreeRootLatest = useRef<string | null>(null);
+  const open = useRef((path: string) => openLatest.current(path, worktreeRootLatest.current));
   const look = useMemo(() => ({ sideBySide: preferences.sideBySide, wrap: preferences.wrap, ignoreWhitespace: preferences.ignoreWhitespace,
     collapseUnchanged: preferences.collapseUnchanged }), [preferences.sideBySide, preferences.wrap, preferences.ignoreWhitespace, preferences.collapseUnchanged]);
   const selectCommit = useRef((id: string) => setScope({ kind: "commit", id }));
@@ -494,16 +498,20 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   const notice = current?.value ? changeContentNotice(current.value) : null;
   // While the next file is read the editor keeps the previous one, dimmed: it is not built again for each file.
   const compared = content?.value && !changeContentNotice(content.value) && (current || file) ? content.value : null;
-  // The code editor shows the folder of the project: a file of a worktree is not opened there under the same name.
+  // What the editors open: a file of the folder of the project, named from it; or, in a worktree, a file named from the
+  // root of that worktree, which is not the folder of the project in it (the host opens the editor on that folder).
   const prefix = list?.prefix ?? null;
-  const openableOf = useCallback((changed: ChangedFile) => prefix !== null && checkout === null && changed.status !== "deleted" ? projectRelativePath(prefix, changed.path) : null,
-    [prefix, checkout]);
+  const worktreeRoot = checkout !== null && checkouts ? shownCheckout(checkouts, checkout)?.path ?? null : null;
+  worktreeRootLatest.current = worktreeRoot;
+  const openableOf = useCallback((changed: ChangedFile) => checkout !== null && worktreeRoot === null ? null : openablePath(prefix, changed, worktreeRoot !== null),
+    [prefix, checkout, worktreeRoot]);
   const openable = file ? openableOf(file) : null;
   // Beside the code editor, the editor the user chose: asked for once the tab is shown.
   const external = useExternalOpener(visible);
   const externalOpener = external.opener, externalEditor = external.editor, projectId = tab.projectId;
   const externalFiles = useMemo(() => externalOpener && externalEditor
-    ? { editor: externalEditor, open: (path: string) => void externalOpener.openEntry("editor", projectId, path) } : null, [externalOpener, externalEditor, projectId]);
+    ? { editor: externalEditor, open: (path: string) => void (worktreeRoot === null ? externalOpener.openEntry("editor", projectId, path) : externalOpener.openWorktree("editor", projectId, worktreeRoot, path)) }
+    : null, [externalOpener, externalEditor, projectId, worktreeRoot]);
   const appearance = file ? fileAppearance(file.path, false) : null;
   // A file that exists on one side only has nothing to put beside it.
   const oneSided = !!compared && (compared.originalState === "absent" || compared.modifiedState === "absent");
@@ -742,7 +750,7 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
             {reviewing && <><ViewedCheck path={file.path} revision={file.revision} /><FileCommentButton path={file.path} /></>}
             {viewChoice}{!oneSided && sideChoice}
             <Button variant="minimal" size="small" icon={<AppIcon name="code" size={14} />} disabled={openable === null}
-              aria-label={t("Open file")} title={t("Open file")} onClick={() => { if (openable !== null) onOpenFile(openable); }} />
+              aria-label={t("Open file")} title={t("Open file")} onClick={() => { if (openable !== null) open.current(openable); }} />
             {externalFiles && <Button variant="minimal" size="small" icon={<ExternalEditorIcon id={externalFiles.editor.id} size={14} />} disabled={openable === null}
               aria-label={t("Open {name} in {editor}", { name: changeFileName(file.path), editor: externalFiles.editor.name })} title={t("Open in {editor}", { editor: externalFiles.editor.name })}
               onClick={() => { if (openable !== null) externalFiles.open(openable); }} />}

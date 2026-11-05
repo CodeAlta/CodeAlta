@@ -218,6 +218,16 @@ test("the menu of a Claude Code session that has a conversation of the CLI opens
     await page.until(`!document.querySelector('.session-tab-popup')`, "the menu closed");
 
     // Before its first turn a Claude Code session has no conversation to open elsewhere; a session of another provider has none either.
+    // The code editor on the folder the session works in comes before the lines that open its conversation elsewhere.
+    await page.evaluate(`explorerFixture.setEditor(true); explorerFixture.render()`);
+    await openMenu(page, "project-b", "b-cc");
+    assert.deepEqual(await menuLines(page), ["Open session", "Rename…", "Fork…", "Remote Control…", "Open the code editor", "Open in VS Code", "Run in terminal", "Copy resume command", "Move to project…", "Archive", "Delete…"]);
+    await page.clickText('.session-tab-popup [role="menuitem"]', "Open the code editor");
+    await page.until(`explorerFixture.state.editors.length === 1`, "the code editor of the session");
+    assert.deepEqual(await page.evaluate(`explorerFixture.state.editors`), ["b-cc"]);
+    await page.until(`!document.querySelector('.session-tab-popup')`, "the menu closed by the code editor");
+    await page.evaluate(`explorerFixture.setEditor(false); explorerFixture.render()`);
+
     for (const [scope, id] of [["project-b", "b-new"], ["project-b", "b-1"], ["chats", "chat-1"]]) {
       await openMenu(page, scope, id);
       const lines = await menuLines(page);
