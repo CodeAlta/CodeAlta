@@ -62,13 +62,21 @@ internal sealed class FakeAutomationRunner : IAutomationRunner
 
     internal string? Refuse { get; set; }
 
+    /// <summary>Gets or sets who answers the approvals of a run with autonomy; null gives its runs no guard.</summary>
+    internal Func<CodeAlta.Agent.AgentPermissionRequest, CancellationToken, Task<CodeAlta.Agent.AgentPermissionDecision>>? Ask { get; set; }
+
+    /// <summary>Gets the guard of the last run started with one.</summary>
+    internal AutomationRunGuard? Guard { get; private set; }
+
     public Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, CancellationToken cancellationToken)
     {
         var start = new FakeAutomationStart(entry, runId, prompt) { Detail = detail };
         Starts.Add(start);
         _pending.Enqueue(start);
         _signal.Release();
-        return Task.FromResult(Refuse is { } problem ? new AutomationStart(null, problem, null) : new AutomationStart("session-" + Starts.Count, null, start.Completion));
+        if (Refuse is { } problem) return Task.FromResult(new AutomationStart(null, problem, null));
+        var guard = Ask is { } ask && entry.Definition.Autonomy is not null ? Guard = new AutomationRunGuard(entry, new AutomationCallBreaker(), ask, TimeProvider.System, false) : null;
+        return Task.FromResult(new AutomationStart("session-" + Starts.Count, null, start.Completion) { Guard = guard });
     }
 
     internal async Task<FakeAutomationStart> NextAsync()

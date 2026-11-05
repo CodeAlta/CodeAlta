@@ -128,6 +128,8 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
     public async Task<RemoteChildResult> CreateAsync(RemoteChildRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        // Both ways to start one (`alta session create --machine`, `agent({ machine })`) come here.
+        if (await GuardRefusalAsync(request.ParentSessionId, cancellationToken).ConfigureAwait(false) is { } guarded) return Refused(GuardedCode, guarded);
         if (Resolve(request.Machine) is not { } host) return Refused("machine_not_found", $"No machine is named '{request.Machine}': `alta session create --machine-list` lists them.");
         // A sandbox goes with what it confines here, which the machine holds the child to: never its name alone.
         if (request.Sandbox is not null && request.Confinement is null)
@@ -212,6 +214,7 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
     public async Task<RemoteMessageResult> SendAsync(RemoteMessageRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (await GuardRefusalAsync(request.SenderSessionId, cancellationToken).ConfigureAwait(false) is { } guarded) return new("refused", GuardedCode, guarded, request.Machine);
         var host = request.Machine is { } machine ? Resolve(machine) : _fleet.Hosts.FirstOrDefault(value => value.Lists(request.SessionId));
         if (host is null) return new("refused", "session_missing", $"No machine this computer reaches lists the session '{request.SessionId}'.", request.Machine);
         if (PolicyRefusal(request.SpaceId) is { } refusal) return new("refused", "policy_refused", refusal, request.Machine);
@@ -528,6 +531,17 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
     };
 
     private static RemoteChildResult Refused(string code, string message, string? machine = null) => new("refused", code, message) { MachineName = machine };
+
+    /// <summary>The code of a refusal to a session whose tool calls a guard checks.</summary>
+    public const string GuardedCode = "guarded";
+
+    // A session whose tool calls a guard checks (the run of an automation with autonomy) starts and prompts nothing on
+    // another machine: the machine would run that work with its own tools, which no guard of the run checks there (its
+    // allowlist, pins, bounds, hourly limit, dry run). Null when the session is not guarded.
+    private async Task<string?> GuardRefusalAsync(string sessionId, CancellationToken cancellationToken)
+        => _host.RuntimeService.ToolGuards is { } guards && await guards.FindAsync(sessionId, cancellationToken).ConfigureAwait(false) is not null
+            ? "This session runs for an automation that decides what it does without a person: another machine would do what it is handed without that check, so it starts and prompts no session there. Do the work in this session or in a session of its own here, or ask the user."
+            : null;
 
     private static TaskCompletionSource<RemoteChildAnswer> NewAnswer() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 

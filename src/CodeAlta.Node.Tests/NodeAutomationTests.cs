@@ -239,6 +239,17 @@ public sealed class NodeAutomationTests
         StringAssert.Contains(await gate(session, "personal", token), "account credentials");
         StringAssert.Contains(await gate(child, "personal", token), "account credentials");
         Assert.IsNull(await gate(child, provider.Descriptor.ProviderId.Value, token));
+        // Many levels below the run, the rules of the run still hold.
+        var deep = child;
+        for (var level = 0; level < 40; level++)
+        {
+            deep = await host.Commands.CreateDraftSessionAsync(null, provider.Descriptor, $"Level {level}", new CodeAlta.Catalog.AltaActorProvenance
+            {
+                Kind = CodeAlta.Catalog.AltaActorProvenance.WorkflowKind, SourceSessionId = deep.SessionId, CreatedAt = DateTimeOffset.UtcNow,
+            }, null, null, null, null, null, null);
+        }
+
+        StringAssert.Contains(await gate(deep, "personal", token), "account credentials", "a deep descendant of the run");
         // A session that no automation started keeps the providers of the machine.
         Assert.IsNull(await gate(plain, "personal", token));
     }

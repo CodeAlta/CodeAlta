@@ -142,7 +142,8 @@ public sealed class FleetBudgetGate
             var scope = ScopeOf(link, list, access, run);
             foreach (var kept in state.Budgets())
             {
-                if (!FleetBudgetDocuments.TryVerify(kept.Signed, list, access, link.Devices.Identity.DeviceId, out var budget, out _) || !FleetBudgetDocuments.Covers(budget, scope))
+                // Kept once verified: a signer removed since takes no restriction away (FleetBudgetDocuments.TryVerifyKept).
+                if (!FleetBudgetDocuments.TryVerifyKept(kept.Signed, list, access, link.Devices.Identity.DeviceId, out var budget, out _) || !FleetBudgetDocuments.Covers(budget, scope))
                     continue;
                 if (await CheckAsync(link, state, kept, budget, cancellationToken).ConfigureAwait(false) is not { } period) continue;
                 if (budget.Reached == FleetBudgetReachedActions.Stop)
@@ -246,6 +247,18 @@ public sealed class FleetBudgetGate
                     Log($"The run {run.RunId} was stopped at the budget '{budget.Name}'.");
                     return $"The budget '{budget.Name}' is reached and the run was stopped.";
                 case FleetBudgetHoldStates.Continued when hold.Continue is { } signed:
+                    // A Continue anyway is for the version of the budget and the period the run started to wait in: a newer version
+                    // the machine verified since, or a new period, decides first, and one that still holds the run is not continued
+                    // by a decision about another.
+                    await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
+                    var again = await DecideAgainAsync(link, state, budget, run, scope, cancellationToken).ConfigureAwait(false);
+                    if (again.Decided) return again.Problem;
+                    if (again.Current is { } now && (now.Number != budget.Number || FleetBudgetDocuments.PeriodOf(now, _time.GetUtcNow()).StartQuarter != period.StartQuarter))
+                    {
+                        Log($"The run {run.RunId} does not start: it was continued anyway for an earlier version or period of the budget '{now.Name}', which still holds it.");
+                        return $"The run was continued anyway for an earlier version or period of the budget '{now.Name}', which still holds it: start the run again to decide under the budget as it is now.";
+                    }
+
                     if (await VerifyAsync(link, signed, budget, run, nonce, period, cancellationToken).ConfigureAwait(false) is { } refused)
                         return $"Continue anyway was refused: {refused}.";
                     Log($"The run {run.RunId} was continued anyway at the budget '{budget.Name}'.");
@@ -254,20 +267,8 @@ public sealed class FleetBudgetGate
 
             // Reached no more (a new period, a higher limit, an allowance given): the run starts.
             await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
-            // The machine keeps every budget it verified: one it no longer has is one it cannot tell, and the run waits.
-            var kept = state.Budgets().FirstOrDefault(candidate => candidate.Id == budget.BudgetId);
-            if (kept is not null && link.Devices.Current is { } list && FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var current, out _))
-            {
-                // A new version decides again, as for a new run, never by itself: one that no longer covers the run, or that it is
-                // not reached under, starts it; one that stops refuses it; otherwise the run waits for its owner.
-                if (current.Number != budget.Number && !FleetBudgetDocuments.Covers(current, scope)) return null;
-                if (await CheckAsync(link, state, kept, current, cancellationToken).ConfigureAwait(false) is null) return null;
-                if (current.Number != budget.Number && current.Reached == FleetBudgetReachedActions.Stop)
-                {
-                    Log($"The run {run.RunId} does not start: the budget '{current.Name}' is reached and stops its runs now.");
-                    return $"The budget '{current.Name}' is reached: the run does not start.";
-                }
-            }
+            var decided = await DecideAgainAsync(link, state, budget, run, scope, cancellationToken).ConfigureAwait(false);
+            if (decided.Decided) return decided.Problem;
 
             var left = deadline - _time.GetUtcNow();
             if (left <= TimeSpan.Zero) return $"The budget '{budget.Name}' is reached and nobody continued the run in time.";
@@ -276,6 +277,28 @@ public sealed class FleetBudgetGate
             try { await signal.WaitAsync(wait.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
         }
+    }
+
+    // What the newest version of the budget of a held run that the machine verified decides, as for a new run, never by itself:
+    // one that no longer covers the run, or that it is not reached under, starts it (decided, no problem); one that stops refuses
+    // it (decided, with the problem); otherwise the budget still holds the run, under that version (Current). The machine keeps
+    // every budget it verified: one it no longer has is one it cannot tell, and the run waits (not decided, no current version).
+    private async Task<(bool Decided, string? Problem, FleetBudgetDefinition? Current)> DecideAgainAsync(FleetBudgetLink link, LinkState state, FleetBudgetDefinition budget,
+        FleetBudgetRun run, FleetBudgetRunScope scope, CancellationToken cancellationToken)
+    {
+        var kept = state.Budgets().FirstOrDefault(candidate => candidate.Id == budget.BudgetId);
+        if (kept is null || link.Devices.Current is not { } list
+            || !FleetBudgetDocuments.TryVerifyKept(kept.Signed, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var current, out _))
+            return (false, null, null);
+        if (current.Number != budget.Number && !FleetBudgetDocuments.Covers(current, scope)) return (true, null, current);
+        if (await CheckAsync(link, state, kept, current, cancellationToken).ConfigureAwait(false) is null) return (true, null, current);
+        if (current.Number != budget.Number && current.Reached == FleetBudgetReachedActions.Stop)
+        {
+            Log($"The run {run.RunId} does not start: the budget '{current.Name}' is reached and stops its runs now.");
+            return (true, $"The budget '{current.Name}' is reached: the run does not start.", current);
+        }
+
+        return (false, null, current);
     }
 
     private async Task<string?> VerifyAsync(FleetBudgetLink link, FleetSignedBudgetContinue signed, FleetBudgetDefinition budget, FleetBudgetRun run, string nonce,
@@ -308,7 +331,8 @@ public sealed class FleetBudgetGate
             // What the server says is taken only as a newer version this machine verifies: what it leaves out, what does not
             // verify and an older version change nothing that the machine verified (a removal is a signed version too).
             if (link.Devices.Current is { } list)
-                state.Merge(listed, signed => FleetBudgetDocuments.TryVerify(signed, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var budget, out _) ? budget : null);
+                state.Merge(listed, signed => FleetBudgetDocuments.TryVerify(signed, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var budget, out _) ? budget : null,
+                    kept => FleetBudgetDocuments.TryVerifyKept(kept, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var budget, out _) ? budget : null);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested
             && exception is FleetServerException or HttpRequestException or OperationCanceledException or FleetDeviceListException)
@@ -382,7 +406,8 @@ public sealed class FleetBudgetGate
         /// (or the same, whose allowance and state the server updates). A budget the server leaves out, a version that does
         /// not verify, and an older one keep what is kept: only a newer signed version, a removal included, changes a budget.
         /// </summary>
-        public void Merge(IReadOnlyList<FleetMachineBudgetDto> budgets, Func<FleetSignedBudget?, FleetBudgetDefinition?> verify)
+        public void Merge(IReadOnlyList<FleetMachineBudgetDto> budgets, Func<FleetSignedBudget?, FleetBudgetDefinition?> verify,
+            Func<FleetSignedBudget?, FleetBudgetDefinition?> verifyKept)
         {
             lock (_gate)
             {
@@ -390,7 +415,8 @@ public sealed class FleetBudgetGate
                 {
                     if (verify(budget.Signed) is not { } incoming || incoming.BudgetId != budget.Id) continue;
                     var known = _budgets.GetValueOrDefault(budget.Id);
-                    var knownNumber = known is not null && verify(known.Signed) is { } held ? held.Number : (long?)null;
+                    // The version kept was verified when it was kept: its signer removed since, an older version still does not replace it.
+                    var knownNumber = known is not null && verifyKept(known.Signed) is { } held ? held.Number : (long?)null;
                     if (knownNumber > incoming.Number) continue;
                     // The allowance the server says, or more when this machine was given more since (a read raced a grant).
                     var period = FleetStatisticsFamilies.QuarterOf(budget.Usage.PeriodStart);

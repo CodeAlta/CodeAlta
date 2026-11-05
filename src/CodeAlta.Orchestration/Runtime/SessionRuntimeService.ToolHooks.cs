@@ -60,15 +60,19 @@ public sealed partial class SessionRuntimeService
     /// <param name="session">The session.</param>
     /// <param name="match">The condition, such as a creator of the automation kind.</param>
     /// <param name="cancellationToken">Cancels the reads.</param>
-    /// <returns>The creator found; null when no session of the lineage records one that matches.</returns>
+    /// <returns>The creator found; null when no session of the lineage records one that matches, up to its start (a session
+    /// without a parent, or a parent this machine does not have).</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="SessionLineageException">The lineage is deeper than <see cref="SessionToolGuards.MaximumLineageDepth"/>, or
+    /// its links make a cycle: whether a session of it matches cannot be told.</exception>
     public async Task<AltaActorProvenance?> FindLineageCreatorAsync(SessionViewDescriptor session, Func<AltaActorProvenance, bool> match, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(match);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (var current = session; current is not null && seen.Add(current.SessionId) && seen.Count <= 32;)
+        for (var current = session; current is not null;)
         {
+            if (!seen.Add(current.SessionId) || seen.Count > SessionToolGuards.MaximumLineageDepth) throw new SessionLineageException(session.SessionId);
             if (current.CreatedBy is { } createdBy && match(createdBy)) return createdBy;
             if ((NormalizeOptionalText(current.ParentSessionId) ?? NormalizeOptionalText(current.CreatedBy?.SourceSessionId)) is not { } parent) return null;
             current = await TryGetRecoverableSessionAsync(parent, cancellationToken).ConfigureAwait(false);

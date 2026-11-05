@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using CodeAlta.Automations.Integrations;
 
 namespace CodeAlta.Automations;
@@ -47,7 +48,13 @@ internal sealed partial class AutomationService
     // run to the rotation of its team.
     private async Task ReadOnCallAsync(AutomationEntry entry, string runId, CancellationToken cancellationToken)
     {
-        if (entry.Definition.Autonomy is not { Approvers: AutomationAutonomy.OnCallApprovers, OnCall: { } onCall } || Integrations is not { } integrations) return;
+        if (await ReadOnCallPeopleAsync(entry, cancellationToken).ConfigureAwait(false) is { } people) _state.Update(runId, run => run with { OnCall = people });
+    }
+
+    // Who the on-call tool of an automation says is on call now; null when it says nobody, does not answer, or none is set.
+    private async Task<IReadOnlyList<string>?> ReadOnCallPeopleAsync(AutomationEntry entry, CancellationToken cancellationToken)
+    {
+        if (entry.Definition.Autonomy is not { Approvers: AutomationAutonomy.OnCallApprovers, OnCall: { } onCall } || Integrations is not { } integrations) return null;
         var (token, problem) = Resolve(entry.ProjectId, onCall.Token);
         IReadOnlyList<string>? people = null;
         if (token is not null)
@@ -69,21 +76,27 @@ internal sealed partial class AutomationService
 
         if (problem is not null)
             integrations.Log?.Invoke($"Who is on call for '{entry.Definition.Name}' could not be read from {onCall.Source}: {problem}. Its approvals go to the rotation of its team.");
-        if (people is { Count: > 0 }) _state.Update(runId, run => run with { OnCall = people });
+        return people is { Count: > 0 } ? people : null;
     }
 
-    // Reads again who is on call for a run that starts to wait, and tells it: what its server routes the approval with.
-    private async Task OnCallNowAsync(AutomationEntry entry, string runId)
+    // A run that starts to wait for an approval, when its approvals go to the person on call: who is on call is read again first,
+    // and the approval is told only then, with that person, or with nobody when the tool names nobody or does not answer (the
+    // rotation of its team): never with the person on call for an earlier approval. A wait that ended meanwhile is not told.
+    private async Task WaitingOnCallAsync(AutomationEntry entry, string runId, AutomationRunGuard guard, StrongBox<int> changes, int change)
     {
-        if (entry.Definition.Autonomy is not { Approvers: AutomationAutonomy.OnCallApprovers }) return;
+        IReadOnlyList<string>? people;
         try
         {
-            await ReadOnCallAsync(entry, runId, _stop.Token).ConfigureAwait(false);
-            Changed?.Invoke();
+            people = await ReadOnCallPeopleAsync(entry, _stop.Token).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is OperationCanceledException or ObjectDisposedException)
         {
+            return;
         }
+
+        if (Volatile.Read(ref changes.Value) != change || !guard.Waiting) return;
+        _state.Update(runId, run => run.InProgress ? run with { Status = AutomationRun.Waiting, Approval = Guid.CreateVersion7().ToString("N"), OnCall = people } : run);
+        Changed?.Invoke();
     }
 
     /// <summary>Whether a person took a run in progress over.</summary>
@@ -97,15 +110,22 @@ internal sealed partial class AutomationService
     private void Follow(AutomationEntry entry, string runId, AutomationRunGuard guard)
     {
         lock (_gate) _guards[runId] = guard;
+        var changes = new StrongBox<int>();
         guard.WaitingChanged += waiting =>
         {
+            var change = Interlocked.Increment(ref changes.Value);
             // Each time the run starts to wait, an approval of its own (its server tells a person of each one), and who is on
-            // call is read again: the person of the rotation now, not the one when the run started.
+            // call is read again before it is told: the person of the rotation now, not the one of the start or of an earlier approval.
+            if (waiting && entry.Definition.Autonomy is { Approvers: AutomationAutonomy.OnCallApprovers })
+            {
+                _ = WaitingOnCallAsync(entry, runId, guard, changes, change);
+                return;
+            }
+
             _state.Update(runId, run => run.InProgress
                 ? run with { Status = waiting ? AutomationRun.Waiting : AutomationRun.Running, Approval = waiting ? Guid.CreateVersion7().ToString("N") : null }
                 : run);
             Changed?.Invoke();
-            if (waiting) _ = OnCallNowAsync(entry, runId);
         };
         guard.Recorded += call =>
         {

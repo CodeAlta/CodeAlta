@@ -393,14 +393,15 @@ internal sealed class AutomationStateStore
     }
 
     /// <summary>Keeps the calls of the allowed tools of an automation its circuit breaker counts: those of the last hour.</summary>
-    internal void SetCalls(string automationId, IReadOnlyList<DateTimeOffset> calls)
+    /// <returns>Whether they were written: a restart counts them only then.</returns>
+    internal bool SetCalls(string automationId, IReadOnlyList<DateTimeOffset> calls)
     {
         ArgumentNullException.ThrowIfNull(calls);
         lock (_gate)
         {
             if (calls.Count == 0) _state.Calls.Remove(automationId);
             else _state.Calls[automationId] = [.. calls.TakeLast(MaximumCalls)];
-            Save();
+            return Save();
         }
     }
 
@@ -441,8 +442,8 @@ internal sealed class AutomationStateStore
         }
     }
 
-    // Under the gate. A state that cannot be written is still the state of this run of the application.
-    private void Save()
+    // Under the gate. A state that cannot be written is still the state of this run of the application. Whether it was written.
+    private bool Save()
     {
         try
         {
@@ -451,9 +452,11 @@ internal sealed class AutomationStateStore
             using (var stream = File.Create(staged)) JsonSerializer.Serialize(stream, _state, AutomationStateJsonContext.Default.StateFile);
             File.Move(staged, _path, overwrite: true);
             _aliveSavedAt = _state.AliveAt;
+            return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            return false;
         }
     }
 

@@ -5334,14 +5334,35 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         static bool IsRun(AltaActorProvenance createdBy) => createdBy.Kind == AltaActorProvenance.AutomationKind && !string.IsNullOrEmpty(createdBy.AutomationId);
         var caller = await runtime.TryGetRecoverableSessionAsync(callerId, context.CancellationToken).ConfigureAwait(false);
         var target = await runtime.TryGetRecoverableSessionAsync(targetSessionId.Trim(), context.CancellationToken).ConfigureAwait(false);
-        var callerRun = caller is null ? null : await runtime.FindLineageCreatorAsync(caller, IsRun, context.CancellationToken).ConfigureAwait(false);
-        var targetRun = target is null ? null : await runtime.FindLineageCreatorAsync(target, IsRun, context.CancellationToken).ConfigureAwait(false);
+        AltaActorProvenance? callerRun = null, targetRun = null;
+        try
+        {
+            callerRun = caller is null ? null : await runtime.FindLineageCreatorAsync(caller, IsRun, context.CancellationToken).ConfigureAwait(false);
+            targetRun = target is null ? null : await runtime.FindLineageCreatorAsync(target, IsRun, context.CancellationToken).ConfigureAwait(false);
+        }
+        catch (SessionLineageException)
+        {
+            // A lineage that cannot be followed tells no run: the work is refused.
+        }
+
         if (callerRun is not null && targetRun is not null && string.Equals(callerRun.AutomationId, targetRun.AutomationId, StringComparison.Ordinal)
             && string.Equals(callerRun.CorrelationId, targetRun.CorrelationId, StringComparison.Ordinal))
             return null;
         return PermissionDenied(context, "guard.otherSession",
             $"This session runs for an automation that decides what it does without a person, and session '{targetSessionId.Trim()}' is not one of the sessions of its run: "
             + "what it is handed would be done there without that check. Start a session of your own (`alta session create`), which keeps it, or ask the user.");
+    }
+
+    // A session whose tool calls a guard checks hands nothing to another machine (a session it starts there, or one it moves
+    // there): that machine runs it with its own tools, which no guard of the run checks. Null when the caller is not guarded.
+    private static async Task<int?> RefuseGuardedCallerAsync(AltaCommandContext context, string what)
+    {
+        if (!string.Equals(context.Caller.Kind, "agent", StringComparison.OrdinalIgnoreCase) || NormalizeOptionalText(context.Caller.SourceSessionId) is not { } callerId
+            || context.Services.Get<SessionRuntimeService>() is not { ToolGuards: { } guards }
+            || await guards.FindAsync(callerId, context.CancellationToken).ConfigureAwait(false) is null)
+            return null;
+        return PermissionDenied(context, "guard.otherSession",
+            $"This session runs for an automation that decides what it does without a person: it {what}, since another machine would do the work without that check. Ask the user.");
     }
 
     // Whether a session was created by another, or descends from it through its parents.

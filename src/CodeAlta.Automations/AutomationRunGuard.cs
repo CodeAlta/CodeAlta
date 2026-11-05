@@ -29,19 +29,23 @@ internal sealed class AutomationCallBreaker
         _store = store;
     }
 
-    /// <summary>Takes one call of an automation, when it has calls left in the hour.</summary>
-    /// <returns>Whether the call may run without a person.</returns>
-    internal bool TryTake(string automationId, int? maximum, DateTimeOffset now)
+    /// <summary>
+    /// Takes one call of an automation, when it has calls left in the hour and the call is kept: one that cannot be written
+    /// with the state of the automations would be given again after a restart, so it waits for a person.
+    /// </summary>
+    /// <returns>Why the call waits for a person; null when it may run without one.</returns>
+    internal string? Take(string automationId, int? maximum, DateTimeOffset now)
     {
-        if (maximum is not { } most) return true;
+        if (maximum is not { } most) return null;
         lock (_gate)
         {
             if (!_calls.TryGetValue(automationId, out var calls)) _calls[automationId] = calls = new(_store?.Calls(automationId) ?? []);
             while (calls.Count > 0 && now - calls.Peek() >= Window) calls.Dequeue();
-            if (calls.Count >= most) return false;
+            if (calls.Count >= most) return $"it called its allowed tools {most} times in the last hour, and its circuit breaker asks a person";
+            // Counted here whatever is written: this run of the application never gives it again.
             calls.Enqueue(now);
-            _store?.SetCalls(automationId, [.. calls]);
-            return true;
+            return _store is null || _store.SetCalls(automationId, [.. calls]) ? null
+                : "the calls of the hour its circuit breaker counts cannot be written, and a restart would give them again";
         }
     }
 }
@@ -121,8 +125,20 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
     /// <summary>Raised with what a try recorded in place of a call of an allowed tool.</summary>
     internal event Action<string>? Recorded;
 
-    /// <summary>Raised when an approval waited too long and the automation stops its runs then, with why.</summary>
+    /// <summary>Raised when an approval waited too long and the automation stops its runs then, with why: once.</summary>
     internal event Action<string>? Stopped;
+
+    /// <summary>
+    /// Raised at each stop with the session whose approval waited too long and why: a guard that outlives a turn (the one a
+    /// session takes from its automation after its first turn, or after a restart) stops each turn that waits too long.
+    /// </summary>
+    internal event Action<string, string>? StoppedIn;
+
+    /// <summary>
+    /// Gets or sets what is told, at each call the guard checks, the session that makes it: what supervises the approvals of the
+    /// commands and edits of that session while it works. Null tells nothing.
+    /// </summary>
+    internal Action<string>? Calling { get; set; }
 
     /// <summary>Says whether an approval of a command or an edit of the session waits now (the host's own guards ask it).</summary>
     internal void NoteWaiting(bool waiting)
@@ -135,6 +151,13 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
     internal void Stop(string why)
     {
         if (Interlocked.Exchange(ref _stopped, 1) == 0) Stopped?.Invoke(why);
+    }
+
+    /// <summary>Stops the turn of a session whose approval waited too long, with why; the run stops too, once.</summary>
+    internal void Stop(string sessionId, string why)
+    {
+        Stop(why);
+        StoppedIn?.Invoke(sessionId, why);
     }
 
     // Tells whether the run waits, when that changed.
@@ -168,6 +191,7 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
     {
         ArgumentNullException.ThrowIfNull(call);
         var tool = call.Invocation.ToolName;
+        Calling?.Invoke(call.Invocation.SessionId);
         // What the host runs keeps the guards of the host; what an agent CLI runs itself keeps its own prompts.
         if (call.RunByAgent || AutomationAutonomy.HostTools.Contains(tool, StringComparer.Ordinal)) return AgentToolCallDecision.Allow;
         var shown = Shown(tool, call.Invocation.Arguments);
@@ -191,9 +215,9 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
         var held = rules?.CheckPin(call.Spec) ?? rules?.CheckBounds(call.Invocation.Arguments);
         if (held is null)
         {
-            if (_breaker.TryTake(_entry.Id, _autonomy.MaxCallsPerHour, _time.GetUtcNow()))
+            held = _breaker.Take(_entry.Id, _autonomy.MaxCallsPerHour, _time.GetUtcNow());
+            if (held is null)
                 return await PreconditionsAsync(rules, call, cancellationToken).ConfigureAwait(false) is { } failed ? NotMade(tool, failed) : AgentToolCallDecision.Allow;
-            held = $"it called its allowed tools {_autonomy.MaxCallsPerHour} times in the last hour, and its circuit breaker asks a person";
         }
 
         var decision = await AskAsync(call.Invocation.SessionId, tool, shown, DigestOf(tool, call.Invocation.Arguments), $"The automation '{_entry.Definition.Name}' may not make this call of {tool} by itself: {held}. Allow it once, or deny it.",
@@ -268,7 +292,7 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
         if (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested && !TakenOver)
         {
             var why = $"No one answered the call of {tool} within {_autonomy.ApprovalTimeout} minutes: the run stopped.";
-            Stop(why);
+            Stop(sessionId, why);
             return AgentToolCallDecision.Block(why);
         }
 

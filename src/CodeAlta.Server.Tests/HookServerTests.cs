@@ -178,6 +178,46 @@ public sealed class HookServerTests
         Assert.AreEqual(0, (await ListAsync(fixture, owner)).Single().Pending, "every event was handed and answered on one connection");
     }
 
+    // More events wait than are listed at once (1000), and the machine takes the oldest later each time (their source is down):
+    // an event behind them is handed all the same, before it expires.
+    [TestMethod]
+    public async Task AnEventBehindAThousandRetriedOnes_IsHandedAllTheSame()
+    {
+        await using var fixture = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("laptop");
+        using var node = new TestDevice("node");
+        await fixture.SetUpWithNodeAsync(owner, node);
+        var hook = await CreateAsync(fixture, owner, node.DeviceId, HookSources.Webhook);
+        var store = fixture.GetService<CodeAlta.Server.Storage.ICoordinatorStore>();
+        var organization = (await store.GetDeviceAsync(node.DeviceId, CancellationToken.None))!.OrganizationId;
+        var hooks = (CodeAlta.Server.Storage.IHookStore)store;
+        var now = fixture.Clock.GetUtcNow();
+        for (var index = 0; index < 1000; index++)
+        {
+            await hooks.AddHookEventAsync(new CodeAlta.Server.Storage.HookEventRecord(organization, Guid.CreateVersion7().ToString("N"), hook.Id, node.DeviceId, "old-" + index,
+                now.AddMinutes(-30).AddMilliseconds(index), now.AddDays(1), HookEventStates.Pending, null, null, "{}", Encoding.UTF8.GetBytes("{}")));
+        }
+
+        var (_, behind) = await PushAsync(fixture, hook.Path, """{"n":"new"}""", "new");
+        var events = Channel.CreateUnbounded<FleetHookEvent>();
+        var (connection, _) = await ConnectAsync(fixture, node, events);
+        await using var _ = connection;
+        for (var round = 0; ; round++)
+        {
+            Assert.IsLessThan(30, round, "the event behind them was never handed");
+            using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var batch = new List<string>();
+            try { batch.Add((await events.Reader.ReadAsync(wait.Token)).DeliveryId); }
+            catch (OperationCanceledException) { Assert.Fail($"Nothing more was handed after {round} rounds: the event behind the retried ones waits."); }
+            await Task.Delay(100);
+            while (events.Reader.TryRead(out var next)) batch.Add(next.DeliveryId);
+            if (batch.Contains(behind.DeliveryId)) break;
+            // Each one is taken later: its source does not answer the machine.
+            await connection.SendRequestAsync(FleetHookMethods.Ack, JsonSerializer.SerializeToElement(new FleetHookAcks([.. batch.Select(static id => new FleetHookAck(id, false, "x: down") { Retry = true })]),
+                FleetHookServerJsonContext.Default.FleetHookAcks));
+        }
+    }
+
     [TestMethod]
     public async Task TheIngress_RefusesWhatIsNotAHook_TooLarge_OrTooFast_AndAHookIsAPersonsOwn()
     {

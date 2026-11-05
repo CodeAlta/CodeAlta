@@ -349,12 +349,24 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     internal async ValueTask<string?> CheckSessionProviderAsync(SessionViewDescriptor session, string providerKey, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
-        var origin = await _host.RuntimeService.FindLineageCreatorAsync(session,
-            static createdBy => createdBy.Kind == AltaActorProvenance.AutomationKind && !string.IsNullOrEmpty(createdBy.AutomationId), cancellationToken).ConfigureAwait(false);
-        if (origin is null) return null;
+        AltaActorProvenance? origin;
+        bool unknown;
+        try
+        {
+            origin = await _host.RuntimeService.FindLineageCreatorAsync(session,
+                static createdBy => createdBy.Kind == AltaActorProvenance.AutomationKind && !string.IsNullOrEmpty(createdBy.AutomationId), cancellationToken).ConfigureAwait(false);
+            unknown = false;
+        }
+        catch (SessionLineageException)
+        {
+            // Whether an automation started it cannot be told: it keeps to account credentials, as one whose automation left.
+            (origin, unknown) = (null, true);
+        }
+
+        if (origin is null && !unknown) return null;
         if (!_host.ModelProviderRegistry.TryGetProvider(new ModelProviderId(providerKey), out var provider))
             return $"The provider '{providerKey}' is not one of this machine: a session of an automation runs with a provider whose credential is known.";
-        return CredentialRefusal(Engine.Snapshot.Find(origin.AutomationId!), provider, session.SpaceId ?? SpaceDescriptor.DefaultId);
+        return CredentialRefusal(origin is null ? null : Engine.Snapshot.Find(origin.AutomationId!), provider, session.SpaceId ?? SpaceDescriptor.DefaultId);
     }
 
     /// <inheritdoc />

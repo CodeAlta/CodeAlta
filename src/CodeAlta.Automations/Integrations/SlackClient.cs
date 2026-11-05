@@ -81,11 +81,20 @@ internal sealed class SlackClient
 /// hands the messages of the events API to its callback, and connects again when Slack asks it to or the connection
 /// drops, with a growing delay, until it is stopped. Nothing connects into the machine: it dials out to Slack.
 /// </summary>
+/// <remarks>
+/// Slack spreads the events of an app among its connections rather than copying them to each: a machine whose app is connected
+/// elsewhere too (another machine, another program) would take events meant for the triggers there, and miss some of its own.
+/// A listener that Slack greets with other connections of its app closes its own and says why, and tries again later: an app
+/// listens on one machine at a time.
+/// </remarks>
 internal sealed class SlackSocketListener
 {
     private const int MaximumFrameBytes = 1024 * 1024;
     private static readonly TimeSpan FirstDelay = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan LongestDelay = TimeSpan.FromMinutes(5);
+
+    /// <summary>How long a listener whose app is connected elsewhere too waits before it tries again, at least.</summary>
+    internal static readonly TimeSpan SharedWait = TimeSpan.FromMinutes(5);
 
     private readonly SlackClient _client;
     private readonly Func<Uri, CancellationToken, Task<WebSocket>> _connect;
@@ -118,10 +127,14 @@ internal sealed class SlackSocketListener
         ArgumentException.ThrowIfNullOrWhiteSpace(appToken);
         ArgumentNullException.ThrowIfNull(received);
         var delay = FirstDelay;
+        var refresh = false;
         while (!cancellationToken.IsCancellationRequested)
         {
             var opened = await _client.OpenConnectionAsync(appToken, cancellationToken).ConfigureAwait(false);
-            var refresh = false;
+            // A refresh may still count the connection it replaces, for a moment.
+            var refreshing = refresh;
+            refresh = false;
+            var shared = false;
             if (opened.Value is { } url)
             {
                 try
@@ -130,7 +143,15 @@ internal sealed class SlackSocketListener
                     (Connected, Problem) = (true, null);
                     changed?.Invoke();
                     delay = FirstDelay;
-                    refresh = await ReadAsync(socket, received, cancellationToken).ConfigureAwait(false);
+                    var (ended, connections) = await ReadAsync(socket, received, refreshing ? 2 : 1, cancellationToken).ConfigureAwait(false);
+                    refresh = ended == Ended.Refresh;
+                    if (ended == Ended.Shared)
+                    {
+                        shared = true;
+                        Problem = $"This Slack app is connected {connections} times: Slack spreads its events among its connections, so the triggers that listen elsewhere "
+                            + "would miss some. Give each machine its own Slack app; this machine listens again once the app is free.";
+                        await CloseQuietlyAsync(socket).ConfigureAwait(false);
+                    }
                 }
                 catch (Exception exception) when (exception is WebSocketException or IOException or HttpRequestException or JsonException
                     || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
@@ -160,7 +181,8 @@ internal sealed class SlackSocketListener
             if (refresh) continue;
             try
             {
-                await Task.Delay(delay, _time, cancellationToken).ConfigureAwait(false);
+                // Connected elsewhere: later, at a time of its own, so that two machines that both stepped aside do not meet again.
+                await Task.Delay(shared ? SharedWait + TimeSpan.FromSeconds(Random.Shared.Next(0, 120)) : delay, _time, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -184,8 +206,29 @@ internal sealed class SlackSocketListener
         return new SlackMessage(id, payload.Text("team_id"), channel, @event.Text("user"), @event.Text("text") ?? string.Empty, ts, @event.Text("thread_ts"), type == "app_mention");
     }
 
-    // True when Slack asked for a new connection, false when the connection closed.
-    private async Task<bool> ReadAsync(WebSocket socket, Func<SlackMessage, Task> received, CancellationToken cancellationToken)
+    // How a connection ended: closed, Slack asked for a new one, or Slack greeted it with more connections of its app than allowed.
+    private enum Ended
+    {
+        Closed,
+        Refresh,
+        Shared,
+    }
+
+    private static async Task CloseQuietlyAsync(WebSocket socket)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "connected elsewhere", timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is WebSocketException or IOException or OperationCanceledException or ObjectDisposedException)
+        {
+            // Dropped all the same once disposed.
+        }
+    }
+
+    // Reads the connection until it ends; with the number of connections Slack counted for the app when it said so.
+    private async Task<(Ended Ended, int Connections)> ReadAsync(WebSocket socket, Func<SlackMessage, Task> received, int allowed, CancellationToken cancellationToken)
     {
         var buffer = new byte[16 * 1024];
         using var frame = new MemoryStream();
@@ -196,7 +239,7 @@ internal sealed class SlackSocketListener
             do
             {
                 result = await socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
-                if (result.MessageType == WebSocketMessageType.Close) return false;
+                if (result.MessageType == WebSocketMessageType.Close) return (Ended.Closed, 0);
                 if (frame.Length + result.Count > MaximumFrameBytes) throw new WebSocketException("Slack sent a frame larger than can be read.");
                 frame.Write(buffer, 0, result.Count);
             }
@@ -213,16 +256,20 @@ internal sealed class SlackSocketListener
 
             switch (root.Text("type"))
             {
+                // Slack greets each connection with the number of connections of the app: others take part of its events.
+                case "hello" when root.TryGetProperty("num_connections", out var count) && count.ValueKind == JsonValueKind.Number
+                    && count.TryGetInt32(out var connections) && connections > allowed:
+                    return (Ended.Shared, connections);
                 case "disconnect":
                     // Slack refreshes its connections now and then: a new one is opened at once.
-                    return true;
+                    return (Ended.Refresh, 0);
                 case "events_api" when ReadMessage(root.Member("payload")) is { } message:
                     await received(message).ConfigureAwait(false);
                     break;
             }
         }
 
-        return false;
+        return (Ended.Closed, 0);
     }
 
     private static async Task<WebSocket> ConnectAsync(Uri url, CancellationToken cancellationToken)

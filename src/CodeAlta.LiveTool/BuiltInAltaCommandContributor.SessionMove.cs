@@ -65,6 +65,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (NormalizeOptionalText(machine) is not { } target)
             return UsageError(context, "usage.missingMachine", "Name the machine with --machine <name> (`alta session move --list` lists them).", commandPath);
         sessionId = sessionId.Trim();
+        if (await RefuseGuardedCallerAsync(context, "moves no session to another machine, itself included").ConfigureAwait(false) is { } guarded) return guarded;
         if (await RefuseMoveOfOtherAsync(context, sessionId).ConfigureAwait(false) is { } refused) return refused;
 
         // A session of this computer keeps to the space of the caller; one of a machine is checked there.

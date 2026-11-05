@@ -79,6 +79,21 @@ public interface IHookStore
     /// <returns>The events, with their headers and bodies.</returns>
     ValueTask<IReadOnlyList<HookEventRecord>> ListPendingHookEventsAsync(string organizationId, string machineId, DateTimeOffset now, int limit, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Lists the events that wait for a machine and have not expired, the oldest first, after a given one in that order: the next
+    /// page of <see cref="ListPendingHookEventsAsync(string, string, DateTimeOffset, int, CancellationToken)"/>.
+    /// </summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="machineId">The machine.</param>
+    /// <param name="now">The time.</param>
+    /// <param name="afterReceivedAt">When the last event of the page before was received.</param>
+    /// <param name="afterDeliveryId">Its delivery.</param>
+    /// <param name="limit">The most events.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The events, with their headers and bodies.</returns>
+    ValueTask<IReadOnlyList<HookEventRecord>> ListPendingHookEventsAsync(string organizationId, string machineId, DateTimeOffset now, DateTimeOffset afterReceivedAt,
+        string afterDeliveryId, int limit, CancellationToken cancellationToken = default);
+
     /// <summary>Records what a machine did with an event it was given, and forgets its headers and body.</summary>
     /// <param name="organizationId">The organization.</param>
     /// <param name="machineId">The machine, which must be the one of the event.</param>

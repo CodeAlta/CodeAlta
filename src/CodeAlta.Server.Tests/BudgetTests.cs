@@ -336,6 +336,48 @@ public sealed class BudgetTests
         }
     }
 
+    // A controller device removed after it signed a budget takes no restriction away: the machine keeps enforcing the version
+    // it verified, after a restart too, until a newer signed version (a removal included) of another controller ends it.
+    [TestMethod]
+    public async Task ABudget_StaysEnforced_WhenTheDeviceThatSignedItIsRemoved()
+    {
+        var root = new TempDirectory();
+        var fleet = await BudgetFixture.StartAsync(root);
+        try
+        {
+            using var laptopKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "laptop"));
+            using (var desktop = new FleetServerClient(fleet.Server.BaseAddress, fleet.DesktopKey)
+                   { DeviceList = new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey, Path.Combine(root.Path, "desktop-link", FleetOrganizationDevices.PinFileName)) })
+            {
+                using (var laptop = new FleetServerClient(fleet.Server.BaseAddress, laptopKey)) await laptop.EnrollAsync((await desktop.CreateEnrollmentTokenAsync()).Token, "Laptop", FleetDeviceKinds.Controller);
+                await desktop.ApproveAsync(laptopKey.DeviceId, FleetDeviceKinds.Controller);
+            }
+
+            var spend = new FakeSpend { Spent = 100 };
+            var statePath = Path.Combine(root.Path, "node-budgets.json");
+            var gate = fleet.Gate(spend, statePath);
+            var budget = await fleet.Manager.PutAsync(null, Settings(100) with { Name = "Machine", ScopeKind = FleetBudgetScopeKinds.Machine, ScopeId = fleet.NodeKey.DeviceId,
+                Mode = FleetBudgetModes.Advisory, Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
+            StringAssert.Contains((await gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), TestContext.CancellationToken)).Problem, "is reached");
+
+            // The laptop removes the desktop, which signed the budget; the machine reads the new list, as after a restart.
+            var laptopDevices = new FleetOrganizationDevices(fleet.Server.BaseAddress, laptopKey, Path.Combine(root.Path, "laptop-link", FleetOrganizationDevices.PinFileName));
+            using (var laptop = new FleetServerClient(fleet.Server.BaseAddress, laptopKey) { DeviceList = laptopDevices }) await laptop.RevokeAsync(fleet.DesktopKey.DeviceId);
+            var restarted = fleet.Gate(spend, statePath);
+            StringAssert.Contains((await restarted.AdmitAsync(new FleetBudgetRun("run-2", null, null, null), TestContext.CancellationToken)).Problem, "is reached",
+                "a budget verified before its signer was removed still holds");
+
+            // A removal the laptop signs ends it.
+            await new FleetBudgetsManager(laptopDevices).RemoveAsync(budget.Id, CancellationToken.None);
+            Assert.IsNull((await restarted.AdmitAsync(new FleetBudgetRun("run-3", null, null, null), TestContext.CancellationToken)).Problem);
+        }
+        finally
+        {
+            await fleet.DisposeAsync();
+            root.Dispose();
+        }
+    }
+
     // A held run is released only by a signed decision or by its budget not being reached: a server that says the budget is
     // not found releases nothing.
     [TestMethod]
@@ -389,6 +431,30 @@ public sealed class BudgetTests
         await fleet.Manager.PutAsync(second.Id, Settings(100) with { Name = "Second", Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
         gate.Changed();
         StringAssert.Contains((await stopped.WaitAsync(Patience, TestContext.CancellationToken)).Problem, "is reached");
+    }
+
+    // A Continue anyway is for the version of the budget the run started to wait under: once the machine verified a newer version
+    // that still holds the run (a lower limit), a Continue anyway signed for the earlier one does not start it.
+    [TestMethod]
+    public async Task AContinueAnywayForAnEarlierVersionOfTheBudget_DoesNotStartTheRun()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        var budget = await fleet.Manager.PutAsync(null, Settings(100), CancellationToken.None);
+        using (var other = new FleetServerClient(fleet.Server.BaseAddress, fleet.OtherKey))
+            Assert.AreEqual(100, (await other.AskAllowanceAsync(budget.Id, new FleetAllowanceRequest(1, 0, 100))).Granted);
+        var gate = fleet.Gate(new FakeSpend());
+        var held = new TaskCompletionSource();
+        var admission = gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), () => held.TrySetResult(), TestContext.CancellationToken);
+        await held.Task.WaitAsync(Patience, TestContext.CancellationToken);
+        var hold = await WaitForAsync(async () => (await fleet.Manager.ListHoldsAsync(CancellationToken.None)).Holds.FirstOrDefault(), TestContext.CancellationToken);
+
+        // A lower limit, then the hold of the first version is continued anyway.
+        await fleet.Manager.PutAsync(budget.Id, Settings(50), CancellationToken.None);
+        Assert.AreEqual(FleetBudgetHoldStates.Continued, (await fleet.Manager.ContinueAsync(hold.Id, CancellationToken.None)).Status);
+        gate.Changed();
+        var result = await admission.WaitAsync(Patience, TestContext.CancellationToken);
+        StringAssert.Contains(result.Problem, "earlier version or period", "the run does not start on a decision about another version");
+        Assert.IsEmpty(result.Continued);
     }
 
     // What the server gives of an enforced budget is not signed: the machine never holds more than its signed limit, and what it

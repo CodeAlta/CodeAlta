@@ -138,6 +138,29 @@ public sealed class AutomationRunGuardTests
         }
     }
 
+    // A call the circuit breaker cannot keep with the state of the automations (a full disk, a file that cannot be replaced)
+    // would be given again after a restart: it waits for a person.
+    [TestMethod]
+    public async Task TheCircuitBreaker_AsksAPerson_WhenTheCallsOfTheHourCannotBeKept()
+    {
+        var folder = Directory.CreateTempSubdirectory("codealta-breaker-").FullName;
+        try
+        {
+            // The state file cannot be replaced: a folder holds its place.
+            var path = Directory.CreateDirectory(Path.Combine(folder, "state.json")).FullName;
+            var asker = new Asker { Answer = AgentPermissionDecisionKind.Deny };
+            var autonomy = new AutomationAutonomy { AllowedTools = ["k8s_restart_pod"], MaxCallsPerHour = 2 };
+            var guard = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(new AutomationStateStore(path, false)), asker.AskAsync,
+                new AutomationClock { Now = Noon }, dryRun: false);
+            Assert.IsNotNull((await guard.BeforeToolCallAsync(Call("k8s_restart_pod"), default)).BlockMessage, "a call that is not kept is not made by itself");
+            StringAssert.Contains(asker.Asked.Single().Reason, "cannot be written");
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     [TestMethod]
     public async Task APinnedBoundedTool_RunsAsItWasPinned_WithinItsBounds_OnceItsPreconditionHolds()
     {
@@ -228,8 +251,11 @@ public sealed class AutomationRunGuardTests
         var asker = new Asker { Held = new(TaskCreationOptions.RunContinuationsAsynchronously) };
         var guard = new AutomationRunGuard(Entry(new AutomationAutonomy { ApprovalTimeout = 30 }), new AutomationCallBreaker(), asker.AskAsync, clock, dryRun: false);
         var stopped = new List<string>();
+        var stoppedIn = new List<string>();
         var waiting = new List<bool>();
         guard.Stopped += stopped.Add;
+        // The session whose turn waited is told, at each stop: a guard that outlives a turn stops each turn that waits too long.
+        guard.StoppedIn += (session, _) => stoppedIn.Add(session);
         guard.WaitingChanged += waiting.Add;
 
         var held = guard.BeforeToolCallAsync(Call("k8s_scale"), default).AsTask();
@@ -238,6 +264,7 @@ public sealed class AutomationRunGuardTests
         var decision = await held.WaitAsync(TimeSpan.FromSeconds(10));
         StringAssert.Contains(decision.BlockMessage, "within 30 minutes: the run stopped");
         Assert.AreEqual(1, stopped.Count);
+        CollectionAssert.AreEqual(new[] { "s1" }, stoppedIn);
         CollectionAssert.AreEqual(new[] { true, false }, waiting);
 
         // Taken over, the next approval waits for that person as long as they take.
@@ -383,7 +410,7 @@ public sealed class AutomationRunGuardTests
     }
 
     /// <summary>A clock whose timers fire when a test moves it.</summary>
-    private sealed class TimerClock(DateTimeOffset start) : TimeProvider
+    internal sealed class TimerClock(DateTimeOffset start) : TimeProvider
     {
         private readonly Lock _gate = new();
         private readonly List<Timer> _timers = [];

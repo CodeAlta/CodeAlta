@@ -281,7 +281,8 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
             ForScript = true,
         }, cancellationToken).ConfigureAwait(false);
         if (created.Status != "created" || created.SessionId is not { } childId)
-            return Refused($"{created.MachineName ?? request.Machine} refused the session ({created.Code}): {created.Message}");
+            return Refused(created.Code == "guarded" ? created.Message ?? "This session is guarded: it starts no session on another machine."
+                : $"{created.MachineName ?? request.Machine} refused the session ({created.Code}): {created.Message}");
         _host.CodeModeRuns.Record(request.RunId, AgentWorkflowEventKind.SessionStarted, record => record with
         {
             ChildSessionId = childId,
