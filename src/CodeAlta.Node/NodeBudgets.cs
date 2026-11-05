@@ -26,7 +26,10 @@ internal sealed class NodeBudgets
         _connections = connections;
         Gate = new FleetBudgetGate(() => [.. connections.Connections.Where(static connection => connection.Connector is not null)
             .Select(connection => new FleetBudgetLink(connection.Link.Id, connection.Connector!.Devices, connection.Connector.MetadataKeys,
-                Path.Combine(connections.Store.LinkFolder(connection.Link.Id), FileName)) { Access = connection.Connector.Access })], new FleetBudgetLocalSpend(sessions, statistics));
+                Path.Combine(connections.Store.LinkFolder(connection.Link.Id), FileName))
+            {
+                Access = connection.Connector.Access, LinksSpace = connection.Connector.LinksSpace,
+            })], new FleetBudgetLocalSpend(sessions, statistics));
     }
 
     private readonly FleetServerConnections _connections;
