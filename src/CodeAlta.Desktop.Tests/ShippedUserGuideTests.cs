@@ -36,7 +36,7 @@ public sealed partial class ShippedUserGuideTests
         var others = Directory.GetFiles(guide, "*", SearchOption.AllDirectories)
             .Where(file => !file.EndsWith(".md", StringComparison.OrdinalIgnoreCase) && !file.StartsWith(Path.Combine(guide, "img") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             .Select(file => Path.GetRelativePath(guide, file).Replace('\\', '/')).Order(StringComparer.Ordinal).ToArray();
-        CollectionAssert.AreEqual(new[] { "menu.yml", "model-providers/menu.yml", "plugins/menu.yml", "sessions/menu.yml", "workspace/menu.yml" }, others);
+        CollectionAssert.AreEqual(new[] { "fleet/menu.yml", "menu.yml", "model-providers/menu.yml", "plugins/menu.yml", "sessions/menu.yml", "workspace/menu.yml" }, others);
     }
 
     [TestMethod]
@@ -56,7 +56,7 @@ public sealed partial class ShippedUserGuideTests
         Assert.IsTrue(menu.All(static item => item.Title.Length > 0 && !item.Title.Contains('<') && item.Icon is { Length: > 0 }));
 
         // A folder has its own menu, whose first entry is the page of the folder.
-        var folders = new[] { "model-providers", "workspace", "sessions", "plugins" };
+        var folders = new[] { "model-providers", "workspace", "sessions", "fleet", "plugins" };
         foreach (var folder in folders)
         {
             var item = menu.Single(item => item.Path == folder + "/readme.md");
