@@ -172,6 +172,84 @@ public sealed class NodeBudgetTests
         }
     }
 
+    [TestMethod]
+    public async Task ASendHeldWhenTheNodeStopped_IsNotSent_OnAStartThatCannotVerifyTheBudgetsItKept()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+        {
+            DataRoot = Path.Combine(root.Root, "server"), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+        }, token);
+        var address = server.Addresses.First(static uri => uri.Scheme == "http");
+        using var desktopKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "desktop-fleet"));
+        using var otherKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "other-fleet"));
+        using var desktop = new FleetServerClient(address, desktopKey);
+        await desktop.SetUpAsync(server.SetupCode!.Code, "Alex", "Desktop", "Home", token);
+        var enrollment = await desktop.CreateEnrollmentTokenAsync(null, "test-node", token);
+        Assert.AreEqual(NodeExitCodes.Success, await new NodeApplication(TextWriter.Null, TextWriter.Null) { InitializeLogging = false, ServiceEnvironment = static () => null }
+            .RunAsync(["join", address.ToString(), "--token", enrollment.Token, "--data-root", root.DataRoot, "--name", "test-node", "--no-wait"]));
+        var nodeId = (await desktop.ListDevicesAsync(token)).Single(static device => device.Status == "pending").Id;
+        await desktop.ApproveAsync(nodeId, FleetDeviceKinds.Node, token);
+        using (var other = new FleetServerClient(address, otherKey))
+        {
+            await other.EnrollAsync((await desktop.CreateEnrollmentTokenAsync(null, "other", token)).Token, "Build box", FleetDeviceKinds.Node, token);
+            await desktop.ApproveAsync(otherKey.DeviceId, FleetDeviceKinds.Node, token);
+        }
+
+        var provider = new ScriptedNodeProvider();
+        var options = root.Options() with { ConfigureModelProviders = provider.Register };
+        string sessionId;
+        string globalRoot, fleetRoot;
+        // The first start: a budget that stops new runs is reached (another machine holds all of it); the node keeps it.
+        var node = await NodeHost.StartAsync(options, token);
+        var fleet = NodeFleet.Start(node, new NodeListenOptions { Port = 0 }, "test-node", "1.0.0");
+        var servers = NodeServers.Start(node, fleet.Service, "test-node", "1.0.0", Fast);
+        try
+        {
+            await WaitForAsync(async () => (await desktop.ListMachinesAsync(token)).Any(static machine => machine.Online) ? "online" : null, token);
+            var manager = new FleetBudgetsManager(new FleetOrganizationDevices(address, desktopKey, Path.Combine(root.Root, "desktop-link", FleetOrganizationDevices.PinFileName)));
+            var budget = await manager.PutAsync(null, new FleetBudgetSettings("Home tokens", FleetBudgetScopeKinds.Person, null, FleetBudgetMeasures.Tokens, 100,
+                FleetBudgetPeriods.Month, "UTC", FleetBudgetModes.Enforced, FleetBudgetReachedActions.Stop), token);
+            using (var other = new FleetServerClient(address, otherKey)) await other.AskAllowanceAsync(budget.Id, new FleetAllowanceRequest(1, 0, 100), token);
+            var session = await node.Host.Commands.CreateDraftSessionAsync(null, provider.Descriptor, "Report");
+            sessionId = session.SessionId;
+            (globalRoot, fleetRoot) = (node.Host.CatalogOptions.GlobalRoot, node.Host.CatalogOptions.FleetRoot);
+            var first = await WaitForAsync(async () => await node.Budgets!.AdmitAsync(new CodeAlta.Fleet.NodeApi.FleetNodeBudgetRun("run-first", null, session.SpaceId, null), null, token)
+                is { Problem: not null } refused ? refused : null, token);
+            StringAssert.Contains(first.Problem, "'Home tokens' is reached");
+        }
+        finally
+        {
+            await servers.DisposeAsync();
+            await fleet.DisposeAsync();
+            await node.DisposeAsync();
+        }
+
+        // A send the budget held when the node stopped, kept in its fleet folder; the server is away at the next start.
+        new CodeAlta.Fleet.NodeApi.FleetHeldSends(Path.Combine(fleetRoot, "held-sends.json"), new CodeAlta.Catalog.Secrets.LocalSecretStore(globalRoot))
+            .Add(new CodeAlta.Fleet.NodeApi.FleetHeldSend("fleet:held:send-1", sessionId, "The held work.", null, "nonce-1", null, null, null, null, DateTimeOffset.UtcNow));
+        await server.DisposeAsync();
+
+        node = await NodeHost.StartAsync(options, token);
+        fleet = NodeFleet.Start(node, new NodeListenOptions { Port = 0 }, "test-node", "1.0.0");
+        servers = NodeServers.Start(node, fleet.Service, "test-node", "1.0.0", Fast);
+        try
+        {
+            // It cannot verify the budget it kept (its device list is not read yet): the send stays held, never sent as if no budget held it.
+            await Task.Delay(TimeSpan.FromSeconds(3), token);
+            Assert.AreEqual(string.Empty, provider.LastUserText, "no model is called");
+            Assert.AreEqual(1, new CodeAlta.Fleet.NodeApi.FleetHeldSends(Path.Combine(fleetRoot, "held-sends.json"),
+                new CodeAlta.Catalog.Secrets.LocalSecretStore(globalRoot)).List().Count, "the send stays held");
+        }
+        finally
+        {
+            await servers.DisposeAsync();
+            await fleet.DisposeAsync();
+            await node.DisposeAsync();
+        }
+    }
+
     // A version signed by a controller for a machine.
     private static FleetSignedAutomationVersion Sign(DeviceIdentity signer, FleetDeviceListState list, string organization, string machine, string id)
     {

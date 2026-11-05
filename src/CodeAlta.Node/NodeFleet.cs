@@ -477,11 +477,19 @@ internal sealed class NodeServers : IAsyncDisposable
         secrets.Start();
         // The policies kept apply from the start, whether the servers answer or not.
         _ = ApplyPolicyAsync(service, node.Automations);
-        // The budgets and the policies are set: the sends a budget held when the node stopped are taken again through them.
-        service?.ResumeHeldSends();
+        // The budgets and the policies are set, and the links read (their connectors exist, their kept budgets with them): the sends a
+        // budget held when the node stopped are taken again through them, never before.
+        if (service is not null) _ = ResumeOnceLoadedAsync(connections, service);
         var servers = new NodeServers(identity, source, connections, statistics, secrets) { Health = health };
         servers.WatchPolicy(service, node.Automations);
         return servers;
+    }
+
+    // Takes the held sends again once the links were read.
+    private static async Task ResumeOnceLoadedAsync(Fleet.Server.FleetServerConnections connections, FleetNodeService service)
+    {
+        await connections.Loaded.ConfigureAwait(false);
+        service.ResumeHeldSends();
     }
 
     private readonly CancellationTokenSource _stopping = new();

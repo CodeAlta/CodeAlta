@@ -137,7 +137,16 @@ public sealed class FleetBudgetGate
         {
             var state = _states.GetOrAdd(link.LinkId, _ => LinkState.Load(link.StatePath));
             await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
-            if (link.Devices.Current is not { } list) continue;
+            if (link.Devices.Current is not { } list)
+            {
+                // Budgets kept that this machine cannot verify now (its device list not read yet, the server away): the run waits for
+                // them, never runs as if none held it.
+                if (!state.Budgets().Any()) continue;
+                if (await WaitForDevicesAsync(link, run, held, cancellationToken).ConfigureAwait(false) is not { } verified)
+                    return new FleetBudgetAdmission("The budgets this machine keeps could not be verified: the run does not start.", continued);
+                list = verified;
+                held = null;
+            }
             var access = link.Access?.Current;
             var scope = ScopeOf(link, list, access, run);
             foreach (var kept in state.Budgets())
@@ -159,6 +168,35 @@ public sealed class FleetBudgetGate
         }
 
         return continued.Count == 0 ? FleetBudgetAdmission.Admitted : new FleetBudgetAdmission(null, continued);
+    }
+
+    // Waits, as a run a budget holds, for the device list of a link that keeps budgets: null when it is not read within the wait.
+    private async Task<FleetDeviceListState?> WaitForDevicesAsync(FleetBudgetLink link, FleetBudgetRun run, Action? held, CancellationToken cancellationToken)
+    {
+        Log($"The run {run.RunId} waits: the budgets this machine keeps cannot be verified yet.");
+        held?.Invoke();
+        var deadline = _time.GetUtcNow() + HoldWait;
+        while (link.Devices.Current is null)
+        {
+            if (_time.GetUtcNow() >= deadline) return null;
+            var changed = Volatile.Read(ref _changed).Task;
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(ReadTimeout);
+                await link.Devices.RefreshAsync(timeout.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is HttpRequestException or FleetServerException or FleetDeviceListException
+                or OperationCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                wait.CancelAfter(HoldPoll);
+                try { await changed.WaitAsync(wait.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+            }
+        }
+
+        return link.Devices.Current;
     }
 
     // The period of a budget when it is reached for a new run of this machine; null when the run may start.

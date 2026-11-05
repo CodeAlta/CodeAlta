@@ -206,6 +206,14 @@ public sealed class FleetServerConnections : IAsyncDisposable
         _reload = Task.Run(() => ReloadLoopAsync(_stop.Token));
     }
 
+    private readonly TaskCompletionSource _loaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// Gets a task that completes once the file of the links was read the first time after <see cref="Start"/> and the connectors of
+    /// its links exist (whether their servers answer or not): what applies the budgets and policies of the links waits for it.
+    /// </summary>
+    public Task Loaded => _loaded.Task;
+
     /// <summary>Reads the file of the links again now: starts the connectors of new links and stops those of removed or revoked ones.</summary>
     /// <param name="cancellationToken">Cancels the wait for the change.</param>
     /// <returns>A task that completes once the connectors follow the file.</returns>
@@ -293,6 +301,8 @@ public sealed class FleetServerConnections : IAsyncDisposable
                 if (LogManager.IsInitialized) _logger.Warn(exception, "The server links could not be read");
             }
 
+            // Read once, whatever came of it: a file that does not read is read again, and its links' budgets are not known meanwhile.
+            _loaded.TrySetResult();
             try { await Task.Delay(_options.ReloadInterval, stop).ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
         }
