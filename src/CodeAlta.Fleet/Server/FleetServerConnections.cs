@@ -51,6 +51,9 @@ public sealed class FleetServerConnectionsOptions
     /// <summary>Gets what changes the options of each connector, for tests; null for none.</summary>
     public Func<FleetConnectorOptions, FleetConnectorOptions>? Configure { get; init; }
 
+    // What reads the spaces in the place of Spaces, for tests (a read that fails); null reads Spaces.
+    internal Func<CancellationToken, Task<IReadOnlyList<SpaceDescriptor>>>? ReadSpaces { get; init; }
+
     /// <summary>
     /// Gets what receives the telemetry setting of the fleet a server sends, with the connector and the link of that server,
     /// as signed: it verifies it before it applies it. Null ignores it (a desktop does, in this step).
@@ -343,18 +346,20 @@ public sealed class FleetServerConnections : IAsyncDisposable
         {
             if (link.State == FleetServerLinkStates.Revoked || Volatile.Read(ref _running).ContainsKey(link.Id)) continue;
             if (!string.Equals(link.DeviceId, _options.Identity.DeviceId, StringComparison.Ordinal)) continue;
-            // The spaces linked to the server are read before the links count as loaded: the budgets and policies of spaces need
-            // them from the start, also while the server is away and nothing is published.
-            await StartConnector(link).RefreshAsync(CancellationToken.None).ConfigureAwait(false);
+            // The spaces linked to the server are read before its connector exists, and so before the links count as loaded: the
+            // budgets and policies of spaces need them from the start, also while the server is away and nothing is published. A read
+            // that fails starts no connector, and the next reload tries this link again.
+            var linked = new LinkedSpaces(link.Url, _options.ReadSpaces ?? (token => _options.Spaces.LoadAsync(token)));
+            await linked.RefreshAsync(CancellationToken.None).ConfigureAwait(false);
+            StartConnector(link, linked);
             changed = true;
         }
 
         return changed;
     }
 
-    private LinkedSpaces StartConnector(FleetServerLink link)
+    private void StartConnector(FleetServerLink link, LinkedSpaces linked)
     {
-        var linked = new LinkedSpaces(link.Url, _options.Spaces);
         var source = _options.Source is null ? null : new LinkedSource(_options.Source, linked);
         FleetConnector? created = null;
         // One anchored verifier of the server's device list for the link: the trust of relays, the keys and the signatures follow it.
@@ -408,7 +413,6 @@ public sealed class FleetServerConnections : IAsyncDisposable
         connector.DirectoryChanged += _ => Changed?.Invoke();
         ImmutableInterlocked.Update(ref _running, static (map, item) => map.SetItem(item.Id, item.Running), (Id: link.Id, Running: running));
         connector.Start();
-        return linked;
     }
 
     // What a server gave is taken away once its link is gone; a failure is logged, the link stays gone.
@@ -511,7 +515,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
     private sealed record Running(string Url, FleetConnector Connector, LinkedSource? Source);
 
     /// <summary>The spaces linked to one server, read again with each read of the sessions.</summary>
-    private sealed class LinkedSpaces(string url, SpaceCatalog spaces)
+    private sealed class LinkedSpaces(string url, Func<CancellationToken, Task<IReadOnlyList<SpaceDescriptor>>> read)
     {
         private ImmutableHashSet<string> _ids = ImmutableHashSet<string>.Empty;
 
@@ -521,7 +525,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
 
         public async Task RefreshAsync(CancellationToken cancellationToken)
         {
-            var linked = (await spaces.LoadAsync(cancellationToken).ConfigureAwait(false))
+            var linked = (await read(cancellationToken).ConfigureAwait(false))
                 .Where(space => space.Settings.Fleet?.Server is { } server && FleetServerAddress.TryParse(server, out var address)
                     && string.Equals(FleetServerAddress.Format(address), url, StringComparison.OrdinalIgnoreCase))
                 .Select(static space => space.Id);
