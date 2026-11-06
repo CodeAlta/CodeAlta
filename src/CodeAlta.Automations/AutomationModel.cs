@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using CodeAlta.Agent;
+using CodeAlta.Catalog.Secrets;
 
 namespace CodeAlta.Automations;
 
@@ -45,6 +46,62 @@ internal enum AutomationTriggerKind
 
     /// <summary>When any tool pushes a signed event to a hook of the server.</summary>
     Webhook,
+
+    /// <summary>
+    /// When a trigger source gives an event: one of CodeAlta (<c>project</c>, <c>automation</c>) or one a plugin contributes
+    /// (<c>&lt;plugin-id&gt;/&lt;name&gt;</c>). Its type, events and settings are <see cref="AutomationTrigger.Source"/>,
+    /// <see cref="AutomationTrigger.On"/> and <see cref="AutomationTrigger.Settings"/>.
+    /// </summary>
+    Source,
+}
+
+/// <summary>The trigger sources of CodeAlta itself, and the form of the type of a trigger source.</summary>
+internal static class AutomationSourceTypes
+{
+    /// <summary>A project of the catalog is added, archived or removed.</summary>
+    internal const string Project = "project";
+
+    /// <summary>A run of another automation of this machine ends or waits.</summary>
+    internal const string Automation = "automation";
+
+    /// <summary>The sources of CodeAlta, which a configuration file names without a plugin.</summary>
+    internal static readonly string[] BuiltIn = [Project, Automation];
+
+    /// <summary>The longest type of a source kept.</summary>
+    internal const int MaximumLength = 128;
+
+    /// <summary>The most events a trigger of a source chooses.</summary>
+    internal const int MaximumEvents = 16;
+
+    /// <summary>The most settings a trigger of a source has.</summary>
+    internal const int MaximumSettings = 32;
+
+    /// <summary>The longest text of a setting kept.</summary>
+    internal const int MaximumValueLength = 2048;
+
+    /// <summary>The most texts of a setting that is a list.</summary>
+    internal const int MaximumValues = 64;
+
+    /// <summary>Whether a text is the type of a source of a plugin: <c>&lt;plugin-id&gt;/&lt;name&gt;</c>.</summary>
+    internal static bool IsPluginType(string? text)
+    {
+        if (text is not { Length: > 2 and <= MaximumLength }) return false;
+        var slash = text.IndexOf('/', StringComparison.Ordinal);
+        if (slash <= 0 || slash != text.LastIndexOf('/')) return false;
+        var plugin = text.AsSpan(0, slash);
+        if (!char.IsAsciiLetterLower(plugin[0]) && !char.IsAsciiDigit(plugin[0])) return false;
+        return plugin.IndexOfAnyExcept("abcdefghijklmnopqrstuvwxyz0123456789._-") < 0 && IsName(text.AsSpan(slash + 1));
+    }
+
+    /// <summary>Whether a text is the type of a source: one of CodeAlta, or of a plugin.</summary>
+    internal static bool IsType(string? text) => BuiltIn.Contains(text, StringComparer.Ordinal) || IsPluginType(text);
+
+    /// <summary>The id of the plugin that gives a type, or null for a source of CodeAlta.</summary>
+    internal static string? PluginOf(string type) => type.IndexOf('/', StringComparison.Ordinal) is > 0 and var slash ? type[..slash] : null;
+
+    /// <summary>Whether a text is the name of an event or of a setting: a lowercase letter, then lowercase letters, digits and underscores.</summary>
+    internal static bool IsName(ReadOnlySpan<char> text)
+        => text.Length is > 0 and <= 64 && char.IsAsciiLetterLower(text[0]) && text.IndexOfAnyExcept("abcdefghijklmnopqrstuvwxyz0123456789_") < 0;
 }
 
 /// <summary>How the sender of a webhook signs what it pushes.</summary>
@@ -207,6 +264,18 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
     /// </summary>
     public bool Threads { get; init; }
 
+    /// <summary><see cref="AutomationTriggerKind.Source"/>: the type of the source, <c>project</c> or <c>&lt;prefix&gt;/&lt;name&gt;</c> for a plugin.</summary>
+    public string? Source { get; init; }
+
+    /// <summary><see cref="AutomationTriggerKind.Source"/>: the events it starts on, in their order; empty for the default event of the source.</summary>
+    public IReadOnlyList<string> On { get; init; } = [];
+
+    /// <summary><see cref="AutomationTriggerKind.Source"/>: the other keys of its table, which the source reads.</summary>
+    public CodeAlta.Plugins.Abstractions.PluginTriggerSettings Settings { get; init; } = CodeAlta.Plugins.Abstractions.PluginTriggerSettings.Empty;
+
+    /// <summary>Whether the trigger is one of a trigger source, of CodeAlta or of a plugin.</summary>
+    public bool IsSource => Kind == AutomationTriggerKind.Source;
+
     /// <summary>The longest JQL query kept.</summary>
     internal const int MaximumQueryLength = 2000;
 
@@ -239,7 +308,7 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
     public IEnumerable<string> Credentials => new[] { Token, AppToken, BotToken, ApiKey, Secret }.OfType<string>();
 
     /// <summary>Whether the trigger is a schedule, as opposed to an event of the repository, of another tool, or a command.</summary>
-    public bool IsSchedule => !IsEvent && !IsCommand && !IsIntegration;
+    public bool IsSchedule => !IsEvent && !IsCommand && !IsIntegration && !IsSource;
 
     /// <summary>Whether the trigger is an event of the repository of the project, or of its tracker.</summary>
     public bool IsEvent => Kind is AutomationTriggerKind.Issue or AutomationTriggerKind.PullRequest or AutomationTriggerKind.Jira;
@@ -250,18 +319,19 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
     /// <summary>Whether the trigger watches a tracker a plugin gives, as opposed to the hosted repository of the project.</summary>
     public bool IsTracker => Kind == AutomationTriggerKind.Jira;
 
-    /// <summary>The name of the kind in a configuration file.</summary>
-    public string KindName => KindNames[(int)Kind];
+    /// <summary>The name of the kind in a configuration file: for a trigger of a source, the type of the source.</summary>
+    public string KindName => IsSource ? Source ?? string.Empty : KindNames[(int)Kind];
 
+    // The kind of a source is never written: its type is.
     private static readonly string[] KindNames = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira", CommandKindName,
-        "jira_version", "jira_query", "slack", "incident_io", "webhook"];
+        "jira_version", "jira_query", "slack", "incident_io", "webhook", "\0source"];
 
-    /// <summary>Reads the name of a kind from a configuration file.</summary>
+    /// <summary>Reads the name of a kind from a configuration file; the type of a source is not a kind.</summary>
     internal static bool TryParseKind(string? name, out AutomationTriggerKind kind)
     {
         var index = Array.IndexOf(KindNames, name?.Trim().ToLowerInvariant());
         kind = index < 0 ? default : (AutomationTriggerKind)index;
-        return index >= 0;
+        return index >= 0 && kind != AutomationTriggerKind.Source;
     }
 
     /// <summary>A value that identifies this trigger among those of its automation, stable while it is not edited.</summary>
@@ -279,14 +349,22 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
         AutomationTriggerKind.Slack => $"slack:{Event}:{Channel}\t{Match}",
         AutomationTriggerKind.IncidentIo => $"incident_io:{Event}:{Hook}",
         AutomationTriggerKind.Webhook => $"webhook:{Hook}",
+        // What it watches, not how it signs in: a setting that names a secret is left out, as the token of Jira is.
+        AutomationTriggerKind.Source => $"source:{Source}:{string.Join(',', On)}\t" + string.Join('\t', Settings.Values
+            .Where(static pair => !IsSecretReference(pair.Value)).Select(static pair => pair.Key + "=" + pair.Value)),
         _ => $"{KindName}:{Event}:{(Authors == AutomationAuthors.Anyone ? "anyone" : "trusted")}",
     };
+
+    private static bool IsSecretReference(CodeAlta.Plugins.Abstractions.PluginTriggerValue value)
+        => value.Kind == CodeAlta.Plugins.Abstractions.PluginTriggerValueKind.Text
+            && SecretReferences.TryParseLone(value.Text!, out var reference) && reference.Kind == SecretReferenceKind.Secret;
 
     /// <summary>
     /// What the fingerprint of an automation takes of the trigger: its <see cref="Key"/>, and for an integration trigger
     /// also how it signs in, what it binds and whether it replies, so that a change of any of them asks again.
     /// </summary>
-    public string FingerprintKey => !IsIntegration ? Key
+    public string FingerprintKey => IsSource ? $"{Key}\u001d{Settings.ToJson()}"
+        : !IsIntegration ? Key
         : string.Join('\t', Key, Email ?? string.Empty, string.Join(',', Credentials), Signature ?? string.Empty, SignatureHeader ?? string.Empty,
             string.Join(',', Fields), Reply ? "reply" : string.Empty) + (Threads ? "\tthreads" : string.Empty);
 }

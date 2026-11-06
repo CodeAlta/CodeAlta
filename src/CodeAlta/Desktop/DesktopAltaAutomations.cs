@@ -174,8 +174,8 @@ internal static class AutomationTriggerText
             AutomationTriggerKind.Weekly => "weekly@" + string.Join(',', trigger.Days.Select(static day => AutomationTrigger.DayNames[(int)day])) + "@" + string.Join(',', trigger.At),
             AutomationTriggerKind.Cron => "cron@" + trigger.Expression,
             AutomationTriggerKind.Command => "command@" + trigger.Command,
-            // A trigger of another tool has settings of its own: the inline table of a configuration file.
-            _ when trigger.IsIntegration => AutomationConfig.Format(trigger),
+            // A trigger of another tool or of a source has settings of its own: the inline table of a configuration file.
+            _ when trigger.IsIntegration || trigger.IsSource => AutomationConfig.Format(trigger),
             _ => trigger.KindName + "@" + trigger.Event + (trigger.Authors == AutomationAuthors.Anyone ? "+anyone" : string.Empty),
         };
     }

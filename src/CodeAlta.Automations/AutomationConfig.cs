@@ -124,6 +124,10 @@ internal static class AutomationConfig
             {
                 if (AutomationIntegrationConfig.Validate(trigger) is { } integration) return integration;
             }
+            else if (trigger.IsSource)
+            {
+                if (AutomationSourceConfig.Validate(trigger) is { } source) return source;
+            }
             else if (trigger.IsSchedule)
             {
                 if (!AutomationSchedule.TryCreate(trigger, out _, out var error)) return error;
@@ -408,7 +412,10 @@ internal static class AutomationConfig
         if (!TryText(table, "type", out var type, out problem)) return false;
         if (!AutomationTrigger.TryParseKind(type, out var kind))
         {
-            problem = $"'{type}' is not a trigger: hourly, daily, weekly, cron, issue, pull_request, jira, command, jira_version, jira_query, slack, incident_io or webhook.";
+            // The trigger of a source is read whatever its source says: a plugin that is not active keeps its triggers.
+            if (AutomationSourceTypes.IsType(type?.Trim())) return AutomationSourceConfig.TryRead(type!.Trim(), table, out trigger, out problem);
+            problem = $"'{type}' is not a trigger: hourly, daily, weekly, cron, issue, pull_request, jira, command, jira_version, jira_query, slack, incident_io, webhook, "
+                + $"{string.Join(", ", AutomationSourceTypes.BuiltIn)}, or <prefix>/<name> for a trigger of a plugin.";
             return false;
         }
 
@@ -569,6 +576,7 @@ internal static class AutomationConfig
     {
         ArgumentNullException.ThrowIfNull(trigger);
         if (trigger.IsIntegration) return AutomationIntegrationConfig.Format(trigger);
+        if (trigger.IsSource) return AutomationSourceConfig.Format(trigger);
         var builder = new StringBuilder("{ type = ").Append(Quote(trigger.KindName));
         switch (trigger.Kind)
         {
