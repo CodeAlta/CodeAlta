@@ -46,7 +46,7 @@ With **Adaptive**, CodeAlta runs each turn you send on the models of a level, wh
 Critics of another family of models see other mistakes: in November 2026, GPT-6.1 Sol for the turns with Claude Sonnet 5.5 as the critic solved as many hard tasks of real repositories as Claude Opus 5.5 alone, for about a quarter of its cost, and more Terminal-Bench tasks than any model alone.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-adaptive.webp" alt="The Adaptive section of Settings > Models: Set up Adaptive turned on, the tested combinations, the level new sessions start at, and the four levels with the model of their turns and their critics" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-adaptive.webp" alt="The Adaptive section of Settings > Models: Set up Adaptive turned on, a line saying the levels are the recommended ones, and a table of the four levels with the model of their turns, its effort, their critics and the Default level" loading="lazy">
   <figcaption class="small text-secondary mt-2">Settings > Models > Adaptive: the model and the critics of each level.</figcaption>
 </figure>
 
@@ -54,9 +54,9 @@ Critics of another family of models see other mistakes: in November 2026, GPT-6.
 
 In **Settings > Models**, in the **Adaptive** section under the tiers, turn on **Set up Adaptive**.
 
-- When the providers you signed in to have models CodeAlta tested (such as Codex and Claude Code), the section shows the **tested combinations**; **Use these combinations** sets the four levels with them.
-- Otherwise, give each level you want its model with **Choose its model**, and its critics with **Add a critic**, up to three; the reasoning effort of each model is beside it. A level needs only its model: without critics, its changes are rechecked.
-- **New sessions on Adaptive start at** sets the level a session takes when you choose Adaptive without a level.
+- When the providers you signed in to have models CodeAlta tested (such as Codex and Claude Code), turning it on sets the four levels with them. Later, **Recommended for your accounts** lists them again whenever your levels differ, and **Use the recommended levels** puts them back.
+- Otherwise, the table of the levels has a **Choose a model** button on each row: give each level you want its model, then its critics with **Add a critic**, up to three. The reasoning effort of each model is beside it. A level needs only its model: without critics, its changes are rechecked.
+- The **Default** column sets the level a session takes when you choose Adaptive without a level. The bin at the end of a row clears that level.
 
 To choose the models yourself: for the turns, a strong model that is inexpensive per task (one that uses few tokens, whatever its price per token); for the critics, models of another family. Independent leaderboards such as [Artificial Analysis](https://artificialanalysis.ai/) compare models by their results on coding tasks and their price.
 
