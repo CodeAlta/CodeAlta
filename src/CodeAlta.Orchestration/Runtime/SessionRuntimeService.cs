@@ -1771,7 +1771,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var requestedProjectId = project.Id;
         var previousProject = await _projectCatalog.GetByPathAsync(project.ProjectPath, cancellationToken).ConfigureAwait(false);
         var restoredArchivedProject = previousProject?.Archived == true;
-        project = await _projectCatalog.EnsurePersistedAsync(project, cancellationToken).ConfigureAwait(false);
+        project = await _projectCatalog.EnsurePersistedAsync(project, ProjectOrigins.Session, cancellationToken).ConfigureAwait(false);
         var persistedNewProject = previousProject is null &&
             string.Equals(project.Id, requestedProjectId, StringComparison.OrdinalIgnoreCase);
         if (requestedSessionId is not null)

@@ -172,7 +172,8 @@ internal sealed partial class AutomationService
                 if (!source.Trigger.Source.Delivery.HasFlag(PluginTriggerDelivery.Polled)) continue;
                 if (_sourceReads.TryGetValue(key, out var reading) && !reading.IsCompleted) continue;
                 var due = !_sourceReadAt.TryGetValue(key, out var last) ? now
-                    : _sourceSignaledAt.TryGetValue(source.Type, out var signaled) && signaled > last ? Max(now, last + SourceSoonest)
+                    // A signal at the very time a reading started may not be in what it read.
+                    : _sourceSignaledAt.TryGetValue(source.Type, out var signaled) && signaled >= last ? Max(now, last + SourceSoonest)
                     : last + LookEvery;
                 if (due <= now)
                 {

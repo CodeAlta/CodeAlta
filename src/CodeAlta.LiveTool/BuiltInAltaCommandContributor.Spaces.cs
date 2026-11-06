@@ -1037,7 +1037,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         }
 
         var created = await catalog.GetByPathAsync(resolvedPath, context.CancellationToken).ConfigureAwait(false) is null;
-        var project = await catalog.UpsertFromPathAsync(resolvedPath, context.CancellationToken).ConfigureAwait(false);
+        var project = await catalog.UpsertFromPathAsync(resolvedPath, ProjectOrigins.AltaAdd, context.CancellationToken).ConfigureAwait(false);
         if (spaces is not null && joined.Count > 0)
         {
             var assigned = await spaces.AssignAsync(project.Id, joined.Select(static space => space.Id).ToArray(), null, context.CancellationToken).ConfigureAwait(false);

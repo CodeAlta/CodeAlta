@@ -2232,7 +2232,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return NotFound(context, "project.pathNotFound", $"Project path '{resolvedPath}' does not exist.");
         }
 
-        var project = await catalog.UpsertFromPathAsync(resolvedPath, context.CancellationToken).ConfigureAwait(false);
+        var project = await catalog.UpsertFromPathAsync(resolvedPath, ProjectOrigins.AltaUpsert, context.CancellationToken).ConfigureAwait(false);
         WriteProject(context, "alta.project.upserted", project);
         NotifySpacesChanged(context);
         return AltaExitCodes.Success;

@@ -903,7 +903,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // Jira and Slack, with the secrets of this computer, while the desktop runs; the hooks of a server go to its machines.
                     Integrations = Automations.AutomationIntegrationOptions.ForHost(host.CatalogOptions.GlobalRoot),
                 };
-                // The triggers the plugins give, as they run now.
+                // The triggers of CodeAlta, and those the plugins give, as they run now.
+                Automations.AutomationBuiltInSources.AddProjectTrigger(automations, host.ProjectCatalog);
                 automations.Sources.Plugins = () => host.PluginRuntime?.GetAutomationTriggers() ?? [];
                 // An automation of the user can run on a paired machine: it is copied there, and runs there while this
                 // computer is closed. A profile that placed none makes no call and creates no key.

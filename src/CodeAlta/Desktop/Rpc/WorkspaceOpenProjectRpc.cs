@@ -27,7 +27,7 @@ internal sealed partial class WorkspaceService
         _importEpoch = epoch;
         _directoryCompletionReader = (directory, prefix) => Task.Run(() => DirectoryCompletionReader.Read(directory, prefix));
         _import = async path => await catalog.GetByPathAsync(path, CancellationToken.None).ConfigureAwait(false)
-            ?? await catalog.UpsertFromPathAsync(path, CancellationToken.None).ConfigureAwait(false);
+            ?? await catalog.UpsertFromPathAsync(path, ProjectOrigins.Window, CancellationToken.None).ConfigureAwait(false);
         _projectNameWrite = (id, path, source, revision, name) =>
             catalog.RenameDisplayNameAsync(id, path, source, revision, name, CancellationToken.None);
     }

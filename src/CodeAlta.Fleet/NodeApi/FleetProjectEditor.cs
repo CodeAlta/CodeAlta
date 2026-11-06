@@ -129,7 +129,7 @@ public sealed class FleetProjectEditor
     private async Task<FleetProjectChange> AddFolderAsync(string folder, SpaceDescriptor? space, string? note, CancellationToken cancellationToken)
     {
         var existing = await _projects.GetByPathAsync(folder, cancellationToken).ConfigureAwait(false);
-        var project = await _projects.UpsertFromPathAsync(folder, cancellationToken).ConfigureAwait(false);
+        var project = await _projects.UpsertFromPathAsync(folder, ProjectOrigins.Fleet, cancellationToken).ConfigureAwait(false);
         var changed = existing is null || existing.Archived;
         // Every project is in the default space already.
         if (space is { IsDefault: false } && !project.Spaces.Contains(space.Id, StringComparer.Ordinal))

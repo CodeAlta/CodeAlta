@@ -420,7 +420,7 @@ public sealed class FleetMoveReceiver
             return (null, failure);
         var folder = offer.RelativeFolder is "." ? path : Path.GetFullPath(Path.Combine(path, offer.RelativeFolder));
         if (!GitWorktreeService.IsWithin(folder, path) || !Directory.Exists(folder)) return (null, $"The repository has no folder {offer.RelativeFolder}.");
-        await _host.ProjectCatalog.UpsertFromPathAsync(folder, cancellationToken).ConfigureAwait(false);
+        await _host.ProjectCatalog.UpsertFromPathAsync(folder, ProjectOrigins.Fleet, cancellationToken).ConfigureAwait(false);
         return (await _host.RuntimeService.FindProjectOfRepositoryAsync(offer.RepositoryKey, offer.RelativeFolder, cancellationToken).ConfigureAwait(false), null);
     }
 

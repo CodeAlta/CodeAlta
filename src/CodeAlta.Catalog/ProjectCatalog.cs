@@ -270,7 +270,16 @@ public sealed partial class ProjectCatalog
     /// <param name="project">The project descriptor.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <exception cref="InvalidOperationException">The catalog is read-only (<see cref="IsReadOnly"/>).</exception>
-    public async Task SaveAsync(ProjectDescriptor project, CancellationToken cancellationToken = default)
+    public Task SaveAsync(ProjectDescriptor project, CancellationToken cancellationToken = default) => SaveAsync(project, null, cancellationToken);
+
+    /// <summary>
+    /// Saves a project descriptor to the portable catalog, saying where a project it adds comes from (<see cref="ProjectOrigins"/>).
+    /// </summary>
+    /// <param name="project">The project descriptor.</param>
+    /// <param name="origin">What adds the project, or brings it back from the archive, such as <see cref="ProjectOrigins.Window"/>; null when not known or for another change.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidOperationException">The catalog is read-only (<see cref="IsReadOnly"/>).</exception>
+    public async Task SaveAsync(ProjectDescriptor project, string? origin, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(project);
         ThrowIfReadOnly();
@@ -279,6 +288,7 @@ public sealed partial class ProjectCatalog
         Directory.CreateDirectory(_options.ProjectsRoot);
         var markdownPath = GetProjectMarkdownPath(project.Slug);
         var markdown = _serializer.SerializeProjectMarkdown(project);
+        var added = !File.Exists(markdownPath);
         try
         {
             await File.WriteAllTextAsync(markdownPath, markdown, cancellationToken).ConfigureAwait(false);
@@ -289,6 +299,30 @@ public sealed partial class ProjectCatalog
         }
 
         project.SourcePath = markdownPath;
+        Raise(new ProjectCatalogChange(project.Copy(), added ? ProjectCatalogChangeKind.Added : ProjectCatalogChangeKind.Saved, origin));
+    }
+
+    /// <summary>
+    /// Raised, on the thread that changed it, once a project file of this catalog was written or deleted. What another
+    /// process writes in the folder raises nothing: a reader that must see it lists the catalog again.
+    /// </summary>
+    public event Action<ProjectCatalogChange>? Changed;
+
+    // A handler that fails does not undo the change, nor keep the others from being told.
+    private void Raise(ProjectCatalogChange change)
+    {
+        if (Changed is not { } changed) return;
+        foreach (var handler in changed.GetInvocationList().Cast<Action<ProjectCatalogChange>>())
+        {
+            try
+            {
+                handler(change);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // The file is written: what a reader of the change does with it is its own.
+            }
+        }
     }
 
     /// <summary>
@@ -303,7 +337,20 @@ public sealed partial class ProjectCatalog
     /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="project"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="project"/> is invalid.</exception>
-    public async Task<ProjectDescriptor> EnsurePersistedAsync(ProjectDescriptor project, CancellationToken cancellationToken = default)
+    public Task<ProjectDescriptor> EnsurePersistedAsync(ProjectDescriptor project, CancellationToken cancellationToken = default)
+        => EnsurePersistedAsync(project, null, cancellationToken);
+
+    /// <summary>
+    /// Ensures that a project descriptor has a persisted catalog file, as <see cref="EnsurePersistedAsync(ProjectDescriptor, CancellationToken)"/>
+    /// does, saying where a project it adds comes from.
+    /// </summary>
+    /// <param name="project">The project descriptor to persist when no existing descriptor has the same path.</param>
+    /// <param name="origin">What adds the project when it is new (<see cref="ProjectOrigins"/>); null when not known.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The persisted descriptor for the project path.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="project"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="project"/> is invalid.</exception>
+    public async Task<ProjectDescriptor> EnsurePersistedAsync(ProjectDescriptor project, string? origin, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(project);
         project.Validate();
@@ -317,7 +364,7 @@ public sealed partial class ProjectCatalog
             if (existing.Archived && !IsReadOnly)
             {
                 existing.Archived = false;
-                await SaveAsync(existing, cancellationToken).ConfigureAwait(false);
+                await SaveAsync(existing, origin, cancellationToken).ConfigureAwait(false);
             }
 
             return existing;
@@ -335,7 +382,7 @@ public sealed partial class ProjectCatalog
             return AddTransient(project);
         }
 
-        await SaveAsync(project, cancellationToken).ConfigureAwait(false);
+        await SaveAsync(project, origin, cancellationToken).ConfigureAwait(false);
         return project;
     }
 
@@ -411,6 +458,7 @@ public sealed partial class ProjectCatalog
         if (deleted)
         {
             project.SourcePath = null;
+            Raise(new ProjectCatalogChange(project.Copy(), ProjectCatalogChangeKind.Deleted, null));
         }
 
         return deleted || forgotten;
@@ -423,7 +471,19 @@ public sealed partial class ProjectCatalog
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The existing or newly created project descriptor.</returns>
     /// <exception cref="InvalidOperationException">The catalog is read-only (<see cref="IsReadOnly"/>).</exception>
-    public async Task<ProjectDescriptor> UpsertFromPathAsync(string projectPath, CancellationToken cancellationToken = default)
+    public Task<ProjectDescriptor> UpsertFromPathAsync(string projectPath, CancellationToken cancellationToken = default)
+        => UpsertFromPathAsync(projectPath, null, cancellationToken);
+
+    /// <summary>
+    /// Ensures that a project exists in the catalog for the specified path, saying where a project it adds comes from.
+    /// </summary>
+    /// <param name="projectPath">The local project path.</param>
+    /// <param name="origin">What adds the project when it is new (<see cref="ProjectOrigins"/>); null when not known.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The existing or newly created project descriptor.</returns>
+    /// <exception cref="ArgumentException"><paramref name="projectPath"/> is empty.</exception>
+    /// <exception cref="InvalidOperationException">The catalog is read-only (<see cref="IsReadOnly"/>).</exception>
+    public async Task<ProjectDescriptor> UpsertFromPathAsync(string projectPath, string? origin, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(projectPath))
         {
@@ -441,7 +501,7 @@ public sealed partial class ProjectCatalog
             if (existing.Archived)
             {
                 existing.Archived = false;
-                await SaveAsync(existing, cancellationToken).ConfigureAwait(false);
+                await SaveAsync(existing, origin, cancellationToken).ConfigureAwait(false);
             }
 
             return existing;
@@ -462,7 +522,7 @@ public sealed partial class ProjectCatalog
             MarkdownBody = $"# {displayName}\n\nAutomatically discovered from local usage.",
         };
 
-        await SaveAsync(descriptor, cancellationToken).ConfigureAwait(false);
+        await SaveAsync(descriptor, origin, cancellationToken).ConfigureAwait(false);
         return descriptor;
     }
 

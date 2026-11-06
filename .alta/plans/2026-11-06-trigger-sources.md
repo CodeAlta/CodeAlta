@@ -54,7 +54,8 @@ This plan adds **trigger sources**: a trigger type that describes its events and
 ### The Project trigger
 
 - Events `added`, `archived`, `removed`, and an optional space. On each look it compares the catalog with the ids and names it saw, kept in its watermark. So it sees projects added by this instance, the TUI, another instance or a hand-made file, and catches up those added while CodeAlta was closed. A catalog change in this process signals a look at once.
-- Event: `on`, `projectId`, `slug`, `name`, `path`, `spaces`, `repoUrl`, `archived`, and `addedBy` (`window`, `alta project add`, `alta project upsert`, `agent`, or `unknown`). The add paths in this process report their origin; a reconciled event says `unknown`. A removed project is described by what was last seen of it.
+- Event: `on`, `projectId`, `slug`, `name`, `path`, `spaces`, `archived`, `description`, `repository` and `repoUrl` (from the remotes of its folder), and `addedBy` (`window`, `alta project add`, `alta project upsert`, `session`, `fleet`, or `unknown`). The add paths in this process pass their origin to the catalog, whose new `Changed` event tells the source; a reconciled event says `unknown`. A removed project is described by what was last seen of it.
+- With a space, the trigger watches the projects of that space: `added` when a project joins it (so `alta project add --space work`, which adds then assigns, starts it), `removed` when one leaves it. A project brought back from the archive is `added` again.
 
 ### The Automation trigger
 
@@ -94,7 +95,7 @@ A plugin can give a trigger together with the code that handles it, so that "whe
 - [x] 2. Model and configuration of the `Source` kind: read, write, validate, `Key`, `FingerprintKey`; tests in `CodeAlta.Desktop.Tests` (`AutomationConfigTests`).
 - [x] 3. The public contract and its registration: `PluginAutomationTriggers.cs`, `PluginBase.GetAutomationTriggers()`, `PluginContributionRegistry`, the look-now signal; wiring in `DesktopApplication` and `NodeAutomations`; tests in `Plugins.Abstractions.Tests` and `Plugins.Tests`.
 - [x] 4. Engine: polled sources with cursors, push listeners, claims, the prompt section, the JSON `event`; a missing source reported; tests with a fake source (`AutomationServiceTests`).
-- [ ] 5. Project trigger, with the origin reported by the in-process add paths; tests.
+- [x] 5. Project trigger, with the origin reported by the in-process add paths; tests.
 - [ ] 6. Automation trigger, with the self and chain-depth guards; tests.
 - [ ] 7. Scripts without a model or a session: the run in Code Mode without a session, the `alta` binding with the guards of an automation, `agent()` starting a session of the automation, the run's record; tests, including a fake plugin `alta` command that the script calls.
 - [ ] 8. Scripts of a plugin: `PluginBase.GetScripts()`, the `Plugin` scope of the library and its names, read-only; a trigger contribution that names its script, arguments and mode; tests.
