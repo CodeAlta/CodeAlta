@@ -79,7 +79,12 @@ internal sealed partial class MachinesService
         if (request!.Link is not { Length: > 0 and <= MaximumLinkLength } link) return MachinePairPreview.Refused("invalid_link");
         if (!_fleet!.TryPreview(link, out var preview, out var error)) return MachinePairPreview.Refused(error == PairingPayloadError.Expired ? "expired" : "invalid_link");
         return new("ok", preview.Name, preview.DeviceId, preview.Words, [.. preview.Addresses],
-            preview.ExpiresAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), preview.AlreadyPaired);
+            preview.ExpiresAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), preview.AlreadyPaired)
+        {
+            // Both ways needs this computer as a machine of the other one: a desktop that serves the node API.
+            BothWays = preview.BothWays && Node is not null,
+            Listening = Node?.Visible == true,
+        };
     }
 
     /// <summary>Pairs with the machine of a link.</summary>
@@ -88,11 +93,19 @@ internal sealed partial class MachinesService
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
         if (request!.Link is not { Length: > 0 and <= MaximumLinkLength } link) return new("invalid_link", null, null);
+        var turnedOn = false;
+        var bothWays = false;
         try
         {
-            var machine = await _fleet!.PairAsync(link, cancellationToken).ConfigureAwait(false);
-            return new("ok", _fleet.Find(machine.DeviceId) is { } host ? View(host) : null, null);
+            CodeAlta.Fleet.Client.FleetPairBackOffer? pairBack = null;
+            // The person asked for both ways on a link that offers it: this computer listens for the machine, which it trusts.
+            if (request.BothWays && Node is { } node && _fleet!.TryPreview(link, out var preview, out _) && preview.BothWays)
+                (pairBack, turnedOn) = await node.PrepareBothWaysAsync(cancellationToken).ConfigureAwait(false);
+            var paired = await _fleet!.PairAsync(link, pairBack, cancellationToken).ConfigureAwait(false);
+            bothWays = paired.BothWays;
+            return new("ok", _fleet.Find(paired.Machine.DeviceId) is { } host ? View(host) : null, null) { BothWays = bothWays };
         }
+        catch (UnauthorizedAccessException) { return new("write_failed", null, null); }
         catch (FormatException) { return new(_fleet!.TryPreview(link, out _, out var error) || error != PairingPayloadError.Expired ? "invalid_link" : "expired", null, null); }
         catch (DeviceAuthenticationException exception) { return new("refused", null, exception.Message); }
         catch (FleetException exception) when (exception.Error.Code == FleetNodeErrorCodes.PairingRefused) { return new("link_refused", null, null); }
@@ -100,6 +113,23 @@ internal sealed partial class MachinesService
         catch (Exception exception) when (exception is IOException or TimeoutException or System.Security.Authentication.AuthenticationException)
         {
             return new("unreachable", null, exception.Message);
+        }
+        finally
+        {
+            // Listening was turned on for this pairing alone: it stops again when the pairing did not go both ways.
+            if (turnedOn && !bothWays) await StopListeningAfterPairingAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task StopListeningAfterPairingAsync()
+    {
+        try
+        {
+            await Node!.SetVisibleAsync(false, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ObjectDisposedException)
+        {
+            // Left listening: the switch of This computer shows it.
         }
     }
 
@@ -368,7 +398,11 @@ internal sealed record MachinesList(string Status, string? HostEpoch, MachineVie
 /// <summary>A pairing link the person pasted.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
 /// <param name="Link">The <c>codealta-pair://</c> link.</param>
-internal sealed record MachinePairLinkRequest(string ExpectedEpoch, string Link);
+internal sealed record MachinePairLinkRequest(string ExpectedEpoch, string Link)
+{
+    /// <summary>Gets whether the person asks to pair both ways: the machine of the link reaches this computer too, when the link offers it.</summary>
+    public bool BothWays { get; init; }
+}
 
 /// <summary>What a pairing link names.</summary>
 /// <param name="Status"><c>ok</c>, <c>invalid_link</c>, <c>expired</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
@@ -380,18 +414,28 @@ internal sealed record MachinePairLinkRequest(string ExpectedEpoch, string Link)
 /// <param name="AlreadyPaired">Whether this device paired with it already.</param>
 internal sealed record MachinePairPreview(string Status, string? Name, string? DeviceId, string? Words, string[] Addresses, string? ExpiresAt, bool AlreadyPaired)
 {
+    /// <summary>Gets whether the machine reaches this computer too when the person asks: one pairing then goes both ways.</summary>
+    public bool BothWays { get; init; }
+
+    /// <summary>Gets whether this computer lets the person's other computers pair with it already; pairing both ways turns it on otherwise.</summary>
+    public bool Listening { get; init; }
+
     internal static MachinePairPreview Refused(string status) => new(status, null, null, null, [], null, false);
 }
 
 /// <summary>The outcome of a pairing.</summary>
 /// <param name="Status">
 /// <c>ok</c>, <c>invalid_link</c>, <c>expired</c>, <c>link_refused</c> (the machine refused the link: used, replaced or
-/// expired there), <c>refused</c> (another key, or this device was refused), <c>unreachable</c>, <c>stale_epoch</c> or
-/// <c>unavailable</c>.
+/// expired there), <c>refused</c> (another key, or this device was refused), <c>unreachable</c>, <c>write_failed</c>,
+/// <c>stale_epoch</c> or <c>unavailable</c>.
 /// </param>
 /// <param name="Machine">The machine, once paired.</param>
 /// <param name="Message">What the failure said, when it said something.</param>
-internal sealed record MachinePairResult(string Status, MachineView? Machine, string? Message);
+internal sealed record MachinePairResult(string Status, MachineView? Machine, string? Message)
+{
+    /// <summary>Gets whether the machine reaches this computer too: it lists this computer with its machines.</summary>
+    public bool BothWays { get; init; }
+}
 
 /// <summary>A request about one machine.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>

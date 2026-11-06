@@ -95,6 +95,8 @@
 .pair-machine-preview p { margin: 0; }
 .pair-machine-words { display: flex; flex-wrap: wrap; gap: 6px; }
 .pair-machine-words .bp6-tag { font-family: var(--bp-typography-family-mono); }
+.pair-machine-both-ways { display: grid; gap: 2px; }
+.pair-machine-both-ways .bp6-control { margin: 0; }
 .pair-machine-guide { margin-bottom: 12px; }
 .pair-machine-guide p { margin: 0 0 4px; }
 .pair-machine-guide ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
@@ -156,6 +158,8 @@
 .this-computer-reach { display: grid; gap: 4px; font-size: 12px; overflow-wrap: anywhere; }
 .this-computer-servers { display: grid; gap: 4px; margin-top: 6px; }
 .this-computer-servers > p { margin: 0; overflow-wrap: anywhere; }
+.this-computer-both-ways { display: grid; gap: 4px; margin-top: 6px; }
+.this-computer-both-ways > p { margin: 0; overflow-wrap: anywhere; }
 .pair-this-computer-steps { margin: 0 0 8px; padding-left: 20px; display: grid; gap: 4px; }
 .pair-this-computer-copy { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .pair-this-computer-wait { display: flex; align-items: center; gap: 8px; margin: 0; }

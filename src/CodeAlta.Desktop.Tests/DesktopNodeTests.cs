@@ -177,6 +177,181 @@ public sealed class DesktopNodeTests
         }
     }
 
+    [TestMethod]
+    public async Task OnePairingFromALinkOfADesktop_GoesBothWays_WithTheSameTrust()
+    {
+        var token = TestContext.CancellationToken;
+        var root = NewRoot();
+        try
+        {
+            // Two desktops of the person, each with its machines and its node on one fleet folder, as the start wires them.
+            await using var desk = await Desktop.StartAsync(root, "desk", token);
+            await using var laptop = await Desktop.StartAsync(root, "laptop", token);
+            await desk.Node.SetVisibleAsync(true, token);
+            Assert.IsTrue(desk.Node.PairBothWays, "on until the person turns it off");
+            var link = desk.Node.CreatePairing();
+            var waiting = desk.Node.CurrentPairing()!;
+            Assert.IsTrue(desk.Fleet.TryPreview(link.Link, out var preview, out _));
+            Assert.IsTrue(preview.BothWays, "the link of a desktop offers both ways");
+
+            // The laptop does not listen yet: asking for both ways turns it on, and it trusts the desk before the desk records it.
+            Assert.IsFalse(laptop.Node.Visible);
+            var (offer, turnedOn) = await laptop.Node.PrepareBothWaysAsync(token);
+            Assert.IsTrue(turnedOn);
+            Assert.IsTrue(laptop.Node.Listening);
+            var paired = await laptop.Fleet.PairAsync(link.Link, offer, token);
+
+            Assert.IsTrue(paired.BothWays);
+            var outcome = await waiting.WaitAsync(TimeSpan.FromSeconds(10), token);
+            Assert.AreEqual(("redeemed", "laptop", true), (outcome.Status, outcome.DeviceName, outcome.BothWays));
+            // Each trusts the key of the other, with what a pairing gives, and lists the other with its machines.
+            var deskOnLaptop = laptop.Node.Devices().Single();
+            Assert.AreEqual(("desk", FleetPairingCoordinatorDefaults), (deskOnLaptop.Name, deskOnLaptop.Permissions));
+            Assert.AreEqual(("laptop", FleetPairingCoordinatorDefaults), (desk.Node.Devices().Single().Name, desk.Node.Devices().Single().Permissions));
+            var laptopOnDesk = desk.Fleet.Hosts.Single();
+            Assert.AreEqual(("laptop", laptop.Fleet.DeviceId), (laptopOnDesk.Machine.Name, laptopOnDesk.MachineId));
+            CollectionAssert.AreEqual(laptop.Node.Addresses.ToArray(), laptopOnDesk.Machine.Addresses.ToArray(), "the desk reaches the laptop where it listens");
+            CollectionAssert.AreEquivalent(new[] { "view", "drive", "start" }, laptopOnDesk.Machine.Permissions.ToArray());
+            Assert.AreEqual("desk", laptop.Fleet.Hosts.Single().Machine.Name);
+            // The first connection of the desk is accepted: the laptop trusted it before.
+            await WaitAsync(() => laptopOnDesk.State == RemoteMachineState.Online, token);
+
+            // Each direction is revoked on its own side.
+            Assert.IsTrue(await laptop.Node.RevokeAsync(deskOnLaptop.DeviceId));
+            Assert.AreEqual(1, desk.Node.Devices().Count, "the laptop still reaches the desk");
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task ADesktopThatPairsOneWayOnly_LeavesTheOtherAsItWas()
+    {
+        var token = TestContext.CancellationToken;
+        var root = NewRoot();
+        try
+        {
+            await using var desk = await Desktop.StartAsync(root, "desk", token);
+            await using var laptop = await Desktop.StartAsync(root, "laptop", token);
+            await desk.Node.SetVisibleAsync(true, token);
+            await laptop.Node.SetVisibleAsync(true, token);
+
+            // Turned off: its links say nothing of both ways, and the laptop trusts nothing.
+            await desk.Node.SetPairBothWaysAsync(false, token);
+            var link = desk.Node.CreatePairing().Link;
+            Assert.IsTrue(desk.Fleet.TryPreview(link, out var preview, out _));
+            Assert.IsFalse(preview.BothWays);
+            var (offer, turnedOn) = await laptop.Node.PrepareBothWaysAsync(token);
+            Assert.IsFalse(turnedOn, "it listened already");
+            var paired = await laptop.Fleet.PairAsync(link, offer, token);
+            Assert.IsFalse(paired.BothWays);
+            Assert.AreEqual(0, laptop.Node.Devices().Count);
+            Assert.AreEqual(0, desk.Fleet.Hosts.Count);
+            Assert.AreEqual(1, desk.Node.Devices().Count, "the laptop reaches the desk");
+
+            // Turned off after the link was made: the desk declines at the pairing, and the laptop takes its trust back.
+            await desk.Node.SetPairBothWaysAsync(true, token);
+            link = desk.Node.CreatePairing().Link;
+            await desk.Node.SetPairBothWaysAsync(false, token);
+            (offer, _) = await laptop.Node.PrepareBothWaysAsync(token);
+            paired = await laptop.Fleet.PairAsync(link, offer, token);
+            Assert.IsFalse(paired.BothWays);
+            Assert.AreEqual(0, laptop.Node.Devices().Count, "the trust given for the pairing is taken back");
+            Assert.AreEqual(0, desk.Fleet.Hosts.Count);
+
+            // A link refused leaves no trust either.
+            await desk.Node.SetPairBothWaysAsync(true, token);
+            link = desk.Node.CreatePairing().Link;
+            desk.Node.CreatePairing();
+            (offer, _) = await laptop.Node.PrepareBothWaysAsync(token);
+            await Assert.ThrowsExactlyAsync<CodeAlta.Fleet.Protocol.FleetException>(() => laptop.Fleet.PairAsync(link, offer, token));
+            Assert.AreEqual(0, laptop.Node.Devices().Count);
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task ThePage_TurnsListeningOnForAPairingBothWays_AndOffAgainWhenItWentOneWay()
+    {
+        var token = TestContext.CancellationToken;
+        var root = NewRoot();
+        try
+        {
+            await using var desk = await Desktop.StartAsync(root, "desk", token);
+            await using var laptop = await Desktop.StartAsync(root, "laptop", token);
+            var page = new CodeAlta.Desktop.Rpc.MachinesService(laptop.Fleet, "e") { Node = laptop.Node };
+            await desk.Node.SetVisibleAsync(true, token);
+
+            // Declined at the pairing: the laptop pairs one way, and stops listening again.
+            var link = desk.Node.CreatePairing().Link;
+            var preview = page.PreviewPairing(new("e", link));
+            Assert.AreEqual(("ok", true, false), (preview.Status, preview.BothWays, preview.Listening));
+            await desk.Node.SetPairBothWaysAsync(false, token);
+            var oneWay = await page.PairAsync(new("e", link) { BothWays = true }, token);
+            Assert.AreEqual(("ok", false), (oneWay.Status, oneWay.BothWays));
+            Assert.IsFalse(laptop.Node.Visible, "listening was turned on for that pairing alone");
+            Assert.AreEqual(0, laptop.Node.Devices().Count);
+
+            // Both ways: it listens from now on, for the desk.
+            await desk.Node.SetPairBothWaysAsync(true, token);
+            var both = await page.PairAsync(new("e", desk.Node.CreatePairing().Link) { BothWays = true }, token);
+            Assert.AreEqual(("ok", true), (both.Status, both.BothWays));
+            Assert.IsTrue(laptop.Node.Visible);
+            Assert.AreEqual("desk", laptop.Node.Devices().Single().Name);
+        }
+        finally
+        {
+            Delete(root);
+        }
+    }
+
+    private const DevicePermissions FleetPairingCoordinatorDefaults = CodeAlta.Fleet.NodeApi.FleetPairingCoordinator.DefaultPermissions;
+
+    private static async Task WaitAsync(Func<bool> condition, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline) Assert.Fail("The condition was not met in time.");
+            await Task.Delay(50, cancellationToken);
+        }
+    }
+
+    // A desktop as DesktopFleetStartup wires its machines and its node: one fleet folder, the node records who pairs back.
+    private sealed class Desktop : IAsyncDisposable
+    {
+        private readonly CodeAlta.Orchestration.Hosting.CodeAltaHost _host;
+
+        private Desktop(CodeAlta.Orchestration.Hosting.CodeAltaHost host, DesktopFleet fleet, DesktopNode node) => (_host, Fleet, Node) = (host, fleet, node);
+
+        public DesktopFleet Fleet { get; }
+
+        public DesktopNode Node { get; }
+
+        public static async Task<Desktop> StartAsync(string root, string name, CancellationToken cancellationToken)
+        {
+            var host = await FleetNodeFixture.CreateHostAsync(Path.Combine(root, name), new ScriptedFleetProvider(), false, cancellationToken);
+            var fleetRoot = Path.Combine(root, name + "-fleet");
+            var registry = new CodeAlta.Desktop.SessionHosts.SessionHostRegistry(new SessionHostRegistryTests.RecordingSessionHost(null));
+            var fleet = new DesktopFleet(fleetRoot, registry.TakeMembership(), name, null,
+                new RemoteSessionHostOptions { MinimumBackoff = TimeSpan.FromMilliseconds(50), MaximumBackoff = TimeSpan.FromSeconds(30), ListInterval = TimeSpan.FromMilliseconds(100) });
+            var node = new DesktopNode(host, name, "1.0.0", fleetRoot) { ListenAddress = IPAddress.Loopback, PortOverride = 0, PairedBack = fleet.AddPairedBackAsync };
+            return new Desktop(host, fleet, node);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await Fleet.DisposeAsync();
+            await Node.DisposeAsync();
+            await _host.DisposeAsync();
+        }
+    }
+
     private static string NewRoot() => Path.Combine(Path.GetTempPath(), "codealta-desktop-node-tests", Guid.NewGuid().ToString("N"));
 
     private static void Delete(string root)

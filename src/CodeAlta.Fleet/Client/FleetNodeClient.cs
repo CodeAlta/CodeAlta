@@ -228,24 +228,63 @@ public sealed class FleetNodeClient : IAsyncDisposable
     /// <exception cref="DeviceAuthenticationException">The node presented another key than its code names, or refused the connection.</exception>
     /// <exception cref="FleetException">The node refused the secret (<see cref="FleetNodeErrorCodes.PairingRefused"/>).</exception>
     public static async Task<PairedMachine> PairAsync(PairingPayload offer, DeviceIdentity identity, string name, PairedMachineStore? store, CancellationToken cancellationToken)
+        => (await PairAsync(offer, identity, name, store, null, cancellationToken).ConfigureAwait(false)).Machine;
+
+    /// <summary>
+    /// Pairs this device with a node from its pairing code, as <see cref="PairAsync(PairingPayload, DeviceIdentity, string, PairedMachineStore?, CancellationToken)"/>
+    /// does, and both ways when <paramref name="pairBack"/> is given and the code says the node reaches the devices that pair
+    /// (<see cref="PairingPayload.BothWays"/>): this device trusts the node over the channel pinned to the key of the code, then
+    /// asks the node to record it as a machine; the trust is taken back when the node refuses the secret or pairs one way only.
+    /// </summary>
+    /// <param name="offer">The pairing code of the node.</param>
+    /// <param name="identity">The key of this device.</param>
+    /// <param name="name">The name this device gives itself on the node.</param>
+    /// <param name="store">Where the machine is recorded; null to record it nowhere.</param>
+    /// <param name="pairBack">How the node reaches this device too; null to pair one way only.</param>
+    /// <param name="cancellationToken">Cancels the pairing.</param>
+    /// <returns>The paired machine, and whether it reaches this device too.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="IOException">No address of the node answered.</exception>
+    /// <exception cref="DeviceAuthenticationException">The node presented another key than its code names, or refused the connection.</exception>
+    /// <exception cref="FleetException">The node refused the secret (<see cref="FleetNodeErrorCodes.PairingRefused"/>).</exception>
+    public static async Task<FleetPairingResult> PairAsync(PairingPayload offer, DeviceIdentity identity, string name, PairedMachineStore? store, FleetPairBackOffer? pairBack,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(offer);
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(name);
         var (stream, address) = await FleetDirectConnector.ConnectAsync(offer.Addresses, AddressTimeout, cancellationToken).ConfigureAwait(false);
         await using var client = await ConnectAsync(stream, offer.Fingerprint, identity, cancellationToken).ConfigureAwait(false);
-        var redeemed = await client.CallAsync(FleetNodeMethods.PairRedeem, new FleetPairRedeemParams(Base64Url.EncodeToString(offer.Secret), name),
-            FleetNodeJsonContext.Default.FleetPairRedeemParams, FleetNodeJsonContext.Default.FleetPairRedeemResult, null, cancellationToken).ConfigureAwait(false);
+        var parameters = new FleetPairRedeemParams(Base64Url.EncodeToString(offer.Secret), name);
+        // Trusted before the node records this device, so that the first connection of the node is accepted.
+        var trust = pairBack is not null && offer.BothWays ? pairBack.Trust(offer.DeviceName, offer.Fingerprint) : null;
+        if (trust is not null) parameters = parameters with { BothWays = true, Addresses = pairBack!.Addresses, Permissions = trust.Permissions };
+        FleetPairRedeemResult redeemed;
+        try
+        {
+            redeemed = await client.CallAsync(FleetNodeMethods.PairRedeem, parameters, FleetNodeJsonContext.Default.FleetPairRedeemParams,
+                FleetNodeJsonContext.Default.FleetPairRedeemResult, null, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            trust?.Withdraw();
+            throw;
+        }
+
+        if (trust is not null && !redeemed.BothWays) trust.Withdraw();
         // The address that answered comes first next time.
         var addresses = new List<string> { address };
         addresses.AddRange(offer.Addresses.Where(other => !string.Equals(other, address, StringComparison.OrdinalIgnoreCase)));
         var machine = new PairedMachine(offer.DeviceName, offer.DeviceId, offer.Fingerprint, addresses, DateTimeOffset.UtcNow, redeemed.Permissions);
         store?.Save(machine);
         await client.CloseAsync(cancellationToken).ConfigureAwait(false);
-        return machine;
+        return new FleetPairingResult(machine, trust is not null && redeemed.BothWays);
     }
 
-    /// <summary>Redeems a pairing secret on this channel (see <see cref="PairAsync"/>, which also connects and records the machine).</summary>
+    /// <summary>
+    /// Redeems a pairing secret on this channel (see <see cref="PairAsync(PairingPayload, DeviceIdentity, string, PairedMachineStore?, CancellationToken)"/>,
+    /// which also connects and records the machine).
+    /// </summary>
     /// <param name="secret">The secret of the offer, base64url.</param>
     /// <param name="name">The name this device gives itself.</param>
     /// <param name="cancellationToken">Cancels the call.</param>

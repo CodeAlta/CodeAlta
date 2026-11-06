@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Desktop.Mcp;
 using CodeAlta.Fleet.Channels;
+using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Orchestration.Hosting;
@@ -122,6 +123,12 @@ internal sealed class DesktopNode : IAsyncDisposable
     /// <summary>Gets the names of the servers this computer is linked to, whose relay can reach it; null for none.</summary>
     public Func<IReadOnlyList<string>>? Servers { get; init; }
 
+    /// <summary>
+    /// Gets what records a computer that paired with this one both ways as a machine of this computer
+    /// (<see cref="DesktopFleet.AddPairedBackAsync"/>): whether it was recorded. Null pairs one way only.
+    /// </summary>
+    public Func<FleetPairBackRequest, CancellationToken, Task<bool>>? PairedBack { get; init; }
+
     /// <summary>Gets whether the person lets their other computers pair with this one (off until they turn it on).</summary>
     public bool Visible => Volatile.Read(ref _settings).Visible;
 
@@ -130,6 +137,12 @@ internal sealed class DesktopNode : IAsyncDisposable
     /// turn it on): it then serves the channels those servers relay to it, and says so to them.
     /// </summary>
     public bool ReachableThroughServers => Volatile.Read(ref _settings).ReachableThroughServers;
+
+    /// <summary>
+    /// Gets whether the computers that pair with this one from its links may ask to be reached from it too (on until the person
+    /// turns it off): this computer then lists them with its machines, so that one pairing goes both ways.
+    /// </summary>
+    public bool PairBothWays => Volatile.Read(ref _settings).PairBothWays;
 
     /// <summary>Gets whether this computer listens for its paired computers now.</summary>
     public bool Listening => Volatile.Read(ref _listener) is not null;
@@ -225,6 +238,52 @@ internal sealed class DesktopNode : IAsyncDisposable
     }
 
     /// <summary>
+    /// Lets the computers that pair with this one from its links be reached from it too, or not: the links made from now on say
+    /// so, and a computer that asks is listed with the machines of this one. Turned off, they pair one way only.
+    /// </summary>
+    /// <param name="bothWays">Whether a pairing from a link of this computer may go both ways.</param>
+    /// <param name="cancellationToken">Cancels the change.</param>
+    /// <returns>A task that completes once the change applies.</returns>
+    /// <exception cref="IOException">The setting cannot be written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The setting cannot be written.</exception>
+    /// <exception cref="ObjectDisposedException">The application is closing.</exception>
+    public async Task SetPairBothWaysAsync(bool bothWays, CancellationToken cancellationToken)
+    {
+        await _changes.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var settings = Volatile.Read(ref _settings) with { PairBothWays = bothWays };
+            WriteSettings(_settingsPath, settings);
+            Volatile.Write(ref _settings, settings);
+        }
+        finally
+        {
+            _changes.Release();
+        }
+
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Prepares this computer to be reached by a machine it pairs with from a link of that machine (<see cref="PairingPayload.BothWays"/>):
+    /// it lets the person's other computers pair with it when it did not (the person asked for both ways), and gives where that
+    /// machine reaches it and the trust it gets here: what a pairing gives (view, drive, start), taken back when the pairing
+    /// goes one way only.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the change.</param>
+    /// <returns>The offer to the machine, and whether this computer started listening for it.</returns>
+    /// <exception cref="IOException">The setting cannot be written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The setting cannot be written.</exception>
+    /// <exception cref="ObjectDisposedException">The application is closing.</exception>
+    public async Task<(FleetPairBackOffer Offer, bool TurnedOn)> PrepareBothWaysAsync(CancellationToken cancellationToken)
+    {
+        var turnedOn = !Visible;
+        if (turnedOn) await SetVisibleAsync(true, cancellationToken).ConfigureAwait(false);
+        return (new FleetPairBackOffer(Addresses, TrustPairedBack), turnedOn);
+    }
+
+    /// <summary>
     /// Serves a channel a server relays to this computer, from a device of its organization: while the person lets the servers
     /// reach it, with the members of the organization as the connector of that server verifies them (the person's own devices
     /// see, drive and start its sessions, as after a pairing); otherwise the relay is closed at once. Failures never escape.
@@ -299,7 +358,7 @@ internal sealed class DesktopNode : IAsyncDisposable
         // A link names where this computer listens: the node API alone, which its servers relay to, makes none.
         if (Volatile.Read(ref _listener) is null || Volatile.Read(ref _service) is not { } service)
             throw new InvalidOperationException("This computer does not listen: let your other computers pair with it first.");
-        var (offer, outcome) = service.Pairing.CreateOffer(Name, Addresses, LinkLifetime);
+        var (offer, outcome) = service.Pairing.CreateOffer(Name, Addresses, LinkLifetime, manages: false, bothWays: PairBothWays && PairedBack is not null);
         _ = outcome.ContinueWith(_ => Changed?.Invoke(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         return new DesktopNodePairing(offer.ToUri(), offer.Fingerprint.ToShortWords(), offer.ExpiresAt, offer.Addresses);
     }
@@ -393,12 +452,41 @@ internal sealed class DesktopNode : IAsyncDisposable
         {
             Host = _host, Identity = identity, TrustedDevices = _trusted, Name = Name, Version = _version,
             PairingAddresses = () => Volatile.Read(ref _addresses),
+            PairBack = PairBackAsync,
         })
         {
             Policy = Policy,
         };
         Volatile.Write(ref _service, service);
         return service;
+    }
+
+    // A computer that redeemed a link of this one both ways: listed with the machines of this computer, while the person lets it be.
+    private async Task<bool> PairBackAsync(FleetPairBackRequest request, CancellationToken cancellationToken)
+        => PairBothWays && PairedBack is { } record && await record(request, cancellationToken).ConfigureAwait(false);
+
+    // The machine this computer pairs with both ways is trusted here before it records this computer, so that its first connection
+    // is accepted: a machine trusted already keeps what it may do, another one is given what a pairing gives, until withdrawn.
+    private FleetPairBackTrust TrustPairedBack(string name, DeviceFingerprint fingerprint)
+    {
+        var before = _trusted.List(includeRevoked: true).FirstOrDefault(device => device.Fingerprint == fingerprint);
+        if (before is { IsRevoked: false }) return new FleetPairBackTrust(DevicePermissionNames.Format(before.Permissions), static () => { });
+        var device = _trusted.Add(name, fingerprint, FleetPairingCoordinator.DefaultPermissions);
+        Changed?.Invoke();
+        return new FleetPairBackTrust(DevicePermissionNames.Format(device.Permissions), () =>
+        {
+            try
+            {
+                if (before is null) _trusted.Remove(device.DeviceId);
+                else _trusted.Restore(before);
+            }
+            catch (IOException exception)
+            {
+                Log(true, $"The trust of {name} could not be taken back after a pairing one way only: {exception.Message}");
+            }
+
+            Changed?.Invoke();
+        });
     }
 
     private void Listen(FleetNodeService service)
@@ -532,6 +620,9 @@ internal sealed record DesktopNodeSettings
 
     /// <summary>Gets whether the person lets their other computers reach this one through the servers it is linked to.</summary>
     public bool ReachableThroughServers { get; init; }
+
+    /// <summary>Gets whether a computer that pairs from a link of this one may be reached from it too; on by default.</summary>
+    public bool PairBothWays { get; init; } = true;
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]

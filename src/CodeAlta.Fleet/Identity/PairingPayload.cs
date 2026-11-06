@@ -28,7 +28,8 @@ public enum PairingPayloadError
 /// </summary>
 /// <remarks>
 /// The text form is a URI: <c>codealta-pair://pair?v=1&amp;id=…&amp;name=…&amp;fp=…&amp;addr=host:port&amp;addr=…&amp;secret=…&amp;exp=…</c>,
-/// with the fingerprint and the secret in base64url and the expiry in Unix seconds. The secret makes it a credential
+/// with the fingerprint and the secret in base64url and the expiry in Unix seconds, and <c>&amp;both=1</c> when the device
+/// that offers it also reaches the device that pairs (<see cref="BothWays"/>). The secret makes it a credential
 /// until it expires: it is shown, never logged.
 /// </remarks>
 public sealed class PairingPayload
@@ -59,6 +60,20 @@ public sealed class PairingPayload
     /// <param name="expiresAt">When the secret expires; kept to the second.</param>
     /// <exception cref="ArgumentException">A value is missing or invalid.</exception>
     public PairingPayload(string deviceName, DeviceFingerprint fingerprint, IReadOnlyList<string> addresses, ReadOnlySpan<byte> secret, DateTimeOffset expiresAt)
+        : this(deviceName, fingerprint, addresses, secret, expiresAt, bothWays: false)
+    {
+    }
+
+    /// <summary>Creates a payload.</summary>
+    /// <param name="deviceName">The name of the device that offers the pairing.</param>
+    /// <param name="fingerprint">The fingerprint of its key; the device id derives from it.</param>
+    /// <param name="addresses">Where to reach it, as <c>host:port</c> (an IPv6 address in brackets), 1 to <see cref="MaxAddresses"/>.</param>
+    /// <param name="secret">The one-time secret, <see cref="SecretLength"/> bytes.</param>
+    /// <param name="expiresAt">When the secret expires; kept to the second.</param>
+    /// <param name="bothWays">Whether the device that offers the pairing also reaches the device that pairs, when that one asks.</param>
+    /// <exception cref="ArgumentException">A value is missing or invalid.</exception>
+    public PairingPayload(string deviceName, DeviceFingerprint fingerprint, IReadOnlyList<string> addresses, ReadOnlySpan<byte> secret, DateTimeOffset expiresAt,
+        bool bothWays)
     {
         ArgumentNullException.ThrowIfNull(addresses);
         DeviceName = TrustedDeviceStore.ValidateName(deviceName, nameof(deviceName));
@@ -82,6 +97,7 @@ public sealed class PairingPayload
         Addresses = addresses.ToArray();
         _secret = secret.ToArray();
         ExpiresAt = DateTimeOffset.FromUnixTimeSeconds(expiresAt.ToUnixTimeSeconds());
+        BothWays = bothWays;
     }
 
     /// <summary>Gets the version of the payload.</summary>
@@ -105,6 +121,12 @@ public sealed class PairingPayload
     /// <summary>Gets when the secret expires.</summary>
     public DateTimeOffset ExpiresAt { get; }
 
+    /// <summary>
+    /// Gets whether the device that offers the pairing also reaches the device that pairs, when that one asks: one pairing
+    /// then makes each device a machine of the other. A device that does not say so pairs one way only.
+    /// </summary>
+    public bool BothWays { get; }
+
     /// <summary>Writes the payload as a <c>codealta-pair://</c> URI.</summary>
     /// <returns>The URI.</returns>
     public string ToUri()
@@ -121,6 +143,7 @@ public sealed class PairingPayload
 
         builder.Append("&secret=").Append(Base64Url.EncodeToString(_secret));
         builder.Append("&exp=").Append(ExpiresAt.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
+        if (BothWays) builder.Append("&both=1");
         return builder.ToString();
     }
 
@@ -164,7 +187,7 @@ public sealed class PairingPayload
             return false;
         }
 
-        string? version = null, deviceId = null, name = null, fingerprintText = null, secretText = null, expiryText = null;
+        string? version = null, deviceId = null, name = null, fingerprintText = null, secretText = null, expiryText = null, bothText = null;
         var addresses = new List<string>();
         foreach (var part in text[UriPrefix.Length..].Split('&'))
         {
@@ -193,6 +216,7 @@ public sealed class PairingPayload
                 case "secret": if (!SetOnce(ref secretText, value)) return false; break;
                 case "exp": if (!SetOnce(ref expiryText, value)) return false; break;
                 case "addr": addresses.Add(value); break;
+                case "both": if (!SetOnce(ref bothText, value)) return false; break;
                 default: break; // A later version of the same major form may add fields.
             }
         }
@@ -213,7 +237,8 @@ public sealed class PairingPayload
             || name is null
             || secretText is not { Length: 43 } || !Base64Url.IsValid(secretText)
             || !long.TryParse(expiryText, NumberStyles.None, CultureInfo.InvariantCulture, out var expirySeconds)
-            || expirySeconds > DateTimeOffset.MaxValue.ToUnixTimeSeconds())
+            || expirySeconds > DateTimeOffset.MaxValue.ToUnixTimeSeconds()
+            || bothText is not (null or "0" or "1"))
         {
             return false;
         }
@@ -227,7 +252,7 @@ public sealed class PairingPayload
         PairingPayload candidate;
         try
         {
-            candidate = new PairingPayload(name, fingerprint, addresses, secret, DateTimeOffset.FromUnixTimeSeconds(expirySeconds));
+            candidate = new PairingPayload(name, fingerprint, addresses, secret, DateTimeOffset.FromUnixTimeSeconds(expirySeconds), bothText == "1");
         }
         catch (ArgumentException)
         {

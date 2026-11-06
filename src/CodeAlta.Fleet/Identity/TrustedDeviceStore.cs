@@ -122,6 +122,45 @@ public sealed class TrustedDeviceStore : IDeviceTrustPolicy
         }
     }
 
+    /// <summary>
+    /// Forgets a device as if it never paired: what takes back a trust given for a pairing that did not happen. A device to
+    /// refuse from now on is revoked instead (<see cref="Revoke"/>), so that its key stays refused.
+    /// </summary>
+    /// <param name="deviceId">The device id.</param>
+    /// <returns>Whether a device was forgotten.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="deviceId"/> is <see langword="null"/>.</exception>
+    /// <exception cref="IOException">The file cannot be written.</exception>
+    public bool Remove(string deviceId)
+    {
+        ArgumentNullException.ThrowIfNull(deviceId);
+        lock (_gate)
+        {
+            var index = _devices.FindIndex(device => string.Equals(device.DeviceId, deviceId, StringComparison.Ordinal));
+            if (index < 0) return false;
+            var updated = new List<TrustedDevice>(_devices);
+            updated.RemoveAt(index);
+            Save(updated);
+            return true;
+        }
+    }
+
+    /// <summary>Restores a device as it was, after a trust given for a pairing that did not happen replaced it.</summary>
+    /// <param name="device">The device as it was.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="device"/> is <see langword="null"/>.</exception>
+    /// <exception cref="IOException">The file cannot be written.</exception>
+    public void Restore(TrustedDevice device)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        lock (_gate)
+        {
+            var index = _devices.FindIndex(existing => existing.Fingerprint == device.Fingerprint);
+            var updated = new List<TrustedDevice>(_devices);
+            if (index >= 0) updated[index] = device;
+            else updated.Add(device);
+            Save(updated);
+        }
+    }
+
     /// <summary>Changes what a trusted device may do.</summary>
     /// <param name="deviceId">The device id.</param>
     /// <param name="permissions">What it may do from now on.</param>

@@ -10,7 +10,7 @@ import { pairingWords } from "./machines";
 import type { DevicePermission } from "./machineManagement";
 
 /** The calls of the This computer section. */
-export type ThisComputerApi = Pick<typeof machines, "thisComputer" | "setVisible" | "setReachableThroughServers" | "createPairingLink" | "waitPairing"
+export type ThisComputerApi = Pick<typeof machines, "thisComputer" | "setVisible" | "setReachableThroughServers" | "setPairBothWays" | "createPairingLink" | "waitPairing"
   | "setThisComputerDevicePermission" | "revokeThisComputerDevice">;
 
 /** What a computer paired with this one may be given here: what a desktop serves. */
@@ -19,7 +19,8 @@ export const thisComputerPermissions: readonly DevicePermission[] = ["view", "dr
 /**
  * This computer as a machine of the person's other computers, at the top of Settings > Fleet > Machines: a switch lets
  * them pair with it, Pair another computer… shows the link and the six words to give the other computer, and the
- * computers paired with it are listed with what each may do here. Once it is linked to a server, another switch lets the
+ * computers paired with it are listed with what each may do here. A pairing goes both ways unless the person turns it off:
+ * the computer that pairs is listed with the machines of this one too. Once it is linked to a server, another switch lets the
  * person's other devices of that organization reach it through the server, without pairing.
  */
 export function ThisComputerSection({ epoch, api = machines, generation }: { epoch: string; api?: ThisComputerApi; generation: number }) {
@@ -48,6 +49,7 @@ export function ThisComputerSection({ epoch, api = machines, generation }: { epo
     <ThisComputerBody view={view} busy={busy} problem={problem}
       onVisible={visible => void change(() => api.setVisible({ expectedEpoch: epoch, visible }, { timeoutMilliseconds: 30_000 }))}
       onReachable={reachable => void change(() => api.setReachableThroughServers({ expectedEpoch: epoch, reachable }, { timeoutMilliseconds: 30_000 }))}
+      onPairBothWays={bothWays => void change(() => api.setPairBothWays({ expectedEpoch: epoch, bothWays }))}
       onPair={() => setPairing(true)}
       onPermission={(device, permission, allowed) => void change(() => api.setThisComputerDevicePermission({ expectedEpoch: epoch, deviceId: device.id, permission, allowed }))}
       onRevoke={device => void change(() => api.revokeThisComputerDevice({ expectedEpoch: epoch, deviceId: device.id }))} />
@@ -59,8 +61,9 @@ export function ThisComputerSection({ epoch, api = machines, generation }: { epo
 }
 
 /** What the This computer section shows, from what the host said: the switch, where it is reached, and its paired computers. */
-export function ThisComputerBody({ view, busy, problem, onVisible, onReachable, onPair, onPermission, onRevoke }: {
-  view: ThisComputerView; busy: boolean; problem?: MessageKey | null; onVisible: (visible: boolean) => void; onReachable: (reachable: boolean) => void; onPair: () => void;
+export function ThisComputerBody({ view, busy, problem, onVisible, onReachable, onPairBothWays, onPair, onPermission, onRevoke }: {
+  view: ThisComputerView; busy: boolean; problem?: MessageKey | null; onVisible: (visible: boolean) => void; onReachable: (reachable: boolean) => void;
+  onPairBothWays: (bothWays: boolean) => void; onPair: () => void;
   onPermission: (device: MachineDeviceView, permission: DevicePermission, allowed: boolean) => void; onRevoke: (device: MachineDeviceView) => void;
 }) {
   const { t } = useShellLanguage();
@@ -74,6 +77,12 @@ export function ThisComputerBody({ view, busy, problem, onVisible, onReachable, 
     {view.visible && view.listening && <div className="this-computer-reach muted-text">
       {view.tailnet && <div><Tag minimal round intent="success" icon={<AppIcon name="remote" size={11} />}>{view.network ?? "Tailscale"}</Tag> {t("On your private network as {name}: reached away from home too.", { name: view.tailnet })}</div>}
       <div>{t("Reached at {addresses}", { addresses: view.addresses.join(", ") })}</div>
+    </div>}
+    {view.visible && <div className="this-computer-both-ways">
+      <Switch checked={view.pairBothWays} disabled={busy} label={t("Reach the computers that pair with this one too")} onChange={event => onPairBothWays(event.currentTarget.checked)} />
+      <p className="muted-text">{t(view.pairBothWays
+        ? "A computer that pairs with this one from its link is listed with your machines here too, and this computer sees, drives and starts its sessions: one pairing goes both ways."
+        : "A computer that pairs with this one from its link is reached one way only: this computer does not list it with its machines.")}</p>
     </div>}
     {view.visible && !view.listening && <Callout compact intent="warning" role="alert">{t("This computer cannot listen for your other computers.")}
       {view.problem && <div className="muted-text">{view.problem}</div>}</Callout>}
@@ -92,7 +101,7 @@ export function ThisComputerBody({ view, busy, problem, onVisible, onReachable, 
 }
 
 /** The outcome of a pairing link, as the dialog says it. */
-type Outcome = { kind: "waiting" } | { kind: "paired"; name: string | null } | { kind: "expired" } | { kind: "failed" };
+type Outcome = { kind: "waiting" } | { kind: "paired"; name: string | null; bothWays: boolean } | { kind: "expired" } | { kind: "failed" };
 
 /**
  * Pair another computer: a link for the other computer, made when the dialog opens, with the six words of this computer,
@@ -120,7 +129,7 @@ export function PairThisComputerDialog({ epoch, api, name, onClose }: { epoch: s
         // The link lives ten minutes: the wait ends with it, or once the other computer used it.
         const result = await api.waitPairing({ expectedEpoch: epoch }, { signal: abort.signal, timeoutMilliseconds: 11 * 60_000 });
         if (abort.signal.aborted || !open.current) return;
-        setOutcome(result.status === "redeemed" ? { kind: "paired", name: result.deviceName ?? null } : result.status === "expired" || result.status === "replaced" ? { kind: "expired" } : { kind: "failed" });
+        setOutcome(result.status === "redeemed" ? { kind: "paired", name: result.deviceName ?? null, bothWays: result.bothWays } : result.status === "expired" || result.status === "replaced" ? { kind: "expired" } : { kind: "failed" });
       } catch {
         if (!abort.signal.aborted) setOutcome({ kind: "failed" });
       }
@@ -134,6 +143,7 @@ export function PairThisComputerDialog({ epoch, api, name, onClose }: { epoch: s
       {outcome.kind === "paired" ? <Callout intent="success" icon={<AppIcon name="check" size={16} />}>
         {t("{name} is paired with this computer.", { name: outcome.name ?? t("The other computer") })}
         <div className="muted-text">{t("It lists {computer} with its machines, and sees its sessions while CodeAlta runs here.", { computer: name })}</div>
+        {outcome.bothWays && <div className="muted-text">{t("This computer lists it with your machines too.")}</div>}
       </Callout> : <>
         <ol className="pair-this-computer-steps">
           <li>{t("On the other computer, in CodeAlta Desktop, open Settings > Fleet > Machines > Add a machine… > With a pairing link.")}</li>

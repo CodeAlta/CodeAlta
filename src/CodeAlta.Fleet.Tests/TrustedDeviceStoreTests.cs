@@ -38,6 +38,33 @@ public sealed class TrustedDeviceStoreTests
     }
 
     [TestMethod]
+    public void ATrustTakenBack_LeavesTheDevicesAsTheyWere()
+    {
+        using var folder = new TestFolder();
+        var clock = new ManualTimeProvider(Now);
+        var store = new TrustedDeviceStore(folder.Path, clock);
+        var laptop = NewFingerprint();
+        var desk = NewFingerprint();
+        var kept = store.Add("Laptop", laptop, DevicePermissions.View | DevicePermissions.Move);
+
+        // A device trusted for a pairing that did not happen is forgotten, as if it never paired.
+        var added = store.Add("Desk", desk, DevicePermissions.View);
+        Assert.IsTrue(store.Remove(added.DeviceId));
+        Assert.IsFalse(store.Remove(added.DeviceId));
+        Assert.IsNull(store.FindTrusted(desk));
+        Assert.IsFalse(store.IsRevoked(desk));
+
+        // One that was revoked before is revoked again, with what it had.
+        Assert.IsTrue(store.Revoke(kept.DeviceId));
+        var revoked = store.List(includeRevoked: true).Single();
+        store.Add("Laptop", laptop, DevicePermissions.View);
+        store.Restore(revoked);
+        var reopened = new TrustedDeviceStore(folder.Path, clock);
+        Assert.AreEqual(revoked, reopened.List(includeRevoked: true).Single());
+        Assert.IsTrue(reopened.IsRevoked(laptop));
+    }
+
+    [TestMethod]
     public void RevokedDeviceStaysRefused()
     {
         using var folder = new TestFolder();

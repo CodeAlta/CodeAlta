@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Callout, Dialog, DialogBody, DialogFooter, NonIdealState, PopoverNext, Switch, Tag, TextArea } from "@blueprintjs/core";
+import { Button, Callout, Checkbox, Dialog, DialogBody, DialogFooter, NonIdealState, PopoverNext, Switch, Tag, TextArea } from "@blueprintjs/core";
 import { machines, type MachinePairPreview, type MachineView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -112,7 +112,8 @@ export function MachineRow({ machine, busy, onOpen, onForget }: { machine: Machi
 
 /**
  * Pairing from a link: the link is read as it is pasted, and the name of the machine and the six words of its key are
- * shown before anything connects. Pair connects, pinned to that key.
+ * shown before anything connects. Pair connects, pinned to that key. A link of another CodeAlta Desktop offers to pair both
+ * ways, on unless the person unticks it: that computer then lists this one with its machines too, after the same words.
  */
 export function PairMachineDialog({ epoch, api, guide = false, onClose }: { epoch: string; api: Pick<MachinesApi, "previewPairing" | "pair">; guide?: boolean; onClose: (paired: boolean) => void }) {
   const { t } = useShellLanguage();
@@ -121,6 +122,9 @@ export function PairMachineDialog({ epoch, api, guide = false, onClose }: { epoc
   // What went wrong: words of the window, and what the machine said after them.
   const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
   const [pairing, setPairing] = useState(false);
+  const [bothWays, setBothWays] = useState(true);
+  // Paired, but one way only though both were asked: the dialog says so before it closes.
+  const [oneWay, setOneWay] = useState(false);
   const read = useRef(0);
   const link = pairingLinkOf(text);
   useEffect(() => {
@@ -130,7 +134,7 @@ export function PairMachineDialog({ epoch, api, guide = false, onClose }: { epoc
     if (!text.trim()) return;
     if (!link) { setProblem({ key: "This is not a pairing link." }); return; }
     const abort = new AbortController();
-    api.previewPairing({ expectedEpoch: epoch, link }, { signal: abort.signal, timeoutMilliseconds: 10_000 }).then(value => {
+    api.previewPairing({ expectedEpoch: epoch, link, bothWays: false }, { signal: abort.signal, timeoutMilliseconds: 10_000 }).then(value => {
       if (ticket !== read.current) return;
       const failed = pairingProblem(value.status);
       if (failed) setProblem({ key: failed }); else setPreview(value);
@@ -142,8 +146,10 @@ export function PairMachineDialog({ epoch, api, guide = false, onClose }: { epoc
     setPairing(true);
     setProblem(null);
     try {
-      const result = await api.pair({ expectedEpoch: epoch, link }, { timeoutMilliseconds: 60_000 });
+      const asked = preview.bothWays && bothWays;
+      const result = await api.pair({ expectedEpoch: epoch, link, bothWays: asked }, { timeoutMilliseconds: 60_000 });
       const failed = pairingProblem(result.status);
+      if (!failed && asked && !result.bothWays) { setOneWay(true); return; }
       if (!failed) { onClose(true); return; }
       setProblem({ key: failed, detail: result.message });
     } catch {
@@ -151,6 +157,13 @@ export function PairMachineDialog({ epoch, api, guide = false, onClose }: { epoc
     } finally { setPairing(false); }
   }
   const words = pairingWords(preview?.words);
+  if (oneWay) return <Dialog isOpen className="pair-machine-dialog" title={t("Pair a machine")} canOutsideClickClose={false} onClose={() => onClose(true)}>
+    <DialogBody>
+      <Callout intent="success" icon={<AppIcon name="check" size={16} />}>{t("{name} is paired with this computer.", { name: preview?.name ?? "" })}
+        <div className="muted-text">{t("It does not reach this computer: it pairs one way only.")}</div></Callout>
+    </DialogBody>
+    <DialogFooter actions={<Button intent="primary" text={t("Close")} onClick={() => onClose(true)} />} />
+  </Dialog>;
   return <Dialog isOpen className="pair-machine-dialog" title={t("Pair a machine")} canOutsideClickClose={false} onClose={() => { if (!pairing) onClose(false); }}>
     <DialogBody>
       {guide && !preview && <div className="pair-machine-guide">
@@ -173,6 +186,13 @@ export function PairMachineDialog({ epoch, api, guide = false, onClose }: { epoc
         <p>{t("The machine shows the same words:")}</p>
         <div className="pair-machine-words">{words.map((word, index) => <Tag key={`${index}:${word}`} large minimal>{word}</Tag>)}</div>
         {preview.alreadyPaired && <Callout compact intent="primary">{t("This computer is paired with it already: pairing again replaces it.")}</Callout>}
+        {preview.bothWays && <div className="pair-machine-both-ways">
+          <Checkbox checked={bothWays} disabled={pairing} label={t("Let {name} reach this computer too", { name: preview.name ?? "" })}
+            onChange={event => setBothWays(event.currentTarget.checked)} />
+          <small className="muted-text">{t(preview.listening
+            ? "It lists this computer with its machines, and sees, drives and starts its sessions. Change it or revoke it under Computers paired with this one."
+            : "This computer then lets your other computers pair with it, so that the other one reaches it: it lists this computer with its machines, and sees, drives and starts its sessions.")}</small>
+        </div>}
       </section>}
       {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
     </DialogBody>

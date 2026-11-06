@@ -191,7 +191,15 @@ A desktop is a node of the person's other computers while it runs, once they let
 with this one**, off by default): it serves the same node API as `altanode` over its own runtime, on a port of its own
 (2587, so that a node and a server of the same machine keep 2585 and 2586), with the same key it pairs with its machines and its own list of
 paired devices. Another desktop pairs with it from a link, exactly as with a node. Until it is turned on, it listens
-nowhere and makes no key (S1). On a private network that says where it is (Tailscale, or one a plugin brings:
+nowhere and makes no key (S1).
+
+One pairing goes both ways between two desktops. The link of a desktop says it reaches the devices that pair
+(`both=1`), unless its person turned that off; a node's links never do. The desktop that pastes it, when the person
+leaves both ways on, trusts the linking desktop over the channel pinned to the key of the link (listening first if it did
+not), then redeems with its addresses and what it grants; the linking desktop records it as a machine only once the
+secret is accepted and its setting still allows it, and says so in the answer. The trust comes before the redemption so
+that the first connection back is accepted; a refused secret or a one-way answer takes it back. The single six-word check
+covers both keys, and each side revokes or narrows the other on its own. On a private network that says where it is (Tailscale, or one a plugin brings:
 [plugins](../plugins.md)), its links name it there first, so that a laptop away
 from home reaches it. When it exits, it is offline. A machine that must stay reachable runs `altanode`, and the desktop
 opens it in client mode ([architecture](architecture.md#the-desktop-one-session-host-abstraction)).

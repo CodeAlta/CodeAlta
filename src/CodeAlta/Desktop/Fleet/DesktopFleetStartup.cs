@@ -75,7 +75,9 @@ internal sealed class DesktopFleetStartup
                     ? new Mcp.DesktopTailnetNode(found.Presence.Name, found.Presence.Addresses, found.Network.DisplayName)
                     : null,
             Policy = servers.Policy,
-            Servers = () => [.. servers.Connections.Where(static connection => connection.Link.State != CodeAlta.Fleet.Server.FleetServerLinkStates.Revoked)
+            // A computer that pairs with this one both ways is listed with its machines.
+            PairedBack = fleet.AddPairedBackAsync,
+            Servers =() => [.. servers.Connections.Where(static connection => connection.Link.State != CodeAlta.Fleet.Server.FleetServerLinkStates.Revoked)
                 .Select(static connection => connection.Link.OrganizationName ?? connection.Link.Url)],
         };
         servers.AcceptRelay = node.ServeRelayedAsync;

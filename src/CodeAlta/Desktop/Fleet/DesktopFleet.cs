@@ -15,7 +15,9 @@ namespace CodeAlta.Desktop.Fleet;
 /// <param name="Addresses">Where the link says it listens.</param>
 /// <param name="ExpiresAt">When the link expires.</param>
 /// <param name="AlreadyPaired">Whether this device paired with that machine already (pairing again replaces it).</param>
-internal sealed record FleetPairingPreview(string Name, string DeviceId, string Words, IReadOnlyList<string> Addresses, DateTimeOffset ExpiresAt, bool AlreadyPaired);
+/// <param name="BothWays">Whether the machine reaches this device too when it asks: one pairing then goes both ways.</param>
+internal sealed record FleetPairingPreview(string Name, string DeviceId, string Words, IReadOnlyList<string> Addresses, DateTimeOffset ExpiresAt, bool AlreadyPaired,
+    bool BothWays);
 
 /// <summary>
 /// The paired machines of this instance and their session hosts: it reads the machines of the profile
@@ -175,7 +177,7 @@ internal sealed class DesktopFleet : IAsyncDisposable
         if (!PairingPayload.TryParse(link?.Trim(), DateTimeOffset.UtcNow, out var payload, out error)) return false;
         // A machine reached through its server only has a host but no pairing to replace.
         preview = new FleetPairingPreview(payload.DeviceName, payload.DeviceId, payload.Fingerprint.ToShortWords(), payload.Addresses, payload.ExpiresAt,
-            Find(payload.DeviceId) is { IsPaired: true });
+            Find(payload.DeviceId) is { IsPaired: true }, payload.BothWays);
         return true;
     }
 
@@ -189,16 +191,34 @@ internal sealed class DesktopFleet : IAsyncDisposable
     /// <exception cref="CodeAlta.Fleet.Protocol.FleetException">The machine refused the link.</exception>
     /// <exception cref="ObjectDisposedException">The fleet is closing.</exception>
     public async Task<PairedMachine> PairAsync(string link, CancellationToken cancellationToken)
+        => (await PairAsync(link, null, cancellationToken).ConfigureAwait(false)).Machine;
+
+    /// <summary>
+    /// Pairs with the machine of a link as <see cref="PairAsync(string, CancellationToken)"/> does, and both ways when
+    /// <paramref name="pairBack"/> is given and the link says the machine reaches the computers that pair with it.
+    /// </summary>
+    /// <param name="link">The <c>codealta-pair://</c> link.</param>
+    /// <param name="pairBack">How the machine reaches this computer too (<see cref="DesktopNode.PrepareBothWaysAsync"/>); null for one way only.</param>
+    /// <param name="cancellationToken">Cancels the pairing.</param>
+    /// <returns>The paired machine, and whether it reaches this computer too.</returns>
+    /// <exception cref="FormatException">The link is not a valid, unexpired pairing link.</exception>
+    /// <exception cref="IOException">No address of the machine answered.</exception>
+    /// <exception cref="DeviceAuthenticationException">The machine presented another key, or refused this device.</exception>
+    /// <exception cref="CodeAlta.Fleet.Protocol.FleetException">The machine refused the link.</exception>
+    /// <exception cref="ObjectDisposedException">The fleet is closing.</exception>
+    public async Task<FleetPairingResult> PairAsync(string link, FleetPairBackOffer? pairBack, CancellationToken cancellationToken)
     {
         if (!PairingPayload.TryParse(link?.Trim(), DateTimeOffset.UtcNow, out var payload, out var error))
             throw new FormatException($"The pairing link is not usable ({error}).");
         await _changes.WaitAsync(cancellationToken).ConfigureAwait(false);
+        FleetPairingResult paired;
         PairedMachine machine;
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             var identity = Identity();
-            machine = await FleetNodeClient.PairAsync(payload, identity, _deviceName, _store, cancellationToken).ConfigureAwait(false);
+            paired = await FleetNodeClient.PairAsync(payload, identity, _deviceName, _store, pairBack, cancellationToken).ConfigureAwait(false);
+            machine = paired.Machine;
             // Pairing again replaces the machine: its addresses and permissions may have changed.
             if (_membership.Remove(machine.DeviceId) is RemoteSessionHost previous) await RetireAsync(previous).ConfigureAwait(false);
             AddHost(machine, identity);
@@ -209,7 +229,45 @@ internal sealed class DesktopFleet : IAsyncDisposable
         }
 
         Changed?.Invoke();
-        return machine;
+        return paired;
+    }
+
+    /// <summary>
+    /// Records a computer that paired with this one both ways from a link of this computer (<see cref="DesktopNode.PairedBack"/>):
+    /// a machine of this computer from now on, pinned to the key of the pairing. Paired again, it keeps the addresses it had when
+    /// it gives none.
+    /// </summary>
+    /// <param name="request">The computer, where it is reached, and what this computer may do there.</param>
+    /// <param name="cancellationToken">Cancels the wait for the change.</param>
+    /// <returns>Whether it was recorded; false once the fleet is closing.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
+    /// <exception cref="IOException">The paired machines cannot be written.</exception>
+    /// <exception cref="InvalidDataException">The file of the paired machines is damaged.</exception>
+    /// <exception cref="TimeoutException">Another process held the lock of that file too long.</exception>
+    public async Task<bool> AddPairedBackAsync(CodeAlta.Fleet.NodeApi.FleetPairBackRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var deviceId = DeviceIdentity.DeviceIdOf(request.Fingerprint);
+        await _changes.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_disposed) return false;
+            var identity = Identity();
+            var addresses = request.Addresses.Count > 0
+                ? request.Addresses
+                : _store.List().FirstOrDefault(known => known.Fingerprint == request.Fingerprint)?.Addresses ?? [];
+            var machine = new PairedMachine(request.Name, deviceId, request.Fingerprint, addresses, DateTimeOffset.UtcNow, request.Permissions);
+            _store.Save(machine);
+            if (_membership.Remove(deviceId) is RemoteSessionHost previous) await RetireAsync(previous).ConfigureAwait(false);
+            AddHost(machine, identity);
+        }
+        finally
+        {
+            _changes.Release();
+        }
+
+        Changed?.Invoke();
+        return true;
     }
 
     /// <summary>Forgets a machine: its host stops and the machine leaves the paired machines of the profile.</summary>

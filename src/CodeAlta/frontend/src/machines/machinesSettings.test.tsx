@@ -36,9 +36,9 @@ test("a machine added through the server is one of the person's machines: listed
 });
 
 const thisComputer = (change: Partial<ThisComputerView> = {}): ThisComputerView => ({ status: "ok", visible: false, listening: false, name: "DESKTOP-ALEX", words: null,
-  port: 2587, addresses: [], tailnet: null, problem: null, devices: [], reachable: false, servers: [], network: null, ...change });
+  port: 2587, addresses: [], tailnet: null, problem: null, devices: [], reachable: false, servers: [], network: null, pairBothWays: true, ...change });
 const renderThisComputer = (view: ThisComputerView) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
-  createElement(ThisComputerBody, { view, busy: false, onVisible: never, onReachable: never, onPair: never, onPermission: never, onRevoke: never })));
+  createElement(ThisComputerBody, { view, busy: false, onVisible: never, onReachable: never, onPairBothWays: never, onPair: never, onPermission: never, onRevoke: never })));
 
 test("this computer is reachable by nobody until the person lets their other computers pair with it, then offers a link and lists them", () => {
   const off = renderThisComputer(thisComputer());
@@ -58,6 +58,21 @@ test("this computer is reachable by nobody until the person lets their other com
   const blocked = renderThisComputer(thisComputer({ visible: true, listening: false, problem: "Port 2587 cannot be opened" }));
   assert.ok(blocked.includes(english("This computer cannot listen for your other computers.")), blocked);
   assert.ok(blocked.includes("Port 2587 cannot be opened"));
+});
+
+test("a pairing goes both ways unless the person turns it off, and the switch shows only once other computers may pair", () => {
+  const bothWays = english("Reach the computers that pair with this one too");
+  assert.ok(!renderThisComputer(thisComputer()).includes(bothWays), "nothing pairs with it yet");
+
+  // The input of the switch whose label is that text.
+  const input = (markup: string) => markup.slice(markup.lastIndexOf("<input", markup.indexOf(bothWays)), markup.indexOf(bothWays));
+  const on = renderThisComputer(thisComputer({ visible: true, listening: true }));
+  assert.ok(/^<input[^>]*type="checkbox"[^>]*checked=""/.test(input(on)), "a switch, on by default");
+  assert.ok(on.includes(english("A computer that pairs with this one from its link is listed with your machines here too, and this computer sees, drives and starts its sessions: one pairing goes both ways.")), on);
+
+  const off = renderThisComputer(thisComputer({ visible: true, listening: true, pairBothWays: false }));
+  assert.ok(!input(off).includes("checked"), "turned off");
+  assert.ok(off.includes(english("A computer that pairs with this one from its link is reached one way only: this computer does not list it with its machines.")), off);
 });
 
 test("a computer linked to a server is reached through it only once the person lets their other computers do so, without pairing", () => {

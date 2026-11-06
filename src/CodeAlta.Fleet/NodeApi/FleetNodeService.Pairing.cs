@@ -9,8 +9,7 @@ public sealed partial class FleetNodeService
 {
     private async Task<FleetPairRedeemResult> RedeemAsync(FleetNodeCall call, FleetPairRedeemParams parameters, CancellationToken cancellationToken)
     {
-        await Task.CompletedTask.ConfigureAwait(false);
-        if (call.Device is { } known)
+        if (call.Device is { } known && !parameters.BothWays)
         {
             // Already paired: redeeming again changes nothing, and spends no offer.
             return new FleetPairRedeemResult(_options.Name, _options.Identity.DeviceId, Describe(known.Permissions));
@@ -28,10 +27,11 @@ public sealed partial class FleetNodeService
 
         try
         {
-            (TrustedDevice? Device, PairingRedeemResult Result) redeemed;
+            // A device paired already that asks for both ways spends the offer as a new one does, and keeps what it may do here.
+            FleetPairingRedemption redeemed;
             try
             {
-                redeemed = Pairing.Redeem(secret, parameters.Name ?? "", call.Caller.Fingerprint);
+                redeemed = Pairing.Begin(secret, parameters.Name ?? "", call.Caller.Fingerprint, call.Device);
             }
             catch (ArgumentException exception)
             {
@@ -51,12 +51,40 @@ public sealed partial class FleetNodeService
                 throw new FleetException(FleetNodeErrorCodes.PairingRefused, null, why);
             }
 
-            LogInfo($"Device {device.Name} ({device.DeviceId}) paired with the node.");
-            return new FleetPairRedeemResult(_options.Name, _options.Identity.DeviceId, Describe(device.Permissions));
+            var bothWays = false;
+            try
+            {
+                bothWays = parameters.BothWays && redeemed.OfferedBothWays && await PairBackAsync(device, parameters, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                redeemed.Complete(bothWays);
+            }
+
+            LogInfo($"Device {device.Name} ({device.DeviceId}) paired with the node{(bothWays ? " both ways" : "")}.");
+            return new FleetPairRedeemResult(_options.Name, _options.Identity.DeviceId, Describe(device.Permissions)) { BothWays = bothWays };
         }
         finally
         {
             CryptographicOperations.ZeroMemory(secret);
+        }
+    }
+
+    // The device trusts this node already, over the channel pinned to the key of the link: the node records it as a machine
+    // it reaches, with what it says of itself. A failure leaves the pairing one way, which the device is told.
+    private async Task<bool> PairBackAsync(TrustedDevice device, FleetPairRedeemParams parameters, CancellationToken cancellationToken)
+    {
+        if (_options.PairBack is not { } pairBack) return false;
+        IReadOnlyList<string> addresses = [.. (parameters.Addresses ?? []).Where(PairingPayload.IsValidAddress).Distinct(StringComparer.OrdinalIgnoreCase).Take(PairingPayload.MaxAddresses)];
+        var permissions = DevicePermissionNames.TryParse(parameters.Permissions ?? [], out var granted, out _) ? DevicePermissionNames.Format(granted) : [];
+        try
+        {
+            return await pairBack(new FleetPairBackRequest(device.Name, device.Fingerprint, addresses, permissions), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or TimeoutException or ArgumentException)
+        {
+            LogWarn($"Device {device.Name} ({device.DeviceId}) paired one way only: it could not be recorded as a machine here ({exception.Message}).");
+            return false;
         }
     }
 

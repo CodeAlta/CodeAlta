@@ -38,6 +38,24 @@ public sealed class PairingTests
     }
 
     [TestMethod]
+    public void APayloadSaysWhenItsDeviceReachesTheOneThatPairs_AndAnOlderOneDoesNot()
+    {
+        var fingerprint = DeviceFingerprint.FromBytes(RandomNumberGenerator.GetBytes(32));
+        var secret = RandomNumberGenerator.GetBytes(PairingPayload.SecretLength);
+        var both = new PairingPayload("desk", fingerprint, ["192.168.1.20:2587"], secret, Now.AddMinutes(10), bothWays: true);
+
+        Assert.EndsWith("&both=1", both.ToUri());
+        Assert.IsTrue(PairingPayload.Parse(both.ToUri(), Now).BothWays);
+        var oneWay = new PairingPayload("node", fingerprint, ["192.168.1.20:2585"], secret, Now.AddMinutes(10));
+        Assert.DoesNotContain("both=", oneWay.ToUri());
+        Assert.IsFalse(PairingPayload.Parse(oneWay.ToUri(), Now).BothWays, "a link of a node, or of an older version, pairs one way");
+        Assert.IsFalse(PairingPayload.Parse(oneWay.ToUri() + "&both=0", Now).BothWays);
+        Assert.IsFalse(PairingPayload.TryParse(oneWay.ToUri() + "&both=yes", Now, out _, out var error));
+        Assert.AreEqual(PairingPayloadError.Malformed, error);
+        Assert.IsFalse(PairingPayload.TryParse(both.ToUri() + "&both=1", Now, out _, out _), "said once");
+    }
+
+    [TestMethod]
     public void ExpiredPayloadIsRefused()
     {
         var uri = NewPayload(Now.AddMinutes(5)).ToUri();

@@ -98,6 +98,17 @@ public sealed class PairingOfferService
     /// <exception cref="ArgumentException">The name or the addresses are invalid.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="lifetime"/> is out of range.</exception>
     public PairingPayload CreateOffer(string deviceName, IReadOnlyList<string> addresses, TimeSpan lifetime)
+        => CreateOffer(deviceName, addresses, lifetime, bothWays: false);
+
+    /// <summary>Opens an offer, replacing the open one.</summary>
+    /// <param name="deviceName">The name of this device, shown to the other one.</param>
+    /// <param name="addresses">Where the other device reaches this one, as <c>host:port</c>.</param>
+    /// <param name="lifetime">How long the offer stays open, at least a second and at most <see cref="MaxLifetime"/>.</param>
+    /// <param name="bothWays">Whether the payload says that this device also reaches the device that pairs (<see cref="PairingPayload.BothWays"/>).</param>
+    /// <returns>The payload to show; the service keeps only the hash of its secret.</returns>
+    /// <exception cref="ArgumentException">The name or the addresses are invalid.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="lifetime"/> is out of range.</exception>
+    public PairingPayload CreateOffer(string deviceName, IReadOnlyList<string> addresses, TimeSpan lifetime, bool bothWays)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(lifetime, TimeSpan.FromSeconds(1));
         ArgumentOutOfRangeException.ThrowIfGreaterThan(lifetime, MaxLifetime);
@@ -105,7 +116,7 @@ public sealed class PairingOfferService
         RandomNumberGenerator.Fill(secret);
         try
         {
-            var payload = new PairingPayload(deviceName, _identity.Fingerprint, addresses, secret, _timeProvider.GetUtcNow() + lifetime);
+            var payload = new PairingPayload(deviceName, _identity.Fingerprint, addresses, secret, _timeProvider.GetUtcNow() + lifetime, bothWays);
             var offer = new OpenOffer(SHA256.HashData(secret), payload.ExpiresAt);
             lock (_gate)
             {

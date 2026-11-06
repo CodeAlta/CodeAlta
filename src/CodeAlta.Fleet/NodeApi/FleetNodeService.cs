@@ -46,6 +46,12 @@ public sealed class FleetNodeServiceOptions
     /// <summary>Gets the clock of the offers.</summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
 
+    /// <summary>
+    /// Gets what records a device that pairs both ways as a machine this node reaches, once its secret redeemed an offer made
+    /// both ways: whether it was recorded. Null for a node that pairs one way only (a headless node, which reaches no desktop).
+    /// </summary>
+    public Func<FleetPairBackRequest, CancellationToken, Task<bool>>? PairBack { get; init; }
+
     // What protects the held sends in the place of the store of the machine, for tests (a store that goes away); null for that store.
     internal CodeAlta.Catalog.Secrets.LocalSecretStore? HeldSendsProtection { get; init; }
 
@@ -96,6 +102,13 @@ public sealed class FleetNodeServiceOptions
     /// </summary>
     public IFleetNodeProviders? Providers { get; init; }
 }
+
+/// <summary>A device that paired with a node both ways: the node reaches it as a machine of its own, pinned to its key.</summary>
+/// <param name="Name">The name the device gives itself.</param>
+/// <param name="Fingerprint">The fingerprint of its key, from the channel of the pairing.</param>
+/// <param name="Addresses">Where the node reaches it, as <c>host:port</c>; empty when it does not listen (a server may relay to it).</param>
+/// <param name="Permissions">What the node may do on it, as it says (<c>view</c>, <c>drive</c>, <c>start</c>, <c>move</c>).</param>
+public sealed record FleetPairBackRequest(string Name, DeviceFingerprint Fingerprint, IReadOnlyList<string> Addresses, IReadOnlyList<string> Permissions);
 
 /// <summary>
 /// The node API over the runtime of a node (<see cref="CodeAltaHost"/>), served on session channels. Each call is checked

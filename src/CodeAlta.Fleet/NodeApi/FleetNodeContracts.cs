@@ -290,13 +290,30 @@ public static class FleetNodeErrorCodes
 /// <summary>The parameters of <c>pair.redeem</c>.</summary>
 /// <param name="Secret">The one-time secret of the offer, base64url.</param>
 /// <param name="Name">The name the client gives itself, shown in the node's paired devices.</param>
-public sealed record FleetPairRedeemParams(string Secret, string Name);
+public sealed record FleetPairRedeemParams(string Secret, string Name)
+{
+    /// <summary>
+    /// Gets whether the client asks to pair both ways: it trusts the node already, over this channel pinned to the key of the
+    /// link, and the node records the client as a machine it reaches, when its offer said so (<see cref="Identity.PairingPayload.BothWays"/>).
+    /// </summary>
+    public bool BothWays { get; init; }
+
+    /// <summary>Gets where the node reaches the client, as <c>host:port</c>, when it pairs both ways; empty when the client does not listen.</summary>
+    public IReadOnlyList<string>? Addresses { get; init; }
+
+    /// <summary>Gets what the node may do on the client (<c>view</c>, <c>drive</c>, <c>start</c>, <c>move</c>), when it pairs both ways.</summary>
+    public IReadOnlyList<string>? Permissions { get; init; }
+}
 
 /// <summary>The result of <c>pair.redeem</c>.</summary>
 /// <param name="NodeName">The name of the node.</param>
 /// <param name="NodeDeviceId">The device id of the node.</param>
 /// <param name="Permissions">What the client may do on the node (<c>view</c>, <c>drive</c>, <c>start</c>, <c>move</c>).</param>
-public sealed record FleetPairRedeemResult(string NodeName, string NodeDeviceId, IReadOnlyList<string> Permissions);
+public sealed record FleetPairRedeemResult(string NodeName, string NodeDeviceId, IReadOnlyList<string> Permissions)
+{
+    /// <summary>Gets whether the node recorded the client as a machine it reaches, as the client asked; false for one way only.</summary>
+    public bool BothWays { get; init; }
+}
 
 /// <summary>A space of the node.</summary>
 /// <param name="Id">Its id.</param>
@@ -734,7 +751,8 @@ public sealed record FleetPairingOffer(string Link, DateTimeOffset ExpiresAt, IR
 /// <param name="Status"><c>redeemed</c>, <c>expired</c> or <c>replaced</c>.</param>
 /// <param name="DeviceName">The device that paired.</param>
 /// <param name="DeviceId">Its device id.</param>
-public sealed record FleetPairingOutcome(string Status, string? DeviceName = null, string? DeviceId = null);
+/// <param name="BothWays">Whether the node recorded the device as a machine it reaches too.</param>
+public sealed record FleetPairingOutcome(string Status, string? DeviceName = null, string? DeviceId = null, bool BothWays = false);
 
 /// <summary>The result of <c>control.status</c>.</summary>
 /// <param name="Name">The name of the node.</param>

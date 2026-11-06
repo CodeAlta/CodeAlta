@@ -69,6 +69,27 @@ internal sealed partial class MachinesService
         return View(Node, "ok");
     }
 
+    /// <summary>Lets the computers that pair with this one from its links be reached from it too, or pairs them one way only.</summary>
+    [NeoRpcMethod("setPairBothWays")]
+    public async Task<ThisComputerView> SetPairBothWaysAsync(ThisComputerPairBothWaysRequest request, CancellationToken cancellationToken)
+    {
+        if (RefuseNode(request?.ExpectedEpoch) is { } refused) return ThisComputerView.Refused(refused);
+        try
+        {
+            await Node!.SetPairBothWaysAsync(request!.BothWays, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return View(Node!, "write_failed");
+        }
+        catch (ObjectDisposedException)
+        {
+            return ThisComputerView.Refused("unavailable");
+        }
+
+        return View(Node, "ok");
+    }
+
     /// <summary>Makes a pairing link for another computer of the person, which it pastes in Add a machine… there.</summary>
     [NeoRpcMethod("createPairingLink")]
     public ThisComputerPairingLink CreatePairingLink(MachinesRequest request)
@@ -100,7 +121,7 @@ internal sealed partial class MachinesService
         {
             var result = await outcome.WaitAsync(cancellationToken).ConfigureAwait(false);
             if (result.Status == "redeemed") Changed();
-            return new(result.Status, result.DeviceName);
+            return new(result.Status, result.DeviceName) { BothWays = result.BothWays };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -172,6 +193,7 @@ internal sealed partial class MachinesService
                 device.PairedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), null, 0, false))])
         {
             Reachable = node.ReachableThroughServers,
+            PairBothWays = node.PairBothWays,
             Servers = servers,
             Network = node.TailnetName is null ? null : node.NetworkName,
         };
@@ -195,6 +217,9 @@ internal sealed record ThisComputerView(string Status, bool Visible, bool Listen
     /// <summary>Gets whether the person lets their other computers reach this one through the servers it is linked to.</summary>
     public bool Reachable { get; init; }
 
+    /// <summary>Gets whether a computer that pairs from a link of this one may be reached from it too: one pairing then goes both ways.</summary>
+    public bool PairBothWays { get; init; }
+
     /// <summary>Gets the names of the servers this computer is linked to, whose relay reaches it then.</summary>
     public string[] Servers { get; init; } = [];
 
@@ -214,6 +239,11 @@ internal sealed record ThisComputerVisibleRequest(string ExpectedEpoch, bool Vis
 /// <param name="Reachable">Whether they may.</param>
 internal sealed record ThisComputerReachableRequest(string ExpectedEpoch, bool Reachable);
 
+/// <summary>Lets the computers that pair with this one be reached from it too, or not.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="BothWays">Whether a pairing from a link of this computer may go both ways.</param>
+internal sealed record ThisComputerPairBothWaysRequest(string ExpectedEpoch, bool BothWays);
+
 /// <summary>A pairing link made here for another computer of the person.</summary>
 /// <param name="Status"><c>ok</c>, <c>not_listening</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
 /// <param name="Link">The <c>codealta-pair://</c> link.</param>
@@ -228,7 +258,11 @@ internal sealed record ThisComputerPairingLink(string Status, string? Link, stri
 /// <summary>What became of the open pairing link.</summary>
 /// <param name="Status"><c>redeemed</c>, <c>expired</c>, <c>replaced</c>, <c>none</c> (no link is open), <c>cancelled</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
 /// <param name="DeviceName">The computer that paired with it, once redeemed.</param>
-internal sealed record ThisComputerPairingOutcome(string Status, string? DeviceName);
+internal sealed record ThisComputerPairingOutcome(string Status, string? DeviceName)
+{
+    /// <summary>Gets whether this computer lists that computer with its machines too: the pairing went both ways.</summary>
+    public bool BothWays { get; init; }
+}
 
 /// <summary>A permission of a computer paired with this one.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
