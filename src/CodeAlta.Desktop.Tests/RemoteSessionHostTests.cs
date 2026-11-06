@@ -93,7 +93,21 @@ public sealed class RemoteSessionHostTests
         var prompt = tail.Page.Entries.Select(static entry => entry.Event).OfType<AgentContentCompletedEvent>().First(static content => content.Kind == AgentContentKind.User);
         Assert.AreEqual("send-1", PromptImageHistory.ReadClientRequestId(prompt.Details), "The page finds its prompt by the key it gave it.");
         if (tail.Stamp is { } stamp)
-            Assert.IsTrue((await host.ReadTimelineTailAsync(created.SessionId, stamp, token)).Unchanged, "An unchanged journal is not read again.");
+        {
+            // The node may still write the end of the turn after its answer: a read with the stamp of the last read brings
+            // the records written since, until the journal stays as it is and the read with its stamp reads nothing.
+            var deadline = DateTime.UtcNow + Patience;
+            OwnedTimelineTail again;
+            while (!(again = await host.ReadTimelineTailAsync(created.SessionId, stamp, token)).Unchanged && DateTime.UtcNow < deadline)
+            {
+                Assert.IsNotNull(again.Page, "A journal that changed is read again.");
+                Assert.IsNotNull(again.Stamp);
+                stamp = again.Stamp;
+                await Task.Delay(50, token);
+            }
+
+            Assert.IsTrue(again.Unchanged, "An unchanged journal is not read again.");
+        }
         var forward = await host.ReadHistoryPageAsync(created.SessionId, null, token);
         Assert.IsTrue(forward.Entries.Count > 0);
         var record = await host.ReadHistoryRecordAsync(created.SessionId, tail.Page.Entries[^1].Offset, token);

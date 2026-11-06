@@ -150,7 +150,9 @@ public abstract class BrowserToolsTests
     private static async Task<string> WaitForPopupAsync(BrowserSession session, string clickAnswer)
     {
         var answer = clickAnswer;
-        for (var attempt = 0; !answer.Contains("## Opened pages", StringComparison.Ordinal) && attempt < 100; attempt++)
+        // The popup opens when the browser gets to it: a loaded machine takes longer than a count of tries gives it.
+        var deadline = DateTime.UtcNow + BrowserToolTesting.Deadline;
+        while (!answer.Contains("## Opened pages", StringComparison.Ordinal) && DateTime.UtcNow < deadline)
         {
             await Task.Delay(100);
             answer = await session.OkAsync("list_pages");
@@ -211,7 +213,8 @@ public abstract class BrowserToolsTests
         await session.OkAsync("wait_for", """{"text":["Outer"]}""");
         string snapshot = string.Empty;
         // A frame loads after its page: the snapshot is taken again until both are there.
-        for (var attempt = 0; attempt < 20 && snapshot.Split("button \"Press me\"").Length < 3; attempt++)
+        var deadline = DateTime.UtcNow + BrowserToolTesting.Deadline;
+        while (snapshot.Split("button \"Press me\"").Length < 3 && DateTime.UtcNow < deadline)
         {
             await Task.Delay(250);
             snapshot = await session.OkAsync("take_snapshot");
@@ -311,7 +314,7 @@ public sealed class ChromiumToolsTests : BrowserToolsTests
     public async Task TheBrowserOfCodeAlta_StartsWithoutATabOfItsOwn_AndKeepsRunningWhenTheTabsOfASessionClose(bool isolated)
     {
         var connection = (CodeAlta.Browser.Drivers.Cdp.CdpBrowserConnection)Host.Connection;
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(BrowserToolTesting.Deadline);
         await using (var session = Host.NewSession(isolated: isolated))
         {
             await session.ContextAsync(timeout.Token);

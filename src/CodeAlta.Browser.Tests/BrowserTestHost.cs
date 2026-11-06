@@ -87,10 +87,18 @@ internal sealed class BrowserTestHost : IAsyncDisposable
 /// <summary>Calls of tools in tests.</summary>
 internal static class BrowserToolTesting
 {
+    /// <summary>
+    /// How long a test waits for a call that may start the browser, or open its first context: the start of the browser,
+    /// which may take its two minutes, and a command of the browser after it. Measured 2026-11-06 on Windows: Firefox opens
+    /// its BiDi session in about 1 s alone, in 5 to 18 s under a load of a busy pwsh per core, and in more than 60 s in a full
+    /// validation, where a deadline of 60 s failed the call. The deadline is only there to end a test that hangs.
+    /// </summary>
+    public static readonly TimeSpan Deadline = TimeSpan.FromMinutes(3);
+
     public static async Task<BrowserToolResult> CallAsync(this BrowserSession session, string tool, string arguments = "{}")
     {
         using var document = JsonDocument.Parse(arguments);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(Deadline);
         return await session.CallAsync(tool, document.RootElement, timeout.Token);
     }
 

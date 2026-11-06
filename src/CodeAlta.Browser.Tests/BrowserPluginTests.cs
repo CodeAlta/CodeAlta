@@ -450,7 +450,8 @@ public sealed class BrowserPluginTests
     private static async Task<AgentToolResult> CallAsync(IReadOnlyList<AgentToolDefinition> tools, string sessionId, string name, string arguments)
     {
         using var document = JsonDocument.Parse(arguments);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        // The first call starts the browser, which the host gives two minutes.
+        using var timeout = new CancellationTokenSource(BrowserToolTesting.Deadline);
         var tool = tools.Single(tool => tool.Spec.Name == name);
         return await tool.Handler(new AgentToolInvocation(new ModelProviderId("test"), sessionId, "call", name, document.RootElement.Clone()), timeout.Token);
     }

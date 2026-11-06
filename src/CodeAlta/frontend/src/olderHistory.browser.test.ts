@@ -302,7 +302,12 @@ test("a reader leaves the end of a timeline that grows with small turns of the w
       // Going down to the end follows the answer again.
       await wheel(page, 4000);
       await page.until(`${scroller}.dataset.following === 'true'`, "the end followed again");
+      // The answer grows by about ten lines meanwhile. A line can land between two frames, before the view follows
+      // it: the end is read once the stream stopped and the view is still, which a view left behind never reaches.
       await pause(400);
+      await page.evaluate(`olderFixture.stopStream()`);
+      await still(page);
+      assert.equal(await page.evaluate(`${scroller}.dataset.following`), "true", "the reader stays at the end");
       assert.equal(await page.evaluate(atEnd), true, "the growing answer is followed");
     } finally {
       await page.evaluate(`olderFixture.stopStream()`);
