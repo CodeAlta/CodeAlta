@@ -317,8 +317,10 @@ internal sealed partial class AutomationService
         if (EventId(item.Id) is not { } id) return true;
         if (Seen(entry, trigger, id)) return true;
         var detail = AutomationText.Line(item.Title, 120);
+        // A run the Automation trigger starts remembers the run it follows: that is how a chain of them is counted.
+        var cause = trigger.Source == AutomationSourceTypes.Automation && source.PluginId is null ? AutomationRunTriggerSource.RunOf(item.Id) : null;
         if (!Trigger(entry, trigger.KindName, detail.Length == 0 ? null : detail, SourceEventPrompt(entry.Definition.Prompt, source.Trigger, item), waits: true,
-                occurrence: EventOccurrence(trigger, id), eventJson: SourceEventJson(item))) return false;
+                occurrence: EventOccurrence(trigger, id), eventJson: SourceEventJson(item), cause: cause)) return false;
         lock (_gate)
         {
             _state.SetWatermark(entry.Id, trigger.Key, AutomationReplayMemory.Remember(_state.Watermark(entry.Id, trigger.Key), id, null, _time.GetUtcNow(), RememberedEvents),

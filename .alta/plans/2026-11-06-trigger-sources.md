@@ -60,8 +60,8 @@ This plan adds **trigger sources**: a trigger type that describes its events and
 ### The Automation trigger
 
 - Events `completed`, `failed` (failed or interrupted) and `waiting` (waits for an approval), for chosen automations, by id, or for any other automation.
-- Never for its own runs. A run started by this trigger carries its chain depth; past a depth of 5 it is recorded as skipped, so that two automations cannot start each other forever.
-- It is signaled when a run of this machine changes; it sees the runs of this machine only.
+- Never for its own runs. A run started by this trigger records the run it follows (`Cause`); a run that would follow a chain of 5 is recorded as skipped, so that two automations cannot start each other forever.
+- It is polled, and signaled whenever the runs of this machine change; it sees the runs of this machine only. Its cursor keeps the runs that waited, so that one approval is one event.
 - Event: `on`, `automationId`, `automationName`, `runId`, `status`, `message`, `sessionId`, `startedAt`, `endedAt`, and the `detail` of what started that run.
 
 ### Scripts without a model or a session
@@ -96,7 +96,7 @@ A plugin can give a trigger together with the code that handles it, so that "whe
 - [x] 3. The public contract and its registration: `PluginAutomationTriggers.cs`, `PluginBase.GetAutomationTriggers()`, `PluginContributionRegistry`, the look-now signal; wiring in `DesktopApplication` and `NodeAutomations`; tests in `Plugins.Abstractions.Tests` and `Plugins.Tests`.
 - [x] 4. Engine: polled sources with cursors, push listeners, claims, the prompt section, the JSON `event`; a missing source reported; tests with a fake source (`AutomationServiceTests`).
 - [x] 5. Project trigger, with the origin reported by the in-process add paths; tests.
-- [ ] 6. Automation trigger, with the self and chain-depth guards; tests.
+- [x] 6. Automation trigger, with the self and chain-depth guards; tests.
 - [ ] 7. Scripts without a model or a session: the run in Code Mode without a session, the `alta` binding with the guards of an automation, `agent()` starting a session of the automation, the run's record; tests, including a fake plugin `alta` command that the script calls.
 - [ ] 8. Scripts of a plugin: `PluginBase.GetScripts()`, the `Plugin` scope of the library and its names, read-only; a trigger contribution that names its script, arguments and mode; tests.
 - [ ] 9. RPC and editor: trigger descriptors, the generic fields, the events multi-select, **Run without a model**, a plugin's trigger offered with its script as a ready-made automation; frontend tests; checked in the developer instance, both themes and a narrow window.

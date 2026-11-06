@@ -117,6 +117,10 @@ internal sealed partial class AutomationService : IAsyncDisposable
         (_globalConfigPath, _projects, _state, _runner, _time, _zone, _feed) = (globalConfigPath, projects, state, runner, time, zone, feed);
         _aliveBefore = state.AliveAt;
         _sources.Signaled += OnSourceSignaled;
+        // The Automation trigger reads the runs of this service: it looks again whenever they change.
+        var runs = new AutomationRunTriggerSource(this);
+        _sources.AddBuiltIn(runs.Contribution);
+        Changed += runs.Signal.Raise;
         // The sessions of the runs keep the guard of their automation as it is now, a try staying a try, after their run too.
         if (runner is AutomationRunner concrete)
         {
@@ -331,6 +335,28 @@ internal sealed partial class AutomationService : IAsyncDisposable
 
     /// <summary>The run that started a session, or null.</summary>
     internal AutomationRun? RunOfSession(string sessionId) => _state.RunOfSession(sessionId);
+
+    /// <summary>A run by its id, or null.</summary>
+    internal AutomationRun? Run(string runId) => _state.Run(runId);
+
+    /// <summary>The time on the clock of the service.</summary>
+    internal DateTimeOffset Now => _time.GetUtcNow();
+
+    /// <summary>Records that a trigger of an automation started nothing, and why, as a run that was skipped.</summary>
+    /// <param name="automationId">The automation.</param>
+    /// <param name="trigger">The kind of the trigger.</param>
+    /// <param name="detail">What the trigger was about.</param>
+    /// <param name="message">Why nothing started.</param>
+    internal void RecordSkipped(string automationId, string trigger, string? detail, string message)
+    {
+        if (Snapshot.Find(automationId) is not { } entry) return;
+        var now = _time.GetUtcNow();
+        _state.Add(new AutomationRun(NewRunId(), automationId, now, trigger)
+        {
+            Name = entry.Definition.Name, ProjectId = entry.ProjectId, Detail = detail, Status = AutomationRun.Skipped, Message = message, EndedAt = now,
+        });
+        Changed?.Invoke();
+    }
 
     /// <summary>The next times a trigger is due, for the user who writes it.</summary>
     /// <returns>The times, or what is wrong with the trigger.</returns>
@@ -702,9 +728,10 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// <param name="occurrence">What is due, claimed before the run starts when the host claims (<see cref="Occurrence"/>); null for nothing to claim.</param>
     /// <param name="reply">Where the answer of the run is written back, the event's source; null for nowhere.</param>
     /// <param name="eventJson">The event as a JSON object, the <c>event</c> argument of its script; null for the text of the prompt.</param>
+    /// <param name="cause">The run of another automation whose end starts this one (the Automation trigger); null otherwise.</param>
     /// <returns>Whether a run was started.</returns>
     internal bool Trigger(AutomationEntry entry, string trigger, string? detail, string prompt, bool waits = false, string? occurrence = null, AutomationReplyTarget? reply = null,
-        string? eventJson = null)
+        string? eventJson = null, string? cause = null)
     {
         bool busy;
         lock (_gate)
@@ -741,7 +768,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
             return false;
         }
 
-        var start = BeginAsync(entry, trigger, detail, prompt, _stop.Token, runId, occurrence, reply, eventJson);
+        var start = BeginAsync(entry, trigger, detail, prompt, _stop.Token, runId, occurrence, reply, eventJson, cause);
         lock (_gate)
         {
             _observers.RemoveAll(static task => task.IsCompleted);
@@ -753,9 +780,9 @@ internal sealed partial class AutomationService : IAsyncDisposable
 
     // Records the run, starts its session and returns once the session exists; what follows is observed apart.
     private async Task<AutomationRun?> BeginAsync(AutomationEntry entry, string trigger, string? detail, string prompt, CancellationToken cancellationToken, string? runId = null,
-        string? occurrence = null, AutomationReplyTarget? reply = null, string? eventJson = null)
+        string? occurrence = null, AutomationReplyTarget? reply = null, string? eventJson = null, string? cause = null)
     {
-        var run = new AutomationRun(runId ?? NewRunId(), entry.Id, _time.GetUtcNow(), trigger) { Name = entry.Definition.Name, ProjectId = entry.ProjectId, Detail = detail };
+        var run = new AutomationRun(runId ?? NewRunId(), entry.Id, _time.GetUtcNow(), trigger) { Name = entry.Definition.Name, ProjectId = entry.ProjectId, Detail = detail, Cause = cause };
         lock (_gate)
         {
             if (_closed)

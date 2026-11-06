@@ -96,6 +96,9 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
     /// approval once; null while it waits for none.
     /// </summary>
     public string? Approval { get; init; }
+
+    /// <summary>For a run the Automation trigger started, the run of the other automation whose end started it; null otherwise.</summary>
+    public string? Cause { get; init; }
 }
 
 /// <summary>What an event trigger has already seen of a repository.</summary>
