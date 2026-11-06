@@ -32,6 +32,27 @@ public sealed class MobileServerTests
     }
 
     [TestMethod]
+    public async Task PushRegistrationRequiresPairing_ValidatesSubscriptions_AndCanBeDisabled()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.Client.GetAsync("/api/push")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.PostAsync("/api/push/subscription", new JsonObject())).StatusCode);
+        await fixture.SignInAsync();
+        using var configuration = await fixture.Client.GetAsync("/api/push");
+        var json = JsonNode.Parse(await configuration.Content.ReadAsStringAsync())!.AsObject();
+        Assert.AreEqual(1, json.Count, "The VAPID private key and other phones' subscriptions are never exposed.");
+        Assert.IsNotNull(json["publicKey"]);
+        using var receiver = System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        var subscription = MobilePushTests.Subscription(receiver);
+        Assert.AreEqual(HttpStatusCode.NoContent, (await fixture.PostAsync("/api/push/subscription", subscription)).StatusCode);
+        subscription["endpoint"] = "https://127.0.0.1/private";
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await fixture.PostAsync("/api/push/subscription", subscription)).StatusCode);
+        Assert.AreEqual(HttpStatusCode.NoContent, (await fixture.PostAsync("/api/push/unsubscribe", new JsonObject())).StatusCode);
+        await fixture.Access.ResetAsync(default);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.Client.GetAsync("/api/push")).StatusCode);
+    }
+
+    [TestMethod]
     public async Task ThePairingToken_SignsAPhoneIn_WithAKeyOfItsOwn_AndTheResetSignsItOut()
     {
         await using var fixture = await Fixture.StartAsync();
@@ -742,6 +763,7 @@ public sealed class MobileServerTests
         internal int Port { get; }
 
         internal required MobileAccess Access { get; init; }
+        internal required MobilePush Push { get; init; }
 
         /// <summary>The pairing token of the QR code.</summary>
         internal string Token => Access.PairingToken!;
@@ -758,18 +780,20 @@ public sealed class MobileServerTests
             var sessions = new MobileSessions(alta, new FakeSpaces(), live);
             var asks = new FakeAsks();
             var permissions = new FakePermissions();
-            var access = await MobileAccess.LoadAsync(new MobileSettingsTests.MemoryState(), CancellationToken.None);
+            var state = new MobileSettingsTests.MemoryState();
+            var access = await MobileAccess.LoadAsync(state, CancellationToken.None);
+            var push = await MobilePush.LoadAsync(state, access, default);
             await access.PairAsync(CancellationToken.None);
             var server = new MobileServer(new MobileServerOptions
             {
                 Port = port, Access = access, Hosts = () => ["desk.tail1234.ts.net:2584"], Files = files, Sessions = sessions,
                 // An answer the session takes long to take is said pending at once: no test waits the seconds of a phone.
                 Api = new MobileApi(alta, sessions), Asks = new MobileAsks(asks, sessions, TimeSpan.FromMilliseconds(50)),
-                Permissions = new MobilePermissions(permissions, sessions, TimeSpan.FromMilliseconds(50), alta), Live = live, Logger = XenoAtom.Logging.LogManager.GetLogger("mobile-tests"),
+                Permissions = new MobilePermissions(permissions, sessions, TimeSpan.FromMilliseconds(50), alta), Live = live, Push = push, Logger = XenoAtom.Logging.LogManager.GetLogger("mobile-tests"),
             });
             await server.StartAsync(default);
             var client = new HttpClient(new HttpClientHandler { UseCookies = true }) { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
-            return new Fixture(server, client, alta, port) { Asks = asks, Permissions = permissions, Access = access };
+            return new Fixture(server, client, alta, port) { Asks = asks, Permissions = permissions, Access = access, Push = push };
         }
 
         internal Task<HttpResponseMessage> PostAsync(string path, JsonObject body)
@@ -785,6 +809,7 @@ public sealed class MobileServerTests
         {
             Client.Dispose();
             await _server.DisposeAsync();
+            Push.Dispose();
         }
     }
 }

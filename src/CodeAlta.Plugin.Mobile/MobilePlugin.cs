@@ -51,6 +51,8 @@ public sealed class MobilePlugin : PluginBase
     // The networks of the tests; null for those of the host.
     private readonly Func<IReadOnlyList<IPrivateNetworkProvider>>? _networks;
     private readonly MobileLive _live;
+    private readonly MobilePushEvents _pushEvents = new();
+    private volatile MobilePush? _push;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _canvases = new();
     private readonly List<IPluginCanvasRpc> _open = [];
@@ -143,6 +145,7 @@ public sealed class MobilePlugin : PluginBase
         // The server starts in the background: the window does not wait for the provider.
         _ = Tasks.Run("mobile-start", StartAsync, new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Starts the mobile view." });
         Tasks.Run("mobile-live", FlushAsync, new PluginTaskOptions { LongRunning = true, SessionRetentionIndependent = true, Description = "Pushes the state of the sessions to the phones." });
+        Tasks.Run("mobile-push", PushAsync, new PluginTaskOptions { LongRunning = true, SessionRetentionIndependent = true, Description = "Notifies installed phone apps when sessions finish or need the person." });
         await base.OnActivatedAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -158,6 +161,7 @@ public sealed class MobilePlugin : PluginBase
     {
         ArgumentNullException.ThrowIfNull(context);
         _live.Observe(context.Event, context.ProjectId);
+        if (_push is not null) _pushEvents.Observe(context.Event);
         return ValueTask.CompletedTask;
     }
 
@@ -166,6 +170,7 @@ public sealed class MobilePlugin : PluginBase
     {
         await StopAsync(CancellationToken.None).ConfigureAwait(false);
         await base.DisposeAsync().ConfigureAwait(false);
+        Interlocked.Exchange(ref _push, null)?.Dispose();
     }
 
     /// <summary>Reads the settings, starts the server and has the provider publish it: what activation runs in the background.</summary>
@@ -197,6 +202,7 @@ public sealed class MobilePlugin : PluginBase
         var access = await MobileAccess.LoadAsync(Services.State, cancellationToken).ConfigureAwait(false);
         if (MobileToken.IsValid(settings.Token)) await access.AdoptAsync(settings.Token!, cancellationToken).ConfigureAwait(false);
         _access = access;
+        _push = await MobilePush.LoadAsync(Services.State, access, cancellationToken).ConfigureAwait(false);
         var valid = settings with
         {
             Token = null,
@@ -227,7 +233,7 @@ public sealed class MobilePlugin : PluginBase
         {
             Port = port, Access = _access!, Hosts = () => _state.PublicHost is { } host ? [host] : [],
             Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions, attachments),
-            Asks = new MobileAsks(Services.Asks, sessions), Permissions = new MobilePermissions(Services.Permissions, sessions, null, Services.Alta), Live = _live, Logger = Logger,
+            Asks = new MobileAsks(Services.Asks, sessions), Permissions = new MobilePermissions(Services.Permissions, sessions, null, Services.Alta), Live = _live, Push = _push, Logger = Logger,
         });
         try
         {
@@ -487,7 +493,10 @@ public sealed class MobilePlugin : PluginBase
         {
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
-                _live.Flush(await ReadAskingAsync(cancellationToken).ConfigureAwait(false), await ReadApprovingAsync(cancellationToken).ConfigureAwait(false));
+                var asks = await ReadAskingAsync(cancellationToken).ConfigureAwait(false);
+                var permissions = await ReadApprovingAsync(cancellationToken).ConfigureAwait(false);
+                _live.Flush(asks, permissions);
+                if (_push is not null) _pushEvents.Pending(asks, permissions);
                 if (++ticks % 60 == 0) _live.Broadcast("ping", "{}");
             }
         }
@@ -495,6 +504,28 @@ public sealed class MobilePlugin : PluginBase
         {
             // The plugin stops.
         }
+    }
+
+    // One consumer owns deliveries; slow push services never block the agent or the stream to an open phone.
+    private async ValueTask PushAsync(CancellationToken cancellationToken)
+    {
+        var sessions = new MobileSessions(Services.Alta, Services.Spaces, _live);
+        try
+        {
+            await foreach (var notice in _pushEvents.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    if (_push is { } push) await push.SendAsync(notice, sessions, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException && (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested))
+                {
+                    // Exceptions of push services can contain a phone's endpoint and keys.
+                    Logger.Warn("Mobile: a push notification could not be delivered.");
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
 
     /// <summary>

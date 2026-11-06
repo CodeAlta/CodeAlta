@@ -129,6 +129,12 @@ internal sealed class MobileAccess
         lock (_gate) return Contains(_phones, hash);
     }
 
+    /// <summary>Whether a saved phone hash still has access, including after a reset or eviction.</summary>
+    internal bool IsPhoneHash(string hash)
+    {
+        lock (_gate) return Contains(_phones, hash);
+    }
+
     /// <summary>The SHA-256 of a token, base64url: what the file keeps.</summary>
     internal static string Hash(string token)
         => Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(token))).TrimEnd('=').Replace('+', '-').Replace('/', '_');
