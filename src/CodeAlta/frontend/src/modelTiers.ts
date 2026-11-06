@@ -36,7 +36,9 @@ export const adaptiveLevelLabels: Readonly<Record<AdaptiveLevelName, "Low" | "Me
  * A level of Adaptive: the model of its turns and the critics that review its changes of code (none for a recheck), with
  * the names of its model while its provider is ready.
  */
-export type AdaptiveLevel = Readonly<{ level: AdaptiveLevelName; model: TierTarget; critics: readonly TierTarget[]; choice: ModelTierChoiceItem | null }>;
+export type AdaptiveLevel = Readonly<{ level: AdaptiveLevelName; model: TierTarget; critics: readonly TierTarget[]; choice: ModelTierChoiceItem | null;
+  /** The names of the critics as their providers give them; absent for a level the window changed. */
+  criticNames?: readonly string[] }>;
 
 /** Adaptive, as Settings > Models sets it up: the level a session takes when none is chosen, and the levels that are set. */
 export type AdaptiveChoice = Readonly<{ level: AdaptiveLevelName; levels: readonly AdaptiveLevel[] }>;
@@ -111,7 +113,9 @@ function readLevels(value: unknown): readonly AdaptiveLevel[] | null {
     if (!level || !model || levels.some(existing => existing.level === level)) continue;
     const critics = Array.isArray(item.critics) ? item.critics.map(readTarget).filter((critic: TierTarget | null): critic is TierTarget => !!critic).slice(0, maximumAdaptiveCritics) : [];
     const choice = item.choice && text(item.choice.providerKey) && text(item.choice.modelId) ? item.choice as ModelTierChoiceItem : null;
-    levels.push({ level, model, critics, choice });
+    const names = Array.isArray(item.criticNames) && item.criticNames.length === critics.length && item.criticNames.every((name: unknown) => text(name))
+      ? item.criticNames as string[] : undefined;
+    levels.push(names ? { level, model, critics, choice, criticNames: names } : { level, model, critics, choice });
   }
   return levels.sort((left, right) => adaptiveLevelNames.indexOf(left.level) - adaptiveLevelNames.indexOf(right.level));
 }
@@ -155,7 +159,8 @@ const modelOfTarget = (target: TierTarget) => target.modelId;
 export function adaptiveLevelSummary(level: AdaptiveLevel, t: (key: "Recheck" | "Review by {models}", values?: Record<string, string>) => string): string {
   const model = level.choice?.modelName ?? modelOfTarget(level.model);
   const effort = level.choice?.reasoning ?? level.model.reasoning[0];
-  const review = level.critics.length > 0 ? t("Review by {models}", { models: level.critics.map(modelOfTarget).join(", ") }) : t("Recheck");
+  const critics = level.criticNames ?? level.critics.map(modelOfTarget);
+  const review = critics.length > 0 ? t("Review by {models}", { models: critics.join(", ") }) : t("Recheck");
   return [effort ? `${model} ${effort}` : model, review].join(" · ");
 }
 

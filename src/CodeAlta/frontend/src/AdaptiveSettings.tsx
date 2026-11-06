@@ -15,7 +15,7 @@ const noLevels: AdaptiveChoice = Object.freeze({ level: "medium", levels: [] });
 // A level as the host saves it.
 const toSetting = (level: AdaptiveLevel): AdaptiveLevelSetting => ({
   level: level.level, model: { ...level.model, reasoning: [...level.model.reasoning] },
-  critics: level.critics.map(critic => ({ ...critic, reasoning: [...critic.reasoning] })), choice: null,
+  critics: level.critics.map(critic => ({ ...critic, reasoning: [...critic.reasoning] })), choice: null, criticNames: null,
 });
 
 /**

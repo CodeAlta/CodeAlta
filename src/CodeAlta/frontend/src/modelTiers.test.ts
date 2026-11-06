@@ -42,9 +42,9 @@ test("Adaptive is read with its levels, ready only when the host says so, and of
   const sol = { providerKey: "codex", modelId: "gpt-6.1-sol", reasoning: "Low", providerName: "Codex", modelName: "GPT-6.1 Sol" };
   const levels = [
     { level: "max", model: { providerKey: "codex", modelId: "gpt-6.1-sol", reasoning: ["High"] },
-      critics: [{ providerKey: "claude-code", modelId: "sonnet", reasoning: ["High"] }, { providerKey: "claude-code", modelId: "opus", reasoning: ["High"] }], choice: null },
-    { level: "medium", model: { providerKey: "codex", modelId: "gpt-6.1-sol", reasoning: ["Low"] }, critics: [{ providerKey: "claude-code", modelId: "sonnet", reasoning: ["High"] }], choice: sol },
-    { level: "huge", model: { providerKey: "codex", modelId: "gpt-6.1-sol", reasoning: [] }, critics: [], choice: null },
+      critics: [{ providerKey: "claude-code", modelId: "sonnet", reasoning: ["High"] }, { providerKey: "claude-code", modelId: "opus", reasoning: ["High"] }], choice: null, criticNames: null },
+    { level: "medium", model: { providerKey: "codex", modelId: "gpt-6.1-sol", reasoning: ["Low"] }, critics: [{ providerKey: "claude-code", modelId: "sonnet", reasoning: ["High"] }], choice: sol, criticNames: ["Sonnet 5.5"] },
+    { level: "huge", model: { providerKey: "codex", modelId: "gpt-6.1-sol", reasoning: [] }, critics: [], choice: null, criticNames: null },
   ];
   const ready = readTierState(reply({ adaptive: { level: "medium", levels }, adaptiveReady: true, adaptiveProposal: [levels[1]] }))!;
   // From the cheapest; a level that is none is left out.
@@ -58,9 +58,9 @@ test("Adaptive is read with its levels, ready only when the host says so, and of
   assert.equal(adaptiveLevelOf(ready.adaptive, "max")?.level, "max");
   const entry = composerAdaptiveEntry(ready, t);
   assert.equal(entry.ready, true);
-  assert.equal(entry.detail, "GPT-6.1 Sol Low · Review by sonnet");
+  assert.equal(entry.detail, "GPT-6.1 Sol Low · Review by Sonnet 5.5");
   // The provider of Max is not ready: it is offered without a model.
-  assert.deepEqual(entry.levels.map(level => [level.level, level.detail]), [["medium", "GPT-6.1 Sol Low · Review by sonnet"], ["max", null]]);
+  assert.deepEqual(entry.levels.map(level => [level.level, level.detail]), [["medium", "GPT-6.1 Sol Low · Review by Sonnet 5.5"], ["max", null]]);
   assert.equal(adaptiveLevelSummary(ready.adaptive!.levels[1], t), "gpt-6.1-sol High · Review by sonnet, opus");
   // Set up, but the host says it has no level that can be chosen.
   const waiting = readTierState(reply({ adaptive: { level: "medium", levels: [] }, adaptiveReady: true }))!;

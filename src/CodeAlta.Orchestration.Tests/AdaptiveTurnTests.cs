@@ -159,9 +159,11 @@ public sealed class AdaptiveTurnTests
     }
 
     [TestMethod]
-    public async Task TheCriticOfTheHost_OpensAReadOnlyChildSession_OnItsOwnModel()
+    public async Task TheCriticOfTheHost_OpensAReadOnlyChildSession_OnItsOwnModel_ThoughTheSessionStartsNoSessionOfItsOwn()
     {
         await using var f = await Fixture.CreateAsync(Config);
+        // A session without sub-sessions (altacli --no-sub-sessions) is still reviewed: the critic is the host's, not the agent's.
+        Assert.AreEqual("ok", (await f.Host.Commands.SetSessionOptionsAsync(f.Session.SessionId, new AgentSessionOptions { SubSessions = false })).Status);
         await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
         f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
         f.Provider.Scripts.Enqueue(static run => run.Answer = "The change does what the request asks.\nVERDICT: APPROVE");

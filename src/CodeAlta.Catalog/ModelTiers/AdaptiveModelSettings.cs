@@ -215,7 +215,11 @@ public static class AdaptiveProposals
     /// <param name="ProviderKey">The key of the provider.</param>
     /// <param name="ModelId">The model as the provider names it.</param>
     /// <param name="Subscription">Whether the provider runs on a subscription (Codex, Claude Code), which a proposal prefers.</param>
-    public sealed record Candidate(string ProviderKey, string ModelId, bool Subscription);
+    /// <param name="DisplayName">
+    /// The name the provider gives the model, or <see langword="null"/>: an alias (<c>sonnet</c>) is proposed only when it
+    /// names the version that was measured, as Claude Code's <c>haiku</c> may be another one.
+    /// </param>
+    public sealed record Candidate(string ProviderKey, string ModelId, bool Subscription, string? DisplayName = null);
 
     /// <summary>Proposes the levels of Adaptive from the models the configured providers offer.</summary>
     /// <param name="candidates">The models of the providers that are ready, in the order the providers are listed.</param>
@@ -225,10 +229,10 @@ public static class AdaptiveProposals
     {
         ArgumentNullException.ThrowIfNull(candidates);
         var list = candidates.ToArray();
-        var sol = Find(list, "gpt-6.1-sol");
-        var sonnet = Find(list, "claude-sonnet-5-5", "sonnet");
-        var opus = Find(list, "claude-opus-5-5", "opus");
-        var haiku = Find(list, "claude-haiku-5-5", "haiku");
+        var sol = Find(list, "6.1", "gpt-6.1-sol");
+        var sonnet = Find(list, "5.5", "claude-sonnet-5-5", "sonnet");
+        var opus = Find(list, "5.5", "claude-opus-5-5", "opus");
+        var haiku = Find(list, "5.5", "claude-haiku-5-5", "haiku");
         if (sol is not null && (sonnet ?? opus) is { } critic)
         {
             // Both families: measured in November 2026 on SWE-bench Pro and Terminal-Bench.
@@ -271,15 +275,19 @@ public static class AdaptiveProposals
         return [];
     }
 
-    // The first candidate of a model, a subscription first, an exact name before an alias.
-    private static Candidate? Find(Candidate[] candidates, params string[] names)
+    // The first candidate of a model, a subscription first, an exact name before an alias; an alias (the names after
+    // the first) only when the provider gives no name or one with the version measured.
+    private static Candidate? Find(Candidate[] candidates, string version, params string[] names)
     {
         foreach (var subscription in new[] { true, false })
         {
-            foreach (var name in names)
+            for (var index = 0; index < names.Length; index++)
             {
+                var name = names[index];
+                var alias = index > 0;
                 if (candidates.FirstOrDefault(candidate => candidate.Subscription == subscription
-                        && string.Equals(candidate.ModelId, name, StringComparison.OrdinalIgnoreCase)) is { } found)
+                        && string.Equals(candidate.ModelId, name, StringComparison.OrdinalIgnoreCase)
+                        && (!alias || candidate.DisplayName is null || candidate.DisplayName.Contains(version, StringComparison.Ordinal))) is { } found)
                     return found;
             }
         }

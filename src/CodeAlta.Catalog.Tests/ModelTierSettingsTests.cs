@@ -274,6 +274,16 @@ public sealed class ModelTierSettingsTests
         Assert.AreEqual("anthropic:claude-opus-5-5@high", claude.Single(level => level.Level == AdaptiveLevel.Medium).Critics.Single().Format());
 
         Assert.AreEqual(0, AdaptiveProposals.Propose([new("other", "llama", false)]).Count);
+
+        // Claude Code's haiku may be another version than the one measured: its alias is proposed only for Haiku 5.5.
+        var olderHaiku = AdaptiveProposals.Propose(
+        [
+            new("codex", "gpt-6.1-sol", true, "GPT-6.1-Sol"),
+            new("claude-code", "sonnet", true, "Sonnet 5.5"),
+            new("claude-code", "haiku", true, "Haiku 4.5"),
+        ]);
+        Assert.AreEqual(0, olderHaiku.Single(level => level.Level == AdaptiveLevel.Low).Critics.Count);
+        Assert.AreEqual("claude-code:sonnet@high", olderHaiku.Single(level => level.Level == AdaptiveLevel.Medium).Critics.Single().Format());
     }
 
     private static AdaptiveLevelSettings Level(AdaptiveLevel level, string model, params string[] critics)

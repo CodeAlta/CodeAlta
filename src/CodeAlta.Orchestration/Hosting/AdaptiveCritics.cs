@@ -50,9 +50,10 @@ internal sealed class AdaptiveCritics : IAsyncDisposable
             ParentSessionId = request.SessionId,
             CreatedBy = new AltaActorProvenance
             {
-                // As the sessions of a script: the answer comes back here, never to the reviewed session.
+                // As the sessions of a script: the answer comes back here, never to the reviewed session. The host
+                // creates it, not the agent of the reviewed session: a session without sub-sessions is reviewed too, and
+                // what it narrows (its tools) is given above.
                 Kind = AltaActorProvenance.WorkflowKind,
-                SourceSessionId = request.SessionId,
                 SourceProjectId = reviewed.ProjectRef,
                 CorrelationId = "adaptive-review:" + request.SessionId,
                 PromptProvenance = AgentPromptProvenance.AdaptiveReview,

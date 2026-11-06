@@ -72,7 +72,7 @@ internal sealed partial class GlobalConfigService
             var key = state.ProviderId.Value;
             if (scope.SpaceId is not null && !scope.IsProviderAvailable(key)) continue;
             var subscription = state.Descriptor.ProviderType is "codex" or "codex-cli" or "claude-code";
-            candidates.AddRange(state.Models.Select(model => new AdaptiveProposals.Candidate(key, model.Id, subscription)));
+            candidates.AddRange(state.Models.Select(model => new AdaptiveProposals.Candidate(key, model.Id, subscription, model.DisplayName)));
         }
 
         var proposal = AdaptiveProposals.Propose(candidates);
@@ -307,18 +307,27 @@ internal sealed partial class GlobalConfigService
     private AdaptiveSetting? ToItem(AdaptiveModelSettings? adaptive)
         => adaptive is null ? null : new(AdaptiveLevels.NameOf(adaptive.DefaultLevel), [.. adaptive.Levels.Select(ToItem)]);
 
-    // A level with the names of its model when its provider is ready, as a tier gives the model it gives now.
+    // A level with the names of its model when its provider is ready, as a tier gives the model it gives now, and the
+    // names of its critics.
     private AdaptiveLevelSetting ToItem(AdaptiveLevelSettings level)
     {
-        var state = (ProviderStates?.Invoke() ?? []).FirstOrDefault(candidate => string.Equals(candidate.ProviderId.Value, level.Model.ProviderKey, StringComparison.OrdinalIgnoreCase));
-        var model = state?.Models.FirstOrDefault(candidate => string.Equals(candidate.Id, level.Model.ModelId, StringComparison.OrdinalIgnoreCase));
+        var states = ProviderStates?.Invoke() ?? [];
+        var state = StateOf(states, level.Model);
+        var model = ModelOf(state, level.Model);
         return new(AdaptiveLevels.NameOf(level.Level), ToItem(level.Model), [.. level.Critics.Select(ToItem)])
         {
             Choice = state is { Availability: ModelProviderAvailability.Ready } && (model is not null || state.Models.Count == 0)
                 ? new ModelTierChoiceItem(level.Model.ProviderKey, level.Model.ModelId, level.Model.PreferredReasoning?.ToString(),
                     state.Descriptor.DisplayName, model?.DisplayName ?? level.Model.ModelId)
                 : null,
+            CriticNames = [.. level.Critics.Select(critic => ModelOf(StateOf(states, critic), critic)?.DisplayName ?? critic.ModelId)],
         };
+
+        static ModelProviderStateSnapshot? StateOf(IReadOnlyList<ModelProviderStateSnapshot> states, ModelTierTarget target)
+            => states.FirstOrDefault(candidate => string.Equals(candidate.ProviderId.Value, target.ProviderKey, StringComparison.OrdinalIgnoreCase));
+
+        static AgentModelInfo? ModelOf(ModelProviderStateSnapshot? state, ModelTierTarget target)
+            => state?.Models.FirstOrDefault(candidate => string.Equals(candidate.Id, target.ModelId, StringComparison.OrdinalIgnoreCase));
     }
 
     private static ModelTierTargetItem ToItem(ModelTierTarget target)
@@ -353,6 +362,9 @@ internal sealed record AdaptiveLevelSetting(string Level, ModelTierTargetItem Mo
 {
     /// <summary>Gets the model of the turns with its names, when its provider is ready (or for a request: null).</summary>
     public ModelTierChoiceItem? Choice { get; init; }
+
+    /// <summary>Gets the names of the critics, in order, as their providers name them (or for a request: null).</summary>
+    public IReadOnlyList<string>? CriticNames { get; init; }
 }
 
 /// <summary>Asks for the tiers of models.</summary>
