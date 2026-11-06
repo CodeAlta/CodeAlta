@@ -127,6 +127,34 @@ public sealed class CodeModeScriptLibraryTests
     }
 
     [TestMethod]
+    public void TheEventThatStartedARun_ReachesAScriptAsAnObject_OrAsItsText()
+    {
+        using var root = TestTempDirectory.Create();
+        var (library, project) = Create(root.Path);
+        library.Save("onboard", CodeModeScriptScope.Project, """
+            export const meta = { name: "onboard", params: { event: { type: "object" } } };
+            return args.event;
+            """, project, null);
+        library.Save("triage", CodeModeScriptScope.Project, """
+            export const meta = { name: "triage", params: { event: { type: "string" } } };
+            return args.event;
+            """, project, null);
+
+        var started = "\n\n---\nThis automation was started by the Project trigger (project): Added.";
+        var asObject = CodeModeScriptRunPrompt.Build(library, "onboard", null, started, """{"on":"added","slug":"alpha"}""", project, null, out var problem);
+        Assert.IsNotNull(asObject, problem);
+        StringAssert.Contains(asObject, """workflow("onboard", {"event":{"on":"added","slug":"alpha"}})""");
+
+        // Without an object, or with what is not one, the script gets the text that follows the prompt.
+        var asText = CodeModeScriptRunPrompt.Build(library, "triage", null, started, "[1]", project, null, out problem);
+        Assert.IsNotNull(asText, problem);
+        StringAssert.Contains(asText, "\"event\":\"This automation was started by the Project trigger (project): Added.\"");
+        // Arguments that give the event themselves keep it.
+        StringAssert.Contains(CodeModeScriptRunPrompt.Build(library, "onboard", """{"event":{"slug":"fixed"}}""", started, """{"slug":"alpha"}""", project, null, out _),
+            "\"slug\":\"fixed\"");
+    }
+
+    [TestMethod]
     public async Task AltaScriptRun_FromATerminalWhoseCodeAltaEndsWithTheCommand_IsRefusedWithWhatToDoInstead()
     {
         using var root = TestTempDirectory.Create();

@@ -121,6 +121,9 @@ internal sealed record AutomationWatermark
 
     /// <summary>The last commit seen of each open pull request, by its number.</summary>
     public Dictionary<string, string> Heads { get; init; } = [];
+
+    /// <summary>For the trigger of a polled source, where its next reading starts, as the source wrote it; null before its first.</summary>
+    public string? Cursor { get; init; }
 }
 
 /// <summary>
@@ -157,7 +160,7 @@ internal static class AutomationReplayMemory
         return new AutomationWatermark
         {
             Since = now, Seen = seen, Heads = new Dictionary<string, string>(mark?.Heads ?? [], StringComparer.Ordinal), Floor = floor,
-            Newest = Math.Max(mark?.Newest ?? 0, signedAt ?? 0),
+            Newest = Math.Max(mark?.Newest ?? 0, signedAt ?? 0), Cursor = mark?.Cursor,
         };
     }
 }

@@ -116,6 +116,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(zone);
         (_globalConfigPath, _projects, _state, _runner, _time, _zone, _feed) = (globalConfigPath, projects, state, runner, time, zone, feed);
         _aliveBefore = state.AliveAt;
+        _sources.Signaled += OnSourceSignaled;
         // The sessions of the runs keep the guard of their automation as it is now, a try staying a try, after their run too.
         if (runner is AutomationRunner concrete)
         {
@@ -155,6 +156,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
                 _looked.Clear();
                 _tags.Clear();
                 _lookedAt = null;
+                _sourceLooked.Clear();
             }
 
             Wake();
@@ -568,16 +570,19 @@ internal sealed partial class AutomationService : IAsyncDisposable
     {
         Task[] pending;
         List<IAutomationCommand> commands;
+        List<CancellationTokenSource> sourceListeners;
         lock (_gate)
         {
             if (_closed) return;
             _closed = true;
             commands = EndCommands();
             StopListeners();
+            sourceListeners = EndSourceListeners();
             pending = [.. new[] { _loop, _scan, _look }.OfType<Task>(), .. _observers];
         }
 
         foreach (var command in commands) command.Kill();
+        foreach (var listener in sourceListeners) Cancel(listener);
         await _stop.CancelAsync().ConfigureAwait(false);
         try
         {
@@ -673,6 +678,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
             Trigger(entry, trigger.KindName, null, entry.Definition.Prompt, occurrence: Occurrence(trigger, due));
         if (LookAtCommands(now) is { } restart && (next is null || restart < next)) next = restart;
         ListenToSlack(now);
+        if (LookAtSources(now) is { } source && (next is null || source < next)) next = source;
         var wait = next is { } soonest ? soonest - now : LongestWait;
         return wait < TimeSpan.FromMilliseconds(250) ? TimeSpan.FromMilliseconds(250) : wait > LongestWait ? LongestWait : wait;
     }
@@ -695,8 +701,10 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// </param>
     /// <param name="occurrence">What is due, claimed before the run starts when the host claims (<see cref="Occurrence"/>); null for nothing to claim.</param>
     /// <param name="reply">Where the answer of the run is written back, the event's source; null for nowhere.</param>
+    /// <param name="eventJson">The event as a JSON object, the <c>event</c> argument of its script; null for the text of the prompt.</param>
     /// <returns>Whether a run was started.</returns>
-    internal bool Trigger(AutomationEntry entry, string trigger, string? detail, string prompt, bool waits = false, string? occurrence = null, AutomationReplyTarget? reply = null)
+    internal bool Trigger(AutomationEntry entry, string trigger, string? detail, string prompt, bool waits = false, string? occurrence = null, AutomationReplyTarget? reply = null,
+        string? eventJson = null)
     {
         bool busy;
         lock (_gate)
@@ -733,7 +741,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
             return false;
         }
 
-        var start = BeginAsync(entry, trigger, detail, prompt, _stop.Token, runId, occurrence, reply);
+        var start = BeginAsync(entry, trigger, detail, prompt, _stop.Token, runId, occurrence, reply, eventJson);
         lock (_gate)
         {
             _observers.RemoveAll(static task => task.IsCompleted);
@@ -745,7 +753,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
 
     // Records the run, starts its session and returns once the session exists; what follows is observed apart.
     private async Task<AutomationRun?> BeginAsync(AutomationEntry entry, string trigger, string? detail, string prompt, CancellationToken cancellationToken, string? runId = null,
-        string? occurrence = null, AutomationReplyTarget? reply = null)
+        string? occurrence = null, AutomationReplyTarget? reply = null, string? eventJson = null)
     {
         var run = new AutomationRun(runId ?? NewRunId(), entry.Id, _time.GetUtcNow(), trigger) { Name = entry.Definition.Name, ProjectId = entry.ProjectId, Detail = detail };
         lock (_gate)
@@ -777,7 +785,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         try
         {
             // A try is a dry run: the tools its autonomy allows are fakes.
-            start = await _runner.StartAsync(entry, run.Id, prompt, detail, trigger == TryTrigger, cancellationToken).ConfigureAwait(false);
+            start = await _runner.StartAsync(entry, run.Id, prompt, detail, trigger == TryTrigger, eventJson, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {

@@ -103,7 +103,7 @@ internal sealed partial class AutomationService
     /// </summary>
     internal string? WatchProblem(string id)
     {
-        lock (_gate) return _state.Paused ? null : _watchProblems.GetValueOrDefault(id) ?? CommandProblem(id) ?? _listenerProblems.GetValueOrDefault(id).Problem;
+        lock (_gate) return _state.Paused ? null : _watchProblems.GetValueOrDefault(id) ?? CommandProblem(id) ?? _listenerProblems.GetValueOrDefault(id).Problem ?? SourceWatchProblem(id);
     }
 
     /// <summary>

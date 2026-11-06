@@ -93,7 +93,7 @@ A plugin can give a trigger together with the code that handles it, so that "whe
 - [x] 1. Plan (this file); create the worktree branch `add/trigger-sources`.
 - [x] 2. Model and configuration of the `Source` kind: read, write, validate, `Key`, `FingerprintKey`; tests in `CodeAlta.Desktop.Tests` (`AutomationConfigTests`).
 - [x] 3. The public contract and its registration: `PluginAutomationTriggers.cs`, `PluginBase.GetAutomationTriggers()`, `PluginContributionRegistry`, the look-now signal; wiring in `DesktopApplication` and `NodeAutomations`; tests in `Plugins.Abstractions.Tests` and `Plugins.Tests`.
-- [ ] 4. Engine: polled sources with cursors, push listeners, claims, the prompt section, the JSON `event`; a missing source reported; tests with a fake source (`AutomationServiceTests`).
+- [x] 4. Engine: polled sources with cursors, push listeners, claims, the prompt section, the JSON `event`; a missing source reported; tests with a fake source (`AutomationServiceTests`).
 - [ ] 5. Project trigger, with the origin reported by the in-process add paths; tests.
 - [ ] 6. Automation trigger, with the self and chain-depth guards; tests.
 - [ ] 7. Scripts without a model or a session: the run in Code Mode without a session, the `alta` binding with the guards of an automation, `agent()` starting a session of the automation, the run's record; tests, including a fake plugin `alta` command that the script calls.

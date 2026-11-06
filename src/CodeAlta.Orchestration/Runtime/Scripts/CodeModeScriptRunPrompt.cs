@@ -39,6 +39,21 @@ public static partial class CodeModeScriptRunPrompt
     /// <exception cref="ArgumentNullException"><paramref name="library"/> or <paramref name="name"/> is null.</exception>
     public static string? Build(CodeModeScriptLibrary library, string name, string? argumentsJson, string? trigger, string? projectPath, SpaceFilter? spaces,
         out string? problem)
+        => Build(library, name, argumentsJson, trigger, null, projectPath, spaces, out problem);
+
+    /// <summary>Checks a script of a space and its arguments, and writes the prompt that runs it with what started it as a JSON object.</summary>
+    /// <param name="library">The library of the host.</param>
+    /// <param name="name">The name of the script.</param>
+    /// <param name="argumentsJson">Its arguments, a JSON object; null for none.</param>
+    /// <param name="trigger">What started the run, as text: its <c>event</c> argument when <paramref name="eventJson"/> is null.</param>
+    /// <param name="eventJson">What started the run as a JSON object, the <c>event</c> argument of a script that declares one; null for the text.</param>
+    /// <param name="projectPath">The folder of the project the session runs in, whose scripts come first; null for none.</param>
+    /// <param name="spaces">The space of the session that runs it; null for every script.</param>
+    /// <param name="problem">Why the script cannot run so.</param>
+    /// <returns>The prompt, or null when <paramref name="problem"/> is set.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="library"/> or <paramref name="name"/> is null.</exception>
+    public static string? Build(CodeModeScriptLibrary library, string name, string? argumentsJson, string? trigger, string? eventJson, string? projectPath, SpaceFilter? spaces,
+        out string? problem)
     {
         ArgumentNullException.ThrowIfNull(library);
         ArgumentNullException.ThrowIfNull(name);
@@ -70,7 +85,13 @@ public static partial class CodeModeScriptRunPrompt
 
         var started = trigger?.Trim() ?? string.Empty;
         if (started.StartsWith("---", StringComparison.Ordinal)) started = started[3..].Trim();
-        if (started.Length > 0 && !values.ContainsKey("event") && Declares(script.ParametersSchemaJson, "event")) values["event"] = started;
+        if (!values.ContainsKey("event") && Declares(script.ParametersSchemaJson, "event"))
+        {
+            // An event that is an object reaches the script as one; a text, as the text that follows the prompt.
+            if (EventObject(eventJson) is { } data) values["event"] = data;
+            else if (started.Length > 0) values["event"] = started;
+        }
+
         var json = values.ToJsonString();
         if (script.CheckArguments(json) is { } invalid)
         {
@@ -86,6 +107,19 @@ public static partial class CodeModeScriptRunPrompt
             return await workflow("{name}", {json});
             ```
             """;
+
+        static JsonObject? EventObject(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return null;
+            try
+            {
+                return JsonNode.Parse(json) as JsonObject;
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
 
         static bool Declares(string? schema, string parameter)
         {

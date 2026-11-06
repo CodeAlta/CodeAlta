@@ -209,6 +209,18 @@ internal interface IAutomationRunner
     /// <returns>The session and its completion, or why the run did not start.</returns>
     Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, bool dryRun, CancellationToken cancellationToken)
         => StartAsync(entry, runId, prompt, detail, cancellationToken);
+
+    /// <summary>Creates a session where the automation runs, with the event that started it as a JSON object for its script.</summary>
+    /// <param name="entry">The automation.</param>
+    /// <param name="runId">The identifier of the run.</param>
+    /// <param name="prompt">The text to send.</param>
+    /// <param name="detail">What the trigger was about.</param>
+    /// <param name="dryRun">Whether the run is a try.</param>
+    /// <param name="eventJson">The event as a JSON object, the <c>event</c> argument of a script that declares one; null for the text of the prompt.</param>
+    /// <param name="cancellationToken">Cancels the preparation of the run.</param>
+    /// <returns>The session and its completion, or why the run did not start.</returns>
+    Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, bool dryRun, string? eventJson, CancellationToken cancellationToken)
+        => StartAsync(entry, runId, prompt, detail, dryRun, cancellationToken);
 }
 
 /// <summary>
@@ -336,7 +348,11 @@ internal sealed class AutomationRunner : IAutomationRunner
         => StartAsync(entry, runId, prompt, detail, false, cancellationToken);
 
     /// <inheritdoc />
-    public async Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, bool dryRun, CancellationToken cancellationToken)
+    public Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, bool dryRun, CancellationToken cancellationToken)
+        => StartAsync(entry, runId, prompt, detail, dryRun, null, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, bool dryRun, string? eventJson, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
@@ -365,7 +381,7 @@ internal sealed class AutomationRunner : IAutomationRunner
             {
                 // What started the automation (an issue, the output of a command) is the `event` argument of a script that
                 // declares it. A script of yours or a sample runs only in a space that has it.
-                if (CodeModeScriptRunPrompt.Build(_host.CodeModeScripts, scriptName, definition.ScriptArguments, prompt, project?.ProjectPath, inSpace, out var problem) is not { } scriptPrompt)
+                if (CodeModeScriptRunPrompt.Build(_host.CodeModeScripts, scriptName, definition.ScriptArguments, prompt, eventJson, project?.ProjectPath, inSpace, out var problem) is not { } scriptPrompt)
                     return Refuse(problem!);
                 prompt = scriptPrompt;
             }

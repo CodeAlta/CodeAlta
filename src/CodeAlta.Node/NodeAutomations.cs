@@ -193,6 +193,8 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             // Jira, Slack and the hooks of its servers, with the secrets of this machine: the node watches them while nobody is at the keyboard.
             Integrations = _options.Integrations ?? AutomationIntegrationOptions.ForHost(catalog.GlobalRoot),
         };
+        // The triggers its plugins give, as they run now.
+        Engine.Sources.Plugins = () => host.PluginRuntime?.GetAutomationTriggers() ?? [];
         // The credential rules of a run hold at every attachment of its sessions and of those they start.
         host.RuntimeService.ProviderGate = CheckSessionProviderAsync;
         // So do the tools the policy turns off, which the runtime holds in memory only: also once the node started again.

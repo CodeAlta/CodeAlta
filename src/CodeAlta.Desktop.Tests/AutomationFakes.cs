@@ -69,8 +69,11 @@ internal sealed class FakeAutomationRunner : IAutomationRunner
     internal AutomationRunGuard? Guard { get; private set; }
 
     public Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, CancellationToken cancellationToken)
+        => StartAsync(entry, runId, prompt, detail, false, null, cancellationToken);
+
+    public Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, bool dryRun, string? eventJson, CancellationToken cancellationToken)
     {
-        var start = new FakeAutomationStart(entry, runId, prompt) { Detail = detail };
+        var start = new FakeAutomationStart(entry, runId, prompt) { Detail = detail, EventJson = eventJson };
         Starts.Add(start);
         _pending.Enqueue(start);
         _signal.Release();
@@ -98,6 +101,9 @@ internal sealed class FakeAutomationStart(AutomationEntry entry, string runId, s
     internal string Prompt => prompt;
 
     internal string? Detail { get; init; }
+
+    /// <summary>The event that started the run as a JSON object for its script; null for none.</summary>
+    internal string? EventJson { get; init; }
 
     internal Task<AutomationOutcome> Completion => _completion.Task;
 
