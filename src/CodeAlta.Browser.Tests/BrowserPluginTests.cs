@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Browser.Annotations;
 using CodeAlta.Browser.Discovery;
 using CodeAlta.Browser.Drivers;
 using CodeAlta.Plugin.Browser;
@@ -162,6 +163,8 @@ public sealed class BrowserPluginTests
         public event Action<IBrowserPage>? PageOpened { add { } remove { } }
 
         public Task<IBrowserPage> NewPageAsync(bool background, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<IBrowserPage>> FrontPagesAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<IBrowserPage>>([]);
 
         public ValueTask DisposeAsync()
         {
@@ -386,6 +389,395 @@ public sealed class BrowserPluginTests
         Assert.IsTrue(again.Success, again.Error);
     }
 
+
+    [TestMethod]
+    public async Task Annotations_OfAPageOfTheProject_GoWithTheNextPrompt()
+    {
+        if (BrowserTestHost.Find(BrowserEngine.Chromium) is not { } browser)
+        {
+            Assert.Inconclusive("No Chromium browser is installed.");
+            return;
+        }
+
+        using var folder = new TempFolder();
+        var project = Directory.CreateDirectory(System.IO.Path.Combine(folder.Path, "project")).FullName;
+        // The files the server of the project serves: the test site plays its dev server.
+        await File.WriteAllTextAsync(System.IO.Path.Combine(project, "site.css"), ".record-btn {\n  color: rgb(200, 0, 0);\n  padding: 4px;\n}\n");
+        await File.WriteAllTextAsync(System.IO.Path.Combine(project, "app.js"), "function addItem(text) {\n  const item = document.createElement('p');\n}\n");
+        Directory.CreateDirectory(System.IO.Path.Combine(project, "docs"));
+        await File.WriteAllTextAsync(System.IO.Path.Combine(project, "docs", "preview.html"),
+            "<!doctype html>\n<html><head><title>Preview</title></head>\n<body>\n  <h1>Mockup</h1>\n  <button id=\"save\" type=\"button\">Save the day</button>\n</body></html>\n");
+        await File.WriteAllTextAsync(System.IO.Path.Combine(project, ".env"), "SECRET=1");
+        await using var site = await TestSite.StartAsync();
+        await using var other = await TestSite.StartAsync();
+        var host = new BrowserPluginHost(System.IO.Path.Combine(folder.Path, "state"))
+        {
+            HasUser = true, StartTimeout = BrowserStart, PortOwners = new FakePortOwners(new() { [site.Port] = project, [other.Port] = folder.Path }),
+        };
+        host.WorkFolder = (_, _) => ValueTask.FromResult<string?>(project);
+        var window = new SentPrompts();
+        await using var plugin = await StartAsync(host, new BrowserSettings { Browser = browser.Id, Headless = true }, window);
+        window.Submit = async (sessionId, text) => (await plugin.OnPromptSubmittingAsync(new PluginPromptSubmittingContext
+        {
+            Plugin = PluginDescriptorFactory.FromType(typeof(BrowserPlugin)), Services = new Services(new MemoryState(), null), SessionId = sessionId, Text = text,
+        }))?.ReplacementText ?? text;
+
+        // A server of another folder is not a page of the project.
+        var foreign = await RunAsync(plugin, folder, "s1", ["browser", "open", other.Url("/styled")]);
+        Assert.IsFalse(foreign.Records[^1].GetProperty("toolbar").GetBoolean(), foreign.Records[^1].ToString());
+
+        var (exit, records) = await RunAsync(plugin, folder, "s1", ["browser", "open", site.Url("/styled"), "--annotate"]);
+        Assert.AreEqual(0, exit, records[^1].ToString());
+        Assert.IsTrue(records[^1].GetProperty("toolbar").GetBoolean());
+        Assert.IsTrue(records[^1].GetProperty("annotating").GetBoolean(), records[^1].ToString());
+        StringAssert.Contains(records[^1].GetProperty("from").GetString(), "process 4242");
+
+        var session = plugin.SessionOf("s1")!;
+        var tools = plugin.CreateTools(session);
+        Assert.IsTrue(tools.Any(static tool => tool.Spec.Name == "view_annotation"));
+        var snapshot = Text(await CallAsync(tools, "s1", "take_snapshot", "{}"));
+        var button = BrowserToolTesting.Uid(snapshot, "button \"Start recording\"");
+        Assert.IsTrue((await CallAsync(tools, "s1", "click", $$"""{"uid":"{{button}}"}""")).Success);
+        await Task.Delay(200);
+        Assert.IsTrue((await CallAsync(tools, "s1", "type_text", """{"text":"Make it bigger"}""")).Success);
+        Assert.IsTrue((await CallAsync(tools, "s1", "press_key", """{"key":"Control+Enter"}""")).Success);
+        var annotations = session.Annotations!;
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while ((annotations.Pending.Count == 0 || annotations.Pending[0].Sources.Count == 0) && DateTime.UtcNow < deadline) await Task.Delay(100);
+        Assert.AreEqual(1, annotations.Pending.Count);
+        var title = Text(await CallAsync(tools, "s1", "evaluate_script", """{"function":"() => document.title"}"""));
+        StringAssert.Contains(title, "Styled", "the click that chose the element never reached the page");
+
+        // The last button of the toolbar, at the bottom right of the page, switches the look of the toolbar, which CodeAlta
+        // keeps for every page; the page itself stays as it is.
+        const string IsDark = """{"function":"() => 'dark=' + matchMedia('(prefers-color-scheme: dark)').matches"}""";
+        var pageScheme = Text(await CallAsync(tools, "s1", "evaluate_script", IsDark));
+        var size = Text(await CallAsync(tools, "s1", "evaluate_script", """{"function":"() => [innerWidth, innerHeight]"}"""));
+        var numbers = size[(size.IndexOf('[') + 1)..size.IndexOf(']')].Split(',').Select(static text => double.Parse(text, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        var themeButton = $$"""{"x":{{numbers[0] - 34}},"y":{{numbers[1] - 30}}}""";
+        Assert.AreEqual("dark", plugin.Settings.ToolbarTheme);
+        foreach (var expected in new[] { "light", "dark" })
+        {
+            Assert.IsTrue((await CallAsync(tools, "s1", "click_at", themeButton)).Success);
+            for (var wait = DateTime.UtcNow.AddSeconds(10); plugin.Settings.ToolbarTheme != expected && DateTime.UtcNow < wait;) await Task.Delay(100);
+            Assert.AreEqual(expected, plugin.Settings.ToolbarTheme, "the toolbar keeps the look the user chose");
+        }
+
+        Assert.AreEqual(pageScheme, Text(await CallAsync(tools, "s1", "evaluate_script", IsDark)), "the page keeps its own color scheme");
+
+        // The handle of the bar, its brand, moves it out of the way; CodeAlta keeps the place for the next pages.
+        Assert.IsNull(plugin.Settings.ToolbarPosition);
+        var tab = (await session.SelectedPageAsync(CancellationToken.None))!;
+        var barLeft = await BarLeftAsync(tools, numbers[1] - 31);
+        Assert.IsTrue(barLeft > 0, "the bar is at the bottom right");
+        await tab.DragAsync(BrowserPoint.OfPage(tab.MainFrame, barLeft + 20, numbers[1] - 31), BrowserPoint.OfPage(tab.MainFrame, barLeft + 20 - 200, numbers[1] - 31 - 100), CancellationToken.None);
+        for (var wait = DateTime.UtcNow.AddSeconds(10); plugin.Settings.ToolbarPosition is null && DateTime.UtcNow < wait;) await Task.Delay(100);
+        Assert.IsNotNull(plugin.Settings.ToolbarPosition, "the place of the bar is kept");
+        Assert.AreEqual(16 + 200, plugin.Settings.ToolbarPosition.Right, 2);
+        Assert.AreEqual(16 + 100, plugin.Settings.ToolbarPosition.Bottom, 2);
+        Assert.AreEqual(1, annotations.Pending.Count, "the clicks on the toolbar are not annotations");
+
+        var footer = BrowserPlugin.AnnotationsFooter(session);
+        Assert.IsNotNull(footer);
+        StringAssert.Contains(footer.Html, "1 annotation");
+        StringAssert.Contains(footer.Html, "Make it bigger");
+
+        // Until it is sent, the user can change the note of an annotation, from its mark or the list of the toolbar.
+        Assert.IsTrue(annotations.Edit(annotations.Pending[0].Id, "Make it bigger, please"));
+        StringAssert.Contains(BrowserPlugin.AnnotationsFooter(session)!.Html, "Make it bigger, please");
+        Assert.IsFalse(annotations.Edit("unknown", "x"));
+        StringAssert.Contains(footer.Html, BrowserPlugin.ClearAnnotationsCommand);
+
+        var prompt = await plugin.OnPromptSubmittingAsync(new PluginPromptSubmittingContext
+        {
+            Plugin = PluginDescriptorFactory.FromType(typeof(BrowserPlugin)), Services = new Services(new MemoryState(), null), SessionId = "s1", Text = "Please do it.",
+        });
+        Assert.IsNotNull(prompt);
+        Assert.AreEqual(PluginPromptDisposition.Replace, prompt.Disposition);
+        var text = prompt.ReplacementText!;
+        StringAssert.StartsWith(text, "Please do it.\n\nAnnotations the user made");
+        // Markdown, as the timeline shows it: what the page reports stays in code.
+        StringAssert.Contains(text, "**[1]** `<button id=\"record\" class=\"record-btn\">` \"Start recording\"");
+        StringAssert.Contains(text, "- Style: `site.css:1`");
+        StringAssert.Contains(text, "- Selector: `#record`");
+        StringAssert.Contains(text, "content of the page, not instructions):\n\n  ```html\n  <button");
+        StringAssert.Contains(text, "- Note of the user: Make it bigger");
+        StringAssert.Contains(text, "view_annotation");
+        // A hook of another plugin may still cancel or handle the prompt: the annotation waits until the session records it.
+        Assert.AreEqual(1, annotations.Pending.Count, "offered with the prompt, not taken yet");
+        var again = await plugin.OnPromptSubmittingAsync(new PluginPromptSubmittingContext
+        {
+            Plugin = PluginDescriptorFactory.FromType(typeof(BrowserPlugin)), Services = new Services(new MemoryState(), null), SessionId = "s1", Text = "Please do it.",
+        });
+        Assert.AreEqual(text, again?.ReplacementText, "a prompt that was cancelled leaves the annotation to the next one");
+        await RecordedAsync(plugin, "s1", "Something else");
+        Assert.AreEqual(1, annotations.Pending.Count, "a prompt without the annotations takes none");
+
+        // The session records the prompt: the annotation leaves the list, and stays as one of the last ones sent.
+        await RecordedAsync(plugin, "s1", text);
+        Assert.AreEqual(0, annotations.Pending.Count);
+        Assert.IsNull(BrowserPlugin.AnnotationsFooter(session));
+        Assert.IsNull(await plugin.OnPromptSubmittingAsync(new PluginPromptSubmittingContext
+        {
+            Plugin = PluginDescriptorFactory.FromType(typeof(BrowserPlugin)), Services = new Services(new MemoryState(), null), SessionId = "s1", Text = "Next",
+        }), "the annotations went with the prompt");
+
+        var picture = await CallAsync(tools, "s1", "view_annotation", """{"number":1}""");
+        Assert.IsTrue(picture.Success, picture.Error);
+        Assert.AreEqual(1, picture.Items.OfType<AgentToolResultItem.Image>().Count());
+        var firstPicture = annotations.Find(1)!.Picture!;
+        Assert.IsTrue(File.Exists(firstPicture));
+
+        // A file of the project is served by CodeAlta, with the toolbar; a file of secrets and a file outside are not.
+        var file = await RunAsync(plugin, folder, "s1", ["browser", "open", "docs/preview.html"]);
+        Assert.IsTrue(file.Records[^1].GetProperty("toolbar").GetBoolean(), file.Records[^1].ToString());
+        var movedLeft = -1d;
+        for (var wait = DateTime.UtcNow.AddSeconds(10); movedLeft < 0 && DateTime.UtcNow < wait; await Task.Delay(100)) movedLeft = await BarLeftAsync(tools, numbers[1] - 131);
+        Assert.AreEqual(barLeft - 200, movedLeft, 3, "the next page shows the bar where the user put it");
+        Assert.AreEqual("docs/preview.html", file.Records[^1].GetProperty("file").GetString());
+        var served = new Uri(file.Records[^1].GetProperty("url").GetString()!);
+        using var http = new HttpClient();
+        StringAssert.Contains(await http.GetStringAsync(served), "Save the day");
+        Assert.AreEqual(System.Net.HttpStatusCode.NotFound, (await http.GetAsync(new Uri(served, "../.env"))).StatusCode);
+        Assert.AreEqual(System.Net.HttpStatusCode.NotFound, (await http.GetAsync(new Uri(served, "../../state/x"))).StatusCode);
+        Assert.AreEqual(System.Net.HttpStatusCode.MethodNotAllowed, (await http.PostAsync(served, new StringContent("x"))).StatusCode);
+
+        // The Send of the toolbar sends the annotations to the session of the browser, with what the user wrote there.
+        Assert.AreEqual("No annotation waits: mark elements of the page first.", await annotations.SendAsync("Fix it"));
+        var annotate = await RunAsync(plugin, folder, "s1", ["browser", "open", "docs/preview.html", "--annotate"]);
+        Assert.IsTrue(annotate.Records[^1].GetProperty("annotating").GetBoolean(), annotate.Records[^1].ToString());
+        var save = BrowserToolTesting.Uid(Text(await CallAsync(tools, "s1", "take_snapshot", "{}")), "button \"Save the day\"");
+        Assert.IsTrue((await CallAsync(tools, "s1", "click", $$"""{"uid":"{{save}}"}""")).Success);
+        await Task.Delay(200);
+        Assert.IsTrue((await CallAsync(tools, "s1", "type_text", """{"text":"Say it louder"}""")).Success);
+        Assert.IsTrue((await CallAsync(tools, "s1", "press_key", """{"key":"Control+Enter"}""")).Success);
+        for (var wait = DateTime.UtcNow.AddSeconds(20); annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(100);
+        Assert.AreEqual(1, annotations.Pending.Count);
+        Assert.AreEqual("The annotation was sent to the session.", await annotations.SendAsync("Fix it"));
+        Assert.IsTrue(window.Sent.TryDequeue(out var sent));
+        Assert.AreEqual("s1", sent.Session);
+        StringAssert.StartsWith(sent.Text, "Fix it\n\nAnnotations the user made");
+        StringAssert.Contains(sent.Text, "Save the day");
+        StringAssert.Contains(sent.Text, "- Note of the user: Say it louder");
+        await RecordedAsync(plugin, "s1", sent.Text);
+        Assert.AreEqual(0, annotations.Pending.Count);
+        // The annotation sent before is no longer one of the last ones sent: its picture is gone.
+        Assert.IsNull(annotations.Find(1));
+        Assert.IsFalse(File.Exists(firstPicture), "the picture of an annotation that nothing shows any more is deleted");
+        await File.WriteAllTextAsync(System.IO.Path.Combine(folder.Path, "outside.html"), "<p>outside</p>");
+        var outside = await RunAsync(plugin, folder, "s1", ["browser", "open", System.IO.Path.Combine(folder.Path, "outside.html")]);
+        Assert.AreNotEqual(0, outside.Exit);
+        Assert.AreEqual("browser.outsideProject", outside.Records[^1].GetProperty("code").GetString());
+    }
+
+    // The session recording a prompt of the user, as a turn or a prompt steered into one.
+    private static ValueTask RecordedAsync(BrowserPlugin plugin, string sessionId, string prompt) => plugin.OnAgentEventAsync(new PluginAgentEventContext
+    {
+        Plugin = PluginDescriptorFactory.FromType(typeof(BrowserPlugin)), Services = new Services(new MemoryState(), null), SessionId = sessionId,
+        Event = new AgentContentCompletedEvent(new ModelProviderId("test"), sessionId, DateTimeOffset.UtcNow, null, AgentContentKind.User, "user:" + Guid.NewGuid().ToString("N"), null, prompt),
+    });
+
+    // The left edge of the CodeAlta bar at a height, or -1: the bar is in a closed shadow root, so the page sees only its host element.
+    private static async Task<double> BarLeftAsync(IReadOnlyList<AgentToolDefinition> tools, double y)
+    {
+        var text = Text(await CallAsync(tools, "s1", "evaluate_script", $$"""{"function":"() => { for (let x = 0; x < innerWidth; x++) { const e = document.elementFromPoint(x, {{y.ToString(System.Globalization.CultureInfo.InvariantCulture)}}); if (e && e.hasAttribute('data-codealta-toolbar')) return 'left=' + x + ';'; } return 'left=-1;'; }"}"""));
+        var start = text.IndexOf("left=", StringComparison.Ordinal) + 5;
+        return double.Parse(text[start..text.IndexOf(';', start)], System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    [TestMethod]
+    public void AnnotationPrompt_OfSeveralElementsAndOfAnArea_ListsEachElementUnderOneNote()
+    {
+        var page = new Uri("http://localhost:5173/");
+        var project = new ProjectPage("/p", "a server of the project");
+        AnnotatedElement Card(string id) => new() { Tag = "div", Id = id, Classes = ["card"], Text = "Card " + id, Selector = "#" + id, Html = $"<div id=\"{id}\" class=\"card\">Card {id}</div>" };
+        var group = new SessionAnnotation(1, "a1", "The same spacing", page, [Card("c1"), Card("c2"), Card("c3")], new AnnotationArea(20, 30, 700, 200, false), project)
+        {
+            Sources = [[new SourceCandidate("src/Cards.tsx", 12, SourceKind.Text, "the text of the element written there", false)], [], []],
+        };
+        var area = new SessionAnnotation(2, "a2", "Less space\nhere", page, [Card("c1")], new AnnotationArea(10.4, 20, 300.6, 99.5, true), project);
+        var empty = new SessionAnnotation(3, "a3", "Too dark", page, [], new AnnotationArea(0, 0, 50, 50, true), project);
+
+        Assert.AreEqual("<div id=\"c1\" class=\"card\"> \"Card c1\" and 2 more elements", group.Label);
+        Assert.AreEqual("Area 301×100 · <div id=\"c1\" class=\"card\"> \"Card c1\"", area.Label);
+        Assert.AreEqual("Area 50×50", empty.Label);
+
+        var text = AnnotationPrompt.Format([group, area, empty]);
+        StringAssert.Contains(text, "**[1]** 3 elements, one note for all of them\n");
+        StringAssert.Contains(text, "- Element 1 of 3: `<div id=\"c1\" class=\"card\">` \"Card c1\"\n  - Selector: `#c1`\n  - Likely in: `src/Cards.tsx:12`");
+        StringAssert.Contains(text, "- Element 3 of 3: `<div id=\"c3\" class=\"card\">` \"Card c3\"\n  - Selector: `#c3`\n  - Source: not found");
+        StringAssert.Contains(text, "    ```html\n    <div id=\"c3\" class=\"card\">Card c3</div>\n    ```");
+        StringAssert.Contains(text, "- Note of the user: The same spacing\n");
+        StringAssert.Contains(text, "**[2]** An area of the page, with 1 element in it\n- Page: http://localhost:5173/ (a server of the project)\n- Area: 301×100 pixels at 10, 20 of the page\n");
+        StringAssert.Contains(text, "- Note of the user: Less space\n  here");
+        StringAssert.Contains(text, "**[3]** An area of the page\n");
+        Assert.AreEqual(3, text.Split("- Note of the user:").Length - 1, "one note for each annotation");
+    }
+
+    [TestMethod]
+    public async Task PortOwners_NeverNameCodeAltaItself()
+    {
+        // The test site runs in this process, as the file server and the MCP server of CodeAlta do.
+        await using var site = await TestSite.StartAsync();
+        Assert.IsNull(await new SystemPortOwners().FindAsync("127.0.0.1", site.Port, CancellationToken.None));
+        Assert.IsNull(await new SystemPortOwners().FindAsync("localhost", 0, CancellationToken.None));
+    }
+
+    private sealed class FakePortOwners(Dictionary<int, string> folders) : IPortOwners
+    {
+        public Task<PortOwner?> FindAsync(string host, int port, CancellationToken cancellationToken)
+            => Task.FromResult(folders.TryGetValue(port, out var folder) ? new PortOwner(4242, "node vite", folder) : null);
+
+        public Task<IReadOnlyList<ListeningPort>> ListAsync(CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<ListeningPort>>([.. folders.OrderBy(static pair => pair.Key).Select(static pair => new ListeningPort(pair.Key, new PortOwner(4242, "node vite --port " + pair.Key, pair.Value)))]);
+    }
+
+    [TestMethod]
+    public async Task TheUserOpensTheBrowserOfASession_BrowsesAnywhere_AndTheAgentSeesItsTabs()
+    {
+        if (BrowserTestHost.Find(BrowserEngine.Chromium) is not { } browser)
+        {
+            Assert.Inconclusive("No Chromium browser is installed.");
+            return;
+        }
+
+        using var folder = new TempFolder();
+        var project = Directory.CreateDirectory(System.IO.Path.Combine(folder.Path, "project")).FullName;
+        Directory.CreateDirectory(System.IO.Path.Combine(project, "docs"));
+        Directory.CreateDirectory(System.IO.Path.Combine(project, "node_modules", "lib"));
+        await File.WriteAllTextAsync(System.IO.Path.Combine(project, "docs", "preview.html"), "<!doctype html><title>Preview</title><button>Save</button>");
+        await File.WriteAllTextAsync(System.IO.Path.Combine(project, "node_modules", "lib", "readme.html"), "<p>dependency</p>");
+        await using var site = await TestSite.StartAsync();
+        await using var other = await TestSite.StartAsync();
+        var host = new BrowserPluginHost(System.IO.Path.Combine(folder.Path, "state"))
+        {
+            HasUser = true, StartTimeout = BrowserStart, UserBrowserHeadless = true, PortOwners = new FakePortOwners(new() { [site.Port] = project, [other.Port] = folder.Path }),
+        };
+        host.WorkFolder = (_, _) => ValueTask.FromResult<string?>(project);
+        await using var plugin = await StartAsync(host, new BrowserSettings { Browser = browser.Id, Headless = true });
+
+        // Before: nothing under the prompt; the menu of the session opens the browser.
+        Assert.IsNull(plugin.StatusOf("s1"), "a session that does not browse shows no Browser item");
+
+        // The user opens it: the browser of the session, with its tools, on a start page; no agent runs.
+        Assert.IsNull(await plugin.OpenForUserAsync("s1", project, CancellationToken.None));
+        var session = plugin.SessionOf("s1")!;
+        Assert.IsTrue(session.OpenedByUser);
+        var start = session.Tabs.Single();
+        Assert.IsTrue(start.Selected);
+        Assert.AreEqual(BrowserPlugin.OpenCommand, plugin.StatusOf("s1")!.Command, "the item brings the browser to the front");
+        using var http = new HttpClient();
+        var startPage = await http.GetStringAsync(new Uri(start.Url));
+        StringAssert.Contains(startPage, $"http://localhost:{site.Port}/", "the server of the project");
+        Assert.IsFalse(startPage.Contains($"localhost:{other.Port}", StringComparison.Ordinal), "a server of another folder is not listed");
+        StringAssert.Contains(startPage, "docs/preview.html");
+        Assert.IsFalse(startPage.Contains("readme.html", StringComparison.Ordinal), "the files of dependencies are not listed");
+
+        // Opened again, it shows the tab it has.
+        Assert.IsNull(await plugin.OpenForUserAsync("s1", project, CancellationToken.None));
+        Assert.AreEqual(1, session.Tabs.Count);
+
+        // The user browses to a page that is not of the project: it has the toolbar too, without a search of its source.
+        var tools = plugin.CreateTools(session);
+        // The field of the start page takes a host and its port as an address, and keeps the scheme of an address that has one.
+        const string Typed = """{"function":"() => ['localhost:5173', 'example.com:8080/path?x=1', '127.0.0.1:3000', '[::1]:8080', 'localhost', 'example.com', 'http://example.com:81', 'https://localhost:5173/', 'about:blank', 'mailto:a@example.com'].map(normalizeAddress).join('|')"}""";
+        StringAssert.Contains(Text(await CallAsync(tools, "s1", "evaluate_script", Typed)),
+            "http://localhost:5173|https://example.com:8080/path?x=1|http://127.0.0.1:3000|http://[::1]:8080|http://localhost|https://example.com|http://example.com:81|https://localhost:5173/|about:blank|mailto:a@example.com");
+        Assert.IsTrue((await CallAsync(tools, "s1", "navigate_page", $$"""{"type":"url","url":"{{other.Url("/styled")}}"}""")).Success);
+        var tab = (await session.SelectedPageAsync(CancellationToken.None))!;
+        Assert.IsTrue(await session.Annotations!.AnnotateAsync(tab, TimeSpan.FromSeconds(10), CancellationToken.None), "the toolbar of a page that is not of the project");
+        var button = BrowserToolTesting.Uid(Text(await CallAsync(tools, "s1", "take_snapshot", "{}")), "button \"Start recording\"");
+        Assert.IsTrue((await CallAsync(tools, "s1", "click", $$"""{"uid":"{{button}}"}""")).Success);
+        await Task.Delay(200);
+        Assert.IsTrue((await CallAsync(tools, "s1", "type_text", """{"text":"Like this, but blue"}""")).Success);
+        Assert.IsTrue((await CallAsync(tools, "s1", "press_key", """{"key":"Control+Enter"}""")).Success);
+        for (var wait = DateTime.UtcNow.AddSeconds(20); session.Annotations.Pending.Count == 0 && DateTime.UtcNow < wait;) await Task.Delay(100);
+        var annotation = session.Annotations.Pending.Single();
+        Assert.IsNull(annotation.Project);
+        await annotation.Ready;
+        Assert.AreEqual(0, annotation.Sources.Count, "no source is looked for");
+
+        // The agent is told of the tabs; "this page" is the selected one.
+        var told = BrowserPlugin.TabsMessage(session).Single().Content;
+        StringAssert.Contains(told, "(selected, in front): Styled — " + other.Url("/styled"));
+        Assert.AreEqual(0, BrowserPlugin.TabsMessage(session).Count, "a run is told of the tabs only when they changed");
+        var prompt = (await session.Annotations.OfferPromptAsync(CancellationToken.None))!;
+        StringAssert.Contains(prompt, "(not a page of the project, so its source was not looked for)");
+        // A page that is not of the project is asked about, not changed.
+        StringAssert.Contains(prompt, "These pages are not pages of the project:");
+        Assert.IsFalse(prompt.Contains("Change the code of the project so that each note is done", StringComparison.Ordinal));
+        Assert.IsFalse(prompt.Contains("Source: not found", StringComparison.Ordinal));
+
+        // An agent that turns its tools on takes the browser the user opened, and it stays open while idle.
+        var (exit, records) = await RunAsync(plugin, folder, "s1", ["browser", "activate"]);
+        Assert.AreEqual(0, exit, records[^1].ToString());
+        Assert.IsTrue(records[^1].GetProperty("openedByUser").GetBoolean());
+        Assert.AreSame(session, plugin.SessionOf("s1"));
+        Assert.IsFalse(await session.CloseIfIdleAsync(TimeSpan.Zero));
+        Assert.IsTrue(session.IsOpen);
+
+        // The menu of the session closes its tabs; the start page answers no more once the browser is given back.
+        Assert.IsTrue(await plugin.DeactivateAsync("s1"));
+        Assert.AreEqual(System.Net.HttpStatusCode.NotFound, (await http.GetAsync(new Uri(start.Url))).StatusCode);
+    }
+
+    [TestMethod]
+    public async Task TheUserBringsATabToTheFrontByHand_ThisPageIsThatTab()
+    {
+        if (BrowserTestHost.Find(BrowserEngine.Chromium) is not { } browser)
+        {
+            Assert.Inconclusive("No Chromium browser is installed.");
+            return;
+        }
+
+        using var folder = new TempFolder();
+        var project = Directory.CreateDirectory(System.IO.Path.Combine(folder.Path, "project")).FullName;
+        await using var site = await TestSite.StartAsync();
+        var host = new BrowserPluginHost(System.IO.Path.Combine(folder.Path, "state"))
+        {
+            HasUser = true, StartTimeout = BrowserStart, UserBrowserHeadless = true, PortOwners = new FakePortOwners([]),
+        };
+        host.WorkFolder = (_, _) => ValueTask.FromResult<string?>(project);
+        await using var plugin = await StartAsync(host, new BrowserSettings { Browser = browser.Id, Headless = true });
+        Assert.IsNull(await plugin.OpenForUserAsync("s1", project, CancellationToken.None));
+        var session = plugin.SessionOf("s1")!;
+        var tools = plugin.CreateTools(session);
+        Assert.IsTrue((await CallAsync(tools, "s1", "navigate_page", $$"""{"type":"url","url":"{{site.Url("/form")}}"}""")).Success);
+        var first = (await session.SelectedPageAsync(CancellationToken.None))!;
+        Assert.IsTrue((await CallAsync(tools, "s1", "new_page", $$"""{"url":"{{site.Url("/second")}}"}""")).Success);
+        StringAssert.Contains(await ToldAsync(plugin), "page 2 (selected, in front): Second page");
+
+        // The user clicks the first tab: no tool selects it, the browser brings it to the front.
+        await first.BringToFrontAsync(CancellationToken.None);
+        var told = await ToldAsync(plugin);
+        StringAssert.Contains(told, "page 1 (selected, in front): Sign in · Demo");
+        StringAssert.Contains(told, "page 2: Second page");
+
+        // A tool that names no page acts on that tab, and says the selection moved.
+        var snapshot = Text(await CallAsync(tools, "s1", "take_snapshot", "{}"));
+        StringAssert.Contains(snapshot, "another tab came to the front of the browser. Page 1 is now selected.");
+        StringAssert.Contains(snapshot, "Sign in");
+
+        // A tab the agent selects stays selected until another tab comes to the front; the run is told both.
+        Assert.IsTrue((await CallAsync(tools, "s1", "select_page", """{"pageId":2}""")).Success);
+        told = await ToldAsync(plugin);
+        StringAssert.Contains(told, "page 1 (in front): Sign in · Demo");
+        StringAssert.Contains(told, "page 2 (selected): Second page");
+    }
+
+    // What a run of the session s1 is told of its tabs.
+    private static async Task<string> ToldAsync(BrowserPlugin plugin)
+    {
+        var context = new PluginBeforeAgentRunContext
+        {
+            Plugin = PluginDescriptorFactory.FromType(typeof(BrowserPlugin)),
+            Services = new Services(new MemoryState(), null),
+            SessionId = "s1",
+        };
+        var result = await plugin.OnBeforeAgentRunAsync(context, CancellationToken.None);
+        return result?.AdditionalMessages is { Count: > 0 } messages ? messages.Single().Content : "(nothing told)";
+    }
+
     // -------------------------------------------------------------------------------------------------------------
 
     // A browser that starts cold on a busy CI machine can take more than the 30 seconds a desktop gives it.
@@ -405,11 +797,11 @@ public sealed class BrowserPluginTests
             }, host.StateRoot);
     }
 
-    private static async Task<BrowserPlugin> StartAsync(BrowserPluginHost host, BrowserSettings settings)
+    private static async Task<BrowserPlugin> StartAsync(BrowserPluginHost host, BrowserSettings settings, IPluginSessionService? sessions = null)
     {
         var state = new MemoryState();
         await state.WriteJsonAsync(PluginStateScope.User, "settings.json", settings);
-        var services = new Services(state);
+        var services = new Services(state, sessions);
         var plugin = new BrowserPlugin(host);
         plugin.AttachRuntimeContext(new PluginRuntimeContext
         {
@@ -430,7 +822,7 @@ public sealed class BrowserPluginTests
         var context = new PluginAltaCommandContext
         {
             Plugin = PluginDescriptorFactory.FromType(typeof(BrowserPlugin)),
-            Services = new Services(new MemoryState()),
+            Services = new Services(new MemoryState(), null),
             CorrelationId = "test",
             WorkingDirectory = folder.Path,
             SourceSessionId = sessionId,
@@ -494,8 +886,34 @@ public sealed class BrowserPluginTests
         }
     }
 
+    /// <summary>The window of a host as far as a plugin sends prompts to its sessions: it runs the prompt hook of the plugin, as its Send does.</summary>
+    private sealed class SentPrompts : IPluginSessionService
+    {
+        public ConcurrentQueue<(string Session, string Text)> Sent { get; } = new();
+
+        public Func<string, string, Task<string>>? Submit { get; set; }
+
+        public string? SelectedSessionId => null;
+
+        public bool IsSelectedSessionBusy => false;
+
+        public ValueTask SendPromptAsync(string text, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+
+        public ValueTask EnqueuePromptAsync(string text, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+
+        public ValueTask<bool> TrySteerAsync(string text, CancellationToken cancellationToken = default) => ValueTask.FromResult(false);
+
+        public ValueTask<bool> RequestCompactionAsync(CancellationToken cancellationToken = default) => ValueTask.FromResult(false);
+
+        public async ValueTask<bool> SendPromptToSessionAsync(string sessionId, string text, CancellationToken cancellationToken = default)
+        {
+            Sent.Enqueue((sessionId, Submit is null ? text : await Submit(sessionId, text)));
+            return true;
+        }
+    }
+
     /// <summary>The services of a host, with the state in memory.</summary>
-    private sealed class Services(MemoryState state) : IPluginServices
+    private sealed class Services(MemoryState state, IPluginSessionService? sessions) : IPluginServices
     {
         private readonly NoopPluginServices _inner = NoopPluginServices.Create();
 
@@ -507,7 +925,7 @@ public sealed class BrowserPluginTests
 
         public IPluginWorkspaceService Workspace => _inner.Workspace;
 
-        public IPluginSessionService Sessions => _inner.Sessions;
+        public IPluginSessionService Sessions => sessions ?? _inner.Sessions;
 
         public IPluginPromptService Prompts => _inner.Prompts;
 

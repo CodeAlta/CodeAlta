@@ -296,6 +296,66 @@ internal sealed record DOMGetFrameOwnerResult
     public int? NodeId { get; init; }
 }
 
+/// <summary>The parameters of <c>DOM.getDocument</c>.</summary>
+internal sealed record DOMGetDocumentParams
+{
+    /// <summary>The maximum depth at which children should be retrieved, defaults to 1. Use -1 for the entire subtree or provide an integer larger than 0.</summary>
+    [JsonPropertyName("depth")]
+    public int? Depth { get; init; }
+
+    /// <summary>Whether or not iframes and shadow roots should be traversed when returning the subtree (default is false).</summary>
+    [JsonPropertyName("pierce")]
+    public bool? Pierce { get; init; }
+}
+
+/// <summary>The result of <c>DOM.getDocument</c>.</summary>
+internal sealed record DOMGetDocumentResult
+{
+    /// <summary>Resulting node.</summary>
+    [JsonPropertyName("root")]
+    public DOMNode Root { get; init; } = null!;
+}
+
+/// <summary>The parameters of <c>DOM.requestNode</c>.</summary>
+internal sealed record DOMRequestNodeParams
+{
+    /// <summary>JavaScript object id to convert into node.</summary>
+    [JsonPropertyName("objectId")]
+    public string ObjectId { get; init; } = "";
+}
+
+/// <summary>The result of <c>DOM.requestNode</c>.</summary>
+internal sealed record DOMRequestNodeResult
+{
+    /// <summary>Node id for given object.</summary>
+    [JsonPropertyName("nodeId")]
+    public int NodeId { get; init; }
+}
+
+/// <summary>The parameters of <c>DOM.setNodeStackTracesEnabled</c>.</summary>
+internal sealed record DOMSetNodeStackTracesEnabledParams
+{
+    /// <summary>Enable or disable.</summary>
+    [JsonPropertyName("enable")]
+    public bool Enable { get; init; }
+}
+
+/// <summary>The parameters of <c>DOM.getNodeStackTraces</c>.</summary>
+internal sealed record DOMGetNodeStackTracesParams
+{
+    /// <summary>Id of the node to get stack traces for.</summary>
+    [JsonPropertyName("nodeId")]
+    public int NodeId { get; init; }
+}
+
+/// <summary>The result of <c>DOM.getNodeStackTraces</c>.</summary>
+internal sealed record DOMGetNodeStackTracesResult
+{
+    /// <summary>Creation stack trace, if available.</summary>
+    [JsonPropertyName("creation")]
+    public RuntimeStackTrace? Creation { get; init; }
+}
+
 /// <summary>The commands and events of the <c>DOM</c> domain on a session.</summary>
 internal readonly struct CdpDOMDomain(CdpSession session)
 {
@@ -318,4 +378,20 @@ internal readonly struct CdpDOMDomain(CdpSession session)
     /// <summary>Returns iframe node that owns iframe with the given domain.</summary>
     public Task<DOMGetFrameOwnerResult> GetFrameOwnerAsync(DOMGetFrameOwnerParams parameters, CancellationToken cancellationToken = default)
         => session.SendAsync("DOM.getFrameOwner", parameters ?? new(), CdpJsonContext.Default.DOMGetFrameOwnerParams, CdpJsonContext.Default.DOMGetFrameOwnerResult, cancellationToken);
+
+    /// <summary>Returns the root DOM node (and optionally the subtree) to the caller. Implicitly enables the DOM domain events for the current target.</summary>
+    public Task<DOMGetDocumentResult> GetDocumentAsync(DOMGetDocumentParams? parameters = null, CancellationToken cancellationToken = default)
+        => session.SendAsync("DOM.getDocument", parameters ?? new(), CdpJsonContext.Default.DOMGetDocumentParams, CdpJsonContext.Default.DOMGetDocumentResult, cancellationToken);
+
+    /// <summary>Requests that the node is sent to the caller given the JavaScript node object reference. All nodes that form the path from the node to the root are also sent to the client as a series of `setChildNodes` notifications.</summary>
+    public Task<DOMRequestNodeResult> RequestNodeAsync(DOMRequestNodeParams parameters, CancellationToken cancellationToken = default)
+        => session.SendAsync("DOM.requestNode", parameters ?? new(), CdpJsonContext.Default.DOMRequestNodeParams, CdpJsonContext.Default.DOMRequestNodeResult, cancellationToken);
+
+    /// <summary>Sets if stack traces should be captured for Nodes. See `Node.getNodeStackTraces`. Default is disabled.</summary>
+    public Task SetNodeStackTracesEnabledAsync(DOMSetNodeStackTracesEnabledParams parameters, CancellationToken cancellationToken = default)
+        => session.SendAsync("DOM.setNodeStackTracesEnabled", parameters ?? new(), CdpJsonContext.Default.DOMSetNodeStackTracesEnabledParams, cancellationToken);
+
+    /// <summary>Gets stack traces associated with a Node. As of now, only provides stack trace for Node creation.</summary>
+    public Task<DOMGetNodeStackTracesResult> GetNodeStackTracesAsync(DOMGetNodeStackTracesParams parameters, CancellationToken cancellationToken = default)
+        => session.SendAsync("DOM.getNodeStackTraces", parameters ?? new(), CdpJsonContext.Default.DOMGetNodeStackTracesParams, CdpJsonContext.Default.DOMGetNodeStackTracesResult, cancellationToken);
 }

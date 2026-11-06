@@ -218,6 +218,9 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
     }
 
     /// <inheritdoc />
+    public void InvalidateContent() => Refresh();
+
+    /// <inheritdoc />
     public void InvalidateButtons()
     {
         // A page that is not there reads the buttons when it arrives.
@@ -366,22 +369,31 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
     public ValueTask<bool> RequestCompactionAsync(CancellationToken cancellationToken = default)
         => PromptAsync("compact", null, cancellationToken);
 
+    /// <inheritdoc />
+    public ValueTask<bool> SendPromptToSessionAsync(string sessionId, string text, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return PromptAsync("send", text, sessionId, null, cancellationToken);
+    }
+
     /// <summary>
     /// Asks the page to send, queue or steer a prompt, or to compact, in the session of the operation's pane
     /// (the focused one when the operation has no pane). The page uses its own Send, so the prompt is
     /// shown, recorded and refused exactly like one the user typed.
     /// </summary>
-    internal async ValueTask<bool> PromptAsync(string mode, string? text, CancellationToken cancellationToken)
+    internal ValueTask<bool> PromptAsync(string mode, string? text, CancellationToken cancellationToken)
+        => PromptAsync(mode, text, _scope.Value?.SessionId, _scope.Value?.ProjectId, cancellationToken);
+
+    private async ValueTask<bool> PromptAsync(string mode, string? text, string? sessionId, string? projectId, CancellationToken cancellationToken)
     {
         if (mode != "compact") ArgumentException.ThrowIfNullOrWhiteSpace(text);
-        var scope = _scope.Value;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(PromptTimeout);
         try
         {
             var answer = await AskAsync(new PluginUiEvent("prompt")
             {
-                Mode = mode, Text = text is null ? null : Cut(text, MaximumTextUnits), SessionId = scope?.SessionId, ProjectId = scope?.ProjectId,
+                Mode = mode, Text = text is null ? null : Cut(text, MaximumTextUnits), SessionId = sessionId, ProjectId = projectId,
             }, null, timeout.Token).ConfigureAwait(false);
             return answer is { Cancelled: false };
         }
@@ -572,6 +584,8 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         public void InvalidateButtons() => owner.InvalidateButtons();
 
         public void InvalidateLandingCards() => owner.InvalidateLandingCards();
+
+        public void InvalidateContent() => owner.Refresh();
     }
 
     private sealed class Registration(DesktopPluginUi owner, Action<PluginUiEvent> watcher) : IDisposable

@@ -223,6 +223,12 @@ internal interface IBrowserContext : IAsyncDisposable
 
     /// <summary>Opens a tab on <c>about:blank</c>.</summary>
     Task<IBrowserPage> NewPageAsync(bool background, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The tabs of the session that are the active tab of their window now, the one the user sees there, whoever brought
+    /// it to the front; empty when the browser does not tell.
+    /// </summary>
+    Task<IReadOnlyList<IBrowserPage>> FrontPagesAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>

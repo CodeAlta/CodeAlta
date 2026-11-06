@@ -158,7 +158,7 @@ yield return Command.Shell("note-add", "Adds a note.", AddAsync) with
 - The name is what the user types after `/`: letters, digits, `.`, `_`, `-`.
 - A command takes no argument: ask with `context.Ui`.
 - Return `PluginCommandResult.Handled`, `Cancelled`, or `Message("...")` to show a notification. `PluginCommandResult.Handled with { PromptText = "..." }` sends a prompt to the session; add `EnqueuePrompt = true` to queue it.
-- `context.ProjectPath` and `context.SessionId` are the project and the session the command was started from. `context.Prompts.DraftText` and `SetDraftTextAsync` read and replace the prompt being written. `context.Sessions.SendPromptAsync`, `EnqueuePromptAsync` and `TrySteerAsync` talk to the session.
+- `context.ProjectPath` and `context.SessionId` are the project and the session the command was started from. `context.Prompts.DraftText` and `SetDraftTextAsync` read and replace the prompt being written. `context.Sessions.SendPromptAsync`, `EnqueuePromptAsync` and `TrySteerAsync` talk to the session; `SendPromptToSessionAsync(sessionId, text)` sends to a session named by its id, from work that runs outside a command, as its Send in the window does (CodeAlta Desktop, for a session open there).
 - A key binding is one stroke, or `Ctrl+G` then a second stroke: `new PluginKeyBinding(new PluginKeyGesture('g', PluginKeyModifiers.Ctrl), new PluginKeyGesture('n'))`. A key CodeAlta uses keeps its meaning. On the desktop a single letter needs `Ctrl` or `Alt`.
 
 ## Dialogs
@@ -332,7 +332,7 @@ public override IEnumerable<PluginUiContribution> GetUiContributions()
 ```
 
 - A status item is in the status line under the prompt. `Command` names a command of the plugin that a click runs (Desktop). Tones: `Info`, `Success`, `Warning`, `Error`, `Muted`.
-- Content: `SessionFooter` is above the prompt, `CommandBar` and `SessionStatus` are in the status line. A `PluginRenderResult` is shown in its richest form: `Html` (Desktop), then `Markdown`, then `Text`. `FromHtml(html, text)` gives both. Return null to show nothing.
+- Content: `SessionFooter` is above the prompt, `CommandBar` and `SessionStatus` are in the status line. A `PluginRenderResult` is shown in its richest form: `Html` (Desktop), then `Markdown`, then `Text`. `FromHtml(html, text)` gives both. Return null to show nothing. The desktop reads content every few seconds and when a command of the plugin ends; call `Services.Ui.InvalidateContent()` after a change the plugin learned of by itself, so it is read at once.
 - For a terminal control instead of text: `PluginTui.Visual(region, _ => new Markup("[dim]3 notes[/]"), _ => PluginRenderResult.FromHtml(...), "name")`.
 - These callbacks run every few seconds and after each command of the plugin: read a field, never a file or the network.
 - A callback gets the project it is shown for in `context.ProjectPath` (null without a project). What takes time to compute (a git branch) is computed by background work and kept in a field. Background work has no selected project: a project plugin has its project in `Context.ScopeProjectPath`.

@@ -280,6 +280,16 @@ public interface IPluginUiService
     void InvalidateLandingCards()
     {
     }
+
+    /// <summary>
+    /// Tells the host that what the plugin shows around the prompt (<see cref="PluginContentContribution"/>) and in the
+    /// status line may have changed, so it asks for it again now rather than at its next periodic read. A command of the
+    /// plugin that ends does it already.
+    /// </summary>
+    /// <remarks>A host that reads that content on every draw ignores it. It is cheap and may be called often.</remarks>
+    void InvalidateContent()
+    {
+    }
 }
 
 /// <summary>
@@ -381,6 +391,18 @@ public interface IPluginSessionService
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns><see langword="true"/> when compaction was requested.</returns>
     ValueTask<bool> RequestCompactionAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends a prompt to a session named by its id, whichever session the window shows, as the Send of that session does:
+    /// the prompt is shown, recorded, refused and processed by plugins exactly like one the user typed there. A window
+    /// takes it only for a session it has open; a host without such a window takes none.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="text">The prompt text.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns><see langword="true"/> when the session took the prompt.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> or <paramref name="text"/> is empty.</exception>
+    ValueTask<bool> SendPromptToSessionAsync(string sessionId, string text, CancellationToken cancellationToken = default) => ValueTask.FromResult(false);
 }
 
 /// <summary>

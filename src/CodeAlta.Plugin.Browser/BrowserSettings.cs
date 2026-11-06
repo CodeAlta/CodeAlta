@@ -34,18 +34,45 @@ internal sealed record BrowserSettings
     [JsonPropertyName("userProfile")]
     public BrowserUserProfileSettings UserProfile { get; init; } = new();
 
+    /// <summary>Gets the look of the CodeAlta toolbar in the pages of a project: <c>dark</c> or <c>light</c>, which its button switches.</summary>
+    [JsonPropertyName("toolbarTheme")]
+    public string ToolbarTheme { get; init; } = "dark";
+
+    /// <summary>Gets where the user moved the CodeAlta toolbar of the pages, or null for its place at the bottom right.</summary>
+    [JsonPropertyName("toolbarPosition")]
+    public BrowserToolbarPosition? ToolbarPosition { get; init; }
+
     /// <summary>The settings with every value valid: what is not falls back to its default.</summary>
     public BrowserSettings Normalized() => this with
     {
         Browser = string.IsNullOrWhiteSpace(Browser) ? "auto" : Browser.Trim(),
         Engine = Engine is "chromium" or "firefox" ? Engine : null,
         Profile = BrowserProfileSpec.TryParse(Profile, out var profile) ? profile.ToString() : "isolated",
+        ToolbarTheme = ToolbarTheme is "light" ? "light" : "dark",
+        ToolbarPosition = ToolbarPosition is { } position && double.IsFinite(position.Right) && double.IsFinite(position.Bottom)
+            ? new BrowserToolbarPosition { Right = Math.Clamp(position.Right, 0, 100_000), Bottom = Math.Clamp(position.Bottom, 0, 100_000) }
+            : null,
         UserProfile = (UserProfile ?? new()) with
         {
             AllowedSites = BrowserSites.NormalizeAll(UserProfile?.AllowedSites),
             BlockedSites = BrowserSites.NormalizeAll(UserProfile?.BlockedSites),
         },
     };
+}
+
+/// <summary>
+/// Where the user moved the CodeAlta toolbar of the pages: its distance from the right and the bottom of the viewport, in
+/// CSS pixels, which keeps it in the same corner of any window.
+/// </summary>
+internal sealed record BrowserToolbarPosition
+{
+    /// <summary>Gets the distance of the toolbar from the right of the viewport.</summary>
+    [JsonPropertyName("right")]
+    public double Right { get; init; }
+
+    /// <summary>Gets the distance of the toolbar from the bottom of the viewport.</summary>
+    [JsonPropertyName("bottom")]
+    public double Bottom { get; init; }
 }
 
 /// <summary>The settings of the user's own browser.</summary>

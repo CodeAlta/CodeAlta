@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using CodeAlta.Browser.Cdp;
 using CodeAlta.Browser.Discovery;
 using CodeAlta.Browser.Launch;
@@ -289,6 +290,124 @@ internal sealed class CdpBrowserContext : IBrowserContext
         finally
         {
             _attaching.TryRemove(targetId, out _);
+        }
+    }
+
+    // The page target each tab target of the browser shows, learned once per tab: a tab and its page are two targets
+    // that no target info links.
+    private readonly ConcurrentDictionary<string, string> _tabPages = new(StringComparer.Ordinal);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<IBrowserPage>> FrontPagesAsync(CancellationToken cancellationToken)
+    {
+        var pages = Pages;
+        if (pages.Count == 0 || IsClosed) return [];
+        try
+        {
+            // Only the tab targets say which tab is the active one of its window, and no event tells when that changes:
+            // the tabs are read when it is needed. The focus emulation of the tabs makes each page believe it is the
+            // visible one, so the pages cannot tell.
+            var tabs = await Connection.Browser.Target.GetTargetsAsync(new TargetGetTargetsParams { Filter = [new TargetFilterEntry { Type = "tab" }] }, cancellationToken).ConfigureAwait(false);
+            foreach (var gone in _tabPages.Keys.Except(tabs.TargetInfos.Select(static tab => tab.TargetId), StringComparer.Ordinal)) _tabPages.TryRemove(gone, out _);
+            HashSet<int>? windows = null;
+            List<IBrowserPage> front = [];
+            foreach (var tab in tabs.TargetInfos)
+            {
+                if (!(tab.EmbedderData is { ValueKind: JsonValueKind.Object } data && data.TryGetProperty("tabActive", out var active) && active.ValueKind == JsonValueKind.True)) continue;
+                if (!_tabPages.TryGetValue(tab.TargetId, out var pageId))
+                {
+                    var mayBeOurs = _contextId is not null
+                        ? tab.BrowserContextId == _contextId
+                        : await MayShowOursAsync(tab, pages, windows ??= await WindowsAsync(pages, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+                    if (!mayBeOurs) continue;
+                    if (await PageOfTabAsync(tab.TargetId, cancellationToken).ConfigureAwait(false) is not { } found) continue;
+                    _tabPages[tab.TargetId] = pageId = found;
+                }
+
+                if (_pages.TryGetValue(pageId, out var page) && !page.IsClosed) front.Add(page);
+            }
+
+            return front;
+        }
+        catch (CdpException)
+        {
+            // A browser without tab targets, or one that closed meanwhile, does not tell.
+            return [];
+        }
+    }
+
+    // In a shared profile, a tab is looked into only when it shows the address of a tab of the session, in one of its
+    // windows: the tabs of the user are never attached, not even for a moment.
+    private async Task<bool> MayShowOursAsync(TargetTargetInfo tab, IReadOnlyList<IBrowserPage> pages, HashSet<int> windows, CancellationToken cancellationToken)
+    {
+        if (!pages.Any(page => page.Url == tab.Url)) return false;
+        try
+        {
+            var window = await Connection.Browser.Browser.GetWindowForTargetAsync(new BrowserGetWindowForTargetParams { TargetId = tab.TargetId }, cancellationToken).ConfigureAwait(false);
+            return windows.Contains(window.WindowId);
+        }
+        catch (CdpException)
+        {
+            // It closed meanwhile.
+            return false;
+        }
+    }
+
+    private async Task<HashSet<int>> WindowsAsync(IReadOnlyList<IBrowserPage> pages, CancellationToken cancellationToken)
+    {
+        var windows = new HashSet<int>();
+        foreach (var page in pages.OfType<CdpPage>())
+        {
+            try
+            {
+                windows.Add((await Connection.Browser.Browser.GetWindowForTargetAsync(new BrowserGetWindowForTargetParams { TargetId = page.TargetId }, cancellationToken).ConfigureAwait(false)).WindowId);
+            }
+            catch (CdpException)
+            {
+                // It closed meanwhile.
+            }
+        }
+
+        return windows;
+    }
+
+    // The page a tab shows: attached to the tab, the browser reports the page in it as it attaches to it, and both are
+    // let go at once.
+    private async Task<string?> PageOfTabAsync(string tabId, CancellationToken cancellationToken)
+    {
+        TargetAttachToTargetResult attached;
+        try
+        {
+            attached = await Connection.Browser.Target.AttachToTargetAsync(new TargetAttachToTargetParams { TargetId = tabId, Flatten = true }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (CdpException)
+        {
+            // It closed meanwhile.
+            return null;
+        }
+
+        var session = Connection.Session(attached.SessionId);
+        try
+        {
+            var found = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using (session.Target.OnAttachedToTarget(item =>
+            {
+                if (item.TargetInfo.Type == "page") found.TrySetResult(item.TargetInfo.TargetId);
+            }))
+            {
+                await session.Target.SetAutoAttachAsync(new TargetSetAutoAttachParams { AutoAttach = true, WaitForDebuggerOnStart = false, Flatten = true }, cancellationToken).ConfigureAwait(false);
+                return await found.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (TimeoutException)
+        {
+            return null;
+        }
+        finally
+        {
+            try { await Connection.Browser.Target.DetachFromTargetAsync(new TargetDetachFromTargetParams { SessionId = attached.SessionId }, CancellationToken.None).ConfigureAwait(false); }
+            catch (CdpException) { /* the tab closed */ }
+            Connection.Detach(attached.SessionId);
         }
     }
 

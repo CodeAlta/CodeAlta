@@ -39,6 +39,8 @@ internal sealed class TestSite : IAsyncDisposable
         var app = builder.Build();
         foreach (var (path, html) in Pages) app.MapGet(path, () => Results.Content(html.Replace("OTHER/", $"http://localhost:{port}/", StringComparison.Ordinal), "text/html; charset=utf-8"));
         app.MapGet("/api/data", () => Results.Json(new Dictionary<string, object> { ["answer"] = 42, ["items"] = new[] { "a", "b" } }));
+        app.MapGet("/site.css", () => Results.Content(".record-btn {\n  color: rgb(200, 0, 0);\n  padding: 4px;\n}\n", "text/css"));
+        app.MapGet("/app.js", () => Results.Content("function addItem(text) {\n  const item = document.createElement('p');\n  item.className = 'item';\n  item.textContent = text;\n  document.getElementById('list').appendChild(item);\n}\naddItem('Created by script');\n", "text/javascript"));
         app.MapPost("/api/echo", async (HttpRequest request) =>
         {
             using var reader = new StreamReader(request.Body);
@@ -87,6 +89,36 @@ internal sealed class TestSite : IAsyncDisposable
         ("/inner", """
             <!doctype html><html><head><title>Inner</title></head><body>
             <button onclick="this.textContent = 'Pressed in ' + location.host">Press me</button>
+            </body></html>
+            """),
+        ("/styled", """
+            <!doctype html><html><head><title>Styled</title><link rel="stylesheet" href="/site.css">
+            <style>
+            .hero { margin: 20px; }
+            </style></head><body>
+            <main><section class="hero"><button id="record" class="record-btn" type="button" onclick="document.title = 'clicked'">Start recording</button></section>
+            <div id="list"></div></main>
+            <script src="/app.js"></script>
+            </body></html>
+            """),
+        ("/cards", """
+            <!doctype html><html><head><title>Cards</title></head><body style="margin:0">
+            <div id="wrap" style="padding:20px">
+            <div class="card" id="c1" style="height:40px;margin:10px 0">One</div>
+            <div class="card" id="c2" style="height:40px;margin:10px 0">Two</div>
+            <div class="card" id="c3" style="height:40px;margin:10px 0">Three</div>
+            <p id="other">Other things</p>
+            </div></body></html>
+            """),
+        // A page that tries to reach the bar: it claims the name of a custom element before the bar is built, keeping the
+        // internals of any such element, whose shadow root they would give.
+        ("/hostile", """
+            <!doctype html><html><head><title>Hostile</title>
+            <script>
+            window.__captured = [];
+            customElements.define('codealta-toolbar', class extends HTMLElement { constructor() { super(); window.__captured.push(this.attachInternals()); } });
+            </script></head><body style="margin:0">
+            <button id="target" type="button" style="position:absolute;left:40px;top:40px;width:120px;height:40px">Target</button>
             </body></html>
             """),
         ("/beforeunload", """

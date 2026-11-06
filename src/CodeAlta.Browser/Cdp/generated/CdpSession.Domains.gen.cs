@@ -13,6 +13,9 @@ internal sealed partial class CdpSession
     /// <summary>Gets the commands and events of the <c>Browser</c> domain.</summary>
     public CdpBrowserDomain Browser => new(this);
 
+    /// <summary>Gets the commands and events of the <c>CSS</c> domain.</summary>
+    public CdpCSSDomain CSS => new(this);
+
     /// <summary>Gets the commands and events of the <c>DOM</c> domain.</summary>
     public CdpDOMDomain DOM => new(this);
 

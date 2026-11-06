@@ -293,6 +293,8 @@ internal sealed class BrowserPool : IAsyncDisposable
 
         public Task<IBrowserPage> NewPageAsync(bool background, CancellationToken cancellationToken) => inner.NewPageAsync(background, cancellationToken);
 
+        public Task<IReadOnlyList<IBrowserPage>> FrontPagesAsync(CancellationToken cancellationToken) => inner.FrontPagesAsync(cancellationToken);
+
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
