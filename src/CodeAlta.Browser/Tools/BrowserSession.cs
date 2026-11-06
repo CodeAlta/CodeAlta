@@ -585,6 +585,7 @@ internal sealed class BrowserSession : IAsyncDisposable
         var page = state.Page;
         var before = page.Navigations;
         var hadDialog = page.Dialog is not null;
+        await ShowActivityAsync(page, cancellationToken).ConfigureAwait(false);
         // An input event whose handler opens a dialog ends only once the dialog is answered: the action is then over
         // for the caller, who answers the dialog with handle_dialog, and the event completes later.
         var running = action();
@@ -620,8 +621,14 @@ internal sealed class BrowserSession : IAsyncDisposable
             }
         }
 
+        // The document the action led to shows it too, until the agent has not acted for a while.
+        if (!page.IsClosed) await ShowActivityAsync(page, cancellationToken).ConfigureAwait(false);
         return new ActionOutcome(navigatedTo, openedDialog, note);
     }
+
+    // Shows the user that the agent acts in a tab, in a browser that has a window; it never fails the action.
+    private static Task ShowActivityAsync(IBrowserPage page, CancellationToken cancellationToken)
+        => page is IAgentActivityPage { ShowsAgent: true } shown ? shown.ShowAgentActivityAsync(cancellationToken) : Task.CompletedTask;
 
     /// <summary>Refuses a call while a dialog stops the page.</summary>
     /// <exception cref="BrowserToolException">A dialog is open.</exception>

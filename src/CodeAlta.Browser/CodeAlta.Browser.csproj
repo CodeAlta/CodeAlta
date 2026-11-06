@@ -16,6 +16,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Agent\browser-agent.js" LogicalName="CodeAlta.Browser.browser-agent.js" />
     <EmbeddedResource Include="Toolbar\codealta-toolbar.js" LogicalName="CodeAlta.Browser.codealta-toolbar.js" />
+    <EmbeddedResource Include="Agent\codealta-agent-overlay.js" LogicalName="CodeAlta.Browser.codealta-agent-overlay.js" />
   </ItemGroup>
 
   <ItemGroup>

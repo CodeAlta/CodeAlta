@@ -28,7 +28,7 @@ internal enum SourceKind
 /// <param name="Path">The file, relative to the project with <c>/</c> when it is inside it, else absolute.</param>
 /// <param name="Line">The line, from 1.</param>
 /// <param name="Kind">What the place is drawn from.</param>
-/// <param name="Reason">Why, in a few words.</param>
+/// <param name="Reason">Why, in a few words: what the page names in it (a selector, a function) is in a code span of Markdown.</param>
 /// <param name="Certain">Whether the browser said so, rather than a search found it.</param>
 internal sealed record SourceCandidate(string Path, int Line, SourceKind Kind, string Reason, bool Certain);
 
@@ -217,7 +217,8 @@ internal sealed partial class SourceLocator
             && await run.ResolveAsync(innermost.Url, innermost.Line, innermost.Column, null).ConfigureAwait(false) is { } creator
             && run.IsProjectFile(creator.File) && !IsDependency(creator.File))
         {
-            var name = innermost.Function.Length == 0 ? "an anonymous function" : innermost.Function + "()";
+            // The page names its functions and its rules: they stay code in the Markdown of the prompt.
+            var name = innermost.Function.Length == 0 ? "an anonymous function" : AnnotationMarkdown.Code(innermost.Function + "()");
             candidates.Add(new SourceCandidate(run.Show(creator.File), creator.Line, SourceKind.Created, $"the browser recorded {name} creating the element ({creator.How})", true));
         }
 
@@ -229,7 +230,7 @@ internal sealed partial class SourceLocator
             if (!IsTelling(rule.Selector)) continue;
             var place = await run.StyleAsync(rule, pageFile).ConfigureAwait(false);
             if (place is not { } found || !run.IsProjectFile(found.File) || IsDependency(found.File) || !styled.Add(found.File + ":" + found.Line)) continue;
-            candidates.Add(new SourceCandidate(run.Show(found.File), found.Line, SourceKind.Style, $"the rule `{Clip(rule.Selector, 80)}` ({found.How})", found.Certain));
+            candidates.Add(new SourceCandidate(run.Show(found.File), found.Line, SourceKind.Style, $"the rule {AnnotationMarkdown.Code(Clip(rule.Selector, 80))} ({found.How})", found.Certain));
         }
 
         // Nothing sure says where the element is written: its text, id and classes are looked for.
@@ -304,7 +305,7 @@ internal sealed partial class SourceLocator
         }
 
         /// <summary>The text of a file the session may read, or null.</summary>
-        public string? Read(string file) => gate.CanRead(file) ? ReadFile(file) : null;
+        public string? Read(string file) => gate.Read(file);
 
         // The text of an address: the file CodeAlta serves, a file of this computer, or what the server of the page answers.
         private Task<string?> TextAsync(Uri uri)
@@ -464,15 +465,16 @@ internal sealed partial class SourceLocator
 
     /// <summary>
     /// Whether one search may read a file or a folder: as <see cref="BrowserFiles.CanRead"/> decides it for the tools of the
-    /// session (inside its folders, not denied by its sandbox, no file of secrets), with the resolved folders kept, since a
-    /// search goes through thousands of files.
+    /// session (inside its folders, not denied by its sandbox, no file of secrets), with the folders of the session resolved
+    /// once. A path is resolved at each check, never from a folder resolved before: a folder of the project can become a
+    /// link while a search runs.
     /// </summary>
-    private sealed class FileGate(BrowserFiles files)
+    internal sealed class FileGate(BrowserFiles files)
     {
         private readonly string[] _roots = [.. files.ReadRoots.Select(Real)];
         private readonly string[] _denied = [.. files.Denied.Select(Real)];
-        private readonly Dictionary<string, string?> _folders = new(StringComparer.Ordinal);
 
+        /// <summary>Whether the session may read a file or a folder, as its path is now.</summary>
         public bool CanRead(string path)
         {
             string full;
@@ -481,37 +483,57 @@ internal sealed partial class SourceLocator
 
             // Outside the folders, the path is never touched: a UNC path would make the system reach its server.
             if (!files.ReadRoots.Any(root => BrowserFiles.IsWithin(full, root)) && !_roots.Any(root => BrowserFiles.IsWithin(full, root))) return false;
-            if (RealOf(full) is not { } real) return false;
-            return _roots.Any(root => BrowserFiles.IsWithin(real, root)) && !_denied.Any(entry => BrowserFiles.IsWithin(real, entry))
-                && !BrowserFiles.IsSecret(full) && !BrowserFiles.IsSecret(real);
+            string real;
+            try { real = BrowserFiles.RealPath(full); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException) { return false; }
+            return Allows(real) && !BrowserFiles.IsSecret(full);
         }
 
-        // The path as the system resolves it, as BrowserFiles.RealPath gives it, with the folder resolved once; null when it
-        // cannot be resolved.
-        private string? RealOf(string full)
+        /// <summary>The text of a file the session may read, checked as it was opened, or null.</summary>
+        public string? Read(string path) => CanRead(path) ? ReadChecked(path) : null;
+
+        /// <summary>
+        /// Reads a file <see cref="CanRead"/> accepted, then checks what was opened: a file or a folder of its path replaced
+        /// by a link between the check and the opening could lead out of the folders, into a denied one or to a file of
+        /// secrets. Where the system does not tell the path of an opened file, the path is resolved again, which leaves a
+        /// smaller window. The limit of size is kept on what was opened, while it is read: the file can grow meanwhile.
+        /// </summary>
+        internal string? ReadChecked(string path)
         {
             try
             {
-                if (Path.GetDirectoryName(full) is not { Length: > 0 } folder) return BrowserFiles.RealPath(full);
-                if (!_folders.TryGetValue(folder, out var realFolder))
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096);
+                var opened = BrowserFileHandles.PathOf(stream.SafeFileHandle) ?? BrowserFiles.RealPath(path);
+                if (!Allows(opened)) return null;
+                using var bytes = new MemoryStream();
+                var buffer = ArrayPool<byte>.Shared.Rent(81920);
+                try
                 {
-                    try { realFolder = BrowserFiles.RealPath(folder); }
-                    catch (IOException) { realFolder = null; }
-                    _folders[folder] = realFolder;
+                    int read;
+                    while ((read = stream.Read(buffer)) > 0)
+                    {
+                        if (bytes.Length + read > MaximumFileBytes) return null;
+                        bytes.Write(buffer, 0, read);
+                    }
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buffer);
                 }
 
-                if (realFolder is null) return null;
-                var resolved = Path.Combine(realFolder, Path.GetFileName(full));
-                // The file or folder itself can be a link too.
-                return File.Exists(resolved) || Directory.Exists(resolved)
-                    ? (File.GetAttributes(resolved) & FileAttributes.ReparsePoint) != 0 ? BrowserFiles.RealPath(resolved) : resolved
-                    : resolved;
+                bytes.Position = 0;
+                using var reader = new StreamReader(bytes, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                return reader.ReadToEnd();
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 return null;
             }
         }
+
+        // A path as the system resolves it that the session may read.
+        private bool Allows(string real)
+            => _roots.Any(root => BrowserFiles.IsWithin(real, root)) && !_denied.Any(entry => BrowserFiles.IsWithin(real, entry)) && !BrowserFiles.IsSecret(real);
     }
 
     private static string Real(string path)
@@ -594,20 +616,6 @@ internal sealed partial class SourceLocator
         var path = file.Replace('\\', '/');
         return path.Contains("/node_modules/", StringComparison.OrdinalIgnoreCase) || path.Contains("/.vite/", StringComparison.OrdinalIgnoreCase)
             || path.Contains("/vendor/", StringComparison.OrdinalIgnoreCase) || path.Contains("/wwwroot/lib/", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string? ReadFile(string file)
-    {
-        try
-        {
-            var info = new FileInfo(file);
-            if (!info.Exists || info.Length > MaximumFileBytes || BrowserFiles.IsSecret(file)) return null;
-            return File.ReadAllText(file);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return null;
-        }
     }
 
     private static string? MapReference(string text)

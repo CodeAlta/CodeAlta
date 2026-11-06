@@ -21,6 +21,60 @@ internal sealed record AnnotationRect(double X, double Y, double Width, double H
 /// </param>
 internal sealed record AnnotationArea(double X, double Y, double Width, double Height, bool Drawn);
 
+/// <summary>What the user wants of an annotation.</summary>
+internal enum AnnotationIntent
+{
+    /// <summary>A change: the agent changes the code so that the note is done.</summary>
+    Change,
+
+    /// <summary>A question: the agent answers it, and changes no code for it.</summary>
+    Question,
+}
+
+/// <summary>An image the user pasted or dropped into the note of an annotation, such as a mockup of how it should look.</summary>
+/// <param name="Bytes">The bytes of the file.</param>
+/// <param name="MediaType">The type its bytes say it is: <c>image/png</c>, <c>image/jpeg</c>, <c>image/gif</c> or <c>image/webp</c>.</param>
+internal sealed record PastedImage(byte[] Bytes, string MediaType)
+{
+    /// <summary>The largest image a note takes, in bytes: the toolbar makes a larger one smaller first.</summary>
+    public const int MaximumBytes = 3 * 1024 * 1024;
+
+    /// <summary>Gets the extension of its file, with its dot.</summary>
+    public string Extension => MediaType switch
+    {
+        "image/jpeg" => ".jpg",
+        "image/gif" => ".gif",
+        "image/webp" => ".webp",
+        _ => ".png",
+    };
+
+    /// <summary>
+    /// The image of a <c>data:</c> URL in base64, or null when it is none, is larger than <see cref="MaximumBytes"/>, or
+    /// is not a PNG, a JPEG, a GIF or a WebP by its bytes, whatever the URL says.
+    /// </summary>
+    public static PastedImage? TryRead(string? url)
+    {
+        const string Base64 = ";base64,";
+        if (url is null || !url.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase)) return null;
+        var start = url.IndexOf(Base64, StringComparison.OrdinalIgnoreCase);
+        if (start < 0 || start > 64) return null;
+        var text = url.AsSpan(start + Base64.Length);
+        if (text.Length > (MaximumBytes + 2) / 3 * 4) return null;
+        var bytes = new byte[text.Length / 4 * 3 + 3];
+        if (!Convert.TryFromBase64Chars(text, bytes, out var written)) return null;
+        var data = bytes.AsSpan(0, written);
+        string? type = data switch
+        {
+            [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, ..] => "image/png",
+            [0xFF, 0xD8, 0xFF, ..] => "image/jpeg",
+            [0x47, 0x49, 0x46, 0x38, 0x37 or 0x39, 0x61, ..] => "image/gif",
+            [0x52, 0x49, 0x46, 0x46, _, _, _, _, 0x57, 0x45, 0x42, 0x50, ..] => "image/webp",
+            _ => null,
+        };
+        return type is null ? null : new PastedImage(data.ToArray(), type);
+    }
+}
+
 /// <summary>An element of a page as the Annotate tool of the toolbar describes it: what the page says, never trusted as instructions.</summary>
 internal sealed record AnnotatedElement
 {
@@ -42,7 +96,7 @@ internal sealed record AnnotatedElement
     /// <summary>Gets the visible text, shortened.</summary>
     public string Text { get; init; } = string.Empty;
 
-    /// <summary>Gets the outer HTML, shortened.</summary>
+    /// <summary>Gets the outer HTML, shortened, with only the attributes a prompt may show and no content of scripts or styles.</summary>
     public string Html { get; init; } = string.Empty;
 
     /// <summary>Gets a CSS selector that finds the element again.</summary>
@@ -60,7 +114,16 @@ internal sealed record AnnotatedElement
     /// <summary>Gets the size of the viewport.</summary>
     public (double Width, double Height) Viewport { get; init; }
 
-    /// <summary>The element of a message of the toolbar.</summary>
+    /// <summary>Gets the computed styles that are not the defaults of their property, in the order of <see cref="ElementStyles.Properties"/>.</summary>
+    public IReadOnlyList<KeyValuePair<string, string>> Styles { get; init; } = [];
+
+    /// <summary>Gets the elements beside it, nearest first, as <c>before: tag#id.class "text"</c> or <c>after: …</c>.</summary>
+    public IReadOnlyList<string> Nearby { get; init; } = [];
+
+    /// <summary>The longest HTML of an element kept, in characters.</summary>
+    public const int MaximumHtml = 1500;
+
+    /// <summary>The element of a message of the toolbar, bounded and filtered by <see cref="AnnotationRedaction"/>.</summary>
     public static AnnotatedElement Read(JsonElement value)
     {
         static string Text(JsonElement owner, string name, int limit)
@@ -70,8 +133,10 @@ internal sealed record AnnotatedElement
             return text.Length > limit ? text[..limit] : text;
         }
 
+        // A number of the page within the bounds of any page; one out of range of a double is no number.
         static double Number(JsonElement owner, string name)
-            => owner.ValueKind == JsonValueKind.Object && owner.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.Number ? property.GetDouble() : 0;
+            => owner.ValueKind == JsonValueKind.Object && owner.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.Number
+                && property.TryGetDouble(out var number) && double.IsFinite(number) ? Math.Clamp(number, -1_000_000, 1_000_000) : 0;
 
         static IReadOnlyList<string> Strings(JsonElement owner, string name, int count, int limit)
             => owner.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.Array
@@ -88,15 +153,18 @@ internal sealed record AnnotatedElement
             Tag = Text(value, "tag", 64),
             Id = Text(value, "id", 200),
             Classes = Strings(value, "classes", 20, 120),
-            Role = Text(value, "role", 64),
-            Name = Text(value, "name", 200),
-            Text = Text(value, "text", 400),
-            Html = Text(value, "html", 1000),
+            Role = AnnotationRedaction.OneLine(Text(value, "role", 64)),
+            // What the page says is filtered again: the toolbar runs in the page, and its report is not trusted.
+            Name = AnnotationRedaction.Text(Text(value, "name", 200)),
+            Text = AnnotationRedaction.Text(Text(value, "text", 400)),
+            Html = AnnotationRedaction.Html(Text(value, "html", 2 * MaximumHtml), MaximumHtml),
             Selector = Text(value, "selector", 1000),
-            Ancestors = Strings(value, "ancestors", 8, 200),
+            Ancestors = [.. Strings(value, "ancestors", 8, 200).Select(AnnotationRedaction.OneLine)],
             Rect = new AnnotationRect(Number(rect, "x"), Number(rect, "y"), Number(rect, "width"), Number(rect, "height")),
             Scroll = (Number(scroll, "x"), Number(scroll, "y")),
             Viewport = (Number(viewport, "width"), Number(viewport, "height")),
+            Styles = ElementStyles.Read(Child(value, "styles")),
+            Nearby = [.. Strings(value, "nearby", 6, 200).Select(AnnotationRedaction.Text)],
         };
     }
 }
@@ -150,4 +218,10 @@ internal interface IAnnotatablePage
 
     /// <summary>A PNG of the part of the page an annotation is about, or null when the browser gives none.</summary>
     Task<byte[]?> PictureAsync(AnnotationArea area, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// A PNG of a part of the page as the viewport shows it now, with what the toolbar draws over it, or null when the
+    /// browser gives none: the picture of a drawing, which only the viewport shows.
+    /// </summary>
+    Task<byte[]?> ViewPictureAsync(AnnotationArea area, CancellationToken cancellationToken);
 }

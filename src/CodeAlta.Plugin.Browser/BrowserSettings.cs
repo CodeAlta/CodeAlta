@@ -42,6 +42,13 @@ internal sealed record BrowserSettings
     [JsonPropertyName("toolbarPosition")]
     public BrowserToolbarPosition? ToolbarPosition { get; init; }
 
+    /// <summary>
+    /// Gets whether the annotations sent to a session come with the details of the page (HTML, computed styles, ancestors,
+    /// nearby elements, bounds, viewport), which the switch of the Send popup of the toolbar sets.
+    /// </summary>
+    [JsonPropertyName("annotationDetails")]
+    public bool AnnotationDetails { get; init; }
+
     /// <summary>The settings with every value valid: what is not falls back to its default.</summary>
     public BrowserSettings Normalized() => this with
     {

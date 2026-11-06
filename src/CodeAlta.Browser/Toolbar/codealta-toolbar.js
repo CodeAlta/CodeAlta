@@ -17,9 +17,31 @@
   // The toolbar is for the document of the tab, not for its frames.
   if (window !== window.top) return;
 
-  const MAX_HTML = 600;
+  // What goes into the bar stays out of the page. A key, an input, a paste, a copy, a cut and the drags of a drop cross
+  // the shadow root of the bar: a listener of the page on the window, as the event starts, gets it before the bar does,
+  // with the keys, the words and the files it carries. This script runs as a document is created, before the scripts of
+  // the page, so these listeners are the first of the window: they stop there every event bound for the bar, run the
+  // keys of its fields and hand its images to the note open (see guard). In a page already open when CodeAlta added this
+  // script, the page may have listened first.
+  for (const type of ['keydown', 'keypress', 'keyup', 'beforeinput', 'input', 'textInput', 'compositionstart', 'compositionupdate', 'compositionend', 'paste', 'copy', 'cut', 'dragenter', 'dragover', 'dragleave', 'drop']) {
+    window.addEventListener(type, event => guard(event), true);
+  }
+
+  const MAX_HTML = 1500;
   const MAX_TEXT = 300;
   const MARK_COLOR = '#7c3aed';
+  // The bounds of what the bar reads of an element: the page may hold anything, of any size, so every text, every list
+  // and every walk of the DOM stops at a bound. The host bounds and filters what it receives again.
+  const MAX_NAME = 120;
+  const MAX_ATTRIBUTE = 300;
+  const MAX_CLASSES = 20;
+  const MAX_CLASS = 120;
+  const MAX_ID = 200;
+  const MAX_LABELLED_BY = 16;
+  const MAX_HTML_NODES = 400;
+  const MAX_HTML_DEPTH = 12;
+  const MAX_TEXT_NODES = 400;
+  const MAX_AREA_SCAN = 10000;
 
   function squash(text) {
     return String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
@@ -66,7 +88,7 @@
 
   function roleOf(element) {
     const explicit = element.getAttribute('role');
-    if (explicit) return explicit.split(' ')[0];
+    if (explicit) return explicit.trim().slice(0, 200).split(/\s+/)[0];
     if (element.localName === 'input') {
       const type = (element.getAttribute('type') || 'text').toLowerCase();
       return type === 'checkbox' ? 'checkbox' : type === 'radio' ? 'radio' : type === 'button' || type === 'submit' || type === 'reset' ? 'button' : 'textbox';
@@ -76,17 +98,136 @@
 
   function nameOf(element) {
     const label = element.getAttribute('aria-label');
-    if (label) return squash(label);
+    if (label) return safeText(clip(squash(label.slice(0, 4 * MAX_NAME)), MAX_NAME));
     const labelledBy = element.getAttribute('aria-labelledby');
     if (labelledBy) {
-      const text = labelledBy.split(/\s+/).map(id => document.getElementById(id)).filter(Boolean).map(node => squash(node.textContent)).join(' ');
-      if (text) return text;
+      const ids = labelledBy.slice(0, 1000).split(/\s+/).filter(Boolean).slice(0, MAX_LABELLED_BY);
+      // A label may be hidden and still name the element.
+      const text = ids.map(id => document.getElementById(id)).filter(Boolean).map(node => textOf(node, MAX_NAME, true)).join(' ');
+      if (text) return safeText(clip(squash(text), MAX_NAME));
     }
     for (const attribute of ['alt', 'title', 'placeholder']) {
       const value = element.getAttribute(attribute);
-      if (value) return squash(value);
+      if (value) return safeText(clip(squash(value.slice(0, 4 * MAX_NAME)), MAX_NAME));
     }
-    return clip(squash(element.innerText || element.textContent), 80);
+    return textOf(element, 80);
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // What the bar tells of the page: bounded, and without what may be a secret
+  //
+  // The prompt carries what the page shows of an element, and is kept in the session and shown in its timeline: only
+  // the attributes that say what an element is go into it, an address loses its query and fragment (where tokens
+  // travel), and a value that looks like a credential is replaced. The host applies the same rules again.
+  // ---------------------------------------------------------------------------------------------------------------
+
+  const REDACTED = '[redacted]';
+  // The attributes kept in the HTML of an element, with every aria-* one. Of the data-* attributes, which a page may fill
+  // with anything, only the hooks of tests are kept: they name an element, and its source can be found by them.
+  const SAFE_ATTRIBUTES = new Set(['id', 'class', 'name', 'type', 'role', 'href', 'src', 'alt', 'title', 'placeholder', 'for', 'action', 'method',
+    'data-testid', 'data-test', 'data-test-id', 'data-cy', 'data-qa']);
+  // Attributes that name an element rather than carry a value: name="password" or class="api-key" says what a field is,
+  // and is kept.
+  const NAMING_ATTRIBUTES = new Set(['id', 'class', 'name', 'type', 'role', 'for', 'method', 'data-testid', 'data-test', 'data-test-id', 'data-cy', 'data-qa']);
+  const URL_ATTRIBUTES = new Set(['href', 'src', 'action']);
+  const SECRET = /access[_-]?token|auth[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|apikey|client[_-]?secret|oauth[_-]?state|x-amz-|session[_-]?id|sessionid|csrf|xsrf|secret|password|passwd|bearer\s/i;
+  // A value written after the name of a credential in a text, such as "token=…", "Password: hunter2" or "Authorization:
+  // Bearer …", or after "Bearer": it goes whatever it looks like, since a weak password is a password all the same.
+  const SECRET_VALUE = /((?:access[_-]?token|auth[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key|apikey|client[_-]?secret|session[_-]?id|sessionid|csrf[_-]?token|xsrf[_-]?token|authorization|auth|secret|password|passwd|pwd|token|session|cookie|bearer)["']?\s*[:=]\s*["']?(?:(?:bearer|basic)\s+)?|\bbearer\s+)([^\s"'&<>,;]+)/gi;
+  const URL_IN_TEXT = /\b((?:https?|file):\/\/[^\s?#"'<>]*)[?#][^\s"'<>]*/gi;
+  const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
+  // Elements whose content is code or hidden markup, never what the element shows.
+  const OPAQUE = /^(script|style|noscript|template)$/;
+
+  // An address without its query and fragment; of another scheme than http, https or file only the scheme is kept
+  // (javascript:…, data:…, mailto:…). A link to an anchor of the page keeps its anchor.
+  function safeUrl(value) {
+    const text = String(value).trim();
+    if (/^#[\w-]{1,80}$/.test(text) && !SECRET.test(text)) return text;
+    const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(text);
+    if (scheme && !/^(https?|file)$/i.test(scheme[1])) return scheme[1].toLowerCase() + ':…';
+    const cut = text.search(/[?#]/);
+    return cut < 0 ? text : text.slice(0, cut);
+  }
+
+  function safeAttribute(name, value) {
+    let text = String(value).slice(0, 4 * MAX_ATTRIBUTE);
+    if (URL_ATTRIBUTES.has(name)) text = safeUrl(text);
+    if (!NAMING_ATTRIBUTES.has(name) && SECRET.test(text)) return REDACTED;
+    return clip(squash(text), MAX_ATTRIBUTE);
+  }
+
+  // A text of the page: its addresses lose their query and fragment, and the values of credentials written in it go.
+  function safeText(text) {
+    return String(text).replace(URL_IN_TEXT, '$1').replace(SECRET_VALUE, '$1' + REDACTED);
+  }
+
+  function escapeHtml(text, quote) {
+    text = String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return quote ? text.replace(/"/g, '&quot;') : text;
+  }
+
+  // The text an element shows, its whitespace collapsed: a walk of its text nodes that stops at a bound of nodes and of
+  // text, where innerText would lay out and copy all of it. The text of scripts, styles and, unless asked, hidden
+  // elements is left out.
+  function textOf(element, limit, hidden) {
+    let text = '';
+    let seen = 0;
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node && seen < MAX_TEXT_NODES && text.length <= 2 * limit; node = walker.nextNode()) {
+      seen++;
+      const parent = node.parentElement;
+      if (!parent || OPAQUE.test(parent.localName)) continue;
+      if (!hidden && typeof parent.checkVisibility === 'function' && !parent.checkVisibility()) continue;
+      text += String(node.nodeValue).slice(0, 2 * limit);
+    }
+    return safeText(clip(squash(text), limit));
+  }
+
+  // The opening tag of an element with the attributes the prompt may show.
+  function openTag(node) {
+    let tag = '<' + node.localName;
+    let count = 0;
+    for (const attribute of node.attributes) {
+      if (count === 30) break;
+      const name = attribute.name.toLowerCase();
+      if (!SAFE_ATTRIBUTES.has(name) && !/^aria-[a-z-]+$/.test(name)) continue;
+      count++;
+      tag += ' ' + name + '="' + escapeHtml(safeAttribute(name, attribute.value), true) + '"';
+    }
+    return tag + '>';
+  }
+
+  // The HTML of an element as the prompt shows it: the attributes of the list above only, no content of scripts and
+  // styles, no comments, and whitespace collapsed, within a bound of length, of depth and of the nodes it visits.
+  function htmlOf(element) {
+    let out = '';
+    let visited = 0;
+    let full = false;
+    const add = text => {
+      if (out.length + text.length <= MAX_HTML) { out += text; return; }
+      out += text.slice(0, MAX_HTML - out.length);
+      full = true;
+    };
+    const walk = (node, depth) => {
+      if (full) return;
+      if (visited++ >= MAX_HTML_NODES) { full = true; return; }
+      if (node.nodeType === 3) {
+        const text = String(node.nodeValue).slice(0, MAX_HTML).replace(/\s*\n\s*/g, '\n').replace(/[ \t\f\r]+/g, ' ');
+        if (text) add(escapeHtml(safeText(text), false));
+        return;
+      }
+      if (node.nodeType !== 1 || node === host) return;
+      add(openTag(node));
+      if (VOID_TAGS.has(node.localName)) return;
+      if (!OPAQUE.test(node.localName)) {
+        if (depth >= MAX_HTML_DEPTH && node.firstChild) add('…');
+        else for (let child = node.firstChild; child && !full; child = child.nextSibling) walk(child, depth + 1);
+      }
+      if (!full) add('</' + node.localName + '>');
+    };
+    walk(element, 0);
+    return full ? out + '…</' + element.localName + '>' : out;
   }
 
   function short(element) {
@@ -105,27 +246,65 @@
     return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(value) : String(value).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
   }
 
-  // A selector that finds the element again after a reload: its id where it has one, else a short path of tags,
-  // classes and positions among siblings of the same tag.
+  // A name a tool made up rather than a person: a long run of letters and digits in both cases, as hashes are.
+  function looksHashy(value) {
+    return /^[A-Za-z0-9_-]{12,}$/.test(value) && /\d/.test(value) && /[A-Z]/.test(value) && /[a-z]/.test(value);
+  }
+
+  // An id that changes from one render to the next: one of React's useId (:r1:, «r1»), or a hash.
+  function stableId(id) {
+    return !!id && id.length <= 80 && !/^[:«].*[:»]$/.test(id) && !/^(ember|ext-gen|yui_|jQuery)\d/.test(id) && !looksHashy(id);
+  }
+
+  // The classes of an element that stay from one build and one render to the next, at most two. The libraries of CSS
+  // in JavaScript and the CSS modules add classes whose names hold a hash of the build (css-1x2y3z, sc-AxjAm with its
+  // kGtEvt, Button_primary__3xYz1, _primary_1x2y3_12, jsx-123, svelte-abc), and a page adds and removes the classes of
+  // a state (active, is-open) as the user moves: none of them finds the element again after a reload.
+  function stableClasses(node) {
+    const names = [...node.classList];
+    const styled = names.some(name => name.startsWith('sc-'));
+    const result = [];
+    for (const name of names) {
+      if (result.length === 2) break;
+      if (!name || name.length > 60) continue;
+      if (/^(css|sc|jsx|svelte|emotion|styled|ng-tns|ng-star)-/.test(name) || name.startsWith('_') || looksHashy(name)) continue;
+      // A CSS module: the name of the class, then the hash of the build after two underscores or more.
+      if (/_{2,}[A-Za-z0-9-]{5,}$/.test(name) && /_{2,}[A-Za-z0-9-]*\d[A-Za-z0-9-]*$|_{2,}(?=[A-Za-z0-9-]*[A-Z])(?=[A-Za-z0-9-]*[a-z])[A-Za-z0-9-]{5}$/.test(name)) continue;
+      // The hash class styled-components puts beside its sc- class: a few letters in both cases.
+      if (styled && /^[A-Za-z]{5,8}$/.test(name) && /[A-Z]/.test(name) && /[a-z]/.test(name)) continue;
+      if (/^(active|selected|current|open|opened|closed|hover|hovered|focus|focused|focus-visible|disabled|checked|expanded|collapsed|visible|hidden|show|shown|in)$/.test(name)) continue;
+      if (/^(is|has)-/.test(name)) continue;
+      result.push(name);
+    }
+    return result;
+  }
+
+  // One step of a selector: the tag with its id, or with its stable classes.
+  function selectorPart(node) {
+    if (stableId(node.id)) return node.localName + '#' + escape(node.id);
+    return node.localName + stableClasses(node).map(name => '.' + escape(name)).join('');
+  }
+
+  // A selector that finds the element again after a reload: its id where it has a stable one, else the shortest path
+  // of tags with their ids or stable classes, from the element up, that finds it alone; the position of a step among
+  // its siblings is added only where siblings match the same step.
   function selectorOf(element) {
-    if (element.id && unique('#' + escape(element.id))) return '#' + escape(element.id);
+    if (stableId(element.id) && unique('#' + escape(element.id))) return '#' + escape(element.id);
     const parts = [];
     let node = element;
-    while (node && node.nodeType === 1 && node !== document.documentElement && parts.length < 8) {
-      let part = node.localName;
-      if (node.id) {
-        part += '#' + escape(node.id);
-        parts.unshift(part);
-        if (unique(parts.join(' > '))) return parts.join(' > ');
-        node = node.parentElement;
-        continue;
-      }
-      const classes = [...node.classList].filter(name => !/^(css-|sc-|jsx-|svelte-|_)/.test(name)).slice(0, 2);
-      if (classes.length) part += classes.map(name => '.' + escape(name)).join('');
+    while (node && node.nodeType === 1 && node !== document.documentElement && parts.length < 10) {
+      let part = selectorPart(node);
       const parent = node.parentElement;
-      if (parent) {
-        const same = [...parent.children].filter(child => child.localName === node.localName);
-        if (same.length > 1) part += ':nth-of-type(' + (same.indexOf(node) + 1) + ')';
+      if (parent && !unique([part].concat(parts).join(' > '))) {
+        let same = 0, index = 0;
+        for (const child of parent.children) {
+          if (child.localName !== node.localName) continue;
+          same++;
+          if (child === node) index = same;
+        }
+        let siblings = 0;
+        try { siblings = parent.querySelectorAll(':scope > ' + part).length; } catch (_) { siblings = same; }
+        if (siblings > 1) part += ':nth-of-type(' + index + ')';
       }
       parts.unshift(part);
       if (unique(parts.join(' > '))) return parts.join(' > ');
@@ -134,33 +313,79 @@
     return parts.join(' > ');
   }
 
-  function htmlOf(element) {
-    const html = element.outerHTML || '';
-    if (html.length <= MAX_HTML) return html;
-    const open = html.slice(0, html.indexOf('>') + 1);
-    return clip(open, MAX_HTML) + '…</' + element.localName + '>';
-  }
-
   function describe(element) {
     const rect = element.getBoundingClientRect();
     const ancestors = [];
     for (let node = element.parentElement; node && node !== document.body && node !== document.documentElement && ancestors.length < 6; node = node.parentElement) {
-      ancestors.unshift(short(node));
+      ancestors.unshift(clip(short(node), 200));
     }
     return {
       tag: element.localName,
-      id: element.id || '',
-      classes: [...element.classList],
-      role: roleOf(element),
+      id: clip(element.id || '', MAX_ID),
+      classes: [...element.classList].slice(0, MAX_CLASSES).map(name => clip(name, MAX_CLASS)),
+      role: clip(roleOf(element), 64),
       name: nameOf(element),
-      text: clip(squash(element.innerText || element.textContent), MAX_TEXT),
+      text: textOf(element, MAX_TEXT),
       html: htmlOf(element),
       selector: selectorOf(element),
       ancestors: ancestors,
       rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
       scroll: { x: window.scrollX, y: window.scrollY },
       viewport: { width: window.innerWidth, height: window.innerHeight },
+      styles: stylesOf(element),
+      nearby: nearbyOf(element),
     };
+  }
+
+  // The computed styles the prompt may show, by their names in CSS. A value that is the default of its property says
+  // nothing and is left out.
+  const STYLE_PROPERTIES = ['display', 'position', 'width', 'height', 'margin', 'padding', 'color', 'background-color', 'border', 'border-radius',
+    'font-family', 'font-size', 'font-weight', 'line-height', 'text-align', 'z-index'];
+
+  function isDefaultStyle(name, value) {
+    if (!value || value === 'auto' || value === 'normal' || value === 'none') return true;
+    switch (name) {
+      case 'display': return value === 'inline';
+      case 'position': return value === 'static';
+      case 'background-color': return value === 'transparent' || value === 'rgba(0, 0, 0, 0)';
+      case 'margin': case 'padding': case 'border-radius': return value === '0px';
+      case 'border': return /^(0px |medium )?none\b/.test(value) || /^0px\b/.test(value);
+      case 'text-align': return value === 'start';
+      default: return false;
+    }
+  }
+
+  function stylesOf(element) {
+    const styles = {};
+    const computed = getComputedStyle(element);
+    for (const name of STYLE_PROPERTIES) {
+      const value = clip(squash(computed.getPropertyValue(name).slice(0, 400)), 200);
+      if (!isDefaultStyle(name, value)) styles[name] = value;
+    }
+    return styles;
+  }
+
+  // The elements beside an element, the nearest first, in a few words each: what it is among. Hidden ones are skipped,
+  // and the walk stops at a bound.
+  const MAX_NEARBY = 3;
+  const MAX_NEARBY_SCAN = 40;
+
+  function nearbyOf(element) {
+    const nearby = [];
+    for (const [side, step] of [['before', 'previousElementSibling'], ['after', 'nextElementSibling']]) {
+      let found = 0;
+      let seen = 0;
+      for (let node = element[step]; node && found < MAX_NEARBY && seen < MAX_NEARBY_SCAN; node = node[step]) {
+        seen++;
+        if (node === host || OPAQUE.test(node.localName)) continue;
+        const rect = node.getBoundingClientRect();
+        if (rect.width < 1 && rect.height < 1) continue;
+        const text = textOf(node, 60);
+        nearby.push(side + ': ' + clip(short(node), 80) + (text ? ' "' + text + '"' : ''));
+        found++;
+      }
+    }
+    return nearby;
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -191,6 +416,8 @@
 
   const STYLE = `
     :host { all: initial; }
+    .layer { position: fixed; inset: 0; z-index: 2147483647; display: block; width: 100vw; height: 100vh; max-width: none; max-height: none;
+      margin: 0; padding: 0; border: 0; background: transparent; color: inherit; overflow: visible; pointer-events: none; }
     * { box-sizing: border-box; font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; }
     .bar { position: fixed; right: 16px; bottom: 16px; z-index: 2147483647; display: flex; align-items: center; gap: 6px;
       padding: 5px 6px 5px 10px; border-radius: 999px; background: var(--surface); color: var(--text); border: 1px solid var(--border);
@@ -215,7 +442,8 @@
     .outline { position: fixed; z-index: 2147483646; pointer-events: none; border: 2px solid ${MARK_COLOR}; background: rgba(124,58,237,.08);
       border-radius: 3px; display: none; }
     .label { position: fixed; z-index: 2147483647; pointer-events: none; padding: 1px 6px; border-radius: 4px; background: ${MARK_COLOR};
-      color: #fff; font-size: 11px; display: none; white-space: nowrap; }
+      color: #fff; font-size: 11px; display: none; white-space: nowrap; max-width: calc(100vw - 8px); overflow: hidden; text-overflow: ellipsis;
+      box-shadow: 0 1px 4px rgba(0,0,0,.3); }
     .draw { position: fixed; z-index: 2147483646; pointer-events: none; border: 2px dashed ${MARK_COLOR}; background: rgba(124,58,237,.10); }
     .chosen { position: fixed; z-index: 2147483645; pointer-events: none; border: 2px solid ${MARK_COLOR}; background: rgba(124,58,237,.14); border-radius: 3px; }
     .popup, .panel, .notice { position: fixed; z-index: 2147483647; padding: 10px; border-radius: 10px; background: var(--surface); color: var(--text);
@@ -245,9 +473,25 @@
     .badge { position: fixed; z-index: 2147483646; pointer-events: auto; cursor: pointer; min-width: 20px; height: 20px; padding: 0 6px;
       border-radius: 10px; background: ${MARK_COLOR}; color: #fff; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center;
       box-shadow: 0 2px 6px rgba(0,0,0,.35); }
+    .switch { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--muted); cursor: pointer; }
+    .switch input { margin: 0; accent-color: ${MARK_COLOR}; cursor: pointer; }
+    .question::after { content: '?'; margin-left: 1px; }
+    .choice { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .intent { flex: none; display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--field); border: 1px solid var(--border); }
+    .intent button { padding: 2px 10px; font-size: 12px; background: transparent; }
+    .intent button:hover { background: var(--hover); }
+    .intent button.on { background: ${MARK_COLOR}; color: #fff; }
+    .choice .hint { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; }
+    .images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .image { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: 6px; background: var(--field); border: 1px solid var(--border); }
+    .image img { display: block; width: 40px; height: 40px; object-fit: cover; border-radius: 4px; }
+    .image .name { padding: 0 4px; font-size: 12px; color: var(--muted); }
+    .popup.dropping { outline: 2px dashed ${MARK_COLOR}; outline-offset: -4px; }
   `;
 
   let host = null;
+  // The shadow root of the bar, and the layer that holds everything it shows: the parts of the bar go in the layer.
+  let shadow = null;
   let root = null;
   let bar = null;
   let tools = null;
@@ -268,6 +512,8 @@
   let notice = null;
   let enabled = false;
   let picking = false;
+  // Whether the prompt carries the details of the page with the annotations: CodeAlta keeps the choice for every page.
+  let details = false;
   let nextId = 1;
   // The marks of this page, by the id of their annotation: their elements or their area, and what shows them.
   const marks = new Map();
@@ -286,7 +532,15 @@
   function button(text, className, title, action) {
     const node = element('button', className || '', text);
     if (title) node.title = title;
-    node.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); if (event.isTrusted && !node.disabled) action(event); });
+    node.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.isTrusted && !node.disabled) action(event);
+      // Clicked with the pointer, a button gives the focus back to the page: the keys then belong to the mode it turned
+      // on, and Enter after a drawing opens its note instead of pressing Draw again. A button reached with the keyboard
+      // keeps the focus.
+      if (event.detail > 0 && shadow && shadow.activeElement === node) node.blur();
+    });
     return node;
   }
 
@@ -306,7 +560,10 @@
     host = document.createElement('div');
     host.setAttribute('data-codealta-toolbar', '');
     host.style.setProperty('all', 'initial', 'important');
-    root = host.attachShadow({ mode: 'closed' });
+    shadow = host.attachShadow({ mode: 'closed' });
+    root = element('div', 'layer');
+    root.setAttribute('popover', 'manual');
+    shadow.appendChild(root);
     const style = element('style');
     style.textContent = STYLE;
     themeStyle = element('style');
@@ -327,6 +584,7 @@
     counter = button('0', 'count', 'The annotations waiting: change or remove them', togglePanel);
     sender = button('Send', 'primary', 'Send the annotations to the session, with a message', openSend);
     addTool('annotate', [toggle, chooser, counter, sender]);
+    buildDrawTool();
 
     // The look of the bar, kept by CodeAlta for every page: it changes the bar, never the page.
     themeButton = button('', 'icon', '', () => {
@@ -352,8 +610,84 @@
     // Keys typed in the popups stay out of the page's own shortcuts as far as a bubbling listener can keep them.
     for (const type of ['keydown', 'keyup', 'keypress']) root.addEventListener(type, event => event.stopPropagation());
     (document.documentElement || document).appendChild(host);
+    findModals();
+    raise();
     updateCount();
   }
+
+  // The layer of the bar is a popover of the top layer, above the modal dialogs, the popovers and the element in full
+  // screen of the page, whatever their z-index; what the page shows in the top layer later goes above it, so it is
+  // shown again then, last. A browser without popovers shows it as an element of the highest z-index.
+  function raise() {
+    if (!root || !host || typeof root.showPopover !== 'function') return;
+    // Showing it again, or moving it, takes the focus from a note being written: it goes back where it was.
+    const focused = shadow.activeElement;
+    const selection = focused && typeof focused.selectionStart === 'number' ? [focused.selectionStart, focused.selectionEnd] : null;
+    const home = homeOf();
+    if (home && host.parentNode !== home) home.appendChild(host);
+    watchHome(!!home && home !== document.documentElement);
+    if (!host.isConnected) return;
+    try {
+      if (root.matches(':popover-open')) root.hidePopover();
+      root.showPopover();
+    } catch (_) { /* the host is being moved: the next change of the top layer shows it */ }
+    if (focused && focused.isConnected && shadow.activeElement !== focused) {
+      focused.focus({ preventScroll: true });
+      if (selection) try { focused.setSelectionRange(selection[0], selection[1]); } catch (_) { /* not a field */ }
+    }
+  }
+
+  // The modal dialogs of the page in the order they opened: the last one open makes the rest of the document inert,
+  // the top layer included, so the bar could not be clicked nor its note written. While one is open, the host of the
+  // bar goes in it (the layer stays in the top layer, where the dialog does not clip it), and back to the root of the
+  // document once none is.
+  const modals = [];
+  let homeWatcher = null;
+
+  // The modal dialogs already open when the bar is built: the page may have opened them before this script came to a
+  // tab already open, so no toggle event told of them. Their order of opening is unknown; that of the document is used.
+  function findModals() {
+    for (const dialog of document.querySelectorAll('dialog')) {
+      let modal = false;
+      try { modal = dialog.matches(':modal'); } catch (_) { /* no :modal */ }
+      if (modal && !modals.includes(dialog)) modals.push(dialog);
+    }
+  }
+
+  function homeOf() {
+    for (let index = modals.length - 1; index >= 0; index--) {
+      let open = false;
+      try { open = modals[index].isConnected && modals[index].matches(':modal'); } catch (_) { /* no :modal */ }
+      if (open) return modals[index];
+      modals.splice(index, 1);
+    }
+    return document.documentElement;
+  }
+
+  // While the host is in a dialog, the page may take the dialog out of the document without closing it: the host then
+  // goes back home.
+  function watchHome(on) {
+    if (!on) { if (homeWatcher) { homeWatcher.disconnect(); homeWatcher = null; } return; }
+    if (homeWatcher || typeof MutationObserver !== 'function') return;
+    homeWatcher = new MutationObserver(() => { if (host && (!host.isConnected || host.parentNode !== homeOf())) raise(); });
+    homeWatcher.observe(document, { childList: true, subtree: true });
+  }
+
+  // Popovers and dialogs of the page say when they open and close, and the document when an element goes in or out of
+  // full screen.
+  window.addEventListener('toggle', event => {
+    if (ours(event)) return;
+    const target = event.target;
+    const dialog = target && target.localName === 'dialog';
+    if (dialog && event.newState === 'open' && !modals.includes(target)) {
+      let modal = false;
+      try { modal = target.matches(':modal'); } catch (_) { /* no :modal */ }
+      if (modal) modals.push(target);
+    }
+    if (event.newState === 'open' || dialog) raise();
+  }, true);
+  window.addEventListener('close', event => { if (event.target && event.target.localName === 'dialog') raise(); }, true);
+  document.addEventListener('fullscreenchange', () => raise(), true);
 
   // The brand is the handle of the bar: dragged, it moves the bar out of the way of what is under it; clicked, it
   // collapses or expands the bar; double-clicked, it puts the bar back at the bottom right. CodeAlta keeps the place for
@@ -460,6 +794,8 @@
 
   function setPicking(on) {
     picking = on && enabled;
+    // Annotate and Draw both take the pointer: one at a time.
+    if (picking) setDrawing(false);
     if (toggle) toggle.classList.toggle('on', picking);
     if (!picking) { hideOutline(); clearChosen(); cancelDraw(); }
   }
@@ -484,8 +820,50 @@
     if (!target || target === document.documentElement) { hideOutline(); return; }
     const rect = target.getBoundingClientRect();
     Object.assign(outline.style, { display: 'block', left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px' });
-    label.textContent = short(target) + (chosen.length ? '  ·  Shift+click: ' + (chosen.some(item => item.target === target) ? 'remove' : 'add') : '');
-    Object.assign(label.style, { display: 'block', left: Math.max(0, rect.left) + 'px', top: Math.max(0, rect.top - 20) + 'px' });
+    label.textContent = hoverLabel(target, rect) + (chosen.length ? '  ·  Shift+click: ' + (chosen.some(item => item.target === target) ? 'remove' : 'add') : '');
+    placeLabel(rect);
+  }
+
+  // What the outline says of the element under the pointer: its tag with its stable id or classes, its role where the
+  // tag does not say it, the start of its name or text, and its size.
+  function hoverLabel(target, rect) {
+    const parts = [selectorPart(target)];
+    const role = roleOf(target);
+    if (role && role !== target.localName) parts.push(role);
+    const text = hoverText(target);
+    if (text) parts.push('"' + text + '"');
+    parts.push(Math.round(rect.width) + '×' + Math.round(rect.height));
+    return parts.join(' · ');
+  }
+
+  // The start of the name or the text of an element, read only as far as the label shows: the element under the pointer
+  // can be the whole page, whose text is long to gather at each move.
+  function hoverText(target) {
+    const LIMIT = 40;
+    for (const attribute of ['aria-label', 'alt', 'title', 'placeholder']) {
+      const value = squash(target.getAttribute(attribute));
+      if (value) return clip(value, LIMIT);
+    }
+    let text = '';
+    const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, {
+      acceptNode: node => node.parentElement && /^(script|style|template|noscript)$/.test(node.parentElement.localName) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    });
+    for (let node = walker.nextNode(), count = 0; node && text.length <= LIMIT && count < 200; node = walker.nextNode(), count++) {
+      text = squash(text + ' ' + node.data.slice(0, 2 * LIMIT));
+    }
+    return clip(text, LIMIT);
+  }
+
+  // The label goes above the outline, below it when the element starts at the top of the window, inside it when the
+  // element fills the window; always inside the window.
+  function placeLabel(rect) {
+    Object.assign(label.style, { display: 'block', left: '0px', top: '0px' });
+    const width = label.offsetWidth;
+    const height = label.offsetHeight || 18;
+    let top = rect.top - height - 3;
+    if (top < 2) top = rect.bottom + 3 + height <= window.innerHeight - 2 ? rect.bottom + 3 : Math.max(2, rect.top + 2);
+    const left = Math.max(4, Math.min(rect.left, window.innerWidth - width - 4));
+    Object.assign(label.style, { left: left + 'px', top: Math.min(top, window.innerHeight - height - 2) + 'px' });
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -529,7 +907,9 @@
   function elementsIn(rect) {
     const found = [];
     if (document.body) {
+      let scanned = 0;
       for (const node of document.body.querySelectorAll('*')) {
+        if (++scanned > MAX_AREA_SCAN) break;
         if (node === host || /^(script|style|template|noscript)$/.test(node.localName)) continue;
         if (found.some(outer => outer.contains(node))) continue;
         const box = node.getBoundingClientRect();
@@ -541,13 +921,23 @@
       }
     }
     if (found.length) return found;
-    let node = document.elementFromPoint((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+    let node = pageElementAt((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
     while (node && node !== document.body && node !== document.documentElement) {
       const box = node.getBoundingClientRect();
       if (node !== host && box.left <= rect.left && box.top <= rect.top && box.right >= rect.right && box.bottom >= rect.bottom) return [node];
       node = node.parentElement;
     }
     return [];
+  }
+
+  // The element of the page at a point of the viewport, under what the bar shows there, such as the sheet of Draw; null
+  // on the page itself.
+  function pageElementAt(x, y) {
+    for (const node of document.elementsFromPoint(x, y)) {
+      if (node === host) continue;
+      return node === document.body || node === document.documentElement ? null : node;
+    }
+    return null;
   }
 
   // The box around elements, in pixels of the document.
@@ -573,6 +963,7 @@
 
   function closePopup() {
     if (popup) { popup.remove(); popup = null; }
+    imageSink = null;
   }
 
   function placePopup(anchor) {
@@ -608,13 +999,261 @@
     popup.appendChild(row);
     root.appendChild(popup);
     placePopup(anchor);
-    field.addEventListener('keydown', event => {
+    onKeys(field, event => {
       if (!event.isTrusted) return;
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); commit(field); }
       else if (event.key === 'Escape') { event.preventDefault(); closePopup(); }
     });
     setTimeout(() => { field.focus(); field.setSelectionRange(field.value.length, field.value.length); }, 0);
     return field;
+  }
+
+  // What the user wants of an annotation: a change of the code, or the answer to a question, which changes no code.
+  const INTENTS = {
+    change: { label: 'Change', title: 'Ask the agent to change it in the code', placeholder: 'What should change here?', hint: 'The agent changes the code.' },
+    question: { label: 'Question', title: 'Ask the agent about it: it answers, and changes no code', placeholder: 'What do you want to know about it?', hint: 'The agent answers; it changes no code.' },
+  };
+
+  function intentOf(value) {
+    return value === 'question' ? 'question' : 'change';
+  }
+
+  // The choice of a note between a change and a question, under its field, Change first: it changes the hint of the
+  // field; the arrows switch it, and Ctrl+Enter saves from it as from the field. Gives what the user chose.
+  function addIntentChoice(field, initial, commit) {
+    let value = intentOf(initial);
+    const row = element('div', 'choice');
+    const group = element('span', 'intent');
+    group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', 'What you want');
+    const hint = element('span', 'hint');
+    const buttons = {};
+    const pick = next => {
+      value = intentOf(next);
+      for (const key of Object.keys(buttons)) {
+        buttons[key].classList.toggle('on', key === value);
+        buttons[key].setAttribute('aria-checked', String(key === value));
+      }
+      field.placeholder = INTENTS[value].placeholder;
+      hint.textContent = INTENTS[value].hint;
+    };
+    for (const key of Object.keys(INTENTS)) {
+      buttons[key] = button(INTENTS[key].label, '', INTENTS[key].title, () => pick(key));
+      buttons[key].setAttribute('role', 'radio');
+      group.appendChild(buttons[key]);
+    }
+    row.appendChild(group);
+    row.appendChild(hint);
+    onKeys(row, event => {
+      if (!event.isTrusted) return;
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); commit(); }
+      else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); pick(value === 'change' ? 'question' : 'change'); buttons[value].focus(); }
+      else if (event.key === 'Escape') { event.preventDefault(); closePopup(); }
+    });
+    field.after(row);
+    pick(value);
+    fitPopup();
+    return () => value;
+  }
+
+  // A popup placed by its top, and grown since, stays inside the window.
+  function fitPopup() {
+    if (!popup || !popup.style.top) return;
+    const rect = popup.getBoundingClientRect();
+    if (rect.bottom > window.innerHeight - 8) popup.style.top = Math.max(8, window.innerHeight - 8 - rect.height) + 'px';
+  }
+
+  // The images of a note: a mockup of how it should look, a picture of another site. They come from the clipboard, where
+  // text wins over an image as a copy from a page or a document often carries a picture of its text, or from a drop.
+  const MAX_IMAGES = 4;
+  const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+  const MAX_IMAGE_SIDE = 2400;
+  const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp)$/;
+
+  function readData(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  // An image as the data URL the host takes: as it is when it is small enough, else smaller, as a JPEG; null when it
+  // cannot be made small enough.
+  async function imageData(file) {
+    if (file.size <= MAX_IMAGE_BYTES) return await readData(file);
+    if (typeof createImageBitmap !== 'function') return null;
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    if (bitmap.close) bitmap.close();
+    for (const quality of [0.85, 0.7, 0.5]) {
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+      if (blob && blob.size <= MAX_IMAGE_BYTES) return await readData(blob);
+    }
+    return null;
+  }
+
+  function hasFiles(event) {
+    return !!event.dataTransfer && [...event.dataTransfer.types].includes('Files');
+  }
+
+  const TYPING = new Set(['keydown', 'keypress', 'keyup', 'beforeinput', 'input', 'textInput', 'compositionstart', 'compositionupdate', 'compositionend']);
+
+  // What the keys do in a field of the bar, or in a part of it, run by the guard of the window, which stops the keys
+  // before they reach the bar: the nearest part of the bar holding the focus that has keys.
+  const keyHandlers = new WeakMap();
+
+  function onKeys(element, handler) {
+    keyHandlers.set(element, handler);
+  }
+
+  function runKeys(event) {
+    for (let node = shadow ? shadow.activeElement : null; node && node !== shadow; node = node.parentNode) {
+      const handler = keyHandlers.get(node);
+      if (handler) { handler(event); return true; }
+    }
+    return false;
+  }
+
+  // The keys of Annotate and Draw, pressed while a button of the bar has the focus, as after a click on Draw: they do
+  // what they do over the page, but in a field, and Enter and Space still press the button.
+  const modeKeys = [];
+
+  function runModeKeys(event) {
+    const active = shadow ? shadow.activeElement : null;
+    if (active && /^(input|textarea|select)$/.test(active.localName)) return;
+    if (active && active.localName === 'button' && (event.key === 'Enter' || event.key === ' ')) return;
+    for (const handler of modeKeys) {
+      if (event.defaultPrevented) return;
+      handler(event, true);
+    }
+  }
+
+  // The popup open whose note takes images, with its field and what takes them; null when none is.
+  let imageSink = null;
+
+  // A paste, a copy, a cut or a drag bound for the bar, stopped on the window before any listener of the page (see the
+  // top of this script). The browser still pastes, copies and cuts words in the fields of the bar as it does. A picture
+  // pasted into the field of a note, or files dropped on its popup, go to the note; files dragged anywhere else over the
+  // bar are dropped nowhere. The closed shadow root hides from the window where in the bar the event is: the focus says
+  // it of a paste, the pointer of a drag.
+  function guard(event) {
+    if (!ours(event)) return;
+    event.stopImmediatePropagation();
+    // A key or what it types: the browser still types it in the field, and the keys of the bar run from here.
+    if (TYPING.has(event.type)) { if (event.type === 'keydown' && !runKeys(event)) runModeKeys(event); return; }
+    const sink = imageSink && imageSink.box === popup ? imageSink : null;
+    if (event.type === 'paste') {
+      if (!sink || !event.isTrusted || shadow.activeElement !== sink.field) return;
+      // Text wins over an image: a copy from a page or a document often carries a picture of its text.
+      if (!event.clipboardData || event.clipboardData.getData('text/plain')) return;
+      const files = [...event.clipboardData.items].filter(item => item.kind === 'file' && IMAGE_TYPES.test(item.type)).map(item => item.getAsFile());
+      if (!files.length) return;
+      event.preventDefault();
+      sink.take(files);
+      return;
+    }
+    // Words dragged into a field are dropped there by the browser, as they are typed.
+    if (event.type === 'copy' || event.type === 'cut' || !hasFiles(event)) return;
+    const rect = sink ? sink.box.getBoundingClientRect() : null;
+    const over = !!rect && event.clientX >= rect.left && event.clientX < rect.right && event.clientY >= rect.top && event.clientY < rect.bottom;
+    if (event.type === 'dragleave') {
+      // Out of the bar: from the window, a node of the bar is its host.
+      if (sink && event.relatedTarget !== host) sink.box.classList.remove('dropping');
+      return;
+    }
+    event.preventDefault();
+    if (sink) sink.box.classList.toggle('dropping', over && event.type !== 'drop');
+    if (event.type === 'drop') { if (over && event.isTrusted) sink.take([...event.dataTransfer.files]); return; }
+    event.dataTransfer.dropEffect = over ? 'copy' : 'none';
+  }
+
+  // The images of the note of a popup, under its field: those the annotation has, by the names the host gave them, and
+  // those pasted or dropped since, kept here until the note is saved. Each can be removed.
+  function addImages(field, existing) {
+    const box = popup;
+    const kept = (Array.isArray(existing) ? existing : []).filter(name => typeof name === 'string');
+    const added = [];
+    const waiting = [];
+    let reading = 0;
+    const strip = element('div', 'images');
+    const render = () => {
+      strip.textContent = '';
+      kept.forEach((name, index) => {
+        const chip = element('span', 'image');
+        chip.appendChild(element('span', 'name', 'Image ' + (index + 1)));
+        chip.appendChild(button('✕', 'small', 'Remove this image', () => { kept.splice(index, 1); render(); }));
+        strip.appendChild(chip);
+      });
+      added.forEach((data, index) => {
+        const chip = element('span', 'image');
+        const picture = element('img');
+        picture.alt = 'Image ' + (kept.length + index + 1);
+        // A page whose policy forbids data: images shows its name instead.
+        picture.addEventListener('error', () => picture.replaceWith(element('span', 'name', picture.alt)));
+        picture.src = data;
+        chip.appendChild(picture);
+        chip.appendChild(button('✕', 'small', 'Remove this image', () => { added.splice(index, 1); render(); }));
+        strip.appendChild(chip);
+      });
+      if (reading) strip.appendChild(element('span', 'name', 'Reading the image…'));
+      strip.classList.toggle('hidden', !strip.childNodes.length);
+      fitPopup();
+    };
+    const take = files => {
+      for (const file of files) {
+        if (!file || !IMAGE_TYPES.test(file.type)) continue;
+        if (kept.length + added.length + reading >= MAX_IMAGES) { showNotice('A note takes ' + MAX_IMAGES + ' images at most.'); break; }
+        reading++;
+        imageData(file)
+          .then(data => { if (data && box === popup) added.push(data); else if (!data) showNotice('This image is too large for a note, even made smaller.'); },
+            () => showNotice('CodeAlta could not read this image.'))
+          .finally(() => {
+            reading--;
+            render();
+            if (!reading) for (const action of waiting.splice(0)) action();
+          });
+      }
+      render();
+    };
+    // The guard of the window hands over the pastes and the drops of the note, which the page never sees.
+    imageSink = { box: box, field: field, take: take };
+    field.title = 'Paste or drop an image to show what you mean';
+    field.after(strip);
+    render();
+    return {
+      // The names of the images the annotation keeps, and the images to send.
+      kept: () => kept.slice(),
+      added: () => added.slice(),
+      // Runs an action once the images being read are read, and only while its popup is open: the popup is the token of
+      // its own life, so a note saved and then cancelled, or replaced by another one, while an image was read is not
+      // saved later, nor does it close the newer popup.
+      ready: action => {
+        const run = () => { if (box === popup) action(); };
+        if (reading) waiting.push(run); else run();
+      },
+    };
+  }
+
+  // Sends the images pasted into the note of an annotation, after the annotation or its change.
+  function sendImages(id, images) {
+    for (const data of images.added()) send({ type: 'image', id: id, data: data });
+  }
+
+  // Shows on the mark of an annotation whether it is a question.
+  function setMarkIntent(id, value) {
+    const mark = marks.get(id);
+    if (!mark) return;
+    mark.intent = intentOf(value);
+    mark.badge.classList.toggle('question', mark.intent === 'question');
   }
 
   // The note of a new annotation, on the elements chosen or the area drawn.
@@ -624,18 +1263,31 @@
     closePanel();
     const area = choice.area || areaOf(choice.targets);
     let field = null;
+    let intent = null;
+    let images = null;
+    let saved = false;
     const commit = () => {
       const text = field.value.trim();
       if (!text) { field.focus(); return; }
+      if (saved) return;
+      saved = true;
+      // An image still being read goes with the note.
+      images.ready(() => store(text));
+    };
+    const store = text => {
       const id = 'a' + Date.now().toString(36) + '-' + (nextId++);
       addMark(id, choice.targets, choice.area, null, text);
-      send({ type: 'annotation', id: id, note: text, url: location.href, elements: choice.targets.map(describe), area: area });
+      setMarkIntent(id, intent());
+      send({ type: 'annotation', id: id, note: text, intent: intent(), url: location.href, elements: choice.targets.map(describe), area: area });
+      sendImages(id, images);
       clearChosen();
       closePopup();
     };
     const cancel = button('Cancel', '', '', closePopup);
     const save = button('Save', 'primary', 'Save the note (Ctrl+Enter)', commit);
     field = openPopup(describeChoice(choice), '', 'What should change here?', viewOf(area), ['grow', cancel, save], commit);
+    intent = addIntentChoice(field, 'change', commit);
+    images = addImages(field, []);
   }
 
   // The note of an annotation waiting: changed, or the annotation removed.
@@ -646,12 +1298,23 @@
     const number = item ? item.number : mark ? mark.number : null;
     const title = (number == null ? '' : '#' + number + ' · ') + (item && item.label ? item.label : 'Annotation');
     let field = null;
+    let intent = null;
+    let images = null;
+    let saved = false;
     const commit = () => {
       const text = field.value.trim();
       if (!text) { field.focus(); return; }
+      if (saved) return;
+      saved = true;
+      images.ready(() => store(text));
+    };
+    const store = text => {
       if (mark) { mark.note = text; mark.badge.title = text; }
-      if (item) item.note = text;
-      send({ type: 'edit', id: id, note: text });
+      if (item) { item.note = text; item.intent = intent(); }
+      setMarkIntent(id, intent());
+      // The images the annotation keeps, when the host listed them: without the list, it keeps them all.
+      send({ type: 'edit', id: id, note: text, intent: intent(), images: item ? images.kept() : undefined });
+      sendImages(id, images);
       closePopup();
       renderPanel();
     };
@@ -660,6 +1323,8 @@
     const save = button('Save', 'primary', 'Save the note (Ctrl+Enter)', commit);
     closePanel();
     field = openPopup(title, note, 'What should change here?', mark ? markView(mark) : null, [remove, 'grow', cancel, save], commit);
+    intent = addIntentChoice(field, item ? item.intent : mark ? mark.intent : 'change', commit);
+    images = addImages(field, item ? item.images : []);
   }
 
   // The message sent with the annotations, as the prompt of the session.
@@ -677,6 +1342,27 @@
     const go = button('Send', 'primary', 'Send to the session (Ctrl+Enter)', commit);
     field = openPopup('Send ' + count + (count === 1 ? ' annotation' : ' annotations') + ' to the session',
       '', 'A message to the agent (optional)', null, ['grow', cancel, go], commit);
+    popup.insertBefore(detailsSwitch(), popup.lastChild);
+    placeNearBar(popup);
+  }
+
+  // The switch of the Send popup that adds the details of the page to the prompt: the HTML, computed styles, ancestors,
+  // nearby elements, bounds and viewport of each element. CodeAlta keeps the choice for every page, and for the prompts
+  // written in CodeAlta.
+  function detailsSwitch() {
+    const row = element('label', 'switch');
+    row.title = 'Adds the HTML, computed styles, ancestors, nearby elements, bounds and viewport of each element: for questions of layout. Kept for every page.';
+    const box = element('input');
+    box.type = 'checkbox';
+    box.checked = details;
+    box.addEventListener('change', event => {
+      if (!event.isTrusted) { box.checked = details; return; }
+      details = box.checked;
+      send({ type: 'details', on: details });
+    });
+    row.appendChild(box);
+    row.appendChild(element('span', '', 'Include page details'));
+    return row;
   }
 
   let noticeTimer = 0;
@@ -714,15 +1400,17 @@
   function renderPanel() {
     if (!panel) return;
     panel.textContent = '';
-    const list = items || [...marks.entries()].map(([id, mark]) => ({ id: id, number: mark.number, label: '', note: mark.note, url: location.href }));
+    const list = items || [...marks.entries()].map(([id, mark]) => ({ id: id, number: mark.number, label: '', note: mark.note, intent: mark.intent, url: location.href }));
     panel.appendChild(element('div', 'title', list.length ? 'Annotations waiting (' + list.length + ')' : 'Annotations waiting'));
     if (!list.length) panel.appendChild(element('div', 'empty', 'None yet: turn on Annotate, then click an element, Shift+click several, or drag over an area.'));
     for (const item of list) {
       const row = element('div', 'item');
-      row.appendChild(element('span', 'number', item.number == null ? '…' : String(item.number)));
+      row.appendChild(element('span', 'number' + (item.intent === 'question' ? ' question' : ''), item.number == null ? '…' : String(item.number)));
       const text = element('div', 'text');
       if (item.label) text.appendChild(element('div', 'what', item.label));
       text.appendChild(element('div', 'note', item.note));
+      const pictures = Array.isArray(item.images) ? item.images.length : 0;
+      if (pictures) text.appendChild(element('div', 'where', pictures === 1 ? '1 image' : pictures + ' images'));
       if (!samePage(item.url)) {
         let where = item.url;
         try { where = new URL(item.url).pathname; } catch (_) { /* as it is */ }
@@ -913,8 +1601,8 @@
     showOutline(targetOf(event));
   }, true);
 
-  window.addEventListener('keydown', event => {
-    if (!event.isTrusted || ours(event)) return;
+  const annotateKeys = (event, fromBar) => {
+    if (!event.isTrusted || (ours(event) && !fromBar)) return;
     if (event.key === 'Escape') {
       if (popup) closePopup();
       else if (panel) closePanel();
@@ -929,7 +1617,603 @@
       event.stopImmediatePropagation();
       openNote({ targets: chosen.map(item => item.target), area: null });
     }
+  };
+  window.addEventListener('keydown', annotateKeys, true);
+  modeKeys.push(annotateKeys);
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Draw: the user draws over the page to show what they mean, then saves the drawing with a note
+  //
+  // While Draw is on, a sheet over the viewport takes the pointer, and the page gets none of what draws. The shapes
+  // are kept in pixels of the document, so that they stay on what they were drawn over when the page scrolls. Saved,
+  // the drawing is an annotation of its own kind: the bar hides everything of its own but the drawing, the host takes
+  // the picture of that part of the page with the drawing on it, then the drawing leaves the page and its mark stays.
+  // What is under the drawing is not looked for: the picture shows it.
+  // ---------------------------------------------------------------------------------------------------------------
+
+  const SVG = 'http://www.w3.org/2000/svg';
+  // U+FE0E keeps the symbols as text, not as colored emoji.
+  const DRAW_TOOLS = [
+    { name: 'pen', key: 'p', icon: '✎︎', title: 'Pen (P)' },
+    { name: 'highlighter', key: 'h', icon: '▮︎', title: 'Highlighter (H)' },
+    { name: 'arrow', key: 'a', icon: '↗︎', title: 'Arrow (A)' },
+    { name: 'rect', key: 'r', icon: '▭︎', title: 'Rectangle (R)' },
+    { name: 'ellipse', key: 'o', icon: '◯︎', title: 'Ellipse (O)' },
+    { name: 'text', key: 't', icon: 'T', title: 'Text (T): click where it goes, type it, then Enter' },
+    { name: 'eraser', key: 'e', icon: '⌫︎', title: 'Eraser (E): click or drag over shapes to remove them' },
+  ];
+  const DRAW_COLORS = [
+    { value: '#ef4444', name: 'Red' }, { value: '#f59e0b', name: 'Amber' }, { value: '#22c55e', name: 'Green' },
+    { value: '#3b82f6', name: 'Blue' }, { value: '#111827', name: 'Black' },
+  ];
+  const STROKE = { pen: 3, highlighter: 16, arrow: 3, rect: 3, ellipse: 3 };
+  const TEXT_SIZE = 18;
+  const MAX_SHAPES = 200;
+  const MAX_POINTS = 2000;
+  // The room around the drawing in its picture, and how long the bar waits for the host to take it.
+  const DRAW_MARGIN = 24;
+  const PICTURE_WAIT = 5000;
+
+  const DRAW_STYLE = `
+    .sheet { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 2147483644; pointer-events: auto; cursor: crosshair; touch-action: none; }
+    .sheet[data-tool="text"] { cursor: text; }
+    .sheet[data-tool="eraser"] { cursor: cell; }
+    .sheet svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; }
+    .draw-controls { display: inline-flex; align-items: center; gap: 3px; }
+    /* While Draw is on, its controls take a row of their own under the bar, which stays narrow enough for small windows. */
+    .bar.drawing { flex-wrap: wrap; justify-content: flex-end; border-radius: 16px; max-width: calc(100vw - 16px); }
+    .bar.drawing.collapsed { width: auto !important; }
+    .bar.drawing .draw-controls { order: 1; flex-basis: 100%; justify-content: flex-end; flex-wrap: wrap; padding-top: 3px; }
+    .draw-controls button.icon { min-width: 26px; padding: 3px 5px; }
+    button.swatch { width: 16px; height: 16px; padding: 0; margin: 0 1px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255,255,255,.4); }
+    button.swatch.picked { outline: 2px solid var(--text); outline-offset: 2px; }
+    .sketch-text { all: unset; position: fixed; z-index: 2147483647; min-width: 140px; padding: 1px 4px; border-radius: 4px;
+      font: 600 ${TEXT_SIZE}px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif; background: rgba(255,255,255,.92); border: 1px dashed currentColor; }
+  `;
+
+  // The drawing being made: its shapes, the lists of shapes before (for Undo) and after (for Redo), the shape or the
+  // erasing the pointer is doing, the text being typed, and the drawing whose picture the host is taking.
+  const sketch = { on: false, tool: 'pen', color: DRAW_COLORS[0].value, shapes: [], past: [], future: [], stroke: null, text: null, saving: null };
+  let sheet = null;
+  let sheetSvg = null;
+  let drawToggle = null;
+  let drawControls = null;
+  let undoButton = null;
+  let clearButton = null;
+  let drawSave = null;
+
+  // The Draw tool of the bar, after Annotate: its button, then the controls it shows while it is on.
+  function buildDrawTool() {
+    const style = element('style');
+    style.textContent = DRAW_STYLE;
+    root.appendChild(style);
+    drawToggle = button('Draw', '', 'Draw on the page to show what you mean, then save the drawing with a note (Esc ends)', () => setDrawing(!sketch.on));
+    drawControls = element('span', 'draw-controls hidden');
+    for (const tool of DRAW_TOOLS) {
+      const control = button(tool.icon, 'icon', tool.title, () => { sketch.tool = tool.name; commitText(); updateDrawControls(); });
+      control.dataset.drawTool = tool.name;
+      control.setAttribute('aria-label', tool.title);
+      drawControls.appendChild(control);
+    }
+    for (const color of DRAW_COLORS) {
+      const swatch = button('', 'swatch', color.name + ' (' + (DRAW_COLORS.indexOf(color) + 1) + ')', () => { sketch.color = color.value; updateDrawControls(); });
+      swatch.style.background = color.value;
+      swatch.dataset.color = color.value;
+      swatch.setAttribute('aria-label', color.name);
+      drawControls.appendChild(swatch);
+    }
+    undoButton = button('↶︎', 'icon', 'Undo (Ctrl+Z; Ctrl+Shift+Z redoes)', () => undoSketch(false));
+    clearButton = button('⌧︎', 'icon', 'Clear the drawing', clearSketch);
+    drawSave = button('Save', 'primary', 'Save the drawing with a note (Enter)', openDrawingNote);
+    drawControls.appendChild(undoButton);
+    drawControls.appendChild(clearButton);
+    drawControls.appendChild(drawSave);
+    addTool('draw', [drawToggle, drawControls]);
+
+    sheet = element('div', 'sheet hidden');
+    sheetSvg = document.createElementNS(SVG, 'svg');
+    sheet.appendChild(sheetSvg);
+    root.appendChild(sheet);
+    // A bar built again (the page removed it) starts with Draw off; a drawing not saved shows again when it is on.
+    sketch.on = false;
+    renderSketch();
+    updateDrawControls();
+  }
+
+  function setDrawing(on) {
+    on = !!on && enabled && !!sheet;
+    if (on === sketch.on) return;
+    if (on) setPicking(false);
+    if (!on) { commitText(); sketch.stroke = null; }
+    sketch.on = on;
+    // A drawing not saved stays, hidden, until Draw is on again.
+    if (!sketch.saving) sheet.classList.toggle('hidden', !on);
+    drawToggle.classList.toggle('on', on);
+    bar.style.width = '';
+    const row = bar.offsetWidth;
+    drawControls.classList.toggle('hidden', !on);
+    bar.classList.toggle('drawing', on);
+    if (on) {
+      // A bar that wraps would take the whole width of the window: it takes the width of its row, or of the controls
+      // when they are wider.
+      let controls = 0;
+      for (const control of drawControls.children) controls += control.offsetWidth + 4;
+      bar.style.width = Math.ceil(Math.max(row, controls + 24)) + 'px';
+    }
+    renderSketch();
+    updateDrawControls();
+    placeBar();
+  }
+
+  function updateDrawControls() {
+    if (!drawControls) return;
+    for (const control of drawControls.children) {
+      if (control.dataset.drawTool) control.classList.toggle('on', control.dataset.drawTool === sketch.tool);
+      if (control.dataset.color) control.classList.toggle('picked', control.dataset.color === sketch.color);
+    }
+    undoButton.disabled = !sketch.past.length || !!sketch.saving;
+    clearButton.disabled = !sketch.shapes.length || !!sketch.saving;
+    drawSave.disabled = !sketch.shapes.length || !!sketch.saving;
+    sheet.dataset.tool = sketch.tool;
+  }
+
+  // Each change keeps the shapes before it, as Undo gives them back.
+  function changeShapes(shapes) {
+    sketch.past.push(sketch.shapes);
+    if (sketch.past.length > MAX_SHAPES) sketch.past.shift();
+    sketch.future = [];
+    sketch.shapes = shapes;
+    renderSketch();
+    updateDrawControls();
+  }
+
+  function undoSketch(redo) {
+    if (sketch.saving) return;
+    commitText();
+    const from = redo ? sketch.future : sketch.past;
+    const to = redo ? sketch.past : sketch.future;
+    if (!from.length) return;
+    if (redo) to.push(sketch.shapes); else to.unshift(sketch.shapes);
+    sketch.shapes = redo ? from.shift() : from.pop();
+    renderSketch();
+    updateDrawControls();
+  }
+
+  function clearSketch() {
+    commitText();
+    if (sketch.shapes.length && !sketch.saving) changeShapes([]);
+  }
+
+  // ---- Shapes, in pixels of the document ----
+
+  function pagePoint(event) {
+    return { x: event.clientX + window.scrollX, y: event.clientY + window.scrollY };
+  }
+
+  function distance(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
+  function segmentDistance(point, a, b) {
+    const length = (b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y);
+    if (!length) return distance(point, a);
+    const t = Math.max(0, Math.min(1, ((point.x - a.x) * (b.x - a.x) + (point.y - a.y) * (b.y - a.y)) / length));
+    return distance(point, { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) });
+  }
+
+  // The box of a shape, its stroke included; the width of a text is measured once it is drawn.
+  function shapeBox(shape) {
+    if (shape.kind === 'text') {
+      const at = shape.points[0];
+      const width = shape.width || shape.text.length * TEXT_SIZE * 0.6;
+      return { left: at.x, top: at.y, right: at.x + width, bottom: at.y + TEXT_SIZE * 1.3 };
+    }
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const point of shape.points) {
+      left = Math.min(left, point.x); top = Math.min(top, point.y); right = Math.max(right, point.x); bottom = Math.max(bottom, point.y);
+    }
+    // An arrow's head reaches past its line.
+    const pad = shape.kind === 'arrow' ? 14 : STROKE[shape.kind] / 2 + 1;
+    return { left: left - pad, top: top - pad, right: right + pad, bottom: bottom + pad };
+  }
+
+  // Whether a point is on a shape: on its line, or on the outline of a rectangle or an ellipse (what is inside them is
+  // the page, not the shape), or in the box of a text.
+  function shapeHit(shape, point, tolerance) {
+    const reach = tolerance + (STROKE[shape.kind] || 0) / 2;
+    const points = shape.points;
+    if (shape.kind === 'text') {
+      const box = shapeBox(shape);
+      return point.x >= box.left - tolerance && point.x <= box.right + tolerance && point.y >= box.top - tolerance && point.y <= box.bottom + tolerance;
+    }
+    if (shape.kind === 'rect') {
+      const left = Math.min(points[0].x, points[1].x), right = Math.max(points[0].x, points[1].x);
+      const top = Math.min(points[0].y, points[1].y), bottom = Math.max(points[0].y, points[1].y);
+      const corners = [{ x: left, y: top }, { x: right, y: top }, { x: right, y: bottom }, { x: left, y: bottom }];
+      return corners.some((corner, index) => segmentDistance(point, corner, corners[(index + 1) % 4]) <= reach);
+    }
+    if (shape.kind === 'ellipse') {
+      const cx = (points[0].x + points[1].x) / 2, cy = (points[0].y + points[1].y) / 2;
+      const rx = Math.max(1, Math.abs(points[1].x - points[0].x) / 2), ry = Math.max(1, Math.abs(points[1].y - points[0].y) / 2);
+      const radial = Math.hypot((point.x - cx) / rx, (point.y - cy) / ry);
+      return Math.abs(radial - 1) * Math.min(rx, ry) <= reach;
+    }
+    if (points.length === 1) return distance(point, points[0]) <= reach;
+    for (let index = 1; index < points.length; index++) if (segmentDistance(point, points[index - 1], points[index]) <= reach) return true;
+    return false;
+  }
+
+  // A shape too small to mean anything is not kept: a click with the rectangle tool draws no rectangle.
+  function worthKeeping(shape) {
+    if (shape.kind === 'pen' || shape.kind === 'highlighter') return shape.points.length > 0;
+    return shape.points.length === 2 && distance(shape.points[0], shape.points[1]) >= 4;
+  }
+
+  function svgNode(tag, attributes) {
+    const node = document.createElementNS(SVG, tag);
+    for (const name of Object.keys(attributes)) node.setAttribute(name, String(attributes[name]));
+    return node;
+  }
+
+  function shapeNode(shape) {
+    const points = shape.points;
+    const stroke = { stroke: shape.color, 'stroke-width': STROKE[shape.kind], fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
+    switch (shape.kind) {
+      case 'pen':
+      case 'highlighter': {
+        // One point is a dot: a line of no length with round ends.
+        const path = points.map((point, index) => (index ? 'L' : 'M') + point.x + ' ' + point.y).join(' ') + (points.length === 1 ? ' l 0.01 0' : '');
+        const node = svgNode('path', Object.assign(stroke, { d: path }));
+        if (shape.kind === 'highlighter') node.setAttribute('stroke-opacity', '0.38');
+        return node;
+      }
+      case 'arrow': {
+        const [from, to] = points;
+        const angle = Math.atan2(to.y - from.y, to.x - from.x);
+        const head = (turn) => (to.x - 14 * Math.cos(angle + turn)) + ' ' + (to.y - 14 * Math.sin(angle + turn));
+        const group = svgNode('g', {});
+        group.appendChild(svgNode('line', Object.assign({}, stroke, { x1: from.x, y1: from.y, x2: to.x, y2: to.y })));
+        group.appendChild(svgNode('path', { d: 'M' + to.x + ' ' + to.y + ' L' + head(0.45) + ' L' + head(-0.45) + ' Z', fill: shape.color, stroke: shape.color, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+        return group;
+      }
+      case 'rect':
+        return svgNode('rect', Object.assign(stroke, {
+          x: Math.min(points[0].x, points[1].x), y: Math.min(points[0].y, points[1].y),
+          width: Math.abs(points[1].x - points[0].x), height: Math.abs(points[1].y - points[0].y), rx: 3,
+        }));
+      case 'ellipse':
+        return svgNode('ellipse', Object.assign(stroke, {
+          cx: (points[0].x + points[1].x) / 2, cy: (points[0].y + points[1].y) / 2,
+          rx: Math.abs(points[1].x - points[0].x) / 2, ry: Math.abs(points[1].y - points[0].y) / 2,
+        }));
+      default: {
+        // A light halo keeps the text readable on any page.
+        const node = svgNode('text', {
+          x: points[0].x, y: points[0].y + TEXT_SIZE, fill: shape.color, stroke: '#ffffff', 'stroke-width': 3, 'paint-order': 'stroke',
+          'font-family': 'system-ui, -apple-system, "Segoe UI", sans-serif', 'font-size': TEXT_SIZE, 'font-weight': 600,
+        });
+        node.textContent = shape.text;
+        return node;
+      }
+    }
+  }
+
+  // Draws the shapes where the page is scrolled to now.
+  function renderSketch() {
+    if (!sheetSvg) return;
+    sheetSvg.textContent = '';
+    const group = svgNode('g', { transform: 'translate(' + -window.scrollX + ' ' + -window.scrollY + ')' });
+    const shapes = sketch.stroke && sketch.stroke.shape ? sketch.shapes.concat([sketch.stroke.shape]) : sketch.shapes;
+    for (const shape of shapes) {
+      const node = shapeNode(shape);
+      group.appendChild(node);
+    }
+    sheetSvg.appendChild(group);
+    // The width of a text, as the browser draws it, for the eraser and the bounds of the picture.
+    for (const node of group.querySelectorAll('text')) {
+      const shape = shapes[[...group.children].indexOf(node)];
+      if (shape && !shape.width) { try { shape.width = node.getComputedTextLength(); } catch (_) { /* not laid out */ } }
+    }
+  }
+
+  window.addEventListener('scroll', () => { if (sketch.shapes.length || sketch.stroke) renderSketch(); }, { passive: true });
+
+  // ---- Text ----
+
+  function openText(at) {
+    commitText();
+    const field = element('input', 'sketch-text');
+    field.type = 'text';
+    field.maxLength = 200;
+    field.placeholder = 'Text, then Enter';
+    field.style.color = sketch.color;
+    field.style.left = (at.x - window.scrollX) + 'px';
+    field.style.top = (at.y - window.scrollY) + 'px';
+    onKeys(field, event => {
+      if (!event.isTrusted) return;
+      if (event.key === 'Enter') { event.preventDefault(); commitText(); }
+      else if (event.key === 'Escape') { event.preventDefault(); cancelText(); }
+    });
+    field.addEventListener('blur', event => { if (event.isTrusted) commitText(); });
+    root.appendChild(field);
+    sketch.text = { at: at, field: field, color: sketch.color };
+    setTimeout(() => field.focus(), 0);
+  }
+
+  function commitText() {
+    const text = sketch.text;
+    if (!text) return;
+    sketch.text = null;
+    const value = squash(text.field.value);
+    text.field.remove();
+    if (value && sketch.shapes.length < MAX_SHAPES) changeShapes(sketch.shapes.concat([{ kind: 'text', color: text.color, points: [text.at], text: value }]));
+  }
+
+  function cancelText() {
+    const text = sketch.text;
+    if (!text) return;
+    sketch.text = null;
+    text.field.remove();
+  }
+
+  // ---- Pointer and keys while drawing: only what the user does draws ----
+
+  // An event of the user on the sheet: the page cannot reach the sheet, nor make up an event the browser trusts. Seen
+  // from the window, an event inside the closed shadow root is at its host; the root itself says what is under the
+  // pointer, and the pointer that draws stays on the sheet wherever it goes.
+  function onSheet(event) {
+    if (!sketch.on || !event.isTrusted || !sheet || !ours(event)) return false;
+    if (sketch.stroke && event.pointerId === sketch.stroke.id) return true;
+    // The shadow root says what is under the pointer; the layer that holds the parts of the bar is an element.
+    const under = (shadow || root).elementFromPoint(event.clientX, event.clientY);
+    return !!under && sheet.contains(under);
+  }
+
+  // The page gets nothing of what draws.
+  function keep(event) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+  function eraseAt(point) {
+    const left = sketch.shapes.filter(shape => !shapeHit(shape, point, 6));
+    if (left.length !== sketch.shapes.length) { sketch.shapes = left; renderSketch(); }
+  }
+
+  window.addEventListener('pointerdown', event => {
+    if (!onSheet(event)) return;
+    keep(event);
+    if (event.button !== 0 || popup || sketch.saving || sketch.stroke) return;
+    const at = pagePoint(event);
+    if (sketch.tool === 'text') { openText(at); return; }
+    commitText();
+    try { sheet.setPointerCapture(event.pointerId); } catch (_) { /* the pointer is gone */ }
+    if (sketch.tool === 'eraser') {
+      sketch.stroke = { id: event.pointerId, erase: true, before: sketch.shapes };
+      eraseAt(at);
+      return;
+    }
+    if (sketch.shapes.length >= MAX_SHAPES) return;
+    const points = sketch.tool === 'pen' || sketch.tool === 'highlighter' ? [at] : [at, at];
+    sketch.stroke = { id: event.pointerId, shape: { kind: sketch.tool, color: sketch.color, points: points } };
+    renderSketch();
   }, true);
+
+  window.addEventListener('pointermove', event => {
+    if (!onSheet(event)) return;
+    keep(event);
+    const stroke = sketch.stroke;
+    if (!stroke || event.pointerId !== stroke.id) return;
+    const at = pagePoint(event);
+    if (stroke.erase) { eraseAt(at); return; }
+    const points = stroke.shape.points;
+    if (points.length === 2 && stroke.shape.kind !== 'pen' && stroke.shape.kind !== 'highlighter') points[1] = at;
+    else if (points.length < MAX_POINTS && distance(points[points.length - 1], at) >= 1.5) points.push(at);
+    else return;
+    renderSketch();
+  }, true);
+
+  function endStroke(event) {
+    if (!onSheet(event)) return;
+    keep(event);
+    const stroke = sketch.stroke;
+    if (!stroke || event.pointerId !== stroke.id) return;
+    sketch.stroke = null;
+    if (stroke.erase) {
+      // The whole erasing is one step to undo.
+      if (sketch.shapes !== stroke.before) {
+        const shapes = sketch.shapes;
+        sketch.shapes = stroke.before;
+        changeShapes(shapes);
+      }
+      return;
+    }
+    if (event.type === 'pointerup' && worthKeeping(stroke.shape)) changeShapes(sketch.shapes.concat([stroke.shape]));
+    else renderSketch();
+  }
+
+  window.addEventListener('pointerup', endStroke, true);
+  window.addEventListener('pointercancel', endStroke, true);
+  for (const type of ['mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'auxclick', 'touchstart', 'touchmove', 'touchend']) {
+    window.addEventListener(type, event => { if (onSheet(event)) keep(event); }, true);
+  }
+
+  // After the keys of Annotate: Esc closes the note first, then the text being typed (in its field), then leaves Draw.
+  // Enter opens the note of the drawing, Ctrl+Z undoes, Ctrl+Shift+Z or Ctrl+Y redoes, a letter or a digit picks a tool or a color.
+  const drawKeys = (event, fromBar) => {
+    if (!sketch.on || !event.isTrusted || (ours(event) && !fromBar) || popup || sketch.saving) return;
+    const key = event.key.toLowerCase();
+    if (event.key === 'Escape') setDrawing(false);
+    else if ((event.metaKey || event.ctrlKey) && key === 'z') undoSketch(event.shiftKey);
+    else if ((event.metaKey || event.ctrlKey) && key === 'y') undoSketch(true);
+    else if (event.key === 'Enter' && sketch.shapes.length) openDrawingNote();
+    else if (!event.metaKey && !event.ctrlKey && !event.altKey && pickByKey(key)) { /* a tool or a color */ }
+    else return;
+    keep(event);
+  };
+  window.addEventListener('keydown', drawKeys, true);
+  modeKeys.push(drawKeys);
+
+  // A letter picks a tool, a digit a color, as their buttons say.
+  function pickByKey(key) {
+    const tool = DRAW_TOOLS.find(candidate => candidate.key === key);
+    const color = /^[1-9]$/.test(key) ? DRAW_COLORS[+key - 1] : null;
+    if (!tool && !color) return false;
+    if (tool) { commitText(); sketch.tool = tool.name; }
+    if (color) sketch.color = color.value;
+    updateDrawControls();
+    return true;
+  }
+
+  // ---- Saving ----
+
+  // The part of the page the picture shows: the drawing with some room around it, inside the viewport, since only the
+  // viewport shows the drawing. A drawing that fits in the viewport is first scrolled into it.
+  function pictureArea() {
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const shape of sketch.shapes) {
+      const box = shapeBox(shape);
+      left = Math.min(left, box.left); top = Math.min(top, box.top); right = Math.max(right, box.right); bottom = Math.max(bottom, box.bottom);
+    }
+    if (!isFinite(left)) return null;
+    left -= DRAW_MARGIN; top -= DRAW_MARGIN; right += DRAW_MARGIN; bottom += DRAW_MARGIN;
+    const width = Math.min(window.innerWidth, document.documentElement.clientWidth || window.innerWidth);
+    const height = Math.min(window.innerHeight, document.documentElement.clientHeight || window.innerHeight);
+    let x = window.scrollX, y = window.scrollY;
+    if (left < x || right > x + width || top < y || bottom > y + height) {
+      if (right - left <= width) x = Math.max(0, Math.min(left, right - width));
+      if (bottom - top <= height) y = Math.max(0, Math.min(top, bottom - height));
+      if (x !== window.scrollX || y !== window.scrollY) {
+        window.scrollTo({ left: x, top: y, behavior: 'instant' });
+        x = window.scrollX; y = window.scrollY;
+        renderSketch();
+      }
+    }
+    const area = { x: Math.max(left, x), y: Math.max(top, y), right: Math.min(right, x + width), bottom: Math.min(bottom, y + height) };
+    if (area.right - area.x < 1 || area.bottom - area.y < 1) return null;
+    return { x: area.x, y: area.y, width: area.right - area.x, height: area.bottom - area.y, drawn: true };
+  }
+
+  function openDrawingNote() {
+    commitText();
+    if (!sketch.shapes.length || sketch.saving) return;
+    closePanel();
+    const area = pictureArea();
+    if (!area) return;
+    let field = null;
+    let intent = null;
+    let images = null;
+    let saved = false;
+    const commit = () => {
+      const text = field.value.trim();
+      if (!text) { field.focus(); return; }
+      if (saved) return;
+      saved = true;
+      // An image still being read goes with the drawing.
+      images.ready(() => {
+        const chosen = intent();
+        const added = images.added();
+        closePopup();
+        saveDrawing(text, chosen, added);
+      });
+    };
+    const cancel = button('Cancel', '', '', closePopup);
+    const save = button('Save', 'primary', 'Save the drawing with the note (Ctrl+Enter)', commit);
+    const count = sketch.shapes.length;
+    field = openPopup('Drawing · ' + count + (count === 1 ? ' shape' : ' shapes'), '', 'What should change here?', viewOf(area), ['grow', cancel, save], commit);
+    intent = addIntentChoice(field, 'change', commit);
+    images = addImages(field, []);
+  }
+
+  // Shows only the drawing over the page and asks the host for its picture; the host answers with drawn(id).
+  function saveDrawing(note, intent, images) {
+    const area = pictureArea();
+    if (!area) return;
+    const id = 'd' + Date.now().toString(36) + '-' + (nextId++);
+    const targets = drawingTargets();
+    addMark(id, targets, area, null, note);
+    setMarkIntent(id, intent);
+    // The marks of the other annotations stay in the picture: the agent sees which of them the drawing is about.
+    const others = new Set();
+    for (const [other, mark] of marks) {
+      if (other === id) continue;
+      for (const box of mark.boxes) others.add(box);
+      others.add(mark.badge);
+    }
+    const hidden = [];
+    for (const node of root.children) {
+      if (node === sheet || others.has(node) || node.localName === 'style' || node.style.visibility === 'hidden') continue;
+      node.style.visibility = 'hidden';
+      hidden.push(node);
+    }
+    sheet.classList.remove('hidden');
+    sketch.saving = { id: id, hidden: hidden, timer: setTimeout(() => finishDrawing(id), PICTURE_WAIT) };
+    updateDrawControls();
+    // The picture is taken once the browser painted the page without the bar.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      send({ type: 'drawing', id: id, note: note, intent: intentOf(intent), url: location.href, area: area, elements: targets.map(describe) });
+      for (const data of images || []) send({ type: 'image', id: id, data: data });
+    }));
+  }
+
+  // The elements a drawing is about, as the Annotate tool would choose them: those a rectangle, an ellipse or a stroke
+  // surrounds, the element an arrow points at, the element a text is written on. With them, the prompt says where in
+  // the code is what the drawing shows. In the order the shapes were drawn, each once, at most as many as a note
+  // covers: an arrow at a button of a card a rectangle surrounds names both, the card and the button it means.
+  function drawingTargets() {
+    const found = [];
+    const add = node => {
+      if (!node || node === host || found.length >= MAX_ELEMENTS || found.includes(node)) return;
+      found.push(node);
+    };
+    for (const shape of sketch.shapes) {
+      const box = shapeBox(shape);
+      if (shape.kind === 'arrow') {
+        const head = shape.points[shape.points.length - 1];
+        add(pageElementAt(head.x - window.scrollX, head.y - window.scrollY));
+      } else if (shape.kind === 'text') {
+        add(pageElementAt((box.left + box.right) / 2 - window.scrollX, (box.top + box.bottom) / 2 - window.scrollY));
+      } else {
+        const view = { left: box.left - window.scrollX, top: box.top - window.scrollY, right: box.right - window.scrollX, bottom: box.bottom - window.scrollY };
+        for (const node of elementsIn(view)) add(node);
+      }
+    }
+    return found;
+  }
+
+  // The picture is taken, or the host did not answer in time: the bar comes back and the drawing leaves the page.
+  function finishDrawing(id) {
+    const saving = sketch.saving;
+    if (!saving || saving.id !== id) return false;
+    clearTimeout(saving.timer);
+    sketch.saving = null;
+    for (const node of saving.hidden) node.style.visibility = '';
+    sketch.shapes = [];
+    sketch.past = [];
+    sketch.future = [];
+    sheet.classList.toggle('hidden', !sketch.on);
+    renderSketch();
+    updateDrawControls();
+    track();
+    return true;
+  }
+
+  // What the host calls of the Draw tool, beside the calls of the bar.
+  const drawingCalls = {
+    // Turns Draw on or off, as its button does.
+    draw(on) {
+      if (!enabled) return false;
+      whenBody(() => { build(); setDrawing(!!on); });
+      return true;
+    },
+    // The host has the picture of a drawing.
+    drawn(id) {
+      return finishDrawing(String(id));
+    },
+    drawState() {
+      return { drawing: sketch.on, tool: sketch.tool, color: sketch.color, shapes: sketch.shapes.length, saving: !!sketch.saving, undo: sketch.past.length, redo: sketch.future.length, typing: !!sketch.text };
+    },
+  };
 
   // ---------------------------------------------------------------------------------------------------------------
   // What the host calls
@@ -957,6 +2241,7 @@
         // An area shows at once; elements wait for the page to render them, then show those found.
         if (area || found.length === selectors.length || (attempts >= 20 && found.length)) {
           addMark(item.id, found, area, item.number, item.note);
+          setMarkIntent(item.id, item.intent);
           left.splice(index, 1);
         }
       }
@@ -970,6 +2255,7 @@
       enabled = true;
       if (options && typeof options.theme === 'string') applyTheme(options.theme);
       if (options && 'position' in options) moveBar(options.position);
+      if (options && typeof options.details === 'boolean') details = options.details;
       whenBody(() => {
         build();
         if (options && Array.isArray(options.pending)) restore(options.pending);
@@ -997,6 +2283,7 @@
       for (const item of items) {
         const mark = marks.get(item.id);
         if (mark) { mark.note = item.note; mark.badge.title = item.note + '\nClick to change or remove this annotation.'; }
+        setMarkIntent(item.id, item.intent);
       }
       updateCount();
       renderPanel();
@@ -1009,6 +2296,11 @@
     // Shows the bar in the look the user chose, here or in another tab.
     theme(name) {
       applyTheme(name);
+      return true;
+    },
+    // Whether the prompt carries the details of the page, as the user chose here or in another tab.
+    details(on) {
+      details = !!on;
       return true;
     },
     // Puts the bar where the user moved it, here or in another tab; null puts it back at the bottom right.
@@ -1036,9 +2328,11 @@
       return true;
     },
     state() {
-      return { enabled: enabled, picking: picking, noting: !!popup, marks: marks.size, chosen: chosen.length, waiting: waiting(), theme: theme, position: position };
+      return { enabled: enabled, picking: picking, noting: !!popup, marks: marks.size, chosen: chosen.length, waiting: waiting(), theme: theme, position: position, details: details,
+        hover: label && label.style.display === 'block' ? label.textContent : '' };
     },
   };
+  Object.assign(globalThis[KEY], drawingCalls);
 
   send({ type: 'ready', url: location.href, title: document.title });
 })();

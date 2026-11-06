@@ -297,6 +297,8 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
             Gate = (url, kind, token) => CheckAsync(url, kind, asking: false, token),
             GateDocuments = IsUserProfile,
             BlockedPorts = ReservedPorts(),
+            // The user sees where the agent acts in a browser with a window; the user's own browser always has its windows.
+            ShowAgent = !Target.Headless || IsUserProfile,
         };
         return await _pool.OpenContextAsync(Target, options, cancellationToken).ConfigureAwait(false);
     }

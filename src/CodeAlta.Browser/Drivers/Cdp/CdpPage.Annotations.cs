@@ -158,6 +158,31 @@ internal sealed partial class CdpPage : IAnnotatablePage
         }
     }
 
+    /// <inheritdoc />
+    public async Task<byte[]?> ViewPictureAsync(AnnotationArea area, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(area);
+        if (area.Width <= 0 || area.Height <= 0) return null;
+        try
+        {
+            // The cursor and the glow of the agent are no part of what the user drew over the page.
+            await using var overlay = await HideAgentOverlayAsync(cancellationToken).ConfigureAwait(false);
+            // Not beyond the viewport: a capture of the whole document lays the page out again in a taller viewport,
+            // and what the toolbar draws, fixed to the viewport, would no longer be over what it was drawn on.
+            var shot = await _session.Page.CaptureScreenshotAsync(new PageCaptureScreenshotParams
+            {
+                Format = "png",
+                Clip = new PageViewport { X = area.X, Y = area.Y, Width = Math.Min(area.Width, PictureMaximumWidth), Height = Math.Min(area.Height, PictureMaximumHeight), Scale = 1 },
+                CaptureBeyondViewport = false,
+            }, cancellationToken).ConfigureAwait(false);
+            return Convert.FromBase64String(shot.Data);
+        }
+        catch (CdpException)
+        {
+            return null;
+        }
+    }
+
     // The rules the authors of the page wrote (not the browser's own), the most specific first.
     private async Task<IReadOnlyList<StyleRuleEvidence>> RulesAsync(int nodeId, CancellationToken cancellationToken)
     {

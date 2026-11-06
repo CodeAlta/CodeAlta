@@ -121,6 +121,76 @@ internal sealed class TestSite : IAsyncDisposable
             <button id="target" type="button" style="position:absolute;left:40px;top:40px;width:120px;height:40px">Target</button>
             </body></html>
             """),
+        // A page whose elements hold what must not reach a prompt: tokens in addresses, secrets in data attributes and in
+        // labels, scripts, styles and comments, and an element far larger than any bound.
+        ("/secrets", """
+            <!doctype html><html><head><title>Secrets</title></head><body style="margin:0">
+            <div id="box" class="panel" data-session="s3cr3t-session-value" aria-label="Reset with password: hunter22" style="padding:10px 10px 200px">
+            <a id="reset" href="/reset?token=abc123#done" data-api-key="sk-live-123" data-testid="reset-link" title="See https://example.com/cb?access_token=zzz999" onclick="steal()">Reset now</a>
+            <img src="data:image/png;base64,AAAA" alt="logo">
+            <script>window.hidden = 'in a script';</script>
+            <style>.panel { color: red; }</style>
+            <!-- a comment with password=hunter2 -->
+            <input type="password" name="password" value="hunter2">
+            </div>
+            <div id="big" style="height:80px"></div>
+            <script>
+            const big = document.getElementById('big');
+            big.appendChild(document.createTextNode('word '.repeat(40000)));
+            for (let i = 0; i < 3000; i++) { const b = document.createElement('b'); b.style.display = 'none'; b.textContent = 'hidden ' + i; big.appendChild(b); }
+            </script>
+            </body></html>
+            """),
+        // A page built by tools that name its classes and ids with hashes of the build or of the render, as CSS in
+        // JavaScript, CSS modules and React do: a selector of the Annotate tool skips those names.
+        ("/generated", """
+            <!doctype html><html><head><title>Generated</title></head><body style="margin:0">
+            <div class="css-1x2y3z Card_card__3xYz1 sc-AxjAm kGtEvt" style="padding:10px">
+            <ul class="menu"><li class="menu__item active" data-k="one">One</li><li class="menu__item" data-k="two">Two</li></ul>
+            </div>
+            <section class="Panel_panel__aB3cD panel"><button class="_primary_1x2y3_12 jsx-12345 buy" data-k="buy1" type="button">Buy one</button></section>
+            <section class="Panel_panel__aB3cD panel"><button class="_primary_1x2y3_12 jsx-12345 buy" data-k="buy2" type="button">Buy two</button></section>
+            <div id=":r5:"><span class="xYz12AbCdEf9GhIj" data-k="hashy">Hashy</span><span data-k="plain">Plain</span></div>
+            </body></html>
+            """),
+        // A page that shows a modal dialog and a popover in the top layer, above every z-index of the page.
+        ("/modal", """
+            <!doctype html><html><head><title>Modal</title></head><body style="margin:0">
+            <p id="behind">Behind the dialog</p>
+            <dialog id="dialog" style="margin:0;left:20px;top:20px;width:300px;height:120px;padding:10px;border:0"><button id="inside" type="button">Inside the dialog</button></dialog>
+            <div id="pop" popover="manual" style="margin:0;inset:auto 0 0 auto;width:100vw;height:100vh;padding:0;border:0;background:rgba(0,0,0,.2)">A popover over everything</div>
+            </body></html>
+            """),
+        // A page that listens, before anything else of it, to every key, input, paste, copy, cut and drag on the window and
+        // on the document as they start, and writes down what their data holds: none of what goes into the bar may reach it.
+        ("/snoop", """
+            <!doctype html><html><head><title>Snoop</title>
+            <script>
+            window.__snooped = [];
+            const record = where => event => {
+              const data = event.clipboardData || event.dataTransfer;
+              let files = 0, text = '';
+              try { files = data ? data.files.length : 0; text = data ? data.getData('text/plain') : event.key || event.data || ''; } catch (_) { }
+              window.__snooped.push(where + ':' + event.type + ':' + (data ? [...data.types].join('|') : '') + ':' + files + ':' + text);
+            };
+            for (const type of ['paste', 'copy', 'cut', 'drop', 'dragenter', 'dragover', 'dragleave', 'keydown', 'keypress', 'keyup', 'beforeinput', 'input', 'textInput', 'compositionstart', 'compositionupdate', 'compositionend']) {
+              window.addEventListener(type, record('window'), true);
+              document.addEventListener(type, record('document'), true);
+            }
+            </script></head><body style="margin:0">
+            <div id="wrap" style="padding:20px">
+            <div class="card" id="c1" style="height:40px;margin:10px 0">One</div>
+            <div class="card" id="c2" style="height:40px;margin:10px 0">Two</div>
+            </div></body></html>
+            """),
+        // A page that shows its modal dialog as it loads, before a toolbar added to the open tab is there to see it open.
+        ("/modal-open", """
+            <!doctype html><html><head><title>Modal open</title></head><body style="margin:0">
+            <p id="behind">Behind the dialog</p>
+            <dialog id="dialog" style="margin:0;left:20px;top:20px;width:300px;height:120px;padding:10px;border:0"><button id="inside" type="button">Inside the dialog</button></dialog>
+            <script>document.getElementById('dialog').showModal();</script>
+            </body></html>
+            """),
         ("/beforeunload", """
             <!doctype html><html><head><title>Leave?</title></head><body><p>Stay</p>
             <script>window.addEventListener('beforeunload', e => { e.preventDefault(); e.returnValue = ''; });</script>

@@ -274,6 +274,12 @@ internal sealed record BrowserContextOptions
 
     /// <summary>Gets the ports of the loopback no request of the tabs may reach.</summary>
     public IReadOnlyList<int> BlockedPorts { get; init; } = [];
+
+    /// <summary>
+    /// Gets whether the tabs show the user where the agent acts (see <see cref="IAgentActivityPage"/>): true for a browser
+    /// with a window, never for a headless one, where nobody looks. Chromium browsers only.
+    /// </summary>
+    public bool ShowAgent { get; init; }
 }
 
 /// <summary>A browser CodeAlta drives: one it started, or the user's own it attached to.</summary>
