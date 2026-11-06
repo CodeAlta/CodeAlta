@@ -143,6 +143,15 @@ asking it to call `exec` (`CodeModeScriptRunPrompt`), and gives that session `ex
 (`CodeModeRunRegistry.RequireCodeMode`). The run then has the permissions, the sandbox and the timeline of an ordinary
 call.
 
+An automation that runs a script **without a model** has no session, so no one is there to approve a call: what the run
+may do is declared on the automation and bound by `UnattendedScriptRunner` (`CodeAlta.LiveTool`). Its `alta` is the
+commands whose policy changes nothing, plus those of plugins, with caller kind `automation` and no sub-sessions; nothing
+that starts or drives an agent, and no `agent()`, `ask()` or MCP. Its `tools.*` are the built-in tools that read, and,
+when the automation declares write access, those that write, behind the same `SandboxToolRouter` as a session's
+(`SessionRuntimeService.CreateUnattendedToolsAsync`). A script of a project's configuration that writes needs a sandbox,
+since others change that file; only the user's own configuration may write without one. The value of the script is
+the answer of the run.
+
 ## The library
 
 `CodeModeScriptLibrary` reads the samples shipped with CodeAlta, the user's scripts (`~/.alta/scripts`) and the
@@ -151,6 +160,10 @@ the script and refuses a copy changed since it was edited; they never write `.al
 write guard and the sandbox keep out of their reach, because a library script later runs with the tools of whoever runs
 it, an automation at night included. An automation that runs a script is allowed with the script's hash, so a change
 brought by an agent or a pull waits for the user.
+
+The running plugins add their scripts (scope `Plugin`, `CodeModeScriptLibrary.PluginScripts`), named
+`<prefix>/<name>` so that no file of the library can take their name: they are read from the plugin each time, in the
+spaces that have the plugin, and never edited or saved over, since they change with their plugin.
 
 ## Questions and time
 

@@ -4,7 +4,7 @@ title: Automations
 
 # Automations
 
-An automation is a prompt that CodeAlta Desktop sends by itself: at a time you choose, when an issue or a pull request is opened, when a command of yours succeeds, or when you click **Run now**. Each run starts a new session, so you read the result like any other work. Automations are in CodeAlta Desktop only.
+An automation is a prompt that CodeAlta Desktop sends by itself: at a time you choose, when an issue or a pull request is opened, when a command of yours succeeds, when a project is added, or when you click **Run now**. Each run starts a new session, so you read the result like any other work; a [script without a model](#without-a-model) runs alone instead. Automations are in CodeAlta Desktop only.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-automations.webp" alt="CodeAlta Desktop Automations tab with the next 24 hours, six automations of a project and the details of the selected one" loading="lazy">
@@ -44,6 +44,23 @@ An agent creates one with `alta automation create --name "PR review" --trigger p
 
 An automation an agent creates is disabled, and an agent enables none: what runs by itself is turned on by you, in the **Automations** tab. An agent can still run one now, disable or delete one.
 
+### Without a model
+
+Turn on **Run without a model** for a script that only does something on its own: write a line in a file, call a command of a plugin that sends a mail. No session starts and no model is called: the script runs alone, and what it returns is the answer of the run.
+
+- It calls the `alta` commands that change nothing, and the commands of [plugins](plugins/readme.md). The commands that start, steer or create a session are not there, nor `agent()`, `ask()` or the tools of MCP servers.
+- Its `tools.*` read files and search. Turn on **It may edit files and run commands** to let it write and run commands too, in the [sandbox](sessions/sandbox.md) chosen in **Runs with**.
+- Without a sandbox, a script that writes runs only from **My configuration**: one in the configuration of a project, which others can change, needs a sandbox.
+
+```toml
+script = "branch-watch/log"
+script_mode = "direct"
+script_access = "write"
+sandbox = "workspace"
+```
+
+`alta automation create` gives the same with `--script-mode direct`, `--script-access write` and `--sandbox`.
+
 ## What its sessions run with
 
 **Runs with** is the [Agent chip](workspace/prompt.md#agent-and-model) of the prompt: click it for the same form, with the agent prompt, the provider, the model, the reasoning effort, the [permission mode](workspace/prompt.md#permission-modes), [review before commit](reviews.md#review-before-commit) and the [sandbox](sessions/sandbox.md).
@@ -80,6 +97,9 @@ sub_sessions = false
 | Slack | When the app is mentioned in a channel, or when a message is posted there. |
 | incident.io | When incident.io declares or updates an incident ([a hook of a server](fleet/operations.md#receive-events-of-other-tools)). |
 | Webhook | When another tool pushes a signed event ([a hook of a server](fleet/operations.md#receive-events-of-other-tools)). |
+| Project | When a project is added to the catalog, archived or removed. |
+| Automation | When a run of another automation completes, fails or waits for an approval. |
+| A trigger of a plugin | When what the [plugin](#triggers-of-plugins) watches happens. |
 
 An automation can have several triggers. Times are read on the clock of your computer.
 
@@ -122,6 +142,31 @@ triggers = [
   { type = "slack", event = "mention", channel = "C0123ABCDEF", app_token = "${secret:SLACK_APP}", bot_token = "${secret:SLACK_BOT}", reply = true },
 ]
 ```
+
+### Projects and other automations
+
+These triggers watch CodeAlta itself, on the machine that runs the automation.
+
+- **Project** starts when a project is added, archived or removed: choose the events, and a space to watch only its projects. A project that joins the space counts as added, one that leaves it as removed. The session gets the name, the folder and the repository of the project, and how it was added: from the window, by `alta project add`, by a session, or `unknown`.
+- **Automation** starts when a run of another automation completes, fails or waits for an approval: choose the events, and the automations to follow, by name or id, or none to follow all the others. An automation never starts on its own runs, and a chain of automations that start one another stops after five: the next run is recorded as skipped.
+- A script of the automation gets the event as its `event` argument, a JSON object: `on` (the event), `id`, and the fields of the project or of the run, such as `path` or `status`.
+
+```toml
+triggers = [
+  { type = "project", on = ["added"], space = "work" },
+  { type = "automation", on = ["failed"], automations = ["nightly-build"] },
+]
+```
+
+An agent writes them `--trigger project@added,archived` or `--trigger automation@failed`.
+
+### Triggers of plugins
+
+A [plugin](plugins/readme.md) can add its own triggers, which **Add a trigger** lists with the others under their name. Its type is written with the prefix of the plugin, such as `{ type = "acme.deploys/deploy", on = ["succeeded"], environment = "prod" }`.
+
+- CodeAlta keeps where the trigger stopped reading, and runs the automation once for each event, also after a restart.
+- A trigger can come with a script of its plugin: in an automation that has no prompt and no script yet, **Add a trigger** says **With its script**, and choosing it fills the script, which most often [runs without a model](#without-a-model).
+- While the plugin is turned off, the automation says so, and runs only with **Run now**.
 
 ## Decide what it does without you
 

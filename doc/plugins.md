@@ -87,6 +87,15 @@ links) or publishes a page of the loopback address at an HTTPS address (`Publish
 network, CodeAlta's first; a network that fails is passed over, never fatal. The publisher keeps its own state through its
 host, so the Mobile plugin knows no network by name.
 
+**Automation triggers and scripts.** `GetAutomationTriggers()` gives triggers of automations, each with an
+`IAutomationTriggerSource` that is polled with a cursor or keeps a listener running. The plugin only reports events:
+the automation engine (`AutomationSources`, `AutomationService.Sources.cs`) owns the cursor, the dedup by event id, the
+retries and the runs, and treats the events as someone else's text. The built-in Project and Automation triggers are
+sources of the same contract, so the engine has one path for all of them. `GetScripts()` gives scripts to the library
+of Code Mode; a trigger may name one it comes with, which an automation runs without a model to call the plugin back.
+A type or a script name carries a prefix of the plugin, since the configuration file names it alone: a second plugin
+with the same one shadows the first, with a diagnostic.
+
 Two rules protect the host from a plugin:
 
 - **Bounded admission.** An activation has at most 64 outstanding callbacks (agent events, landing cards). An event

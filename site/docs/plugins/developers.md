@@ -163,6 +163,8 @@ Override only the methods the plugin needs. A `Get…()` method is called once w
 | `GetSystemPromptContributions()` | Text added to the system or developer prompt | yes | yes |
 | `GetInstructionProcessors()` | Changes to the final instructions of a session | yes | yes |
 | `GetResources()` | Skills shipped with the plugin | yes | yes |
+| `GetAutomationTriggers()` | Triggers of [automations](../automations.md#triggers-of-plugins): see [Automation triggers](#automation-triggers) | yes | no |
+| `GetScripts()` | Scripts of the [library of Code Mode](../sessions/code-mode.md#scripts-of-the-library) | yes | yes |
 | `OnBeforeAgentRunAsync` | Tools and messages for one run; can cancel the run | yes | yes |
 | `OnAgentEventAsync` | Sees the events of the sessions | yes | yes |
 | `OnToolCallAsync`, `OnToolResultAsync` | Sees, blocks or changes every tool call: see [Tool hooks](#tool-hooks) | yes | yes |
@@ -196,6 +198,34 @@ sealed class AcmeNetwork : IPrivateNetworkProvider
     public IPrivateNetworkPublisher CreatePublisher(IPrivateNetworkHost host) => new AcmePublisher(host);
 }
 ```
+
+### Automation triggers
+
+`GetAutomationTriggers()` gives triggers that [automations](../automations.md#triggers-of-plugins) start on. A `PluginAutomationTriggerContribution` has a type with the plugin's own prefix (`acme.deploys/deploy`), its events (`on = [...]` in the configuration file, the default first), its fields (the other keys of the trigger, drawn by the editor: text, a `${secret:NAME}`, choices, a space, a project, automations) and its source, an `IAutomationTriggerSource`:
+
+- **Polled**: `ReadAsync(context, cursor)` answers the events since the cursor and the next cursor, which CodeAlta keeps with the trigger, across restarts. The first reading has no cursor and answers no event. CodeAlta reads every five minutes, or within seconds after the plugin raises the trigger's `Signal`.
+- **Pushed**: `ListenAsync(context, sink)` runs while the trigger is armed and hands each event to `sink.PublishAsync`; the token is canceled when the automation is turned off or edited, and a listener that ends is started again after a pause.
+
+An event runs once, by its `Id`. Its `Title` and `Fields` go into the prompt, marked as someone else's text, and its `DataJson` is the `event` argument of a script. `ValidateAsync` checks the settings beyond what the fields say; a page or the sink's `SetProblem` says why nothing comes, under the trigger.
+
+`GetScripts()` gives scripts to the library, named with the same prefix (`acme.deploys/notify`), which the user runs but never saves over. A trigger names one in `Script` to come with it, to [run without a model](../automations.md#without-a-model) by default: an event then calls the plugin back, such as an `alta` command of the plugin, with no session.
+
+```csharp
+public override IEnumerable<PluginAutomationTriggerContribution> GetAutomationTriggers()
+{
+    yield return new PluginAutomationTriggerContribution
+    {
+        Type = "acme.deploys/deploy",
+        DisplayName = "Deployment",
+        Events = [new("succeeded", "Succeeded"), new("failed", "Failed")],
+        Fields = [new("environment", "Environment", PluginTriggerFieldKind.Text) { Placeholder = "prod" }],
+        Source = this, // IAutomationTriggerSource: Delivery and ReadAsync
+        Script = new PluginTriggerScript("acme.deploys/notify"),
+    };
+}
+```
+
+The `automation-trigger` [sample](#samples) is a complete one.
 
 The publisher keeps what it needs between starts with `host.ReadStateAsync` and `WriteStateAsync`, runs its background work with `host.Run`, and says a change with `host.ReportAsync`. A plugin reads the networks of this computer with `Services.PrivateNetworks`.
 
@@ -438,6 +468,7 @@ The `codealta-plugin-runtime` skill ships complete plugins that CodeAlta's tests
 | `report-dialog` | A dialog with Markdown, a diagram and highlighted code |
 | `agent-tool` | A tool the model calls |
 | `alta-command` | A command of the `alta` tool |
+| `automation-trigger` | A trigger of automations, with a script that runs without a model and calls a command of the plugin |
 | `timeline-card` | A timeline card computed from session events |
 | `ui-status`, `ui-all-regions` | Status items and content in every region |
 | `prompt-guidance` | Text added to the prompt |

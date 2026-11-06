@@ -9,10 +9,12 @@ organization. Who owns what is in [access control](access-control.md).
 CodeAlta Desktop already has the pieces, on one machine ([automations](../../site/docs/automations.md),
 [Code Mode](../codemode.md)):
 
-- **Automations**: triggers (schedules, cron, issues and pull requests, Jira issues, commands that succeed, **Run now**),
-  a prompt or a library script, and what their sessions run with (provider, model, effort, permission mode, review,
-  sandbox, sub-sessions). They live in the user's `config.toml` or in a project's `.alta/config.toml`, which travels
-  with the repository and waits for **Allow** on each machine. Each run is a session.
+- **Automations**: triggers (schedules, cron, issues and pull requests, Jira issues, commands that succeed, projects
+  of the catalog, runs of other automations, triggers of plugins, **Run now**), a prompt or a library script, and what
+  their sessions run with (provider, model, effort, permission mode, review, sandbox, sub-sessions). They live in the
+  user's `config.toml` or in a project's `.alta/config.toml`, which travels with the repository and waits for
+  **Allow** on each machine. Each run is a session, except a script run without a model, which calls plugins and tools
+  within the access its automation declares.
 - **Workflows**: Code Mode scripts of the library (project, user, samples) that start sub-agents (`agent()`,
   `parallel()`), record their steps, and resume after a restart.
 - **Orchestration between sessions**: children, messages between agents, reminders and jobs.
@@ -57,7 +59,8 @@ and an owner; a project automation stays in its repository, where code review co
 | Trackers and other tools: Jira (issue created or updated, version released, a JQL query), incident.io, PagerDuty, Slack (a message in a channel) | Trigger sources contributed by plugins, running on the assigned machine with its credentials (polling, Slack Socket Mode), or at the server for inbound webhooks | Each source says where it can run |
 | Inbound webhooks | The server's ingress (`/api/v1/hooks/<id>`), which checks the sender's signature and hands the event to the assigned machine | For tools that only push |
 | Commands that succeed | The machine that runs the command (as today) | |
-| Fleet events | The server: a run ended or failed, a session waits, a machine went offline, a budget threshold | Chaining automations |
+| Events of the machine: a project added, archived or removed; a run of another automation ended, failed or waits | The machine that runs the automation, from its own catalog and its own runs (as today) | A chain of runs stops after five |
+| Fleet events | The server: a run ended or failed, a session waits, a machine went offline, a budget threshold | Chaining automations across machines |
 | By hand | The console, the phone, `alta automation run`, the REST API | Signed by the device of the person who asks |
 
 **An event is not an authority, and must be authentic.** The run starts only on a machine that checks the

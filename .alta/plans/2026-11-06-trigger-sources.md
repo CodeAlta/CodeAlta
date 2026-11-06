@@ -101,7 +101,7 @@ A plugin can give a trigger together with the code that handles it, so that "whe
 - [x] 8. Scripts of a plugin: `PluginBase.GetScripts()`, the `Plugin` scope of the library and its names, read-only; a trigger contribution that names its script, arguments and mode; tests.
 - [x] 9. RPC and editor: trigger descriptors, the generic fields, the events multi-select, **Run without a model**, a plugin's trigger offered with its script as a ready-made automation; frontend tests; checked in the developer instance, both themes and a narrow window.
 - [x] 10. `alta automation`: `--trigger <type>@<events>`, `--script-mode`, `--script-access`, `--sandbox`; tests. Deviation: no `--trigger-setting`; the settings of a trigger are written in its table, `--trigger '{ type = "project", on = ["added"], space = "work" }'`, which `alta` already read.
-- [ ] 11. Documentation:
+- [x] 11. Documentation:
   - `site/docs/automations.md`: the two triggers, a "CodeAlta events" section, scripts without a model, the automations a plugin offers;
   - the plugin runtime skill (`src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime`): how to write a trigger and its script, and an `automation-trigger` sample (a local git branch that moves, with a script that writes a line through the plugin's `alta` command);
   - `doc/plugins.md`: the new extension points; `doc/codemode.md`: the `Plugin` scope and runs without a session; `doc/fleet/orchestration.md`: where source triggers are evaluated.

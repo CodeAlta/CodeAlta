@@ -130,6 +130,8 @@ Override only what the plugin needs.
 | `GetSystemPromptContributions()` | Text added to the system or developer prompt | yes | yes |
 | `GetInstructionProcessors()` | Changes to the final instructions of a session | yes | yes |
 | `GetResources()` | Skills shipped with the plugin: `Resources.SkillRoot("skills")` | yes | yes |
+| `GetAutomationTriggers()` | Triggers that automations start on (see "Automation triggers") | yes | no |
+| `GetScripts()` | Scripts of the library of Code Mode, named `<prefix>/<name>` (see "Automation triggers") | yes | yes |
 | `OnBeforeAgentRunAsync` | Tools and messages for one run; can cancel the run | yes | yes |
 | `OnAgentEventAsync` | Sees the events of the sessions | yes | yes |
 | `OnToolCallAsync`, `OnToolResultAsync` | Hooks: see, block or change every tool call of a session (see "Tool hooks") | yes | yes |
@@ -545,6 +547,48 @@ The first word of `Path` is the root command. It cannot be a root of CodeAlta: `
 
 `await context.ResolveSourceSpaceIdAsync?.Invoke(ct)` gives the space of the calling session (null for the user): a command refuses an agent what its space does not have, as `alta mcp activate` does.
 
+## Automation triggers
+
+A trigger is what starts an automation of CodeAlta Desktop: the plugin class implements `IAutomationTriggerSource` and returns a `PluginAutomationTriggerContribution` from `GetAutomationTriggers()`. See `samples/automation-trigger`.
+
+```csharp
+public sealed class DeploysPlugin : PluginBase, IAutomationTriggerSource
+{
+    public PluginTriggerDelivery Delivery => PluginTriggerDelivery.Polled;
+
+    public override IEnumerable<PluginAutomationTriggerContribution> GetAutomationTriggers()
+    {
+        yield return new PluginAutomationTriggerContribution
+        {
+            Type = "acme.deploys/deploy",                       // <prefix>/<name>; the file writes { type = "acme.deploys/deploy", on = ["failed"], environment = "prod" }
+            DisplayName = "Deployment",
+            Events = [new("succeeded", "Succeeded"), new("failed", "Failed")],   // the default first
+            Fields = [new("environment", "Environment", PluginTriggerFieldKind.Text) { Required = true }],
+            Source = this,
+            Script = new PluginTriggerScript("acme.deploys/notify"),            // optional: the script it comes with, without a model
+        };
+    }
+
+    public async ValueTask<PluginTriggerPage> ReadAsync(PluginTriggerContext context, string? cursor, CancellationToken cancellationToken)
+    {
+        var latest = await ReadLatestDeployAsync(context.Settings.Text("environment")!, cancellationToken);
+        if (cursor is null || cursor == latest.Id) return new([], latest.Id);  // the first reading answers no event
+        return new([new(latest.Id, latest.Failed ? "failed" : "succeeded", $"Deploy {latest.Version}") { DataJson = latest.Json }], latest.Id);
+    }
+
+    public override IEnumerable<PluginScriptContribution> GetScripts()
+    {
+        yield return new PluginScriptContribution { Name = "acme.deploys/notify", Content = NotifyScript };   // with its `export const meta`
+    }
+}
+```
+
+- **Polled** (`ReadAsync`): CodeAlta keeps the cursor with the trigger, across restarts, and reads every five minutes; set `Signal = new PluginTriggerSignal()` and call `Raise()` to be read within seconds. **Pushed** (`ListenAsync(context, sink, token)`): a listener that hands each event to `sink.PublishAsync` until the token is canceled; one that ends is started again after a minute.
+- An event runs once by its `Id`, also when it is read again. Only the events of `context.Events` start the automation. `Title` and `Fields` go into the prompt as someone else's text; `DataJson` (a JSON object) is the `event` argument of a script, with `on` and `id`.
+- `Problem` of a page, or `sink.SetProblem`, is shown under the trigger. `ValidateAsync` refuses settings the fields do not check. `Project = PluginTriggerProject.Required` gives `context.ProjectPath`.
+- A field of kind `Secret` holds `${secret:NAME}`; `context.Settings` gives its value.
+- A script of a plugin is in the library while the plugin runs, and is never saved over. A script run **without a model** has no session: it calls the `alta` commands that change nothing and those of plugins (`alta.<root>.<command>(...)`, such as a command that sends a mail), and the tools that read; `PluginTriggerScript.Writes = true` asks for edits and commands too, in a sandbox. Nothing that starts or drives an agent.
+
 ## Text added to the prompt
 
 ```csharp
@@ -638,6 +682,7 @@ Each folder under `samples/` is a complete plugin that the tests of CodeAlta bui
 | `report-dialog` | A dialog with Markdown, a Mermaid diagram and highlighted code |
 | `agent-tool` | A tool the model calls |
 | `alta-command` | A command of the `alta` tool |
+| `automation-trigger` | A trigger of automations that polls a git branch, with a script without a model that calls an `alta` command of the plugin |
 | `timeline-card` | A card in the timeline, computed from the events of a session |
 | `prompt-guidance` | Text added to the prompt |
 | `ui-status`, `ui-all-regions` | Status items and content in every region |

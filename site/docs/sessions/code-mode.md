@@ -156,7 +156,8 @@ A script worth keeping goes in the library, where any session runs it by its nam
 
 - the samples that come with CodeAlta;
 - your scripts, in `~/.alta/scripts/<name>.js`;
-- the scripts of a project, in `.alta/scripts/<name>.js`, committed with it. A project script wins over yours of the same name, and yours over a sample.
+- the scripts of a project, in `.alta/scripts/<name>.js`, committed with it. A project script wins over yours of the same name, and yours over a sample;
+- the scripts of the [plugins](../plugins/readme.md) that run, named with the prefix of their plugin, such as `acme.deploys/notify`. They change with their plugin, and are never edited or saved over: to change one, save a copy under another name.
 
 The samples show what scripts do well, and are a start for your own (`alta script edit <name>` gives a copy to change):
 
@@ -196,7 +197,7 @@ Agents manage the library with `alta script`:
 
 A [sandboxed session](sandbox.md) reads the library but does not save in it. `alta script run` from a terminal needs a CodeAlta that keeps running: `altacli alta script run` refuses, since its CodeAlta ends with the command.
 
-Your scripts and the samples are in every [space](../spaces.md) unless you limit them, as skills are, in `~/.alta/config.toml`. A script limited so is listed, found and run only in those spaces; the scripts of a project are in every space of its sessions.
+Your scripts and the samples are in every [space](../spaces.md) unless you limit them, as skills are, in `~/.alta/config.toml`. A script limited so is listed, found and run only in those spaces; the scripts of a project are in every space of its sessions, and those of a plugin in the spaces that have the plugin.
 
 ```toml
 [scripts.spaces]

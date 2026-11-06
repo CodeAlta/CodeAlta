@@ -25,6 +25,7 @@ public sealed class PluginRuntimeSampleTests
         "canvas-board",
         "canvas-flow",
         "landing-card",
+        "automation-trigger",
     ];
 
     [TestMethod]
