@@ -462,14 +462,17 @@ public sealed class UpdateCampaignServerTests
         public Task<UpdateRequest> WaitAppliedAsync() => _applied.Task.WaitAsync(Waits.Hang);
     }
 
-    /// <summary>A node as a bare control connection: it keeps the events the server sends and reports what it is told to.</summary>
-    private sealed class TestNode(FleetConnection connection, TestDevice device) : IAsyncDisposable
+    /// <summary>
+    /// A node as a bare control connection: it keeps the events the server sends and reports what it is told to. It exists
+    /// before its connection does, so that an event the server sends as soon as the node connects (its policy) is kept.
+    /// </summary>
+    private sealed class TestNode(TestDevice device) : IAsyncDisposable
     {
         private readonly List<FleetEvent> _seen = [];
 
         public Channel<FleetEvent> Events { get; } = Channel.CreateUnbounded<FleetEvent>();
 
-        public FleetConnection Connection => connection;
+        public FleetConnection Connection { get; set; } = null!;
 
         public TestDevice Device => device;
 
@@ -496,10 +499,10 @@ public sealed class UpdateCampaignServerTests
         }
 
         public Task ReportAsync(string campaignId, string state)
-            => connection.SendRequestAsync(FleetServerMethods.UpdateReport, JsonSerializer.SerializeToElement(
+            => Connection.SendRequestAsync(FleetServerMethods.UpdateReport, JsonSerializer.SerializeToElement(
                 new FleetUpdateReport(campaignId, state, "4.0.2", "4.0.1", null, DateTimeOffset.UtcNow), FleetServerJsonContext.Default.FleetUpdateReport));
 
-        public ValueTask DisposeAsync() => connection.DisposeAsync();
+        public ValueTask DisposeAsync() => Connection.DisposeAsync();
     }
 
     /// <summary>A server set up by an owner's desktop, with nodes approved, whose own update is faked.</summary>
@@ -582,9 +585,10 @@ public sealed class UpdateCampaignServerTests
 
         public async Task<TestNode> ConnectAsync(int index)
         {
-            TestNode? node = null;
-            var (connection, _) = await Fixture.ConnectAsync(Nodes[index], connection => connection.SetEventHandler((fleetEvent, _) => node!.OnEventAsync(fleetEvent)));
-            node = new TestNode(connection, Nodes[index]);
+            // The events of the connection go to the node from its first one: the server sends its policy as soon as it connects.
+            var node = new TestNode(Nodes[index]);
+            var (connection, _) = await Fixture.ConnectAsync(Nodes[index], connection => connection.SetEventHandler((fleetEvent, _) => node.OnEventAsync(fleetEvent)));
+            node.Connection = connection;
             _connections.Add(node);
             var presence = Fixture.GetService<Control.PresenceRegistry>();
             await WaitForAsync(() => Task.FromResult(presence.IsOnline(Nodes[index].DeviceId)));
