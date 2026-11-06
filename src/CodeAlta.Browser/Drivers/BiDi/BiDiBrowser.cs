@@ -39,15 +39,16 @@ internal sealed class BiDiBrowserConnection : IBrowserConnection
     public bool IsClosed => _lost || Volatile.Read(ref _disposed) != 0 || (_process?.HasExited ?? false);
 
     /// <summary>How many times a Firefox whose session does not open is started again, the first start included.</summary>
-    internal const int SessionAttempts = 3;
+    internal const int SessionAttempts = 5;
 
     /// <summary>
-    /// How long a start that is not the last waits for its session. Measured on Windows, 2026-11-06: a Firefox opens its
-    /// session in about 1 s alone and in up to 18 s on a machine busy on every core, but on a machine that runs many test
-    /// suites at once, one start in several waits minutes for <c>session.new</c> or <c>session.subscribe</c>, or never gets an
-    /// answer, while the next start answers in a second. The last start waits as long as any command does.
+    /// How long a command that opens the session waits, in a start that is not the last. Measured on Windows, 2026-11-06:
+    /// a Firefox opens its session in about 1 s alone and in up to 18 s on a machine busy on every core, but on a machine
+    /// that runs many test suites at once, one start in several stops reading its connection after an answer: the next
+    /// command waits minutes, until the connection closes, while another start answers in a second. Three starts of 30 s
+    /// could all stall there; five of 20 s fit the same time. The last start waits as long as any command does.
     /// </summary>
-    internal static readonly TimeSpan SessionPatience = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan SessionPatience = TimeSpan.FromSeconds(20);
 
     /// <summary>
     /// Starts Firefox on a profile of CodeAlta's and connects to it; the browser ends with the connection. A Firefox whose
