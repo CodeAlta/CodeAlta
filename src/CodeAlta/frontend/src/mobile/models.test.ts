@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelOption, Options } from "./contract";
-import { choiceLabel, choiceRequest, forgetMode, groupVariants, initialChoice, orderModels, parseModel, pickEffort, pickModel, rememberChoice, tierChoice, tierText } from "./models";
+import { choiceLabel, choiceRequest, forgetMode, groupVariants, initialChoice, pickEffort, pickModel, rememberChoice, tierChoice, tierText } from "./models";
 
 const model = (provider: string, id: string, name = id, efforts: string[] = ["low", "medium", "high"], defaultEffort: string | null = "medium"): ModelOption =>
   ({ provider, id, name, providerName: provider.toUpperCase(), efforts, defaultEffort });
@@ -20,19 +20,6 @@ const options = (overrides: Partial<Options> = {}): Options => ({
   defaults: { provider: "claude", model: "claude-sonnet-4-5", reasoning: "low", prompt: "default" },
   error: null,
   ...overrides,
-});
-
-test("model ids are read as a base, a version and a suffix", () => {
-  assert.deepEqual(parseModel("claude-opus-4-7"), { base: "claude-opus", version: [4, 7], suffix: "" });
-  assert.deepEqual(parseModel("claude-4.5-opus"), { base: "claude-opus", version: [4, 5], suffix: "" });
-  assert.deepEqual(parseModel("cursor-kimi-k3"), { base: "kimi", version: [3], suffix: "" });
-  assert.deepEqual(parseModel("gpt-6.1-sol-fast"), { base: "gpt", version: [6, 1], suffix: "sol-fast" });
-});
-
-test("the frontier holds the latest version of each line, the rest goes to other models", () => {
-  const { frontier, other } = orderModels(options().models);
-  assert.deepEqual(frontier.map(m => m.id), ["claude-opus-4-7", "claude-sonnet-4-5", "gpt-6.1", "gpt-6.1-fast"]);
-  assert.deepEqual(other.map(m => m.id), ["claude-opus-4-1", "gpt-5"]);
 });
 
 test("ids that differ only by a variant are one entry with options", () => {

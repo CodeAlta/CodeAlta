@@ -267,7 +267,7 @@ supports_tool_call = true
   ```
 
   A session that already uses a hidden model keeps it. A rule that does not read stops the configuration from loading, with the provider and the rule named.
-- `models_order` lists them in the provider's order (`provider`), by name (`name`), or by name with the highest version first among the names that differ only by their numbers (`name_version`): `Claude Fable 5.1` before `Claude Fable 5`, `Gemini 4 Argon` before `Gemini 3.8 Flash`. The models of an [ACP agent](acp-agents.md) are in the `name_version` order unless you choose another one.
+- `models_order` lists them in the provider's order (`provider`), by name (`name`), or by name with the highest version first among the names that differ only by their numbers (`name_version`): `Claude Fable 5.1` before `Claude Fable 5`, `Gemini 4 Argon` before `Gemini 3.8 Flash`. The models of an [ACP agent](acp-agents.md) are in the `name_version` order unless you choose another one. The model list of the prompt has an order of its own (see [Agent and model](../workspace/prompt.md#agent-and-model)).
 
 ## Compaction settings
 

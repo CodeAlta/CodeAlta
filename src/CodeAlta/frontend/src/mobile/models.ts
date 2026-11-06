@@ -1,43 +1,5 @@
 import type { ModelOption, Options, TierOption } from "./contract";
-
-// Orders a provider's models by their ids: the base name is what comes before the version ("gemini", "gpt",
-// "claude-opus"), the version follows it, the rest is the suffix (sub-line and variants: "argon", "sol-fast",
-// "thinking"). "Frontier" holds every entry carrying the highest version of its base name, whatever its suffix;
-// all older entries go to "Other models", even a sub-line with no newer release.
-// Ids are normalized first: "claude-opus-4-7" reads 4.7, "claude-4.5-opus" reads base claude-opus, "kimi-k3" reads 3,
-// and a "cursor-" prefix is dropped.
-const versionWord = /^k?(\d+(?:\.\d+)*)$/i;
-
-/** The base name, the version and the suffix of a model id. */
-export function parseModel(id: string): { base: string; version: number[]; suffix: string } {
-  const words = id.toLowerCase().replace(/^cursor-/, "").split(/[-_\s]+/).filter(Boolean);
-  const at = words.findIndex(word => versionWord.test(word));
-  if (at < 0) return { base: words.join("-"), version: [], suffix: "" };
-  let end = at + 1;
-  const version = [versionWord.exec(words[at])![1]];
-  while (end < words.length && /^\d+$/.test(words[end])) version.push(words[end++]); // "4-7" is 4.7
-  let base = words.slice(0, at);
-  const rest = words.slice(end);
-  if (base.length === 1 && base[0] === "claude" && rest.length && !/^(thinking|fast)$/.test(rest[0])) base = [base[0], rest.shift()!];
-  return { base: base.join("-"), version: version.join(".").split(".").map(Number), suffix: rest.join("-") };
-}
-
-const compareVersions = (a: readonly number[], b: readonly number[]) => {
-  for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] ?? 0) - (b[i] ?? 0); if (d) return d; }
-  return 0;
-};
-// Within a version: the base model, then its thinking variant, then the other suffixes by name.
-const suffixKey = (suffix: string) => suffix === "" ? "0" : suffix === "thinking" ? "1" : `2${suffix}`;
-
-/** Splits models into the latest of each line ("frontier") and the older ones, each in the order of the list. */
-export function orderModels<T extends { id: string }>(models: readonly T[]): { frontier: T[]; other: T[] } {
-  const parsed = models.map(model => ({ model, p: parseModel(model.id) }));
-  const latest = new Map<string, number[]>();
-  for (const { p } of parsed) { const v = latest.get(p.base); if (!v || compareVersions(p.version, v) > 0) latest.set(p.base, p.version); }
-  const sort = (a: typeof parsed[number], b: typeof parsed[number]) => a.p.base.localeCompare(b.p.base) || compareVersions(b.p.version, a.p.version) || suffixKey(a.p.suffix).localeCompare(suffixKey(b.p.suffix));
-  const top = (x: typeof parsed[number]) => compareVersions(x.p.version, latest.get(x.p.base)!) === 0;
-  return { frontier: parsed.filter(top).sort(sort).map(x => x.model), other: parsed.filter(x => !top(x)).sort(sort).map(x => x.model) };
-}
+import { orderModels } from "../modelOrder";
 
 /** A variant a model id may carry. */
 export type Variant = "thinking" | "fast";

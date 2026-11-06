@@ -14,10 +14,11 @@ import { setUpNotifications } from "./notifications";
 import { createLiveStream, type LinkState } from "./liveStream";
 import { createMarkdownView, linkedFileName, linksMarkdown } from "./markdownView";
 import {
-  choiceLabel, choiceRequest, entryName, findModel, forgetMode, groupVariants, initialChoice, lastProjectKey, modelsOf, orderModels, pickEffort, pickModel, preferencesKey,
+  choiceLabel, choiceRequest, entryName, findModel, forgetMode, groupVariants, initialChoice, lastProjectKey, modelsOf, pickEffort, pickModel, preferencesKey,
   providerName, providers, rememberChoice, tierChoice, tierLabel, tierReady, tierText, variantLabels, type Choice, type ProjectPreferences,
 } from "./models";
 import { createPhoneFiles, newSessionFiles } from "./phoneFiles";
+import { orderModels } from "../modelOrder";
 import {
   appliedSelection, chipText, modeDescription, modeName, pickedChanges, pickSessionModel, providerPermissionMode, queueFirstKey, shownSelection, type Picked,
 } from "./selection";
