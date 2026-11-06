@@ -168,16 +168,19 @@ public sealed partial class FleetNodeService
         RecordPrincipal(call.Device, sessionId);
         // The tools it does without are known before it attaches, and kept with its lineage across restarts of the node.
         _host.RuntimeService.SetDisabledToolPatterns(sessionId, toolsOff.Count > 0 ? toolsOff : null);
+        var worktree = await PrepareWorktreeAsync(project, sessionId).ConfigureAwait(false);
         SessionViewDescriptor session;
         try
         {
-            session = await _host.Commands.CreateDraftSessionAsync(project, provider, parameters.Title, createdBy, null, request.SpaceId, permissionMode, sessionId,
+            session = await _host.Commands.CreateDraftSessionAsync(project, provider, parameters.Title, createdBy, worktree.Folder, request.SpaceId, permissionMode, sessionId,
                 request.ParentSessionId, limits.SubSessions ? null : new AgentSessionOptions { SubSessions = false }).ConfigureAwait(false);
         }
-        catch (ObjectDisposedException)
+        catch (Exception exception)
         {
             _host.RuntimeService.SetDisabledToolPatterns(sessionId, null);
-            throw new FleetException(FleetNodeErrorCodes.NodeStopping, FleetErrorHints.Retry, "The node is stopping.");
+            await _worktrees.RemoveUnusedAsync(project, worktree).ConfigureAwait(false);
+            if (exception is ObjectDisposedException) throw new FleetException(FleetNodeErrorCodes.NodeStopping, FleetErrorHints.Retry, "The node is stopping.");
+            throw;
         }
 
         _agents.Add(new FleetAgentChild(session.SessionId, request.ParentSessionId, call.Caller.DeviceId, request.ParentMachineName, request.SpaceId,

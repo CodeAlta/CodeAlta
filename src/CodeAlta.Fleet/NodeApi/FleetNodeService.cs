@@ -112,6 +112,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
 
     private readonly FleetNodeServiceOptions _options;
     private readonly CodeAltaHost _host;
+    // The worktree each session started here works in (doc/fleet/node.md, "Workspaces").
+    private readonly FleetSessionWorktrees _worktrees;
     private readonly TrustedDeviceStore _trusted;
     private readonly X509Certificate2 _certificate;
     private readonly ConcurrentDictionary<FleetConnection, FleetNodeCaller> _callers = new();
@@ -136,6 +138,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         TrustedDeviceStore.ValidateName(options.Name, nameof(options));
         _options = options;
         _host = options.Host;
+        _worktrees = new FleetSessionWorktrees(options.Host.CatalogOptions);
         _trusted = options.TrustedDevices;
         Pairing = new FleetPairingCoordinator(options.Identity, options.TrustedDevices, options.TimeProvider);
         _certificate = options.Identity.CreateTlsCertificate();

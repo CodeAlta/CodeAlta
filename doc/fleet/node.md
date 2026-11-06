@@ -146,8 +146,11 @@ labels, its local policy).
 
 - A node clones the repositories it is asked to work on into its workspace root (`~/code` by default, set per node),
   as `<host>/<owner>/<repo>`, and adds them to the space that asked.
-- Moved sessions and sessions started remotely work in worktrees of their own, so a person's checkout on that
-  machine is never changed under them.
+- Moved sessions, sessions started remotely (by a person or by an agent of another machine) and the runs of its
+  automations work in worktrees of their own, so that two sessions never edit, build and commit in the same checkout,
+  and a person's checkout on that machine is never changed under them. A project in no git repository, or one without
+  a commit yet, is worked in where it is; a worktree that cannot be made refuses the session rather than share the
+  checkout.
 - Disk use is shown in the fleet; worktrees of sessions archived or deleted are removed by the existing worktree
   cleanup.
 

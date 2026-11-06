@@ -34,6 +34,8 @@ While a machine is offline, its sessions stay listed with what was last known of
 4. Choose the provider and the model among the ones ready on that machine.
 5. Write your prompt and send it. The session starts on the machine and opens in its tab.
 
+In a project in a git repository, the session works in a worktree of its own on the machine, on a new `alta/` branch that starts from the commit its checkout is on: two sessions of the machine never change the same files, and the checkout of the project there stays as it is. A session started by an agent of another computer, or by a run of an automation, gets one too. A project that is not a git repository is worked in where it is.
+
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-fleet-run-on.webp" alt="The prompt of a new session with the Run on menu open: This machine, Build box and Workstation" loading="lazy">
   <figcaption class="small text-secondary mt-2">Run on chooses the machine the session starts on.</figcaption>

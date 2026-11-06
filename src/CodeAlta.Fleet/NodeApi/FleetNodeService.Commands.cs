@@ -63,16 +63,19 @@ public sealed partial class FleetNodeService
 
         // Whose work it is is known before the session exists: its identity, read when it attaches, resolves only what that person may use.
         RecordPrincipal(device, sessionId);
+        var worktree = await PrepareWorktreeAsync(project, sessionId).ConfigureAwait(false);
         SessionViewDescriptor session;
         try
         {
-            session = await _host.Commands.CreateDraftSessionAsync(project, provider, parameters.Title, null, null, parameters.SpaceId, permissionMode, sessionId, null, null)
+            session = await _host.Commands.CreateDraftSessionAsync(project, provider, parameters.Title, null, worktree.Folder, parameters.SpaceId, permissionMode, sessionId, null, null)
                 .ConfigureAwait(false);
         }
-        catch (ObjectDisposedException)
+        catch (Exception exception)
         {
             _host.RuntimeService.SetDisabledToolPatterns(sessionId, null);
-            throw new FleetException(FleetNodeErrorCodes.NodeStopping, FleetErrorHints.Retry, "The node is stopping.");
+            await _worktrees.RemoveUnusedAsync(project, worktree).ConfigureAwait(false);
+            if (exception is ObjectDisposedException) throw new FleetException(FleetNodeErrorCodes.NodeStopping, FleetErrorHints.Retry, "The node is stopping.");
+            throw;
         }
 
         // Work of the fleet: a stop of the kill switch and the longest time of a policy reach it.
@@ -96,6 +99,17 @@ public sealed partial class FleetNodeService
         }
 
         return new FleetCreateSessionResult(session.SessionId, provider.ProviderId.Value, send);
+    }
+
+    // The worktree a new session of a project works in: one of its own in a git repository, so that the sessions of the
+    // machine never share a checkout; none could be made, the session is not created.
+    private async Task<FleetSessionWorktree> PrepareWorktreeAsync(ProjectDescriptor? project, string sessionId)
+    {
+        var worktree = await _worktrees.PrepareAsync(project, CancellationToken.None).ConfigureAwait(false);
+        if (worktree.Problem is not { } problem) return worktree;
+        _host.RuntimeService.SetDisabledToolPatterns(sessionId, null);
+        LogWarn($"A session in {project?.Name} could not start: {problem}");
+        throw new FleetException(FleetNodeErrorCodes.Unavailable, null, problem);
     }
 
     private async Task AdmitThenSendAsync(string environment, SessionViewDescriptor session, ModelProviderDescriptor provider, FleetCreateSessionParams parameters, string retryKey)

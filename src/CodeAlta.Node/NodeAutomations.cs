@@ -152,6 +152,8 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     private readonly CodeAltaHost _host;
     private readonly NodeAutomationOptions _options;
     private readonly string _fleetRoot;
+    // The worktree each run works in, as each session started on the node does.
+    private readonly FleetSessionWorktrees _worktrees;
     private readonly Lock _gate = new();
     // One version applied at a time, from the check of the number held to the write: two at once could both pass it.
     private readonly SemaphoreSlim _applies = new(1, 1);
@@ -175,6 +177,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         _options = options ?? new();
         var catalog = host.CatalogOptions;
         _fleetRoot = catalog.FleetRoot;
+        _worktrees = new FleetSessionWorktrees(catalog);
         _assignments = LoadAssignments(Path.Combine(_fleetRoot, AssignmentsFileName));
         Engine = new AutomationService(catalog.ConfigPath, token => host.ProjectCatalog.LoadAsync(token),
             new AutomationStateStore(Path.Combine(catalog.StateRoot, "automations.json"), pausedByDefault: false),
@@ -418,6 +421,20 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         if (FleetPolicyGuard.SandboxProblem(sandbox, rules, _host.RuntimeService.ReadSandboxSettings().Profiles) is { } problem)
             return AutomationRunLimits.Refused($"This automation cannot run here: {problem}.");
         return new AutomationRunLimits(null, mode, sandbox, rules.ToolsOff is { Count: > 0 } tools ? tools : null);
+    }
+
+    /// <inheritdoc />
+    public async Task<AutomationRunFolder> PrepareFolderAsync(ProjectDescriptor? project, CancellationToken cancellationToken)
+    {
+        var worktree = await _worktrees.PrepareAsync(project, cancellationToken).ConfigureAwait(false);
+        return new AutomationRunFolder(worktree.Folder, worktree.Root, worktree.Problem);
+    }
+
+    /// <inheritdoc />
+    public Task ReleaseFolderAsync(ProjectDescriptor? project, AutomationRunFolder folder)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+        return _worktrees.RemoveUnusedAsync(project, new FleetSessionWorktree(folder.Worktree, folder.Root, folder.Problem));
     }
 
     // The rules that apply to a run of an automation in a space; null when no signed policy says anything there.

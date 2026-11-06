@@ -134,6 +134,21 @@ internal interface IAutomationRunGate
     AutomationRunLimits LimitsFor(AutomationEntry entry, ModelProviderDescriptor provider, string spaceId) => AutomationRunLimits.None;
 
     /// <summary>
+    /// Gives the session of a run the folder it works in (<c>doc/fleet/node.md</c>, "Workspaces"): on a machine of a fleet, a
+    /// worktree of its own in a git repository, so that the runs and the other sessions of the machine never share a checkout.
+    /// </summary>
+    /// <param name="project">The project of the run; null for a chat.</param>
+    /// <param name="cancellationToken">Stops the creation.</param>
+    /// <returns>The folder; <see cref="AutomationRunFolder.Project"/> for the folder of the project, the default.</returns>
+    Task<AutomationRunFolder> PrepareFolderAsync(ProjectDescriptor? project, CancellationToken cancellationToken) => Task.FromResult(AutomationRunFolder.Project);
+
+    /// <summary>Takes back a folder <see cref="PrepareFolderAsync"/> made when no session came of it.</summary>
+    /// <param name="project">The project of the run; null for a chat.</param>
+    /// <param name="folder">The folder.</param>
+    /// <returns>A task that completes once it is taken back.</returns>
+    Task ReleaseFolderAsync(ProjectDescriptor? project, AutomationRunFolder folder) => Task.CompletedTask;
+
+    /// <summary>
     /// Records whose work the session of a run is, before it attaches (<c>doc/fleet/security-and-privacy.md</c>, shared machines):
     /// a run that is not positively the work of the owner of the machine (an automation of a team or of the organization, or one
     /// another person gave) resolves none of the owner's own values. Nothing to record on a host whose every session is its owner's.
@@ -160,6 +175,16 @@ internal sealed record AutomationRunLimits(string? Problem, string? PermissionMo
     /// <param name="problem">Why.</param>
     /// <returns>The limits.</returns>
     public static AutomationRunLimits Refused(string problem) => new(problem, null, null, null);
+}
+
+/// <summary>The folder the session of a run works in.</summary>
+/// <param name="Worktree">The worktree folder it works in; null for the folder of its project.</param>
+/// <param name="Root">The root of a worktree made for it, taken back when no session comes of it; null for none.</param>
+/// <param name="Problem">Why no folder could be given and the run does not start; null when one was.</param>
+internal sealed record AutomationRunFolder(string? Worktree, string? Root, string? Problem)
+{
+    /// <summary>Gets the folder of a run that works in the folder of its project.</summary>
+    public static AutomationRunFolder Project { get; } = new(null, null, null);
 }
 
 /// <summary>Starts the session of a run and sends it the prompt.</summary>
@@ -420,6 +445,14 @@ internal sealed class AutomationRunner : IAutomationRunner
                 _host.RuntimeService.SetDisabledToolPatterns(limitedId, off);
             }
 
+            // The folder of the run: on a machine of a fleet, a worktree of its own; none could be made, the run does not start.
+            var folder = _gate is null ? AutomationRunFolder.Project : await _gate.PrepareFolderAsync(project, cancellationToken).ConfigureAwait(false);
+            if (folder.Problem is { } noFolder)
+            {
+                if (limitedId is not null) _host.RuntimeService.SetDisabledToolPatterns(limitedId, null);
+                return Refuse(noFolder);
+            }
+
             SessionViewDescriptor session;
             try
             {
@@ -430,11 +463,12 @@ internal sealed class AutomationRunner : IAutomationRunner
                     SourceProjectId = project?.Id,
                     CorrelationId = runId,
                     CreatedAt = DateTimeOffset.UtcNow,
-                }, null, spaceId, permissionMode, limitedId, null, definition.SessionOptions).ConfigureAwait(false);
+                }, folder.Worktree, spaceId, permissionMode, limitedId, null, definition.SessionOptions).ConfigureAwait(false);
             }
             catch
             {
                 if (limitedId is not null) _host.RuntimeService.SetDisabledToolPatterns(limitedId, null);
+                if (_gate is not null) await _gate.ReleaseFolderAsync(project, folder).ConfigureAwait(false);
                 throw;
             }
 
