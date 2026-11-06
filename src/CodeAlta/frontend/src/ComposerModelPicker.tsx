@@ -1,6 +1,7 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Button, InputGroup, Menu, MenuItem, PopoverNext } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
+import { orderModels } from "./modelOrder";
 import { matchingModels, modelAfterKey, modelPickerPreferences, useModelPickerRows, type ModelPickerChoice, type ModelPickerPreferenceStore } from "./modelPicker";
 import { ModelIcon } from "./ProviderIcon";
 import { useShellLanguage } from "./shellLanguage";
@@ -17,8 +18,9 @@ export type ComposerAdaptive = Readonly<{ ready: boolean; detail: string; title?
 
 /**
  * The model of the next Send as a searchable list: the focus stays in the search box, the arrows move through the
- * models that match, and Enter takes the active one. The list shows the number of models chosen in Settings and scrolls
- * for the rest. A saved model the provider does not list is named on the button, never in the list.
+ * models that match, and Enter takes the active one. The latest model of each family comes first, the older ones after
+ * "Other models" (see modelOrder.ts). The list shows the number of models chosen in Settings and scrolls for the rest.
+ * A saved model the provider does not list is named on the button, never in the list.
  */
 export function ComposerModelPicker({ id, value, models, providerKey, disabled = false, loading = false, title, onChange, preferences = modelPickerPreferences,
   tiers, currentTier = null, onChooseTier, adaptive = null, onChooseAdaptive, currentAdaptiveLevel = null }: {
@@ -43,7 +45,10 @@ export function ComposerModelPicker({ id, value, models, providerKey, disabled =
   const list = useRef<HTMLUListElement>(null), search = useRef<HTMLInputElement>(null);
   const listId = useId();
   const onAdaptive = currentTier === "adaptive" || !!currentTier?.startsWith("adaptive:");
-  const shown = useMemo(() => matchingModels(models, query), [models, query]);
+  const sections = useMemo(() => orderModels(matchingModels(models, query)), [models, query]);
+  const shown = useMemo(() => [...sections.frontier, ...sections.other], [sections]);
+  // The separator stands before the first older model, when the latest ones are listed too.
+  const separatorAt = sections.frontier.length > 0 && sections.other.length > 0 ? sections.frontier.length : -1;
   const current = models.find(model => model.id === value);
   const label = current?.name ?? (value ? loading ? t("Loading…") : `${value} · ${t("Unverified")}` : t(loading ? "Loading…" : "No model"));
   const usable = !disabled && !loading;
@@ -97,13 +102,13 @@ export function ComposerModelPicker({ id, value, models, providerKey, disabled =
         event.preventDefault(); setActive(next);
       }} />
     <Menu ulRef={list} id={listId} role="listbox" aria-label={t("Models")}>
-      {shown.map((model, index) => <MenuItem key={model.id} roleStructure="listoption" data-model-id={model.id}
+      {shown.map((model, index) => <Fragment key={model.id}>{index === separatorAt && <li role="separator" className="composer-model-separator">{t("Other models")}</li>}<MenuItem roleStructure="listoption" data-model-id={model.id}
         // The option is the list item, which is what the search box names as its active descendant.
         ref={item => { if (item) item.id = option(index); }}
         active={index === active} selected={model.id === value} shouldDismissPopover={false}
         icon={<ModelIcon modelId={model.id} providerKey={providerKey} size={14} />}
         text={model.name} label={model.name !== model.id ? model.id : undefined} htmlTitle={model.id}
-        onMouseEnter={() => setActive(index)} onClick={() => choose(model)} />)}
+        onMouseEnter={() => setActive(index)} onClick={() => choose(model)} /></Fragment>)}
     </Menu>
     {shown.length === 0 && <p role="status">{t(models.length ? "No models match this search." : "No model")}</p>}
   </div>;
@@ -112,7 +117,7 @@ export function ComposerModelPicker({ id, value, models, providerKey, disabled =
   return <PopoverNext className="composer-model-target" fill placement="bottom-start" matchTargetWidth isOpen={open && usable} content={content} onOpening={focusSearch}
     onInteraction={next => {
       // The list opens on the model in use, with nothing searched.
-      if (next && !open) { setQuery(""); setActive(Math.max(0, models.findIndex(model => model.id === value))); }
+      if (next && !open) { const all = orderModels(models); setQuery(""); setActive(Math.max(0, [...all.frontier, ...all.other].findIndex(model => model.id === value))); }
       setOpen(next);
     }} onOpened={() => { focusSearch(); reveal(); }}>
     <Button id={id} className="composer-model-select" data-model-selector alignText="start" aria-haspopup="listbox" aria-expanded={open && usable}

@@ -1111,6 +1111,7 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .composer-model-picker .bp6-menu-item > .bp6-text-overflow-ellipsis { flex: 1 1 auto; }
 .composer-model-picker .bp6-menu-item-label { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .composer-model-picker p { margin: 4px 2px; color: var(--muted); }
+.composer-model-separator { list-style: none; margin: 4px 0 2px; padding: 6px 7px 2px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
 /* The tiers of models at the top of the list: one button each, with the model it gives now. */
 .composer-tiers { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 4px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
 .composer-tier.bp6-button { display: grid; justify-items: start; gap: 0; min-width: 0; padding: 3px 6px; text-align: start; }

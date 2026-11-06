@@ -27,20 +27,23 @@ test("the model list of the composer searches, shows the chosen number of models
     assert.equal(Math.round(shape.list / shape.row), 10, JSON.stringify(shape));
     assert.ok(shape.scrolls && shape.inView, JSON.stringify(shape));
     assert.equal(await page.evaluate(active), "vendor/model-25");
+    // The latest model of the family first, then the older ones, highest version first, after "Other models".
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.composer-model-picker [role="listbox"] > li')].slice(0, 3).map(item => item.textContent)`),
+      ["Model 40vendor/model-40", "Other models", "Model 39vendor/model-39"], "each model with its id");
 
     // The search narrows the list; the arrows and Enter choose without leaving the box.
     await page.type("model 3");
     await page.until(`${listed}.length === 13`, "the models that match");
     assert.equal(await page.evaluate(`${listed}[0].startsWith('Model 3')`), true);
-    assert.equal(await page.evaluate(active), "vendor/model-3");
+    assert.equal(await page.evaluate(active), "vendor/model-39");
     await page.key("ArrowDown", 40); await page.key("ArrowDown", 40); await page.key("ArrowUp", 38);
-    assert.equal(await page.evaluate(active), "vendor/model-13");
+    assert.equal(await page.evaluate(active), "vendor/model-38");
     assert.equal(await page.evaluate(`(() => { const option = document.querySelector('.composer-model-picker .bp6-active').closest('[role="option"]');
       return !!option.id && document.activeElement?.getAttribute('aria-activedescendant') === option.id; })()`), true, "the search box names the active option");
     await page.key("Enter", 13);
     await page.until(`!document.querySelector('.composer-model-picker')`, "the list closed by the choice");
-    assert.deepEqual(await page.evaluate(`pickerFixture.chosen`), ["vendor/model-13"]);
-    assert.equal(await page.evaluate(`document.querySelector('#composer-model-test').textContent`), "Model 13");
+    assert.deepEqual(await page.evaluate(`pickerFixture.chosen`), ["vendor/model-38"]);
+    assert.equal(await page.evaluate(`document.querySelector('#composer-model-test').textContent`), "Model 38");
     assert.equal(await page.evaluate(`!!document.querySelector('.composer-selection-form')`), true, "the form of the chip stays open");
 
     // A search that finds nothing says so, and Escape closes the list only.
@@ -53,13 +56,13 @@ test("the model list of the composer searches, shows the chosen number of models
     await page.key("Escape", 27);
     await page.until(`!document.querySelector('.composer-model-picker')`, "the list closed by Escape");
     assert.equal(await page.evaluate(`!!document.querySelector('.composer-selection-form')`), true);
-    assert.deepEqual(await page.evaluate(`pickerFixture.chosen`), ["vendor/model-13"]);
+    assert.deepEqual(await page.evaluate(`pickerFixture.chosen`), ["vendor/model-38"]);
 
     // A click chooses as well, and choosing the model in use changes nothing.
     await page.click('#composer-model-test');
-    await page.click('.composer-model-picker [data-model-id="vendor/model-13"]');
+    await page.click('.composer-model-picker [data-model-id="vendor/model-38"]');
     await page.until(`!document.querySelector('.composer-model-picker')`, "the list closed by the click");
-    assert.deepEqual(await page.evaluate(`pickerFixture.chosen`), ["vendor/model-13"]);
+    assert.deepEqual(await page.evaluate(`pickerFixture.chosen`), ["vendor/model-38"]);
   }, options);
 });
 
