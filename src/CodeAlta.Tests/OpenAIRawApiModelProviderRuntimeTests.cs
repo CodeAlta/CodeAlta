@@ -7253,7 +7253,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     {
         public List<ResponseRequestRecord> Requests { get; } = [];
 
-        public override AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
+        public override Task<AsyncStreamingResult<StreamingResponseUpdate>> CreateResponseStreamingAsync(
             CreateResponseOptions options,
             CancellationToken cancellationToken = default)
         {
@@ -7266,7 +7266,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             var updates = requestIndex < responseBatches.Count
                 ? responseBatches[requestIndex]
                 : [];
-            return new TestAsyncCollectionResult<StreamingResponseUpdate>(updates);
+            return StreamingResult(new TestAsyncCollectionResult<StreamingResponseUpdate>(updates), cancellationToken);
         }
 
         private static CreateResponseOptions CloneOptions(CreateResponseOptions? options)
@@ -7608,7 +7608,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     private sealed class ThrowingOpenAIResponseClient(Exception exception)
         : ResponsesClient(new ApiKeyCredential("test-key"))
     {
-        public override AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
+        public override Task<AsyncStreamingResult<StreamingResponseUpdate>> CreateResponseStreamingAsync(
             CreateResponseOptions options,
             CancellationToken cancellationToken = default)
             => throw exception;
@@ -7619,13 +7619,12 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         IReadOnlyList<StreamingResponseUpdate> updates)
         : ResponsesClient(new ApiKeyCredential("test-key"))
     {
-        public override AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
+        public override Task<AsyncStreamingResult<StreamingResponseUpdate>> CreateResponseStreamingAsync(
             CreateResponseOptions options,
             CancellationToken cancellationToken = default)
         {
             _ = options;
-            _ = cancellationToken;
-            return new DelayedAsyncCollectionResult<StreamingResponseUpdate>(release, updates);
+            return StreamingResult(new DelayedAsyncCollectionResult<StreamingResponseUpdate>(release, updates), cancellationToken);
         }
     }
 
@@ -7634,13 +7633,13 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     {
         public int RequestCount { get; private set; }
 
-        public override AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
+        public override Task<AsyncStreamingResult<StreamingResponseUpdate>> CreateResponseStreamingAsync(
             CreateResponseOptions options,
             CancellationToken cancellationToken = default)
         {
             _ = options;
             RequestCount++;
-            return new PendingAfterFirstAsyncCollectionResult<StreamingResponseUpdate>(update, cancellationToken);
+            return StreamingResult(new PendingAfterFirstAsyncCollectionResult<StreamingResponseUpdate>(update, cancellationToken), cancellationToken);
         }
     }
 
@@ -7650,13 +7649,13 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     {
         public int RequestCount { get; private set; }
 
-        public override AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
+        public override Task<AsyncStreamingResult<StreamingResponseUpdate>> CreateResponseStreamingAsync(
             CreateResponseOptions options,
             CancellationToken cancellationToken = default)
         {
             _ = options;
             var index = RequestCount++;
-            return new PendingAfterFirstAsyncCollectionResult<StreamingResponseUpdate>(updates[index], cancellationToken);
+            return StreamingResult(new PendingAfterFirstAsyncCollectionResult<StreamingResponseUpdate>(updates[index], cancellationToken), cancellationToken);
         }
     }
 
@@ -7667,7 +7666,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     {
         public int RequestCount { get; private set; }
 
-        public override AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
+        public override Task<AsyncStreamingResult<StreamingResponseUpdate>> CreateResponseStreamingAsync(
             CreateResponseOptions options,
             CancellationToken cancellationToken = default)
         {
@@ -7677,7 +7676,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 throw failures[RequestCount - 1];
             }
 
-            return new TestAsyncCollectionResult<StreamingResponseUpdate>(successUpdates);
+            return StreamingResult(new TestAsyncCollectionResult<StreamingResponseUpdate>(successUpdates), cancellationToken);
         }
     }
 
@@ -7689,14 +7688,16 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     {
         public int RequestCount { get; private set; }
 
-        public override AsyncCollectionResult<StreamingResponseUpdate> CreateResponseStreamingAsync(
+        public override Task<AsyncStreamingResult<StreamingResponseUpdate>> CreateResponseStreamingAsync(
             CreateResponseOptions options,
             CancellationToken cancellationToken = default)
         {
             RequestCount++;
-            return RequestCount == 1
-                ? new FailingAsyncCollectionResult<StreamingResponseUpdate>(firstUpdate, failure)
-                : new TestAsyncCollectionResult<StreamingResponseUpdate>(successUpdates);
+            return StreamingResult(
+                RequestCount == 1
+                    ? new FailingAsyncCollectionResult<StreamingResponseUpdate>(firstUpdate, failure)
+                    : new TestAsyncCollectionResult<StreamingResponseUpdate>(successUpdates),
+                cancellationToken);
         }
     }
 
@@ -7788,6 +7789,15 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             "DeserializeStreamingChatCompletionUpdate",
             BindingFlags.NonPublic | BindingFlags.Static)
         ?? throw new InvalidOperationException("The OpenAI package no longer exposes the expected chat-stream deserializer.");
+
+    // The Responses client answers once the response is established; its updates are then read once.
+    private static Task<AsyncStreamingResult<StreamingResponseUpdate>> StreamingResult(
+        IAsyncEnumerable<StreamingResponseUpdate> updates,
+        CancellationToken cancellationToken)
+        => Task.FromResult(AsyncStreamingResult.Create(
+            new TestPipelineResponse { ContentStream = new MemoryStream() },
+            (_, _) => updates,
+            cancellationToken));
 
     private sealed class TestAsyncCollectionResult<T>(IReadOnlyList<T> values) : AsyncCollectionResult<T>
     {

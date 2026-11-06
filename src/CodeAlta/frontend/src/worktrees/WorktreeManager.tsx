@@ -311,11 +311,11 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
   // Beside the code editor, the editor the user chose and the file manager of the system.
   const external = useExternalOpener();
   const externalRows = external.opener ? { editor: external.editor ?? null, platform: external.platform,
-    open: (row: InventoryRow, target: ExternalTarget) => void external.opener!.openWorktree(target, project.id, row.path) } : null;
+    open: (row: InventoryRow, target: ExternalTarget) => void external.opener!.openWorktree(target, project.id, row.path, null, null) } : null;
 
   function openEditor(row: InventoryRow) {
     setOpening(true); setNotice(null);
-    void api.openEditor({ expectedEpoch: epoch, projectId: project.id, path: row.path }, { timeoutMilliseconds: 30_000 })
+    void api.openEditor({ expectedEpoch: epoch, projectId: project.id, path: row.path, file: null, line: null }, { timeoutMilliseconds: 30_000 })
       .then(reply => typeof reply?.status === "string" ? reply.status : "failed", () => "failed")
       .then(status => {
         if (!alive.current) return;

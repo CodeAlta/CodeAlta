@@ -66,8 +66,12 @@ export async function endBrowser(browser: ChildProcess | undefined, timeoutMs = 
  * follows `navigator.languages` when no language is chosen, and the tests look for its English labels. On macOS
  * Edge ignores `--lang` and takes the languages of the system; the headless `--accept-lang` sets them there.
  *
- * `--blink-settings=preferredColorScheme=0` makes `prefers-color-scheme` dark whatever the theme of the system: the
- * pages that follow it (the phone page, a window on the system theme) render the same on every machine.
+ * `--blink-settings` makes `prefers-color-scheme` dark whatever the theme of the system (`preferredColorScheme=0`): the
+ * pages that follow it (the phone page, a window on the system theme) render the same on every machine. It also gives
+ * the page a fine pointer that can hover (`primaryPointerType=4`, `primaryHoverType=2`, and the same available): a
+ * headless browser on a Linux machine without a mouse says `(hover: none)` and `(pointer: none)`, so the controls a
+ * row shows under the pointer would always be drawn and the tests of the desktop would fail there alone. Chromium
+ * takes one `--blink-settings`: the settings stay in this one.
  */
 export const browserBaseArgs: readonly string[] = Object.freeze([
   "--headless=new",
@@ -79,7 +83,7 @@ export const browserBaseArgs: readonly string[] = Object.freeze([
   "--guest",
   "--lang=en-US",
   "--accept-lang=en-US",
-  "--blink-settings=preferredColorScheme=0",
+  "--blink-settings=preferredColorScheme=0,primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2",
 ]);
 
 /** Waits through missing/partial port files, with a real deadline and bounded launch diagnostics. */

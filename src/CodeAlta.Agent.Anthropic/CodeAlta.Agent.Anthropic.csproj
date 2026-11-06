@@ -5,10 +5,6 @@
     <Nullable>enable</Nullable>
     <IsAotCompatible>true</IsAotCompatible>
     <IsPackable>false</IsPackable>
-    <CodeAltaAnthropicSdkProjectPath Condition="'$(CodeAltaAnthropicSdkProjectPath)' == ''">$(MSBuildThisFileDirectory)..\..\..\anthropic-sdk-csharp\src\Anthropic\Anthropic.csproj</CodeAltaAnthropicSdkProjectPath>
-    <!-- Disable for now, as the package integrates our latest changes -->
-    <CodeAltaUseCodeAltaAnthropicSdkProject>false</CodeAltaUseCodeAltaAnthropicSdkProject>
-    <CodeAltaUseCodeAltaAnthropicSdkProject Condition="'$(CodeAltaUseCodeAltaAnthropicSdkProject)' == '' AND Exists('$(CodeAltaAnthropicSdkProjectPath)')">true</CodeAltaUseCodeAltaAnthropicSdkProject>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,12 +17,7 @@
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(CodeAltaUseCodeAltaAnthropicSdkProject)' == 'true'">
-    <!-- Temporary local SDK reference while validating the Anthropic streaming fix. -->
-    <ProjectReference Include="$(CodeAltaAnthropicSdkProjectPath)" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(CodeAltaUseCodeAltaAnthropicSdkProject)' != 'true'">
+  <ItemGroup>
     <PackageReference Include="Anthropic" />
   </ItemGroup>
 </Project>

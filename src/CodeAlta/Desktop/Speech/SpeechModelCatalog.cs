@@ -88,7 +88,7 @@ internal static class SpeechModelCatalog
     /// The version of sherpa-onnx: of the managed wrapper the project references and of the native libraries
     /// downloaded here. They are built from the same structures and change together.
     /// </summary>
-    public const string EngineVersion = "2.0.0";
+    public const string EngineVersion = "2.0.1";
 
     /// <summary>Gets the preset models, the default first.</summary>
     public static IReadOnlyList<SpeechModelDefinition> Presets { get; } =
@@ -139,12 +139,12 @@ internal static class SpeechModelCatalog
 
     private static readonly FrozenDictionary<string, SpeechEngineDefinition> Engines = new SpeechEngineDefinition[]
     {
-        new("win-x64", 8390394, "eb6e8a4eaa900e399919af655339031e951b31f9d4e949fbfa0b85b8b92e9e1c", ["onnxruntime.dll", "sherpa-onnx-c-api.dll"]),
-        new("win-arm64", 8007360, "c34f119290ac12232915e45b4ed79c2790a7e0476e38d2b92090ea113cf2d6ef", ["onnxruntime.dll", "sherpa-onnx-c-api.dll"]),
-        new("osx-x64", 10947234, "781b70cf207b4822f01087271b2163dee00cb88092a53c6dab8f190810d32b10", ["libonnxruntime.dylib", "libsherpa-onnx-c-api.dylib"]),
-        new("osx-arm64", 9761211, "a724b91e9716e1e239d840797a850499567ac0af6704f540cbcc96d852e451b9", ["libonnxruntime.dylib", "libsherpa-onnx-c-api.dylib"]),
-        new("linux-x64", 10668748, "8039f3ae3978a550169945dd06a79a3efe43ec98442bf27e7c6a81f809756de5", ["libonnxruntime.so", "libsherpa-onnx-c-api.so"]),
-        new("linux-arm64", 13514409, "75c8535478ff04364bcdc2aab562f0c9b35d616907346431497804a0f1da656f", ["libonnxruntime.so", "libsherpa-onnx-c-api.so"]),
+        new("win-x64", 8413229, "aa1af9048923eee5790c6626b8857803f9b637c1d9290bc5aa14496ed430da4e", ["onnxruntime.dll", "sherpa-onnx-c-api.dll"]),
+        new("win-arm64", 8029645, "bb6598a20d267e62b549d90cc5dd7dcf7088e5545e0fa678ec2991dc915d0795", ["onnxruntime.dll", "sherpa-onnx-c-api.dll"]),
+        new("osx-x64", 10973176, "60eb5dee411e64589ddd235e1d01d9a4cd353650a537d43c8b2a2f6379eabcb2", ["libonnxruntime.dylib", "libsherpa-onnx-c-api.dylib"]),
+        new("osx-arm64", 9783984, "9944605af98d3306837e4208d0ae42c0526c2e28db38eb7512969babdfc6a259", ["libonnxruntime.dylib", "libsherpa-onnx-c-api.dylib"]),
+        new("linux-x64", 10694863, "9f826edb3e72b7a7c9fc30310d66a7ab03972cf3b993c3ee65a2dd05bae85427", ["libonnxruntime.so", "libsherpa-onnx-c-api.so"]),
+        new("linux-arm64", 13535140, "193a36bfb098e953764f393f8e9923e54c02aa87b0e9c437b915376827ec0978", ["libonnxruntime.so", "libsherpa-onnx-c-api.so"]),
     }.ToFrozenDictionary(static engine => engine.RuntimeIdentifier, StringComparer.Ordinal);
 
     /// <summary>Gets the runtime identifiers the engine exists for.</summary>

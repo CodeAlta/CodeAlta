@@ -258,6 +258,17 @@ export function projectRelativePath(prefix: string, path: string): string | null
   return !prefix ? path : path.startsWith(prefix) && path.length > prefix.length ? path.slice(prefix.length) : null;
 }
 
+/**
+ * The path the editors open for a changed file, or null when there is none to open: a file that is gone, one outside
+ * the project folder, or a list that is not read yet. In the folder of the project it is named from that folder; in a
+ * worktree (`fromRoot`) from the root of the worktree, where git names the paths of the list, so that a file beside
+ * the project folder opens too.
+ */
+export function openablePath(prefix: string | null, changed: Pick<ChangedFile, "path" | "status">, fromRoot = false): string | null {
+  if (prefix === null || changed.status === "deleted") return null;
+  return fromRoot ? changed.path : projectRelativePath(prefix, changed.path);
+}
+
 /** What the diff side of a changes tab shows: the selected file alone, or every file, one under the other, in one view that scrolls. */
 export type ChangesView = "file" | "all";
 export const changesViews: readonly ChangesView[] = ["file", "all"];

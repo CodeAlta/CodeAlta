@@ -763,8 +763,11 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .output-viewer-bar { display: flex; align-items: center; gap: .5rem; min-height: 56px; padding: calc(6px + env(safe-area-inset-top)) calc(8px + var(--safe-right)) 6px calc(16px + var(--safe-left)); border-bottom: 1px solid var(--line); }
 .output-viewer-title { display: flex; flex: 1; align-items: baseline; gap: .5rem; min-width: 0; font-size: .875rem; }
 .output-viewer-title strong { flex: none; }
-.output-viewer-stage { flex: 1; min-height: 0; overflow: auto; padding: .5rem calc(12px + var(--safe-right)) calc(12px + env(safe-area-inset-bottom)) calc(12px + var(--safe-left)); }
+.output-viewer-stage { flex: 1; min-height: 0; overflow: auto; overflow-anchor: none; padding: .5rem calc(12px + var(--safe-right)) calc(12px + env(safe-area-inset-bottom)) calc(12px + var(--safe-left)); }
 .output-viewer-text { margin: .5rem 0; font: .75rem/1.4 var(--code-font); white-space: pre-wrap; overflow-wrap: anywhere; }
+.toast:has(~ .output-viewer) { z-index: 51; }
+.output-viewer-mark { display: block; margin-inline: -.375rem; padding-inline: .375rem; color: inherit; background: color-mix(in srgb, var(--yellow) 22%, transparent); box-shadow: inset 2px 0 var(--yellow); }
+.output-viewer-drawn { margin: .5rem 0; overflow-wrap: anywhere; }
 .output-viewer-note { margin: .5rem 0; color: var(--muted); font-size: .8125rem; }
 .output-viewer-note:empty { display: none; }
 /* A table scrolls sideways in its message: its cells keep their words whole, as the rest of the message does not. */

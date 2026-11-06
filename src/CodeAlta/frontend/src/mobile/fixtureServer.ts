@@ -66,6 +66,8 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     tools: new Map<string, ToolCallDetail>(),
     /** The whole outputs of the tool calls, read a page at a time, by `<session>/<activity id>`. */
     toolOutputs: new Map<string, string>(),
+    /** The files the answers link, by `<session>/<seq>/<target of the link>`; the path the server finds is `C:\work\` and the target. */
+    linkedFiles: new Map<string, string>(),
     /**
      * The images of the sessions, by `<session>/<image id>` for a saved copy and `<session>/linked/<seq>/<position>` for a
      * picture of the disk an answer shows; any other image is not found.
@@ -186,6 +188,18 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     }
     const steerPath = /^\/api\/sessions\/([^/]+)\/steer\/([^/]+)\/withdraw$/.exec(path);
     if (steerPath) return send(response, 200, { withdrawn: state.steers.delete(decodeURIComponent(steerPath[2])), error: null });
+    const filePath = /^\/api\/sessions\/([^/]+)\/file$/.exec(path);
+    if (filePath) {
+      const link = url.searchParams.get("link") ?? "", whole = state.linkedFiles.get(`${decodeURIComponent(filePath[1])}/${url.searchParams.get("seq")}/${link}`);
+      if (whole === undefined) return send(response, 400, { error: "This file is not there." });
+      const page = 16_000, offset = url.searchParams.get("offset"), before = url.searchParams.get("before");
+      const place = offset === null && before === null ? /#L(\d+)/u.exec(link) : null, lines = whole.split("\n");
+      const markStart = place ? lines.slice(0, Number(place[1]) - 1).reduce((sum, line) => sum + line.length + 1, 0) : undefined;
+      const markEnd = place ? markStart! + lines[Number(place[1]) - 1].length + 1 : undefined;
+      const start = before !== null ? Math.max(0, Number(before) - page) : offset !== null ? Number(offset) : place ? Math.max(0, markStart! - page / 2) : 0;
+      const end = before !== null ? Number(before) : Math.min(whole.length, start + page);
+      return send(response, 200, { path: `C:\\work\\${link.split("#")[0].replaceAll("/", "\\")}`, output: whole.slice(start, end), outputOffset: start, outputLength: whole.length, markStart, markEnd, error: null });
+    }
     const outputPath = /^\/api\/sessions\/([^/]+)\/tools\/([^/]+)\/output$/.exec(path);
     if (outputPath) {
       const key = `${decodeURIComponent(outputPath[1])}/${decodeURIComponent(outputPath[2])}`, whole = state.toolOutputs.get(key);

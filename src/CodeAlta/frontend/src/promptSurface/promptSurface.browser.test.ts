@@ -113,6 +113,7 @@ test("the prompt surface keeps one row above and one below the editor at every w
         overflow:surface.scrollWidth>surface.clientWidth+1||document.documentElement.scrollWidth>document.documentElement.clientWidth+1,
         tokens:visible('.context-usage-tokens')?surface.querySelector('.context-usage-tokens').textContent:null,
         cache:visible('.prompt-cache-countdown')?surface.querySelector('.prompt-cache-countdown').textContent:null,
+        signIn:visible('.sign-in-end')?visible('.sign-in-end > span')?surface.querySelector('.sign-in-end').textContent:'icon':null,
         send:visible('[aria-label="Send"]'),stop:visible('[aria-label="Cancel observed run"]'),workspace:visible('.workspace-chip'),mcp:visible('.composer-plugin-status-item'),
         agent:visible('.composer-selection'),more:visible('.prompt-surface-more-button'),subAgents:visible('.prompt-surface-meters .sub-agents-chip'),
         folded:!!surface.querySelector('.prompt-surface-folded .sub-agents-chip'),mark:surface.querySelector('.prompt-surface-more-mark')?.textContent??null,
@@ -192,6 +193,8 @@ test("the prompt surface keeps one row above and one below the editor at every w
           assert.equal(seen.apart, true, `the Agent chip does not cover the meters at ${where}`);
           assert.equal(seen.tokens, "563k/1M", `the tokens of the context are always shown at ${where}`);
           assert.equal(seen.cache, "37m", `the prompt cache countdown is shown at ${where}`);
+          // Where room is short the warning stays, without the time left.
+          assert.equal(seen.signIn, density === "narrow" || density === "tiny" ? "icon" : "2d", `the end of the sign-in is shown at ${where}`);
           assert.ok(seen.workspace && seen.mcp && seen.agent && seen.more, `the chips and the menu are shown at ${where}`);
           assert.equal(running ? seen.stop : seen.send, true, `the main action is shown at ${where}`);
           if (running) assert.equal(seen.jobs, true, `the background jobs are shown at ${where}`);

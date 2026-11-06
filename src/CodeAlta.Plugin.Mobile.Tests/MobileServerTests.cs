@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
+using CodeAlta.Catalog;
 using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Plugin.Mobile.Tests;
@@ -586,16 +587,146 @@ public sealed class MobileServerTests
     }
 
     [TestMethod]
-    public void LinkedImages_NeverNameAnotherComputer()
+    public async Task Files_AreReadOnlyWhenTheAnswerLinksThem_APageAtATime()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        using var folder = new TempFolder();
+        var code = string.Join('\n', Enumerable.Range(1, 3).Select(static line => $"line {line}"));
+        var large = new string('a', MobileFiles.PageCharacters + 10);
+        var numbered = string.Join('\n', Enumerable.Range(1, MobileFiles.PageCharacters / 2).Select(static line => $"line {line}"));
+        var (middle, lastLine) = (MobileFiles.PageCharacters / 4, MobileFiles.PageCharacters / 2);
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "numbered.txt"), numbered);
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "code.cs"), code);
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "with space.md"), "# Title");
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "large.txt"), large);
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "secret.txt"), "not linked");
+        await File.WriteAllBytesAsync(Path.Combine(folder.Path, "data.bin"), [1, 0, 2]);
+        await using (var tooLarge = File.Create(Path.Combine(folder.Path, "huge.txt"))) tooLarge.SetLength(MobileFiles.MaximumBytes + 1);
+        Directory.CreateDirectory(Path.Combine(folder.Path, "sub"));
+        var full = Path.Combine(folder.Path, "code.cs");
+        var status = FakeAlta.Status("a", "p1", "personal");
+        status["workingDirectory"] = folder.Path;
+        fixture.Alta
+            .Answer("session status a", status)
+            .Answer("session events a", new JsonObject
+            {
+                ["type"] = "alta.session.event", ["sequenceNumber"] = 7, ["kind"] = "assistant.message",
+                ["content"] = new JsonArray(new JsonObject
+                {
+                    ["text"] = $"[code](code.cs), [line 2](code.cs#L2), [at 3](code.cs:3), [range](code.cs#L2-L3), [past](code.cs#L2-L99), [none](code.cs#L99), [middle](numbered.txt#L{middle}), [last](numbered.txt#L{lastLine}), [spaced](<with space.md>), [full]({full}), [large](large.txt), [gone](gone.txt), [sub](sub), [bin](data.bin), [huge](huge.txt), "
+                        + "[web](https://example.com/a.txt), [other](//server/share/a.txt)\n\n`[code](secret.txt)`\n\n```\n[fence](secret.txt)\n```",
+                }),
+            });
+
+        JsonNode? Read(HttpResponseMessage response) => JsonNode.Parse(response.Content.ReadAsStringAsync().Result);
+        Task<HttpResponseMessage> Get(string link, long seq = 7, string more = "")
+            => fixture.Client.GetAsync($"/api/sessions/a/file?seq={seq}&link={Uri.EscapeDataString(link)}{more}");
+
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await Get("code.cs")).StatusCode, "A file needs a phone that signed in.");
+        await fixture.SignInAsync();
+
+        var whole = Read(await Get("code.cs"))!;
+        Assert.AreEqual(code, (string?)whole["output"]);
+        Assert.AreEqual(0, (int?)whole["outputOffset"]);
+        Assert.AreEqual(code.Length, (int?)whole["outputLength"]);
+        Assert.AreEqual(full, (string?)whole["path"], "The phone is told which file it reads.");
+        Assert.AreEqual("# Title", (string?)Read(await Get("with%20space.md"))!["output"], "A link as the page writes its target.");
+        Assert.AreEqual(code, (string?)Read(await Get(full.Replace('\\', '/')))!["output"], "With the separators of either system.");
+
+        // A place in the file: a file that fits comes whole, and the page says where the lines to mark are, their line break included.
+        (int? Offset, int? Start, int? End) Marked(JsonNode page) => ((int?)page["outputOffset"], (int?)page["markStart"], (int?)page["markEnd"]);
+        var second = Read(await Get("code.cs#L2"))!;
+        Assert.AreEqual(code, (string?)second["output"]);
+        Assert.AreEqual((0, 7, 14), Marked(second));
+        Assert.AreEqual((0, 14, 20), Marked(Read(await Get("code.cs:3"))!), "The last line has no line break.");
+        Assert.AreEqual((0, 7, 20), Marked(Read(await Get("code.cs#L2-L3"))!));
+        Assert.AreEqual((0, 7, 20), Marked(Read(await Get("code.cs#L2-L99"))!), "A range ends with the file.");
+        Assert.AreEqual((0, null, null), Marked(Read(await Get("code.cs#L99"))!), "A line the file no longer has opens the file at its start.");
+        Assert.IsNull(Read(await Get("code.cs"))!["markStart"], "A link to the file names no line.");
+
+        // A long file: half a page before the line, on the start of a line, and no less than a page at its end.
+        var around = Read(await Get($"numbered.txt#L{middle}"))!;
+        var (offset, markStart, markEnd) = Marked(around);
+        var wanted = numbered.IndexOf($"\nline {middle}\n", StringComparison.Ordinal) + 1;
+        Assert.AreEqual(wanted, markStart);
+        Assert.AreEqual(wanted + $"line {middle}\n".Length, markEnd);
+        Assert.IsTrue(offset > 0 && wanted - offset <= MobileFiles.PageCharacters / 2 && wanted - offset > MobileFiles.PageCharacters / 2 - 32, $"{offset} for {wanted}");
+        Assert.AreEqual('\n', numbered[offset!.Value - 1], "The page starts on a line.");
+        Assert.AreEqual(numbered.Substring(offset.Value, MobileFiles.PageCharacters), (string?)around["output"]);
+        var last = Read(await Get($"numbered.txt#L{lastLine}"))!;
+        Assert.AreEqual(numbered.Length, (int?)last["outputOffset"] + ((string?)last["output"])?.Length, "The page reaches the end of the file.");
+        Assert.IsTrue(((string?)last["output"])!.Length > MobileFiles.PageCharacters - 32, "A page that ends the file is still a whole page.");
+
+        // The pages around it say nothing of the mark: the phone has it from the first.
+        Assert.AreEqual((0, null, null), Marked(Read(await Get($"numbered.txt#L{middle}", more: "&offset=0"))!));
+        Assert.IsNull(Read(await Get($"numbered.txt#L{middle}", more: "&before=100"))!["markStart"]);
+
+        var first = Read(await Get("large.txt"))!;
+        Assert.AreEqual(MobileFiles.PageCharacters, ((string?)first["output"])?.Length);
+        Assert.AreEqual(large.Length, (int?)first["outputLength"]);
+        Assert.AreEqual(10, ((string?)Read(await Get("large.txt", more: $"&offset={MobileFiles.PageCharacters}"))!["output"])?.Length, "The page after.");
+        Assert.AreEqual(5, ((string?)Read(await Get("large.txt", more: "&before=5"))!["output"])?.Length, "The page before.");
+
+        foreach (var (link, reason) in ((string, string)[])[("gone.txt", "not there"), ("sub", "folder"), ("data.bin", "not text"), ("huge.txt", "too large")])
+        {
+            using var refused = await Get(link);
+            Assert.AreEqual(HttpStatusCode.BadRequest, refused.StatusCode, reason);
+            Assert.IsNotNull((string?)Read(refused)!["error"], reason);
+        }
+
+        // Only what the answer links, as a link.
+        foreach (var link in (string[])["secret.txt", "../secret.txt", Path.Combine(folder.Path, "secret.txt"), "https://example.com/a.txt", "//server/share/a.txt"])
+            Assert.AreEqual(HttpStatusCode.BadRequest, (await Get(link)).StatusCode, link);
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await Get("code.cs", 8)).StatusCode, "Another record than the answer asked for.");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/c/file?seq=7&link=code.cs")).StatusCode, "A session the phone does not see.");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/a/file?seq=7")).StatusCode, "No link.");
+
+        // A prompt the user sent links files as an answer does; one that came from elsewhere, and any other record, links none.
+        JsonObject Message(string kind, JsonObject? metadata) => new()
+        {
+            ["type"] = "alta.session.event", ["sequenceNumber"] = 9, ["kind"] = kind, ["metadata"] = metadata,
+            ["content"] = new JsonArray(new JsonObject { ["text"] = "[code](code.cs)" }),
+        };
+        fixture.Alta.Answer("session events a", Message("user.message", null));
+        Assert.AreEqual(code, (string?)Read(await Get("code.cs", 9))!["output"], "A prompt of the user.");
+        Assert.Contains("assistant.message,user.message", fixture.Alta.Calls.Last(static call => call.Args[1] == "events").Args);
+        foreach (var other in (JsonObject[])[
+            Message("user.message", new JsonObject { ["provenance"] = "agent-session", ["sourceSessionId"] = "b" }), Message("user.message", new JsonObject { ["provenance"] = "background-job" }),
+            Message("user.message", new JsonObject { ["provenance"] = "reminder" }), Message("user.message", new JsonObject { ["sourceSessionId"] = "b" }), Message("tool.output", null)])
+        {
+            var said = other.ToJsonString();
+            fixture.Alta.Answer("session events a", other);
+            Assert.AreEqual(HttpStatusCode.BadRequest, (await Get("code.cs", 9)).StatusCode, said);
+        }
+    }
+
+    [TestMethod]
+    public void LinkedFiles_ReadsTheLinksOfATextAsThePageDraws()
+    {
+        var root = OperatingSystem.IsWindows() ? "file:///C:/tmp" : "file:///tmp";
+        CollectionAssert.AreEqual(
+            (string[])["a.cs", "a.cs:3", "with space.md", "code\\b.md", "c(1).md", "d_e.md", "x&y.md", "h.md", $"{root}/f.txt", $"{root}/g.txt"],
+            MobileTimeline.LinkedFiles($"[a](a.cs) [l](a.cs:3) [s](<with space.md> \"title\") [w](code\\b.md) [p](c(1).md) [e](d\\_e.md) [n](x&amp;y.md) <{root}/f.txt> see {root}/g.txt. [`code`](h.md) [web](https://example.com/) [mail](mailto:me@example.com) [other](//server/a.md) `[no](no.md)`\n\n    [no](no.md)").ToArray());
+    }
+
+    [TestMethod]
+    public void Links_NeverNameAnotherComputer_APictureNoMoreThanAFile()
     {
         // Only parsed, never opened: opening one is what would send the credentials of the user to that computer. FileLinkTests
-        // has every form of such a path; these show that a picture goes through that rule.
-        foreach (var target in (string[])["//server/share/a.png", @"\\server\share\a.png", @"\??\UNC\server\share\a.png", "%5C%5Cserver%5Cshare%5Ca.png", "file://server/share/a.png"])
+        // has every form of such a path; these show that a picture and a link go through that rule.
+        foreach (var target in (string[])["//server/share/a.png", @"\\server\share\a.png", @"\??\UNC\server\share\a.png","%5C%5Cserver%5Cshare%5Ca.png", "file://server/share/a.png"])
         {
             Assert.IsEmpty(MobileTimeline.LinkedImages($"![a](<{target}>)"), target);
             Assert.IsEmpty(MobileTimeline.LinkedImages($"![a]({target})"), target);
+            Assert.IsEmpty(MobileTimeline.LinkedFiles($"[a](<{target.Replace(@"\", @"\\")}>)"), target);
             Assert.IsNull(MobileImages.Locate(target, Path.GetFullPath("/start")), target);
         }
+
+        // Markdown reads "\\" as one backslash: what is left is a path inside the folder of the session.
+        var linked = MobileTimeline.LinkedFiles(@"[a](<\\server\share\a.txt>)").Single();
+        Assert.IsTrue(FileLink.TryParse(linked, out var link));
+        var folder = Path.GetFullPath("/start");
+        Assert.AreEqual(Path.Combine(folder, "server", "share", "a.txt"), link.Locate(folder, ""));
     }
 
     private sealed class TempFolder : IDisposable

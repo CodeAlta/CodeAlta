@@ -25,6 +25,7 @@ export const externalEditorMessages = {
   "The external editor could not be started.": [
     "No se pudo iniciar el editor externo.", "L’éditeur externe n’a pas pu être lancé.", "Der externe Editor konnte nicht gestartet werden.",
     "外部エディターを起動できませんでした。", "无法启动外部编辑器。"],
+  "This file is no longer in the worktree.": ["Este archivo ya no está en el worktree.", "Ce fichier n’est plus dans le worktree.", "Diese Datei ist nicht mehr im Worktree.", "このファイルはワークツリーにありません。", "此文件已不在工作树中。"],
   "The folder could not be opened.": ["No se pudo abrir la carpeta.", "Le dossier n’a pas pu être ouvert.", "Der Ordner konnte nicht geöffnet werden.", "フォルダーを開けませんでした。", "无法打开该文件夹。"],
   // The setting, on the General page.
   "External editor": ["Editor externo", "Éditeur externe", "Externer Editor", "外部エディター", "外部编辑器"],

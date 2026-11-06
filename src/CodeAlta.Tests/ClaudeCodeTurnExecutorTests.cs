@@ -1439,6 +1439,53 @@ public sealed class ClaudeCodeTurnExecutorTests
         AssertCacheLifetime(TimeSpan.FromHours(1), response.Usage!);
     }
 
+    [TestMethod]
+    public async Task SignIn_ItsEndIsInTheUsage_AndASessionWarnsOnceInItsLastDays()
+    {
+        var cli = new ClaudeCodeFakeCli { CredentialExpiresAt = "2026-12-24T03:01:53.159Z" };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var updates = new List<AgentTurnSessionUpdate>();
+        Task<AgentTurnResponse> Run(AgentTurnRequest request) => executor.ExecuteTurnAsync(
+            request,
+            static (_, _) => ValueTask.CompletedTask,
+            (update, _) =>
+            {
+                updates.Add(update);
+                return ValueTask.CompletedTask;
+            }).WaitAsync(Timeout);
+
+        // Weeks away: the usage says it, nothing warns.
+        var first = await Run(CreateRequest([User("one")]));
+        Assert.AreEqual(DateTimeOffset.Parse("2026-12-24T03:01:53.159Z", System.Globalization.CultureInfo.InvariantCulture), first.Usage!.SignInExpiresAt);
+        Assert.IsFalse(updates.Any(static update => update.Message?.Contains("sign-in", StringComparison.Ordinal) == true));
+
+        // In its last days: one warning, which says how to sign in again; the next turn does not repeat it.
+        var soon = DateTimeOffset.UtcNow.AddHours(30);
+        cli.CredentialExpiresAt = soon.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        var second = await Run(CreateRequest([User("one"), first.AssistantMessage, User("two")], first));
+        var third = await Run(CreateRequest([User("one"), first.AssistantMessage, User("two"), second.AssistantMessage, User("three")], second));
+
+        var warning = updates.Single(static update => update.Kind == AgentSessionUpdateKind.Warning && update.Message?.Contains("sign-in", StringComparison.Ordinal) == true);
+        StringAssert.Contains(warning.Message, "ends in 29 hours");
+        StringAssert.Contains(warning.Message, "/login");
+        Assert.AreEqual(soon, third.Usage!.SignInExpiresAt);
+
+        // A CLI that does not say it (an API key, an older CLI): the usage says nothing of it.
+        cli.CredentialExpiresAt = null;
+        var fourth = await Run(CreateRequest([User("one"), first.AssistantMessage, User("two"), second.AssistantMessage, User("three"), third.AssistantMessage, User("four")], third));
+        Assert.IsNull(fourth.Usage!.SignInExpiresAt);
+    }
+
+    [TestMethod]
+    public void SignIn_TheMessageOfItsEnd_SaysWhenAndHow()
+    {
+        var options = new ClaudeCodeFakeCli().CreateOptions();
+        var end = new DateTimeOffset(2026, 11, 24, 3, 1, 0, TimeSpan.Zero);
+        StringAssert.Contains(ClaudeCodeSession.SignInEndMessage(options, end, TimeSpan.FromDays(2.5)), "ends in 2 days");
+        StringAssert.Contains(ClaudeCodeSession.SignInEndMessage(options, end, TimeSpan.FromMinutes(20)), "ends in 20 minutes");
+        StringAssert.Contains(ClaudeCodeSession.SignInEndMessage(options, end, TimeSpan.FromMinutes(-5)), "ended on");
+    }
+
     private static JsonObject CacheUsage(long read, long write, long write1h, long write5m) => new()
     {
         ["input_tokens"] = 10,

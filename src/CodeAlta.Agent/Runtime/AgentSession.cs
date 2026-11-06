@@ -4482,7 +4482,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Source: AgentUsageSource.RecoveredHistory,
             UpdatedAt: DateTimeOffset.UtcNow,
             Details: previousUsage?.Details,
-            PromptCacheExpiresAt: previousUsage?.PromptCacheExpiresAt);
+            PromptCacheExpiresAt: previousUsage?.PromptCacheExpiresAt,
+            SignInExpiresAt: previousUsage?.SignInExpiresAt);
     }
 
     private long CountDurableEvents()

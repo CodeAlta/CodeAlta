@@ -174,6 +174,7 @@ const editorFailures: Readonly<Record<string, MessageKey>> = {
   worktree_missing: "The folder of this worktree is gone.",
   not_worktree: "The worktree is no longer there.",
   no_window: "The code editor could not be opened.",
+  file_missing: "This file is no longer in the worktree.",
 };
 
 /** Why the code editor did not open on a checkout. */

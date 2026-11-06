@@ -3057,11 +3057,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const pasteInTerminalLatest = useRef(pasteInTerminal); pasteInTerminalLatest.current = pasteInTerminal;
   const [pasteSessionTerminal] = useState(() => (commands: string, scope: MarkdownLinkScope) => void pasteInTerminalLatest.current(commands, scope));
   // The code editor on the folder a session works in: the worktree, as git lists it, while its folder is there; the editor of the project otherwise.
-  async function openWorkEditor(project: Readonly<{ id: string; path: string }>, worktreeRoot: string | null) {
+  // A file of the worktree ("a/b.ts" from its root) is opened in it, which the Changes tab of a worktree asks for.
+  async function openWorkEditor(project: Readonly<{ id: string; path: string }>, worktreeRoot: string | null, file: string | null = null) {
     const epoch = currentHostEpoch.current;
     if (!owned || !epoch) return;
     if (!worktreeRoot) { openProjectEditor(project); return; }
-    const status = await worktreesApi.openEditor({ expectedEpoch: epoch, projectId: project.id, path: worktreeRoot }, { timeoutMilliseconds: 30_000 })
+    const status = await worktreesApi.openEditor({ expectedEpoch: epoch, projectId: project.id, path: worktreeRoot, file, line: null }, { timeoutMilliseconds: 30_000 })
       .then(reply => reply.status, () => "failed");
     if (status !== "ok") showToast({ intent: "warning", icon: "warning-sign", timeout: 6000, message: editorFailure(status, t) });
   }
@@ -3203,7 +3204,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       { timeoutMilliseconds: 15_000 })).status,
     openEntry: async (target, projectId, path, line) => (await projectFiles.openExternal({ expectedEpoch: currentHostEpoch.current ?? null, projectId, path, target, line, column: null },
       { timeoutMilliseconds: 15_000 })).status,
-    openWorktree: async (target, projectId, path) => (await worktreesApi.openExternal({ expectedEpoch: currentHostEpoch.current ?? null, projectId, path, target },
+    openWorktree: async (target, projectId, path, file, line) => (await worktreesApi.openExternal({ expectedEpoch: currentHostEpoch.current ?? null, projectId, path, target, file, line },
       { timeoutMilliseconds: 15_000 })).status,
     failed: message => showToast({ message: translate(shownLocale.current, message), intent: "warning", icon: "warning-sign", timeout: 6000 }),
   }));
@@ -4130,7 +4131,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
-      onAction={(session, action, focusPrompt) => openScopeSession(scope, session, action, focusPrompt)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionCloudEntries(session), ...sessionBookmarkEntries(session), ...sessionLineageEntries(session), ...sessionReviewEntries(session), ...sessionMachineEntries(session)]} deleteAsks={confirms.sessionDelete}
+      onAction={(session, action, focusPrompt) => openScopeSession(scope, session, action, focusPrompt)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionCloudEntries(session), ...sessionBookmarkEntries(session), ...sessionLineageEntries(session), ...sessionReviewEntries(session), ...sessionMachineEntries(session)]}
+      openEntries={sessionEditorEntries} deleteAsks={confirms.sessionDelete}
       archiveAsks={session => archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0}
       spaces={spacesState.available && spacesState.spaces.length > 1}
       drag={session => sessionDragSource(session, scope)}
@@ -4460,6 +4462,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const sessionMachineEntries = (session: WorkspaceSession): SessionMenuEntry[] => owned && pairedMachines.length > 0 && !session.archived && !inCloud(session)
     && session.scopeKind === "project" && (!!session.machineId || !!session.projectId)
     ? [{ key: "move-machine", label: t("Move to machine…"), icon: "remote" as const, onSelect: () => setMachineMove(session) }] : [];
+  // The code editor on the folder a session works in, as the code editor of its prompt opens it: its worktree while the
+  // folder is there, else the project. A session of a paired machine works in a folder of that machine.
+  const sessionEditorEntries = (session: WorkspaceSession): SessionMenuEntry[] => {
+    const project = owned && session.projectId && !session.archived && !session.machineId && !inCloud(session)
+      ? snapshot?.projects.find(value => value.id === session.projectId && !value.archived && !value.machineId) : undefined;
+    return project ? [{ key: "code-editor", label: t("Open the code editor"), icon: "code" as const,
+      onSelect: () => void openWorkEditorLatest.current(project, session.worktreeRoot && !session.worktreeMissing ? session.worktreeRoot : null) }] : [];
+  };
   const sessionReviewEntries = (session: WorkspaceSession): SessionMenuEntry[] => owned && session.projectId && !session.archived && !inCloud(session)
     ? [{ key: "review-changes", label: t("Review changes"), icon: "chat" as const, onSelect: () => reviewSessionChanges(session) }] : [];
   const sessionLineageEntries = (session: WorkspaceSession): SessionMenuEntry[] => {
@@ -6189,10 +6199,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 projectName={snapshot?.projects.find(project => project.id === tab.projectId)?.name} request={changeRequests.get(tab.projectId)}
                 sessions={snapshot?.sessions} onWorktreesChanged={refreshSessionList} onOpenSession={id => void openAutomationSession(id)}
                 visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={activateShown(tab, visible)}
-                onOpenFile={path => openEditor({ id: tab.projectId, path: tab.projectPath }, { path, line: null, column: null, explorer: null })} />
+                onOpenFile={(path, worktree) => worktree === null ? openEditor({ id: tab.projectId, path: tab.projectPath }, { path, line: null, column: null, explorer: null })
+                  : void openWorkEditorLatest.current({ id: tab.projectId, path: tab.projectPath }, worktree, path)} />
               : <ProjectEditor key={fileTabKey(tab)} tab={tab} editors={fileEditors} request={editorRequests.get(tab.projectId)}
               projectName={tab.name ?? snapshot?.projects.find(project => project.id === tab.projectId)?.name} platform={shellPreferences?.platform ?? "windows"}
               epoch={!status ? undefined : owned ? status.hostEpoch : null} onPickFile={isFolderTab(tab) ? undefined : openFilePicker}
+              onOpenWorktree={owned && !isFolderTab(tab) && !snapshot?.projects.find(project => project.id === tab.projectId)?.archived ? worktree => void openWorkEditorLatest.current({ id: tab.projectId, path: tab.projectPath }, worktree.path) : undefined}
               visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={activateShown(tab, visible)}
               // The files of a project take comments, sent to one of its sessions; a folder that is not a project's, none.
               review={owned && !isFolderTab(tab) && snapshot?.projects.some(project => project.id === tab.projectId)

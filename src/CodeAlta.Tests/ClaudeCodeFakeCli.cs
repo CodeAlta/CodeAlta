@@ -83,6 +83,9 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     /// <summary>Gets or sets what a result says of the models of the conversation. The default names the model that answers.</summary>
     public Func<JsonObject>? ModelUsage { get; set; }
 
+    /// <summary>Gets or sets when the claude.ai sign-in ends, as a result of Claude Code 2.1.318 says it; null for none.</summary>
+    public string? CredentialExpiresAt { get; set; }
+
     /// <summary>Adds the cost of a turn to its conversation and returns the total, which is what the CLI reports.</summary>
     public double AddCost(string conversationId, double cost)
         => _totalCosts.AddOrUpdate(conversationId, cost, (_, total) => total + cost);
@@ -614,6 +617,11 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         if (userMessage is { } user && user.TryGetProperty("uuid", out var uuid))
         {
             result["user_message_uuids"] = new JsonArray(uuid.GetString());
+        }
+
+        if (_cli.CredentialExpiresAt is { } expiresAt)
+        {
+            result["credential_expires_at"] = expiresAt;
         }
 
         Emit(result);

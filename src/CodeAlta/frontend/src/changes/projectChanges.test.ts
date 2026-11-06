@@ -3,7 +3,7 @@ import test from "node:test";
 import { changeBar, changeCommitsReply, changeContent, changeContentNotice, changeDiffLimit, changeHistoryHeight, changeKeyKept, changeKeysAttribute, changeLetter, changeLineHeight,
   changeListReply, changeStep,
   changeListRows, changeListWidth, changeScopeKey, changesViewLabel, changesViews, changeTreeRows, defaultChangesPreferences, estimatedDiffHeight, filterChanges,
-  fittedDiffHeight, orderChanges, persistChangesPreferences, projectRelativePath, restoreChangesPreferences, sectionAt, selectedChange,
+  fittedDiffHeight, orderChanges, openablePath, persistChangesPreferences, projectRelativePath, restoreChangesPreferences, sectionAt, selectedChange,
   type ChangedFile } from "./projectChanges";
 
 const file = (path: string, values: Partial<ChangedFile> = {}): ChangedFile =>
@@ -116,6 +116,17 @@ test("a changed file is opened by its path inside the project, when it is inside
   assert.equal(projectRelativePath("packages/app/", "packages/app/src/a.ts"), "src/a.ts");
   assert.equal(projectRelativePath("packages/app/", "packages/other/a.ts"), null);
   assert.equal(projectRelativePath("packages/app/", "packages/app/"), null);
+  // What the editors open: the file of the folder the list was read for, a worktree included (it has no prefix); never a deleted one.
+  assert.equal(openablePath("", { path: "src/a.ts", status: "modified" }), "src/a.ts");
+  assert.equal(openablePath("packages/app/", { path: "packages/app/src/a.ts", status: "added" }), "src/a.ts");
+  assert.equal(openablePath("packages/app/", { path: "packages/other/a.ts", status: "modified" }), null);
+  assert.equal(openablePath("", { path: "src/a.ts", status: "deleted" }), null);
+  assert.equal(openablePath(null, { path: "src/a.ts", status: "modified" }), null);
+  // In a worktree the path is named from its root, whatever folder the project is in: a file beside that folder opens too.
+  assert.equal(openablePath("packages/app/", { path: "packages/app/src/a.ts", status: "modified" }, true), "packages/app/src/a.ts");
+  assert.equal(openablePath("packages/app/", { path: "packages/other/a.ts", status: "modified" }, true), "packages/other/a.ts");
+  assert.equal(openablePath("", { path: "src/a.ts", status: "deleted" }, true), null);
+  assert.equal(openablePath(null, { path: "src/a.ts", status: "modified" }, true), null);
 });
 
 test("the layout of the tab is kept; a stored value that is not one restores the default", () => {

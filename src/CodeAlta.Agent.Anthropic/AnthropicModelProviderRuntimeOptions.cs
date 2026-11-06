@@ -140,4 +140,7 @@ public sealed class AnthropicProviderOptions
     internal HttpClient? HttpClient { get; set; }
 
     internal Func<DelegatingHandler>? HttpHandlerFactory { get; set; }
+
+    // The thinking the endpoint refused, kept by a provider that creates the executor of each request (Copilot).
+    internal AgentRefusedReasoning? RefusedReasoning { get; set; }
 }

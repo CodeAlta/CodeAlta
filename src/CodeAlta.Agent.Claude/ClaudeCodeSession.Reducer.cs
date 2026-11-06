@@ -74,6 +74,11 @@ internal sealed partial class ClaudeCodeSession
     private long? _lastOutputTokens;
     private string? _lastModel;
     private AgentRateLimitSummary? _rateLimits;
+    // When the claude.ai sign-in of the CLI ends (credential_expires_at of a result, from 2.1.318 on); null for an API
+    // key, a token or an older CLI.
+    private DateTimeOffset? _signInExpiresAt;
+    // The end of the sign-in this session already warned of: once for each sign-in.
+    private DateTimeOffset? _signInEndWarned;
 
     private void ResetRunState()
     {
@@ -164,6 +169,7 @@ internal sealed partial class ClaudeCodeSession
                     ? CreateResponse(toolSegment, requiresFollowUp: false)
                     : null;
             case "result":
+                await NoteSignInEndAsync(message, onSessionUpdate, cancellationToken).ConfigureAwait(false);
                 return ReduceResult(@event);
             case "system":
                 return await ReduceSystemAsync(@event, onSessionUpdate, cancellationToken).ConfigureAwait(false);
@@ -607,6 +613,53 @@ internal sealed partial class ClaudeCodeSession
         }
     }
 
+    /// <summary>How long before the end of the sign-in of the CLI a session warns of it.</summary>
+    internal static readonly TimeSpan SignInEndWarning = TimeSpan.FromDays(3);
+
+    // A claude.ai sign-in ends after some weeks, and the turns of the provider then fail until it is signed in again:
+    // the usage of the session says when, and the session warns once in its last days.
+    private async ValueTask NoteSignInEndAsync(
+        JsonElement result,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
+        CancellationToken cancellationToken)
+    {
+        _signInExpiresAt = ClaudeCodeJson.GetString(result, "credential_expires_at") is { } text &&
+                           DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
+            ? parsed
+            : null;
+        if (_signInExpiresAt is not { } end || _signInEndWarned == end)
+        {
+            return;
+        }
+
+        var left = end - DateTimeOffset.UtcNow;
+        if (left > SignInEndWarning)
+        {
+            return;
+        }
+
+        _signInEndWarned = end;
+        await onSessionUpdate(
+                new AgentTurnSessionUpdate { Kind = AgentSessionUpdateKind.Warning, Message = SignInEndMessage(_options, end, left) },
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    internal static string SignInEndMessage(ClaudeCodeModelProviderRuntimeOptions options, DateTimeOffset end, TimeSpan left)
+    {
+        var when = end.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        if (left <= TimeSpan.Zero)
+        {
+            return $"The claude.ai sign-in of Claude Code ended on {when}: its turns fail until it is signed in again. {options.SignInHint()}.";
+        }
+
+        var remaining = left.TotalHours >= 48
+            ? $"{(int)left.TotalDays} days"
+            : left.TotalHours >= 1 ? $"{(int)left.TotalHours} hours" : $"{Math.Max(1, (int)Math.Ceiling(left.TotalMinutes))} minutes";
+        return $"The claude.ai sign-in of Claude Code ends in {remaining}, on {when}: its turns will fail until it is signed in again. " +
+               $"{options.SignInHint()} before then to renew it.";
+    }
+
     private static AgentRateLimitWindow? ReadUnifiedWindow(JsonElement windows, string name, long minutes)
         => ClaudeCodeJson.TryGetObject(windows, name, out var window) && ClaudeCodeJson.GetDouble(window, "utilization") is { } used
             ? new AgentRateLimitWindow(
@@ -759,9 +812,10 @@ internal sealed partial class ClaudeCodeSession
     {
         if (_lastUsage is not { } usage)
         {
-            return _rateLimits is null
+            return _rateLimits is null && _signInExpiresAt is null
                 ? null
-                : new AgentSessionUsage(RateLimits: _rateLimits, Scope: AgentUsageScope.RateLimitOnly, Source: AgentUsageSource.ProviderUsage, UpdatedAt: DateTimeOffset.UtcNow);
+                : new AgentSessionUsage(RateLimits: _rateLimits, Scope: AgentUsageScope.RateLimitOnly, Source: AgentUsageSource.ProviderUsage, UpdatedAt: DateTimeOffset.UtcNow,
+                    SignInExpiresAt: _signInExpiresAt);
         }
 
         // `input_tokens` is what was not read from or written to the prompt cache: the request read all three, and
@@ -793,7 +847,8 @@ internal sealed partial class ClaudeCodeSession
             Scope: AgentUsageScope.CurrentWindow,
             Source: AgentUsageSource.ProviderUsage,
             UpdatedAt: DateTimeOffset.UtcNow,
-            PromptCacheExpiresAt: _promptCacheExpiresAt);
+            PromptCacheExpiresAt: _promptCacheExpiresAt,
+            SignInExpiresAt: _signInExpiresAt);
     }
 
     // Claude Code ends a turn that was stopped while the model wrote or while its tools ran with these reasons.

@@ -1,4 +1,4 @@
-import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, LatestEventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, QueuePage, Session, SessionChoices, SessionPage, TakeOverResult, ToolCallDetail, ToolOutputPage, ToolOutputPlace, UnqueueResult, UnsteerResult, WaitingPage, WaitingRun } from "./contract";
+import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, LatestEventPage, LinkedFilePage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, QueuePage, Session, SessionChoices, SessionPage, TakeOverResult, ToolCallDetail, ToolOutputPage, ToolOutputPlace, UnqueueResult, UnsteerResult, WaitingPage, WaitingRun } from "./contract";
 
 /** What the page says when the server no longer knows this phone. */
 export const signedOutMessage = "This phone is no longer connected: scan the QR code of the Mobile tab again.";
@@ -178,6 +178,13 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
       if (place.before !== undefined) query.set("before", String(place.before));
       const search = query.toString();
       return call<ToolOutputPage>("GET", `${session(id)}/tools/${encodeURIComponent(activityId)}/output${search ? `?${search}` : ""}`);
+    },
+    /** A page of a file that the answer `seq` links: the server finds the link in that answer. */
+    linkedFile: (id: string, seq: number, link: string, place: ToolOutputPlace) => {
+      const query = new URLSearchParams({ seq: String(seq), link });
+      if (place.offset !== undefined) query.set("offset", String(place.offset));
+      if (place.before !== undefined) query.set("before", String(place.before));
+      return call<LinkedFilePage>("GET", `${session(id)}/file?${query}`);
     },
     abort: (id: string) => command<ActionResult>(`${session(id)}/abort`),
     archive: (id: string) => command<ActionResult>(`${session(id)}/archive`),

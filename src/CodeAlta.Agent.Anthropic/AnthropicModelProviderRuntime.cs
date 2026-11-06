@@ -134,7 +134,34 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         {
             ToolDeferral = request => DefersTools(provider, request),
             AttachFailureDiagnostics = AttachFailureDiagnostics,
+            IsRefusedReplayedReasoning = IsRefusedThinkingSignature,
+            RefusedReasoning = provider.RefusedReasoning ?? new AgentRefusedReasoning(),
         };
+    }
+
+    // The Claude API drops a block it cannot match (the binding control of AnthropicAdaptiveThinkingChatClient); an
+    // endpoint without it (Copilot, a gateway) refuses the request: {"type":"error","error":{"type":
+    // "invalid_request_error","message":"messages.5.content.0: Invalid `signature` in `thinking` block"}}.
+    internal static bool IsRefusedThinkingSignature(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            var text = current switch
+            {
+                global::Anthropic.Exceptions.AnthropicApiException { StatusCode: System.Net.HttpStatusCode.BadRequest } api => api.ResponseBody ?? api.Message,
+                global::Anthropic.Exceptions.AnthropicApiException => null,
+                _ => current.Message,
+            };
+            if (text is not null &&
+                text.Contains("invalid", StringComparison.OrdinalIgnoreCase) &&
+                text.Contains("thinking", StringComparison.OrdinalIgnoreCase) &&
+                (text.Contains("signature", StringComparison.OrdinalIgnoreCase) || text.Contains("redacted_thinking", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // What the error card, the log and `alta` show of an error of the API: its status and its body (an error event of

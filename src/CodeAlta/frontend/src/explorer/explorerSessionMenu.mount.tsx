@@ -29,6 +29,9 @@ const state = {
   /** Whether the other project has Claude Code sessions, and what the window allows for its rows (the actions besides renaming and deleting). */
   claudeCode: false,
   access: {} as Record<string, boolean>,
+  /** Whether the rows of a project open the code editor, and the sessions whose line was chosen. */
+  editor: false,
+  editors: [] as string[],
 };
 
 /** A canvas as the host declares it. */
@@ -81,6 +84,7 @@ function Scope({ scope }: { scope: string | null }) {
       menuEntries={row => sessionCanvasMenuEntries(state.catalog, row, projects.find(value => value.id === scope), {
         label: title => `Open ${title}`, more: "More…", openPage: () => { state.pages++; },
         open: (item, target) => { state.canvases.push({ canvas: item.id, project: target.project, sessionId: target.sessionId }); } })}
+      openEntries={row => state.editor && row.projectId ? [{ key: "code-editor", label: "Open the code editor", icon: "code" as const, onSelect: () => { state.editors.push(row.id); } }] : []}
       access={() => ({ rename: true, delete: true, ...state.access })} marks={() => null} onAction={(value, action) => { state.actions.push({ session: value.id, action }); }}
       onMore={() => { }} onFewer={() => { }} /></li></ul></section>;
 }
@@ -102,6 +106,8 @@ const fixture = {
   },
   /** Lists the Claude Code sessions in the other project, with what the window allows for its rows. */
   setClaudeCode(on: boolean, access: Record<string, boolean> = {}) { state.claudeCode = on; state.access = access; },
+  /** Whether the rows of a project open the code editor from now on. */
+  setEditor(on: boolean) { state.editor = on; },
   clear() { flushSync(() => root.render(null)); },
 };
 Object.assign(window, { explorerFixture: fixture });

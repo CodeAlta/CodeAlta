@@ -185,7 +185,9 @@ internal static class AgentUsageFactory
             Source: incoming.Source,
             UpdatedAt: incoming.UpdatedAt,
             Details: incoming.Details ?? current.Details,
-            PromptCacheExpiresAt: ResolvePromptCacheExpiry(current, incoming));
+            PromptCacheExpiresAt: ResolvePromptCacheExpiry(current, incoming),
+            // The sign-in is of the account, not of a request: an update that does not say it keeps it.
+            SignInExpiresAt: incoming.SignInExpiresAt ?? current.SignInExpiresAt);
     }
 
     /// <summary>

@@ -12,7 +12,7 @@ function fake(answers: ExternalEditorsResponse[], statuses: Record<string, strin
     list: async refresh => { calls.push(`list ${refresh}`); return answers.shift() ?? reply(null); },
     openFolder: async (target, projectId, sessionId) => { calls.push(`folder ${target} ${projectId} ${sessionId}`); return statuses[target] ?? "ok"; },
     openEntry: async (target, projectId, path, line) => { calls.push(`entry ${target} ${projectId} ${path} ${line}`); return statuses[target] ?? "ok"; },
-    openWorktree: async (target, projectId, path) => { calls.push(`worktree ${target} ${projectId} ${path}`); return statuses[target] ?? "ok"; },
+    openWorktree: async (target, projectId, path, file, line) => { calls.push(`worktree ${target} ${projectId} ${path} ${file} ${line}`); return statuses[target] ?? "ok"; },
     failed: message => { failures.push(message); },
   };
   return { api, calls, failures };
@@ -51,11 +51,20 @@ test("what is opened is named to the host, and a refusal is told to the user", a
   await opener.openFolder("editor", "p1", "s1");
   await opener.openEntry("explorer", "p1", "src/a.ts", 4);
   await opener.openWorktree("editor", "p1", "C:/wt");
-  assert.deepEqual(host.calls.filter(call => !call.startsWith("list")), ["folder editor p1 s1", "entry explorer p1 src/a.ts 4", "worktree editor p1 C:/wt"]);
+  assert.deepEqual(host.calls.filter(call => !call.startsWith("list")), ["folder editor p1 s1", "entry explorer p1 src/a.ts 4", "worktree editor p1 C:/wt null null"]);
   assert.deepEqual(host.failures, ["No external editor was found. Choose one in Settings > General.", "The file manager could not be opened.",
     "No external editor was found. Choose one in Settings > General."]);
   // An editor that is gone is looked for again.
   assert.ok(host.calls.includes("list true"));
+});
+
+test("a file of a worktree is named to the host from the folder of the worktree, and a file that is gone is told", async () => {
+  const host = fake([reply({ id: "vscode", name: "Visual Studio Code" })], { editor: "file_missing" });
+  const opener = createExternalOpener(host.api);
+  await opener.openWorktree("editor", "p1", "/trees/wt", "src/a.ts", 12);
+  assert.deepEqual(host.calls.filter(call => !call.startsWith("list")), ["worktree editor p1 /trees/wt src/a.ts 12"]);
+  assert.deepEqual(host.failures, ["This file is no longer in the worktree."]);
+  assert.equal(failure("explorer", "file_missing"), "The folder could not be opened.");
 });
 
 test("the failures and the file manager are named for the user", () => {

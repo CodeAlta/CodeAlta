@@ -99,7 +99,9 @@ Invariants that hold across these providers:
   marked: its cache write would never be read.
 - **Reasoning replay.** Opaque reasoning (Anthropic signatures, OpenAI encrypted reasoning) is sent back only to the
   provider key, protocol family, transport and model that produced it (`AgentReasoningReplay`); any other gets the
-  text. Signatures are bound to their conversation and account, and a mismatched block fails every later request.
+  text. Signatures are bound to their conversation and account: the Claude API is asked to drop a block it cannot
+  match; an endpoint that refuses one instead (Copilot) gets the request once more with that reasoning as text, and the
+  payloads it refused go as text for as long as the provider runs (`AgentRefusedReasoning`), so the session goes on.
 - **Token counts.** `InputTokens` is the whole input, cache reads and writes included; `AgentInputTokenUsage.From` is
   the one rule every view and the statistics use, so a token is counted once.
 - **Deferred tools.** A provider that supports tool search (`AgentToolDeferral.IsSupported`) gets deferred tools and

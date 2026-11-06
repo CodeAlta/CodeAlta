@@ -1,5 +1,6 @@
 import { diagramAppearance, diagramColors, diagrams, type DiagramColors } from "../diagrams";
 import { createMarkdownRenderer, equationCopy, followFootnote, markdownPending, toggleRenderedSource } from "../markdownBoundary";
+import { fileMarkdownHref } from "../markdownLinks";
 import { loadMath } from "../math";
 import { el, iconSvg } from "./dom";
 
@@ -52,9 +53,24 @@ export function createDiagramPages(upload: DiagramUpload, capacity = 48) {
   };
 }
 
-/** What a tap on a link of a message does: a page of the web opens in a tab of its own; anything else (a file of the computer) does nothing here. */
-export function linkTarget(href: string | null): "web" | "none" {
-  return href !== null && /^(https?:|mailto:)/iu.test(href.trim()) ? "web" : "none";
+/** What a tap on a link of a message does: a page of the web opens in a tab of its own, a file of the computer is read here, and anything else does nothing. */
+export function linkTarget(href: string | null): "web" | "file" | "none" {
+  if (href === null) return "none";
+  if (/^(https?:|mailto:)/iu.test(href.trim())) return "web";
+  return fileMarkdownHref(href) ? "file" : "none";
+}
+
+/** Whether a file a link names is read as Markdown: by its name, unless the link goes to a line, which only its source has. */
+export function linksMarkdown(href: string): boolean {
+  const [path, fragment] = href.split("#", 2);
+  return /\.(md|markdown)$/iu.test(path) && !/^L?\d/iu.test(fragment ?? "");
+}
+
+/** The name of the file a link names, for its title until the server gives its path. */
+export function linkedFileName(href: string): string {
+  let path = href.split("#", 1)[0];
+  try { path = decodeURIComponent(path); } catch { /* Not escapes: the path is as it is written. */ }
+  return path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path;
 }
 
 /**
@@ -157,8 +173,12 @@ export function createMarkdownView(options: Readonly<{ window: Window & typeof g
     close.focus();
   }
 
-  /** Handles the taps in the messages of an element: diagrams, their Open link, copy buttons and links. */
-  function handle(root: HTMLElement) {
+  /**
+   * Handles the taps in the messages of an element: diagrams, their Open link, copy buttons and links. `openFile` reads the
+   * file a link of an answer or of a prompt the user sent names, by the sequence number of that message; a link of anything
+   * else names no file the phone may read. `say` tells why a tap on a link opens nothing.
+   */
+  function handle(root: HTMLElement, say: (text: string) => void, openFile?: (href: string, seq: number) => void) {
     root.addEventListener("click", event => {
       const target = event.target as Element | null;
       const open = target?.closest<HTMLAnchorElement>("a.diagram-open");
@@ -181,10 +201,17 @@ export function createMarkdownView(options: Readonly<{ window: Window & typeof g
         }, () => options.note("The code could not be copied."));
         return;
       }
-      const link = target?.closest<HTMLAnchorElement>(".markdown-content a[href]");
+      // A link the renderer refuses, such as a path of another computer, comes without its target: it opens nothing, and says so.
+      const link = target?.closest<HTMLAnchorElement>(".markdown-content a");
       if (link) {
         event.preventDefault();
-        if (linkTarget(link.getAttribute("href")) === "web") window.open(link.href, "_blank", "noopener");
+        const href = link.getAttribute("href"), kind = linkTarget(href);
+        if (kind === "web") window.open(link.href, "_blank", "noopener");
+        else if (kind === "file") {
+          const seq = Number(link.closest<HTMLElement>("li.msg[data-seq]")?.dataset.seq);
+          if (seq && openFile) openFile(href!, seq);
+          else say("Only the links of an answer or of a prompt you sent open on the phone.");
+        } else say("This link does not open on the phone.");
       }
     });
     root.addEventListener("keydown", event => {

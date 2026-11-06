@@ -3,7 +3,7 @@ import { Button } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { compactTokens } from "../contextUsage";
 import { useShellLanguage } from "../shellLanguage";
-import { cacheCountdown, cacheCountdownTick, ringDash } from "./promptSurface";
+import { cacheCountdown, cacheCountdownTick, ringDash, signInEnd } from "./promptSurface";
 
 /**
  * How much room the prompt surface has, from its own width: `wide` shows every label, `medium` shortens them,
@@ -60,6 +60,32 @@ export function DraftUsage({ contextTokens }: { contextTokens: number | null }) 
     <span className="context-usage-text">0%</span>
     <span className="context-usage-tokens">{summary}</span>
   </Button>;
+}
+
+/**
+ * The end of the sign-in of the provider, after the prompt cache timer: a warning with the time left ("3d") in its
+ * last week, in the danger colour in its last day and once it ended. Nothing is shown before, nor where the provider
+ * does not say when its sign-in ends.
+ */
+export function SignInEnd({ expiresAt, provider }: { expiresAt: string | null | undefined; provider: string | null | undefined }) {
+  const { t } = useShellLanguage();
+  const [now, setNow] = useState(() => Date.now());
+  const view = signInEnd(expiresAt, now);
+  useEffect(() => { setNow(Date.now()); }, [expiresAt]);
+  useEffect(() => {
+    if (!expiresAt || view?.state === "ended") return;
+    const timer = setTimeout(() => setNow(Date.now()), 60_000);
+    return () => clearTimeout(timer);
+  }, [expiresAt, now, view?.state]);
+  if (!view) return null;
+  const name = provider || t("session provider");
+  const date = new Date(expiresAt!).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  const title = view.state === "ended"
+    ? t("The sign-in of {provider} ended on {date}: its turns fail until it is signed in again.", { provider: name, date })
+    : t("The sign-in of {provider} ends in {time}, on {date}. Sign in again before then: once it ends, its turns fail until it is signed in again.", { provider: name, time: view.text, date });
+  return <span className="sign-in-end" data-state={view.state} role="img" aria-label={title} title={title}>
+    <AppIcon name="warning" size={14} />{view.text && <span>{view.text}</span>}
+  </span>;
 }
 
 /**

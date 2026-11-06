@@ -281,7 +281,8 @@ internal sealed class WorktreesService
     /// <summary>
     /// Opens the code editor on a checkout of a project's repository: the editor of the project for the checkout
     /// the project lives in, and an editor on the folder of the project in that checkout for any other one. The
-    /// folder is looked up in what git lists: nothing else is opened.
+    /// folder is looked up in what git lists: nothing else is opened. A file of the checkout, when one is named, is
+    /// opened in it at its line.
     /// </summary>
     [NeoRpcMethod("openEditor")]
     public async Task<WorktreeChangeResponse> OpenEditorAsync(WorktreeOpenRequest request, CancellationToken cancellationToken)
@@ -295,14 +296,27 @@ internal sealed class WorktreesService
         var folder = Normalize(request.Path!);
         if (worktrees.FirstOrDefault(worktree => worktree.Path.Equals(folder, PathComparison)) is not { } target) return new("not_worktree");
         if (target.Missing || !Directory.Exists(target.Path)) return new("worktree_missing");
+        // The file is named from the folder of the checkout, as the Changes tab lists it.
+        var file = FileIn(target.Path, request.File, out var full);
+        if (file != "ok") return new(file);
         var checkout = GitWorktreeService.FindCheckoutRoot(root);
-        if (target.Path.Equals(checkout, PathComparison)) return new(_editor.Open(request.ProjectId!, null, null, null) ? "ok" : "no_window");
+        if (target.Path.Equals(checkout, PathComparison))
+        {
+            // The editor of the project names its files from the folder of the project, which may be below the checkout.
+            var named = full is null ? null : RelativeTo(root, full);
+            if (full is not null && named is null) return new("invalid_request");
+            return new(_editor.Open(request.ProjectId!, named, named is null ? null : request.Line, null) ? "ok" : "no_window");
+        }
+
         // The folder of the project in that checkout, when the branch it is on has it.
-        var below = checkout is null ? "." : Path.GetRelativePath(checkout, root);
-        var shown = below == "." ? target.Path : Path.Combine(target.Path, below);
+        var inside = checkout is null ? "." : Path.GetRelativePath(checkout, root);
+        var shown = inside == "." ? target.Path : Path.Combine(target.Path, inside);
         if (!Directory.Exists(shown)) shown = target.Path;
+        // A file outside the folder of the project cannot be named from it: the editor then opens the whole checkout.
+        var opened = full is null ? null : RelativeTo(shown, full);
+        if (full is not null && opened is null) { shown = target.Path; opened = RelativeTo(shown, full); }
         // The tab is named by the worktree, whatever the folder of the project is called inside it.
-        return new(_editor.OpenFolder(_folders.Give(shown) with { Name = target.Name }, null, null, null) ? "ok" : "no_window");
+        return new(_editor.OpenFolder(_folders.Give(shown) with { Name = target.Name }, opened, opened is null ? null : request.Line, null) ? "ok" : "no_window");
     }
 
     /// <summary>The editors of the machine that <c>openExternal</c> opens in; null where there are none.</summary>
@@ -314,6 +328,7 @@ internal sealed class WorktreesService
     /// <summary>
     /// Opens a checkout of a project's repository outside CodeAlta: in the external editor (<c>editor</c>) or in the
     /// file manager of the system (<c>explorer</c>). The folder is looked up in what git lists: nothing else is opened.
+    /// The external editor opens a file of the checkout, when one is named, at its line.
     /// </summary>
     [NeoRpcMethod("openExternal")]
     public async Task<WorktreeChangeResponse> OpenExternalAsync(WorktreeOpenExternalRequest request, CancellationToken cancellationToken)
@@ -329,7 +344,39 @@ internal sealed class WorktreesService
         if (target.Missing || !Directory.Exists(target.Path)) return new("worktree_missing");
         if (request.Target == "explorer") return new(OpenFolder(target.Path) ? "ok" : "failed");
         if (ExternalEditors is null) return new("unavailable");
-        return new(await ExternalEditors.OpenAsync(target.Path, null, null, null, cancellationToken).ConfigureAwait(false));
+        var file = FileIn(target.Path, request.File, out var full);
+        if (file != "ok") return new(file);
+        return new(await ExternalEditors.OpenAsync(target.Path, full, full is null ? null : request.Line, null, cancellationToken).ConfigureAwait(false));
+    }
+
+    // The file of a checkout that a request names, from the folder of the checkout: ok with the full path of the file,
+    // or with none when no file is asked for; invalid_request for a path that leaves the folder, goes through a link
+    // (which is never followed) or is no path; file_missing for one that is no file of it.
+    private static string FileIn(string folder, string? file, out string? full)
+    {
+        full = null;
+        if (file is null) return "ok";
+        if (ProjectFilesService.Normalize(file, out var relative) != "ok") return "invalid_request";
+        try
+        {
+            var located = ProjectFilesService.LocateFile(folder, relative!, out var path);
+            if (located != "ok") return located == "outside_root" ? "invalid_request" : "file_missing";
+            full = path;
+            return "ok";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return "file_missing";
+        }
+    }
+
+    // The path of a file from a folder it is in, with forward slashes; null when it is not below the folder.
+    private static string? RelativeTo(string folder, string full)
+    {
+        var relative = Path.GetRelativePath(folder, full);
+        // A name that merely starts with two dots is a name; a segment of two dots leaves the folder.
+        return relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) || Path.IsPathRooted(relative) ? null
+            : relative.Replace('\\', '/');
     }
 
     /// <summary>Lists the branches the checkout of a project, or one of its worktrees, can move to.</summary>
@@ -541,7 +588,8 @@ internal sealed record WorktreeRemoveRequest(string? ExpectedEpoch, string? Proj
 /// <c>ok</c>, or why nothing changed: <c>in_use</c>, <c>dirty</c>, <c>main</c>, <c>locked</c>, <c>not_worktree</c>,
 /// <c>not_found</c>, <c>not_repository</c>, <c>git_unavailable</c>, <c>timeout</c>, <c>failed</c>, or a refusal of the request.
 /// The code editor that was asked for a checkout also answers <c>worktree_missing</c> for a folder that is gone,
-/// and <c>no_window</c> when no window is there to show it.
+/// and <c>no_window</c> when no window is there to show it; either one opening a file also answers <c>file_missing</c>
+/// for a file that is not in the checkout.
 /// </summary>
 /// <param name="Status">The outcome code.</param>
 /// <param name="Message">What git said, when it refused.</param>
@@ -616,14 +664,18 @@ internal sealed record WorktreeRemoval(string Path, string Status, string? Messa
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
 /// <param name="ProjectId">The project; required.</param>
 /// <param name="Path">The folder of the checkout, as the inventory names it.</param>
-internal sealed record WorktreeOpenRequest(string? ExpectedEpoch, string? ProjectId, string? Path);
+/// <param name="File">A file to open in it, from the folder of the checkout (forward slashes); null to show the files only.</param>
+/// <param name="Line">The 1-based line of the file to go to; null to keep where the file was.</param>
+internal sealed record WorktreeOpenRequest(string? ExpectedEpoch, string? ProjectId, string? Path, string? File = null, int? Line = null);
 
 /// <summary>Asks to open a checkout in the external editor or in the file manager of the system.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
 /// <param name="ProjectId">The project; required.</param>
 /// <param name="Path">The folder of the checkout, as the inventory names it.</param>
 /// <param name="Target"><c>editor</c> (the external editor) or <c>explorer</c> (the file manager of the system).</param>
-internal sealed record WorktreeOpenExternalRequest(string? ExpectedEpoch, string? ProjectId, string? Path, string? Target);
+/// <param name="File">A file to open in the external editor, from the folder of the checkout (forward slashes); null for the folder. The file manager ignores it.</param>
+/// <param name="Line">The 1-based line of the file to go to; null for the start.</param>
+internal sealed record WorktreeOpenExternalRequest(string? ExpectedEpoch, string? ProjectId, string? Path, string? Target, string? File = null, int? Line = null);
 
 /// <summary>Asks for the branches a checkout can move to.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>

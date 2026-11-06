@@ -1,4 +1,4 @@
-import type { ToolOutputPage, ToolOutputPlace } from "./contract";
+import type { LinkedFilePage, ToolOutputPlace } from "./contract";
 import { el } from "./dom";
 import { timelineIcon } from "./timelineIcons";
 
@@ -17,13 +17,18 @@ export function createOutputViewer(options: Readonly<{ window: Window & typeof g
     return item;
   }
 
-  /** Shows an output: `caption` says of which call, `read` gives its pages, and `fromEnd` says to start at its end. */
-  function open(caption: readonly Node[], read: (place: ToolOutputPlace) => Promise<ToolOutputPage>, fromEnd: boolean) {
+  /**
+   * Shows a text: `caption` says what it is, `read` gives its pages, and `fromEnd` says to start at its end. `label` names
+   * the view; `drawn` draws what is read so far instead of showing it as it is written (a Markdown file). A page may say
+   * which part of the text to mark: the view opens on it.
+   */
+  function open(caption: readonly Node[], read: (place: ToolOutputPlace) => Promise<LinkedFilePage>, fromEnd: boolean,
+    how: Readonly<{ label?: string; drawn?: Readonly<{ prepare: (element: HTMLElement) => void; draw: (element: HTMLElement, text: string) => void }> }> = {}) {
     shown?.leave();
     const view = el(document, "div", "output-viewer");
     view.setAttribute("role", "dialog");
     view.setAttribute("aria-modal", "true");
-    view.setAttribute("aria-label", "Output of the tool call");
+    view.setAttribute("aria-label", how.label ?? "Output of the tool call");
     const bar = el(document, "div", "output-viewer-bar");
     const title = el(document, "div", "output-viewer-title");
     title.append(...caption);
@@ -35,7 +40,9 @@ export function createOutputViewer(options: Readonly<{ window: Window & typeof g
     bar.append(title, close);
     const stage = el(document, "div", "output-viewer-stage");
     const earlier = moreButton("output-viewer-earlier"), later = moreButton("output-viewer-later");
-    const text = el(document, "pre", "output-viewer-text");
+    const text = how.drawn ? el(document, "div", "output-viewer-drawn markdown-content") : el(document, "pre", "output-viewer-text");
+    how.drawn?.prepare(text);
+    let whole = "";
     const note = el(document, "p", "output-viewer-note", "Loading…");
     stage.append(earlier, text, note, later);
     view.append(bar, stage);
@@ -43,6 +50,14 @@ export function createOutputViewer(options: Readonly<{ window: Window & typeof g
     // What the page holds of the output, in characters; null until a page came.
     let range: { start: number; end: number; length: number } | null = null;
     let reading = false;
+    // The part of the text to mark, in characters: lines that may reach over several pages.
+    let mark: { start: number; end: number } | null = null;
+
+    const pieces = (part: string, start: number): Node[] => {
+      if (!mark || start >= mark.end || start + part.length <= mark.start) return [document.createTextNode(part)];
+      const from = Math.max(0, mark.start - start), to = Math.min(part.length, mark.end - start);
+      return [document.createTextNode(part.slice(0, from)), el(document, "mark", "output-viewer-mark", part.slice(from, to)), document.createTextNode(part.slice(to))];
+    };
 
     const update = () => {
       earlier.hidden = !range || range.start <= 0;
@@ -59,10 +74,11 @@ export function createOutputViewer(options: Readonly<{ window: Window & typeof g
       reading = true;
       note.textContent = "Loading…";
       update();
-      let failure = "";
+      let failure = "", textEnd: number | null = null;
       try {
         const page = await read(place);
         if (!view.isConnected) return;
+        if (place.before !== undefined) textEnd = text.getBoundingClientRect().bottom;
         if (page.error) failure = page.error;
         else add(page, place);
       } catch (error) {
@@ -70,28 +86,32 @@ export function createOutputViewer(options: Readonly<{ window: Window & typeof g
         failure = error instanceof Error ? error.message : String(error);
       }
       reading = false;
-      note.textContent = failure;
+      note.textContent = failure || (range?.length === 0 ? "This is empty." : "");
       update();
+      // What comes before stays out of sight: the text being read does not move, also when the button above it goes away.
+      if (textEnd !== null) stage.scrollTop += text.getBoundingClientRect().bottom - textEnd;
     };
 
-    const add = (page: ToolOutputPage, place: ToolOutputPlace) => {
+    const add = (page: LinkedFilePage, place: ToolOutputPlace) => {
       const part = page.output ?? "", start = page.outputOffset ?? 0, length = page.outputLength ?? part.length;
-      const node = document.createTextNode(part);
-      if (range && place.before !== undefined) {
-        // What comes before stays out of sight: the text being read does not move.
-        const height = stage.scrollHeight;
-        text.prepend(node);
-        stage.scrollTop += stage.scrollHeight - height;
-        range = { start, end: range.end, length };
-      } else {
-        text.append(node);
-        range = { start: range?.start ?? start, end: start + part.length, length };
-      }
+      const earlierPart = !!range && place.before !== undefined;
+      if (page.markStart !== undefined && page.markEnd !== undefined) mark = { start: page.markStart, end: page.markEnd };
+      if (how.drawn) {
+        // A page may end inside a block: the text is drawn again whole, and that block with it.
+        whole = earlierPart ? part + whole : whole + part;
+        how.drawn.draw(text, whole);
+      } else if (earlierPart) text.prepend(...pieces(part, start));
+      else text.append(...pieces(part, start));
+      range = earlierPart ? { start, end: range!.end, length } : { start: range?.start ?? start, end: start + part.length, length };
     };
 
     const first = async () => {
       await load({});
-      if (fromEnd && view.isConnected) stage.scrollTop = stage.scrollHeight;
+      if (!view.isConnected) return;
+      // What is marked stands a third of the way down, with what comes before it in sight.
+      const marked = text.querySelector(".output-viewer-mark");
+      if (marked) stage.scrollTop += marked.getBoundingClientRect().top - stage.getBoundingClientRect().top - stage.clientHeight / 3;
+      else if (fromEnd) stage.scrollTop = stage.scrollHeight;
     };
     earlier.addEventListener("click", () => { if (range) void load({ before: range.start }); });
     later.addEventListener("click", () => { if (range) void load({ offset: range.end }); else void first(); });

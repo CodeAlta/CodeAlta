@@ -14,9 +14,12 @@ export const sessionOperations = { ...composerOperations, choices: async (reques
 const epoch = "fixture-epoch";
 const minutes = (count: number) => new Date(Date.now() + count * 60_000).toISOString();
 
-/** What the usage reading says, set by the test: the tokens used and the minutes left of the prompt cache (null: unknown). */
-type UsageFixture = { used: string; limit: string; cacheMinutes: number | null };
-const usage = () => (window as Window & { fixtureUsage?: UsageFixture }).fixtureUsage ?? { used: "563412", limit: "1000000", cacheMinutes: 37 };
+/**
+ * What the usage reading says, set by the test: the tokens used, the minutes left of the prompt cache and the days left
+ * of the sign-in of the provider (null: unknown).
+ */
+type UsageFixture = { used: string; limit: string; cacheMinutes: number | null; signInDays?: number | null };
+const usage = () => (window as Window & { fixtureUsage?: UsageFixture }).fixtureUsage ?? { used: "563412", limit: "1000000", cacheMinutes: 37, signInDays: 2.5 };
 
 export const sessionUsage = {
   read: async ({ sessionId }: { sessionId: string }) => {
@@ -26,6 +29,6 @@ export const sessionUsage = {
       observation: { sequence: "3", scope: "CurrentWindow", source: "LocalProviderUsage", sourceUpdatedAt: null, eventTimestamp: "2026-10-15T10:00:00Z",
         hadInvalidValues: false, hadOmittedData: false,
         window: { currentTokens: value.used, tokenLimit: value.limit, messageCount: 42, label: null, totalContextEnvelope: null, maxOutputTokens: null },
-        lastOperation: null, rateLimits: null, sessionTotal: null, promptCacheExpiresAt: value.cacheMinutes === null ? null : minutes(value.cacheMinutes) } };
+        lastOperation: null, rateLimits: null, sessionTotal: null, promptCacheExpiresAt: value.cacheMinutes === null ? null : minutes(value.cacheMinutes), signInExpiresAt: value.signInDays == null ? null : minutes(value.signInDays * 24 * 60) } };
   },
 };

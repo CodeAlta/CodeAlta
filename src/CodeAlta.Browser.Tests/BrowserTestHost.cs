@@ -62,13 +62,13 @@ internal sealed class BrowserTestHost : IAsyncDisposable
         return new BrowserTestHost(connection, site, folder);
     }
 
-    /// <summary>A session of the tools in a context of its own.</summary>
-    public BrowserSession NewSession(Func<Uri, CancellationToken, ValueTask<string?>>? checkNavigation = null)
+    /// <summary>A session of the tools in a context of its own, or in the windows of the browser's profile when not isolated.</summary>
+    public BrowserSession NewSession(Func<Uri, CancellationToken, ValueTask<string?>>? checkNavigation = null, bool isolated = true)
     {
         var files = new BrowserFiles(Folder, [Folder], [Folder], Path.Combine(Folder, "tmp"));
         return new BrowserSession(new BrowserSessionOptions
         {
-            OpenContext = cancellationToken => Connection.CreateContextAsync(new BrowserContextOptions { Isolated = true, DownloadDirectory = Path.Combine(Folder, "downloads") }, cancellationToken),
+            OpenContext = cancellationToken => Connection.CreateContextAsync(new BrowserContextOptions { Isolated = isolated, DownloadDirectory = Path.Combine(Folder, "downloads") }, cancellationToken),
             Files = _ => ValueTask.FromResult(files),
             CheckNavigation = checkNavigation,
         });
