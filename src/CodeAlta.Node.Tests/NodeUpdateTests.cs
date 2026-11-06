@@ -26,7 +26,13 @@ public sealed class NodeUpdateTests
 
         var check = await app.RunAsync(["update", "--check", "--source", feed, "--data-root", root.DataRoot]);
         Assert.AreEqual(NodeExitCodes.Success, check, error.ToString());
-        StringAssert.Contains(output.ToString(), "An update to 99.0.1-beta.1 is available", "this build is a prerelease: it follows the prereleases");
+        var latest = UpdateVersion.Parse(NodeApplication.Version).IsPrerelease ? "99.0.1-beta.1" : "99.0.0";
+        StringAssert.Contains(output.ToString(), $"An update to {latest} is available", "a stable build follows releases; a prerelease follows prereleases");
+        Assert.IsFalse(Directory.Exists(Path.Combine(root.Profile().StateRoot, "fleet", "versions", latest)), "--check changes nothing");
+
+        output.GetStringBuilder().Clear();
+        Assert.AreEqual(NodeExitCodes.Success, await app.RunAsync(["update", "--check", "--prerelease", "--source", feed, "--data-root", root.DataRoot]));
+        StringAssert.Contains(output.ToString(), "An update to 99.0.1-beta.1 is available", "--prerelease opts a stable build into prereleases too");
         Assert.IsFalse(Directory.Exists(Path.Combine(root.Profile().StateRoot, "fleet", "versions", "99.0.1-beta.1")), "--check changes nothing");
 
         var code = await app.RunAsync(["update", "--version", "99.0.0", "--source", feed, "--data-root", root.DataRoot]);
