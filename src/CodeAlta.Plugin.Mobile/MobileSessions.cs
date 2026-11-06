@@ -34,9 +34,13 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
 
     private volatile MobileNames? _names;
     private MobileImages? _images;
+    private MobileFiles? _files;
 
     /// <summary>The images of the timelines the phone sees.</summary>
     internal MobileImages Images => _images ??= new MobileImages(alta, this);
+
+    /// <summary>The files that the answers of the timelines the phone sees link.</summary>
+    internal MobileFiles Files => _files ??= new MobileFiles(alta, this);
 
     /// <summary>The ids of the spaces of the plugin; empty when it is in every space.</summary>
     internal IReadOnlyList<string> Spaces => spaces.GetAssignedSpaces();

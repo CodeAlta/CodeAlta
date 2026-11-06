@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using CodeAlta.Catalog;
@@ -82,6 +83,52 @@ internal static partial class MobileTimeline
     {
         if (!markdown.Contains("![", StringComparison.Ordinal)) return [];
         var found = new List<(string, string)>();
+        foreach (var line in LinesOutsideCode(markdown))
+        {
+            foreach (Match match in ImagePattern().Matches(line))
+            {
+                var target = match.Groups["angle"].Success ? match.Groups["angle"].Value : match.Groups["bare"].Value;
+                // The rule of every link: no address of the web, and nothing of another computer, which the phone would have read
+                // with no tap, as it loads the pictures it shows. The target stays as written: reading it again decodes it.
+                if (!FileLink.TryParse(target, out _)) continue;
+                found.Add((match.Groups["alt"].Value.Trim(), target));
+                if (found.Count >= MaximumLinkedImages) return found;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// The targets of the links of a Markdown text that name a file of this computer, as Markdown reads them (escapes undone),
+    /// outside blocks and spans of code. An address of the web or of another scheme, and a path of another computer, are none.
+    /// </summary>
+    internal static IReadOnlyList<string> LinkedFiles(string markdown)
+    {
+        var found = new List<string>();
+        foreach (var line in LinesOutsideCode(markdown))
+        {
+            foreach (Match match in LinkPattern().Matches(line))
+            {
+                var target = match.Groups["angle"].Success ? match.Groups["angle"].Value : match.Groups["bare"].Value;
+                target = WebUtility.HtmlDecode(MarkdownEscapePattern().Replace(target, "$1"));
+                if (FileLink.TryParse(target, out _)) found.Add(target);
+            }
+
+            // An address the page makes a link by itself; what ends a sentence is not part of it.
+            foreach (Match match in FileAddressPattern().Matches(line))
+            {
+                var target = match.Value.TrimEnd('.', ',', ';', ':', '!', '?');
+                if (FileLink.TryParse(target, out _)) found.Add(target);
+            }
+        }
+
+        return found;
+    }
+
+    // The lines of a Markdown text outside blocks of code, with their spans of code blanked.
+    private static IEnumerable<string> LinesOutsideCode(string markdown)
+    {
         string? fence = null;
         foreach (var raw in markdown.Split('\n'))
         {
@@ -95,18 +142,8 @@ internal static partial class MobileTimeline
             }
 
             if (fence is not null || line.StartsWith("    ", StringComparison.Ordinal) || line.StartsWith('\t')) continue;
-            foreach (Match match in ImagePattern().Matches(WithoutCodeSpans(line)))
-            {
-                var target = match.Groups["angle"].Success ? match.Groups["angle"].Value : match.Groups["bare"].Value;
-                // The rule of every link: no address of the web, and nothing of another computer, which the phone would have read
-                // with no tap, as it loads the pictures it shows. The target stays as written: reading it again decodes it.
-                if (!FileLink.TryParse(target, out _)) continue;
-                found.Add((match.Groups["alt"].Value.Trim(), target));
-                if (found.Count >= MaximumLinkedImages) return found;
-            }
+            yield return WithoutCodeSpans(line);
         }
-
-        return found;
     }
 
     // The line with its spans of code blanked, so that a picture written as code is not one.
@@ -158,4 +195,14 @@ internal static partial class MobileTimeline
 
     [GeneratedRegex("!\\[(?<alt>[^\\]\\n]*)\\]\\(\\s*(?:<(?<angle>[^>\\n]+)>|(?<bare>[^\\s)]+))(?:\\s+\"[^\"\\n]*\")?\\s*\\)", RegexOptions.CultureInvariant)]
     private static partial Regex ImagePattern();
+
+    // The end of a link: what it says may hold anything, also a picture or code. A target may hold balanced parentheses.
+    [GeneratedRegex("\\]\\(\\s*(?:<(?<angle>[^>\\n]+)>|(?<bare>(?:[^\\s()]|\\([^\\s()]*\\))+))(?:\\s+\"[^\"\\n]*\")?\\s*\\)", RegexOptions.CultureInvariant)]
+    private static partial Regex LinkPattern();
+
+    [GeneratedRegex("\\\\([!-/:-@\\[-`{-~])", RegexOptions.CultureInvariant)]
+    private static partial Regex MarkdownEscapePattern();
+
+    [GeneratedRegex("file:///[^\\s<>()\\[\\]]+", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex FileAddressPattern();
 }

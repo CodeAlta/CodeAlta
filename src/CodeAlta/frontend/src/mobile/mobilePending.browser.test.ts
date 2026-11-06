@@ -13,6 +13,8 @@ import { pageFiles, session, startFixtureServer } from "./fixtureServer";
 // Where the pictures of this test go, when a person wants to look at them.
 const shots = process.env.CODEALTA_SHOTS ?? "";
 
+const numberedLines = (word: string, lines: number) => Array.from({ length: lines }, (_, index) => `${word} ${index + 1}`).join("\n");
+
 test("the phone takes back a prompt that waits, and opens a tool call on what it does", { skip: !browserExecutable, timeout: 90_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "codealta-mobile-pending-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
@@ -25,8 +27,16 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
   const event = (kind: string, text: string, extra: Partial<TimelineEvent> = {}): TimelineEvent => ({ seq: ++seq, at: now, kind, text, activityId: null, ...extra });
   const running = { id: "s1", projectId: "p1", live: "running", kind: "activity", line: null, at: now, activity: null, canSteer: true } as const;
   server.state.sessions = [session("s1", "A running session", "p1", 0, { live: "running", kind: "activity", line: null, canSteer: true })];
+  const answer = event("assistant.message", "See [code](src/a.cs#L1250), [the guide](docs/guide.md), [gone](gone.txt), [elsewhere](//server/share/a.txt) and [the web](https://example.com/).");
+  const ownPrompt = event("user.message", "Build it [my prompt](docs/own.md)");
+  const linkedFile = (seq: number, link: string) => `s1/${seq}/${link}`;
+  const longCode = numberedLines("code", 2500);
+  server.state.linkedFiles.set(linkedFile(answer.seq, "src/a.cs#L1250"), longCode);
+  server.state.linkedFiles.set(linkedFile(answer.seq, "docs/guide.md"), "# The guide\n\nIts **first** paragraph, and [the next](next.md).");
+  server.state.linkedFiles.set(linkedFile(ownPrompt.seq, "docs/own.md"), "# My own notes");
   server.state.events.set("s1", [
-    event("user.message", "Build it"),
+    answer,
+    ownPrompt,
     event("activity.toolcall.started", "Bash", { activityId: "call-1", subject: "dotnet build -c Release" }),
     event("activity.toolcall.started", "Grep", { activityId: "call-2" }),
     event("activity.toolcall.completed", "Grep", { activityId: "call-2" }),
@@ -34,15 +44,14 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     event("activity.toolcall.completed", "Read", { activityId: "call-3", subject: "C:\\work\\skills\\SKILL.md" }),
   ]);
   const longLine = "an output line that is much wider than the screen of a phone, ".repeat(6);
-  const numbered = (word: string, lines: number) => Array.from({ length: lines }, (_, index) => `${word} ${index + 1}`).join("\n");
   // Three pages of the fixture server, and two.
-  const buildOutput = `${numbered("built", 4000)}\n${longLine}`;
+  const buildOutput = `${numberedLines("built", 4000)}\n${longLine}`;
   server.state.toolOutputs.set("s1/call-1", buildOutput);
   server.state.tools.set("s1/call-1", {
     name: "Bash", phase: "started", command: "dotnet build -c Release", sessionFolder: "C:\\work\\worktrees\\calm-otter",
     output: buildOutput.slice(-2000), outputOffset: buildOutput.length - 2000, outputLength: buildOutput.length, error: null,
   });
-  const fileOutput = numbered("line", 2500);
+  const fileOutput = numberedLines("line", 2500);
   server.state.toolOutputs.set("s1/call-3", fileOutput);
   server.state.tools.set("s1/call-3", { name: "Read", phase: "completed", output: fileOutput.slice(0, 2000), outputOffset: 0, outputLength: fileOutput.length, error: null });
   // A prompt queued before this page opened, as after a reload of the phone.
@@ -109,7 +118,7 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     const facts = await evaluate<string[]>('[...document.querySelectorAll(".tool-detail .tool-fact")].map(e => e.textContent)');
     assert.deepEqual(facts, ["FolderC:\\work\\worktrees\\calm-otter"], "the folder it works in");
     assert.deepEqual(await evaluate('[...document.querySelectorAll(".tool-detail .tool-section")].map(e => e.textContent)'), ["Command", "Output"]);
-    assert.equal(server.requests.filter(request => request.path.endsWith("/tools/call-1")).at(-1)?.query, `?since=1`, "from the first event of the call");
+    assert.equal(server.requests.filter(request => request.path.endsWith("/tools/call-1")).at(-1)?.query, `?since=2`, "from the first event of the call");
     assert.equal(await evaluate('document.querySelector(".tool-detail .tool-output-text").textContent'), `built 3997\nbuilt 3998\nbuilt 3999\nbuilt 4000\n${longLine}`, "the last lines of a command");
     assert.match(await evaluate<string>('document.querySelector(".tool-detail .tool-output-more").textContent'), /^Read all [\d,. ]+ characters$/u);
     assert.equal(await evaluate("document.documentElement.scrollWidth <= window.innerWidth"), true, "a long line stays inside its box, never wider than the page");
@@ -145,7 +154,7 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     assert.equal(pagesOf("call-1").length, 0, "no page is read until the output is opened");
     await evaluate('(() => { const open = document.querySelector(".tool-detail .tool-output"); open.focus(); open.click(); })()');
     await pageRead(16_000);
-    assert.equal(pagesOf("call-1").at(-1)?.query, "?since=1", "where it says the most");
+    assert.equal(pagesOf("call-1").at(-1)?.query, "?since=2", "where it says the most");
     assert.equal(await shownText(), buildOutput.slice(-16_000));
     assert.match(await evaluate<string>('document.querySelector(".output-viewer-title").textContent'), /^Bashdotnet build -c Release$/u, "says of which call");
     assert.deepEqual([await isHidden(".output-viewer-earlier"), await isHidden(".output-viewer-later")], [false, true], "the end of a command: only what comes before is left");
@@ -156,7 +165,7 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     const reading = await fromBottom();
     await evaluate('document.querySelector(".output-viewer-earlier").click()');
     await pageRead(32_000);
-    assert.equal(pagesOf("call-1").at(-1)?.query, `?since=1&before=${buildOutput.length - 16_000}`);
+    assert.equal(pagesOf("call-1").at(-1)?.query, `?since=2&before=${buildOutput.length - 16_000}`);
     assert.equal(await shownText(), buildOutput.slice(-32_000), "what came before goes first");
     assert.ok(Math.abs(await fromBottom() - reading) <= 2, "the text being read did not move");
     await evaluate('document.querySelector(".output-viewer-earlier").click()');
@@ -171,7 +180,7 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     // Its copy reads all of it, from its start, though a command shows its end; it does not open the full-screen view.
     const pagesBefore = pagesOf("call-1").length;
     assert.equal(await copy("output"), buildOutput);
-    assert.deepEqual(pagesOf("call-1").slice(pagesBefore).map(request => request.query), ["?since=1&offset=0", "?since=1&offset=16000", "?since=1&offset=32000"]);
+    assert.deepEqual(pagesOf("call-1").slice(pagesBefore).map(request => request.query), ["?since=2&offset=0", "?since=2&offset=16000", "?since=2&offset=32000"]);
     assert.equal(await evaluate('document.querySelector(".output-viewer")'), null);
     // What is open follows the call: once it ended, it says how.
     server.state.tools.set("s1/call-1", { name: "Bash", phase: "failed", command: "dotnet build -c Release", sessionFolder: "C:\\work\\worktrees\\calm-otter", exitCode: 1, failure: "It broke", output: "error CS0001", outputLength: 12, error: null });
@@ -220,6 +229,75 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     await waitFor('!document.querySelector(".output-viewer")');
     await evaluate('document.querySelector("#timeline .tool-row[data-activity=call-3]").click()');
     await waitFor('!document.querySelector(".tool-detail")');
+
+    // ---- A link to a file of an answer or of a prompt the user sent reads it full screen, a page at a time; Markdown is drawn ----
+    const fileLink = (name: string) => `[...document.querySelectorAll("#timeline li.msg a")].find(a => a.textContent === ${JSON.stringify(name)})`;
+    const fileReads = () => server.requests.filter(request => request.path === "/api/sessions/s1/file");
+    await waitFor(fileLink("code"));
+    assert.equal(fileReads().length, 0, "nothing of a file is read until its link is tapped");
+    await evaluate(`${fileLink("code")}.click()`);
+    await waitFor('document.querySelector(".output-viewer-text")?.textContent.length === 16000');
+    // It opens around the line the link names: marked, in sight, with what comes before it above it.
+    const markedLine = "code 1250", pageStart = longCode.indexOf(`\n${markedLine}\n`) + 1 - 8_000;
+    assert.equal(await evaluate('document.querySelector(".output-viewer-text").textContent'), longCode.slice(pageStart, pageStart + 16_000));
+    assert.equal(await evaluate('document.querySelector(".output-viewer-mark").textContent'), `${markedLine}\n`);
+    const shownMark = await evaluate<{ top: number; bottom: number; height: number; line: number; scrolled: number }>(`(() => {
+      const stage = document.querySelector(".output-viewer-stage"), box = stage.getBoundingClientRect(), marked = document.querySelector(".output-viewer-mark").getBoundingClientRect();
+      return { top: marked.top - box.top, bottom: box.bottom - marked.bottom, height: marked.height, line: parseFloat(getComputedStyle(document.querySelector(".output-viewer-text")).lineHeight), scrolled: stage.scrollTop };
+    })()`);
+    assert.ok(shownMark.top > 0 && shownMark.bottom > 0 && shownMark.scrolled > 0, `the marked line is in sight: ${JSON.stringify(shownMark)}`);
+    assert.ok(Math.abs(shownMark.height - shownMark.line) < 1, `one line, with no line of its own for its break: ${JSON.stringify(shownMark)}`);
+    await shot("linked-line");
+    assert.equal(await evaluate('document.querySelector(".output-viewer").getAttribute("aria-label")'), "File a.cs");
+    assert.match(await evaluate<string>('document.querySelector(".output-viewer-title .tool-path-file").textContent'), /^\\a\.cs$/u, "the path the server found");
+    assert.equal(new URLSearchParams(fileReads()[0].query).get("seq"), String(answer.seq));
+    assert.equal(new URLSearchParams(fileReads()[0].query).get("link"), "src/a.cs#L1250", "the link as the answer wrote it");
+    const markTop = () => evaluate<number>('document.querySelector(".output-viewer-mark").getBoundingClientRect().top');
+    const topBefore = await markTop();
+    await evaluate('document.querySelector(".output-viewer-earlier").click()');
+    await waitFor(`document.querySelector(".output-viewer-text").textContent.length === ${16_000 + pageStart}`);
+    assert.equal(new URLSearchParams(fileReads().at(-1)!.query).get("before"), String(pageStart));
+    assert.ok(Math.abs(await markTop() - topBefore) < 2, "what is read before does not move the marked line");
+    await waitFor('!document.querySelector(".output-viewer-later").disabled');
+    await evaluate('document.querySelector(".output-viewer-later").click()');
+    await waitFor(`document.querySelector(".output-viewer-text").textContent.length === ${longCode.length}`);
+    assert.equal(new URLSearchParams(fileReads().at(-1)!.query).get("offset"), String(pageStart + 16_000));
+    assert.equal(await evaluate('document.querySelector(".output-viewer-text").textContent'), longCode, "the pages are in their order around the mark");
+    assert.equal(await evaluate('document.querySelectorAll(".output-viewer-mark").length'), 1);
+    await evaluate('document.querySelector(".output-viewer-close").click()');
+    await waitFor('!document.querySelector(".output-viewer")');
+    await evaluate(`${fileLink("the guide")}.click()`);
+    await waitFor('document.querySelector(".output-viewer-drawn h1")');
+    assert.equal(await evaluate('document.querySelector(".output-viewer-drawn h1").textContent'), "The guide");
+    assert.equal(await evaluate('document.querySelector(".output-viewer-drawn strong").textContent'), "first");
+    await shot("linked-markdown");
+    // A link inside a file opens nothing, and says so above the viewer.
+    const toast = 'document.querySelector("#toast:not([hidden]) .toast-text")?.textContent';
+    const readsSoFar = fileReads().length;
+    await evaluate('[...document.querySelectorAll(".output-viewer-drawn a")].find(a => a.textContent === "the next").click()');
+    await waitFor(`${toast} === "Only the links of an answer or of a prompt you sent open on the phone."`);
+    assert.equal(fileReads().length, readsSoFar);
+    assert.equal(await evaluate('(() => { const box = document.querySelector("#toast").getBoundingClientRect(); return document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.closest("#toast")?.id; })()'), "toast", "the note is above the viewer");
+    await evaluate('document.querySelector(".output-viewer-close").click()');
+    await waitFor('!document.querySelector(".output-viewer")');
+
+    // The link of a prompt the user sent reads the file by that prompt.
+    await evaluate(`${fileLink("my prompt")}.click()`);
+    await waitFor('document.querySelector(".output-viewer-drawn h1")?.textContent === "My own notes"');
+    assert.equal(new URLSearchParams(fileReads().at(-1)!.query).get("seq"), String(ownPrompt.seq));
+    await evaluate('document.querySelector(".output-viewer-close").click()');
+    await waitFor('!document.querySelector(".output-viewer")');
+
+    // A link of another computer reads nothing, and says so.
+    const readsBefore = fileReads().length;
+    await evaluate(`${fileLink("elsewhere")}.click()`);
+    await waitFor(`${toast} === "This link does not open on the phone."`);
+    assert.equal(fileReads().length, readsBefore);
+    assert.equal(await evaluate('document.querySelector(".output-viewer")'), null);
+    await evaluate(`${fileLink("gone")}.click()`);
+    await waitFor('document.querySelector(".output-viewer-note")?.textContent === "This file is not there."');
+    await evaluate('document.querySelector(".output-viewer-close").click()');
+    await waitFor('!document.querySelector(".output-viewer")');
 
     // ---- A prompt queued before the page opened shows, and can be deleted ----
     await waitFor(`${card("Queued before the reload")}`);

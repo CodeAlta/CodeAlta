@@ -138,6 +138,8 @@ export function createTimelineView(options: TimelineViewOptions) {
     if (block.host && !pending) return hostBlock(block, block.host);
     const item = make("li", `msg msg-${block.role}${pending ? " pending" : ""}`);
     item.dataset.key = block.key;
+    // What a link of an answer or of a prompt the user sent is read by: the server looks for it in that message.
+    if (block.role !== "error" && !pending && block.seq !== undefined) item.dataset.seq = String(block.seq);
     const label = make("div", "msg-label", pending ? pendingLabels[pending.mode] : block.role === "user" ? "You" : block.role === "assistant" ? "Agent" : "Error");
     const clock = pending ? null : clockTime(block.at);
     if (clock) {

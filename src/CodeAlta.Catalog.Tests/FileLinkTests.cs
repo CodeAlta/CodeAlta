@@ -35,6 +35,35 @@ public sealed class FileLinkTests
     }
 
     [TestMethod]
+    [DataRow("a.cs", null, null)]
+    [DataRow("a.cs#L42", 42, null)]
+    [DataRow("a.cs#L42-L50", 42, 50)]
+    [DataRow("a.cs#L42C7-L50C2", 42, 50)]
+    [DataRow("a.cs#42-50", 42, 50)]
+    [DataRow("a.cs:42-50", 42, 50)]
+    [DataRow("a.cs:42:7-50:2", 42, 50)]
+    [DataRow("a.cs#L42-L42", 42, 42)]
+    [DataRow("a.cs#L50-L42", 50, null)]
+    [DataRow("a.cs#L0-L42", null, null)]
+    public void ARange_KeepsItsEnd(string target, int? line, int? endLine)
+    {
+        Assert.IsTrue(FileLink.TryParse(target, out var link), target);
+        Assert.AreEqual("a.cs", link.Path);
+        Assert.AreEqual(line, link.Line);
+        Assert.AreEqual(endLine, link.EndLine);
+    }
+
+    [TestMethod]
+    public void ARange_OfAnAddress_KeepsItsEnd()
+    {
+        var address = OperatingSystem.IsWindows() ? "file:///C:/code/a.cs" : "file:///code/a.cs";
+        Assert.IsTrue(FileLink.TryParse(address + "#L4-L9", out var link));
+        Assert.AreEqual((4, 9), (link.Line, link.EndLine));
+        Assert.IsTrue(FileLink.TryParse(address + ":4-9", out link));
+        Assert.AreEqual((4, 9), (link.Line, link.EndLine));
+    }
+
+    [TestMethod]
     public void ATarget_NamesADriveOrAnAddressOfAFile_AsTheSystemWritesThem()
     {
         if (OperatingSystem.IsWindows())
