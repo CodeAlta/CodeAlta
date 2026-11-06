@@ -252,11 +252,14 @@ class FusionCodeAlta(LockedCodeAlta):
       repair             the model reference of the repair (cascade)
       helper_timeout_sec the budget of each review, revision and repair (default 360)
       critic_mode        tools (default: read-only tools, runs tests) or diff (the diff in the prompt, no tool; git only)
+      adaptive           low, medium, high or max: CodeAlta's own Adaptive runs the task (altacli --tier adaptive:<level>),
+                         the level made of -m and its effort for the turns and critics= for its critics, reviewed by the
+                         host itself; no step of this adapter runs then
     """
 
     def __init__(self, *args: Any, steps: str | None = None, critics: str | None = None, judge: str | None = None,
                  repair: str | None = None, helper_timeout_sec: int | str | None = None, critic_mode: str | None = None,
-                 **kwargs: Any):
+                 adaptive: str | None = None, **kwargs: Any):
         recheck = "recheck" in [s.strip().lower() for s in (steps or "").split(",")]
         super().__init__(*args, recheck=recheck, **kwargs)
         self._steps = [s.strip().lower() for s in (steps or "").split(",") if s.strip()]
@@ -275,6 +278,11 @@ class FusionCodeAlta(LockedCodeAlta):
         for ref in filter(None, (self._judge, self._repair)):
             parse_model_ref(ref)
         self._helper_sec = int(helper_timeout_sec) if helper_timeout_sec is not None else 360
+        self._adaptive = adaptive.strip().lower() if adaptive else None
+        if self._adaptive is not None and self._adaptive not in ("low", "medium", "high", "max"):
+            raise ValueError(f"adaptive must be low, medium, high or max; got {adaptive!r}")
+        if self._adaptive is not None and self._steps:
+            raise ValueError("adaptive runs CodeAlta's own review: name no steps with it")
         self._critic_mode = (critic_mode or "tools").strip().lower()
         if self._critic_mode not in ("tools", "diff"):
             raise ValueError(f"critic_mode must be tools or diff; got {critic_mode!r}")
@@ -336,6 +344,24 @@ class FusionCodeAlta(LockedCodeAlta):
         return (f"mkdir -p {_LOGS} {profile}; cd {shlex.quote(repo)} && "
                 f"timeout -k 30 {budget_sec - 60} {run} < {prompt_file} > {jsonl} 2> {stderr}; "
                 'echo "ALTACLI_EXIT=$?"')
+
+    def _command(self, repo: str, model_ref: str, settings: list[str], budget_sec: int | None = None, resume: bool = False,
+                 prompt_file: str = f"{_RUN_DIR}/instruction.md", jsonl: str = _JSONL, stderr: str = _STDERR) -> str:
+        command = super()._command(repo, model_ref, settings, budget_sec, resume, prompt_file, jsonl, stderr)
+        if self._adaptive is None:
+            return command
+        # CodeAlta's Adaptive chooses the model: the level is given by the settings, the session by --tier.
+        level = self._adaptive
+        adaptive = [
+            "--tier", f"adaptive:{level}",
+            "-c", f"models.adaptive.level={_toml_string(level)}",
+            "-c", f"models.adaptive.{level}.model={_toml_string(model_ref)}",
+            "-c", f"models.adaptive.{level}.critics=[{', '.join(_toml_string(critic) for critic in self._critics)}]",
+        ]
+        model = f"-m {shlex.quote(model_ref)}"
+        if model not in command:
+            raise RuntimeError(f"the command names no model to replace: {command}")
+        return command.replace(model, " ".join(shlex.quote(part) for part in adaptive), 1)
 
     async def _upload_text(self, environment: BaseEnvironment, text: str, name: str) -> str:
         with tempfile.TemporaryDirectory(prefix="codealta-fusion-") as tmp:

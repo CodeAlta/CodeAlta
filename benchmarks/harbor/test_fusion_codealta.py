@@ -74,6 +74,21 @@ class SettingsTests(unittest.TestCase):
         self.assertIn("chat.default_provider=\"anthropic\"", command)
         self.assertNotIn("chat.default_provider=\"openai\"", command)
 
+    def test_adaptive_runs_the_level_of_codealta_instead_of_a_model(self) -> None:
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "o", "ANTHROPIC_API_KEY": "a"}):
+            agent = _agent(reasoning_effort="medium", adaptive="high", critics="anthropic:claude-sonnet-5-5@high")
+            model_ref, settings, _ = agent._multi_settings()
+        command = agent._command("/app", model_ref, settings)
+        self.assertNotIn(" -m ", command)
+        self.assertIn("--tier adaptive:high", command)
+        self.assertIn("'models.adaptive.high.model=\"openai:gpt-6.1-sol@medium\"'", command)
+        self.assertIn("'models.adaptive.high.critics=[\"anthropic:claude-sonnet-5-5@high\"]'", command)
+        self.assertIn('providers.anthropic.type="anthropic"', command)
+        with self.assertRaisesRegex(ValueError, "name no steps"):
+            _agent(adaptive="high", steps="critique", critics="anthropic:claude-sonnet-5-5@high")
+        with self.assertRaisesRegex(ValueError, "adaptive must be"):
+            _agent(adaptive="huge")
+
     def test_steps_need_their_models(self) -> None:
         with self.assertRaisesRegex(ValueError, "critics="):
             _agent(steps="critique")
