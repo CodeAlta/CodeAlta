@@ -394,6 +394,10 @@ public sealed class PluginContributionRegistry
                 // A configuration file names a trigger by its type: a second plugin with the same type shadows the first.
                 yield return new ContributionConflictKey("automation-trigger", $"automation-trigger:{trigger.Type}", trigger.Type);
                 yield break;
+            case PluginScriptContribution script:
+                // A script is run by its name: a second plugin with the same name shadows the first.
+                yield return new ContributionConflictKey("script", $"script:{script.Name}", script.Name);
+                yield break;
             case PluginUiContribution ui:
                 yield return new ContributionConflictKey("ui-region", $"ui:{ui.Region}:{ui.Name ?? ui.GetType().Name}", $"{ui.Region}:{ui.Name ?? ui.GetType().Name}");
                 yield break;
@@ -478,6 +482,7 @@ public sealed class PluginContributionRegistry
             PluginModelProviderContribution provider => provider.ProviderType,
             PluginSettingContribution setting => setting.Key,
             PluginAutomationTriggerContribution trigger => trigger.Type,
+            PluginScriptContribution script => script.Name,
             _ => null,
         };
 

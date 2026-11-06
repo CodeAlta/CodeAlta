@@ -558,7 +558,8 @@ public static class CodeModeToolFactory
     private static string ScopeName(CodeModeScriptScope scope) => scope switch
     {
         CodeModeScriptScope.Project => "project",
-        CodeModeScriptScope.Global => "user",
+
+
         _ => "sample",
     };
 

@@ -54,6 +54,8 @@ public enum PluginPoint
     Settings,
     /// <summary>Automation trigger: what starts automations, with the source of its events.</summary>
     AutomationTrigger,
+    /// <summary>Script: a script of Code Mode the plugin gives to the library.</summary>
+    Script,
 }
 
 /// <summary>

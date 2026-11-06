@@ -364,6 +364,9 @@ public sealed record PluginAutomationTriggerContribution
     /// <summary>Gets the signal the source raises to be looked at now; null for a source that waits for the next look.</summary>
     public PluginTriggerSignal? Signal { get; init; }
 
+    /// <summary>Gets the script the trigger comes with, which the editor offers to run on it; null for a trigger that comes with none.</summary>
+    public PluginTriggerScript? Script { get; init; }
+
     /// <summary>Gets the order among the triggers the editor offers; the lower comes first.</summary>
     public int Order { get; init; }
 
@@ -383,6 +386,7 @@ public sealed record PluginAutomationTriggerContribution
         if (Fields.Select(static field => field.Id).Distinct(StringComparer.Ordinal).Count() != Fields.Count) return "names a field twice";
         if (Fields.Any(static field => field.Kind is PluginTriggerFieldKind.Choice or PluginTriggerFieldKind.Choices && field.Choices is not { Count: > 0 }))
             return "has a field of choices that offers none";
+        if (Script is { } script && !PluginScriptContribution.IsName(script.Name)) return "comes with a script whose name is not <prefix>/<name>";
         return null;
     }
 
@@ -512,4 +516,66 @@ public interface IAutomationTriggerSource
     /// <exception cref="NotSupportedException">The source is not <see cref="PluginTriggerDelivery.Pushed"/>.</exception>
     Task ListenAsync(PluginTriggerContext context, IPluginTriggerSink sink, CancellationToken cancellationToken)
         => throw new NotSupportedException("This trigger source does not listen.");
+}
+
+/// <summary>
+/// A script of Code Mode that a plugin gives to the library: run as <c>workflow("acme.deploys/notify")</c>, by an automation, from
+/// the Workflows tab or by an agent, like a script of the user. It changes with the plugin and is never saved over.
+/// </summary>
+/// <remarks>Return it from <see cref="PluginBase.GetScripts"/>. It is in the spaces its plugin is in, while the plugin runs.</remarks>
+public sealed record PluginScriptContribution
+{
+    /// <summary>The longest script.</summary>
+    public const int MaximumLength = 256 * 1024;
+
+    /// <summary>
+    /// Gets the name of the script: <c>&lt;prefix&gt;/&lt;name&gt;</c>, with a prefix of the plugin's own (lowercase letters, digits,
+    /// <c>.</c>, <c>_</c> and <c>-</c>) and a name of lowercase letters, digits and hyphens that starts with a letter, such as
+    /// <c>acme.deploys/notify</c>.
+    /// </summary>
+    public required string Name { get; init; }
+
+    /// <summary>Gets the script, with its <c>export const meta = { ... }</c> as any script of the library has.</summary>
+    public required string Content { get; init; }
+
+    /// <summary>Gets a message that says why the script is not valid, or <see langword="null"/> when it is.</summary>
+    /// <returns>The reason, in a sentence.</returns>
+    public string? Validate()
+    {
+        if (!IsName(Name)) return "has a name that is not <prefix>/<name>, such as acme.deploys/notify";
+        if (string.IsNullOrWhiteSpace(Content)) return "has no content";
+        if (Content.Length > MaximumLength) return $"is longer than {MaximumLength} characters";
+        return null;
+    }
+
+    /// <summary>Gets whether a text is the name of a script of a plugin: <c>&lt;prefix&gt;/&lt;name&gt;</c>.</summary>
+    /// <param name="text">The text.</param>
+    /// <returns>True for a name.</returns>
+    public static bool IsName(string? text)
+    {
+        if (text is not { Length: > 2 and <= 128 }) return false;
+        var slash = text.IndexOf('/', StringComparison.Ordinal);
+        if (slash <= 0 || slash != text.LastIndexOf('/')) return false;
+        var prefix = text.AsSpan(0, slash);
+        var name = text.AsSpan(slash + 1);
+        return (char.IsAsciiLetterLower(prefix[0]) || char.IsAsciiDigit(prefix[0])) && prefix.IndexOfAnyExcept("abcdefghijklmnopqrstuvwxyz0123456789._-") < 0
+            && name.Length is > 0 and <= 64 && char.IsAsciiLetterLower(name[0]) && name.IndexOfAnyExcept("abcdefghijklmnopqrstuvwxyz0123456789-") < 0;
+    }
+}
+
+/// <summary>
+/// The script a trigger of a plugin comes with: the editor of automations offers the trigger as a ready-made automation that runs
+/// it, which the user saves and turns on.
+/// </summary>
+/// <param name="Name">The script, one the plugin gives (<see cref="PluginScriptContribution.Name"/>).</param>
+public sealed record PluginTriggerScript(string Name)
+{
+    /// <summary>Gets the arguments of the script, a JSON object; null for none.</summary>
+    public string? ArgumentsJson { get; init; }
+
+    /// <summary>Gets whether the script runs without a model, with no session (the default); false for a session that a model asks to run it in.</summary>
+    public bool WithoutModel { get; init; } = true;
+
+    /// <summary>Gets whether a script without a model edits files and runs commands, beside reading.</summary>
+    public bool Writes { get; init; }
 }

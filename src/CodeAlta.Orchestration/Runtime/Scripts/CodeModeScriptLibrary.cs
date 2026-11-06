@@ -17,7 +17,16 @@ public enum CodeModeScriptScope
 
     /// <summary>A script of the project, in <c>.alta/scripts</c>, committed with it.</summary>
     Project,
+
+    /// <summary>A script a running plugin gives, named <c>&lt;prefix&gt;/&lt;name&gt;</c>; it is changed with the plugin, never saved.</summary>
+    Plugin,
 }
+
+/// <summary>A script a running plugin gives to the library.</summary>
+/// <param name="Name">Its name, <c>&lt;prefix&gt;/&lt;name&gt;</c> (<see cref="CodeModeScriptLibrary.IsPluginName"/>).</param>
+/// <param name="Content">The script.</param>
+/// <param name="PluginId">The plugin that gives it, whose spaces it is in.</param>
+public sealed record CodeModePluginScript(string Name, string Content, string PluginId);
 
 /// <summary>A step a library script declares in its <c>meta</c>.</summary>
 /// <param name="Id">The id that calls and <c>step()</c> name.</param>
@@ -79,6 +88,9 @@ public sealed partial class CodeModeScriptLibrary
 {
     private readonly CatalogOptions _catalog;
     private readonly string? _builtInRoot;
+    private readonly Lock _preparedGate = new();
+    private readonly Dictionary<string, CodeModeSource> _prepared = new(StringComparer.Ordinal);
+    private Func<IReadOnlyList<CodeModePluginScript>>? _pluginScripts;
 
     /// <summary>Creates the library of a host.</summary>
     /// <param name="catalog">The roots of the host: your scripts are under its global root.</param>
@@ -108,6 +120,28 @@ public sealed partial class CodeModeScriptLibrary
     /// <returns>True for a name.</returns>
     public static bool IsName(string? name) => name is { Length: > 0 and <= 64 } && NamePattern().IsMatch(name);
 
+    /// <summary>
+    /// Gets whether a name is the name of a script of a plugin: a prefix of the plugin's own (lowercase letters, digits, <c>.</c>,
+    /// <c>_</c> and <c>-</c>), a slash, and a name as <see cref="IsName"/> says, such as <c>acme.deploys/notify</c>.
+    /// </summary>
+    /// <param name="name">The name.</param>
+    /// <returns>True for such a name.</returns>
+    public static bool IsPluginName(string? name)
+        => name is { Length: > 2 and <= 128 } && name.IndexOf('/', StringComparison.Ordinal) is > 0 and var slash && slash == name.LastIndexOf('/')
+           && PluginPrefixPattern().IsMatch(name[..slash]) && IsName(name[(slash + 1)..]);
+
+    /// <summary>Gets whether a name names a script the library can hold: one of yours, of a project or of CodeAlta, or one of a plugin.</summary>
+    /// <param name="name">The name.</param>
+    /// <returns>True for a name.</returns>
+    public static bool IsReference(string? name) => IsName(name) || IsPluginName(name);
+
+    /// <summary>Gets or sets what gives the scripts of the running plugins; null for a host without plugins.</summary>
+    public Func<IReadOnlyList<CodeModePluginScript>>? PluginScripts
+    {
+        get => Volatile.Read(ref _pluginScripts);
+        set => Volatile.Write(ref _pluginScripts, value);
+    }
+
     /// <summary>Lists the scripts a project sees, one per name: the project's, then yours, then the samples.</summary>
     /// <param name="projectRoot">The folder of the project, or null for none.</param>
     /// <returns>The scripts, by name.</returns>
@@ -133,6 +167,8 @@ public sealed partial class CodeModeScriptLibrary
             }
         }
 
+        // The scripts of plugins have names of their own: they take the place of no other.
+        foreach (var script in Plugins(spaces)) byName.TryAdd(script.Name, script);
         return [.. byName.Values.OrderBy(static script => script.Name, StringComparer.Ordinal)];
     }
 
@@ -149,6 +185,7 @@ public sealed partial class CodeModeScriptLibrary
     /// <returns>The script, or null.</returns>
     public CodeModeLibraryScript? Find(string name, string? projectRoot, SpaceFilter? spaces)
     {
+        if (IsPluginName(name)) return Plugins(spaces).FirstOrDefault(script => script.Name == name);
         if (!IsName(name)) return null;
         foreach (var (scope, folder) in Folders(projectRoot).Reverse())
         {
@@ -173,6 +210,7 @@ public sealed partial class CodeModeScriptLibrary
     /// <returns>The hash, or null when there is no such script.</returns>
     public string? FindHash(string name, string? projectRoot)
     {
+        if (IsPluginName(name)) return Plugins(null).FirstOrDefault(script => script.Name == name)?.Hash;
         if (!IsName(name)) return null;
         foreach (var (_, folder) in Folders(projectRoot).Reverse())
         {
@@ -205,6 +243,7 @@ public sealed partial class CodeModeScriptLibrary
     public (CodeModeLibraryScript? Script, string? Refusal) Save(string name, CodeModeScriptScope scope, string content, string? projectRoot, string? expectedHash)
     {
         ArgumentNullException.ThrowIfNull(content);
+        if (IsPluginName(name)) return (null, $"'{name}' is a script of a plugin: it changes with its plugin. Save a copy under another name.");
         if (!IsName(name)) return (null, $"'{name}' is not a script name: lowercase letters, digits and hyphens, starting with a letter.");
         if (scope == CodeModeScriptScope.BuiltIn) return (null, "The samples of CodeAlta are not saved: save a copy under your scripts or the project's.");
         if (scope == CodeModeScriptScope.Project && string.IsNullOrWhiteSpace(projectRoot)) return (null, "A project script needs a project.");
@@ -256,6 +295,39 @@ public sealed partial class CodeModeScriptLibrary
         return null;
     }
 
+    // The scripts of the running plugins in a space: those of the plugins the space has.
+    private IEnumerable<CodeModeLibraryScript> Plugins(SpaceFilter? spaces)
+    {
+        IReadOnlyList<CodeModePluginScript> scripts;
+        try
+        {
+            scripts = PluginScripts?.Invoke() ?? [];
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The plugins could not be listed now: their scripts come back at the next reading.
+            yield break;
+        }
+
+        foreach (var script in scripts)
+        {
+            if (!IsPluginName(script.Name) || spaces is not null && !spaces.Allows(SpaceResourceKind.Plugin, script.PluginId)) continue;
+            var hash = HashOf(script.Content);
+            CodeModeSource source;
+            lock (_preparedGate)
+            {
+                if (!_prepared.TryGetValue(script.Name + "@" + hash, out source!))
+                {
+                    // A new version of the script of a plugin is prepared once; the old ones go with it.
+                    foreach (var old in _prepared.Keys.Where(key => key.StartsWith(script.Name + "@", StringComparison.Ordinal)).ToArray()) _prepared.Remove(old);
+                    _prepared[script.Name + "@" + hash] = source = CodeModeSource.Prepare(script.Content, script.Name.Replace('/', '.') + ".js");
+                }
+            }
+
+            yield return new CodeModeLibraryScript(script.Name, CodeModeScriptScope.Plugin, "plugin:" + script.PluginId + "/" + script.Name, hash, source);
+        }
+    }
+
     // The folders, from the lowest precedence to the highest.
     private IEnumerable<(CodeModeScriptScope Scope, string Folder)> Folders(string? projectRoot)
     {
@@ -279,4 +351,7 @@ public sealed partial class CodeModeScriptLibrary
 
     [GeneratedRegex("^[a-z][a-z0-9-]*$")]
     private static partial Regex NamePattern();
+
+    [GeneratedRegex("^[a-z0-9][a-z0-9._-]*$")]
+    private static partial Regex PluginPrefixPattern();
 }

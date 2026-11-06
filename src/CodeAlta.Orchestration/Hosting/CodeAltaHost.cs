@@ -313,8 +313,11 @@ public sealed class CodeAltaHost : IAsyncDisposable
             ? Task.CompletedTask
             : CodeModeRuns.UseStoreAsync(new Runtime.Scripts.CodeModeRunStore(Runtime.Scripts.CodeModeRunStore.RootOf(CatalogOptions)));
 
-    /// <summary>Gets the library of the scripts of Code Mode: the user's scripts, and those of the projects.</summary>
-    public Runtime.Scripts.CodeModeScriptLibrary CodeModeScripts => _codeModeScripts ??= new Runtime.Scripts.CodeModeScriptLibrary(CatalogOptions, Runtime.Scripts.CodeModeScriptLibrary.ShippedRoot);
+    /// <summary>Gets the library of the scripts of Code Mode: the user's scripts, those of the projects, and those of the running plugins.</summary>
+    public Runtime.Scripts.CodeModeScriptLibrary CodeModeScripts => _codeModeScripts ??= new Runtime.Scripts.CodeModeScriptLibrary(CatalogOptions, Runtime.Scripts.CodeModeScriptLibrary.ShippedRoot)
+    {
+        PluginScripts = () => [.. PluginRuntime.GetScripts().Select(static pair => new Runtime.Scripts.CodeModePluginScript(pair.Script.Name, pair.Script.Content, pair.PluginId))],
+    };
 
     private Runtime.Scripts.CodeModeScriptLibrary? _codeModeScripts;
 

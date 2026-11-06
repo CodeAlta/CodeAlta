@@ -97,8 +97,8 @@ A plugin can give a trigger together with the code that handles it, so that "whe
 - [x] 4. Engine: polled sources with cursors, push listeners, claims, the prompt section, the JSON `event`; a missing source reported; tests with a fake source (`AutomationServiceTests`).
 - [x] 5. Project trigger, with the origin reported by the in-process add paths; tests.
 - [x] 6. Automation trigger, with the self and chain-depth guards; tests.
-- [ ] 7. Scripts without a model: `script_mode` and `script_access` (read, validate, fingerprint; write without a sandbox only in the user's configuration); the tools of a run without a session, in the sandbox of the automation (the sandbox router of the runtime takes the sandbox it is given); the unattended runner in `CodeAlta.LiveTool` (`alta` read-only and plugin commands, `tools.*` by access, discovery, `present()`); the runner of the automation that uses it; tests.
-- [ ] 8. Scripts of a plugin: `PluginBase.GetScripts()`, the `Plugin` scope of the library and its names, read-only; a trigger contribution that names its script, arguments and mode; tests.
+- [x] 7. Scripts without a model: `script_mode` and `script_access` (read, validate, fingerprint; write without a sandbox only in the user's configuration); the tools of a run without a session, in the sandbox of the automation (the sandbox router of the runtime takes the sandbox it is given); the unattended runner in `CodeAlta.LiveTool` (`alta` read-only and plugin commands, `tools.*` by access, discovery, `present()`); the runner of the automation that uses it; tests.
+- [x] 8. Scripts of a plugin: `PluginBase.GetScripts()`, the `Plugin` scope of the library and its names, read-only; a trigger contribution that names its script, arguments and mode; tests.
 - [ ] 9. RPC and editor: trigger descriptors, the generic fields, the events multi-select, **Run without a model**, a plugin's trigger offered with its script as a ready-made automation; frontend tests; checked in the developer instance, both themes and a narrow window.
 - [ ] 10. `alta automation`: `--trigger <type>@<events>`, `--trigger-setting`, `--script-mode`; tests.
 - [ ] 11. Documentation:

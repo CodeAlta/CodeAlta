@@ -43,6 +43,39 @@ public sealed class PluginAutomationTriggerRegistrationTests
         Assert.IsTrue(registry.GetDiagnostics().Any(static diagnostic => diagnostic.Message.Contains("acme/deploy", StringComparison.Ordinal)), "the second one is reported");
     }
 
+    [TestMethod]
+    public async Task Activation_KeepsTheValidScripts_AndLeavesOutTheInvalidOnesWithAWarning()
+    {
+        var registry = new PluginContributionRegistry();
+        var activator = new PluginRuntimeActivator(registry);
+        var discovered = new DiscoveredPluginType { Type = typeof(ScriptsPlugin), Descriptor = PluginDescriptorFactory.FromType(typeof(ScriptsPlugin)) };
+
+        var result = await activator.ActivateAsync(discovered, null, null, new PluginActivationOptions { HostInfo = HostInfo() });
+
+        var kept = registry.GetSnapshot().Where(static item => item.Handle.Point == PluginPoint.Script).Select(static item => ((PluginScriptContribution)item.Contribution).Name).ToArray();
+        CollectionAssert.AreEqual(new[] { "acme/notify" }, kept);
+        var warnings = result.Diagnostics.Where(static diagnostic => diagnostic.Severity == PluginDiagnosticSeverity.Warning).Select(static diagnostic => diagnostic.Message).ToArray();
+        Assert.AreEqual(3, warnings.Length, string.Join(Environment.NewLine, warnings));
+        Assert.IsTrue(warnings.Any(static message => message.Contains("'notify'", StringComparison.Ordinal) && message.Contains("<prefix>/<name>", StringComparison.Ordinal)));
+        Assert.IsTrue(warnings.Any(static message => message.Contains("'acme/empty'", StringComparison.Ordinal) && message.Contains("no content", StringComparison.Ordinal)));
+        Assert.IsTrue(warnings.Any(static message => message.Contains("repeats", StringComparison.Ordinal)));
+        // A trigger that names a script checks its name.
+        Assert.IsNotNull((Trigger("acme/deploy", new PluginTriggerEventType("done", "Done")) with { Script = new("notify") }).Validate());
+        Assert.IsNull((Trigger("acme/deploy", new PluginTriggerEventType("done", "Done")) with { Script = new("acme/notify") }).Validate());
+        await result.ActivePlugin!.DeactivateAsync(TimeSpan.FromSeconds(5));
+    }
+
+    private sealed class ScriptsPlugin : PluginBase
+    {
+        public override IEnumerable<PluginScriptContribution> GetScripts()
+        {
+            yield return new() { Name = "acme/notify", Content = "export const meta = { name: \"notify\" };\nreturn 1;" };
+            yield return new() { Name = "notify", Content = "return 1;" };
+            yield return new() { Name = "acme/empty", Content = " " };
+            yield return new() { Name = "acme/notify", Content = "return 2;" };
+        }
+    }
+
     private static PluginAutomationTriggerContribution Trigger(string type, params PluginTriggerEventType[] events)
         => new() { Type = type, DisplayName = "Trigger " + type, Events = events, Source = new Source() };
 

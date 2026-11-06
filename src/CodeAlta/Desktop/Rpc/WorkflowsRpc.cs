@@ -110,7 +110,7 @@ internal sealed class WorkflowsService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null);
-        if (!CodeModeScriptLibrary.IsName(request.Name) || (request.ProjectId is { } projectId && !Identifier(projectId))) return new("invalid_request", null);
+        if (!CodeModeScriptLibrary.IsReference(request.Name) || (request.ProjectId is { } projectId && !Identifier(projectId))) return new("invalid_request", null);
         var project = request.ProjectId is null ? null : await _projects!.GetByIdAsync(request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (request.ProjectId is not null && (project is null || project.Archived)) return new("not_found", null);
         var spaces = _spaceOf is null ? null : await _spaceOf(project, cancellationToken).ConfigureAwait(false);
@@ -119,7 +119,8 @@ internal sealed class WorkflowsService
         if (script is null) return new("not_found", null);
         try
         {
-            var source = await File.ReadAllTextAsync(script.Path, cancellationToken).ConfigureAwait(false);
+            // The script of a plugin has no file: the library keeps its text.
+            var source = script.Scope == CodeModeScriptScope.Plugin ? script.Source.Original : await File.ReadAllTextAsync(script.Path, cancellationToken).ConfigureAwait(false);
             return source.Length > MaximumSourceLength ? new("refused", null) : new("ok", source);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -168,7 +169,7 @@ internal sealed class WorkflowsService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null);
-        if (!CodeModeScriptLibrary.IsName(request.Name) || !Identifier(request.ProjectId) || request.Arguments is { Length: > MaximumArgumentsLength }
+        if (!CodeModeScriptLibrary.IsReference(request.Name) || !Identifier(request.ProjectId) || request.Arguments is { Length: > MaximumArgumentsLength }
             || request.ProviderId is not null && !Name(request.ProviderId) || request.ModelId is not null && (request.ProviderId is null || !Name(request.ModelId))
             || request.ReasoningEffort is not null && (request.ModelId is null || !Name(request.ReasoningEffort))
             || request.PermissionMode is not null && !Name(request.PermissionMode) || request.Sandbox is not null && !Name(request.Sandbox)
@@ -251,7 +252,8 @@ internal sealed class WorkflowsService
     private static string Scope(CodeModeScriptScope scope) => scope switch
     {
         CodeModeScriptScope.Project => "project",
-        CodeModeScriptScope.Global => "global",
+
+
         _ => "builtin",
     };
 

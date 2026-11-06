@@ -77,7 +77,7 @@ internal static class AutomationConfig
         if (definition.Name.Length > AutomationDefinition.MaximumNameLength || definition.Name.Any(char.IsControl)) return $"The name of an automation is one line of at most {AutomationDefinition.MaximumNameLength} characters.";
         if (definition.Script is { } script)
         {
-            if (!CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary.IsName(script))
+            if (!CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary.IsReference(script))
                 return "The script of an automation is the name of a script of the library: lowercase letters, digits and hyphens.";
             if (definition.Prompt.Length > 0) return "An automation runs a prompt or a script, not both.";
             if (definition.ScriptArguments is { } arguments && !IsObject(arguments)) return "The arguments of a script are a JSON object, such as { \"pr\": 42 }.";

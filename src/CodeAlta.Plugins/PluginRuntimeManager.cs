@@ -126,6 +126,14 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
             .Select(static registration => new PluginAutomationTriggerRegistration((PluginAutomationTriggerContribution)registration.Contribution,
                 registration.PluginId ?? PluginContributionRegistry.PluginIdOf(registration.Handle.PluginRuntimeKey, null), registration.Scope, registration.ScopeProjectId))];
 
+    /// <summary>Gets the scripts the running plugins give to the library, in their registration order, with the plugin of each.</summary>
+    /// <returns>The scripts.</returns>
+    public IReadOnlyList<(PluginScriptContribution Script, string PluginId)> GetScripts()
+        => [.. _registry.GetSnapshot()
+            .Where(static registration => registration.Handle.Point == PluginPoint.Script && registration.Contribution is PluginScriptContribution)
+            .Select(static registration => ((PluginScriptContribution)registration.Contribution,
+                registration.PluginId ?? PluginContributionRegistry.PluginIdOf(registration.Handle.PluginRuntimeKey, null)))];
+
     /// <summary>
     /// Gets the model provider types one running plugin contributes: the id configuration names it by (the folder of
     /// a source package, the name of a plugin of the application).

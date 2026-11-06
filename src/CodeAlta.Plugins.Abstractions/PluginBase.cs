@@ -223,6 +223,13 @@ public abstract class PluginBase : IAsyncDisposable
     public virtual IEnumerable<PluginAutomationTriggerContribution> GetAutomationTriggers() => [];
 
     /// <summary>
+    /// Gets the scripts of Code Mode the plugin gives to the library, named <c>&lt;prefix&gt;/&lt;name&gt;</c>: what a trigger of the
+    /// plugin comes with, or what an agent or an automation runs.
+    /// </summary>
+    /// <returns>Script contributions.</returns>
+    public virtual IEnumerable<PluginScriptContribution> GetScripts() => [];
+
+    /// <summary>
     /// A hook that observes or transforms a prompt when it is submitted.
     /// </summary>
     /// <param name="context">The prompt submission context.</param>

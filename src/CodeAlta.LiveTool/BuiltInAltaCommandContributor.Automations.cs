@@ -473,7 +473,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.scriptArgsWithoutScript", "--script-args are the arguments of --script: name the script.", "alta automation create");
         }
 
-        if (script is not null && !CodeModeScriptLibrary.IsName(script))
+        if (script is not null && !CodeModeScriptLibrary.IsReference(script))
         {
             return UsageError(context, "usage.invalidScript", "--script is the name of a script of the library: lowercase letters, digits and hyphens (`alta script list`).", "alta automation create");
         }

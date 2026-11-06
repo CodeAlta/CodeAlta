@@ -155,7 +155,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         {
             return UsageError(context, "usage.missingScript", "Name a script, the path of a script file, or use --stdin.", path);
         }
-        else if (CodeModeScriptLibrary.IsName(given) && context.Services.Get<CodeModeScriptLibrary>() is { } library
+        else if (CodeModeScriptLibrary.IsReference(given) && context.Services.Get<CodeModeScriptLibrary>() is { } library
                  && await FindInCallerSpaceAsync(context, library, given).ConfigureAwait(false) is { } script)
         {
             content = script.Source.Original;
@@ -196,6 +196,8 @@ internal sealed partial class BuiltInAltaCommandContributor
     {
         if (context.Services.Get<CodeModeScriptLibrary>() is not { } library) return ScriptsUnavailable(context);
         if (NormalizeOptionalText(name) is not { } scriptName) return UsageError(context, "usage.missingName", "A script name is required.", "alta script edit");
+        if (CodeModeScriptLibrary.IsPluginName(scriptName))
+            return UsageError(context, "script.ofPlugin", $"'{scriptName}' is a script of a plugin: it changes with its plugin. Edit a copy under another name.", "alta script edit");
         var script = await FindInCallerSpaceAsync(context, library, scriptName).ConfigureAwait(false);
         // The copy is in the scratchpad of the session, which its file tools reach; a new script starts empty.
         var scratchpad = context.Services.Get<SessionRuntimeService>()?.ScratchpadRoot
@@ -473,7 +475,8 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static string ScopeName(CodeModeScriptScope scope) => scope switch
     {
         CodeModeScriptScope.Project => "project",
-        CodeModeScriptScope.Global => "global",
+
+
         _ => "builtin",
     };
 

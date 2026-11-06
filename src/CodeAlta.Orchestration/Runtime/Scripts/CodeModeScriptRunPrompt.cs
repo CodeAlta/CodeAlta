@@ -193,7 +193,7 @@ public static partial class CodeModeScriptRunPrompt
         return RunOfScript().IsMatch(code);
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex("""\A\s*(?:\x60{3}(?:js|javascript)?\s*\n)?(?://\s*@exec:[^\n]*\n)?\s*return\s+await\s+workflow\(\s*"[a-z][a-z0-9-]*"\s*(?:,[\s\S]*)?\)\s*;?\s*(?:\x60{3}\s*)?\z""")]
+    [System.Text.RegularExpressions.GeneratedRegex("""\A\s*(?:\x60{3}(?:js|javascript)?\s*\n)?(?://\s*@exec:[^\n]*\n)?\s*return\s+await\s+workflow\(\s*"(?:[a-z0-9][a-z0-9._-]*/)?[a-z][a-z0-9-]*"\s*(?:,[\s\S]*)?\)\s*;?\s*(?:\x60{3}\s*)?\z""")]
     private static partial System.Text.RegularExpressions.Regex RunOfScript();
 
     private static string FirstLine(string message)
