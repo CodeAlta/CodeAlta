@@ -38,7 +38,8 @@ internal sealed record RunFailureNotice(
 /// <param name="PermissionMode">Its permission mode, or <see langword="null"/> for the one of its provider.</param>
 /// <param name="AgentPromptId">Its agent prompt.</param>
 /// <param name="Tier">The tier it runs on, or <see langword="null"/> for a model chosen by hand.</param>
-/// <param name="Adaptive">Whether CodeAlta chooses the model of each of its turns.</param>
+/// <param name="Adaptive">Whether CodeAlta chooses the models of each of its turns.</param>
+/// <param name="Level">The level of Adaptive it chose, or <see langword="null"/> for the default level.</param>
 /// <param name="HasQueuedPrompts">Whether prompts wait in its queue.</param>
 /// <param name="Scope">The tiers of its space, the providers available there, and Adaptive.</param>
 internal sealed record AdaptiveSessionNotice(
@@ -50,6 +51,7 @@ internal sealed record AdaptiveSessionNotice(
     string? AgentPromptId,
     ModelTier? Tier,
     bool Adaptive,
+    AdaptiveLevel? Level,
     bool HasQueuedPrompts,
     ModelTierScope Scope);
 
@@ -199,6 +201,7 @@ public sealed partial class SessionRuntimeService
                         entry?.PendingAgentPromptId ?? entry?.AgentPromptId ?? local?.AgentPromptId ?? session.AgentPromptId,
                         ModelTiers.Parse(local?.Tier),
                         local?.Adaptive == true,
+                        AdaptiveLevels.Parse(local?.AdaptiveLevel),
                         local?.HasPendingQueuedPrompts() ?? false,
                         scope);
                 }, CancellationToken.None).AsTask(),
@@ -272,7 +275,7 @@ public sealed partial class SessionRuntimeService
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
     /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
     public Task<bool> SetSessionTierAsync(string sessionId, ModelTier? tier, CancellationToken cancellationToken = default)
-        => SetSessionModelChoiceAsync(sessionId, tier, adaptive: null, cancellationToken);
+        => SetSessionModelChoiceAsync(sessionId, tier, adaptive: null, level: null, cancellationToken);
 
     /// <summary>
     /// Records the tier of models a session runs on and whether CodeAlta chooses the model of each of its turns (Adaptive),
@@ -285,7 +288,25 @@ public sealed partial class SessionRuntimeService
     /// <returns>Whether the session is known.</returns>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
     /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
-    public async Task<bool> SetSessionModelChoiceAsync(string sessionId, ModelTier? tier, bool? adaptive, CancellationToken cancellationToken = default)
+    public Task<bool> SetSessionModelChoiceAsync(string sessionId, ModelTier? tier, bool? adaptive, CancellationToken cancellationToken = default)
+        => SetSessionModelChoiceAsync(sessionId, tier, adaptive, level: null, cancellationToken);
+
+    /// <summary>
+    /// Records the tier of models a session runs on, whether it is on Adaptive and the level of Adaptive it chose, as
+    /// <see cref="SetSessionModelChoiceAsync(string, ModelTier?, bool?, CancellationToken)"/> records the first two.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="tier">The tier, or <see langword="null"/> for a model chosen by hand.</param>
+    /// <param name="adaptive">Whether the session is on Adaptive; <see langword="null"/> keeps what it records.</param>
+    /// <param name="level">
+    /// The level of Adaptive of a session put on it; <see langword="null"/> keeps the level it records. A session taken
+    /// off Adaptive forgets its level.
+    /// </param>
+    /// <param name="cancellationToken">Stops waiting; what was started is completed.</param>
+    /// <returns>Whether the session is known.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    public async Task<bool> SetSessionModelChoiceAsync(string sessionId, ModelTier? tier, bool? adaptive, AdaptiveLevel? level, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         return await AdmitAsync(async () =>
@@ -298,7 +319,7 @@ public sealed partial class SessionRuntimeService
                 {
                     // An attachment that is being made reads what is saved: it is waited for first.
                     if (_transitions.TryGetValue(sessionId, out var pending)) return ((Task?)pending, false);
-                    return (null, await WriteSessionTierAsync(sessionId, tier, adaptive, token).ConfigureAwait(false));
+                    return (null, await WriteSessionTierAsync(sessionId, tier, adaptive, level, token).ConfigureAwait(false));
                 }, CancellationToken.None).ConfigureAwait(false);
                 if (transition is null) return known;
                 // Its failure belongs to the one that attaches.
@@ -328,6 +349,27 @@ public sealed partial class SessionRuntimeService
             .WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Reads the level of Adaptive a session chose, as it was last chosen.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>The level, or <see langword="null"/> for a session that is not on Adaptive, takes the default level, or is not known.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    public async Task<AdaptiveLevel?> GetSessionAdaptiveLevelAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return await AdmitAsync(
+                () => GetActorForWork(sessionId).QueryAsync(async token =>
+                {
+                    var session = await ResolveOwnedSessionBodyAsync(sessionId, token).ConfigureAwait(false);
+                    if (session is null) return (AdaptiveLevel?)null;
+                    var local = await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false);
+                    return local?.Adaptive == true ? AdaptiveLevels.Parse(local.AdaptiveLevel) : null;
+                }, CancellationToken.None).AsTask(),
+                cancellationToken)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     // Runs on the actor of the session.
     private async ValueTask<ModelTier?> ReadSessionTierAsync(string sessionId, CancellationToken token)
     {
@@ -336,15 +378,17 @@ public sealed partial class SessionRuntimeService
         return ModelTiers.Parse((await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false))?.Tier);
     }
 
-    // Runs on the actor of the session. A null adaptive keeps what the session records.
-    private async ValueTask<bool> WriteSessionTierAsync(string sessionId, ModelTier? tier, bool? adaptive, CancellationToken token)
+    // Runs on the actor of the session. A null adaptive keeps what the session records, and a null level the level it records.
+    private async ValueTask<bool> WriteSessionTierAsync(string sessionId, ModelTier? tier, bool? adaptive, AdaptiveLevel? level, CancellationToken token)
     {
         var session = await ResolveOwnedSessionBodyAsync(sessionId, token).ConfigureAwait(false);
         if (session is null) return false;
         var name = tier is { } chosen ? ModelTiers.NameOf(chosen) : null;
         var localState = await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false);
         var recorded = adaptive is false ? null : adaptive ?? localState?.Adaptive;
-        if (localState is not null && string.Equals(localState.Tier, name, StringComparison.Ordinal) && localState.Adaptive == recorded) return true;
+        var levelName = recorded is not true ? null : level is { } asked ? AdaptiveLevels.NameOf(asked) : localState?.AdaptiveLevel;
+        if (localState is not null && string.Equals(localState.Tier, name, StringComparison.Ordinal) && localState.Adaptive == recorded
+            && string.Equals(localState.AdaptiveLevel, levelName, StringComparison.Ordinal)) return true;
         if (localState is null)
         {
             localState = new SessionViewLocalState();
@@ -353,6 +397,7 @@ public sealed partial class SessionRuntimeService
 
         localState.Tier = name;
         localState.Adaptive = recorded;
+        localState.AdaptiveLevel = levelName;
         await _sessionViewCatalog.JournalStore.AppendStateAsync(session, localState, token).ConfigureAwait(false);
         return true;
     }

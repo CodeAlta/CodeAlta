@@ -689,9 +689,11 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
       icon = "worktree";
       title = normalizedKind === "warning" ? "Working folder not changed" : "Working folder changed";
     } else if (adaptiveCard(entry)) {
-      // What Adaptive did at the end of a turn: a recheck of its change, or its continuation on a stronger model.
-      icon = "model";
-      title = stringAt(parsedDetails, "adaptive") === "recheck" ? "Adaptive · Recheck" : "Adaptive · Escalation";
+      // What Adaptive did at the end of a turn: the review of its change, a recheck, or (the first Adaptive) its
+      // continuation on a stronger model.
+      const what = stringAt(parsedDetails, "adaptive");
+      icon = what === "review" ? "eye" : "model";
+      title = what === "review" ? "Adaptive · Review" : what === "recheck" ? "Adaptive · Recheck" : "Adaptive · Escalation";
     } else {
       title = sessionUpdateTitle(kind);
       // A local compaction is detailed like in the terminal, in place of its raw record.
@@ -853,7 +855,7 @@ function workFolderCard(entry: HistoryEntry): boolean {
 // A card of Adaptive: what it did at the end of a turn, which its details name.
 function adaptiveCard(entry: HistoryEntry): boolean {
   return ["info", "warning"].includes(entry.kind?.toLowerCase() ?? "") && !!entry.details?.includes("adaptive")
-    && ["recheck", "escalation"].includes(stringAt(parseDetails(entry.details), "adaptive") ?? "");
+    && ["recheck", "escalation", "review"].includes(stringAt(parseDetails(entry.details), "adaptive") ?? "");
 }
 
 function sessionUpdateTitle(kind: string): string {

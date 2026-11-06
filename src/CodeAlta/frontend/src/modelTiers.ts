@@ -19,17 +19,32 @@ export type TierState = Readonly<{
   fallback: ModelFallbackSetting;
   /** Where the tiers come from: the space's own, or the global ones. */
   source: "global" | "space";
-  /** How CodeAlta chooses the model of each turn of a session on Adaptive; null while it is not set up. */
+  /** How CodeAlta runs the turns of a session on Adaptive: its levels; null while it is not set up. */
   adaptive: AdaptiveChoice | null;
-  /** Whether a session can be put on Adaptive: it is set up and the tiers it names have models. */
+  /** Whether a session can be put on Adaptive: it is set up with a level. */
   adaptiveReady: boolean;
+  /** The levels Adaptive proposes for the providers that are ready; null when it knows none of their models. */
+  adaptiveProposal: readonly AdaptiveLevel[] | null;
 }>;
 
-/** Adaptive, as Settings > Models sets it up: the tier of the turns, the tier a turn in trouble continues on, the recheck. */
-export type AdaptiveChoice = Readonly<{ code: TierName; escalate: TierName; recheck: boolean }>;
+/** The levels of Adaptive, from the cheapest. */
+export type AdaptiveLevelName = "low" | "medium" | "high" | "max";
+export const adaptiveLevelNames: readonly AdaptiveLevelName[] = Object.freeze(["low", "medium", "high", "max"]);
+export const adaptiveLevelLabels: Readonly<Record<AdaptiveLevelName, "Low" | "Medium" | "High" | "Max">> = Object.freeze({ low: "Low", medium: "Medium", high: "High", max: "Max" });
 
-/** What the evaluation of #273 found best: the quick tier with a recheck of each change of code, the complex tier on trouble. */
-export const recommendedAdaptive: AdaptiveChoice = Object.freeze({ code: "quick", escalate: "complex", recheck: true });
+/**
+ * A level of Adaptive: the model of its turns and the critics that review its changes of code (none for a recheck), with
+ * the names of its model while its provider is ready.
+ */
+export type AdaptiveLevel = Readonly<{ level: AdaptiveLevelName; model: TierTarget; critics: readonly TierTarget[]; choice: ModelTierChoiceItem | null;
+  /** The names of the critics as their providers give them; absent for a level the window changed. */
+  criticNames?: readonly string[] }>;
+
+/** Adaptive, as Settings > Models sets it up: the level a session takes when none is chosen, and the levels that are set. */
+export type AdaptiveChoice = Readonly<{ level: AdaptiveLevelName; levels: readonly AdaptiveLevel[] }>;
+
+/** The most critics of a level. */
+export const maximumAdaptiveCritics = 3;
 
 /** The name the composer and the model list give the choice of Adaptive, beside the tiers. */
 export const adaptiveTier = "adaptive";
@@ -53,13 +68,14 @@ export const emptyTiers: TierState = Object.freeze({
   source: "global",
   adaptive: null,
   adaptiveReady: false,
+  adaptiveProposal: null,
 });
 
 /** Whether the user set no tier: the composer then offers none and new sessions keep the default provider. */
 export const noTiers = (state: TierState | null | undefined) => !state || tierNames.every(tier => state.tiers[tier].length === 0);
 
 /** The tiers a reply of the host gives; null for one that is not such a reading. A tier the host did not list is empty. */
-export function readTierState(reply: Pick<GlobalConfigModelTiersResponse, "tiers" | "fallback"> & Partial<Pick<GlobalConfigModelTiersResponse, "source" | "adaptive" | "adaptiveReady">> | null | undefined): TierState | null {
+export function readTierState(reply: Pick<GlobalConfigModelTiersResponse, "tiers" | "fallback"> & Partial<Pick<GlobalConfigModelTiersResponse, "source" | "adaptive" | "adaptiveReady" | "adaptiveProposal">> | null | undefined): TierState | null {
   if (!reply || !Array.isArray(reply.tiers) || !reply.fallback) return null;
   const tiers: Record<TierName, TierTarget[]> = { complex: [], standard: [], quick: [] };
   const choices: Record<TierName, ModelTierChoiceItem | null> = { complex: null, standard: null, quick: null };
@@ -75,38 +91,96 @@ export function readTierState(reply: Pick<GlobalConfigModelTiersResponse, "tiers
   }
   return { tiers, choices, fallback: { enabled: reply.fallback.enabled === true, onQuota: reply.fallback.onQuota !== false, onUnavailable: reply.fallback.onUnavailable !== false,
     resume: reply.fallback.resume === true, maxResumes: readMaxResumes(reply.fallback.maxResumes) },
-    source: reply.source === "space" ? "space" : "global", ...readAdaptive(reply.adaptive, reply.adaptiveReady) };
+    source: reply.source === "space" ? "space" : "global", ...readAdaptive(reply.adaptive, reply.adaptiveReady),
+    adaptiveProposal: readLevels(reply.adaptiveProposal) };
 }
 
-// Adaptive as a reply gives it: null for a tier that is none, and never ready then.
+const readLevelName = (value: unknown): AdaptiveLevelName | undefined => adaptiveLevelNames.find(name => name === value);
+
+function readTarget(value: unknown): TierTarget | null {
+  const target = value as Partial<Record<"providerKey" | "modelId" | "reasoning", unknown>> | null | undefined;
+  if (!text(target?.providerKey) || !text(target?.modelId)) return null;
+  const reasoning = Array.isArray(target.reasoning) ? target.reasoning.filter((effort: unknown): effort is string => text(effort, 32)).slice(0, 1) : [];
+  return { providerKey: target.providerKey, modelId: target.modelId, reasoning };
+}
+
+// The levels a reply gives, from the cheapest; a level that is not one, or without a model, is left out.
+function readLevels(value: unknown): readonly AdaptiveLevel[] | null {
+  if (!Array.isArray(value)) return null;
+  const levels: AdaptiveLevel[] = [];
+  for (const item of value.slice(0, adaptiveLevelNames.length)) {
+    const level = readLevelName(item?.level), model = readTarget(item?.model);
+    if (!level || !model || levels.some(existing => existing.level === level)) continue;
+    const critics = Array.isArray(item.critics) ? item.critics.map(readTarget).filter((critic: TierTarget | null): critic is TierTarget => !!critic).slice(0, maximumAdaptiveCritics) : [];
+    const choice = item.choice && text(item.choice.providerKey) && text(item.choice.modelId) ? item.choice as ModelTierChoiceItem : null;
+    const names = Array.isArray(item.criticNames) && item.criticNames.length === critics.length && item.criticNames.every((name: unknown) => text(name))
+      ? item.criticNames as string[] : undefined;
+    levels.push(names ? { level, model, critics, choice, criticNames: names } : { level, model, critics, choice });
+  }
+  return levels.sort((left, right) => adaptiveLevelNames.indexOf(left.level) - adaptiveLevelNames.indexOf(right.level));
+}
+
+// Adaptive as a reply gives it: ready only with a level.
 function readAdaptive(value: unknown, ready: unknown): Pick<TierState, "adaptive" | "adaptiveReady"> {
-  const read = value as Partial<Record<"code" | "escalate" | "recheck", unknown>> | null | undefined;
-  const code = tierNames.find(name => name === read?.code), escalate = tierNames.find(name => name === read?.escalate);
-  const adaptive = code && escalate ? { code, escalate, recheck: read?.recheck !== false } : null;
-  return { adaptive, adaptiveReady: !!adaptive && ready === true };
+  const read = value as Partial<Record<"level" | "levels", unknown>> | null | undefined;
+  if (!read) return { adaptive: null, adaptiveReady: false };
+  const levels = readLevels(read.levels) ?? [];
+  return { adaptive: { level: readLevelName(read.level) ?? "medium", levels }, adaptiveReady: levels.length > 0 && ready === true };
 }
 
-/** The model a session on Adaptive starts its turns with: the one the tier of its turns gives now; null while it cannot be chosen. */
-export function adaptiveChoice(state: TierState | null | undefined): ModelTierChoiceItem | null {
-  return state?.adaptive && state.adaptiveReady ? state.choices[state.adaptive.code] : null;
+/** The level a session runs on, as the host resolves it: the one asked when it is set, else the default, else the nearest one (the cheaper on a tie). */
+export function adaptiveLevelOf(adaptive: AdaptiveChoice | null | undefined, asked?: string | null): AdaptiveLevel | null {
+  if (!adaptive || adaptive.levels.length === 0) return null;
+  const wanted = readLevelName(asked) ?? adaptive.level;
+  const index = adaptiveLevelNames.indexOf(wanted);
+  return adaptive.levels.find(level => level.level === wanted)
+    ?? [...adaptive.levels].sort((left, right) => Math.abs(adaptiveLevelNames.indexOf(left.level) - index) - Math.abs(adaptiveLevelNames.indexOf(right.level) - index)
+      || adaptiveLevelNames.indexOf(left.level) - adaptiveLevelNames.indexOf(right.level))[0];
+}
+
+/** The model a session on Adaptive starts its turns with at a level: the one of that level; null while it cannot be chosen. */
+export function adaptiveChoice(state: TierState | null | undefined, level?: string | null): ModelTierChoiceItem | null {
+  return state?.adaptive && state.adaptiveReady ? adaptiveLevelOf(state.adaptive, level)?.choice ?? null : null;
+}
+
+/** The name the draft of a new session gives Adaptive at a level, beside the tiers: `adaptive` for the default level. */
+export const adaptiveTierOf = (level?: string | null) => readLevelName(level) ? `${adaptiveTier}:${level}` : adaptiveTier;
+
+/** Whether a tier of a draft or a session is Adaptive, and its level when it names one. */
+export function readAdaptiveTier(tier: string | null | undefined): Readonly<{ adaptive: boolean; level: AdaptiveLevelName | null }> {
+  if (tier === adaptiveTier) return { adaptive: true, level: null };
+  const level = tier?.startsWith(`${adaptiveTier}:`) ? readLevelName(tier.slice(adaptiveTier.length + 1)) : undefined;
+  return level ? { adaptive: true, level } : { adaptive: false, level: null };
+}
+
+const modelOfTarget = (target: TierTarget) => target.modelId;
+
+/** What a level does, in a few words: its model, and who reviews its changes (or its recheck). */
+export function adaptiveLevelSummary(level: AdaptiveLevel, t: (key: "Recheck" | "Review by {models}", values?: Record<string, string>) => string): string {
+  const model = level.choice?.modelName ?? modelOfTarget(level.model);
+  const effort = level.choice?.reasoning ?? level.model.reasoning[0];
+  const critics = level.criticNames ?? level.critics.map(modelOfTarget);
+  const review = critics.length > 0 ? t("Review by {models}", { models: critics.join(", ") }) : t("Recheck");
+  return [effort ? `${model} ${effort}` : model, review].join(" · ");
 }
 
 /**
- * Adaptive as the list of the composer offers it, after the tiers: what it runs on, the recheck and the model a turn in
- * trouble goes to; `ready` false while it is not set up, when choosing it offers to set it up.
+ * Adaptive as the list of the composer offers it, after the tiers: each level with what it runs; `ready` false while
+ * it is not set up, when choosing it offers to set it up.
  */
 export function composerAdaptiveEntry(state: TierState | null | undefined,
-  t: (key: "Not set up" | "No model ready" | "Recheck" | "{model} on trouble", values?: Record<string, string>) => string)
-  : Readonly<{ ready: boolean; detail: string; title: string | null }> {
-  if (!state?.adaptive || !state.adaptiveReady) return { ready: false, detail: t("Not set up"), title: null };
-  // Set up, while no model of the tier of its turns is ready yet (a provider that starts).
-  const turn = adaptiveChoice(state);
-  if (!turn) return { ready: true, detail: t("No model ready"), title: null };
-  const escalation = state.choices[state.adaptive.escalate];
-  const parts = [turn.modelName, state.adaptive.recheck ? t("Recheck") : null,
-    escalation && state.adaptive.escalate !== state.adaptive.code ? t("{model} on trouble", { model: escalation.modelName }) : null];
-  const detail = parts.filter(Boolean).join(" · ");
-  return { ready: true, detail, title: `${turn.providerName} · ${detail}` };
+  t: (key: "Not set up" | "No model ready" | "Recheck" | "Review by {models}" | "Low" | "Medium" | "High" | "Max", values?: Record<string, string>) => string)
+  : Readonly<{ ready: boolean; detail: string; title: string | null; levels: readonly Readonly<{ level: AdaptiveLevelName; label: string; detail: string | null; title: string | null }>[] }> {
+  if (!state?.adaptive || !state.adaptiveReady) return { ready: false, detail: t("Not set up"), title: null, levels: [] };
+  const levels = state.adaptive.levels.map(level => {
+    const summary = adaptiveLevelSummary(level, t);
+    // Set up, while the provider of its model is not ready yet (a provider that starts).
+    return { level: level.level, label: t(adaptiveLevelLabels[level.level]), detail: level.choice ? summary : null,
+      title: level.choice ? `${level.choice.providerName} · ${summary}` : null };
+  });
+  const usual = adaptiveLevelOf(state.adaptive);
+  const detail = usual?.choice ? adaptiveLevelSummary(usual, t) : t("No model ready");
+  return { ready: true, detail, title: usual?.choice ? `${usual.choice.providerName} · ${detail}` : null, levels };
 }
 
 /** The tiers as the host saves them. */

@@ -66,18 +66,21 @@ public sealed partial class OwnedSessionCommandService
     }
 
     /// <summary>
-    /// Puts a session on Adaptive: CodeAlta then chooses the model of each of its turns, from the tiers of its space as
-    /// <c>[models.adaptive]</c> names them. The model of its next prompt is the one of the turn tier, which the caller
-    /// chooses as it chooses a tier.
+    /// Puts a session on Adaptive at a level: CodeAlta then runs each of its turns on the model of that level, and has
+    /// the critics of the level review each change of code (<c>[models.adaptive]</c>). The model of its next prompt is the
+    /// one of the level, which the caller chooses as it chooses the model of a tier.
     /// </summary>
     /// <param name="sessionId">The session.</param>
+    /// <param name="level">The level; <see langword="null"/> for the one the session chose before, else the default level.</param>
     /// <param name="cancellationToken">Stops waiting.</param>
     /// <returns>
-    /// The status (<c>ok</c>; <c>not_ready</c> when Adaptive is not set up or the tiers it names have no model;
-    /// <c>unavailable</c> for a session that is not known; <c>closed</c>) and, with <c>ok</c>, the tier of its turns.
+    /// The status (<c>ok</c>; <c>not_ready</c> when Adaptive is not set up or has no level; <c>unavailable</c> for a
+    /// session that is not known; <c>closed</c>) and, with <c>ok</c>, the level it runs on: the one asked, or the nearest
+    /// level that is set.
     /// </returns>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
-    public async Task<(string Status, Catalog.ModelTiers.ModelTier? Tier)> SetSessionAdaptiveAsync(string sessionId, CancellationToken cancellationToken = default)
+    public async Task<(string Status, Catalog.ModelTiers.AdaptiveLevelSettings? Level)> SetSessionAdaptiveAsync(string sessionId,
+        Catalog.ModelTiers.AdaptiveLevel? level = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         lock (_gate) { if (_closed || _retained) return ("closed", null); }
@@ -87,9 +90,11 @@ public sealed partial class OwnedSessionCommandService
             if (session is null) return ("unavailable", null);
             var scope = await _runtime.LoadModelTierScopeAsync(session.SpaceId, session.ProjectRef, cancellationToken).ConfigureAwait(false);
             if (!scope.IsAdaptiveReady) return ("not_ready", null);
-            var tier = scope.Adaptive!.Code;
-            return await _runtime.SetSessionModelChoiceAsync(sessionId, tier, adaptive: true, cancellationToken).ConfigureAwait(false)
-                ? ("ok", tier) : ("unavailable", null);
+            var asked = level ?? await _runtime.GetSessionAdaptiveLevelAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            if (scope.Adaptive!.Resolve(asked) is not { } chosen) return ("not_ready", null);
+            // A session on Adaptive has no tier: its level names its models, and a fallback follows the tier its model is in.
+            return await _runtime.SetSessionModelChoiceAsync(sessionId, tier: null, adaptive: true, chosen.Level, cancellationToken).ConfigureAwait(false)
+                ? ("ok", chosen) : ("unavailable", null);
         }
         catch (ObjectDisposedException) { return ("closed", null); }
     }

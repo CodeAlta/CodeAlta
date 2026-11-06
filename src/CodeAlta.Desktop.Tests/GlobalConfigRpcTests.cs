@@ -543,7 +543,7 @@ type = "fake-agent"
     }
 
     [TestMethod]
-    public async Task Adaptive_IsSetUpAndTakenOut_ReadWithTheTiers_AndKeptWhenTheTiersAreSaved()
+    public async Task Adaptive_IsSetUpWithItsLevelsAndTakenOut_ReadWithTheTiers_AndKeptWhenTheTiersAreSaved()
     {
         await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");
         var service = fixture.Service;
@@ -551,24 +551,41 @@ type = "fake-agent"
         Assert.IsNull(none.Adaptive);
         Assert.IsFalse(none.AdaptiveReady);
 
-        // Set up before its tiers have models: it is saved, and cannot be chosen yet.
-        var set = await service.SaveAdaptiveAsync(new(Epoch, new AdaptiveSetting("quick", "complex", true)), CancellationToken.None);
-        Assert.AreEqual("ok", set.Status, set.Message);
-        Assert.AreEqual(new AdaptiveSetting("quick", "complex", true), set.Adaptive);
-        Assert.IsFalse(set.AdaptiveReady);
+        // Set up without a level: it is saved, and cannot be chosen yet.
+        var empty = await service.SaveAdaptiveAsync(new(Epoch, new AdaptiveSetting("medium", [])), CancellationToken.None);
+        Assert.AreEqual("ok", empty.Status, empty.Message);
+        Assert.AreEqual(0, empty.Adaptive!.Levels.Count);
+        Assert.IsFalse(empty.AdaptiveReady);
         StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "[models.adaptive]");
+
+        var medium = new AdaptiveLevelSetting("medium", new("codex", "gpt-6.1-sol", ["Low"]), [new("claude-code", "sonnet", ["High"])]);
+        var set = await service.SaveAdaptiveAsync(new(Epoch, new AdaptiveSetting("max", [medium])), CancellationToken.None);
+        Assert.AreEqual("ok", set.Status, set.Message);
+        Assert.IsTrue(set.AdaptiveReady);
+        Assert.AreEqual("max", set.Adaptive!.Level);
+        var level = set.Adaptive.Levels.Single();
+        Assert.AreEqual("medium", level.Level);
+        Assert.AreEqual("gpt-6.1-sol", level.Model.ModelId);
+        CollectionAssert.AreEqual(new[] { "Low" }, level.Model.Reasoning.ToArray());
+        Assert.AreEqual("sonnet", level.Critics.Single().ModelId);
+        var content = File.ReadAllText(fixture.ConfigPath);
+        StringAssert.Contains(content, "[models.adaptive.medium]");
+        StringAssert.Contains(content, "model = \"codex:gpt-6.1-sol@low\"");
 
         var tiers = SaveTiers(service, new(Epoch,
             [new("complex", [new("claude-code", "opus", ["XHigh"])]), new("quick", [new("claude-code", "haiku", ["High"])])],
             new(false, true, true, false, 5)));
-        Assert.AreEqual(new AdaptiveSetting("quick", "complex", true), tiers.Adaptive, "Saving the tiers keeps Adaptive.");
-        Assert.IsTrue(tiers.AdaptiveReady);
+        Assert.AreEqual("sonnet", tiers.Adaptive!.Levels.Single().Critics.Single().ModelId, "Saving the tiers keeps Adaptive.");
 
-        var changed = await service.SaveAdaptiveAsync(new(Epoch, new AdaptiveSetting("standard", "complex", false)), CancellationToken.None);
-        Assert.AreEqual(new AdaptiveSetting("standard", "complex", false), changed.Adaptive);
-        Assert.IsFalse(changed.AdaptiveReady, "The standard tier has no model.");
+        // A model with two efforts, a level that is none, or too many critics is refused with what is wrong.
+        var twoEfforts = await service.SaveAdaptiveAsync(new(Epoch, new AdaptiveSetting("medium",
+            [medium with { Model = new("codex", "gpt-6.1-sol", ["Low", "High"]) }])), CancellationToken.None);
+        Assert.AreEqual("invalid", twoEfforts.Status);
+        StringAssert.Contains(twoEfforts.Message, "models.adaptive.medium.model");
+        Assert.AreEqual("invalid", (await service.SaveAdaptiveAsync(new(Epoch, new AdaptiveSetting("medium", [medium with { Level = "huge" }])), CancellationToken.None)).Status);
+        Assert.AreEqual("invalid", (await service.SaveAdaptiveAsync(new(Epoch, new AdaptiveSetting("medium",
+            [medium with { Critics = [.. Enumerable.Repeat(new ModelTierTargetItem("claude-code", "sonnet", []), 4)] }])), CancellationToken.None)).Status);
 
-        Assert.AreEqual("invalid", (await service.SaveAdaptiveAsync(new(Epoch, new AdaptiveSetting("cheap", "complex", true)), CancellationToken.None)).Status);
         var removed = await service.SaveAdaptiveAsync(new(Epoch, null), CancellationToken.None);
         Assert.IsNull(removed.Adaptive);
         Assert.DoesNotContain("adaptive", File.ReadAllText(fixture.ConfigPath));

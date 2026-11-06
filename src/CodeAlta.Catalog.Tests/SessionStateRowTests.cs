@@ -30,6 +30,7 @@ public sealed class SessionStateRowTests
             ("model", static state => { state.ProviderKey = "claude"; state.ModelId = "opus"; state.ReasoningEffort = AgentReasoningEffort.High; }),
             ("tier", static state => state.Tier = "quick"),
             ("adaptive", static state => state.Adaptive = true),
+            ("adaptive-level", static state => state.AdaptiveLevel = "high"),
             ("title", static state => state.TitleMode = "last_message"),
             ("permission", static state => state.PermissionMode = "plan"),
             ("sandbox", static state => state.Sandbox = "strict"),

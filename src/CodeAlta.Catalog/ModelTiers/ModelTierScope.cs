@@ -23,13 +23,13 @@ public sealed record ModelTierScope(ModelTierSettings Tiers, bool FromSpace, str
     public bool FallbackFromSpace { get; init; }
 
     /// <summary>
-    /// Gets how CodeAlta chooses the model of each turn of a session on Adaptive, from the global settings; it takes its
-    /// models from the tiers of this scope. <see langword="null"/> when it is not set up.
+    /// Gets how CodeAlta runs the turns of a session on Adaptive, from the global settings: its levels name their models
+    /// themselves. <see langword="null"/> when it is not set up.
     /// </summary>
     public AdaptiveModelSettings? Adaptive { get; init; }
 
-    /// <summary>Gets whether a session of this scope can be put on Adaptive: it is set up and the tiers it names have models.</summary>
-    public bool IsAdaptiveReady => Adaptive?.IsReadyIn(Tiers) == true;
+    /// <summary>Gets whether a session of this scope can be put on Adaptive: it is set up with a level.</summary>
+    public bool IsAdaptiveReady => Adaptive?.IsReady == true;
 
     /// <summary>Gets whether a provider is available in the space.</summary>
     /// <param name="providerKey">The key of the provider.</param>

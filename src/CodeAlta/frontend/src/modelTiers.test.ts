@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { GlobalConfigModelTiersResponse } from "#neoastra";
-import { adaptiveChoice, addTierTarget, composerAdaptiveEntry, composerTierEntries, createTierStore, emptyTiers, moveEffort, moveTierTarget, noTiers, readMaxResumes, readTierState,
+import { adaptiveChoice, adaptiveLevelOf, adaptiveLevelSummary, adaptiveTierOf, addTierTarget, composerAdaptiveEntry, composerTierEntries, readAdaptiveTier, createTierStore, emptyTiers, moveEffort, moveTierTarget, noTiers, readMaxResumes, readTierState,
   removeTierTarget, replaceTierTarget, setTierReasoning, startingEfforts, tierLists, type TierState } from "./modelTiers";
 
 const reply = (changes: Partial<GlobalConfigModelTiersResponse> = {}): GlobalConfigModelTiersResponse => ({
-  status: "ok", message: null, source: "global", spaceId: null, adaptive: null, adaptiveReady: false,
+  status: "ok", message: null, source: "global", spaceId: null, adaptive: null, adaptiveReady: false, adaptiveProposal: null,
   fallback: { enabled: true, onQuota: true, onUnavailable: false, resume: false, maxResumes: 5 },
   tiers: [
     { tier: "complex", targets: [{ providerKey: "claude-code", modelId: "opus", reasoning: ["High", "XHigh"] }, { providerKey: "codex", modelId: "gpt-6.1", reasoning: ["XHigh"] }],
@@ -35,27 +35,45 @@ test("the tiers of the host are read with what each gives, and a reply that is n
   assert.deepEqual(tierLists(read).map(list => [list.tier, list.targets.length, list.choice]), [["complex", 2, null], ["standard", 0, null], ["quick", 1, null]]);
 });
 
-test("Adaptive is read with the tiers, ready only when the host says so, and offered by the composer with what it runs on", () => {
+test("Adaptive is read with its levels, ready only when the host says so, and offered by the composer level by level", () => {
   const t = (key: string, values?: Record<string, string>) => key.replace(/\{(\w+)\}/g, (_, name: string) => values?.[name] ?? name);
   assert.equal(state().adaptive, null);
-  assert.deepEqual(composerAdaptiveEntry(state(), t), { ready: false, detail: "Not set up", title: null });
-  // Set up on tiers that have models: the turns run on the quick tier, a turn in trouble goes to the complex one.
-  const quick = { providerKey: "claude-code", modelId: "haiku", reasoning: "High", providerName: "Claude Code", modelName: "Haiku" };
-  const ready = readTierState(reply({ adaptive: { code: "quick", escalate: "complex", recheck: true }, adaptiveReady: true,
-    tiers: [...reply().tiers.slice(0, 2), { tier: "quick", targets: [{ providerKey: "claude-code", modelId: "haiku", reasoning: ["High"] }], choice: quick }] }))!;
-  assert.deepEqual(ready.adaptive, { code: "quick", escalate: "complex", recheck: true });
-  assert.equal(adaptiveChoice(ready)?.modelId, "haiku");
-  assert.deepEqual(composerAdaptiveEntry(ready, t), { ready: true, detail: "Haiku · Recheck · GPT-6.1 on trouble", title: "Claude Code · Haiku · Recheck · GPT-6.1 on trouble" });
-  // Set up, but the host says its tiers cannot give a model: it cannot be chosen.
-  const waiting = readTierState(reply({ adaptive: { code: "quick", escalate: "complex", recheck: false }, adaptiveReady: false }))!;
+  assert.deepEqual(composerAdaptiveEntry(state(), t), { ready: false, detail: "Not set up", title: null, levels: [] });
+  const sol = { providerKey: "codex", modelId: "gpt-6.1-sol", reasoning: "Low", providerName: "Codex", modelName: "GPT-6.1 Sol" };
+  const levels = [
+    { level: "max", model: { providerKey: "codex", modelId: "gpt-6.1-sol", reasoning: ["High"] },
+      critics: [{ providerKey: "claude-code", modelId: "sonnet", reasoning: ["High"] }, { providerKey: "claude-code", modelId: "opus", reasoning: ["High"] }], choice: null, criticNames: null },
+    { level: "medium", model: { providerKey: "codex", modelId: "gpt-6.1-sol", reasoning: ["Low"] }, critics: [{ providerKey: "claude-code", modelId: "sonnet", reasoning: ["High"] }], choice: sol, criticNames: ["Sonnet 5.5"] },
+    { level: "huge", model: { providerKey: "codex", modelId: "gpt-6.1-sol", reasoning: [] }, critics: [], choice: null, criticNames: null },
+  ];
+  const ready = readTierState(reply({ adaptive: { level: "medium", levels }, adaptiveReady: true, adaptiveProposal: [levels[1]] }))!;
+  // From the cheapest; a level that is none is left out.
+  assert.deepEqual(ready.adaptive?.levels.map(level => level.level), ["medium", "max"]);
+  assert.equal(ready.adaptive?.level, "medium");
+  assert.deepEqual(ready.adaptiveProposal?.map(level => level.level), ["medium"]);
+  assert.equal(adaptiveChoice(ready)?.modelId, "gpt-6.1-sol");
+  // A level that is not set takes the nearest one, the cheaper on a tie, as the host does.
+  assert.equal(adaptiveLevelOf(ready.adaptive, "low")?.level, "medium");
+  assert.equal(adaptiveLevelOf(ready.adaptive, "high")?.level, "medium");
+  assert.equal(adaptiveLevelOf(ready.adaptive, "max")?.level, "max");
+  const entry = composerAdaptiveEntry(ready, t);
+  assert.equal(entry.ready, true);
+  assert.equal(entry.detail, "GPT-6.1 Sol Low · Review by Sonnet 5.5");
+  // The provider of Max is not ready: it is offered without a model.
+  assert.deepEqual(entry.levels.map(level => [level.level, level.detail]), [["medium", "GPT-6.1 Sol Low · Review by Sonnet 5.5"], ["max", null]]);
+  assert.equal(adaptiveLevelSummary(ready.adaptive!.levels[1], t), "gpt-6.1-sol High · Review by sonnet, opus");
+  // Set up, but the host says it has no level that can be chosen.
+  const waiting = readTierState(reply({ adaptive: { level: "medium", levels: [] }, adaptiveReady: true }))!;
   assert.equal(waiting.adaptiveReady, false);
   assert.equal(adaptiveChoice(waiting), null);
   assert.equal(composerAdaptiveEntry(waiting, t).ready, false);
-  // Set up and ready, while the provider of the tier of its turns does not answer yet: chosen, it says so.
-  const starting = readTierState(reply({ adaptive: { code: "quick", escalate: "complex", recheck: true }, adaptiveReady: true }))!;
-  assert.deepEqual(composerAdaptiveEntry(starting, t), { ready: true, detail: "No model ready", title: null });
-  // A tier that is none is not Adaptive.
-  assert.equal(readTierState(reply({ adaptive: { code: "cheap", escalate: "complex", recheck: true }, adaptiveReady: true }))!.adaptive, null);
+  // The draft of a new session names Adaptive at a level beside the tiers.
+  assert.equal(adaptiveTierOf("high"), "adaptive:high");
+  assert.equal(adaptiveTierOf(null), "adaptive");
+  assert.deepEqual(readAdaptiveTier("adaptive:max"), { adaptive: true, level: "max" });
+  assert.deepEqual(readAdaptiveTier("adaptive"), { adaptive: true, level: null });
+  assert.deepEqual(readAdaptiveTier("adaptive:huge"), { adaptive: false, level: null });
+  assert.deepEqual(readAdaptiveTier("quick"), { adaptive: false, level: null });
 });
 
 test("the resume after a limit is read with its number of resumes in a row, the default for one the host would refuse", () => {

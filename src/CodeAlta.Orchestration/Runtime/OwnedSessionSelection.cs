@@ -80,8 +80,11 @@ public sealed record OwnedSelectionChoices(OwnedSessionSelection Current, IReadO
     /// </summary>
     public string? Tier { get; init; }
 
-    /// <summary>Gets whether CodeAlta chooses the model of each turn of the session (Adaptive); <see cref="Tier"/> is then the tier of its turns.</summary>
+    /// <summary>Gets whether CodeAlta chooses the models of each turn of the session (Adaptive).</summary>
     public bool Adaptive { get; init; }
+
+    /// <summary>Gets the level of Adaptive the session chose (<c>low</c>, <c>medium</c>, <c>high</c> or <c>max</c>), or null for the default level.</summary>
+    public string? AdaptiveLevel { get; init; }
 }
 
 /// <summary>The outcome of completing a selection named by its parts (<see cref="OwnedSessionCommandService.CheckSelectionAsync"/>).</summary>
@@ -212,6 +215,8 @@ public sealed partial class OwnedSessionCommandService
             SupportsRemoteControl = configured?.SupportsRemoteControl ?? false,
             Tier = tier is { } recorded ? Catalog.ModelTiers.ModelTiers.NameOf(recorded) : null,
             Adaptive = adaptive,
+            AdaptiveLevel = adaptive && await _runtime.GetSessionAdaptiveLevelAsync(sessionId, cancellationToken).ConfigureAwait(false) is { } level
+                ? Catalog.ModelTiers.AdaptiveLevels.NameOf(level) : null,
         };
     }
 

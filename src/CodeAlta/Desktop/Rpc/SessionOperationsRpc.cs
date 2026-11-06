@@ -267,6 +267,7 @@ internal sealed class SessionOperationsService
                 SupportsRemoteControl = choices.SupportsRemoteControl ? true : null,
                 Tier = choices.Tier,
                 Adaptive = choices.Adaptive ? true : null,
+                AdaptiveLevel = choices.AdaptiveLevel,
                 // A provider taken out of the space of the session: the page asks for another one before a send.
                 ProviderOutsideSpace = space is { ProviderInSpace: false } ? true : null,
                 // A provider removed from the configuration, or turned off: the page switches to the replacement, or
@@ -543,22 +544,28 @@ internal sealed class SessionOperationsService
         return new(status, _epoch, request.SessionId, tier is { } chosen && status == "ok" ? Catalog.ModelTiers.ModelTiers.NameOf(chosen) : null);
     }
 
-    // Adaptive: CodeAlta then chooses the model of each turn of the session. The page then takes the model of the tier
-    // of its turns, as it takes the one of a tier; a model or a tier chosen afterwards (setTier) takes it off Adaptive.
+    // Adaptive at a level: CodeAlta then runs each turn of the session on the model of the level, and has its critics
+    // review each change of code. The page then takes the model of the level, as it takes the one of a tier; a model or a
+    // tier chosen afterwards (setTier) takes it off Adaptive.
     [NeoRpcMethod("setAdaptive")]
     public async Task<SessionAdaptiveResult> SetAdaptiveAsync(SessionAdaptiveRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        Catalog.ModelTiers.AdaptiveLevel? level = null;
         lock (_gate)
         {
             var denied = CheckEpoch(request.ExpectedEpoch);
             if (denied is not null) return new(denied, _epoch, request.SessionId, null);
             if (!Identity(request.SessionId, 256)) return new("invalid_request", _epoch, request.SessionId, null);
+            if (request.Level is not null && (level = Catalog.ModelTiers.AdaptiveLevels.Parse(request.Level)) is null) return new("invalid_request", _epoch, request.SessionId, null);
             if (_commands is null) return new("unavailable", _epoch, request.SessionId, null);
         }
 
-        var (status, tier) = await _commands.SetSessionAdaptiveAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
-        return new(status, _epoch, request.SessionId, tier is { } chosen ? Catalog.ModelTiers.ModelTiers.NameOf(chosen) : null);
+        var (status, chosen) = await _commands.SetSessionAdaptiveAsync(request.SessionId, level, cancellationToken).ConfigureAwait(false);
+        return new(status, _epoch, request.SessionId, chosen is null ? null : Catalog.ModelTiers.AdaptiveLevels.NameOf(chosen.Level))
+        {
+            Model = chosen is null ? null : new(chosen.Model.ProviderKey, chosen.Model.ModelId, chosen.Model.PreferredReasoning?.ToString()),
+        };
     }
 
     // Remote Control acts on the provider at once, outside the runs: it leaves no receipt. Its state is read in the
@@ -972,19 +979,30 @@ internal sealed record SessionChoicesResponse(string Status, string? Epoch, stri
     // The tier of models the session runs on (complex, standard or quick); absent for a model chosen by hand.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Tier { get; init; }
-    // True when CodeAlta chooses the model of each turn of the session (Adaptive); Tier is then the tier of its turns.
+    // True when CodeAlta chooses the models of each turn of the session (Adaptive).
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? Adaptive { get; init; }
+    // The level of Adaptive the session chose (low, medium, high or max); absent for the default level.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AdaptiveLevel { get; init; }
 }
 // Records the tier of models a session runs on (complex, standard or quick), or null for a model chosen by hand.
 internal sealed record SessionTierRequest(string ExpectedEpoch, string SessionId, string? Tier);
 // ok with the tier after the request; invalid_request, unavailable (an unknown session), closed, or why it was refused.
 internal sealed record SessionTierResult(string Status, string? Epoch, string SessionId, string? Tier);
-// Puts a session on Adaptive.
-internal sealed record SessionAdaptiveRequest(string ExpectedEpoch, string SessionId);
-// ok with the tier of its turns; not_ready when Adaptive is not set up or its tiers have no model; invalid_request,
-// unavailable (an unknown session) or closed.
-internal sealed record SessionAdaptiveResult(string Status, string? Epoch, string SessionId, string? Tier);
+// Puts a session on Adaptive at a level: low, medium, high or max; null for the level it chose before, else the default one.
+internal sealed record SessionAdaptiveRequest(string ExpectedEpoch, string SessionId)
+{
+    public string? Level { get; init; }
+}
+// ok with the level it runs on (the nearest one that is set) and the model of its turns; not_ready when Adaptive is not
+// set up or has no level; invalid_request, unavailable (an unknown session) or closed.
+internal sealed record SessionAdaptiveResult(string Status, string? Epoch, string SessionId, string? Level)
+{
+    public SessionAdaptiveModel? Model { get; init; }
+}
+// The model of the turns of a level of Adaptive: the page selects it as it selects the model of a tier.
+internal sealed record SessionAdaptiveModel(string ProviderKey, string ModelId, string? Reasoning);
 // A mode a session can be given, by its identifier: the page names it.
 internal sealed record SessionPermissionModeChoice(string Id);
 internal sealed record SessionAbortRequest(string ExpectedEpoch, string ClientRequestId, string TargetOperationId);

@@ -208,8 +208,9 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, sp
         </section>;
       })}
     </div>
-    {/* Adaptive is set up once for every space: it takes its models from the tiers of the space of each session. */}
-    {!spaceId && api.saveAdaptive && <AdaptiveSettings epoch={epoch} state={state} api={{ saveAdaptive: api.saveAdaptive }} store={store} onSaved={setShown} />}
+    {/* Adaptive is set up once for every space: its levels name their models, of any provider. */}
+    {!spaceId && api.saveAdaptive && <AdaptiveSettings epoch={epoch} state={state} api={{ saveAdaptive: api.saveAdaptive }} store={store} onSaved={setShown}
+      providers={providers} models={models} />}
   </section>;
 }
 
@@ -249,9 +250,11 @@ function EffortChips({ efforts, offered, onChange }: { efforts: readonly string[
 const sameTarget = (target: TierTarget, provider: string, model: string) =>
   target.providerKey.toLowerCase() === provider.toLowerCase() && target.modelId.toLowerCase() === model.toLowerCase();
 
-// The models of the enabled providers it offers, by provider, with a search, opened by the button it is given; a model
-// the tier has is not offered again, except the current one of the row it changes.
-function TierModelPicker({ providers, models, offered, note, taken, current, className, onChoose, children }: {
+/**
+ * The models of the enabled providers it offers, by provider, with a search, opened by the button it is given; a model
+ * the tier has is not offered again, except the current one of the row it changes. Adaptive chooses its models with it.
+ */
+export function TierModelPicker({ providers, models, offered, note, taken, current, className, onChoose, children }: {
   providers: readonly ModelCatalogProvider[]; models: ReadonlyMap<string, readonly ModelCatalogModel[]>;
   offered: (providerKey: string) => boolean; note: (providerKey: string) => string | null; taken: readonly TierTarget[];
   current?: TierTarget; className?: string; onChoose: (provider: ModelCatalogProvider, model: ModelCatalogModel) => void; children: ReactElement;

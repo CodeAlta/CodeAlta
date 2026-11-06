@@ -3,7 +3,7 @@ import { modelCatalog, workspace, type ConfigurationSnapshot, type ModelCatalogM
 import type { createMutationCapability } from "./sessionOperations";
 import { chosenNewSessionPreference, newSessionPreferencesKey, newSessionProvider, newSessionSelection, newSessionTier, providersInSpace, newSessionTierProvider, rememberNewSessionPreference,
   restoreNewSessionPreferences, tierNewSessionPreference, type NewSessionChoiceField } from "./newSessionPreferences";
-import { adaptiveChoice, adaptiveTier, useTiers } from "./modelTiers";
+import { adaptiveChoice, adaptiveTier, adaptiveTierOf, useTiers } from "./modelTiers";
 
 // Catalogs only. Draft choices are preferences, never send or provider-switch authority.
 export function useNewSessionChoices(epoch: string | undefined | null, projectId: string | null, projectPath: string | null,
@@ -79,8 +79,11 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
     prompts?.key === key ? prompts.defaultId : null);
   // The mode chosen while the provider still offers it; none runs the session in the default one, as an existing session.
   const value = { ...selection, permissionMode: permissionModes.find(mode => mode.id === saved?.permissionMode)?.id ?? null };
-  // Adaptive is offered as a tier that gives the model of the tier of its turns, while it is set up.
-  const tierChoices = tiers ? { ...tiers.choices, [adaptiveTier]: adaptiveChoice(tiers) } : null;
+  // Adaptive is offered as a tier that gives the model of its usual level, and of each level (adaptive:<level>), while it is set up.
+  const tierChoices = tiers ? {
+    ...tiers.choices, [adaptiveTier]: adaptiveChoice(tiers),
+    ...Object.fromEntries((tiers.adaptive?.levels ?? []).map(level => [adaptiveTierOf(level.level), adaptiveChoice(tiers, level.level)])),
+  } : null;
   const tier = newSessionTier(saved, value, tierChoices);
   // The modes are read before a creation, so that a mode chosen earlier is not left out while they load.
   const ready = !!provider && prompts?.key === key && prompts.rows.some(prompt => prompt.id === value.agentPromptId) && permissions?.key === key

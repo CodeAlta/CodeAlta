@@ -1118,25 +1118,80 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .composer-tier-name { font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
 .composer-tier-model { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .composer-tier.bp6-button.bp6-active .composer-tier-name { color: var(--accent); }
-/* Adaptive beside the tiers, with its Experimental tag; muted while it is not set up. */
+/* Adaptive under the tiers: its levels on a line of their own; muted while it is not set up. */
 .composer-tier.composer-adaptive.bp6-button { grid-column: 1 / -1; justify-content: start; }
 .composer-tier.composer-adaptive.bp6-button .bp6-button-text { justify-items: start; }
-.composer-adaptive .composer-tier-name { display: inline-flex; align-items: center; gap: 6px; }
+.composer-adaptive-levels { grid-column: 1 / -1; display: grid; align-items: center; gap: 4px; padding-top: 4px; border-top: 1px dashed var(--line); }
+.composer-adaptive-levels .composer-tier.composer-adaptive.bp6-button { grid-column: auto; overflow: hidden; }
+.composer-adaptive-levels .composer-tier-model { display: block; width: 100%; }
+.composer-adaptive-name { padding: 0 4px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
 .composer-adaptive[data-ready="false"] .composer-tier-model { font-style: italic; }
-.adaptive-experimental.bp6-tag { min-height: 0; padding: 0 6px; font-size: 10px; font-weight: 500; letter-spacing: 0; line-height: 16px; text-transform: none; }
 .adaptive-setup-title { margin: 0 0 6px; font-size: 14px; }
-/* Adaptive on Settings > Models, under the tiers. */
-.adaptive-settings { display: grid; justify-items: start; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* Adaptive on Settings > Models, under the tiers: the recommendation, then a grid of the four levels whose columns line up. */
+.adaptive-settings { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); container-type: inline-size; }
 .adaptive-settings h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; }
-.adaptive-settings .settings-field-help { margin: 2px 0 0; }
-.adaptive-settings .bp6-switch { margin: 0; }
-.adaptive-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding-left: 38px; }
-.adaptive-field { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
-.adaptive-fields .bp6-checkbox { margin: 0; font-size: 12px; }
-.adaptive-missing { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; font-style: italic; }
-.adaptive-guidance { max-width: 72ch; color: var(--muted); font-size: 12px; }
-.adaptive-guidance h3 { margin: 4px 0; color: var(--text); font-size: 12px; }
-.adaptive-guidance p { margin: 0 0 4px; }
+.adaptive-settings .settings-field-help { max-width: 90ch; margin: 2px 0 0; }
+.adaptive-settings .bp6-switch { justify-self: start; margin: 0; }
+.adaptive-body { display: grid; gap: 12px; }
+.adaptive-missing { margin: 0; color: var(--muted); font-size: 12px; font-style: italic; }
+.adaptive-proposal.bp6-callout { max-width: 760px; font-size: 12px; }
+.adaptive-proposal p { margin: 0 0 6px; }
+.adaptive-proposal-levels { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 14px; margin: 0 0 8px; }
+.adaptive-proposal-levels > div { display: contents; }
+.adaptive-proposal-levels dt { font-weight: 600; }
+.adaptive-proposal-levels dd { margin: 0; color: var(--muted); }
+.adaptive-proposal-used { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: 12px; }
+.adaptive-proposal-used svg { color: var(--success, #3fb950); }
+/* One width for every model button and every effort, in the rows and in the critics, so that they line up. */
+.adaptive-grid { --adaptive-model: 200px; --adaptive-effort: 120px; display: grid; align-items: stretch;
+  grid-template-columns: 136px var(--adaptive-model) var(--adaptive-effort) minmax(0, 1fr) 64px 40px;
+  border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+.adaptive-row { display: contents; }
+.adaptive-row > * { box-sizing: border-box; min-width: 0; display: flex; align-items: center; padding: 8px 10px; border-top: 1px solid var(--line); }
+.adaptive-head > * { padding-block: 6px; border-top: 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+.adaptive-row > .adaptive-center { justify-content: center; }
+.adaptive-row[data-set="false"] > * { color: var(--muted); }
+.adaptive-level-name { flex-direction: column; align-items: flex-start !important; justify-content: center; gap: 1px; }
+.adaptive-level-name strong { font-size: 13px; }
+.adaptive-level-name .bp6-text-muted { font-size: 11px; }
+.adaptive-picker { display: block; width: 100%; min-width: 0; }
+.adaptive-picker > .bp6-popover-target { display: block; width: 100%; }
+.adaptive-model-button { box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; height: 36px; min-width: 0; padding: 0 8px;
+  border: 1px solid var(--line); border-radius: 4px; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.adaptive-model-button:hover { background: var(--hover, rgba(127, 127, 127, .12)); }
+.adaptive-model-text { display: grid; flex: 1; min-width: 0; line-height: 1.25; }
+.adaptive-model-text strong, .adaptive-model-text .model-tier-provider { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adaptive-model-text .model-tier-provider { color: var(--muted); font-size: 11px; }
+.adaptive-effort.bp6-html-select { width: 100%; }
+.adaptive-effort.bp6-html-select select { font-size: 12px; }
+.adaptive-effort-none { color: var(--muted); }
+/* The critics of a level: one line each, model and effort as in the row, then the add button under them. */
+.adaptive-row > .adaptive-critics { display: grid; grid-template-columns: var(--adaptive-model) var(--adaptive-effort) 28px; align-content: center; align-items: center;
+  justify-content: start; gap: 4px 10px; }
+.adaptive-critic { display: contents; }
+.adaptive-critics > .adaptive-recheck, .adaptive-critics > .adaptive-picker { grid-column: 1 / -1; justify-self: start; width: auto; }
+.adaptive-recheck { color: var(--muted); font-style: italic; }
+.adaptive-default.bp6-control { margin: 0; }
+.adaptive-guidance { max-width: 80ch; color: var(--muted); font-size: 12px; }
+.adaptive-guidance summary { color: var(--text); font-weight: 600; cursor: pointer; }
+.adaptive-guidance p { margin: 4px 0; }
+/* A narrow window: each level is a card, its cells one under the other with their names. */
+@container (max-width: 900px) {
+  .adaptive-grid { grid-template-columns: minmax(0, 1fr); border: 0; gap: 8px; --adaptive-effort: 96px; }
+  .adaptive-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); border: 1px solid var(--line); border-radius: 6px; padding: 4px 0; }
+  .adaptive-row.adaptive-head { display: none; }
+  .adaptive-row > * { border-top: 0; padding: 4px 10px; }
+  .adaptive-row > .adaptive-level-name { flex-direction: row; align-items: baseline !important; justify-content: flex-start; gap: 8px; padding-right: 44px; }
+  .adaptive-row > .adaptive-cell { display: grid; grid-template-columns: 88px minmax(0, 1fr); justify-content: stretch; justify-items: start; gap: 4px 8px; }
+  .adaptive-row > .adaptive-cell > .adaptive-picker { justify-self: stretch; max-width: 320px; }
+  .adaptive-row > .adaptive-cell > .adaptive-effort { width: var(--adaptive-effort); }
+  .adaptive-row > .adaptive-cell[data-label]::before { content: attr(data-label); color: var(--muted); font-size: 11px; }
+  .adaptive-row > .adaptive-cell:not([data-label]) { position: absolute; top: 4px; right: 4px; display: flex; padding: 0; }
+  .adaptive-row > .adaptive-cell:empty { display: none; }
+  .adaptive-row > .adaptive-critics { grid-template-columns: 88px minmax(0, 320px) var(--adaptive-effort) 28px; justify-content: start; }
+  .adaptive-critics > .adaptive-critic > :first-child { grid-column: 2; justify-self: stretch; }
+  .adaptive-critics > .adaptive-recheck, .adaptive-critics > .adaptive-picker { grid-column: 2 / -1; }
+}
 .model-picker-settings { flex: none; margin-bottom: 12px; }
 .model-picker-settings .settings-field { border-bottom: 1px solid var(--line); }
 .model-picker-rows .bp6-input { width: 58px; text-align: right; }

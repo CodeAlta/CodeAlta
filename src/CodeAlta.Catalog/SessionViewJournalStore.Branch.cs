@@ -187,6 +187,7 @@ public sealed partial class SessionViewJournalStore
             SandboxNoted = string.IsNullOrWhiteSpace(target.Sandbox) ? sourceLocal?.SandboxNoted : null,
             Tier = sourceLocal?.Tier,
             Adaptive = sourceLocal?.Adaptive,
+            AdaptiveLevel = sourceLocal?.AdaptiveLevel,
             AgentPromptId = sourceLocal?.AgentPromptId,
             Archived = target.Status == SessionViewStatus.Archived,
             ParentSessionId = target.ParentSessionId,

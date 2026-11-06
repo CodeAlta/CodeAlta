@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeAlta.Agent;
@@ -9,26 +10,45 @@ using XenoAtom.Logging;
 
 namespace CodeAlta.Orchestration.Runtime;
 
+/// <summary>What a critic of a level of Adaptive is asked: the session whose change it reviews, its model and its prompt.</summary>
+/// <param name="SessionId">The session whose change is reviewed; the critic runs in a read-only child session of it.</param>
+/// <param name="Critic">The model of the critic.</param>
+/// <param name="Prompt">The prompt of the review: the request, the change, and the verdict to end with.</param>
+/// <param name="Timeout">The time the review is given.</param>
+internal sealed record AdaptiveCriticRequest(string SessionId, ModelTierTarget Critic, string Prompt, TimeSpan Timeout);
+
+/// <summary>What a critic answered.</summary>
+/// <param name="Answer">The final answer of the review, or <see langword="null"/> when it gave none.</param>
+/// <param name="Failure">Why the review did not complete, or <see langword="null"/>.</param>
+internal sealed record AdaptiveCriticAnswer(string? Answer, string? Failure);
+
 /// <summary>
-/// Chooses the model of the turns of the sessions on Adaptive (<c>[models.adaptive]</c>), as the evaluation of #273 found
-/// that agents do not change their model by themselves: a turn the user starts runs on the turn tier; a turn that
-/// changed code is asked once to check its change against the request, on the same model; a turn that ends in visible
-/// trouble (no answer, a refusal to use tools it did not call, a last test run that failed) continues once on the
-/// escalation tier, and the next turn starts again on the turn tier.
+/// Runs the turns of the sessions on Adaptive (<c>[models.adaptive]</c>), as the evaluation of November 2026 found best: a
+/// turn the user starts runs on the model of the level of the session; when it changed code, the critics of the level,
+/// models of another family, review the change read-only, each in a session of its own given the request and the diff,
+/// and the session revises it once with what they found. A level without critics, or whose critics could not review,
+/// has the model of the turn recheck its change against the request instead.
 /// </summary>
 /// <remarks>
 /// It follows the events the runtime publishes, never in their way: what a run did is counted as it goes, and the end
 /// of a run is decided on its own, once the send of the run has released the session. Whether a turn changed code is
 /// read from git, a tree of the working folder taken before the turn and after it, so that a turn that commits what was
-/// there changes nothing; a folder without git falls back on the files the tool calls say they changed.
+/// there changes nothing; a folder without git falls back on the files the tool calls say they changed. The session
+/// keeps its own cache: the critics get only the request and the diff, as Copilot Fusion's critics do.
 /// </remarks>
 internal sealed partial class AdaptiveTurnCoordinator
 {
     private const string LoggerName = "CodeAlta.Adaptive";
     private const int MaximumSessions = 1024;
+    // What a review shows of the diff and of the findings it passes on; the rest is in the files.
+    private const int MaximumDiff = 60_000;
+    private const int MaximumFindings = 8_000;
+    private const int MaximumRequest = 20_000;
     private static readonly TimeSpan ReleaseWait = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan ReleasePoll = TimeSpan.FromMilliseconds(50);
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(30);
+    // A review reads the code and runs tests: the measured ones took one to six minutes.
+    private static readonly TimeSpan ReviewTime = TimeSpan.FromMinutes(10);
     // A tree taken for a send whose run never started is not the tree of a later turn.
     private static readonly TimeSpan SnapshotLife = TimeSpan.FromMinutes(10);
 
@@ -53,6 +73,7 @@ internal sealed partial class AdaptiveTurnCoordinator
         _runtime = runtime;
         Snapshot = GitSnapshotAsync;
         Changes = GitChangesAsync;
+        Diff = GitDiffAsync;
     }
 
     /// <summary>Gets or sets the clock; the system clock unless a test sets another.</summary>
@@ -63,6 +84,15 @@ internal sealed partial class AdaptiveTurnCoordinator
 
     /// <summary>Gets or sets what lists the paths that differ between two trees of a folder; null when it cannot tell.</summary>
     internal Func<string, string, string, CancellationToken, Task<IReadOnlyList<string>?>> Changes { get; set; }
+
+    /// <summary>Gets or sets what writes the diff between two trees of a folder; null when it cannot.</summary>
+    internal Func<string, string, string, CancellationToken, Task<string?>> Diff { get; set; }
+
+    /// <summary>
+    /// Gets or sets what runs a review by a critic, in a read-only child session of the reviewed one; the host sets it.
+    /// Without it, a level with critics has its change rechecked instead.
+    /// </summary>
+    internal Func<AdaptiveCriticRequest, CancellationToken, Task<AdaptiveCriticAnswer>>? Critic { get; set; }
 
     /// <summary>Waits for the decisions that run and stops new ones.</summary>
     public async Task CloseAsync()
@@ -111,17 +141,14 @@ internal sealed partial class AdaptiveTurnCoordinator
                     _snapshots.Remove(sessionId);
                     return;
                 case AgentContentCompletedEvent { Kind: AgentContentKind.User } user:
-                    StartRun(sessionId, user.RunId?.Value, user.Provenance);
+                    StartRun(sessionId, user.RunId?.Value, user.Provenance, text: user.Content);
                     return;
                 case AgentActivityEvent activity when IsToolActivity(activity.Kind) && !string.IsNullOrEmpty(activity.ActivityId)
                     && CurrentTurn(sessionId, activity.RunId) is { } turn:
-                    turn.Note(activity);
+                    turn.Note(activity.Details);
                     return;
                 case AgentContentCompletedEvent { Kind: AgentContentKind.ToolOutput } output when CurrentTurn(sessionId, output.RunId) is { } turn:
-                    turn.Note(output);
-                    return;
-                case AgentContentCompletedEvent { Kind: AgentContentKind.Assistant } answer when CurrentTurn(sessionId, answer.RunId) is { } turn:
-                    if (!string.IsNullOrWhiteSpace(answer.Content)) turn.Answer = answer.Content;
+                    turn.Note(output.Details);
                     return;
                 case AgentErrorEvent error when CurrentTurn(sessionId, error.RunId) is { } turn:
                     // A run that failed is the fallback's: Adaptive does not continue it.
@@ -148,22 +175,29 @@ internal sealed partial class AdaptiveTurnCoordinator
     /// </summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="provenance">The provenance of the prompt; null for a prompt of the user.</param>
-    internal void BeginRun(string sessionId, string? provenance)
+    /// <param name="text">The text of the prompt: the request the critics check a change against.</param>
+    internal void BeginRun(string sessionId, string? provenance, string? text = null)
     {
         lock (_gate)
         {
-            if (!_closing.IsCancellationRequested) StartRun(sessionId, runId: null, provenance, sent: true);
+            if (!_closing.IsCancellationRequested) StartRun(sessionId, runId: null, provenance, text, sent: true);
         }
     }
 
     // Under _gate. A prompt starts a run: a new turn, unless it steers the run that goes on, or continues the turn
-    // (a recheck, an escalation, the continuation of a fallback). A provider may name the run only in its later events.
+    // (a recheck, a revision, the continuation of a fallback). A provider may name the run only in its later events.
     // A prompt the host sends always starts a run; the user message the run then publishes is the same run.
-    private void StartRun(string sessionId, string? runId, string? provenance, bool sent = false)
+    private void StartRun(string sessionId, string? runId, string? provenance, string? text, bool sent = false)
     {
         var turn = _turns.GetValueOrDefault(sessionId);
-        if (!sent && turn is { Active: true } && (runId is null || turn.RunId is null || turn.RunId == runId)) return;
-        if (turn is not null && provenance is AgentPromptProvenance.AdaptiveRecheck or AgentPromptProvenance.AdaptiveEscalation or AgentPromptProvenance.ModelFallback)
+        if (!sent && turn is { Active: true } && (runId is null || turn.RunId is null || turn.RunId == runId))
+        {
+            turn.Request ??= Bounded(text, MaximumRequest);
+            return;
+        }
+
+        if (turn is not null && provenance is AgentPromptProvenance.AdaptiveRecheck or AgentPromptProvenance.AdaptiveReview
+                or AgentPromptProvenance.AdaptiveEscalation or AgentPromptProvenance.ModelFallback)
         {
             turn.StartRun(runId, provenance == AgentPromptProvenance.ModelFallback ? turn.Phase : provenance);
             return;
@@ -176,7 +210,7 @@ internal sealed partial class AdaptiveTurnCoordinator
             _turns.Remove(oldest);
         }
 
-        var fresh = new Turn(runId, Time.GetUtcNow());
+        var fresh = new Turn(runId, Time.GetUtcNow()) { Request = Bounded(text, MaximumRequest) };
         if (_snapshots.Remove(sessionId, out var snapshot) && Time.GetUtcNow() - snapshot.At < SnapshotLife) fresh.Before = snapshot;
         _turns[sessionId] = fresh;
     }
@@ -193,9 +227,10 @@ internal sealed partial class AdaptiveTurnCoordinator
     }
 
     /// <summary>
-    /// Chooses the model of a turn the user starts in a session: the session on Adaptive takes the first ready model of
-    /// the turn tier that its provider has, and the tree of its working folder is taken to tell, at the end of the turn,
-    /// whether it changed code. Never throws: what cannot be read keeps the selection sent.
+    /// Chooses the model of a turn the user starts in a session: the session on Adaptive takes the model of its level,
+    /// when the provider of the session is the one of that model (choosing the level moved the session there), and the
+    /// tree of its working folder is taken to tell, at the end of the turn, whether it changed code. Never throws: what
+    /// cannot be read keeps the selection sent.
     /// </summary>
     /// <param name="session">The session.</param>
     /// <param name="selection">The selection the prompt was sent with, or null.</param>
@@ -216,12 +251,12 @@ internal sealed partial class AdaptiveTurnCoordinator
                 lock (_gate) _snapshots[session.SessionId] = new TreeSnapshot(workFolder, tree, Time.GetUtcNow());
             }
 
-            // A send keeps the provider of the session: the turn tier gives the model it has there.
-            var choice = Select(notice.Scope, settings.Code, onProvider: session.ResolvedProviderKey);
-            if (choice is null) return selection;
-            if (notice.Tier != settings.Code) await _runtime.SetSessionTierAsync(session.SessionId, settings.Code, cancellationToken).ConfigureAwait(false);
+            // A send keeps the provider of the session: the model of the level is taken on its own provider only.
+            if (settings.Resolve(notice.Level) is not { } level
+                || !string.Equals(level.Model.ProviderKey, session.ResolvedProviderKey, StringComparison.OrdinalIgnoreCase))
+                return selection;
             return (selection ?? new OwnedSessionSelection(session.ResolvedProviderKey, notice.AgentPromptId ?? "default", null, null))
-                with { ModelId = choice.Target.ModelId, ReasoningEffort = choice.Reasoning };
+                with { ModelId = level.Model.ModelId, ReasoningEffort = level.Model.PreferredReasoning ?? selection?.ReasoningEffort };
         }
         catch (Exception exception) when (exception is not (OutOfMemoryException or OperationCanceledException))
         {
@@ -245,28 +280,18 @@ internal sealed partial class AdaptiveTurnCoordinator
             if (notice is not { Adaptive: true, Scope.Adaptive: { } settings }) return;
             Facts facts;
             lock (_gate) facts = turn.Read();
-            if (facts.Failed) return;
-            if (facts.Phase == AgentPromptProvenance.AdaptiveEscalation)
-            {
-                await ReturnToTurnTierAsync(notice, settings).ConfigureAwait(false);
-                return;
-            }
-
+            // A failed run is the fallback's; a recheck or a revision ends the turn.
+            if (facts.Failed || facts.Phase is not null || facts.Checked) return;
             // A prompt that waits starts the next turn: the user, or another session, said what comes next.
             if (notice.HasQueuedPrompts) return;
-            if (facts.Phase is null && settings.Recheck && !facts.Rechecked && notice.Tier is not ModelTier.Complex
-                && await ChangedCodeAsync(facts).ConfigureAwait(false))
-            {
-                lock (_gate) turn.Rechecked = true;
-                await RecheckAsync(notice, runId).ConfigureAwait(false);
+            var change = await ChangeOfTurnAsync(facts).ConfigureAwait(false);
+            if (change is null) return;
+            lock (_gate) turn.Checked = true;
+            var level = settings.Resolve(notice.Level);
+            if (level is { Critics.Count: > 0 } && Critic is { } critic
+                && await ReviewAsync(notice, level, critic, facts, change, runId).ConfigureAwait(false))
                 return;
-            }
-
-            if (!facts.Escalated && notice.Tier != settings.Escalate && Trouble(facts.Answer, facts.ToolCalls, facts.LastTestExit) is { } sign)
-            {
-                lock (_gate) turn.Escalated = true;
-                await EscalateAsync(notice, settings, sign, runId).ConfigureAwait(false);
-            }
+            await RecheckAsync(notice, runId).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -283,34 +308,24 @@ internal sealed partial class AdaptiveTurnCoordinator
         }
     }
 
-    /// <summary>
-    /// A sign of trouble at the end of a turn that the host sees without knowing the task, as the evaluation measured
-    /// it: the turn ended without an answer, its answer says it cannot use tools though it called none, or the last test
-    /// command of the turn failed. Null when the turn looks done.
-    /// </summary>
-    internal static string? Trouble(string? answer, int toolCalls, int? lastTestExit)
-    {
-        if (string.IsNullOrWhiteSpace(answer)) return "the turn ended without an answer";
-        if (toolCalls == 0 && RefusalPattern().IsMatch(answer)) return "the answer says the tools cannot be used, though it called none";
-        // A failure read from the summary of the runner counts as 1: the code is said only when the command gave another.
-        if (lastTestExit is { } code and not 0) return code == 1 ? "the last test run failed" : $"the last test run failed (exit code {code})";
-        return null;
-    }
-
-    private async Task<bool> ChangedCodeAsync(Facts facts)
+    // The code a turn changed: the paths, the diff when git gives it, and the tree after the turn; null when it changed
+    // no code (documentation only, or nothing).
+    private async Task<TurnChange?> ChangeOfTurnAsync(Facts facts)
     {
         if (facts.Before is { } before)
         {
             var after = await Snapshot(before.Folder, _closing.Token).ConfigureAwait(false);
             if (after is not null)
             {
-                if (string.Equals(after, before.Tree, StringComparison.Ordinal)) return false;
+                if (string.Equals(after, before.Tree, StringComparison.Ordinal)) return null;
                 var changed = await Changes(before.Folder, before.Tree, after, _closing.Token).ConfigureAwait(false);
-                return changed?.Any(IsCode) ?? true;
+                if (changed is not null && !changed.Any(IsCode)) return null;
+                var diff = await Diff(before.Folder, before.Tree, after, _closing.Token).ConfigureAwait(false);
+                return new TurnChange(changed ?? facts.ChangedFiles, diff, before.Folder, after);
             }
         }
 
-        return facts.ChangedFiles.Any(IsCode);
+        return facts.ChangedFiles.Any(IsCode) ? new TurnChange(facts.ChangedFiles, null, facts.Before?.Folder, null) : null;
     }
 
     /// <summary>Gets whether a path changed by a turn is code: not documentation, not what CodeAlta keeps under <c>.alta</c>.</summary>
@@ -331,80 +346,117 @@ internal sealed partial class AdaptiveTurnCoordinator
         }).ConfigureAwait(false);
     }
 
-    private async Task EscalateAsync(AdaptiveSessionNotice notice, AdaptiveModelSettings settings, string sign, string runId)
+    // The critics of the level review the change at the same time; the session revises it once with what they found.
+    // False when no critic could review: the change is then rechecked.
+    private async Task<bool> ReviewAsync(AdaptiveSessionNotice notice, AdaptiveLevelSettings level, Func<AdaptiveCriticRequest, CancellationToken, Task<AdaptiveCriticAnswer>> critic,
+        Facts facts, TurnChange change, string runId)
     {
-        var choice = Select(notice.Scope, settings.Escalate, onProvider: null);
-        if (choice is null)
+        var prompt = CriticPrompt(facts.Request, change);
+        var reviews = await Task.WhenAll(level.Critics.Select(async model =>
         {
-            await WriteCardAsync(notice.SessionId, $"Adaptive did not continue the turn ({sign}): no model of the {ModelTiers.NameOf(settings.Escalate)} tier is ready.",
-                "escalation", AgentSessionUpdateKind.Warning).ConfigureAwait(false);
-            return;
+            try { return (Model: model, Answer: await critic(new AdaptiveCriticRequest(notice.SessionId, model, prompt, ReviewTime), _closing.Token).ConfigureAwait(false)); }
+            catch (Exception exception) when (exception is not (OutOfMemoryException or OperationCanceledException))
+            {
+                LogManager.GetLogger(LoggerName).Error(exception, $"Adaptive could not run the review by {model.Format()} of session {notice.SessionId}.");
+                return (Model: model, Answer: new AdaptiveCriticAnswer(null, exception.Message));
+            }
+        })).ConfigureAwait(false);
+
+        // A critic is read-only: what changed in the files while it reviewed is said, never undone behind the user's back.
+        if (change is { Folder: { } folder, After: { } after } && await Snapshot(folder, _closing.Token).ConfigureAwait(false) is { } now
+            && !string.Equals(now, after, StringComparison.Ordinal))
+        {
+            var touched = await Changes(folder, after, now, _closing.Token).ConfigureAwait(false) ?? [];
+            await WriteCardAsync(notice.SessionId, $"The review of Adaptive changed files it should only have read: {string.Join(", ", touched.Take(10))}.", "review").ConfigureAwait(false);
         }
 
-        if (!await WaitForReleaseAsync(notice.SessionId).ConfigureAwait(false)) return;
-        var target = choice.Target;
-        string? permissionMode = null;
-        if (!string.Equals(target.ProviderKey, notice.ProviderKey, StringComparison.OrdinalIgnoreCase))
+        var findings = new List<(ModelTierTarget Model, string Text)>();
+        var approved = new List<ModelTierTarget>();
+        var silent = new List<(ModelTierTarget Model, string Why)>();
+        foreach (var (model, answer) in reviews)
         {
-            permissionMode = _commands.Fallback.KeepOrNarrow(notice.PermissionMode, notice.ProviderKey, target.ProviderKey);
-            var switched = await SwitchProviderAsync(notice.SessionId, target.ProviderKey,
-                new SessionViewProviderCarryOver(target.ModelId, choice.Reasoning, permissionMode)).ConfigureAwait(false);
-            if (switched != "ok")
+            var (verdict, text) = ParseVerdict(answer.Answer);
+            switch (verdict)
             {
-                await WriteCardAsync(notice.SessionId, $"Adaptive did not continue the turn ({sign}): the switch to {choice.ProviderDisplayName} was refused ({switched}).",
-                    "escalation", AgentSessionUpdateKind.Warning).ConfigureAwait(false);
-                return;
+                case "REVISE" when text.Length > 0: findings.Add((model, text)); break;
+                case "APPROVE": approved.Add(model); break;
+                default: silent.Add((model, answer.Failure ?? (answer.Answer is null ? "no answer" : "no verdict"))); break;
             }
         }
 
-        await _runtime.SetSessionTierAsync(notice.SessionId, settings.Escalate, _closing.Token).ConfigureAwait(false);
-        var to = $"{choice.ProviderDisplayName} {choice.ModelDisplayName}{(choice.Reasoning is { } effort ? " " + CodeAltaConfigStore.FormatReasoningEffort(effort) : string.Empty)}";
-        // The prompt is the card: the timeline titles it Adaptive escalation, and it says why and on which model.
-        await AdmitAsync(new OwnedTextSendRequest($"adaptive-escalation:{notice.SessionId}:{runId}", notice.SessionId, EscalationPrompt(sign, to))
+        if (silent.Count > 0)
+            await WriteCardAsync(notice.SessionId, "Adaptive could not get a review from " + string.Join(", ", silent.Select(static item => $"{item.Model.Format()} ({item.Why})")) + ".",
+                "review").ConfigureAwait(false);
+        if (findings.Count == 0 && approved.Count == 0) return false;
+        if (findings.Count == 0)
         {
-            Selection = new OwnedSessionSelection(target.ProviderKey, notice.AgentPromptId ?? "default", target.ModelId, choice.Reasoning) { PermissionMode = permissionMode },
-            Provenance = AgentPromptProvenance.AdaptiveEscalation,
+            await WriteCardAsync(notice.SessionId, "Adaptive review: the change was approved by " + string.Join(", ", approved.Select(static model => model.Format())) + ".",
+                "review", AgentSessionUpdateKind.Info).ConfigureAwait(false);
+            return true;
+        }
+
+        if (!await WaitForReleaseAsync(notice.SessionId).ConfigureAwait(false)) return true;
+        // The prompt is the card: the timeline titles it Adaptive review, with what each critic found.
+        await AdmitAsync(new OwnedTextSendRequest($"adaptive-review:{notice.SessionId}:{runId}", notice.SessionId, RevisionPrompt(findings))
+        {
+            Provenance = AgentPromptProvenance.AdaptiveReview,
         }).ConfigureAwait(false);
+        return true;
     }
 
-    // After an escalation, the session goes back to the turn tier: on its provider, the next turn takes the model
-    // there; on another one, the session switches back now, while it is idle.
-    private async Task ReturnToTurnTierAsync(AdaptiveSessionNotice notice, AdaptiveModelSettings settings)
+    /// <summary>The prompt of a critic: the request, the change of the turn, what to check and the verdict to end with.</summary>
+    internal static string CriticPrompt(string? request, TurnChange change)
     {
-        var choice = Select(notice.Scope, settings.Code, onProvider: notice.ProviderKey) ?? Select(notice.Scope, settings.Code, onProvider: null);
-        if (choice is not null && !notice.HasQueuedPrompts && !string.Equals(choice.Target.ProviderKey, notice.ProviderKey, StringComparison.OrdinalIgnoreCase))
+        var text = new StringBuilder();
+        text.Append("[CodeAlta Adaptive]\nYou review a change that another engineer, another AI model, made to answer the request below. ");
+        text.Append("You are read-only: do not modify, create or delete any file of the project; a scratch copy outside it is fine. ");
+        text.Append("Read the code, and run the tests or the commands you need to check the change.\n\n## The request\n\n");
+        text.Append(string.IsNullOrWhiteSpace(request) ? "(The request is in the session that made the change; judge the change on its own.)" : request.Trim());
+        text.Append("\n\n## The change\n\n");
+        if (change.Diff is { Length: > 0 } diff)
         {
-            if (!await WaitForReleaseAsync(notice.SessionId).ConfigureAwait(false)) return;
-            var permissionMode = _commands.Fallback.KeepOrNarrow(notice.PermissionMode, notice.ProviderKey, choice.Target.ProviderKey);
-            var switched = await SwitchProviderAsync(notice.SessionId, choice.Target.ProviderKey,
-                new SessionViewProviderCarryOver(choice.Target.ModelId, choice.Reasoning, permissionMode)).ConfigureAwait(false);
-            if (switched != "ok") return;
+            text.Append("It is in the working tree").Append(change.Folder is null ? "" : $" of {change.Folder}").Append(". Its diff:\n\n```diff\n");
+            text.Append(diff.Length <= MaximumDiff ? diff : diff[..MaximumDiff] + "\n[... the diff goes on: read the files ...]");
+            text.Append("\n```\n");
+        }
+        else
+        {
+            text.Append("It is in the working tree; the files it changed: ").Append(string.Join(", ", change.Paths.Take(50))).Append(".\n");
         }
 
-        await _runtime.SetSessionTierAsync(notice.SessionId, settings.Code, _closing.Token).ConfigureAwait(false);
+        text.Append("""
+
+            ## What to check
+
+            - Does it do every part of the request, with the names, signatures, messages and behaviours it states?
+            - Is it correct on the edge cases and the error paths? Does it fix the cause rather than a symptom? Does it break existing behaviour or tests?
+
+            Report only problems you verified in the code or by a run, each with the file, what is wrong and why it matters, most important first. Do not report style or optional improvements.
+
+            End your answer with exactly one line: `VERDICT: APPROVE` if the change is right as it is, or `VERDICT: REVISE` if at least one problem must be fixed.
+            """);
+        return text.ToString();
     }
 
-    // The first ready target of a tier, among those of a provider when one is named.
-    private ModelTierChoice? Select(ModelTierScope scope, ModelTier tier, string? onProvider)
+    /// <summary>The prompt that gives the session what the critics found, for it to check and fix.</summary>
+    internal static string RevisionPrompt(IReadOnlyList<(ModelTierTarget Model, string Text)> findings)
     {
-        var states = _commands.Fallback.ProviderStates?.Invoke() ?? [];
-        if (onProvider is not null)
-        {
-            IReadOnlyList<ModelTierTarget> Kept(ModelTier which)
-                => which == tier ? [.. scope.Tiers.Get(which).Where(target => string.Equals(target.ProviderKey, onProvider, StringComparison.OrdinalIgnoreCase))] : [];
-            scope = scope with { Tiers = new ModelTierSettings(Kept(ModelTier.Complex), Kept(ModelTier.Standard), Kept(ModelTier.Quick)) };
-        }
-
-        return ModelTierSelection.SelectForNewSession(scope, tier, states, key => _commands.SelectionProvider?.Invoke(new ModelProviderId(key)), requestedReasoning: null);
+        var text = new StringBuilder("[CodeAlta Adaptive]\nReviewers of other models checked your change against the request, read-only. What they found:\n");
+        foreach (var (model, found) in findings) text.Append("\n### ").Append(model.Format()).Append("\n\n").Append(Bounded(found, MaximumFindings)).Append('\n');
+        text.Append("\nCheck each finding yourself. Fix the ones that are real and keep the tests passing; leave the ones that are wrong. Then answer as you would have.\n");
+        text.Append("This message comes from CodeAlta, not from the user.");
+        return text.ToString();
     }
 
-    internal static string EscalationPrompt(string sign, string to)
-        => $"""
-            [CodeAlta Adaptive]
-            The last turn ended in trouble: {sign}. CodeAlta moved this session to {to} to finish it.
-            Check what was done (the files, git status, the tests), then finish the request before this message. Do not redo what is already done and right.
-            This message comes from CodeAlta, not from the user.
-            """;
+    /// <summary>The last verdict line of a review, upper case, and the findings around it; (null, answer) without a verdict.</summary>
+    internal static (string? Verdict, string Findings) ParseVerdict(string? answer)
+    {
+        var text = answer ?? string.Empty;
+        var matches = VerdictPattern().Matches(text);
+        if (matches.Count == 0) return (null, text.Trim());
+        var last = matches[^1];
+        return (last.Groups[1].Value.ToUpperInvariant(), (text[..last.Index] + text[(last.Index + last.Length)..]).Trim());
+    }
 
     // A session the run that ended still holds (its cleanup, a switch of provider) is busy for a moment: asked again a while.
     private async Task<OwnedSessionCommandAdmission> AdmitAsync(OwnedTextSendRequest request)
@@ -437,20 +489,7 @@ internal sealed partial class AdaptiveTurnCoordinator
         return true;
     }
 
-    private async Task<string> SwitchProviderAsync(string sessionId, string providerKey, SessionViewProviderCarryOver carryOver)
-    {
-        var deadline = Time.GetUtcNow() + ReleaseWait;
-        while (true)
-        {
-            var context = await _commands.GetProviderSelectionAsync(sessionId).ConfigureAwait(false);
-            var result = context is null ? "busy" : await _commands.SelectProviderAsync(context, providerKey, carryOver).ConfigureAwait(false);
-            if (result is not ("busy" or "session_in_use" or "stale_selection" or "stale_attachment") || Time.GetUtcNow() >= deadline) return result;
-            await Task.Delay(ReleasePoll, _closing.Token).ConfigureAwait(false);
-        }
-    }
-
-    // A warning of the timeline, when Adaptive could not continue a turn; its details name what it tried, which the
-    // timeline titles it by.
+    // A card of the timeline; its details name what Adaptive did, which the timeline titles it by.
     private async Task WriteCardAsync(string sessionId, string message, string what, AgentSessionUpdateKind kind = AgentSessionUpdateKind.Warning)
     {
         var session = await _runtime.ResolveOwnedSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
@@ -492,6 +531,8 @@ internal sealed partial class AdaptiveTurnCoordinator
         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
+    private static string? Bounded(string? text, int length) => text is null || text.Length <= length ? text : text[..length] + "\n[...]";
+
     private static bool IsToolActivity(AgentActivityKind kind)
         => kind is AgentActivityKind.ToolCall or AgentActivityKind.CommandExecution or AgentActivityKind.FileChange or AgentActivityKind.McpToolCall
             or AgentActivityKind.DynamicToolCall;
@@ -526,6 +567,9 @@ internal sealed partial class AdaptiveTurnCoordinator
     private static async Task<IReadOnlyList<string>?> GitChangesAsync(string folder, string before, string after, CancellationToken cancellationToken)
         => (await GitAsync(folder, null, cancellationToken, "diff", "--name-only", "--no-renames", before, after).ConfigureAwait(false))
             ?.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static Task<string?> GitDiffAsync(string folder, string before, string after, CancellationToken cancellationToken)
+        => GitAsync(folder, null, cancellationToken, "diff", "--no-color", "--no-ext-diff", before, after);
 
     // The output of a git command, or null when it failed, took too long or git is not there.
     private static async Task<string?> GitAsync(string folder, IReadOnlyDictionary<string, string>? environment, CancellationToken cancellationToken, params string[] arguments)
@@ -575,63 +619,26 @@ internal sealed partial class AdaptiveTurnCoordinator
         }
     }
 
-    // A command that runs tests, as the evaluation recognized them in the title of a tool call.
-    [GeneratedRegex(@"\b(npm (run )?test|yarn test|pnpm test|node --test|npx (jest|vitest|mocha)|jest|vitest|mocha|pytest|python3? -m pytest|tox|go test|cargo test|dotnet test|mvn( -\S+)* test|gradle test|make test|phpunit|rspec|bundle exec rspec)\b")]
-    private static partial Regex TestCommandPattern();
-
-    // The first line of the output of CodeAlta's shell tool.
-    [GeneratedRegex(@"^exit_code: (-?\d+)", RegexOptions.Multiline)]
-    private static partial Regex ExitCodePattern();
-
-    // A summary that says tests failed: `ℹ fail 1` and `# fail 1` (node), `1 failed`, `2 failing`, `1 failure`, `Failed: 1`
-    // (dotnet test), a line `FAIL ...` (Go, Jest), `test result: FAILED` (Cargo).
-    [GeneratedRegex(@"^\s*(ℹ|#)\s*fail\s+[1-9]\d*\b|\b[1-9]\d*\s+(failed|failing|failures?)\b|\bFailed:\s*[1-9]\d*\b|^(--- )?FAIL\b|test result: FAILED", RegexOptions.Multiline)]
-    private static partial Regex TestsFailedPattern();
-
-    // A summary that says no test failed: `ℹ fail 0`, `0 failed`, `Failed: 0`, `Passed!`, `test result: ok`, `ok  ` (Go), `N passed`.
-    [GeneratedRegex(@"^\s*(ℹ|#)\s*fail\s+0\b|\b0\s+(failed|failures)\b|\bFailed:\s*0\b|\bPassed!|test result: ok\b|^ok\s+\S|\b[1-9]\d*\s+passed\b|\b[1-9]\d*\s+passing\b", RegexOptions.Multiline)]
-    private static partial Regex TestsPassedPattern();
-
-    // An answer that says the tools cannot be used: only a refusal about tools, files or access, never a plain "cannot".
-    [GeneratedRegex(@"\b(cannot|can't|can not|unable to|do not have|don't have|no)\b[^.\n]{0,40}\b(access|tools?|run commands?|execute|read (the )?files?|edit (the )?files?|file ?system)\b", RegexOptions.IgnoreCase)]
-    private static partial Regex RefusalPattern();
-
-    internal static bool IsTestCommand(string? name, JsonElement? details)
-    {
-        string? command = null;
-        if (details is { ValueKind: JsonValueKind.Object } value && value.TryGetProperty("arguments", out var arguments) && arguments.ValueKind == JsonValueKind.Object
-            && arguments.TryGetProperty("command", out var written) && written.ValueKind == JsonValueKind.String)
-            command = written.GetString();
-        return TestCommandPattern().IsMatch(command ?? name ?? string.Empty);
-    }
-
-    /// <summary>
-    /// Reads how a test run ended from the summary its runner writes (node, Jest, Vitest, Mocha, pytest, dotnet test, Go,
-    /// Cargo, RSpec): 1 when tests failed, 0 when it says none did, null when the output says neither.
-    /// </summary>
-    internal static int? TestOutcome(string? output)
-    {
-        if (string.IsNullOrEmpty(output)) return null;
-        if (TestsFailedPattern().IsMatch(output)) return 1;
-        return TestsPassedPattern().IsMatch(output) ? 0 : null;
-    }
-
-    internal static int? ExitCode(string? output)
-        => output is not null && ExitCodePattern().Match(output) is { Success: true } match && int.TryParse(match.Groups[1].ValueSpan, out var code) ? code : null;
+    // A verdict line of a review: `VERDICT: APPROVE`, `**Verdict: revise**`.
+    [GeneratedRegex(@"^\W*VERDICT\W*:?\W*(APPROVE|REVISE)\b\W*$", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
+    private static partial Regex VerdictPattern();
 
     // The tree of a working folder before a turn.
     private sealed record TreeSnapshot(string Folder, string Tree, DateTimeOffset At);
 
-    // What the decision reads of a turn, copied under the gate.
-    private sealed record Facts(string? Phase, bool Failed, string? Answer, int ToolCalls, int? LastTestExit, bool Rechecked, bool Escalated,
-        TreeSnapshot? Before, IReadOnlyList<string> ChangedFiles);
+    /// <summary>The code a turn changed.</summary>
+    /// <param name="Paths">The paths it changed.</param>
+    /// <param name="Diff">The diff of the turn, when git gives it.</param>
+    /// <param name="Folder">The working folder, when git tells the change.</param>
+    /// <param name="After">The tree after the turn, when git tells the change.</param>
+    internal sealed record TurnChange(IReadOnlyList<string> Paths, string? Diff, string? Folder, string? After);
 
-    // A turn the user started, with the recheck and the escalation that continue it. Read and written under the gate.
+    // What the decision reads of a turn, copied under the gate.
+    private sealed record Facts(string? Phase, bool Failed, bool Checked, string? Request, TreeSnapshot? Before, IReadOnlyList<string> ChangedFiles);
+
+    // A turn the user started, with the recheck or the revision that continues it. Read and written under the gate.
     private sealed class Turn(string? runId, DateTimeOffset startedAt)
     {
-        private readonly HashSet<string> _calls = new(StringComparer.Ordinal);
-        private readonly HashSet<string> _tests = new(StringComparer.Ordinal);
-        private readonly HashSet<string> _exitsSeen = new(StringComparer.Ordinal);
         private readonly HashSet<string> _changedFiles = new(StringComparer.OrdinalIgnoreCase);
 
         public string? RunId { get; set; } = runId;
@@ -641,66 +648,32 @@ internal sealed partial class AdaptiveTurnCoordinator
 
         public DateTimeOffset StartedAt { get; } = startedAt;
 
-        // Null for the run the user started; the provenance of a recheck or an escalation.
+        // Null for the run the user started; the provenance of a recheck or a revision.
         public string? Phase { get; private set; }
 
         public string? DecidedRun { get; set; }
 
         public TreeSnapshot? Before { get; set; }
 
-        public bool Rechecked { get; set; }
+        // The request of the user, which the critics check the change against.
+        public string? Request { get; set; }
 
-        public bool Escalated { get; set; }
+        // Whether the change of the turn was rechecked or reviewed: a turn is checked once.
+        public bool Checked { get; set; }
 
         public bool Failed { get; set; }
-
-        public string? Answer { get; set; }
-
-        // Of the current run only: a refusal is read in the run that refuses.
-        public int ToolCalls { get; private set; }
-
-        // Of the whole turn: the last test run decides, whichever run ran it.
-        public int? LastTestExit { get; private set; }
 
         public void StartRun(string? runId, string? phase)
         {
             RunId = runId;
             Active = true;
             Phase = phase;
-            Answer = null;
-            ToolCalls = 0;
             Failed = false;
         }
 
-        public void Note(AgentActivityEvent activity)
-        {
-            if (_calls.Add(activity.ActivityId))
-            {
-                ToolCalls++;
-                if (IsTestCommand(activity.Name, activity.Details)) _tests.Add(activity.ActivityId);
-            }
+        public Facts Read() => new(Phase, Failed, Checked, Request, Before, [.. _changedFiles]);
 
-            NoteFiles(activity.Details);
-            // A call whose output said no exit code ends as it says: failed or not.
-            if (activity.Phase is AgentActivityPhase.Completed or AgentActivityPhase.Failed && _tests.Contains(activity.ActivityId) && !_exitsSeen.Contains(activity.ActivityId))
-                LastTestExit = activity.Phase == AgentActivityPhase.Completed ? 0 : 1;
-        }
-
-        public void Note(AgentContentCompletedEvent output)
-        {
-            NoteFiles(output.Details);
-            // What the test runner says of its tests wins over the exit code, which a pipe (`npm test | grep`) hides.
-            if (output.ParentActivityId is { Length: > 0 } callId && _tests.Contains(callId) && (TestOutcome(output.Content) ?? ExitCode(output.Content)) is { } code)
-            {
-                LastTestExit = code;
-                _exitsSeen.Add(callId);
-            }
-        }
-
-        public Facts Read()
-            => new(Phase, Failed, Answer, ToolCalls, LastTestExit, Rechecked, Escalated, Before, [.. _changedFiles]);
-
-        private void NoteFiles(JsonElement? details)
+        public void Note(JsonElement? details)
         {
             if (details is not { ValueKind: JsonValueKind.Object } value || !value.TryGetProperty("modifiedFiles", out var files) || files.ValueKind != JsonValueKind.Array) return;
             foreach (var file in files.EnumerateArray())

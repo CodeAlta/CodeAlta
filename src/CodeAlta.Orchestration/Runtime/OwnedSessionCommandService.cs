@@ -956,7 +956,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                         };
                         if (SendStarting is { } starting) await starting(operation.SessionId, operation.Execution.Token).ConfigureAwait(false);
                         // What the run does is followed from here: a session on Adaptive is decided at its end.
-                        Adaptive.BeginRun(prepared.Session.SessionId, operation.Request.Provenance);
+                        Adaptive.BeginRun(prepared.Session.SessionId, operation.Request.Provenance, operation.Request.Text);
                         operation.SendInvocation.Launch(() => operation.Send = _runtime.SendOwnedCommandAsync(prepared.Session, prepared.Options, sendOptions,
                             operation.PermissionExecution, operation.Execution.Token, operation.AskExecution, operation.AskSubmission));
                         if (await operation.SendInvocation.Outcome.ConfigureAwait(false) is { } sendFailure) ExceptionDispatchInfo.Throw(sendFailure);

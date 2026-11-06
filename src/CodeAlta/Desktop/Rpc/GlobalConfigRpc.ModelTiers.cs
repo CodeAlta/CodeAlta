@@ -58,12 +58,30 @@ internal sealed partial class GlobalConfigService
         {
             Source = scope.FromSpace ? "space" : "global", SpaceId = space?.Id,
             Adaptive = ToItem(scope.Adaptive), AdaptiveReady = scope.IsAdaptiveReady,
+            AdaptiveProposal = Propose(scope),
         };
     }
 
+    // The levels Adaptive proposes for the providers that are ready (in the space, with a space), a subscription first.
+    private IReadOnlyList<AdaptiveLevelSetting>? Propose(ModelTierScope scope)
+    {
+        var candidates = new List<AdaptiveProposals.Candidate>();
+        foreach (var state in ProviderStates?.Invoke() ?? [])
+        {
+            if (state.Availability != ModelProviderAvailability.Ready || !state.Descriptor.IsEnabled) continue;
+            var key = state.ProviderId.Value;
+            if (scope.SpaceId is not null && !scope.IsProviderAvailable(key)) continue;
+            var subscription = state.Descriptor.ProviderType is "codex" or "codex-cli" or "claude-code";
+            candidates.AddRange(state.Models.Select(model => new AdaptiveProposals.Candidate(key, model.Id, subscription, model.DisplayName)));
+        }
+
+        var proposal = AdaptiveProposals.Propose(candidates);
+        return proposal.Count == 0 ? null : [.. proposal.Select(ToItem)];
+    }
+
     /// <summary>
-    /// Sets up Adaptive with its choices, or takes it out with none: the tier its turns run on, the tier a turn in trouble
-    /// continues on, and whether a turn that changed code rechecks it. The reply reads the global tiers again.
+    /// Sets up Adaptive with its levels, or takes it out with none: for each level, the model of its turns and the critics
+    /// that review its changes, and the level a session takes when none is chosen. The reply reads the global tiers again.
     /// </summary>
     [NeoRpcMethod("saveAdaptive")]
     public async Task<GlobalConfigModelTiersResponse> SaveAdaptiveAsync(GlobalConfigSaveAdaptiveRequest request, CancellationToken cancellationToken)
@@ -74,9 +92,26 @@ internal sealed partial class GlobalConfigService
         AdaptiveModelSettings? adaptive = null;
         if (request.Adaptive is { } chosen)
         {
-            if (CodeAlta.Catalog.ModelTiers.ModelTiers.Parse(chosen.Code) is not { } code || CodeAlta.Catalog.ModelTiers.ModelTiers.Parse(chosen.Escalate) is not { } escalate)
-                return new("invalid", [], null, "Adaptive names a tier that is not one: use complex, standard or quick.");
-            adaptive = new AdaptiveModelSettings(code, escalate, chosen.Recheck);
+            if (chosen.Levels is null || chosen.Levels.Count > AdaptiveLevels.All.Count) return new("invalid", [], null, "The levels of Adaptive are not complete.");
+            var document = new CodeAltaModelAdaptiveDocument { Level = chosen.Level };
+            foreach (var level in chosen.Levels)
+            {
+                if (level is null || AdaptiveLevels.Parse(level.Level) is not { } name || level.Model is null || level.Critics is null
+                    || level.Critics.Count > AdaptiveLevelSettings.MaximumCritics)
+                    return new("invalid", [], null, "A level of Adaptive names no level, no model, or too many critics.");
+                var written = new CodeAltaModelAdaptiveLevelDocument { Model = Written(level.Model), Critics = [.. level.Critics.Select(Written)] };
+                switch (name)
+                {
+                    case AdaptiveLevel.Low: document.Low = written; break;
+                    case AdaptiveLevel.Medium: document.Medium = written; break;
+                    case AdaptiveLevel.High: document.High = written; break;
+                    default: document.Max = written; break;
+                }
+            }
+
+            var errors = ModelSettings.Validate(new CodeAltaModelSettingsDocument { Adaptive = document });
+            if (errors.Count > 0) return new("invalid", [], null, Bound(string.Join(" ", errors)));
+            adaptive = AdaptiveModelSettings.Read(document);
         }
 
         lock (_gate)
@@ -269,21 +304,68 @@ internal sealed partial class GlobalConfigService
     private static ModelFallbackSetting ToItem(ModelFallbackSettings fallback)
         => new(fallback.Enabled, fallback.OnQuota, fallback.OnUnavailable, fallback.Resume, fallback.MaxResumes);
 
-    private static AdaptiveSetting? ToItem(AdaptiveModelSettings? adaptive)
-        => adaptive is null ? null
-            : new(CodeAlta.Catalog.ModelTiers.ModelTiers.NameOf(adaptive.Code), CodeAlta.Catalog.ModelTiers.ModelTiers.NameOf(adaptive.Escalate), adaptive.Recheck);
+    private AdaptiveSetting? ToItem(AdaptiveModelSettings? adaptive)
+        => adaptive is null ? null : new(AdaptiveLevels.NameOf(adaptive.DefaultLevel), [.. adaptive.Levels.Select(ToItem)]);
+
+    // A level with the names of its model when its provider is ready, as a tier gives the model it gives now, and the
+    // names of its critics.
+    private AdaptiveLevelSetting ToItem(AdaptiveLevelSettings level)
+    {
+        var states = ProviderStates?.Invoke() ?? [];
+        var state = StateOf(states, level.Model);
+        var model = ModelOf(state, level.Model);
+        return new(AdaptiveLevels.NameOf(level.Level), ToItem(level.Model), [.. level.Critics.Select(ToItem)])
+        {
+            Choice = state is { Availability: ModelProviderAvailability.Ready } && (model is not null || state.Models.Count == 0)
+                ? new ModelTierChoiceItem(level.Model.ProviderKey, level.Model.ModelId, level.Model.PreferredReasoning?.ToString(),
+                    state.Descriptor.DisplayName, model?.DisplayName ?? level.Model.ModelId)
+                : null,
+            CriticNames = [.. level.Critics.Select(critic => ModelOf(StateOf(states, critic), critic)?.DisplayName ?? critic.ModelId)],
+        };
+
+        static ModelProviderStateSnapshot? StateOf(IReadOnlyList<ModelProviderStateSnapshot> states, ModelTierTarget target)
+            => states.FirstOrDefault(candidate => string.Equals(candidate.ProviderId.Value, target.ProviderKey, StringComparison.OrdinalIgnoreCase));
+
+        static AgentModelInfo? ModelOf(ModelProviderStateSnapshot? state, ModelTierTarget target)
+            => state?.Models.FirstOrDefault(candidate => string.Equals(candidate.Id, target.ModelId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static ModelTierTargetItem ToItem(ModelTierTarget target)
+        => new(target.ProviderKey, target.ModelId, [.. target.Reasoning.Select(static effort => effort.ToString())]);
+
+    // A model of a level as the configuration writes it; what is not valid is told by the validation of the table.
+    private static string Written(ModelTierTargetItem? target)
+    {
+        if (target is null) return string.Empty;
+        var efforts = (target.Reasoning ?? []).Select(static effort => Enum.TryParse<AgentReasoningEffort>(effort, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)
+            ? parsed.ToString().ToLowerInvariant() : effort).ToArray();
+        var model = $"{target.ProviderKey?.Trim()}:{target.ModelId?.Trim()}";
+        return efforts.Length == 0 ? model : $"{model}@{string.Join(',', efforts)}";
+    }
 }
 
 /// <summary>Sets up Adaptive, or takes it out.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>
-/// <param name="Adaptive">The choices of Adaptive, or null to take it out.</param>
+/// <param name="Adaptive">The levels of Adaptive, or null to take it out.</param>
 internal sealed record GlobalConfigSaveAdaptiveRequest(string ExpectedEpoch, AdaptiveSetting? Adaptive);
 
-/// <summary>How CodeAlta chooses the model of each turn of a session on Adaptive.</summary>
-/// <param name="Code">The tier its turns run on: <c>complex</c>, <c>standard</c> or <c>quick</c>.</param>
-/// <param name="Escalate">The tier a turn that ends in visible trouble continues on.</param>
-/// <param name="Recheck">Whether a turn that changed code is asked once to check its change against the request.</param>
-internal sealed record AdaptiveSetting(string Code, string Escalate, bool Recheck);
+/// <summary>How CodeAlta runs the turns of a session on Adaptive: its levels, and the level a session takes when none is chosen.</summary>
+/// <param name="Level">The default level: <c>low</c>, <c>medium</c>, <c>high</c> or <c>max</c>.</param>
+/// <param name="Levels">The levels that are set, from the cheapest.</param>
+internal sealed record AdaptiveSetting(string Level, IReadOnlyList<AdaptiveLevelSetting> Levels);
+
+/// <summary>A level of Adaptive: the model of its turns, and the critics that review its changes of code.</summary>
+/// <param name="Level"><c>low</c>, <c>medium</c>, <c>high</c> or <c>max</c>.</param>
+/// <param name="Model">The model of the turns, with at most one reasoning effort.</param>
+/// <param name="Critics">The critics, each with at most one reasoning effort; none for a recheck.</param>
+internal sealed record AdaptiveLevelSetting(string Level, ModelTierTargetItem Model, IReadOnlyList<ModelTierTargetItem> Critics)
+{
+    /// <summary>Gets the model of the turns with its names, when its provider is ready (or for a request: null).</summary>
+    public ModelTierChoiceItem? Choice { get; init; }
+
+    /// <summary>Gets the names of the critics, in order, as their providers name them (or for a request: null).</summary>
+    public IReadOnlyList<string>? CriticNames { get; init; }
+}
 
 /// <summary>Asks for the tiers of models.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>
@@ -328,8 +410,14 @@ internal sealed record GlobalConfigModelTiersResponse(string Status, IReadOnlyLi
     /// <summary>Gets the choices of Adaptive, or null when it is not set up.</summary>
     public AdaptiveSetting? Adaptive { get; init; }
 
-    /// <summary>Gets whether a session of the scope can be put on Adaptive: it is set up and the tiers it names have models.</summary>
+    /// <summary>Gets whether a session of the scope can be put on Adaptive: it is set up with a level.</summary>
     public bool AdaptiveReady { get; init; }
+
+    /// <summary>
+    /// Gets the levels Adaptive proposes for the providers that are ready, as tested in November 2026; null when none of
+    /// the models a proposal knows is there, and the user then chooses the models.
+    /// </summary>
+    public IReadOnlyList<AdaptiveLevelSetting>? AdaptiveProposal { get; init; }
 }
 
 /// <summary>A tier of models: its targets in order of preference, and the model it gives now.</summary>
