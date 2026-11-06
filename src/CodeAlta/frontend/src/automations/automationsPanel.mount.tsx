@@ -48,7 +48,7 @@ const hub = {
     for (const listener of listeners) listener();
     return { ok: true, id: "nightly", message: null };
   },
-  scripts: async () => [], publishTargets: async () => [{ scope: "team:infra", name: "Infra" }],
+  scripts: async () => [], triggerTypes: async () => [], publishTargets: async () => [{ scope: "team:infra", name: "Infra" }],
   preview: async () => ({ ok: true, message: null, times: [] }),
   takeOver: async (id: string, runId: string) => {
     calls.push(JSON.stringify({ takeOver: runId }));

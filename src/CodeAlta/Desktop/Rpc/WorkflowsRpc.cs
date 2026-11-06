@@ -120,7 +120,7 @@ internal sealed class WorkflowsService
         try
         {
             // The script of a plugin has no file: the library keeps its text.
-            var source = script.Scope == CodeModeScriptScope.Plugin ? script.Source.Original : await File.ReadAllTextAsync(script.Path, cancellationToken).ConfigureAwait(false);
+            var source = script.Scope == CodeModeScriptScope.Plugin ? script.Content : await File.ReadAllTextAsync(script.Path, cancellationToken).ConfigureAwait(false);
             return source.Length > MaximumSourceLength ? new("refused", null) : new("ok", source);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

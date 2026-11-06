@@ -49,6 +49,9 @@ public sealed record CodeModeLibraryScript(string Name, CodeModeScriptScope Scop
     /// <summary>Gets why the script does not parse, or null when it does.</summary>
     public string? Problem => Source.Error?.Message;
 
+    /// <summary>Gets the text of the script, as it was read: the only copy of the script of a plugin, which has no file.</summary>
+    public string Content => Source.Original;
+
     /// <summary>Gets the title its <c>meta</c> gives, or null.</summary>
     public string? Title => Source.Descriptor?.Title;
 

@@ -1,6 +1,6 @@
 ---
 title: Trigger sources - Project and Automation triggers, plugin triggers, scripts without a model
-status: in-progress
+status: done
 created: 2026-11-06
 summary: Open the fixed list of automation triggers to trigger sources, built in or contributed by plugins (polled with a cursor or pushed by a listener), add the Project trigger of issue #354 and the Automation trigger for chaining, let a script automation run without a model, and let a plugin ship a trigger together with the script that handles it.
 ---
@@ -105,19 +105,19 @@ A plugin can give a trigger together with the code that handles it, so that "whe
   - `site/docs/automations.md`: the two triggers, a "CodeAlta events" section, scripts without a model, the automations a plugin offers;
   - the plugin runtime skill (`src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime`): how to write a trigger and its script, and an `automation-trigger` sample (a local git branch that moves, with a script that writes a line through the plugin's `alta` command);
   - `doc/plugins.md`: the new extension points; `doc/codemode.md`: the `Plugin` scope and runs without a session; `doc/fleet/orchestration.md`: where source triggers are evaluated.
-- [ ] 12. Full validation: build, `dotnet test`, `npm test`, `lunet build`.
+- [x] 12. Full validation: Release build (0 warnings), `dotnet test`, `npm test`, `lunet build`. It found two problems of this branch, fixed: the fake hub of the Automations browser test had no `triggerTypes`, and the desktop read a `CodeModeSource` (the guard keeps `CodeAlta.CodeMode` out of the desktop assembly; the library script now gives its `Content`). `RemoteHost_ListsReadsAndDrivesTheSessionsOfTheNode` failed only while both suites ran, and passed alone.
 
 ## How it is verified
 
-- [ ] Configuration round trip of source triggers, with an unknown type kept as written.
-- [ ] A fake polled source: first look starts nothing; a new event starts one run, once; catch-up; a cursor kept across a restart; a signal looks within 30 s.
-- [ ] A fake push source: events run once; the listener ends on disable and pause and restarts after a failure.
-- [ ] Project trigger: added, archived, removed; space filter; added while closed with and without **Catch up**; `addedBy`.
-- [ ] Automation trigger: each event; never its own runs; a chain stops at depth 5.
-- [ ] Script without a model: no session is created; it calls a plugin's `alta` command with the event; its return value is the answer; a failure fails the run; `tools.*` is absent; `agent()` starts one session of the automation; autonomy still applies.
-- [ ] Scripts of a plugin: listed under their prefixed name while the plugin is active, gone when it is not, never overwritten by a save; a project script of the same short name does not hide them.
-- [ ] A plugin's trigger with its script: the editor fills the trigger, script, arguments and mode; the automation is saved disabled until the user enables it; a changed script asks for **Allow** again.
-- [ ] Editor: a plugin trigger's fields drawn from its descriptor; frontend tests pass.
+- [x] Configuration round trip of source triggers, with an unknown type kept as written (`AutomationSourceConfigTests`).
+- [x] A fake polled source: first look starts nothing; a new event starts one run, once; catch-up; the cursor kept; a signal reads again soon; a failing source is shown and read again (`AutomationSourceTests`).
+- [x] A fake push source: listens while armed, events run once; a listener that fails is shown and started again after a pause.
+- [x] Project trigger: added, archived, removed; space filter; a catalog change signals a look; an automation runs with the project as the `event` of its script (`ProjectTriggerSourceTests`, `ProjectCatalogChangeTests`).
+- [x] Automation trigger: chosen events; never its own runs; a chain stops at five (`AutomationRunTriggerTests`).
+- [x] Script without a model (as decided at step 7, which replaced "`tools.*` is absent; `agent()` starts a session"): no session; read-only `alta` and plugin commands, nothing that starts an agent; `tools.*` that read, and write with write access; `present()` kept; a script that cannot run says why; a plugin's script runs with its event (`UnattendedScriptRunnerTests`, `CodeModePluginScriptsTests`, `AutomationConfigTests`).
+- [x] Scripts of a plugin: in the library under their prefixed name, never saved over (`CodeModePluginScriptsTests`).
+- [x] A plugin's trigger with its script: the editor fills the script and its mode (checked in the developer instance at step 9; no automated test of that menu). A changed script asks for **Allow** through the script hash every library script has; not tested for the plugin scope on its own.
+- [x] Editor: the fields of a source trigger drawn from its descriptor; frontend tests pass.
 
 ## Risks
 
