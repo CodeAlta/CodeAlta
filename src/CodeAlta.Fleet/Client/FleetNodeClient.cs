@@ -427,6 +427,27 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.ControlAgentsSet, policy, FleetNodeJsonContext.Default.FleetAgentPolicyInfo, FleetNodeJsonContext.Default.FleetAgentPolicyInfo,
             null, cancellationToken);
 
+    /// <summary>The owner's local control, or a device that manages the node: what its sessions run with when nothing else chooses it.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The defaults.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetSessionDefaultsInfo> GetSessionDefaultsAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlSessionDefaultsGet, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetSessionDefaultsInfo,
+            null, cancellationToken);
+
+    /// <summary>The owner's local control, or a device that manages the node: changes what its sessions run with by default.</summary>
+    /// <param name="defaults">The defaults.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The defaults as the node keeps them.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="defaults"/> is null.</exception>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetSessionDefaultsInfo> SetSessionDefaultsAsync(FleetSessionDefaultsInfo defaults, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(defaults);
+        return CallAsync(FleetNodeMethods.ControlSessionDefaultsSet, defaults, FleetNodeJsonContext.Default.FleetSessionDefaultsInfo,
+            FleetNodeJsonContext.Default.FleetSessionDefaultsInfo, null, cancellationToken);
+    }
+
     /// <summary>The owner's local control, or a device that manages the node: the labels of the machine.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The labels.</returns>

@@ -393,6 +393,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             RegisterSecrets(caller, Access.Owner);
             RegisterProviders(caller, Access.Owner, Access.Owner);
             RegisterAgentPolicy(caller, Access.Owner);
+            RegisterSessionDefaults(caller, Access.Owner);
             RegisterLabels(caller, Access.Owner);
             RegisterPeople(caller, Access.Owner);
             // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
@@ -470,6 +471,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         // Its providers are read by any device that manages it; a key or a sign-in, a credential of the machine, by a paired one only.
         RegisterProviders(caller, Access.Manage, Access.ManagePaired);
         RegisterAgentPolicy(caller, Access.Manage);
+        RegisterSessionDefaults(caller, Access.Manage);
         RegisterLabels(caller, Access.Manage);
         // Who the machine lets in is its owner's: a device paired to manage it, never one trusted through the organization alone.
         RegisterPeople(caller, Access.ManagePaired);

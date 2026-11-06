@@ -138,9 +138,9 @@ labels, its local policy).
     the provider starts; `unknown` is refused, and a refused run is recorded with its reason, without a session.
 - **Statistics are counted on nodes.** The statistics engine runs headless too, from the node's first day; the node
   publishes its facts as a versioned set per session ([statistics](statistics.md)).
-- **The node's host can ask.** Unlike today's headless runs of `altacli`, which grant everything (`FullTrust`), a node
-  routes permission requests and questions to people, bound to their exact attempts, and refuses what nobody may
-  approve.
+- **The node's host runs permission modes.** Unlike today's headless runs of `altacli`, which grant everything
+  (`FullTrust`), a node runs each session in its permission mode, as CodeAlta Desktop does, and routes what a mode asks
+  about, and questions, to people, bound to their exact attempts; it refuses what nobody may approve.
 
 ## Workspaces
 
@@ -164,8 +164,12 @@ labels, its local policy).
 
 - A node listens only where its owner allows (loopback, LAN, tailnet interface, or nowhere when a server relays).
 - Every request is authenticated by a device key the node trusts (paired, or the same person in the fleet, or a share).
-- Agent-started sessions from other machines are off until the owner turns them on, per space; they run sandboxed
-  when the policy says so.
+- A session without a mode of its own (started from another computer, a run of an automation) runs in the mode of the
+  machine (`fleet/session-defaults.json`): `bypassPermissions`, since a machine is installed to run agents and nobody
+  sits at it, until its owner or a device that manages it chooses to ask first. A policy of the organization narrows it,
+  and a session another session creates asks what its creator asks.
+- Agent-started sessions from other machines are off until the owner turns them on, per space; they have at most the
+  mode of their parent, never bypass permissions unless the owner allows it, and run sandboxed when the policy says so.
 - The node's owner can stop everything it runs, from the desktop or with `altanode` locally, and can quarantine the
   node (refuse all remote requests) without uninstalling it.
 

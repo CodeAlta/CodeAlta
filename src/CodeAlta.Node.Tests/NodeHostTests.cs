@@ -2,7 +2,9 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.Harness;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Catalog;
+using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Hosting;
+using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Logging;
 
@@ -72,18 +74,18 @@ public sealed class NodeHostTests
     }
 
     [TestMethod]
-    public async Task Composition_NeverTrustsFully_AndReviewsEveryRequest()
+    public async Task Composition_NeverTrustsFully_AndFollowsThePermissionModeOfEachSession()
     {
         using var root = new NodeTestRoot();
         await using var toolEndpoints = new LoopbackHarnessToolEndpoints(LogManager.GetLogger("CodeAlta.Node.Tests"));
         await using var modelsDev = new ModelsDevCatalogService(new ModelsDevCatalogServiceOptions { CacheFilePath = Path.Combine(root.Root, "models.json") });
         var options = NodeHost.CreateHostOptions(root.Options(), null, modelsDev, new PluginModelProviderTypes(toolEndpoints));
 
-        Assert.IsFalse(options.FullTrust, "A node never uses the full trust of headless runs.");
-        Assert.IsFalse(options.AutoApproveOwnedPermissions);
-        Assert.IsTrue(options.ReviewOwnedCommandPermissions, "The requests of a send wait for a person.");
-        Assert.IsNull(options.ReviewOwnedPermissionsPolicy);
-        Assert.IsFalse(options.SessionPermissionModes, "No permission mode of a session approves by itself.");
+        Assert.IsFalse(options.FullTrust, "A node never uses the full trust of headless runs: the mode of a session decides.");
+        Assert.IsTrue(options.SessionPermissionModes, "Each session runs in its permission mode, as in CodeAlta Desktop.");
+        Assert.IsNotNull(options.ReviewOwnedPermissionsPolicy);
+        Assert.IsFalse(options.ReviewOwnedPermissionsPolicy(), "A machine installed to run agents bypasses permissions until its owner chooses.");
+        Assert.IsTrue(options.InheritPermissionModePolicy?.Invoke(), "A session another session creates asks what its creator asks.");
         Assert.IsTrue(options.IsHeadless);
         Assert.IsFalse(options.HasInteractiveUi);
         Assert.IsFalse(options.ReadOnlyGlobalState, "A node owns its profile.");
@@ -95,7 +97,7 @@ public sealed class NodeHostTests
     }
 
     [TestMethod]
-    public async Task PermissionRequests_AreNeverGrantedByTheNode()
+    public async Task PermissionRequests_FollowTheModeOfTheMachine_AndWhatAlwaysAsksIsNeverGranted()
     {
         using var root = new NodeTestRoot();
         await using var node = await NodeHost.StartAsync(root.Options(), TestContext.CancellationToken);
@@ -107,9 +109,14 @@ public sealed class NodeHostTests
         var skill = new AgentSkillPermissionRequest(provider, "session-1", DateTimeOffset.UtcNow, null, "i-3", "server", "skill",
             "skill://server/skill/SKILL.md", 1, 10, Dynamic: false);
 
-        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await permissions.OwnedDefaultPermissionHandler(command, TestContext.CancellationToken)).Kind,
-            "A request nobody can be asked about is refused, never granted.");
-        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await permissions.OwnedDefaultPermissionHandler(fileChange, TestContext.CancellationToken)).Kind);
+        // By default the sessions of a machine bypass permissions: a command and a file change run; a skill of a server always asks.
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await permissions.OwnedDefaultPermissionHandler(command, TestContext.CancellationToken)).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await permissions.OwnedDefaultPermissionHandler(fileChange, TestContext.CancellationToken)).Kind);
         Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await permissions.RequestForSessionAsync("session-1", skill, TestContext.CancellationToken)).Kind);
+
+        // Once the owner makes them ask first, a request nobody can be asked about is refused, never granted.
+        FleetSessionDefaults.Write(node.Host.CatalogOptions.FleetRoot, new FleetSessionDefaultsInfo(SessionPermissionModes.Ask));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await permissions.OwnedDefaultPermissionHandler(command, TestContext.CancellationToken)).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await permissions.OwnedDefaultPermissionHandler(fileChange, TestContext.CancellationToken)).Kind);
     }
 }

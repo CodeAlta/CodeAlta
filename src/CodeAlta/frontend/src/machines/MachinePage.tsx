@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { Button, Callout, HTMLSelect, InputGroup, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { machines, type MachinePeopleView, type MachineAgentsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type SecretsList } from "#neoastra";
+import { machines, type MachinePeopleView, type MachineAgentsView, type MachineSessionDefaultsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type SecretsList } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { SecretsBody, type SecretsActions } from "../secrets/SecretsSettings";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -16,7 +16,7 @@ import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devic
 /** The calls of the page of a machine. */
 export type MachinePageApi = Pick<typeof machines, "management" | "setDevicePermission" | "revokeDevice" | "addProject" | "cloneProject" | "removeProject"
   | "readLog" | "updateMachine" | "secrets" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable"
-  | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "people" | "setMachinePerson" | "labels" | "setLabels" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait">;
+  | "sessionDefaults" | "setSessionPermissionMode" | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "people" | "setMachinePerson" | "labels" | "setLabels" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait">;
 
 type Problem = { key: MessageKey; detail?: string | null } | null;
 
@@ -85,6 +85,7 @@ export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch:
       <DevicesSection view={view} busy={busy} machine={machine}
         onPermission={(device, permission, allowed) => void change(() => api.setDevicePermission({ expectedEpoch: epoch, machineId: machine.id, deviceId: device.id, permission, allowed }))}
         onRevoke={device => void change(() => api.revokeDevice({ expectedEpoch: epoch, machineId: machine.id, deviceId: device.id }))} />
+      <PermissionsSection epoch={epoch} machine={machine} api={api} />
       <AgentsSection epoch={epoch} machine={machine} api={api} />
       <PeopleSection epoch={epoch} machine={machine} api={api} />
       <LabelsSection epoch={epoch} machine={machine} api={api} />
@@ -247,6 +248,54 @@ function PeopleSection({ epoch, machine, api }: { epoch: string; machine: Machin
         options={[{ value: "", label: t("Add a person…") }, ...view.others.map(person => ({ value: person.personId, label: person.name }))]}
         onChange={event => { if (event.currentTarget.value) void set(event.currentTarget.value, all); }} />}
     </>}
+  </section>;
+}
+
+/**
+ * What a session of the machine without a mode of its own does before it acts, as `altanode permission-mode` sets it there:
+ * bypass permissions, as a machine installed to run agents does by default, or ask first. A machine of an earlier version
+ * has no such choice: its sessions ask first.
+ */
+function PermissionsSection({ epoch, machine, api }: { epoch: string; machine: MachineView; api: MachinePageApi }) {
+  const { t } = useShellLanguage();
+  const [view, setView] = useState<MachineSessionDefaultsView | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<Problem>(null);
+  const [generation, setGeneration] = useState(0);
+  useEffect(() => {
+    const abort = new AbortController();
+    api.sessionDefaults({ expectedEpoch: epoch, machineId: machine.id }, { signal: abort.signal, timeoutMilliseconds: 30_000 }).then(value => {
+      if (abort.signal.aborted) return;
+      const failed = value.status === "method_not_found" ? null : managementProblem(value.status);
+      if (failed) setProblem({ key: failed, detail: value.message }); else setView(value);
+    }, () => { if (!abort.signal.aborted) setProblem({ key: "The machine does not answer: it is offline." }); });
+    return () => abort.abort();
+  }, [api, epoch, machine.id, generation]);
+  const save = async (permissionMode: string) => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const result = await api.setSessionPermissionMode({ expectedEpoch: epoch, machineId: machine.id, permissionMode });
+      const failed = managementProblem(result.status);
+      if (failed) setProblem({ key: failed, detail: result.message });
+    } catch {
+      setProblem({ key: "The machine does not answer: it is offline." });
+    } finally {
+      setBusy(false);
+      setGeneration(value => value + 1);
+    }
+  };
+  return <section className="machine-section machine-session-permissions" aria-label={t("Permissions")}>
+    <h2>{t("Permissions")}</h2>
+    <p className="muted-text">{t("What a session of {name} without a mode of its own does before it runs a command or changes a file: one started from another computer, a run of an automation.", { name: machine.name })}</p>
+    {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    {view?.status === "method_not_found" && <p className="muted-text">{t("Update CodeAlta Node on {name} to choose it: until then, its sessions ask first.", { name: machine.name })}</p>}
+    {view?.permissionMode && <label className="machine-agent-row">
+      <span className="machine-agent-label">{t("Default mode")}</span>
+      <HTMLSelect value={view.permissionMode} disabled={busy} aria-label={t("Default mode")}
+        options={[{ value: "bypassPermissions", label: t("Bypass permissions") }, { value: "default", label: t("Ask first") }]}
+        onChange={event => { const mode = event.currentTarget.value; void save(mode); }} />
+    </label>}
   </section>;
 }
 

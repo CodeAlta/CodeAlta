@@ -159,6 +159,12 @@ public static class FleetNodeMethods
     /// <summary>The owner's local control, or a device that manages the node: changes that policy.</summary>
     public const string ControlAgentsSet = "control.agents.set";
 
+    /// <summary>The owner's local control, or a device that manages the node: what its sessions run with when nothing else chooses it.</summary>
+    public const string ControlSessionDefaultsGet = "control.session_defaults.get";
+
+    /// <summary>The owner's local control, or a device that manages the node: changes what its sessions run with by default.</summary>
+    public const string ControlSessionDefaultsSet = "control.session_defaults.set";
+
     /// <summary>The owner's local control, or a device that manages the node: the labels of the machine.</summary>
     public const string ControlLabelsGet = "control.labels.get";
 
@@ -877,6 +883,17 @@ public sealed record FleetNodePeopleInfo(IReadOnlyList<FleetNodePerson> People, 
 /// </param>
 public sealed record FleetNodePeopleChange(string PersonId, IReadOnlyList<string>? Permissions = null, bool Refuse = false, string? OrganizationId = null);
 
+/// <summary>
+/// What the sessions of a node run with when nothing else chooses it (<c>control.session_defaults.get</c>,
+/// <c>control.session_defaults.set</c>; <see cref="FleetSessionDefaults"/>).
+/// </summary>
+/// <param name="PermissionMode">
+/// The permission mode of a session started there without one of its own: <c>bypassPermissions</c>, the default, or
+/// <c>default</c> (ask first). A policy of the organization narrows it, and a session an agent of another machine starts
+/// has at most the mode of its parent.
+/// </param>
+public sealed record FleetSessionDefaultsInfo(string PermissionMode);
+
 /// <summary>The labels the owner gives a machine (<c>control.labels.get</c>, <c>control.labels.set</c>), which it publishes in its inventory.</summary>
 /// <param name="Labels">The labels, such as <c>gpu</c> or <c>prod</c>.</param>
 public sealed record FleetMachineLabelsInfo(IReadOnlyList<string> Labels);
@@ -990,6 +1007,7 @@ public sealed record FleetAgentDeliveryAckParams(IReadOnlyList<string> Ids);
 [JsonSerializable(typeof(FleetNodePeopleInfo))]
 [JsonSerializable(typeof(FleetNodePeopleChange))]
 [JsonSerializable(typeof(FleetMachineLabelsInfo))]
+[JsonSerializable(typeof(FleetSessionDefaultsInfo))]
 [JsonSerializable(typeof(FleetAgentDeliveryTakeParams))]
 [JsonSerializable(typeof(FleetAgentDeliveryList))]
 [JsonSerializable(typeof(FleetAgentDeliveryAckParams))]

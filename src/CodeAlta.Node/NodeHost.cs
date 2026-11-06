@@ -2,6 +2,7 @@ using System.Diagnostics;
 using CodeAlta.Agent.Harness;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Catalog;
+using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Hosting;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
@@ -17,10 +18,11 @@ namespace CodeAlta.Node;
 /// CLI (the <c>alta</c> tool and Code Mode), and the sessions other processes write followed.
 /// </summary>
 /// <remarks>
-/// Permission requests of its sessions are never granted by the node itself: they wait in the runtime's permission
-/// service (<see cref="Orchestration.Runtime.SessionRuntimeService.Permissions"/>) for a person to answer them, and
-/// are refused where nobody can be asked. Stopped by <see cref="StopAsync"/>: it accepts no more work, gives running
-/// turns a bound to finish, then disposes the host and releases the lock.
+/// Its sessions run in their permission mode, else in the mode of the machine (<see cref="FleetSessionDefaults"/>), which
+/// bypasses permissions by default. A request a mode asks about waits in the runtime's permission service
+/// (<see cref="Orchestration.Runtime.SessionRuntimeService.Permissions"/>) for a person to answer it. Stopped by
+/// <see cref="StopAsync"/>: it accepts no more work, gives running turns a bound to finish, then disposes the host and
+/// releases the lock.
 /// </remarks>
 public sealed class NodeHost : IAsyncDisposable
 {
@@ -174,16 +176,19 @@ public sealed class NodeHost : IAsyncDisposable
             IsHeadless = true,
             HasInteractiveUi = false,
             OwnsLogging = false,
-            // Permissions: a node is NOT a headless run of altacli. FullTrust, which grants every request, is never used:
-            // the sessions of a node act for people who are elsewhere, and only they may allow what an agent asks.
-            // - every owned send reviews its requests: they stay pending in the runtime's permission service
-            //   (RuntimeService.Permissions), where the node API answers them for a person (a later part of the fleet);
-            // - nothing is approved automatically, whatever the permission mode of a session (no session modes);
-            // - a request outside a send, which nobody can be asked about, is denied.
+            // Permissions: a node is installed to run agents, as CodeAlta Desktop runs them, with the permission mode of each
+            // session; it is not a headless run of altacli, whose FullTrust grants every request whatever the mode:
+            // - a session without a mode of its own runs in the mode of the machine (fleet/session-defaults.json), which
+            //   bypasses permissions until its owner, or a device that manages it, chooses to ask first;
+            // - a request a mode asks about stays pending in the runtime's permission service (RuntimeService.Permissions),
+            //   where the node API answers it for a person;
+            // - a policy of the organization narrows the mode of a session, and a session an agent of another machine
+            //   starts has at most the mode of its parent (FleetNodeService);
+            // - a session another session creates asks what its creator asks.
             FullTrust = false,
-            AutoApproveOwnedPermissions = false,
-            ReviewOwnedCommandPermissions = true,
-            SessionPermissionModes = false,
+            ReviewOwnedPermissionsPolicy = () => FleetSessionDefaults.AsksByDefault(catalog.FleetRoot),
+            SessionPermissionModes = true,
+            InheritPermissionModePolicy = static () => true,
             // A session works under the Git, GitHub and CLI identity of its space, as in CodeAlta Desktop.
             AppliesSpaceIdentities = true,
             // The sessions it runs are leased, so that the command line does not run them meanwhile; the sessions the

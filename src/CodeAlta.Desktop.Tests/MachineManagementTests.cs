@@ -202,6 +202,32 @@ public sealed class MachineManagementTests
         CollectionAssert.AreEqual(new[] { "gpu", "prod" }, (await firstService.LabelsAsync(new MachineRequest(firstEpoch, firstMachine), token)).Labels);
     }
 
+    // What altanode permission-mode sets on the machine, set from its page.
+    [TestMethod]
+    public async Task TheComputerThatManagesAMachine_MakesItsSessionsAskFirstFromItsPage_AndOneThatDoesNotIsRefused()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        await using var firstComputer = await PairAsync(fixture, "first", token);
+        await using var secondComputer = await PairAsync(fixture, "second", token);
+        var (first, firstService, firstEpoch) = firstComputer;
+        var (second, secondService, secondEpoch) = secondComputer;
+        var firstMachine = first.Hosts.Single().MachineId!;
+        var secondMachine = second.Hosts.Single().MachineId!;
+
+        var initial = await firstService.SessionDefaultsAsync(new MachineRequest(firstEpoch, firstMachine), token);
+        Assert.AreEqual(("ok", "bypassPermissions"), (initial.Status, initial.PermissionMode), initial.Message);
+        Assert.AreEqual("ok", (await firstService.SetSessionPermissionModeAsync(new MachineSessionPermissionModeRequest(firstEpoch, firstMachine, "default"), token)).Status);
+        Assert.AreEqual("default", (await firstService.SessionDefaultsAsync(new MachineRequest(firstEpoch, firstMachine), token)).PermissionMode);
+        Assert.AreEqual("invalid_params", (await firstService.SetSessionPermissionModeAsync(new MachineSessionPermissionModeRequest(firstEpoch, firstMachine, "auto"), token)).Status);
+        Assert.AreEqual("stale_epoch", (await firstService.SessionDefaultsAsync(new MachineRequest("other", firstMachine), token)).Status);
+
+        // A computer that does not manage the machine reads and changes nothing there.
+        Assert.AreEqual("not_manager", (await secondService.SessionDefaultsAsync(new MachineRequest(secondEpoch, secondMachine), token)).Status);
+        Assert.AreEqual("not_manager", (await secondService.SetSessionPermissionModeAsync(new MachineSessionPermissionModeRequest(secondEpoch, secondMachine, "bypassPermissions"), token)).Status);
+        Assert.AreEqual("default", (await firstService.SessionDefaultsAsync(new MachineRequest(firstEpoch, firstMachine), token)).PermissionMode);
+    }
+
     // The providers of a machine, from its page: the calls reach the machine, which answers for itself; this node has none to change.
     [TestMethod]
     public async Task TheProvidersOfAMachine_AreAskedOfTheMachine_AndRefusedToAComputerThatDoesNotManageIt()

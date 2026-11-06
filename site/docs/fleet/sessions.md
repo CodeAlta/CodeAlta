@@ -41,6 +41,15 @@ While a machine is offline, its sessions stay listed with what was last known of
 
 The **+** of the row of a machine in the Explorer opens the same prompt, already set to run on that machine.
 
+### What its sessions may do
+
+A machine runs agents for you while nobody sits at it, so its sessions bypass permissions by default: they run commands and change files without asking, as a session of this computer in **Bypass permissions** does. That is the mode of a session started from another computer and of a run of an automation, when nothing gives them one.
+
+- To have them ask first, choose **Ask first** under **Permissions** on the page of the machine (see [Manage a machine from CodeAlta Desktop](machines.md#manage-a-machine-from-codealta-desktop)), or run `altanode permission-mode ask` on it. A request then waits for a person, who answers it from a computer that may drive the session.
+- Only the owner of the machine and the computers that manage it change it.
+- A [policy of the organization](policies-and-audit.md) with **Permission mode at most** narrows it, and a session an agent starts there has at most the mode of that agent ([Let agents start sessions on it](#let-agents-start-sessions-on-it)).
+- A session that is not sandboxed runs with the rights of the account of the node: a [sandbox](../sessions/sandbox.md), chosen on the machine as on this computer, limits what it can read, write and reach.
+
 ### Let agents start sessions on it
 
 An agent of a session on this computer can hand part of its work to a session on a machine ("run the iOS tests on the Mac"), and get its final answer back as it does from a session of this computer.

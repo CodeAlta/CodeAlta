@@ -17,6 +17,8 @@ let devices: MachineDeviceView[] = [
     channels: 1, isThisComputer: true },
   { id: "phone", name: "phone", fingerprint: "PH0N EEEE AAAA", permissions: ["view"], pairedAt: "2026-11-02T00:00:00Z", revokedAt: null, channels: 0, isThisComputer: false },
 ];
+// What a session of the machine without a mode of its own does: it bypasses permissions, as a machine starts.
+let sessionMode = "bypassPermissions";
 // The policy of the machine for agents of other machines: off in every space, as a machine starts.
 const agentPolicy = { spaces: [] as string[], sandbox: null as string | null, allowBypass: false };
 // The people of the organization the machine names, and one who asked to use it.
@@ -77,6 +79,8 @@ const api: MachinePageApi = {
     return { status: "ok", message: null };
   },
   deleteVariable: async request => { calls.push(JSON.stringify({ deleteVariable: request.name })); variables.delete(request.name); return { status: "ok", message: null }; },
+  sessionDefaults: async () => ({ status: "ok", message: null, permissionMode: sessionMode }),
+  setSessionPermissionMode: async request => { calls.push(JSON.stringify({ sessionMode: request.permissionMode })); sessionMode = request.permissionMode; return { status: "ok", message: null }; },
   agents: async () => ({ status: "ok", message: null, sandbox: agentPolicy.sandbox, allowBypass: agentPolicy.allowBypass, sandboxes: ["workspace", "strict"],
     spaces: [{ id: "default", name: "Default" }, { id: "work", name: "Work" }].map(space => ({ ...space, allowed: agentPolicy.spaces.includes(space.id) })) }),
   setAgentSpace: async request => {

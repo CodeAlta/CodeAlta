@@ -102,6 +102,9 @@ internal sealed record NodeCommandHandlers(
     /// <summary>Gets what lists and changes the labels of the machine; null for none.</summary>
     public Func<NodeLabelCommandOptions, ValueTask<int>>? Labels { get; init; }
 
+    /// <summary>Gets what shows and changes the permission mode the sessions of the machine run in by default; null for none.</summary>
+    public Func<NodePermissionModeCommandOptions, ValueTask<int>>? PermissionMode { get; init; }
+
     /// <summary>Gets what shows or changes whether agents of other machines may start sessions on the node; does nothing by default.</summary>
     public Func<NodeAgentCommandOptions, ValueTask<int>> Agents { get; init; } = static _ => ValueTask.FromResult(0);
 
@@ -485,6 +488,29 @@ internal static class NodeCommandLine
             return handlers.Labels?.Invoke(labels) ?? handlers.NotImplemented("labels");
         });
 
+        var permissionMode = new NodePermissionModeCommandOptions();
+        var permissionModeCommand = new Command("permission-mode", "Show or change whether the sessions of this machine ask before they act")
+        {
+            new CommandUsage("Usage: {NAME} [bypass|ask] [options]"),
+            _,
+            "The permission mode of a session of this machine that has none of its",
+            "own: a session started from another computer, a run of an automation.",
+            "  bypass  runs commands and changes files without asking (the default)",
+            "  ask     waits for a person, who answers from a paired computer",
+            "A policy of the organization narrows it, and a session an agent of",
+            "another machine starts has at most the mode of its parent. CodeAlta",
+            "Desktop changes it on the page of the machine. Without a mode: shows it.",
+            _,
+            "Options:",
+        };
+        AddProfile(permissionModeCommand, permissionMode.Profile);
+        permissionModeCommand.Add("<>", "bypass or ask");
+        permissionModeCommand.Add((_, words) =>
+        {
+            permissionMode.Words.AddRange(words);
+            return handlers.PermissionMode?.Invoke(permissionMode) ?? handlers.NotImplemented("permission-mode");
+        });
+
         var agents = new NodeAgentCommandOptions();
         var agentsCommand = new Command("agents", "Show or change whether agents of other machines may start sessions here")
         {
@@ -613,6 +639,7 @@ internal static class NodeCommandLine
             automationsCommand,
             secretsCommand,
             labelsCommand,
+            permissionModeCommand,
             agentsCommand,
             joinCommand,
             machinesCommand,

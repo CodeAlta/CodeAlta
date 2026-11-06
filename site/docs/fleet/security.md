@@ -38,7 +38,7 @@ A change reaches the machines once a signer signs the next version: until then t
 
 - **Remote sessions run code on the machine.** A paired computer can start agents there that use its tools, as you would sitting at it. Pair only your own computers, and revoke the ones you no longer use.
 - **Keys are pinned.** Each computer has its own key. Pairing records the key of the other side, and every connection checks it: a machine that presents another key is refused. The six words let you check, at pairing, that the link comes from the machine you think. Through a server, the key comes from the list of devices your own computers signed, never from the server alone, and a device revoked there is refused.
-- **Permission requests wait for a person.** The node never grants a permission request by itself: you answer it from a paired computer or on the machine.
+- **Its sessions bypass permissions unless you choose otherwise.** A machine runs agents while nobody sits at it, so a session without a mode of its own runs commands and changes files without asking. Choose **Ask first** for the machine ([What its sessions may do](sessions.md#what-its-sessions-may-do)): a request then waits for a person, who answers it from a paired computer. A sandbox limits what a session reaches, whatever its mode.
 - **Agents never get more on another machine.** A session an agent starts elsewhere has at most the space, tools, permission mode and sandbox of the session that asked ([Let agents start sessions on it](sessions.md#let-agents-start-sessions-on-it)).
 
 ## Networks

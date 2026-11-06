@@ -116,7 +116,8 @@ internal sealed class NodeApplication
             return await Create(new NodeCommandHandlers(RunNodeAsync, service.StatusAsync, NotImplementedAsync, client.PairAsync, client.MachinesAsync,
                     client.ConnectAsync, client.RemoteAsync, service.InstallAsync, service.UninstallAsync, logs.RunAsync, devices.DevicesAsync,
                     devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync, projects.RunAsync, servers.JoinAsync, update.UpdateAsync, automations.RunAsync)
-                    { Secrets = new NodeSecretCommands(_output, _error, Console.In).RunAsync, Labels = new NodeLabelCommands(_output, _error).RunAsync, Agents = agents.RunAsync })
+                    { Secrets = new NodeSecretCommands(_output, _error, Console.In).RunAsync, Labels = new NodeLabelCommands(_output, _error).RunAsync,
+                      PermissionMode = new NodePermissionModeCommands(_output, _error).RunAsync, Agents = agents.RunAsync })
                 .RunAsync(args, new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
         }
         catch (Exception exception)

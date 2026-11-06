@@ -143,6 +143,20 @@ test("the computer that manages a machine sets, rotates and deletes its secrets 
     }, options);
   });
 
+test("the sessions of a machine bypass permissions by default, and the computer that manages it makes them ask first", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    const select = ".machine-session-permissions select";
+    await page.until(`document.querySelector('${select}')`, "the default mode of the machine");
+    assert.equal(await page.evaluate(`document.querySelector('${select}').value`), "bypassPermissions");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('${select} option')].map(option => [option.value, option.textContent])`),
+      [["bypassPermissions", "Bypass permissions"], ["default", "Ask first"]]);
+    await page.evaluate(choose(select, "default"));
+    await page.until(`document.querySelector('${select}')?.value === 'default' && !document.querySelector('${select}').disabled`, "ask first");
+    assert.deepEqual(await calls(page), [{ sessionMode: "default" }]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the computer that manages a machine lets agents of other machines in, space by space, and turning on their bypass asks first", { skip: !edge, timeout: 90_000 },
   async () => {
     await withCanvas(async page => {
