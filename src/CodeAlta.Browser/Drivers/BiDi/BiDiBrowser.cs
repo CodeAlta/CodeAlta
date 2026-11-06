@@ -319,6 +319,10 @@ internal sealed class BiDiBrowserContext : IBrowserContext
     public event Action<IBrowserPage>? PageOpened;
 
     /// <inheritdoc />
+    /// <remarks>WebDriver BiDi does not say which tab is in front.</remarks>
+    public Task<IReadOnlyList<IBrowserPage>> FrontPagesAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<IBrowserPage>>([]);
+
+    /// <inheritdoc />
     public async Task<IBrowserPage> NewPageAsync(bool background, CancellationToken cancellationToken)
     {
         var pages = Pages;

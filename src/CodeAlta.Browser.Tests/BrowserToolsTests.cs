@@ -331,6 +331,62 @@ public sealed class ChromiumToolsTests : BrowserToolsTests
     }
 
     [TestMethod]
+    [DataRow(true, DisplayName = "Isolated")]
+    [DataRow(false, DisplayName = "Persistent")]
+    public async Task ATabBroughtToTheFrontOutsideTheTools_IsSelected_WhereTheSessionFollowsTheFront(bool isolated)
+    {
+        var connection = ((CodeAlta.Browser.Drivers.Cdp.CdpBrowserConnection)Host.Connection).Connection;
+        using var timeout = new CancellationTokenSource(BrowserToolTesting.Deadline);
+        await using var session = Host.NewSession(isolated: isolated, followFrontTab: true);
+        await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/form")}}"}""");
+        var link = BrowserToolTesting.Uid(await session.OkAsync("take_snapshot"), "link \"Open in a new tab\"");
+        await session.OkAsync("click", $$"""{"uid":"{{link}}"}""");
+        for (var wait = DateTime.UtcNow.AddSeconds(10); session.Pages.Count < 2 && DateTime.UtcNow < wait;) await Task.Delay(100);
+        var first = session.Pages[0];
+        var second = session.Pages[1];
+        static string TargetOf(BrowserPageState state) => ((CodeAlta.Browser.Drivers.Cdp.CdpPage)state.Page).TargetId;
+
+        // The user clicks the second tab, then the first, as Target.activateTarget does: no tool selects them.
+        await connection.Browser.Target.ActivateTargetAsync(new() { TargetId = TargetOf(second) }, timeout.Token);
+        await session.RefreshFrontAsync(timeout.Token);
+        Assert.AreEqual(second.Id, session.Tabs.Single(static tab => tab.Selected).Id);
+        Assert.AreEqual(second.Id, session.Tabs.Single(static tab => tab.Front).Id);
+        await connection.Browser.Target.ActivateTargetAsync(new() { TargetId = TargetOf(first) }, timeout.Token);
+        var snapshot = await session.OkAsync("take_snapshot");
+        StringAssert.Contains(snapshot, $"Page {first.Id} is now selected.");
+        StringAssert.Contains(snapshot, "heading \"Sign in\"");
+
+        // A tab the agent selects in the background stays selected while the front does not change.
+        await session.OkAsync("select_page", $$"""{"pageId":{{second.Id}}}""");
+        await session.RefreshFrontAsync(timeout.Token);
+        Assert.AreEqual(second.Id, session.Tabs.Single(static tab => tab.Selected).Id);
+        Assert.AreEqual(first.Id, session.Tabs.Single(static tab => tab.Front).Id);
+
+        // A tab of the user at the same address, in a window of its own, is neither followed nor attached.
+        var theirs = await connection.Browser.Target.CreateTargetAsync(new() { Url = Host.Site.Url("/form"), NewWindow = true }, timeout.Token);
+        await connection.Browser.Target.ActivateTargetAsync(new() { TargetId = theirs.TargetId }, timeout.Token);
+        await session.RefreshFrontAsync(timeout.Token);
+        Assert.AreEqual(second.Id, session.Tabs.Single(static tab => tab.Selected).Id);
+        var targets = await connection.Browser.Target.GetTargetsAsync(cancellationToken: timeout.Token);
+        Assert.IsFalse(targets.TargetInfos.Single(target => target.TargetId == theirs.TargetId).Attached, "a tab of the user is never attached");
+        await connection.Browser.Target.CloseTargetAsync(new() { TargetId = theirs.TargetId }, timeout.Token);
+    }
+
+    [TestMethod]
+    public async Task ATabBroughtToTheFrontOutsideTheTools_LeavesTheSelection_WhereTheSessionDoesNotFollowTheFront()
+    {
+        var connection = ((CodeAlta.Browser.Drivers.Cdp.CdpBrowserConnection)Host.Connection).Connection;
+        using var timeout = new CancellationTokenSource(BrowserToolTesting.Deadline);
+        await using var session = Host.NewSession();
+        await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/form")}}"}""");
+        await session.OkAsync("new_page", $$"""{"url":"{{Host.Site.Url("/second")}}"}""");
+        var first = (CodeAlta.Browser.Drivers.Cdp.CdpPage)session.Pages[0].Page;
+        await connection.Browser.Target.ActivateTargetAsync(new() { TargetId = first.TargetId }, timeout.Token);
+        StringAssert.Contains(await session.OkAsync("take_snapshot"), "heading \"The second page\"");
+        Assert.IsFalse(session.Tabs.Any(static tab => tab.Front), "the front is not read");
+    }
+
+    [TestMethod]
     public async Task PerformanceTraceAndHeapSnapshot()
     {
         await using var session = Host.NewSession();

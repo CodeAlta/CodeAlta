@@ -42,12 +42,21 @@
     "Runtime.callFunctionOn",
     "Runtime.releaseObject",
     "Runtime.runIfWaitingForDebugger",
+    "Runtime.addBinding",
+    "Runtime.removeBinding",
 
     "DOM.enable",
     "DOM.describeNode",
     "DOM.resolveNode",
     "DOM.setFileInputFiles",
     "DOM.getFrameOwner",
+    "DOM.getDocument",
+    "DOM.requestNode",
+    "DOM.setNodeStackTracesEnabled",
+    "DOM.getNodeStackTraces",
+
+    "CSS.enable",
+    "CSS.getMatchedStylesForNode",
 
     "Input.dispatchMouseEvent",
     "Input.dispatchKeyEvent",
@@ -114,6 +123,9 @@
     "Runtime.executionContextsCleared",
     "Runtime.consoleAPICalled",
     "Runtime.exceptionThrown",
+    "Runtime.bindingCalled",
+
+    "CSS.styleSheetAdded",
 
     "Input.dragIntercepted",
 

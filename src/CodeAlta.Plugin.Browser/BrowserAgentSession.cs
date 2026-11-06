@@ -30,6 +30,7 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
     private BrowserSandboxProxy? _proxy;
     private int _calls;
     private int _disposed;
+    private volatile bool _openedByUser;
 
     /// <summary>Creates the browser of a session.</summary>
     /// <param name="host">What the application gives the plugin.</param>
@@ -94,6 +95,71 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Gets whether the user opened this browser from the window: they browse in it themselves, the CodeAlta toolbar shows
+    /// on every page, and it stays open while no tool is called.
+    /// </summary>
+    public bool OpenedByUser => _openedByUser;
+
+    /// <summary>Gets or sets the address of the start page CodeAlta made for this browser, once the user opened it.</summary>
+    internal Uri? StartPage { get; set; }
+
+    /// <summary>Gets or sets what the agent was last told of the tabs, so that a run is told again only when they changed.</summary>
+    internal string? TabsTold { get; set; }
+
+    /// <summary>The tabs of the session, in the order they opened, with the one the tools act on; none while its browser is closed.</summary>
+    public IReadOnlyList<BrowserTab> Tabs => Volatile.Read(ref _session)?.Tabs ?? [];
+
+    /// <summary>
+    /// Reads which tabs are in front of the browser the user opened, and makes the selected tab follow the one the user
+    /// brought there, so that <see cref="Tabs"/> tells what they see; nothing while the browser is closed.
+    /// </summary>
+    /// <exception cref="OperationCanceledException">The call was canceled.</exception>
+    public Task RefreshTabsAsync(CancellationToken cancellationToken) => Volatile.Read(ref _session)?.RefreshFrontAsync(cancellationToken) ?? Task.CompletedTask;
+
+    /// <summary>
+    /// Shows the browser of the session to the user, who opened it from the window: on a start page when no tab is open
+    /// (the browser opens then), else with its selected tab brought to the front.
+    /// </summary>
+    /// <param name="startPage">The address of the start page, asked only when it is shown.</param>
+    /// <param name="cancellationToken">Ends the wait.</param>
+    /// <returns>The answer of the load of the start page, or null when a tab was brought to the front.</returns>
+    /// <exception cref="OperationCanceledException">The call was canceled.</exception>
+    public async Task<BrowserToolResult?> ShowAsync(Func<Uri> startPage, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(startPage);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        _openedByUser = true;
+        Interlocked.Increment(ref _calls);
+        try
+        {
+            var session = Session();
+            if (session.Browser is not null && session.PageCount != 0 && await session.SelectedPageAsync(cancellationToken).ConfigureAwait(false) is { } page)
+            {
+                await page.BringToFrontAsync(cancellationToken).ConfigureAwait(false);
+                session.KeepAlive();
+                return null;
+            }
+
+            using var arguments = System.Text.Json.JsonDocument.Parse($$"""{"type":"url","url":{{BrowserSession.JsonText(startPage().ToString())}}}""");
+            return await session.CallAsync("navigate_page", arguments.RootElement, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _calls);
+        }
+    }
+
+    /// <summary>Gets or sets the annotations of the session: the toolbar of the pages of its project, and the notes of the user.</summary>
+    internal BrowserAnnotations? Annotations { get; set; }
+
+    /// <summary>The tab the tools act on when they name none, opening the browser when it is closed.</summary>
+    /// <exception cref="OperationCanceledException">The call was canceled.</exception>
+    internal Task<IBrowserPage?> SelectedPageAsync(CancellationToken cancellationToken) => Session().SelectedPageAsync(cancellationToken);
+
+    /// <summary>Counts as a use of the tabs: the user works in them, and they do not close when idle.</summary>
+    public void KeepAlive() => Volatile.Read(ref _session)?.KeepAlive();
+
     /// <summary>The tools of the session's browser, as their definitions; the same for every session of an engine.</summary>
     public IReadOnlyList<BrowserToolDefinition> Tools => BrowserSession.ToolsFor(BrowserTools.Create(AllowScriptEvaluation), Target.Browser.Engine);
 
@@ -123,6 +189,9 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
                 Files = FilesAsync,
                 CheckNavigation = (url, token) => CheckAsync(url, BrowserRequestKind.Page, asking: true, token),
                 AllowScriptEvaluation = AllowScriptEvaluation,
+                PageAdded = page => Annotations?.Attach(page),
+                // Where the user browses too, "this page" is the tab they look at: the tools follow it.
+                FollowFrontTab = () => _openedByUser,
             });
         }
     }
@@ -136,6 +205,9 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
         {
             session = _session;
             if (session is null || Volatile.Read(ref _calls) != 0 || DateTimeOffset.UtcNow - session.LastUsed < idle) return false;
+            // A browser the user opened, or a page of the project with the CodeAlta toolbar, is the user's to look at and
+            // mark: it stays until they close it.
+            if (_openedByUser || Annotations?.HasToolbar == true) return false;
             _session = null;
         }
 
@@ -225,11 +297,66 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
             Gate = (url, kind, token) => CheckAsync(url, kind, asking: false, token),
             GateDocuments = IsUserProfile,
             BlockedPorts = ReservedPorts(),
+            // The user sees where the agent acts in a browser with a window; the user's own browser always has its windows.
+            ShowAgent = !Target.Headless || IsUserProfile,
         };
         return await _pool.OpenContextAsync(Target, options, cancellationToken).ConfigureAwait(false);
     }
 
     private IReadOnlyList<int> ReservedPorts() => _host.ReservedPorts?.Invoke() ?? [];
+
+    /// <summary>
+    /// Loads an address in the selected tab of the session, opening its browser when it is closed. A page of the project
+    /// is readied first: the tab records which script creates each node of it.
+    /// </summary>
+    /// <param name="url">The address.</param>
+    /// <param name="projectPage">Whether the page belongs to the project of the session.</param>
+    /// <param name="annotate">Whether to turn the Annotate mode of its toolbar on once it is loaded.</param>
+    /// <param name="cancellationToken">Ends the wait.</param>
+    /// <returns>The answer of the load, and whether the Annotate mode is on.</returns>
+    public async Task<(BrowserToolResult Result, bool Annotating)> OpenAsync(Uri url, bool projectPage, bool annotate, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(url);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        Interlocked.Increment(ref _calls);
+        try
+        {
+            if (projectPage && Annotations is { } annotations && await Session().SelectedPageAsync(cancellationToken).ConfigureAwait(false) is { } page)
+            {
+                await annotations.PrepareAsync(page, cancellationToken).ConfigureAwait(false);
+            }
+
+            using var arguments = System.Text.Json.JsonDocument.Parse($$"""{"type":"url","url":{{BrowserSession.JsonText(url.ToString())}}}""");
+            var result = await Session().CallAsync("navigate_page", arguments.RootElement, cancellationToken).ConfigureAwait(false);
+            var annotating = !result.IsError && projectPage && annotate && Annotations is { } toolbar
+                && await Session().SelectedPageAsync(cancellationToken).ConfigureAwait(false) is { } shown
+                && await toolbar.AnnotateAsync(shown, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+            return (result, annotating);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _calls);
+        }
+    }
+
+    /// <summary>The folder the session works in: its worktree, else the folder of its project; null when neither is known.</summary>
+    public async ValueTask<string?> WorkFolderAsync(CancellationToken cancellationToken)
+    {
+        string? folder = null;
+        if (_host.WorkFolder is { } resolve)
+        {
+            try
+            {
+                folder = await resolve(SessionId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // The session is not known any more: it works in the folder of its project.
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder) ? _fallbackFolder : folder;
+    }
 
     /// <summary>Where the tools of the session read and write files.</summary>
     public async ValueTask<BrowserFiles> FilesAsync(CancellationToken cancellationToken)
@@ -399,6 +526,7 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         await _lifetime.CancelAsync().ConfigureAwait(false);
+        if (Annotations is { } annotations) await annotations.DisposeAsync().ConfigureAwait(false);
         await CloseTabsAsync().ConfigureAwait(false);
         BrowserSandboxProxy? proxy;
         lock (_gate)

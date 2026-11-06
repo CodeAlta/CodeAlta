@@ -144,6 +144,12 @@ public sealed class BrowserPluginHost
     /// <summary>Gets how long a session's browser stays open without a call of its tools.</summary>
     internal TimeSpan IdleTimeout { get; init; } = TimeSpan.FromMinutes(15);
 
+    /// <summary>Gets what finds the program of a port of this computer: tests give a fixture.</summary>
+    internal IPortOwners PortOwners { get; init; } = new SystemPortOwners();
+
     /// <summary>Gets how long a browser the plugin starts has to open its endpoint: tests on a busy machine give more.</summary>
     internal TimeSpan StartTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Gets whether the browser the user opens from the window runs without a window: for tests only.</summary>
+    internal bool UserBrowserHeadless { get; init; }
 }

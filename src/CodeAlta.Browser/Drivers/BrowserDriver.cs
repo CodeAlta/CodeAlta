@@ -223,6 +223,12 @@ internal interface IBrowserContext : IAsyncDisposable
 
     /// <summary>Opens a tab on <c>about:blank</c>.</summary>
     Task<IBrowserPage> NewPageAsync(bool background, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The tabs of the session that are the active tab of their window now, the one the user sees there, whoever brought
+    /// it to the front; empty when the browser does not tell.
+    /// </summary>
+    Task<IReadOnlyList<IBrowserPage>> FrontPagesAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -268,6 +274,12 @@ internal sealed record BrowserContextOptions
 
     /// <summary>Gets the ports of the loopback no request of the tabs may reach.</summary>
     public IReadOnlyList<int> BlockedPorts { get; init; } = [];
+
+    /// <summary>
+    /// Gets whether the tabs show the user where the agent acts (see <see cref="IAgentActivityPage"/>): true for a browser
+    /// with a window, never for a headless one, where nobody looks. Chromium browsers only.
+    /// </summary>
+    public bool ShowAgent { get; init; }
 }
 
 /// <summary>A browser CodeAlta drives: one it started, or the user's own it attached to.</summary>

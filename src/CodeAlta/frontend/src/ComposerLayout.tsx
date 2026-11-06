@@ -18,6 +18,20 @@ export function useComposerLayout(preferredHeight: number | undefined, onHeight:
       const editor = surface?.querySelector<HTMLElement>(":scope > .prompt-editor");
       return surface && editor && surface.offsetHeight > 0 && editor.offsetHeight > 0 ? { surface, editor } : null;
     };
+    // The height of what the surface holds, not the height it is given: its least height, set from the last measure,
+    // stretches it, so a measure of that height would keep the room of what showed in it once it is gone.
+    const held = (surface: HTMLElement) => {
+      const top = surface.getBoundingClientRect().top;
+      let bottom = top;
+      for (const child of Array.from(surface.children)) {
+        if (!(child instanceof HTMLElement)) continue;
+        const childStyle = getComputedStyle(child);
+        if (childStyle.display === "none" || childStyle.position === "absolute" || childStyle.position === "fixed") continue;
+        bottom = Math.max(bottom, child.getBoundingClientRect().bottom + parseFloat(childStyle.marginBottom));
+      }
+      const surfaceStyle = getComputedStyle(surface);
+      return Math.ceil(bottom - top + parseFloat(surfaceStyle.paddingBottom) + parseFloat(surfaceStyle.borderBottomWidth));
+    };
     const measure = () => {
       const style = getComputedStyle(workspace);
       let chromeHeight = 0;
@@ -31,19 +45,31 @@ export function useComposerLayout(preferredHeight: number | undefined, onHeight:
         parseFloat(style.paddingTop) + parseFloat(style.paddingBottom), chromeHeight);
       const rendered = Math.round(region.getBoundingClientRect().height);
       const shown = prompt();
-      const { surface, region: minimum } = shown ? composerMinimum(region.scrollHeight, shown.surface.offsetHeight, shown.editor.offsetHeight) : { surface: 0, region: 0 };
+      // A surface that was hidden when the region last changed (a tab not in front) is watched once it shows.
+      if (shown && watched !== shown.surface) watch(shown);
+      const natural = shown ? held(shown.surface) : 0;
+      const { surface, region: minimum } = shown
+        ? composerMinimum(region.scrollHeight - shown.surface.offsetHeight + natural, natural, shown.editor.offsetHeight) : { surface: 0, region: 0 };
       setLayout(old => old.available === available && old.rendered === rendered && old.surface === surface && old.minimum === minimum
         ? old : { available, rendered, surface, minimum });
     };
+    let watched: HTMLElement | null = null;
     const sizes = new ResizeObserver(measure);
     sizes.observe(workspace);
     // The surface and its editor change size inside a region that does not (a picture, a panel, a line of text at the
-    // largest height): they are observed too, and found again when the region holds other children.
+    // largest height): they are observed too, and found again when the region holds other children. So are the parts of
+    // the surface, and what comes into it and goes: held at its least height, the surface itself does not change size
+    // when one of them shrinks or goes.
+    const watch = (shown: { surface: HTMLElement; editor: HTMLElement }) => {
+      sizes.observe(shown.surface); sizes.observe(shown.editor);
+      for (const part of Array.from(shown.surface.children)) sizes.observe(part);
+      if (watched !== shown.surface) { watched = shown.surface; children.observe(shown.surface, { childList: true }); }
+    };
     const changed = () => {
       sizes.disconnect(); sizes.observe(workspace);
       for (const child of Array.from(workspace.children)) sizes.observe(child);
       const shown = prompt();
-      if (shown) { sizes.observe(shown.surface); sizes.observe(shown.editor); }
+      if (shown) watch(shown);
       measure();
     };
     const children = new MutationObserver(changed);

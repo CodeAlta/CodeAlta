@@ -38,12 +38,6 @@ public sealed class BrowserFilesAndTraceTests
     [TestMethod]
     public async Task AFolderReplacedByALinkAfterTheCheck_IsRefusedWhenTheFileIsOpened()
     {
-        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux())
-        {
-            Assert.Inconclusive("The system does not tell the path of an opened file here: the path is resolved again instead.");
-            return;
-        }
-
         var folder = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-files", Guid.NewGuid().ToString("N")[..8])).FullName;
         var work = Directory.CreateDirectory(Path.Combine(folder, "work")).FullName;
         var outside = Directory.CreateDirectory(Path.Combine(folder, "outside")).FullName;
@@ -79,6 +73,42 @@ public sealed class BrowserFilesAndTraceTests
             try
             {
                 if (Directory.Exists(sub)) Directory.Delete(sub);
+                Directory.Delete(folder, recursive: true);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [TestMethod]
+    public async Task TheSystemTellsThePathOfAnOpenedFile_AsTheLinksOfItsPathLed()
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-files", Guid.NewGuid().ToString("N")[..8])).FullName;
+        try
+        {
+            var target = Directory.CreateDirectory(Path.Combine(folder, "target")).FullName;
+            await File.WriteAllTextAsync(Path.Combine(target, "file.txt"), "text");
+            var link = Path.Combine(folder, "link");
+            if (OperatingSystem.IsWindows())
+            {
+                using var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"") { CreateNoWindow = true, UseShellExecute = false })!;
+                await mklink.WaitForExitAsync();
+            }
+            else
+            {
+                Directory.CreateSymbolicLink(link, target);
+            }
+
+            using var stream = File.OpenRead(Path.Combine(link, "file.txt"));
+            var opened = BrowserFileHandles.PathOf(stream.SafeFileHandle);
+            Assert.IsNotNull(opened, "Windows, Linux and macOS tell the path of an opened file");
+            Assert.AreEqual(BrowserFiles.RealPath(Path.Combine(target, "file.txt")), opened, ignoreCase: !OperatingSystem.IsLinux());
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(Path.Combine(folder, "link"))) Directory.Delete(Path.Combine(folder, "link"));
                 Directory.Delete(folder, recursive: true);
             }
             catch (IOException) { }

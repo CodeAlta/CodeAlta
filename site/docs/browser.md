@@ -29,6 +29,66 @@ The agent turns the tools on for its session with `alta browser activate`, then 
 
 The browser tools and the [UI tools](ui-tools.md) have the same names: a session has one set or the other, and turning one on gives the other back.
 
+## Open the browser of a session yourself
+
+Each session has one browser of its own. In CodeAlta Desktop, choose **Open the browser of this session** in the menu of the session to open it yourself, without asking the agent. It opens on a start page that lists the servers running in the folder of the project and its HTML files, with a field for any address.
+
+Browse wherever you like: the agent sees the tabs of this browser and knows which one is selected, so you can ask, for example (when the tabs changed, your next prompt shows what the agent is told of them):
+
+```text
+Look at this page: why is the menu cut off?
+```
+
+Once open, the **Browser** item under the prompt shows its browser and tabs and brings its window to the front, and **Close the browser tabs of this session** in the menu of the session closes it. A browser you opened stays open until you close it, and an agent of the session uses it rather than starting another one, unless it names another browser or profile.
+
+## Annotate the pages of your project
+
+Show the agent what you mean on the page itself. Ask in any session:
+
+```text
+Start the app and open it in the browser: I want to mark what should change.
+```
+
+```text
+Open docs/mockups/home.html in the browser.
+```
+
+The agent starts what the app needs as usual, then opens it with `alta browser open`. A file of the project is served by CodeAlta. An address of this computer is a page of the project when the program that listens on its port runs in the folder of the project, such as a dev server the agent started there. On Windows, where CodeAlta cannot read the folder a program runs in, it is the program whose command line names a file or folder of the project, such as Vite or Next.js started from the project. In a browser the agent opened, other pages get no toolbar; in a browser you [opened yourself](#open-the-browser-of-a-session-yourself), every page has it, but CodeAlta looks for the source of its elements only on the pages of the project.
+
+In Chrome and Edge, such a page shows a small **CodeAlta** toolbar at its bottom right:
+
+1. Click **Annotate**. The element under the pointer is outlined, with its tag, role, text and size, and what you click or drag does not reach the page. The toolbar stays above the dialogs and the full-screen elements of the page, so their elements can be marked too.
+2. Choose what the note is about:
+   - **One element:** click it.
+   - **Several elements:** `Shift`+click each one, then click the last one, press `Enter` or click **Note for**. Use this for elements side by side that no single element holds alone.
+   - **An area:** drag a rectangle over it. The note gets a picture of the area and the elements wholly inside it.
+3. Write what should change, then **Save** (`Ctrl+Enter`, `Cmd+Enter` on macOS). A numbered mark stays on the page. `Esc` ends the mode.
+   - **Change** or **Question**: a question is answered, and changes no code. Its mark shows a **?**.
+   - Paste or drop images into the note, such as a mockup of how it should look: up to 4, large ones are made smaller.
+4. Send the annotations: click **Send** in the toolbar and add a message if you like, or write your prompt in CodeAlta, where the annotations wait above the prompt of the session.
+
+Until they are sent, the number in the toolbar opens the list of the annotations of the session, from every page: **Edit** changes a note, **✕** removes an annotation, and pointing at one shows it on the page. Clicking the number on a mark does the same. In CodeAlta, **Discard** drops them all.
+
+When the toolbar covers what you want to mark, drag it by **CodeAlta** to another place. Click **CodeAlta** to collapse or expand the toolbar, and double-click it to put the toolbar back at the bottom right. The sun or moon button at the end switches the toolbar between a dark and a light look, so it stays readable on any page. CodeAlta keeps the place and the look for every page; the page itself does not change.
+
+The prompt carries each annotation: its elements, its page and your note, and where each element is written as far as the browser and a search tell: the file CodeAlta serves, the stylesheet of its rules, the script that created it, or the file where its text, id and classes are. No plugin of your build is needed. A note covers at most 12 elements, and the source is looked for of the first 6. The agent sees the elements, the area and your images with `view_annotation`. Once the session has the prompt, the marks leave the page.
+
+The prompt is short by default. Check **Include page details** when you send from the toolbar to add the HTML of the elements, their computed styles, the elements around them and the layout; CodeAlta keeps the choice for every page, also for the prompts you write in CodeAlta. What looks like a secret, such as a token in an address or in an attribute, is left out (`[redacted]`), and addresses go without their query.
+
+**Send** in the toolbar needs the session open in one window of CodeAlta: while a second window of CodeAlta is open, write your prompt in CodeAlta instead.
+
+On a page that is not of your project, such as a site you like, annotate to ask about it: the prompt carries the computed styles of the elements, and the agent answers what the note asks (the font and its size, the colors, the spacing, how an element is built) and changes nothing unless the note asks for it.
+
+## Draw on the page
+
+When an element is not enough, draw what you mean. Click **Draw** in the CodeAlta toolbar: a second row shows the pen, the highlighter, the arrow, the rectangle, the ellipse, text, the eraser, five colors, **Undo**, **Clear** and **Save**. The page cannot be clicked while you draw.
+
+1. Draw with the pointer. For text, choose **T**, click where it goes, type, then press `Enter`.
+2. Click **Save** or press `Enter`, write the note (**Change** or **Question**, images as for an annotation), then save it with `Ctrl+Enter` (`Cmd+Enter` on macOS).
+3. The drawing leaves the page and a numbered box marks where it was. It is sent like the annotations, with a picture of the page and your drawing, which the agent sees with `view_annotation`. The picture keeps the numbered marks of your other annotations, and the prompt names the elements your shapes are about: what a rectangle, an ellipse or a stroke surrounds, what an arrow points at, what a text is written on, with where each is written.
+
+Keys: `P` pen, `H` highlighter, `A` arrow, `R` rectangle, `O` ellipse, `T` text, `E` eraser, `1` to `5` colors, `Ctrl+Z` undo, `Ctrl+Shift+Z` or `Ctrl+Y` redo, `Esc` steps back and leaves Draw. The picture covers what is on screen, at most 1200×900 pixels of the page.
+
 ## Which browser
 
 The first of these that names a browser wins:
@@ -92,8 +152,9 @@ On a Mac with Safari 27 or later, Safari's own MCP server (`safaridriver --mcp`)
 ## See and stop what the agent does
 
 - The browser marks a window it drives: Chrome's automation bar, Firefox's robot icon, Safari's banner.
-- The status line of the session shows its browser, profile and tabs, such as **Edge · isolated · 2 tabs**. Click it to close the session's tabs.
-- The tabs close by themselves after 15 minutes without a call, and with CodeAlta. The next call opens them again.
+- In Chrome and Edge with a window, a violet pointer moves to where the agent clicks, points or drags, and the page glows with **CodeAlta agent is using this page** while it acts, until about 15 seconds after its last action. The page cannot reach them, and the snapshots and screenshots of the agent never show them.
+- The status line of the session shows its browser, profile and tabs, such as **Edge · isolated · 2 tabs**. Click it to bring the browser to the front; **Close the browser tabs of this session** in the menu of the session closes them.
+- The tabs close by themselves after 15 minutes without a call, and with CodeAlta; the next call opens them again. A browser you opened yourself, or one that shows the CodeAlta toolbar, stays open until you close it.
 
 ## Tools
 
@@ -119,6 +180,7 @@ A [sandboxed session](sessions/sandbox.md) browses in the isolated profile only.
 
 - `file:` pages open only from the folders of the session, and never in a sandboxed session. A page never gets a file that looks like it holds secrets (`.env`, keys, `.ssh`).
 - A page never reaches the ports of CodeAlta itself: its MCP server and the developer instance.
+- The CodeAlta toolbar runs apart from the page: the page can neither see it nor report an annotation. Firefox and Safari have no toolbar yet.
 - Downloads go to `~/.alta/browser/downloads` and are never opened; in your own browser, they go where your browser saves them. A sandboxed session downloads nothing.
 - A Firefox CodeAlta starts never checks for or installs an update of your Firefox.
 - To keep sessions from using a browser, turn off the **Browser** plugin in **Settings**, **Plugins**.

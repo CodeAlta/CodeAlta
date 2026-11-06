@@ -44,6 +44,14 @@ internal sealed class BrowserPageState
     public double NetworkMultiplier => Emulation.NetworkConditions switch { "Fast 4G" => 1, "Slow 4G" => 2.5, "Fast 3G" => 5, "Slow 3G" => 10, _ => 1 };
 }
 
+/// <summary>A tab of a session, as the user and the agent see it.</summary>
+/// <param name="Id">The id the tools name it by.</param>
+/// <param name="Title">Its title.</param>
+/// <param name="Url">Its address.</param>
+/// <param name="Selected">Whether the tools that name no tab act on it.</param>
+/// <param name="Front">Whether it is the active tab of its window, the one the user sees there; known only where the selected tab follows it.</param>
+internal sealed record BrowserTab(int Id, string Title, string Url, bool Selected, bool Front);
+
 /// <summary>What a session needs from its host: how to open its browser, where its files may go, what it may load.</summary>
 internal sealed class BrowserSessionOptions
 {
@@ -64,6 +72,18 @@ internal sealed class BrowserSessionOptions
 
     /// <summary>Gets how long a wait for an element or a text may take by default.</summary>
     public TimeSpan WaitTimeout { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Gets what is told of each tab the session gets, the first one and the popups included, off the thread that found
+    /// it; null for nothing.
+    /// </summary>
+    public Action<IBrowserPage>? PageAdded { get; init; }
+
+    /// <summary>
+    /// Gets whether the selected tab follows the tab brought to the front of the browser, asked each time: true where the
+    /// user browses too, so that the tools act on the tab they look at; null for never.
+    /// </summary>
+    public Func<bool>? FollowFrontTab { get; init; }
 }
 
 /// <summary>
@@ -82,6 +102,10 @@ internal sealed class BrowserSession : IAsyncDisposable
     private readonly Lock _state = new();
     private IBrowserContext? _context;
     private BrowserPageState? _selected;
+    // The tabs in front when they were last read, and whether the tools chose the selected tab since: a choice of the
+    // agent stays until another tab comes to the front.
+    private HashSet<BrowserPageState> _front = [];
+    private bool _keepSelection;
     private int _nextPageId = 1;
     private string? _note;
     private long _lastUsed;
@@ -116,6 +140,9 @@ internal sealed class BrowserSession : IAsyncDisposable
     public DateTimeOffset LastUsed => DateTimeOffset.FromUnixTimeMilliseconds(Interlocked.Read(ref _lastUsed));
 
     private void Touch() => Interlocked.Exchange(ref _lastUsed, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+
+    /// <summary>Counts as a use of the tabs, which keeps them from closing when idle: the user works in them.</summary>
+    public void KeepAlive() => Touch();
 
     /// <summary>The tools a browser engine can do: what needs CDP is left out for the others.</summary>
     public static IReadOnlyList<BrowserToolDefinition> ToolsFor(IReadOnlyList<BrowserToolDefinition> tools, BrowserEngine engine)
@@ -221,6 +248,8 @@ internal sealed class BrowserSession : IAsyncDisposable
                 _pages.Clear();
                 _opened.Clear();
                 _selected = null;
+                _front = [];
+                _keepSelection = false;
                 foreach (var page in context.Pages) AddLocked(page);
                 if (restarted) _note = "Note: the browser was restarted or reconnected, and the ids of the pages changed. Call list_pages to see them.";
             }
@@ -246,6 +275,7 @@ internal sealed class BrowserSession : IAsyncDisposable
         if (_pages.FirstOrDefault(state => ReferenceEquals(state.Page, page)) is { } known) return known;
         var state = new BrowserPageState(_nextPageId++, page);
         _pages.Add(state);
+        if (_options.PageAdded is { } added) ThreadPool.QueueUserWorkItem(static item => item.Added(item.Page), (Added: added, Page: page), preferLocal: false);
         return state;
     }
 
@@ -288,6 +318,7 @@ internal sealed class BrowserSession : IAsyncDisposable
     {
         var context = await ContextAsync(call.CancellationToken).ConfigureAwait(false);
         if (call.OptionalInteger("pageId") is { } id) return PageById(id);
+        await FollowFrontAsync(context, call.CancellationToken).ConfigureAwait(false);
         lock (_state)
         {
             if (_selected is { Page.IsClosed: false } selected) return selected;
@@ -308,6 +339,60 @@ internal sealed class BrowserSession : IAsyncDisposable
         }
     }
 
+    /// <summary>The open tabs, in the order they opened, with the one the calls that name none act on.</summary>
+    public IReadOnlyList<BrowserTab> Tabs
+    {
+        get
+        {
+            lock (_state)
+            {
+                var selected = _selected is { Page.IsClosed: false } chosen ? chosen : _pages.LastOrDefault(static page => !page.Page.IsClosed);
+                return [.. _pages.Where(static page => !page.Page.IsClosed).Select(page => new BrowserTab(page.Id, page.Page.Title, page.Page.Url, ReferenceEquals(page, selected), _front.Contains(page)))];
+            }
+        }
+    }
+
+    /// <summary>Reads which tabs are in front, when the browser is open, so that <see cref="Tabs"/> tells what the user sees.</summary>
+    /// <exception cref="OperationCanceledException">The call was canceled.</exception>
+    public async Task RefreshFrontAsync(CancellationToken cancellationToken)
+    {
+        if (Volatile.Read(ref _context) is { IsClosed: false } context) await FollowFrontAsync(context, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Where the selected tab follows the front of the browser, selects the tab that came to the front since the tabs
+    /// were last read: the user clicked it, opened it, or a page opened it. Following the change, not the state, keeps a
+    /// tab the agent selected in the background until the user looks at another one.
+    /// </summary>
+    private async Task FollowFrontAsync(IBrowserContext context, CancellationToken cancellationToken)
+    {
+        if (_options.FollowFrontTab?.Invoke() != true) return;
+        var front = await context.FrontPagesAsync(cancellationToken).ConfigureAwait(false);
+        lock (_state)
+        {
+            var now = _pages.Where(state => !state.Page.IsClosed && front.Contains(state.Page)).ToHashSet();
+            var came = _pages.LastOrDefault(state => now.Contains(state) && !_front.Contains(state));
+            _front = now;
+            if (_keepSelection)
+            {
+                _keepSelection = false;
+                return;
+            }
+
+            if (came is null || ReferenceEquals(came, _selected)) return;
+            _selected = came;
+            _note = $"Note: another tab came to the front of the browser. Page {came.Id} is now selected.";
+        }
+    }
+
+    /// <summary>The tab the calls that name none act on, opening the browser and a first tab when needed.</summary>
+    public async Task<IBrowserPage?> SelectedPageAsync(CancellationToken cancellationToken)
+    {
+        var context = await ContextAsync(cancellationToken).ConfigureAwait(false);
+        await FollowFrontAsync(context, cancellationToken).ConfigureAwait(false);
+        lock (_state) return (_selected is { Page.IsClosed: false } selected ? selected : _pages.LastOrDefault(static page => !page.Page.IsClosed))?.Page;
+    }
+
     /// <summary>A page by its id.</summary>
     /// <exception cref="BrowserToolException">No open page has that id.</exception>
     public BrowserPageState PageById(int id)
@@ -322,7 +407,11 @@ internal sealed class BrowserSession : IAsyncDisposable
     /// <summary>Selects a page for the calls that name none.</summary>
     public void Select(BrowserPageState page)
     {
-        lock (_state) _selected = page;
+        lock (_state)
+        {
+            _selected = page;
+            _keepSelection = true;
+        }
     }
 
     /// <summary>Opens a tab, selects it, and loads an address in it.</summary>
@@ -337,6 +426,7 @@ internal sealed class BrowserSession : IAsyncDisposable
             state = AddLocked(page);
             _opened.Remove(state);
             _selected = state;
+            _keepSelection = true;
         }
 
         if (url.AbsoluteUri != "about:blank") await page.NavigateAsync(url.AbsoluteUri, timeout, cancellationToken).ConfigureAwait(false);
@@ -495,6 +585,7 @@ internal sealed class BrowserSession : IAsyncDisposable
         var page = state.Page;
         var before = page.Navigations;
         var hadDialog = page.Dialog is not null;
+        await ShowActivityAsync(page, cancellationToken).ConfigureAwait(false);
         // An input event whose handler opens a dialog ends only once the dialog is answered: the action is then over
         // for the caller, who answers the dialog with handle_dialog, and the event completes later.
         var running = action();
@@ -530,8 +621,14 @@ internal sealed class BrowserSession : IAsyncDisposable
             }
         }
 
+        // The document the action led to shows it too, until the agent has not acted for a while.
+        if (!page.IsClosed) await ShowActivityAsync(page, cancellationToken).ConfigureAwait(false);
         return new ActionOutcome(navigatedTo, openedDialog, note);
     }
+
+    // Shows the user that the agent acts in a tab, in a browser that has a window; it never fails the action.
+    private static Task ShowActivityAsync(IBrowserPage page, CancellationToken cancellationToken)
+        => page is IAgentActivityPage { ShowsAgent: true } shown ? shown.ShowAgentActivityAsync(cancellationToken) : Task.CompletedTask;
 
     /// <summary>Refuses a call while a dialog stops the page.</summary>
     /// <exception cref="BrowserToolException">A dialog is open.</exception>

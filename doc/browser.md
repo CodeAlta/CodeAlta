@@ -34,6 +34,12 @@ joined under their frame element. Input is the browser's own (`Input.dispatch*`,
 frame that holds the element), so a page reacts as it does to a user. After an action the tools wait for a navigation
 that starts within 100 ms, then for a quiet DOM, scaled by the emulated throttling.
 
+In a Chromium browser with a window, the user sees where the agent acts: an overlay (`codealta-agent-overlay.js`) in a
+world of its own, in a closed shadow root and the top layer, takes no pointer and shows a cursor that the driver moves
+before each pointer input (waiting at most 600 ms for it to arrive), and a glow with a label while the tools act. It is
+never part of what the agent sees: hidden from the accessibility tree, so from snapshots, and hidden while the tab takes
+a picture, for a screenshot or an annotation. A headless browser shows none.
+
 ## Choosing the browser
 
 The session's `--browser`, then the preferred browser of Settings, then Automatic. Automatic takes the browser used

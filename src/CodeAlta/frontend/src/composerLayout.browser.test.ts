@@ -88,3 +88,35 @@ test("the prompt keeps its toolbar in a short window, and the timeline is center
     assert.deepEqual(exceptions, []);
   });
 });
+
+// What shows in the prompt for a while and goes (the content a plugin puts above the prompt, such as the annotations of
+// the browser): the prompt grows with it, and gives the room back once it is gone, instead of keeping the height it
+// had as its least one: in the session shown when the window starts, and in one opened later from the Explorer.
+test("the prompt gives back the room of what showed in it for a while", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+  await withSessionWindow({ settingsFixtureOwned: "true" }, async ({ evaluate, until, press, session, exceptions }) => {
+    const workspace = `[...document.querySelectorAll('.session-dock .session-workspace')].find(view => view.querySelector('.session-timeline-area')?.offsetParent)`;
+    const part = (selector: string) => `${workspace}?.querySelector(${JSON.stringify(selector)})`;
+    await until(`${session("one")}?.getAttribute('aria-pressed')==='true' && !!${part(".prompt-surface #session-prompt")}`, "the session that is shown, with its prompt");
+    const frames = () => evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => resolve(true), 50))))");
+    // The room left in the prompt below its toolbar.
+    const below = async () => {
+      await frames();
+      return await evaluate(`${part(".prompt-surface")}.getBoundingClientRect().bottom - ${part(".prompt-surface > .composer-toolbar")}.getBoundingClientRect().bottom`) as number;
+    };
+    const showForAWhile = async (what: string) => {
+      const before = await below();
+      await evaluate(`(() => { const block = document.createElement("div"); block.id = "shown-for-a-while"; block.style.height = "160px"; ${part(".prompt-surface")}.prepend(block); })()`);
+      await until(`${part(".prompt-surface")}.offsetHeight > 200`, `${what}: the prompt grows with what shows in it`);
+      await below();
+      await evaluate(`document.getElementById("shown-for-a-while").remove()`);
+      const after = await below();
+      assert.ok(Math.abs(after - before) <= 1, `${what}: the prompt has no room left below its toolbar once the block is gone (${after} px, before ${before} px)`);
+    };
+
+    await showForAWhile("the session shown at the start");
+    await press(session("two"));
+    await until(`${session("two")}?.getAttribute('aria-pressed')==='true' && !!${part(".prompt-surface #session-prompt")}`, "the session opened from the Explorer, with its prompt");
+    await showForAWhile("a session opened from the Explorer");
+    assert.deepEqual(exceptions, []);
+  });
+});

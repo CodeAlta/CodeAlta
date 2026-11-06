@@ -470,6 +470,30 @@ internal sealed record RuntimeRunIfWaitingForDebuggerParams
 {
 }
 
+/// <summary>The parameters of <c>Runtime.addBinding</c>.</summary>
+internal sealed record RuntimeAddBindingParams
+{
+    /// <summary>name</summary>
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = "";
+
+    /// <summary>If specified, the binding would only be exposed to the specified execution context. If omitted and `executionContextName` is not set, the binding is exposed to all execution contexts of the target. This parameter is mutually exclusive with `executionContextName`. Deprecated in favor of `executionContextName` due to an unclear use case and bugs in implementation (crbug.com/1169639). `executionConte…</summary>
+    [JsonPropertyName("executionContextId")]
+    public int? ExecutionContextId { get; init; }
+
+    /// <summary>If specified, the binding is exposed to the executionContext with matching name, even for contexts created after the binding is added. See also `ExecutionContext.name` and `worldName` parameter to `Page.addScriptToEvaluateOnNewDocument`. This parameter is mutually exclusive with `executionContextId`.</summary>
+    [JsonPropertyName("executionContextName")]
+    public string? ExecutionContextName { get; init; }
+}
+
+/// <summary>The parameters of <c>Runtime.removeBinding</c>.</summary>
+internal sealed record RuntimeRemoveBindingParams
+{
+    /// <summary>name</summary>
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = "";
+}
+
 /// <summary>The parameters of the event <c>Runtime.executionContextCreated</c>.</summary>
 internal sealed record RuntimeExecutionContextCreatedEvent
 {
@@ -535,6 +559,22 @@ internal sealed record RuntimeExceptionThrownEvent
     public RuntimeExceptionDetails ExceptionDetails { get; init; } = null!;
 }
 
+/// <summary>The parameters of the event <c>Runtime.bindingCalled</c>.</summary>
+internal sealed record RuntimeBindingCalledEvent
+{
+    /// <summary>name</summary>
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = "";
+
+    /// <summary>payload</summary>
+    [JsonPropertyName("payload")]
+    public string Payload { get; init; } = "";
+
+    /// <summary>Identifier of the context where the call was made.</summary>
+    [JsonPropertyName("executionContextId")]
+    public int ExecutionContextId { get; init; }
+}
+
 /// <summary>The commands and events of the <c>Runtime</c> domain on a session.</summary>
 internal readonly struct CdpRuntimeDomain(CdpSession session)
 {
@@ -558,6 +598,14 @@ internal readonly struct CdpRuntimeDomain(CdpSession session)
     public Task RunIfWaitingForDebuggerAsync(RuntimeRunIfWaitingForDebuggerParams? parameters = null, CancellationToken cancellationToken = default)
         => session.SendAsync("Runtime.runIfWaitingForDebugger", parameters ?? new(), CdpJsonContext.Default.RuntimeRunIfWaitingForDebuggerParams, cancellationToken);
 
+    /// <summary>If executionContextId is empty, adds binding with the given name on the global objects of all inspected contexts, including those created later, bindings survive reloads. Binding function takes exactly one argument, this argument should be string, in case of any other input, function throws an exception. Each binding function call produces Runtime.bindingCalled notification.</summary>
+    public Task AddBindingAsync(RuntimeAddBindingParams parameters, CancellationToken cancellationToken = default)
+        => session.SendAsync("Runtime.addBinding", parameters ?? new(), CdpJsonContext.Default.RuntimeAddBindingParams, cancellationToken);
+
+    /// <summary>This method does not remove binding function from global object but unsubscribes current runtime agent from Runtime.bindingCalled notifications.</summary>
+    public Task RemoveBindingAsync(RuntimeRemoveBindingParams parameters, CancellationToken cancellationToken = default)
+        => session.SendAsync("Runtime.removeBinding", parameters ?? new(), CdpJsonContext.Default.RuntimeRemoveBindingParams, cancellationToken);
+
     /// <summary>Calls a handler for each <c>Runtime.executionContextCreated</c> of the session, in the order the browser sent them, until the subscription is disposed.</summary>
     public IDisposable OnExecutionContextCreated(Action<RuntimeExecutionContextCreatedEvent> handler)
         => session.On("Runtime.executionContextCreated", CdpJsonContext.Default.RuntimeExecutionContextCreatedEvent, handler);
@@ -577,4 +625,8 @@ internal readonly struct CdpRuntimeDomain(CdpSession session)
     /// <summary>Calls a handler for each <c>Runtime.exceptionThrown</c> of the session, in the order the browser sent them, until the subscription is disposed.</summary>
     public IDisposable OnExceptionThrown(Action<RuntimeExceptionThrownEvent> handler)
         => session.On("Runtime.exceptionThrown", CdpJsonContext.Default.RuntimeExceptionThrownEvent, handler);
+
+    /// <summary>Calls a handler for each <c>Runtime.bindingCalled</c> of the session, in the order the browser sent them, until the subscription is disposed.</summary>
+    public IDisposable OnBindingCalled(Action<RuntimeBindingCalledEvent> handler)
+        => session.On("Runtime.bindingCalled", CdpJsonContext.Default.RuntimeBindingCalledEvent, handler);
 }

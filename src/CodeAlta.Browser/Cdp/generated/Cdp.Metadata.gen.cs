@@ -15,8 +15,8 @@ internal static class CdpProtocolInfo
     public const string Revision = "92be9c279a8ff3af17009705bb357241932128e4";
 
     /// <summary>The number of commands the bindings have.</summary>
-    public const int CommandCount = 74;
+    public const int CommandCount = 82;
 
     /// <summary>The number of events the bindings have.</summary>
-    public const int EventCount = 33;
+    public const int EventCount = 35;
 }

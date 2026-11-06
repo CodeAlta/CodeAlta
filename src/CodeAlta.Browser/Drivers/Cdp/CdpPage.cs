@@ -14,7 +14,7 @@ namespace CodeAlta.Browser.Drivers.Cdp;
 /// The frames of other sites run in their own processes and targets (out-of-process iframes): they are attached as
 /// child sessions, and a frame is driven through the session that holds it.
 /// </remarks>
-internal sealed class CdpPage : IChromiumPage
+internal sealed partial class CdpPage : IChromiumPage
 {
     // The categories DevTools records a performance trace with.
     private const string TraceCategories =
@@ -634,7 +634,7 @@ internal sealed class CdpPage : IChromiumPage
         {
             // The tool layer resolves points across frames; a file input is clicked where the agent of its frame says.
             var point = await CallAgentAsync(frame, "prepareClick", $$"""{"uid":{{Json(uid)}}}""", cancellationToken).ConfigureAwait(false);
-            await ClickAtAsync(point.GetProperty("x").GetDouble(), point.GetProperty("y").GetDouble(), 1, cancellationToken).ConfigureAwait(false);
+            await ClickAtAsync(point.GetProperty("x").GetDouble(), point.GetProperty("y").GetDouble(), 1, 0, cancellationToken).ConfigureAwait(false);
             if (await Task.WhenAny(chooser.Task, Task.Delay(TimeSpan.FromSeconds(3), cancellationToken)).ConfigureAwait(false) != chooser.Task || chooser.Task.Result is not { } backendNodeId)
             {
                 throw new BrowserToolException("no-file-input", $"The element with uid {uid} is not a file input and opened no file chooser.");
@@ -657,21 +657,33 @@ internal sealed class CdpPage : IChromiumPage
     // -------------------------------------------------------------------------------------------------------------
 
     /// <inheritdoc />
-    public Task MouseMoveAsync(BrowserPoint point, CancellationToken cancellationToken) => MoveAsync(point.X, point.Y, cancellationToken);
+    public async Task MouseMoveAsync(BrowserPoint point, CancellationToken cancellationToken)
+    {
+        await PointAgentAsync(point.X, point.Y, wait: true, cancellationToken).ConfigureAwait(false);
+        await MoveAsync(point.X, point.Y, cancellationToken).ConfigureAwait(false);
+    }
 
     private Task MoveAsync(double x, double y, CancellationToken cancellationToken)
         => _session.Input.DispatchMouseEventAsync(new InputDispatchMouseEventParams { Type = "mouseMoved", X = x, Y = y, Button = "none" }, cancellationToken);
 
     /// <inheritdoc />
-    public Task ClickAsync(BrowserPoint point, int clickCount, CancellationToken cancellationToken) => ClickAtAsync(point.X, point.Y, clickCount, cancellationToken);
+    public Task ClickAsync(BrowserPoint point, int clickCount, CancellationToken cancellationToken) => ClickAtAsync(point.X, point.Y, clickCount, 0, cancellationToken);
 
-    private async Task ClickAtAsync(double x, double y, int clickCount, CancellationToken cancellationToken)
+    /// <summary>Clicks once with modifier keys held, as Shift+click: the browser takes them from the event, not from the keys pressed before.</summary>
+    /// <param name="point">Where to click.</param>
+    /// <param name="modifiers">The modifiers of CDP: 1 Alt, 2 Control, 4 Meta, 8 Shift.</param>
+    /// <param name="cancellationToken">Cancels the click.</param>
+    internal Task ClickWithModifiersAsync(BrowserPoint point, int modifiers, CancellationToken cancellationToken) => ClickAtAsync(point.X, point.Y, 1, modifiers, cancellationToken);
+
+    private async Task ClickAtAsync(double x, double y, int clickCount, int modifiers, CancellationToken cancellationToken)
     {
+        await PointAgentAsync(x, y, wait: true, cancellationToken).ConfigureAwait(false);
         await MoveAsync(x, y, cancellationToken).ConfigureAwait(false);
+        await PressAgentAsync(cancellationToken).ConfigureAwait(false);
         for (var count = 1; count <= clickCount; count++)
         {
-            await _session.Input.DispatchMouseEventAsync(new InputDispatchMouseEventParams { Type = "mousePressed", X = x, Y = y, Button = "left", Buttons = 1, ClickCount = count }, cancellationToken).ConfigureAwait(false);
-            await _session.Input.DispatchMouseEventAsync(new InputDispatchMouseEventParams { Type = "mouseReleased", X = x, Y = y, Button = "left", Buttons = 0, ClickCount = count }, cancellationToken).ConfigureAwait(false);
+            await _session.Input.DispatchMouseEventAsync(new InputDispatchMouseEventParams { Type = "mousePressed", X = x, Y = y, Button = "left", Buttons = 1, ClickCount = count, Modifiers = modifiers }, cancellationToken).ConfigureAwait(false);
+            await _session.Input.DispatchMouseEventAsync(new InputDispatchMouseEventParams { Type = "mouseReleased", X = x, Y = y, Button = "left", Buttons = 0, ClickCount = count, Modifiers = modifiers }, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -685,13 +697,16 @@ internal sealed class CdpPage : IChromiumPage
         await _session.Input.SetInterceptDragsAsync(new InputSetInterceptDragsParams { Enabled = true }, cancellationToken).ConfigureAwait(false);
         try
         {
+            await PointAgentAsync(fromX, fromY, wait: true, cancellationToken).ConfigureAwait(false);
             await MoveAsync(fromX, fromY, cancellationToken).ConfigureAwait(false);
+            await PressAgentAsync(cancellationToken).ConfigureAwait(false);
             await _session.Input.DispatchMouseEventAsync(new InputDispatchMouseEventParams { Type = "mousePressed", X = fromX, Y = fromY, Button = "left", Buttons = 1, ClickCount = 1 }, cancellationToken).ConfigureAwait(false);
             const int steps = 5;
             for (var step = 1; step <= steps; step++)
             {
                 var x = fromX + (toX - fromX) * step / steps;
                 var y = fromY + (toY - fromY) * step / steps;
+                await PointAgentAsync(x, y, wait: false, cancellationToken).ConfigureAwait(false);
                 await _session.Input.DispatchMouseEventAsync(new InputDispatchMouseEventParams { Type = "mouseMoved", X = x, Y = y, Button = "left", Buttons = 1 }, cancellationToken).ConfigureAwait(false);
                 await Task.Delay(10, cancellationToken).ConfigureAwait(false);
             }
@@ -741,6 +756,7 @@ internal sealed class CdpPage : IChromiumPage
     /// <inheritdoc />
     public async Task<byte[]> ScreenshotAsync(ScreenshotRequest request, CancellationToken cancellationToken)
     {
+        await using var overlay = await HideAgentOverlayAsync(cancellationToken).ConfigureAwait(false);
         PageViewport? clip = null;
         if (request.FullPage)
         {

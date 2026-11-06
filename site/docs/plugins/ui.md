@@ -190,7 +190,7 @@ yield return PluginTui.Visual(PluginUiRegion.SessionFooter,
     "notes-footer");
 ```
 
-`SessionFooter` is above the prompt; `CommandBar` and `SessionStatus` are in the status line. A `PluginRenderResult` shows its richest form: `Html` on the desktop, then `Markdown`, then `Text`. Return null to show nothing. These callbacks run often: keep them fast, with no I/O.
+`SessionFooter` is above the prompt; `CommandBar` and `SessionStatus` are in the status line. A `PluginRenderResult` shows its richest form: `Html` on the desktop, then `Markdown`, then `Text`. Return null to show nothing. These callbacks run often: keep them fast, with no I/O. CodeAlta Desktop reads them every few seconds, when a command of the plugin ends, and at once on `Services.Ui.InvalidateContent()`, which a plugin calls after a change it learned of by itself.
 
 ## Buttons
 
