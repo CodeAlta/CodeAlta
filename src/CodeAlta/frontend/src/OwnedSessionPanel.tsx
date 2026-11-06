@@ -5,6 +5,7 @@ import { AttachMenu, AttachMenuItems, PromptImageAttachments } from "./PromptIma
 import { folderPickNotice, folderTitle, pickFolder } from "./folderPicker";
 import { folderLink } from "./projectReferences";
 import { insertIssueReferences } from "./issueReferences";
+import { promptKeysHint } from "./promptKeys";
 import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
 import { BackgroundJobDialog } from "./BackgroundJobDialog";
 import { BackgroundTasksStatus } from "./BackgroundTaskViews";
@@ -1450,7 +1451,7 @@ ${value}` : value);
       <ObservationStatus unavailable={!invalidEpoch && (receiptUnavailable || runtimeState?.kind === "error")} /></>}
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
     editor={{ id: active ? "session-prompt" : `session-prompt-${sessionId}`, ref: promptInput, onPaste: pasteImages, label: t("Message"), value: pending?.request.text ?? text, disabled: !!pending || invalidEpoch || expanded,
-      onChange: editText, onCompositionStart: () => { inputRevision.current++; }, placeholder: suggestion ?? t("Ask CodeAlta to work on this project…"), suggested: !!suggestion, onKeyDown: event => {
+      onChange: editText, onCompositionStart: () => { inputRevision.current++; }, placeholder: suggestion ?? `${t("Ask CodeAlta to work on this project…")}\n${t(promptKeysHint)}`, suggested: !!suggestion, onKeyDown: event => {
         if (suggestion && takesPromptSuggestion({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey,
           metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode })) {
           event.preventDefault(); event.stopPropagation();

@@ -18,6 +18,7 @@ import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { IssuePicker } from "./IssuePicker";
+import { promptKeysHint } from "./promptKeys";
 import { MicButton } from "./speech/MicButton";
 import { DraftUsage } from "./promptSurface/PromptSurfaceParts";
 import { useShellLanguage } from "./shellLanguage";
@@ -126,7 +127,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
           && event.nativeEvent.keyCode !== 229 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
           event.preventDefault(); setExpanded(true);
         }
-      }, placeholder: placeholder ?? t("Ask CodeAlta to work on this project…") }}>
+      }, placeholder: placeholder ?? (localDraft ? `${t("Ask CodeAlta to work on this project…")}\n${t(promptKeysHint)}` : t("Ask CodeAlta to work on this project…")) }}>
         {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
         {localDraft && !expanded && <IssuePicker edit={edit} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
         <p id={`catalog-draft-status-${sessionId}`} className="sr-only">{reason ?? t("Sending requires the desktop app.")}</p>

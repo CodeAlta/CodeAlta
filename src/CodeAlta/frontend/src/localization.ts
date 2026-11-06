@@ -1775,6 +1775,7 @@ export const messages = dictionary({
   "Retry exact request": ["Reintentar la solicitud exacta", "Réessayer la requête exacte", "Exakte Anfrage erneut versuchen", "元のリクエストを再試行", "重试原始请求"],
   "Message": ["Mensaje", "Message", "Nachricht", "メッセージ", "消息"],
   "Message composer": ["Editor de mensajes", "Éditeur de messages", "Nachrichteneingabe", "メッセージ入力", "消息编辑器"],
+  "Type ? for help, / for commands, @ to insert a link to a project file, # to insert a link to an issue.": ["Escribe ? para la ayuda, / para los comandos, @ para insertar un enlace a un archivo del proyecto, # para insertar un enlace a una incidencia.", "Tapez ? pour l'aide, / pour les commandes, @ pour insérer un lien vers un fichier du projet, # pour insérer un lien vers un ticket.", "? für Hilfe, / für Befehle, @ fügt einen Link zu einer Projektdatei ein, # einen Link zu einem Issue.", "? でヘルプ、/ でコマンド、@ でプロジェクトのファイルへのリンク、# で Issue へのリンクを挿入。", "输入 ? 查看帮助，/ 打开命令，@ 插入项目文件的链接，# 插入 issue 的链接。"],
   "Ask CodeAlta to work on this project…": ["Pide a CodeAlta que trabaje en este proyecto…", "Demandez à CodeAlta de travailler sur ce projet…", "CodeAlta mit der Arbeit an diesem Projekt beauftragen…", "このプロジェクトの作業を CodeAlta に依頼…", "请 CodeAlta 处理此项目…"],
   "Draft only": ["Solo borrador", "Brouillon uniquement", "Nur Entwurf", "下書きのみ", "仅草稿"],
   "Send unavailable": ["Envío no disponible", "Envoi indisponible", "Senden nicht verfügbar", "送信不可", "无法发送"],

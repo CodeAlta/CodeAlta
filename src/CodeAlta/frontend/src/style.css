@@ -981,7 +981,7 @@ button.mcp-app-heading:focus-visible { outline: 2px solid var(--accent); outline
 .prompt-editor .monaco-editor, .prompt-editor .monaco-editor-background, .prompt-editor .monaco-editor .margin { background-color: var(--panel); }
 .prompt-editor-surface { width: 100%; height: 100%; }
 .prompt-editor.expanded { height: 100%; min-height: 0; }
-.prompt-editor[data-placeholder]::after { content: attr(data-placeholder); position: absolute; top: 8px; left: 8px; right: 8px; color: var(--muted); pointer-events: none; font-family: inherit; font-size: 13px; line-height: 20px; }
+.prompt-editor[data-placeholder]::after { content: attr(data-placeholder); white-space: pre-line; position: absolute; top: 8px; left: 8px; right: 8px; color: var(--muted); pointer-events: none; font-family: inherit; font-size: 13px; line-height: 20px; }
 /* A suggested prompt, which a key takes, is slanted: it does not read as the usual hint, nor as what was written. */
 .prompt-editor[data-suggested]::after { font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .prompt-editor .monaco-editor textarea { min-height: 0; padding: 0; margin: 0; border: 0; box-shadow: none; }
