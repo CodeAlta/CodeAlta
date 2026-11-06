@@ -1,6 +1,6 @@
 import { Button } from "@blueprintjs/core";
 import { CodeEditor } from "./monaco/CodeEditor";
-import { useAttributionDraft } from "./attributionText";
+import { useAttributionDraft, type ConfirmTextRemoval } from "./attributionText";
 import { useShellLanguage } from "./shellLanguage";
 
 /**
@@ -8,11 +8,13 @@ import { useShellLanguage } from "./shellLanguage";
  * as wide as its card, which starts with the text agents get, the one of CodeAlta until the user writes another. Save,
  * or Ctrl+S, keeps it on one line; Use CodeAlta's text goes back to the one of CodeAlta.
  */
-export function AttributionMarkdown({ label, value, defaultValue, maxLength, disabled, onSave }: {
+export function AttributionMarkdown({ label, value, defaultValue, maxLength, disabled, onSave, confirm }: {
   label: string; value: string; defaultValue: string; maxLength: number; disabled: boolean; onSave: (text: string) => void;
+  /** Asks before a text that no longer names CodeAlta is saved. */
+  confirm?: ConfirmTextRemoval;
 }) {
   const { t } = useShellLanguage();
-  const text = useAttributionDraft(value, defaultValue, onSave);
+  const text = useAttributionDraft(value, defaultValue, onSave, confirm);
   const tooLong = text.draft.replace(/\s+/g, " ").trim().length > maxLength;
   return <div className="settings-field-wide attribution-markdown">
     <div className="attribution-markdown-editor">

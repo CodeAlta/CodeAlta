@@ -6,11 +6,23 @@ export function attributionSaved(draft: string, defaultValue: string): string {
   return text === defaultValue ? "" : text;
 }
 
+/** Whether a text of the user still names CodeAlta: one that does not takes CodeAlta out of what agents write. */
+export function namesCodeAlta(text: string): boolean {
+  return /codealta/iu.test(text);
+}
+
+/**
+ * Asks before a text of the user that leaves CodeAlta out is saved: `proceed` saves it, `keep` goes back to the text
+ * agents get now.
+ */
+export type ConfirmTextRemoval = (proceed: () => void, keep: () => void) => void;
+
 /**
  * The draft of an attribution text: it starts as the text agents get, the one of CodeAlta until the user writes another,
- * so that the user tweaks it rather than writing it again. `value` is that text, as the host reads it.
+ * so that the user tweaks it rather than writing it again. `value` is that text, as the host reads it. A text that no
+ * longer names CodeAlta is saved once `confirm` lets it.
  */
-export function useAttributionDraft(value: string, defaultValue: string, onSave: (text: string) => void) {
+export function useAttributionDraft(value: string, defaultValue: string, onSave: (text: string) => void, confirm?: ConfirmTextRemoval) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   // What the configuration file holds: empty while the text is the one of CodeAlta.
@@ -20,7 +32,12 @@ export function useAttributionDraft(value: string, defaultValue: string, onSave:
     draft, setDraft, pending,
     /** Whether the text is one the user wrote, which the text of CodeAlta can replace. */
     own: stored !== "",
-    save: () => { const text = attributionSaved(draft, defaultValue); if (text !== stored) onSave(text); },
+    save: () => {
+      const text = attributionSaved(draft, defaultValue);
+      if (text === stored) return;
+      if (text && !namesCodeAlta(text) && confirm) confirm(() => onSave(text), () => setDraft(value));
+      else onSave(text);
+    },
     /** Goes back to the text of CodeAlta at once. */
     restore: () => { setDraft(defaultValue); if (stored !== "") onSave(""); },
   };

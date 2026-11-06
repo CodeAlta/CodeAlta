@@ -222,7 +222,7 @@ Agents end each commit message with this line, beside the lines their provider a
 Co-authored-by: CodeAlta <noreply@codealta.io>
 ```
 
-GitHub then shows CodeAlta as a co-author. To turn it off, clear **Settings > Sessions > Commits > Add CodeAlta as co-author**. To have agents add another line, write it in **Co-author line**, such as `Assisted-by: Contoso Agent <agents@contoso.example>`: one Git trailer, a name, a colon and a value, of 200 characters at most. The field starts with the line of CodeAlta, and its reset button goes back to it. Both are in `~/.alta/config.toml`:
+GitHub then shows CodeAlta as a co-author. Your name is already on the commit: the line adds that an AI coding agent did the work, and it helps others discover CodeAlta, which is free and open source. Settings says why above both lines, and asks once before you turn one off or save a text that no longer names CodeAlta. To turn it off, clear **Settings > Sessions > Commits > Add CodeAlta as co-author**. To have agents add another line, write it in **Co-author line**, such as `Assisted-by: Contoso Agent <agents@contoso.example>`: one Git trailer, a name, a colon and a value, of 200 characters at most. The field starts with the line of CodeAlta, and its reset button goes back to it. Both are in `~/.alta/config.toml`:
 
 ```toml
 [commits]

@@ -4,7 +4,7 @@ import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { locales, messages, translate } from "./localization";
 import { AttributionText, SessionSettings } from "./SessionSettings";
-import { attributionSaved } from "./attributionText";
+import { attributionSaved, namesCodeAlta } from "./attributionText";
 import { sessionTitleChoice, sessionTitleModes } from "./sessionTitles";
 import { ShellLanguageContext } from "./shellLanguage";
 
@@ -47,7 +47,13 @@ test("the card of the prompt suggestions is named and explained in every languag
 test("the cards of the attribution are named and explained in every language, and their texts start as the ones of CodeAlta", () => {
   for (const key of ["Commits", "Add CodeAlta as co-author", "Co-author line", "The trailer agents add, such as Co-authored-by: Name <email>. Empty for the one of CodeAlta.",
     "Comments and messages", "Say that CodeAlta wrote it", "When an agent writes a pull request comment, an issue, a chat message or an email for you, it ends the text with a line saying that it comes from CodeAlta.",
-    "Instruction to agents", "What agents are told about that line, in Markdown. Its line breaks become spaces.", "Use CodeAlta's text", "At most {count} characters."] as const) {
+    "Instruction to agents", "What agents are told about that line, in Markdown. Its line breaks become spaces.", "Use CodeAlta's text", "At most {count} characters.",
+    "Why CodeAlta signs its work", "Clear provenance", "Help CodeAlta grow", "Both are on by default. Thank you for keeping them!",
+    "Your name is already on the commit or the message. A short line of CodeAlta tells your readers that an AI coding agent did the work, so that they review it knowing how it was made.",
+    "CodeAlta is free and open source. Each line brings it a little visibility where it is used: that is how others find it, and how the project thrives.",
+    "Turn off the co-author line?", "Turn off the line of CodeAlta?", "Leave CodeAlta out of this text?", "Would you keep it? It means a lot to the project.",
+    "Your text no longer names CodeAlta. Its readers would not know that an AI coding agent did the work, and CodeAlta would lose the visibility it gets from it.",
+    "This line tells who did the work, and it helps others discover CodeAlta, which is free and open source.", "Save it anyway", "Turn it off", "Keep it"] as const) {
     assert.ok(key in messages, key);
     for (const locale of locales) assert.ok(translate(locale, key).trim(), `${locale}: ${key}`);
   }
@@ -65,4 +71,7 @@ test("the cards of the attribution are named and explained in every language, an
   assert.equal(attributionSaved("  End with\n_Posted by the Contoso agent._  ", codeAlta), "End with _Posted by the Contoso agent._");
   assert.equal(attributionSaved(` ${codeAlta} `, codeAlta), "");
   assert.equal(attributionSaved("   ", codeAlta), "");
+  // Only a text that leaves CodeAlta out asks before it is saved.
+  assert.equal(namesCodeAlta("Co-authored-by: Codealta Bot <bot@example.com>"), true);
+  assert.equal(namesCodeAlta("Assisted-by: Contoso Agent <agents@contoso.example>"), false);
 });

@@ -7,7 +7,8 @@ import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "./SettingsPage";
 import { sessionTitleChoice, sessionTitleModes } from "./sessionTitles";
 import { useShellLanguage } from "./shellLanguage";
-import { useAttributionDraft } from "./attributionText";
+import { useAttributionDraft, type ConfirmTextRemoval } from "./attributionText";
+import { AttributionWhy, useAttributionConfirmation } from "./AttributionWhy";
 
 // The Markdown editor loads with the card that shows it: the rest of the page does not wait for Monaco.
 const AttributionMarkdown = lazy(() => import("./AttributionMarkdown").then(module => ({ default: module.AttributionMarkdown })));
@@ -51,6 +52,9 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
     void mutate(() => api.saveAttributionSettings({ expectedEpoch: epoch, coAuthor: null, coAuthorTrailer: null, externalWriting: null, externalWritingInstruction: null, ...change },
       { timeoutMilliseconds: 30_000 }), "Saved.");
   const attribution = listing?.attribution ?? null;
+  // Turning off a line of CodeAlta, or saving a text that leaves it out, asks once first.
+  const confirmation = useAttributionConfirmation();
+  const confirmText: ConfirmTextRemoval = (proceed, keep) => confirmation.confirm("text", proceed, keep);
 
   return <SettingsPage className="session-settings" label={t("Sessions")} group="Agent & models" title="Sessions"
     description="How CodeAlta titles your sessions, reviews their changes and shows them in tabs." notice={notice} loading={loading} busy={busy} onReload={reload}>
@@ -93,17 +97,30 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
             }} />
         </Field>
       </Card>}
+      {tabs && <Card className="appearance-settings" aria-labelledby="settings-session-tabs-title">
+        <h2 id="settings-session-tabs-title">{t("Session tabs")}</h2>
+        <Field setting="sessions.single_tab" label={t("Single tab for sessions")} htmlFor="settings-single-session-tab"
+          notice={<p className="settings-field-help">{t("A session you open takes the place of the one shown.")}</p>}>
+          <Switch id="settings-single-session-tab" className="settings-checkbox" checked={tabs.single} onChange={event => tabs.setSingle(event.currentTarget.checked)} />
+        </Field>
+      </Card>}
+      {/* The two lines of CodeAlta come last, together, under why they matter. */}
+      {attribution && <AttributionWhy />}
       {attribution && <Card className="appearance-settings" aria-labelledby="settings-session-commits-title">
         <h2 id="settings-session-commits-title">{t("Commits")}</h2>
         <Field setting="commits.co_author" label={t("Add CodeAlta as co-author")} htmlFor="settings-commit-co-author"
           notice={<p className="settings-field-help">{t("Agents end the message of each commit with a Co-authored-by line for CodeAlta, beside the lines their provider adds.")}</p>}>
           <Switch id="settings-commit-co-author" className="settings-checkbox" checked={attribution.coAuthor} disabled={busy}
-            onChange={event => saveAttribution({ coAuthor: event.currentTarget.checked })} />
+            onChange={event => {
+              const coAuthor = event.currentTarget.checked;
+              if (coAuthor) saveAttribution({ coAuthor });
+              else confirmation.confirm("co-author", () => saveAttribution({ coAuthor }));
+            }} />
         </Field>
         <Field setting="commits.co_author_trailer" label={t("Co-author line")} htmlFor="settings-commit-co-author-trailer"
           notice={<p className="settings-field-help">{t("The trailer agents add, such as Co-authored-by: Name <email>. Empty for the one of CodeAlta.")}</p>}>
           <AttributionText id="settings-commit-co-author-trailer" value={attribution.coAuthorTrailer} defaultValue={attribution.defaultCoAuthorTrailer}
-            maxLength={200} disabled={busy || !attribution.coAuthor} onSave={coAuthorTrailer => saveAttribution({ coAuthorTrailer })} />
+            maxLength={200} disabled={busy || !attribution.coAuthor} onSave={coAuthorTrailer => saveAttribution({ coAuthorTrailer })} confirm={confirmText} />
         </Field>
       </Card>}
       {attribution && <Card className="appearance-settings" aria-labelledby="settings-session-external-writing-title">
@@ -111,7 +128,11 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
         <Field setting="external_writing.attribution" label={t("Say that CodeAlta wrote it")} htmlFor="settings-external-writing-attribution"
           notice={<p className="settings-field-help">{t("When an agent writes a pull request comment, an issue, a chat message or an email for you, it ends the text with a line saying that it comes from CodeAlta.")}</p>}>
           <Switch id="settings-external-writing-attribution" className="settings-checkbox" checked={attribution.externalWriting} disabled={busy}
-            onChange={event => saveAttribution({ externalWriting: event.currentTarget.checked })} />
+            onChange={event => {
+              const externalWriting = event.currentTarget.checked;
+              if (externalWriting) saveAttribution({ externalWriting });
+              else confirmation.confirm("external-writing", () => saveAttribution({ externalWriting }));
+            }} />
         </Field>
         {/* The instruction is Markdown, often long: its editor is as wide as the card, under its label and its help. */}
         <div className="settings-field attribution-instruction" data-setting="external_writing.instruction">
@@ -119,17 +140,13 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
           <p className="settings-field-help">{t("What agents are told about that line, in Markdown. Its line breaks become spaces.")}</p>
           <Suspense fallback={<div className="settings-field-wide attribution-markdown"><div className="attribution-markdown-editor" /></div>}>
             <AttributionMarkdown label={t("Instruction to agents")} value={attribution.externalWritingInstruction} defaultValue={attribution.defaultExternalWritingInstruction}
-              maxLength={1000} disabled={busy || !attribution.externalWriting} onSave={externalWritingInstruction => saveAttribution({ externalWritingInstruction })} />
+              maxLength={1000} disabled={busy || !attribution.externalWriting} onSave={externalWritingInstruction => saveAttribution({ externalWritingInstruction })}
+              confirm={confirmText} />
           </Suspense>
         </div>
       </Card>}
-      {tabs && <Card className="appearance-settings" aria-labelledby="settings-session-tabs-title">
-        <h2 id="settings-session-tabs-title">{t("Session tabs")}</h2>
-        <Field setting="sessions.single_tab" label={t("Single tab for sessions")} htmlFor="settings-single-session-tab"
-          notice={<p className="settings-field-help">{t("A session you open takes the place of the one shown.")}</p>}>
-          <Switch id="settings-single-session-tab" className="settings-checkbox" checked={tabs.single} onChange={event => tabs.setSingle(event.currentTarget.checked)} />
-        </Field>
-      </Card>}</div>
+</div>
+      {attribution && confirmation.dialog}
     </>}
   </SettingsPage>;
 }
@@ -141,11 +158,13 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
  * to the one of CodeAlta. It is saved on Enter or when the field loses the focus, if it changed; an empty field, or the
  * text of CodeAlta, saves no text of the user.
  */
-export function AttributionText({ id, value, defaultValue, maxLength, disabled, onSave }: {
+export function AttributionText({ id, value, defaultValue, maxLength, disabled, onSave, confirm }: {
   id: string; value: string; defaultValue: string; maxLength: number; disabled: boolean; onSave: (text: string) => void;
+  /** Asks before a text that no longer names CodeAlta is saved. */
+  confirm?: ConfirmTextRemoval;
 }) {
   const { t } = useShellLanguage();
-  const text = useAttributionDraft(value, defaultValue, onSave);
+  const text = useAttributionDraft(value, defaultValue, onSave, confirm);
   const restore = text.own || text.draft !== defaultValue
     ? <Button variant="minimal" icon="reset" aria-label={t("Use CodeAlta's text")} title={t("Use CodeAlta's text")} disabled={disabled}
       // The press comes before the blur of the field, which would save the draft first.
