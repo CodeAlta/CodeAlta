@@ -5,14 +5,14 @@ import { locales, translate, type Locale, type MessageKey } from "../localizatio
 import { defaultSessionSettings } from "../sessionSettings/sessionSettings";
 import { automationTemplates, canReply, dayName, denseTimeline, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, formProblem, formSettings, inputOf, integrationTypes, isHooked, isIntegration, isSchedule, maximumNameLength, newAutonomy, describeAllowedTool, describeAutonomy, toolNames,
   maximumPromptLength, needsProject, newTrigger, openableRun, placementLabel, placementProblem, placementWait, scriptArgumentsTemplate, runStatusLabel, runTone, runTriggerLabel, runsWithFacts, secretName, secretReference, sessionOrigin, sessionSettingsOf, timelinePosition, timelineRows, triggerIcon, triggerLabel,
-  triggerTone, triggerTypes, type AutomationForm } from "./automations";
+  triggerTone, triggerTypes, isSourceType, newSourceTrigger, sourceSettings, withSourceEvents, withSourceSetting, type AutomationForm } from "./automations";
 
 const english = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate("en", key, parameters);
 const trigger = (type: string, change: Partial<AutomationTriggerItem> = {}): AutomationTriggerItem =>
-  ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null, ...change });
+  ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null, source: null, ...change });
 const item = (id: string, change: Partial<AutomationItem> = {}): AutomationItem => ({
   id, name: `Automation ${id}`, enabled: true, prompt: "Do the thing.", projectId: null, projectName: null, projectFolder: null, storeProjectId: null, file: "/home/config.toml",
-  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, publishTo: null, placement: null, autonomy: null, ...change,
+  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, scriptMode: null, scriptAccess: null, options: null, runsOn: null, publishTo: null, placement: null, autonomy: null, ...change,
 });
 const run = (id: string, sessionId: string | null): AutomationRunItem =>
   ({ id, automationId: "a", name: "A", sessionId, projectId: null, startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status: "running", message: null, machineId: null, reply: null, output: null, calls: null });
@@ -90,7 +90,7 @@ test("a new trigger starts with values that can be saved; a command waits to be 
     const form: AutomationForm = { ...emptyForm("p"), name: "n", prompt: "p", triggers: [newTrigger(type)] };
     assert.equal(formProblem(form), type === "command" ? "Write the command of the trigger." : null, type);
   }
-  assert.deepEqual(newTrigger("weekly"), { type: "weekly", minute: 0, every: 1, at: ["09:00"], days: ["mon"], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null });
+  assert.deepEqual(newTrigger("weekly"), { type: "weekly", minute: 0, every: 1, at: ["09:00"], days: ["mon"], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null, source: null });
   assert.equal(newTrigger("cron").expression, "0 9 * * 1-5");
   assert.deepEqual([newTrigger("command").command, newTrigger("command").folder, newTrigger("daily").command], ["", null, null]);
 });
@@ -119,7 +119,7 @@ test("what is sent for a form is trimmed, and names a model only with its provid
   const form: AutomationForm = { ...emptyForm("p"), id: "id", name: "  Nightly ", prompt: "Review.\n", provider: " codex ", model: " gpt ", effort: "High", agent: " reviewer ", catchUp: true,
     permissionMode: " acceptEdits ", reviewBeforeCommit: false, sandbox: "off",
     storeInProject: true, triggers: [trigger("daily", { at: ["17:30", "09:00"], expression: "left over" }), trigger("cron", { expression: " 0 9 * * * " })] };
-  assert.deepEqual(inputOf(form), { id: "id", name: "Nightly", enabled: true, prompt: "Review.\n", script: null, scriptArguments: null, projectId: "p", provider: "codex", model: "gpt", effort: "High",
+  assert.deepEqual(inputOf(form), { id: "id", name: "Nightly", enabled: true, prompt: "Review.\n", script: null, scriptArguments: null, scriptMode: null, scriptAccess: null, projectId: "p", provider: "codex", model: "gpt", effort: "High",
     agent: "reviewer", catchUp: true, permissionMode: "acceptEdits", reviewBeforeCommit: false, sandbox: "off", options: null, runsOn: null, publishTo: null, autonomy: null,
     triggers:[trigger("daily", { at: ["09:00", "17:30"] }), trigger("cron", { expression: "0 9 * * *" })] });
   assert.deepEqual([inputOf(emptyForm(null)).permissionMode, inputOf(emptyForm(null)).reviewBeforeCommit, inputOf(emptyForm(null)).sandbox], [null, null, null], "The defaults are sent as nothing.");
@@ -181,13 +181,13 @@ test("an automation that runs a script sends its script and arguments, and no pr
 test("the form of an automation holds what it is, and where it is written", () => {
   const stored = item("a", { projectId: "p", storeProjectId: "p", provider: "codex", model: "gpt", effort: "Low", agent: "reviewer", catchUp: true, triggers: [trigger("issue")], enabled: false,
     permissionMode: "plan", reviewBeforeCommit: true, sandbox: "strict", options: { subSessions: false } });
-  assert.deepEqual(formOf(stored), { id: "a", name: "Automation a", enabled: false, prompt: "Do the thing.", script: "", scriptArguments: "", projectId: "p", storeInProject: true, provider: "codex", model: "gpt", effort: "Low",
+  assert.deepEqual(formOf(stored), { id: "a", name: "Automation a", enabled: false, prompt: "Do the thing.", script: "", scriptArguments: "", withoutModel: false, writes: false, projectId: "p", storeInProject: true, provider: "codex", model: "gpt", effort: "Low",
     agent: "reviewer", catchUp: true, permissionMode: "plan", reviewBeforeCommit: true, sandbox: "strict", options: { subSessions: false }, runsOn: null, publishTo: null, triggers: [trigger("issue")], autonomy: null });
   assert.deepEqual(formOf(item("b")), { ...emptyForm(null), id: "b", name: "Automation b", prompt: "Do the thing." });
   // The host says the defaults too: the form holds them as nothing.
   assert.equal(formOf(item("c", { options: { subSessions: true } })).options, null);
   // What a form sends back is what it was read from.
-  assert.deepEqual(inputOf(formOf(stored)), { id: "a", name: "Automation a", enabled: false, prompt: "Do the thing.", script: null, scriptArguments: null, projectId: "p", provider: "codex", model: "gpt", effort: "Low", agent: "reviewer",
+  assert.deepEqual(inputOf(formOf(stored)), { id: "a", name: "Automation a", enabled: false, prompt: "Do the thing.", script: null, scriptArguments: null, scriptMode: null, scriptAccess: null, projectId: "p", provider: "codex", model: "gpt", effort: "Low", agent: "reviewer",
     catchUp: true, permissionMode: "plan", reviewBeforeCommit: true, sandbox: "strict", options: { subSessions: false }, runsOn: null, publishTo: null, triggers: [trigger("issue")], autonomy: null });
 });
 
@@ -304,4 +304,44 @@ test("every template can be saved as it is, in a project or as a chat, and is na
   const script = automationTemplates.find(template => template.script);
   assert.equal(script?.script, "review-pr", "One template runs a sample script on each pull request.");
   assert.deepEqual(inputOf({ ...emptyForm("p"), name: "Review", prompt: script!.prompt, script: script!.script!, triggers: script!.triggers }).script, "review-pr");
+});
+
+test("a trigger of a source reads with its events, its settings stay as JSON, and its kind is neither a schedule nor an event of a repository", () => {
+  const read = (value: AutomationTriggerItem, sources: Parameters<typeof describeTrigger>[4] = []) => describeTrigger(value, english, "en", false, sources);
+  const project = { type: "project", events: [{ id: "added", label: "Added", description: null }, { id: "archived", label: "Archived", description: null }, { id: "removed", label: "Removed", description: null }] };
+  const added = newSourceTrigger(project);
+  assert.deepEqual(added.source, { on: ["added"], settingsJson: "{}" });
+  assert.equal(read(added), "When a project is added");
+  assert.equal(read(withSourceEvents(added, ["added", "removed", "archived"])), "When a project is added, removed or archived");
+  const work = withSourceSetting(added, "space", "work");
+  assert.deepEqual(sourceSettings(work), { space: "work" });
+  assert.equal(read(work), "When a project of work is added");
+  assert.deepEqual(sourceSettings(withSourceSetting(work, "space", "")), {}, "an empty value is no setting");
+  assert.equal(read(trigger("automation", { source: { on: ["failed", "waiting"], settingsJson: "{}" } })), "When another automation fails or waits for an approval");
+  // No event chosen: the default one of its source.
+  const deploy = { type: "acme/deploy", displayName: "Deployment", events: [{ id: "succeeded", label: "Succeeded", description: null }] };
+  assert.equal(read(trigger("acme/deploy", { source: { on: [], settingsJson: "{}" } }), [deploy as never]), "Deployment: Succeeded");
+  assert.equal(read(trigger("acme/deploy", { source: { on: ["failed"], settingsJson: "{}" } })), "acme/deploy: failed", "a plugin that is not running reads as it is written");
+  for (const type of ["project", "automation", "acme/deploy"]) {
+    assert.ok(isSourceType(type) && !isSchedule({ type }) && !needsProject({ type }), type);
+    assert.notEqual(triggerIcon(type), "hand", type);
+  }
+  assert.ok(!isSourceType("daily") && !isSourceType("Acme/Deploy"));
+  assert.equal(triggerLabel("project"), "Project");
+  assert.equal(triggerLabel("acme/deploy"), "Plugin trigger");
+  assert.equal(runTriggerLabel("automation"), "Automation");
+  for (const locale of locales) assert.notEqual(describeTrigger(withSourceEvents(added, ["added", "archived"]), (key, parameters) => translate(locale, key, parameters), locale), "", locale);
+});
+
+test("a script without a model says what it may do, and only when it runs a script", () => {
+  const form: AutomationForm = { ...emptyForm(null), name: "Log", script: "acme/log", withoutModel: true, writes: true };
+  assert.deepEqual([inputOf(form).scriptMode, inputOf(form).scriptAccess], ["direct", "write"]);
+  assert.deepEqual([inputOf({ ...form, writes: false }).scriptMode, inputOf({ ...form, writes: false }).scriptAccess], ["direct", null]);
+  assert.deepEqual([inputOf({ ...form, script: "", prompt: "Hi" }).scriptMode, inputOf({ ...form, script: "", prompt: "Hi" }).scriptAccess], [null, null]);
+  const stored = formOf(item("log", { script: "acme/log", scriptMode: "direct", scriptAccess: "write" }));
+  assert.deepEqual([stored.withoutModel, stored.writes], [true, true]);
+  // Kept with a project, a script that writes without a model names its sandbox.
+  assert.equal(formProblem({ ...form, projectId: "p", storeInProject: true }), "A script of a project that writes without a model runs in a sandbox: choose one in Runs with.");
+  assert.equal(formProblem({ ...form, projectId: "p", storeInProject: true, sandbox: "strict" }), null);
+  assert.equal(formProblem(form), null, "your own configuration may run it without a sandbox");
 });

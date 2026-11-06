@@ -156,6 +156,13 @@ button.automation-run:hover, button.automation-run:focus-visible { background: v
 .automation-command { flex: 3 1 260px; }
 .automation-command-folder { flex: 1 1 140px; }
 .automation-command input, .automation-command-folder input { font-family: var(--code-font); }
+/* The trigger of a source: its events, several at once, then a field for each of its settings. */
+.automation-trigger-fields > .automation-source-events, .automation-trigger-fields > .automation-source-choices { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; color: var(--text); }
+.automation-source-events .bp6-control, .automation-source-choices .bp6-control, .automation-trigger-fields > .bp6-switch { margin: 0; }
+.automation-source-text { flex: 1 1 160px; min-width: 0; }
+.automation-source-number.bp6-numeric-input { width: 96px; }
+.automation-source-missing { font-family: var(--code-font); }
+.automation-script-direct { margin: 6px 0 0; }
 .automation-times { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .automation-time { display: inline-flex; align-items: center; }
 .automation-time input[type="time"] { height: 28px; padding: 0 6px; font: inherit; font-variant-numeric: tabular-nums; color-scheme: dark; }

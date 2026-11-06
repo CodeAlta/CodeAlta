@@ -117,6 +117,39 @@ internal sealed class AutomationsService
     }
 
     /// <summary>The scripts of the library an automation of a project, or of the user, can run, with their parameters.</summary>
+    /// <summary>
+    /// The triggers of trigger sources the editor offers beside its own: those of CodeAlta (project, automation) and those of the
+    /// running plugins, with their events, their fields and the script a trigger of a plugin comes with.
+    /// </summary>
+    [NeoRpcMethod("triggerTypes")]
+    public AutomationTriggerTypesResponse TriggerTypes(AutomationsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, []);
+        return new("ok", [.. _automations!.Sources.List().OrderBy(static source => source.PluginId is null ? 0 : 1).ThenBy(static source => source.Trigger.Order)
+            .Select(static source => new AutomationTriggerTypeItem(source.Type, source.Trigger.DisplayName, source.Trigger.Description,
+                [.. source.Trigger.Events.Select(static type => new AutomationTriggerEventItem(type.Id, type.Label, type.Description))],
+                [.. source.Trigger.Fields.Select(static field => new AutomationTriggerFieldItem(field.Id, field.Label, FieldKind(field.Kind), field.Description, field.Required,
+                    [.. field.Choices.Select(static choice => new AutomationTriggerChoiceItem(choice.Id, choice.Label))], field.Placeholder))],
+                source.Trigger.Project == CodeAlta.Plugins.Abstractions.PluginTriggerProject.Required, source.PluginId)
+            {
+                Script = source.Trigger.Script is { } script ? new AutomationTriggerScriptItem(script.Name, script.ArgumentsJson, script.WithoutModel, script.Writes) : null,
+            })]);
+
+        static string FieldKind(CodeAlta.Plugins.Abstractions.PluginTriggerFieldKind kind) => kind switch
+        {
+            CodeAlta.Plugins.Abstractions.PluginTriggerFieldKind.Secret => "secret",
+            CodeAlta.Plugins.Abstractions.PluginTriggerFieldKind.Choice => "choice",
+            CodeAlta.Plugins.Abstractions.PluginTriggerFieldKind.Choices => "choices",
+            CodeAlta.Plugins.Abstractions.PluginTriggerFieldKind.Flag => "flag",
+            CodeAlta.Plugins.Abstractions.PluginTriggerFieldKind.Number => "number",
+            CodeAlta.Plugins.Abstractions.PluginTriggerFieldKind.Space => "space",
+            CodeAlta.Plugins.Abstractions.PluginTriggerFieldKind.Project => "project",
+            CodeAlta.Plugins.Abstractions.PluginTriggerFieldKind.Automations => "automations",
+            _ => "text",
+        };
+    }
+
     [NeoRpcMethod("scripts")]
     public async Task<AutomationScriptsResponse> ScriptsAsync(AutomationScriptsRequest request, CancellationToken cancellationToken)
     {
@@ -472,6 +505,8 @@ internal sealed class AutomationsService
             {
                 Script = definition.Script,
                 ScriptArguments = definition.ScriptArguments,
+                ScriptMode = definition.ScriptMode,
+                ScriptAccess = definition.ScriptAccess,
                 Options = SessionOptionsChoice.Of(definition.SessionOptions),
                 RunsOn = definition.RunsOn,
                 PublishTo = definition.PublishTo,
@@ -533,7 +568,45 @@ internal sealed class AutomationsService
                     Threads = trigger.Threads,
                 }
                 : null,
+            Source = trigger.IsSource ? new AutomationSourceTriggerItem(trigger.On, trigger.Settings.ToJson()) : null,
         };
+
+    // The settings of the trigger of a source, from the JSON object the page sends: texts, flags, whole numbers and lists of texts.
+    private static bool TryReadSettings(string? json, out CodeAlta.Plugins.Abstractions.PluginTriggerSettings settings)
+    {
+        settings = CodeAlta.Plugins.Abstractions.PluginTriggerSettings.Empty;
+        if (string.IsNullOrWhiteSpace(json)) return true;
+        if (json.Length > AutomationSourceTypes.MaximumSettings * AutomationSourceTypes.MaximumValueLength) return false;
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return false;
+            var values = new List<KeyValuePair<string, CodeAlta.Plugins.Abstractions.PluginTriggerValue>>();
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                CodeAlta.Plugins.Abstractions.PluginTriggerValue? value = property.Value.ValueKind switch
+                {
+                    System.Text.Json.JsonValueKind.String => CodeAlta.Plugins.Abstractions.PluginTriggerValue.OfText(property.Value.GetString()!),
+                    System.Text.Json.JsonValueKind.True => CodeAlta.Plugins.Abstractions.PluginTriggerValue.OfFlag(true),
+                    System.Text.Json.JsonValueKind.False => CodeAlta.Plugins.Abstractions.PluginTriggerValue.OfFlag(false),
+                    System.Text.Json.JsonValueKind.Number when property.Value.TryGetInt64(out var number) => CodeAlta.Plugins.Abstractions.PluginTriggerValue.OfNumber(number),
+                    System.Text.Json.JsonValueKind.Array when property.Value.EnumerateArray().All(static item => item.ValueKind == System.Text.Json.JsonValueKind.String)
+                        => CodeAlta.Plugins.Abstractions.PluginTriggerValue.OfTexts(property.Value.EnumerateArray().Select(static item => item.GetString()!)),
+                    // A setting the page left empty is no setting.
+                    System.Text.Json.JsonValueKind.Null => null,
+                    _ => throw new System.Text.Json.JsonException(),
+                };
+                if (value is not null && !(value.Kind == CodeAlta.Plugins.Abstractions.PluginTriggerValueKind.Text && string.IsNullOrWhiteSpace(value.Text))) values.Add(new(property.Name, value));
+            }
+
+            settings = new CodeAlta.Plugins.Abstractions.PluginTriggerSettings(values);
+            return true;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
 
     // False: the request is not one the page sends. A problem: what the user wrote is refused, with the reason.
     private static bool TryRead(AutomationInput input, out AutomationDefinition? definition, out string? problem)
@@ -572,6 +645,8 @@ internal sealed class AutomationsService
             Prompt = Blank(input.Script) is null ? input.Prompt : string.Empty,
             Script = Blank(input.Script),
             ScriptArguments = Blank(input.Script) is null ? null : Blank(input.ScriptArguments),
+            ScriptMode = Blank(input.Script) is null ? null : Blank(input.ScriptMode),
+            ScriptAccess = Blank(input.Script) is null || Blank(input.ScriptMode) is null ? null : Blank(input.ScriptAccess),
             Model = new(provider, model, effort),
             Agent = Blank(input.Agent),
             PermissionMode = Blank(input.PermissionMode),
@@ -601,6 +676,20 @@ internal sealed class AutomationsService
     internal static bool TryRead(AutomationTriggerItem item, out AutomationTrigger? trigger)
     {
         trigger = null;
+        // The trigger of a source: its type, its events and its settings, which its source checks.
+        if (!AutomationTrigger.TryParseKind(item.Type, out _) && AutomationSourceTypes.IsType(item.Type))
+        {
+            if (item.Source is not { } source || source.On is null || source.On.Count > AutomationSourceTypes.MaximumEvents
+                || !TryReadSettings(source.SettingsJson, out var settings)) return false;
+            trigger = new AutomationTrigger(AutomationTriggerKind.Source)
+            {
+                Source = item.Type,
+                On = [.. source.On.Select(static name => name?.Trim().ToLowerInvariant() ?? string.Empty).Where(static name => name.Length > 0).Distinct(StringComparer.Ordinal)],
+                Settings = settings,
+            };
+            return true;
+        }
+
         if (!AutomationTrigger.TryParseKind(item.Type, out var kind) || item.At is null || item.Days is null || item.At.Count > 24 || item.Days.Count > 7
             || item.Expression is { Length: > AutomationTrigger.MaximumExpressionLength } || item.Command is { Length: > AutomationTrigger.MaximumCommandLength * 2 }
             || item.Folder is { Length: > AutomationTrigger.MaximumFolderLength * 2 }) return false;
@@ -689,7 +778,48 @@ internal sealed record AutomationTriggerItem(string Type, int Minute, int Every,
 {
     /// <summary>The settings of a trigger of another tool (Jira versions and queries, Slack, incident.io, webhooks); null for the others.</summary>
     public AutomationIntegrationItem? Integration { get; init; }
+
+    /// <summary>The events and the settings of the trigger of a source (<see cref="Type"/> is its type); null for the others.</summary>
+    public AutomationSourceTriggerItem? Source { get; init; }
 }
+
+/// <summary>The events and the settings of the trigger of a source, as the page shows and edits them.</summary>
+/// <param name="On">The events it starts on; empty for the default event of its source.</param>
+/// <param name="SettingsJson">Its settings, a JSON object of texts, flags, whole numbers and lists of texts.</param>
+internal sealed record AutomationSourceTriggerItem(IReadOnlyList<string> On, string SettingsJson);
+
+/// <summary>The triggers of sources the editor offers.</summary>
+internal sealed record AutomationTriggerTypesResponse(string Status, IReadOnlyList<AutomationTriggerTypeItem> Types);
+
+/// <summary>A trigger of a source, as the editor offers it.</summary>
+/// <param name="Type">Its type: <c>project</c>, <c>automation</c>, or <c>&lt;prefix&gt;/&lt;name&gt;</c> for a plugin.</param>
+/// <param name="DisplayName">Its name, as its source names it.</param>
+/// <param name="Description">When it starts an automation, in a sentence; null for none.</param>
+/// <param name="Events">Its events, the default first.</param>
+/// <param name="Fields">Its settings.</param>
+/// <param name="NeedsProject">Whether its automations run in a project only.</param>
+/// <param name="PluginId">The plugin that gives it; null for one of CodeAlta.</param>
+internal sealed record AutomationTriggerTypeItem(string Type, string DisplayName, string? Description, IReadOnlyList<AutomationTriggerEventItem> Events,
+    IReadOnlyList<AutomationTriggerFieldItem> Fields, bool NeedsProject, string? PluginId)
+{
+    /// <summary>The script a trigger of a plugin comes with, offered as a ready-made automation; null for none.</summary>
+    public AutomationTriggerScriptItem? Script { get; init; }
+}
+
+/// <summary>An event of a trigger of a source.</summary>
+internal sealed record AutomationTriggerEventItem(string Id, string Label, string? Description);
+
+/// <summary>A setting of a trigger of a source.</summary>
+/// <param name="Kind"><c>text</c>, <c>secret</c>, <c>choice</c>, <c>choices</c>, <c>flag</c>, <c>number</c>, <c>space</c>, <c>project</c> or <c>automations</c>.</param>
+internal sealed record AutomationTriggerFieldItem(string Id, string Label, string Kind, string? Description, bool Required, IReadOnlyList<AutomationTriggerChoiceItem> Choices, string? Placeholder);
+
+/// <summary>A value a setting offers.</summary>
+internal sealed record AutomationTriggerChoiceItem(string Id, string Label);
+
+/// <summary>The script a trigger of a plugin comes with.</summary>
+/// <param name="WithoutModel">Whether it runs without a model.</param>
+/// <param name="Writes">Whether it edits files and runs commands.</param>
+internal sealed record AutomationTriggerScriptItem(string Name, string? ArgumentsJson, bool WithoutModel, bool Writes);
 
 /// <summary>
 /// The settings of a trigger of another tool, as the page shows and edits them: credentials are <c>${secret:NAME}</c>
@@ -744,6 +874,12 @@ internal sealed record AutomationItem(string Id, string Name, bool Enabled, stri
 
     /// <summary>The arguments of its script, a JSON object; null for none.</summary>
     public string? ScriptArguments { get; init; }
+
+    /// <summary><c>direct</c> for a script that runs without a model; null for one a model runs in a session.</summary>
+    public string? ScriptMode { get; init; }
+
+    /// <summary>For a script without a model: <c>read</c> (null) or <c>write</c>.</summary>
+    public string? ScriptAccess { get; init; }
 
     /// <summary>The options of its sessions, such as whether they can start sessions of their own.</summary>
     public SessionOptionsChoice? Options { get; init; }
@@ -959,6 +1095,12 @@ internal sealed record AutomationInput(string? Id, string Name, bool Enabled, st
 
     /// <summary>The arguments of its script, a JSON object; null for none.</summary>
     public string? ScriptArguments { get; init; }
+
+    /// <summary><c>direct</c> to run its script without a model; null for a session a model runs it in.</summary>
+    public string? ScriptMode { get; init; }
+
+    /// <summary>For a script without a model: <c>read</c> (null) or <c>write</c>.</summary>
+    public string? ScriptAccess { get; init; }
 
     /// <summary>The options of its sessions; null for the defaults, every option on.</summary>
     public SessionOptionsChoice? Options { get; init; }

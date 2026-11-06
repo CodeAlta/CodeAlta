@@ -12,10 +12,10 @@ import { AutomationOriginLabel } from "./AutomationOrigin";
 
 const never = () => assert.fail("rendering must not act");
 const trigger = (type: string, change: Partial<AutomationTriggerItem> = {}): AutomationTriggerItem =>
-  ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null, ...change });
+  ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null, source: null, ...change });
 const item = (id: string, change: Partial<AutomationItem> = {}): AutomationItem => ({
   id, name: `Automation ${id}`, enabled: true, prompt: "Do the thing.", projectId: "p", projectName: "Alpha", projectFolder: "/p", storeProjectId: null, file: "/home/config.toml",
-  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, publishTo: null, placement: null, autonomy: null, ...change,
+  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, scriptMode: null, scriptAccess: null, options: null, runsOn: null, publishTo: null, placement: null, autonomy: null, ...change,
 });
 const run = (id: string, change: Partial<AutomationRunItem> = {}): AutomationRunItem =>
   ({ id, automationId: "a", name: "Nightly", sessionId: null, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "daily", detail: null, status: "completed", message: null, machineId: null, reply: null, output: null, calls: null, ...change });

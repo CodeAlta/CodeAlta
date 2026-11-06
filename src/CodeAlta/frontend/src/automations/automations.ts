@@ -1,6 +1,6 @@
 // What the page knows of an automation without asking the host: how a trigger reads, what a form holds, the
 // templates a new one can start from.
-import type { AutomationAllowedToolItem, AutomationAutonomyItem, AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem, SessionOptionsChoice } from "#neoastra";
+import type { AutomationAllowedToolItem, AutomationAutonomyItem, AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem, AutomationTriggerTypeItem, SessionOptionsChoice } from "#neoastra";
 import type { IconName } from "../AppIcon";
 import type { Locale, MessageKey } from "../localization";
 import { permissionModeName } from "../permissionModes";
@@ -36,12 +36,22 @@ const typeIcons: Readonly<Record<TriggerType, IconName>> = {
   jira_version: "tag", jira_query: "filter", slack: "chat", incident_io: "warning", webhook: "remote",
 };
 
-export const triggerLabel = (type: string): MessageKey => type === "try" ? "Try" : typeLabels[type as TriggerType] ?? "Manual";
+/**
+ * Whether a type is the one of a trigger of a source: of CodeAlta (`project`, `automation`) or of a plugin
+ * (`<prefix>/<name>`). Its events and its settings are in `source`.
+ */
+export const isSourceType = (type: string): boolean => type === "project" || type === "automation" || /^[a-z0-9][a-z0-9._-]*\/[a-z][a-z0-9_]*$/.test(type);
+
+export const triggerLabel = (type: string): MessageKey => type === "try" ? "Try" : type === "project" ? "Project" : type === "automation" ? "Automation"
+  : isSourceType(type) ? "Plugin trigger" : typeLabels[type as TriggerType] ?? "Manual";
 /** The icon of what starts an automation: of its first trigger, or the one of a run by hand. */
-export const triggerIcon = (type: string | undefined): IconName => type && type in typeIcons ? typeIcons[type as TriggerType] : "hand";
+export const triggerIcon = (type: string | undefined): IconName => type === "project" ? "folder" : type === "automation" ? "workflow" : type && isSourceType(type) ? "plugin"
+  : type && type in typeIcons ? typeIcons[type as TriggerType] : "hand";
 /** The color of a kind of trigger, one of the tones of the application. */
 export function triggerTone(type: string | undefined): string {
   switch (type) {
+    case "project": return "green";
+    case "automation": return "purple";
     case "hourly": return "azure";
     case "daily": return "gold";
     case "weekly": return "purple";
@@ -56,14 +66,14 @@ export function triggerTone(type: string | undefined): string {
     case "slack": return "yellow";
     case "incident_io": return "pink";
     case "webhook": return "teal";
-    default: return "muted";
+    default: return type && isSourceType(type) ? "cadet" : "muted";
   }
 }
 
 /** Whether a trigger is an event of the repository of a project, or of its tracker: it needs a project. */
 export const needsProject = (trigger: Readonly<{ type: string }>): boolean => trigger.type === "issue" || trigger.type === "pull_request" || trigger.type === "jira";
 /** Whether a trigger is a time on the clock, as opposed to an event of the repository of a project or a command. */
-export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => !needsProject(trigger) && trigger.type !== "command" && !isIntegration(trigger.type);
+export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => !needsProject(trigger) && trigger.type !== "command" && !isIntegration(trigger.type) && !isSourceType(trigger.type);
 
 /**
  * Whether an automation waits for the user before its triggers start it: it came with the configuration of its
@@ -85,7 +95,48 @@ export function newTrigger(type: TriggerType): AutomationTriggerItem {
   } : null;
   return { type, minute: 0, every: 1, at: type === "daily" || type === "weekly" ? ["09:00"] : [], days: type === "weekly" ? ["mon"] : [],
     expression: type === "cron" ? "0 9 * * 1-5" : null, event: isIntegration(type) ? integrationEvents[type][0]! : type === "jira" ? "created" : "opened", authors: "trusted",
-    command: type === "command" ? "" : null, folder: null, integration };
+    command: type === "command" ? "" : null, folder: null, integration, source: null };
+}
+
+/** A value of a setting of the trigger of a source, as its JSON writes it. */
+export type SourceValue = string | boolean | number | readonly string[];
+
+/** A new trigger of a source: its default event, and no setting yet. */
+export function newSourceTrigger(source: Pick<AutomationTriggerTypeItem, "type" | "events">): AutomationTriggerItem {
+  return { ...newTrigger("hourly"), type: source.type, event: "", source: { on: source.events[0] ? [source.events[0].id] : [], settingsJson: "{}" } };
+}
+
+/** The settings of the trigger of a source, by key; none for another trigger. */
+export function sourceSettings(trigger: AutomationTriggerItem): Readonly<Record<string, SourceValue>> {
+  try {
+    const value: unknown = JSON.parse(trigger.source?.settingsJson || "{}");
+    return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, SourceValue> : {};
+  } catch { return {}; }
+}
+
+/** The trigger with one setting changed; an empty value removes it. */
+export function withSourceSetting(trigger: AutomationTriggerItem, key: string, value: SourceValue | null): AutomationTriggerItem {
+  const settings = { ...sourceSettings(trigger) };
+  if (value === null || value === "" || Array.isArray(value) && value.length === 0) delete settings[key];
+  else settings[key] = value;
+  return { ...trigger, source: { on: trigger.source?.on ?? [], settingsJson: JSON.stringify(settings) } };
+}
+
+/** The trigger with its events: an empty list leaves the default event of its source. */
+export const withSourceEvents = (trigger: AutomationTriggerItem, on: readonly string[]): AutomationTriggerItem =>
+  ({ ...trigger, source: { on: [...on], settingsJson: trigger.source?.settingsJson ?? "{}" } });
+
+// The words of the events of the sources of CodeAlta; those of a plugin are its own.
+const builtInEvents: Readonly<Record<string, Readonly<Record<string, MessageKey>>>> = {
+  project: { added: "added", archived: "archived", removed: "removed" },
+  automation: { completed: "completes", failed: "fails", waiting: "waits for an approval" },
+};
+
+/** The events a trigger of a source starts on, in words joined with "or". */
+function sourceEvents(trigger: AutomationTriggerItem, t: Translate, source: AutomationTriggerTypeItem | undefined): string {
+  const on = trigger.source?.on.length ? trigger.source.on : source?.events[0] ? [source.events[0].id] : [];
+  const words = on.map(id => builtInEvents[trigger.type]?.[id] ? t(builtInEvents[trigger.type]![id]!) : source?.events.find(event => event.id === id)?.label ?? id);
+  return words.length <= 1 ? words.join("") : `${words.slice(0, -1).join(", ")} ${t("or")} ${words[words.length - 1]}`;
 }
 
 /** The name of the secret a reference names (`${secret:JIRA_TOKEN}` gives `JIRA_TOKEN`), or the text when it is no reference. */
@@ -106,8 +157,18 @@ export function dayName(day: string, locale: Locale): string {
  * How one trigger reads: "Daily at 09:00". A command is named by its start, or read whole, with the folder it
  * names, where the user reads what an automation runs before allowing it.
  */
-export function describeTrigger(trigger: AutomationTriggerItem, t: Translate, locale: Locale, whole = false): string {
+export function describeTrigger(trigger: AutomationTriggerItem, t: Translate, locale: Locale, whole = false, sources: readonly AutomationTriggerTypeItem[] = []): string {
   const times = trigger.at.join(", ");
+  if (isSourceType(trigger.type)) {
+    const source = sources.find(candidate => candidate.type === trigger.type);
+    const events = sourceEvents(trigger, t, source);
+    const settings = sourceSettings(trigger);
+    if (trigger.type === "project")
+      return typeof settings["space"] === "string" ? t("When a project of {space} is {events}", { space: settings["space"], events }) : t("When a project is {events}", { events });
+    if (trigger.type === "automation") return t("When another automation {events}", { events });
+    return `${source?.displayName ?? trigger.type}: ${events}`;
+  }
+
   switch (trigger.type) {
     case "hourly": {
       const minute = `:${String(trigger.minute).padStart(2, "0")}`;
@@ -138,8 +199,8 @@ export function describeTrigger(trigger: AutomationTriggerItem, t: Translate, lo
 }
 
 /** How the triggers of an automation read on one line; an automation without one is run by hand. */
-export function describeTriggers(triggers: readonly AutomationTriggerItem[], t: Translate, locale: Locale): string {
-  return triggers.length === 0 ? t("Manual") : triggers.map(trigger => describeTrigger(trigger, t, locale)).join(" · ");
+export function describeTriggers(triggers: readonly AutomationTriggerItem[], t: Translate, locale: Locale, sources: readonly AutomationTriggerTypeItem[] = []): string {
+  return triggers.length === 0 ? t("Manual") : triggers.map(trigger => describeTrigger(trigger, t, locale, false, sources)).join(" · ");
 }
 
 export type RunTone = "running" | "ok" | "failed" | "held" | "muted";
@@ -163,6 +224,10 @@ export type AutomationForm = Readonly<{
   script: string;
   /** The arguments of its script, as the JSON text of an object; empty for none. */
   scriptArguments: string;
+  /** Whether its script runs without a model, with no session. */
+  withoutModel: boolean;
+  /** Whether a script without a model may edit files and run commands, beside reading. */
+  writes: boolean;
   /** The project it runs in; null for a chat. */
   projectId: string | null;
   /** Whether it is written in the configuration of its project rather than of the user. */
@@ -209,13 +274,14 @@ export const toolNames = (text: string): readonly string[] => [...new Set(text.s
 
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {
-  return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
+  return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", withoutModel: false, writes: false, projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
     permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, publishTo: null, triggers: [], autonomy: null };
 }
 
 /** The form of an automation that exists. */
 export function formOf(item: AutomationItem): AutomationForm {
-  return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, script: item.script ?? "", scriptArguments: item.scriptArguments ?? "", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
+  return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, script: item.script ?? "", scriptArguments: item.scriptArguments ?? "",
+    withoutModel: item.scriptMode === "direct", writes: item.scriptMode === "direct" && item.scriptAccess === "write", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
     provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
     permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options),
     runsOn: item.runsOn ?? null, publishTo: item.publishTo ?? null, triggers: item.triggers, autonomy: item.autonomy ?? null };
@@ -285,6 +351,9 @@ export function formProblem(form: AutomationForm): MessageKey | null {
     if (trigger.type === "command" && !(trigger.command ?? "").trim()) return "Write the command of the trigger.";
     if (trigger.type === "command" && form.runsOn && !form.storeInProject) return "A command trigger runs on this computer only.";
   }
+  // Kept with a project, a script that writes without a model names its sandbox: only your own configuration runs one without.
+  if (form.script.trim() && form.withoutModel && form.writes && form.storeInProject && (!form.sandbox.trim() || form.sandbox.trim().toLowerCase() === notSandboxed))
+    return "A script of a project that writes without a model runs in a sandbox: choose one in Runs with.";
   // A team or the organization runs it with the key of an account: the machine and the server check the provider it names.
   if (form.publishTo && form.runsOn && !form.storeInProject && !form.provider.trim()) return "An automation of a team or of the organization names the provider it runs with.";
   return null;
@@ -297,7 +366,9 @@ export function inputOf(form: AutomationForm): AutomationInput {
   const script = form.script.trim();
   // An automation that runs a script sends no prompt of its own.
   return { id: form.id, name: form.name.trim(), enabled: form.enabled, prompt: script ? "" : form.prompt, script: script || null,
-    scriptArguments: script ? form.scriptArguments.trim() || null : null, projectId: form.projectId,
+    scriptArguments: script ? form.scriptArguments.trim() || null : null,
+    // A script without a model runs alone: what it may do is said here, and read only otherwise.
+    scriptMode: script && form.withoutModel ? "direct" : null, scriptAccess: script && form.withoutModel && form.writes ? "write" : null, projectId: form.projectId,
     provider: provider || null, model: model || null, effort: model && form.effort ? form.effort : null, agent: form.agent.trim() || null,
     permissionMode: form.permissionMode.trim() || null, reviewBeforeCommit: form.reviewBeforeCommit, sandbox: form.sandbox.trim() || null,
     options: storedSessionOptions(form.options),

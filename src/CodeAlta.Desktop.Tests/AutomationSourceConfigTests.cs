@@ -115,6 +115,26 @@ public sealed class AutomationSourceConfigTests
     }
 
     [TestMethod]
+    public void TheTriggerOfASource_GoesToThePageAndBackTheSame()
+    {
+        var trigger = Source("acme.deploys/deploy", ["succeeded", "failed"], ("environment", PluginTriggerValue.OfText("prod")), ("retries", PluginTriggerValue.OfNumber(3)),
+            ("strict", PluginTriggerValue.OfFlag(true)), ("regions", PluginTriggerValue.OfTexts(["eu", "us"])));
+        var item = CodeAlta.Desktop.Rpc.AutomationsService.Trigger(trigger);
+        Assert.AreEqual("acme.deploys/deploy", item.Type);
+        CollectionAssert.AreEqual(new[] { "succeeded", "failed" }, item.Source!.On.ToArray());
+        Assert.IsTrue(CodeAlta.Desktop.Rpc.AutomationsService.TryRead(item, out var read));
+        Assert.AreEqual(trigger.FingerprintKey, read!.FingerprintKey);
+
+        // What the page left empty is no setting; what is not a setting, nor a trigger of a source, is refused.
+        Assert.IsTrue(CodeAlta.Desktop.Rpc.AutomationsService.TryRead(item with { Source = new(["Failed", "failed"], """{"environment":"","stage":null}""") }, out var blank));
+        Assert.AreEqual(0, blank!.Settings.Count);
+        CollectionAssert.AreEqual(new[] { "failed" }, blank.On.ToArray());
+        Assert.IsFalse(CodeAlta.Desktop.Rpc.AutomationsService.TryRead(item with { Source = new([], """{"nested":{"a":1}}""") }, out _));
+        Assert.IsFalse(CodeAlta.Desktop.Rpc.AutomationsService.TryRead(item with { Source = null }, out _));
+        Assert.IsFalse(CodeAlta.Desktop.Rpc.AutomationsService.TryRead(item with { Type = "Acme/Deploy" }, out _));
+    }
+
+    [TestMethod]
     public void TheSettingsOfATrigger_ReadTheSameWhateverTheirOrder()
     {
         var one = Settings(("b", PluginTriggerValue.OfText("2")), ("a", PluginTriggerValue.OfTexts(["x", "y"])));

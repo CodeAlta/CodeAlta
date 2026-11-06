@@ -1,10 +1,10 @@
 // The page's link to the automations of the application: what they are now, and the calls that change them.
 import type { automations, AutomationInput, AutomationItem, AutomationPublishTarget, AutomationRunItem, AutomationScriptItem, AutomationsListResponse, AutomationTeamItem,
-  AutomationTriggerItem } from "#neoastra";
+  AutomationTriggerItem, AutomationTriggerTypeItem } from "#neoastra";
 
 /** The calls of the host; `scripts` is missing from a host that has no library of scripts. */
 export type AutomationsApi = Pick<typeof automations, "list" | "refresh" | "save" | "delete" | "setEnabled" | "allow" | "startPlaced" | "setPaused" | "run" | "runs" | "preview" | "watch">
-  & Partial<Pick<typeof automations, "scripts" | "testTrigger" | "sampleEvent" | "tryRun" | "createHook" | "hookAddress" | "takeOver" | "publishTargets"
+  & Partial<Pick<typeof automations, "scripts" | "triggerTypes" | "testTrigger" | "sampleEvent" | "tryRun" | "createHook" | "hookAddress" | "takeOver" | "publishTargets"
   | "teamAutomations" | "openTeamAutomation">>;
 /** What a test or a sample of a trigger of another tool answered: a text, or what is wrong. */
 export type TriggerCheck = Readonly<{ ok: boolean; message: string | null; detail?: string | null; prompt?: string | null; replyTo?: string | null }>;
@@ -165,6 +165,15 @@ export function createAutomationsHub(api: AutomationsApi, timers: Timers = { set
       try {
         const reply = await api.scripts({ expectedEpoch: host, projectId }, { signal, timeoutMilliseconds: 15_000 });
         return reply.status === "ok" ? reply.scripts : [];
+      } catch { return []; }
+    },
+    /** The triggers of sources beside those of the editor: those of CodeAlta (project, automation) and those of the running plugins. */
+    async triggerTypes(signal: AbortSignal): Promise<readonly AutomationTriggerTypeItem[]> {
+      const host = epoch;
+      if (!host || !api.triggerTypes) return [];
+      try {
+        const reply = await api.triggerTypes({ expectedEpoch: host }, { signal, timeoutMilliseconds: 15_000 });
+        return reply.status === "ok" ? reply.types : [];
       } catch { return []; }
     },
     /** Tests the connection of a trigger of another tool, with the secrets of this computer. */

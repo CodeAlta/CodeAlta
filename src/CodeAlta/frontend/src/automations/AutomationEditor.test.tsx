@@ -75,3 +75,31 @@ test("the other triggers keep their own fields", () => {
   assert.doesNotMatch(row(newTrigger("jira")), /aria-label="Authors"|automation-command/);
   assert.doesNotMatch(row(newTrigger("daily")), /aria-label="Authors"|automation-command/);
 });
+
+test("a trigger of a source shows its events and the fields its source says, and a secret by its name", () => {
+  const source = {
+    type: "acme/deploy", displayName: "Deployment", description: null, needsProject: false, pluginId: "acme", script: null,
+    events: [{ id: "succeeded", label: "Succeeded", description: null }, { id: "failed", label: "Failed", description: null }],
+    fields: [
+      { id: "environment", label: "Environment", kind: "text", description: null, required: true, choices: [], placeholder: "prod" },
+      { id: "token", label: "Token", kind: "secret", description: null, required: false, choices: [], placeholder: null },
+      { id: "stage", label: "Stage", kind: "choice", description: null, required: false, choices: [{ id: "beta", label: "Beta" }], placeholder: null },
+      { id: "strict", label: "Strict", kind: "flag", description: null, required: false, choices: [], placeholder: null },
+    ],
+  };
+  const trigger: AutomationTriggerItem = { ...newTrigger("hourly"), type: "acme/deploy", event: "", source: { on: ["failed"], settingsJson: JSON.stringify({ environment: "prod", token: "${secret:DEPLOY}" }) } };
+  const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(TriggerRow, { hub, trigger, chat: true, disabled: false, onChange: never, onRemove: never, sources: [source] })));
+  assert.match(html, /<option value="acme\/deploy" selected="">Deployment<\/option>/);
+  assert.match(html, /role="group" aria-label="Events"/);
+  assert.match(html, /type="checkbox" checked=""\/><span class="bp6-control-indicator"><\/span>Failed/, "the event it chose is checked");
+  assert.match(html, /type="checkbox"\/><span class="bp6-control-indicator"><\/span>Succeeded/, "and only it");
+  assert.match(html, /aria-label="Environment"[^>]*value="prod"|value="prod"[^>]*aria-label="Environment"/);
+  assert.match(html, /value="DEPLOY"/, "a secret shows by its name, never as a value");
+  assert.match(html, /aria-label="Stage"/);
+  assert.match(html, /Strict/);
+  // A trigger whose plugin is not running stays as it is written.
+  const missing = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(TriggerRow, { hub, trigger, chat: true, disabled: false, onChange: never, onRemove: never, sources: [] })));
+  assert.match(missing, /<option value="acme\/deploy" selected="">acme\/deploy<\/option>/);
+});

@@ -18,6 +18,7 @@ import { codeModeSettingsMessages } from "./codeModeSettingsMessages";
 import { scriptCardMessages } from "./scriptCard/messages";
 import { resumeCardMessages } from "./resumeCard/messages";
 import { scriptAutomationMessages } from "./automations/scriptAutomationMessages";
+import { triggerSourceMessages } from "./automations/triggerSourceMessages";
 import { automationPlacementMessages } from "./automations/placementMessages";
 import { automationIntegrationMessages } from "./automations/integrationMessages";
 import { automationAutonomyMessages } from "./automations/autonomyMessages";
@@ -3000,6 +3001,7 @@ export const messages = dictionary({
   ...scriptCardMessages,
   ...resumeCardMessages,
   ...scriptAutomationMessages,
+  ...triggerSourceMessages,
   ...automationIntegrationMessages,
   ...automationAutonomyMessages,
   ...automationPlacementMessages,

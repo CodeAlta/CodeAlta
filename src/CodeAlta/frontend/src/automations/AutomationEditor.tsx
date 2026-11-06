@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { TriggerIcon } from "./TriggerIcon";
-import { Button, ButtonGroup, Callout, FormGroup, HTMLSelect, InputGroup, Menu, MenuItem, NumericInput, PopoverNext, SegmentedControl, Switch, TextArea } from "@blueprintjs/core";
-import type { AutomationPublishTarget, AutomationScriptItem, AutomationTriggerItem, WorkspaceProject } from "#neoastra";
+import { Button, ButtonGroup, Callout, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NumericInput, PopoverNext, SegmentedControl, Switch, TextArea } from "@blueprintjs/core";
+import type { AutomationPublishTarget, AutomationScriptItem, AutomationTriggerItem, AutomationTriggerTypeItem, WorkspaceProject } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { machineState } from "../machines/machines";
@@ -11,8 +11,9 @@ import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettin
 import { sessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import { useShellLanguage } from "../shellLanguage";
 import type { RunProvider } from "../workItems/runsWith";
-import { dayName, formProblem, formSettings, inputOf, isIntegration, isSchedule as schedule, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumTriggers, needsProject,
-  newTrigger, scriptArgumentsTemplate, sessionSettingsOf, triggerLabel, triggerTone, triggerTypes, weekDays, type AutomationForm, type TriggerType } from "./automations";
+import { dayName, formProblem, formSettings, inputOf, isIntegration, isSchedule as schedule, isSourceType, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumTriggers, needsProject,
+  newSourceTrigger, newTrigger, scriptArgumentsTemplate, sessionSettingsOf, triggerLabel, triggerTone, triggerTypes, weekDays, type AutomationForm, type TriggerType } from "./automations";
+import { SourceTriggerFields } from "./SourceTriggerFields";
 import type { AutomationsHub } from "./automationsHub";
 import { IntegrationTriggerFields, type IntegrationContext } from "./IntegrationTriggerFields";
 import { AutonomyFields } from "./AutonomyFields";
@@ -52,8 +53,10 @@ function Times({ value, disabled, onChange }: { value: readonly string[]; disabl
   </span>;
 }
 
-export function TriggerRow({ hub, trigger, chat, disabled, onChange, onRemove, context }: {
+export function TriggerRow({ hub, trigger, chat, disabled, onChange, onRemove, context, sources = [] }: {
   hub: AutomationsHub; trigger: AutomationTriggerItem;
+  /** The triggers of sources: those of CodeAlta and those of the running plugins. */
+  sources?: readonly AutomationTriggerTypeItem[];
   /** Whether the automation runs in no project: its command then runs in the home folder. */
   chat: boolean;
   disabled: boolean; onChange: (value: AutomationTriggerItem) => void; onRemove: () => void;
@@ -65,8 +68,14 @@ export function TriggerRow({ hub, trigger, chat, disabled, onChange, onRemove, c
   return <li className="automation-trigger">
     <span className="automation-trigger-icon" data-file-tone={triggerTone(trigger.type)}><TriggerIcon type={trigger.type} size={15} /></span>
     <div className="automation-trigger-fields">
-      <HTMLSelect value={trigger.type} disabled={disabled} aria-label={t("Trigger")} onChange={event => onChange(newTrigger(event.target.value as TriggerType))}>
+      <HTMLSelect value={trigger.type} disabled={disabled} aria-label={t("Trigger")} onChange={event => {
+        const source = sources.find(candidate => candidate.type === event.target.value);
+        onChange(source ? newSourceTrigger(source) : newTrigger(event.target.value as TriggerType));
+      }}>
         {triggerTypes.map(type => <option key={type} value={type}>{t(triggerLabel(type))}</option>)}
+        {sources.map(source => <option key={source.type} value={source.type}>{source.pluginId ? source.displayName : t(triggerLabel(source.type))}</option>)}
+        {/* A trigger whose plugin is not running stays as it is written. */}
+        {isSourceType(trigger.type) && !sources.some(source => source.type === trigger.type) && <option value={trigger.type}>{trigger.type}</option>}
       </HTMLSelect>
       {trigger.type === "hourly" && <>
         <span>{t("every")}</span>
@@ -104,6 +113,7 @@ export function TriggerRow({ hub, trigger, chat, disabled, onChange, onRemove, c
       </HTMLSelect>}
       {schedule(trigger) && <TriggerPreview hub={hub} trigger={trigger} />}
       {isIntegration(trigger.type) && trigger.integration && context && <IntegrationTriggerFields hub={hub} trigger={trigger} context={context} disabled={disabled} onChange={onChange} />}
+      {isSourceType(trigger.type) && <SourceTriggerFields trigger={trigger} source={sources.find(source => source.type === trigger.type) ?? null} disabled={disabled} onChange={onChange} />}
     </div>
     <Button variant="minimal" size="small" disabled={disabled} icon={<AppIcon name="trash" size={14} />} aria-label={t("Remove this trigger")} title={t("Remove this trigger")} onClick={onRemove} />
   </li>;
@@ -131,6 +141,15 @@ function ScriptFields({ scripts, form, disabled, edit }: {
     {script && script.parameters.length > 0 && <p className="automation-script-parameters">
       {script.parameters.map(parameter => <code key={parameter.name} title={parameter.description ?? undefined}>{`${parameter.name}${parameter.required ? "" : "?"}: ${parameter.type ?? "unknown"}`}</code>)}
     </p>}
+    {/* A script that only calls back into plugins or tools runs alone: what it may do is said here, nobody approves it. */}
+    <Switch className="automation-script-direct" checked={form.withoutModel} disabled={disabled} label={t("Run without a model")}
+      onChange={event => edit({ withoutModel: event.currentTarget.checked, writes: event.currentTarget.checked && form.writes })} />
+    {form.withoutModel && <>
+      <p className="automation-script-description">{t("No session and no model: the script runs alone, with the alta commands that change nothing, those of plugins, and the tools that read.")}</p>
+      <Switch className="automation-script-direct" checked={form.writes} disabled={disabled} label={t("It may edit files and run commands")}
+        onChange={event => edit({ writes: event.currentTarget.checked })} />
+      {form.writes && <p className="automation-script-description">{t("In the sandbox of Runs with; without one only in your own configuration.")}</p>}
+    </>}
   </FormGroup>;
 }
 
@@ -181,6 +200,13 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
     void hub.publishTargets(form.runsOn, abort.signal).then(value => { if (!abort.signal.aborted) setTargets(value); });
     return () => abort.abort();
   }, [hub, form.runsOn]);
+  // The triggers of sources: those of CodeAlta and those of the running plugins.
+  const [sources, setSources] = useState<readonly AutomationTriggerTypeItem[]>([]);
+  useEffect(() => {
+    const abort = new AbortController();
+    void hub.triggerTypes(abort.signal).then(value => { if (!abort.signal.aborted) setSources(value); });
+    return () => abort.abort();
+  }, [hub]);
   const [scripts, setScripts] = useState<readonly AutomationScriptItem[]>([]);
   // The scripts of the project it runs in come first, then yours.
   useEffect(() => {
@@ -209,7 +235,22 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
     const missing = needsProject({ type }) && !form.projectId;
     return <MenuItem key={type} icon={<span data-file-tone={triggerTone(type)}><TriggerIcon type={type} size={15} /></span>} text={t(triggerLabel(type))}
       disabled={missing} label={missing ? t("Needs a project") : undefined} onClick={() => edit({ triggers: [...form.triggers, newTrigger(type)] })} />;
-  })}</Menu>;
+  })}
+    {sources.length > 0 && <MenuDivider />}
+    {sources.map(source => {
+      const missing = source.needsProject && !form.projectId;
+      return <MenuItem key={source.type} icon={<span data-file-tone={triggerTone(source.type)}><TriggerIcon type={source.type} size={15} /></span>}
+        text={source.pluginId ? source.displayName : t(triggerLabel(source.type))} title={source.description ?? undefined} disabled={missing}
+        label={missing ? t("Needs a project") : source.script && !form.script && !form.prompt.trim() ? t("With its script") : undefined} onClick={() => addSource(source)} />;
+    })}</Menu>;
+  // A trigger of a plugin that comes with its script, added to an automation that does nothing yet, makes it run that script.
+  function addSource(source: AutomationTriggerTypeItem) {
+    const triggers = [...form.triggers, newSourceTrigger(source)];
+    if (!source.script || form.script || form.prompt.trim()) { edit({ triggers }); return; }
+    setKind("script");
+    edit({ triggers, script: source.script.name, scriptArguments: source.script.argumentsJson ?? "", withoutModel: source.script.withoutModel, writes: source.script.writes,
+      name: form.name || source.displayName });
+  }
 
   return <AppWindow storageKey="codealta.desktop.window.automation.v1" className="automation-editor-dialog" titleId="automation-editor-title"
     title={t(form.id ? "Edit automation" : "New automation")} preferredSize={viewport => ({ width: Math.min(760, viewport.width - 40), height: Math.min(820, viewport.height - 40) })}
@@ -259,7 +300,7 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
             {form.triggers.length === 0 && <li className="automation-trigger">
               <span className="automation-trigger-icon" data-file-tone="muted"><AppIcon name="hand" size={15} /></span>
               <div className="automation-trigger-fields"><span>{t("When you run it")}</span></div></li>}
-            {form.triggers.map((trigger, index) => <TriggerRow key={index} hub={hub} trigger={trigger} chat={!form.projectId} disabled={busy}
+            {form.triggers.map((trigger, index) => <TriggerRow key={index} hub={hub} trigger={trigger} chat={!form.projectId} disabled={busy} sources={sources}
               context={{ projectId: form.projectId, runsOn: form.runsOn, prompt: form.prompt, savedId: form.id, saved: unchanged, index }}
               onChange={value => edit({ triggers: form.triggers.map((other, at) => at === index ? value : other) })}
               onRemove={() => edit({ triggers: form.triggers.filter((_, at) => at !== index) })} />)}
