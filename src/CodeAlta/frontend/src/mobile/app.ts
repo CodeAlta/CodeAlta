@@ -10,6 +10,7 @@ import { isBusy, type Live, type Options, type ProjectList, type PromptMode, typ
 import { activityLine, el, icon, iconSvg, type IconName } from "./dom";
 import { createDrafts, newSessionDraft } from "./drafts";
 import { installedApp, setUpInstall } from "./install";
+import { setUpNotifications } from "./notifications";
 import { createLiveStream, type LinkState } from "./liveStream";
 import { createMarkdownView } from "./markdownView";
 import {
@@ -1497,13 +1498,14 @@ export function startMobile(window: Window & typeof globalThis) {
   }
 
   async function start() {
-    setUpInstall(window, store);
+    const worker = setUpInstall(window, store);
     sessions.setFilter(keptProjects());
     showFilter();
     if (!await signInFromAddress()) return;
     route();
     await readList();
     if (signedOut) return;
+    setUpNotifications(window, store, api, worker, text => showToast(text));
     stream.start();
     readProjects().then(showFilter, () => { /* the filter names the ids until the projects are read */ });
   }

@@ -42,6 +42,9 @@ internal sealed record MobileServerOptions
     /// <summary>Gets the live state of the sessions.</summary>
     public required MobileLive Live { get; init; }
 
+    /// <summary>Gets Web Push delivery for installed apps; null when the host does not provide it.</summary>
+    public MobilePush? Push { get; init; }
+
     /// <summary>Gets the log of the plugin.</summary>
     public required XenoAtom.Logging.Logger Logger { get; init; }
 }
@@ -133,6 +136,16 @@ internal sealed partial class MobileServer : IAsyncDisposable
 
         var api = app.MapGroup("/api").AddEndpointFilter(async (invocation, next) =>
             Authorized(invocation.HttpContext) ? await next(invocation).ConfigureAwait(false) : Results.Unauthorized());
+        api.MapGet("/push", () => _options.Push is { } push
+            ? Json(new JsonObject { ["publicKey"] = push.PublicKey }) : Results.NotFound());
+        api.MapPost("/push/subscription", async (HttpContext context, CancellationToken ct) =>
+            _options.Push is { } push && await push.SubscribeAsync(Phone(context)!, await BodyAsync(context.Request, ct).ConfigureAwait(false), ct).ConfigureAwait(false)
+                ? Results.NoContent() : Invalid());
+        api.MapPost("/push/unsubscribe", async (HttpContext context, CancellationToken ct) =>
+        {
+            if (_options.Push is { } push) await push.UnsubscribeAsync(Phone(context)!, ct).ConfigureAwait(false);
+            return Results.NoContent();
+        });
         // A project repeated for each one the phone keeps to: ?project=a&project=b.
         api.MapGet("/sessions", async (int? offset, int? limit, string[]? project, CancellationToken ct) =>
             Json(await _options.Sessions.ListAsync(offset ?? 0, limit ?? MobileSessions.DefaultPageSize, project, ct).ConfigureAwait(false)));
@@ -298,11 +311,14 @@ internal sealed partial class MobileServer : IAsyncDisposable
         return Results.Bytes(image.Bytes, image.MediaType);
     }
 
-    private bool Authorized(HttpContext context)
+    private bool Authorized(HttpContext context) => Phone(context) is not null;
+
+    private string? Phone(HttpContext context)
     {
         var header = context.Request.Headers.Authorization.ToString();
-        if (header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && _options.Access.IsPhone(header[7..].Trim())) return true;
-        return _options.Access.IsPhone(context.Request.Cookies[CookieName]);
+        if (header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && _options.Access.IsPhone(header[7..].Trim())) return header[7..].Trim();
+        var cookie = context.Request.Cookies[CookieName];
+        return _options.Access.IsPhone(cookie) ? cookie : null;
     }
 
     private async Task<IResult> FileAsync(HttpContext context, string path, string? policy, CancellationToken cancellationToken)

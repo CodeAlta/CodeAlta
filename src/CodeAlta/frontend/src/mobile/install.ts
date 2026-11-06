@@ -36,7 +36,7 @@ export function setUpInstall(window: Window & typeof globalThis, store: KeyValue
   let deferred: InstallPrompt | null = null;
   const dismissed = () => { const at = Number(store.get(dismissKey)); return !!at && Date.now() - at < week; };
 
-  if ("serviceWorker" in window.navigator) window.navigator.serviceWorker.register("/sw.js").catch(() => { /* no service worker: the page still runs */ });
+  const worker = "serviceWorker" in window.navigator ? window.navigator.serviceWorker.register("/sw.js").catch(() => undefined) : undefined;
   window.addEventListener("beforeinstallprompt", event => { event.preventDefault(); deferred = event as InstallPrompt; sync(); });
   window.addEventListener("appinstalled", () => { deferred = null; sheet.close(); sync(); });
   window.matchMedia("(display-mode: standalone)").addEventListener?.("change", sync);
@@ -68,4 +68,5 @@ export function setUpInstall(window: Window & typeof globalThis, store: KeyValue
   $("install-close").addEventListener("click", () => sheet.close());
   $("install-not-now").addEventListener("click", notNow);
   sync();
+  return worker;
 }

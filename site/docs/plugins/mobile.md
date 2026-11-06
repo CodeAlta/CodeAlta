@@ -34,6 +34,12 @@ The phone opens the page of the sessions and stays signed in. Add it to the home
 
 When something keeps a phone from connecting, the Mobile tab says what it is and how to fix it: Tailscale is not installed, not signed in, Serve is not enabled on the tailnet, or the port is used by something else. **Try again** asks Tailscale again once it is fixed.
 
+## Notifications
+
+In the installed app, tap the **bell** and allow notifications. CodeAlta notifies you when a turn completes or fails, or a session needs your answer, review or permission, even while the app is in the background. Tap a notification to open that session. Tap the bell again to turn notifications off. If you blocked them, allow notifications in the app's settings on your phone first. Notifications require a browser with Web Push support; on iPhone and iPad, open CodeAlta from the home screen.
+
+The computer must stay on with CodeAlta Desktop and the Mobile plugin running, and be able to reach your browser's push service. Notification delivery follows your phone's notification and Focus settings. Push messages are encrypted and contain only a session identifier and the kind of notification, not your conversation or commands. **Reset access** also stops future notifications to disconnected phones.
+
 ## On the phone
 
 - **The sessions**, latest activity first, six at a time, each with a dot and a line that show what it does: working, calling tools, thinking, writing. The filter button keeps the list to the projects you check, one or several; the checked ones come first, and **All projects** shows them all again.

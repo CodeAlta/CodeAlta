@@ -129,6 +129,9 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
   const session = (id: string) => `/api/sessions/${encodeURIComponent(id)}`;
   return {
     login,
+    pushKey: () => call<{ publicKey: string }>("GET", "/api/push"),
+    subscribePush: (subscription: PushSubscriptionJSON) => call<void>("POST", "/api/push/subscription", subscription),
+    unsubscribePush: () => call<void>("POST", "/api/push/unsubscribe"),
     /** Signs in with the token of the QR link: true when it is accepted (and kept), false when refused (and forgotten). */
     async signIn(token: string): Promise<boolean> {
       store.set(tokenKey, token);

@@ -16,6 +16,7 @@
          the desktop (src/CodeAlta/frontend/mobile.html) and given by the host (IPluginServices.AppFiles). -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="QRCoder" />
+    <PackageReference Include="Lib.Net.Http.WebPush" />
     <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
     <InternalsVisibleTo Include="CodeAlta.Plugin.Mobile.Tests" />
     <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
