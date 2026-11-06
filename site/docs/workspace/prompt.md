@@ -20,6 +20,13 @@ The prompt is where you write to a session; the timeline above it shows what the
 | `F10` | Clear the queue |
 | `Alt+=` (`Ctrl+Alt+=` on macOS) | Write or edit an [equation](#equations) (CodeAlta Desktop) |
 
+An empty prompt names the keys that are its own: `?` opens the help and `/` the commands, and at the start of a word `@` inserts a link to a file of the project and `#` a link to an issue.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-prompt-hints.webp" alt="An empty prompt of CodeAlta Desktop: Ask CodeAlta to work on this project, then Type ? for help, / for commands, @ to insert a link to a project file, # to insert a link to an issue" loading="lazy">
+  <figcaption class="small text-secondary mt-2">An empty prompt says what ?, /, @ and # do.</figcaption>
+</figure>
+
 Queued prompts can be edited, repeated, sent at once to steer, or deleted. When a provider cannot steer a running turn, the prompt waits for the next turn. See [Busy sessions and queues](../sessions/readme.md#busy-sessions-and-queues).
 
 ## Above the editor

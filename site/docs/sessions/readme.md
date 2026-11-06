@@ -63,7 +63,7 @@ A session you did not name takes a short title from its first prompt. Then it fo
 | **Chosen by the model** | Is chosen by the model, and changes with the subject of the session. This is the default. |
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-session-settings.webp" alt="The Sessions page of the Settings of CodeAlta Desktop with the choice of how a session you did not name is titled, Review changes before commit, and Single tab for sessions" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-session-settings.webp" alt="The Sessions page of the Settings of CodeAlta Desktop with the choice of how a session you did not name is titled, Suggest the next prompt, Review changes before commit, Single tab for sessions, and the start of Why CodeAlta signs its work" loading="lazy">
   <figcaption class="small text-secondary mt-2">The Sessions page of the Settings chooses how a session you did not name is titled, and whether agents wait for your review before they commit.</figcaption>
 </figure>
 
@@ -222,7 +222,14 @@ Agents end each commit message with this line, beside the lines their provider a
 Co-authored-by: CodeAlta <noreply@codealta.io>
 ```
 
-GitHub then shows CodeAlta as a co-author. Your name is already on the commit: the line adds that an AI coding agent did the work, and it helps others discover CodeAlta, which is free and open source. Settings says why above both lines, and asks once before you turn one off or save a text that no longer names CodeAlta. To turn it off, clear **Settings > Sessions > Commits > Add CodeAlta as co-author**. To have agents add another line, write it in **Co-author line**, such as `Assisted-by: Contoso Agent <agents@contoso.example>`: one Git trailer, a name, a colon and a value, of 200 characters at most. The field starts with the line of CodeAlta, and its reset button goes back to it. Both are in `~/.alta/config.toml`:
+GitHub then shows CodeAlta as a co-author. Your name is already on the commit: the line adds that an AI coding agent did the work, and it helps others discover CodeAlta, which is free and open source. Settings says why above both lines, and asks once before you turn one off or save a text that no longer names CodeAlta.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-session-attribution.webp" alt="Why CodeAlta signs its work, above the Commits card with Add CodeAlta as co-author and the Co-author line, and the Comments and messages card with Say that CodeAlta wrote it and the Markdown editor of the Instruction to agents" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Settings > Sessions says why CodeAlta signs the work of its agents, above the two lines that do it.</figcaption>
+</figure>
+
+To turn it off, clear **Settings > Sessions > Commits > Add CodeAlta as co-author**. To have agents add another line, write it in **Co-author line**, such as `Assisted-by: Contoso Agent <agents@contoso.example>`: one Git trailer, a name, a colon and a value, of 200 characters at most. The field starts with the line of CodeAlta, and its reset button goes back to it. Both are in `~/.alta/config.toml`:
 
 ```toml
 [commits]
