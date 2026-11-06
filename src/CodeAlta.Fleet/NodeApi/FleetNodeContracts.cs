@@ -753,6 +753,9 @@ public sealed record FleetNodeStatus(string Name, string DeviceId, string Versio
 
     /// <summary>Gets the versions of the node and where its self-update stands; null for a node that does not say.</summary>
     public Protocol.FleetUpdateStatus? Update { get; init; }
+
+    /// <summary>Gets what the worktrees of its sessions take on its disk; null before their first measure, or for a node that does not say.</summary>
+    public FleetWorktreeUsage? Worktrees { get; init; }
 }
 
 /// <summary>A paired device as the owner's local control shows it.</summary>

@@ -151,8 +151,12 @@ labels, its local policy).
   and a person's checkout on that machine is never changed under them. A project in no git repository, or one without
   a commit yet, is worked in where it is; a worktree that cannot be made refuses the session rather than share the
   checkout.
-- Disk use is shown in the fleet; worktrees of sessions archived or deleted are removed by the existing worktree
-  cleanup.
+- A headless node runs no CodeAlta Desktop to remove them, so it removes them itself (`FleetSessionWorktreeCleanup`,
+  hourly): the worktree on an `alta/` branch of a session archived, deleted or idle for 7 days, when the session neither
+  works nor waits and nothing in it is uncommitted. Its branch goes only when all its commits are in another branch. A
+  session whose worktree went gets a new one, from the branch that kept its commits, at its next prompt. The worktrees a
+  pass saw are kept in `fleet/session-worktrees.json`, since a deleted session no longer names its own.
+- What the worktrees take on the disk is measured at each pass and shown on the page of the machine.
 
 ## Limits and good citizenship
 

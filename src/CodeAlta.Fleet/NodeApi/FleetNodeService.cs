@@ -114,6 +114,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     private readonly CodeAltaHost _host;
     // The worktree each session started here works in (doc/fleet/node.md, "Workspaces").
     private readonly FleetSessionWorktrees _worktrees;
+    // What removes those worktrees once their sessions no longer use them.
+    private readonly FleetSessionWorktreeCleanup _worktreeCleanup;
     private readonly TrustedDeviceStore _trusted;
     private readonly X509Certificate2 _certificate;
     private readonly ConcurrentDictionary<FleetConnection, FleetNodeCaller> _callers = new();
@@ -139,6 +141,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         _options = options;
         _host = options.Host;
         _worktrees = new FleetSessionWorktrees(options.Host.CatalogOptions);
+        _worktreeCleanup = new FleetSessionWorktreeCleanup(options.Host, options.TimeProvider);
         _trusted = options.TrustedDevices;
         Pairing = new FleetPairingCoordinator(options.Identity, options.TrustedDevices, options.TimeProvider);
         _certificate = options.Identity.CreateTlsCertificate();
@@ -167,6 +170,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         options.Host.Identities.InheritWork = (sessionId, parentSessionId) => Principals.Inherit(sessionId, parentSessionId);
         // A session deleted is gone for sure: whose work it was is forgotten then, never because it is not found now.
         options.Host.RuntimeService.SessionDeleted += ForgetPrincipalOfDeleted;
+        _worktreeCleanup.Start();
         if (options.AdmitBudget is not null)
         {
             // A session whose send a budget holds waits for a person (it does not move); the sends held when the node stopped are
@@ -356,6 +360,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         if (_queuedRunGate is not null && ReferenceEquals(_host.RuntimeService.QueuedRunGate, _queuedRunGate)) _host.RuntimeService.QueuedRunGate = null;
         if (_heldSessions is not null && ReferenceEquals(_host.HeldSends, _heldSessions)) _host.HeldSends = null;
         _host.RuntimeService.SessionDeleted -= ForgetPrincipalOfDeleted;
+        await _worktreeCleanup.DisposeAsync().ConfigureAwait(false);
         foreach (var caller in _callers.Values)
         {
             try { await caller.Connection.CloseAsync("node_stopping").ConfigureAwait(false); }

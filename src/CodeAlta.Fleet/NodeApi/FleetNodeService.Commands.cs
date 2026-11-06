@@ -112,6 +112,31 @@ public sealed partial class FleetNodeService
         throw new FleetException(FleetNodeErrorCodes.Unavailable, null, problem);
     }
 
+    // A session whose worktree was removed while it was not used (FleetSessionWorktreeCleanup) works in a new one before its
+    // prompt: from the branch that kept its commits, else from the commit the checkout is on.
+    private async Task<SessionViewDescriptor> RequireWorktreeAsync(SessionViewDescriptor session)
+    {
+        if (session.WorktreeDirectory is not { Length: > 0 } folder || Directory.Exists(folder) || session.ProjectRef is not { } projectId) return session;
+        var project = await _host.ProjectCatalog.GetByIdAsync(projectId).ConfigureAwait(false);
+        if (project is null || project.Archived || !Directory.Exists(project.ProjectPath))
+            throw new FleetException(FleetNodeErrorCodes.Unavailable, null, $"The node has no project '{projectId}' any more.");
+        var kept = _worktreeCleanup.KeptBranch(session.SessionId);
+        var worktree = await _worktrees.PrepareAsync(project, kept, CancellationToken.None).ConfigureAwait(false);
+        // A kept branch that is gone meanwhile: the session goes on from the checkout.
+        if (worktree.Problem is not null && kept is not null) worktree = await _worktrees.PrepareAsync(project, null, CancellationToken.None).ConfigureAwait(false);
+        if (worktree.Problem is { } problem) throw new FleetException(FleetNodeErrorCodes.Unavailable, null, problem);
+        var switched = await _host.Commands.SwitchWorkFolderAsync(session.SessionId, project.Id, project.ProjectPath, worktree.Folder).ConfigureAwait(false);
+        if (switched.Status is not ("ok" or "unchanged"))
+        {
+            await _worktrees.RemoveUnusedAsync(project, worktree).ConfigureAwait(false);
+            throw new FleetException(FleetErrorCodes.ServerBusy, FleetErrorHints.Retry, $"The session could not be given a new worktree ({switched.Status}).");
+        }
+
+        _worktreeCleanup.Forget(session.SessionId);
+        LogInfo($"The session {session.SessionId} works in a new worktree, {worktree.Root ?? project.ProjectPath}" + (kept is null ? "." : $", from {kept}."));
+        return await RequireSessionAsync(session.SessionId, CancellationToken.None).ConfigureAwait(false);
+    }
+
     private async Task AdmitThenSendAsync(string environment, SessionViewDescriptor session, ModelProviderDescriptor provider, FleetCreateSessionParams parameters, string retryKey)
     {
         try
@@ -195,7 +220,7 @@ public sealed partial class FleetNodeService
         RequireNotHalted();
         var retryKey = RetryKey(call);
         RequirePrompt(parameters.Text);
-        var session = await RequireSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
+        var session = await RequireWorktreeAsync(await RequireSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
         RequirePolicySelection(session, parameters.Selection);
         var text = parameters.Text;
         // An agent's prompt is checked and attributed once: a retry of the same key gets the first receipt.
@@ -222,7 +247,7 @@ public sealed partial class FleetNodeService
         _ = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
         return await Once(call, FleetNodeJsonContext.Default.FleetQueueResult, async () =>
         {
-            var session = await RequireSessionAsync(parameters.SessionId, CancellationToken.None).ConfigureAwait(false);
+            var session = await RequireWorktreeAsync(await RequireSessionAsync(parameters.SessionId, CancellationToken.None).ConfigureAwait(false)).ConfigureAwait(false);
             var text = parameters.Agent is null ? parameters.Text
                 : await AgentPromptAsync(call, parameters.Agent, Protocol.FleetAgentRequestKinds.Queue, session.SessionId, parameters.Text, null, CancellationToken.None)
                     .ConfigureAwait(false);

@@ -42,10 +42,22 @@ public sealed class FleetSessionWorktrees
     /// without a commit yet, which work in the folder of the project; or why none could be made.
     /// </returns>
     /// <exception cref="OperationCanceledException">The token was canceled.</exception>
-    public async Task<FleetSessionWorktree> PrepareAsync(ProjectDescriptor? project, CancellationToken cancellationToken)
+    public Task<FleetSessionWorktree> PrepareAsync(ProjectDescriptor? project, CancellationToken cancellationToken)
+        => PrepareAsync(project, baseReference: null, cancellationToken);
+
+    /// <summary>
+    /// Gives a session of a project the folder it works in, from a branch or a commit: a session whose worktree was removed
+    /// goes on from the branch that kept its commits.
+    /// </summary>
+    /// <param name="project">The project of the session; null for a chat.</param>
+    /// <param name="baseReference">The branch or commit the worktree starts from; the commit the checkout is on when null.</param>
+    /// <param name="cancellationToken">Stops the creation; a worktree git had added is taken away.</param>
+    /// <returns>The worktree, <see cref="FleetSessionWorktree.None"/>, or why none could be made.</returns>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public async Task<FleetSessionWorktree> PrepareAsync(ProjectDescriptor? project, string? baseReference, CancellationToken cancellationToken)
     {
         if (project is null || GitWorktreeService.FindCheckoutRoot(project.ProjectPath) is null) return FleetSessionWorktree.None;
-        var created = await _worktrees.CreateAsync(project, baseReference: null, branchName: null, progress: null, withoutHooks: true, cancellationToken).ConfigureAwait(false);
+        var created = await _worktrees.CreateAsync(project, baseReference, branchName: null, progress: null, withoutHooks: true, cancellationToken).ConfigureAwait(false);
         if (created.Succeeded) return new(created.Folder, created.Root, null);
         // A repository with no commit has nothing to check out: its sessions work in its folder, as before its first commit.
         if (created.Status is "no_commit" or "not_repository") return FleetSessionWorktree.None;
@@ -55,7 +67,7 @@ public sealed class FleetSessionWorktrees
 
     /// <summary>Takes away a worktree no session came of, with its branch; what git cannot remove stays among the worktrees of the project.</summary>
     /// <param name="project">The project of the worktree; null for a chat, which has none.</param>
-    /// <param name="worktree">What <see cref="PrepareAsync"/> gave.</param>
+    /// <param name="worktree">What <see cref="PrepareAsync(ProjectDescriptor?, string?, CancellationToken)"/> gave.</param>
     /// <returns>A task that completes once it is removed, or could not be.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="worktree"/> is null.</exception>
     public async Task RemoveUnusedAsync(ProjectDescriptor? project, FleetSessionWorktree worktree)

@@ -16,6 +16,9 @@ public sealed partial class FleetNodeService
     /// <summary>Gets what the node keeps of the sessions agents of other machines started on it: its owner's policy, their lineage and their outbox.</summary>
     public FleetAgentSessions AgentSessions => _agents;
 
+    /// <summary>Gets what removes the worktrees of the sessions of the node once they no longer use them.</summary>
+    public FleetSessionWorktreeCleanup WorktreeCleanup => _worktreeCleanup;
+
     private void RegisterAgents(FleetNodeCaller caller)
     {
         On(caller, FleetNodeMethods.AgentsDeliveriesTake, Access.View, FleetNodeJsonContext.Default.FleetAgentDeliveryTakeParams,

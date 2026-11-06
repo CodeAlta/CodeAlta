@@ -31,8 +31,8 @@ let projects = [{ id: "p1", name: "app", path: "/home/me/code/app", repository: 
 const view = (id: string): MachineManagement => id === "managed"
   ? { status: "ok", message: null, version: "4.0.0", sessionsAtWork: 0, updating: false, update: { running: "4.0.0", installed: "4.0.0", pendingVersion: null, pendingPhase: null,
     lastVersion: null, lastOutcome: null }, devices, projects, problems: [], providers: [{ key: "codex", name: "Codex", isDefault: true, defaultModel: "GPT-6.1", models: 3 }],
-    thisDevice: "me" }
-  : { status: "not_manager", message: null, version: null, sessionsAtWork: 0, updating: false, update: null, devices: [], projects: [], problems: [], providers: [], thisDevice: "me" };
+    thisDevice: "me", worktrees: { count: 3, kilobytes: 2.5 * 1024 * 1024, idleDays: 7, measuredAt: "2026-11-06T10:00:00Z" } }
+  : { status: "not_manager", message: null, version: null, sessionsAtWork: 0, updating: false, update: null, devices: [], projects: [], problems: [], providers: [], thisDevice: "me", worktrees: null };
 const api: MachinePageApi = {
   management: async request => view(request.machineId),
   setDevicePermission: async request => {

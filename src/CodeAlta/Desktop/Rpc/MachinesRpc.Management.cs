@@ -48,6 +48,8 @@ internal sealed partial class MachinesService
             {
                 Providers = Providers(info),
                 ThisDevice = self,
+                Worktrees = status.Worktrees is { } worktrees
+                    ? new MachineWorktreesView(worktrees.Count, (int)Math.Min(int.MaxValue, worktrees.Bytes / 1024), worktrees.IdleDays, Format(worktrees.MeasuredAt)) : null,
             };
         }
         catch (ObjectDisposedException) { return MachineManagement.Refused(RemoteSessionHost.Describe(host.State)); }
@@ -199,8 +201,18 @@ internal sealed record MachineManagement(string Status, string? Message, string?
     /// <summary>Gets the device id of this computer, as the machine knows it (what its owner names to give it a permission).</summary>
     public string? ThisDevice { get; init; }
 
+    /// <summary>Gets what the worktrees of its sessions take on its disk; null before the machine measured them, or for one that does not say.</summary>
+    public MachineWorktreesView? Worktrees { get; init; }
+
     internal static MachineManagement Refused(string status) => new(status, null, null, 0, false, null, [], [], []);
 }
+
+/// <summary>The worktrees the sessions of a machine work in, as the machine measured them last.</summary>
+/// <param name="Count">How many there are.</param>
+/// <param name="Kilobytes">What their files take on its disk, in kilobytes.</param>
+/// <param name="IdleDays">How many days a session is idle before the machine removes its worktree.</param>
+/// <param name="MeasuredAt">When the machine measured them.</param>
+internal sealed record MachineWorktreesView(int Count, int Kilobytes, int IdleDays, string MeasuredAt);
 
 /// <summary>Where the self-update of a machine stands.</summary>
 /// <param name="Running">The version that runs.</param>

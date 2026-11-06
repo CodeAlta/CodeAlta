@@ -10,6 +10,7 @@ import type { MessageKey } from "../localization";
 import { machineIntent, machineState, machineStateLabel } from "./machines";
 import { parseLabels } from "../fleet/fleetSecrets";
 import { MachineProviders } from "./MachineProviders";
+import { formatSize } from "../search/SearchSettings";
 import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, isMachineLabel, managementProblem, orderedDevices, permissionLabel, permissionsEditable, projectSource,
   updateSummary, type DevicePermission } from "./machineManagement";
 
@@ -442,7 +443,8 @@ function ProjectsSection({ view, busy, machine, onAdd, onRemove }: {
   view: MachineManagement; busy: boolean; machine: MachineView;
   onAdd: (kind: "clone" | "folder", value: string, done: (note: string | null | undefined) => void) => void; onRemove: (projectId: string) => void;
 }) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
+  const worktrees = view.worktrees;
   const [text, setText] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const source = projectSource(text);
@@ -465,6 +467,12 @@ function ProjectsSection({ view, busy, machine, onAdd, onRemove }: {
     {text.trim() && !source && <small className="muted-text">{t("Give a repository URL, or the full path of a folder on the machine.")}</small>}
     {note && <small className="muted-text">{note}</small>}
     {view.problems.map(text => <Callout key={text} compact intent="warning">{text}</Callout>)}
+    {/* Each session works in a worktree of its own there; the machine removes those its sessions no longer use. */}
+    {worktrees && <p className="muted-text machine-worktrees">
+      {t(worktrees.count === 1 ? "Its sessions work in 1 worktree, which takes {size} on its disk." : "Its sessions work in {count} worktrees, which take {size} on its disk.",
+        { count: worktrees.count, size: formatSize(worktrees.kilobytes, locale) })}{" "}
+      {t("A worktree goes once its session is archived, deleted or idle for {days} days, and nothing in it is left uncommitted.", { days: worktrees.idleDays })}
+    </p>}
   </section>;
 }
 
