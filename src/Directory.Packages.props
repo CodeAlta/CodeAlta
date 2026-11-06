@@ -29,8 +29,6 @@
     <PackageVersion Include="OpenTelemetry" Version="1.20.1" />
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.20.1" />
     <PackageVersion Include="QRCoder" Version="1.8.1" />
-    <!-- Mobile Web Push: VAPID and RFC 8291 encryption, using .NET cryptography. -->
-    <PackageVersion Include="Lib.Net.Http.WebPush" Version="3.3.1" />
     <PackageVersion Include="org.k2fsa.sherpa.onnx" Version="2.0.1" />
     <!-- Search by meaning: the managed binding must not be newer than the ONNX Runtime sherpa-onnx 2.0.1 ships (1.28.2). -->
     <PackageVersion Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.28.0" />

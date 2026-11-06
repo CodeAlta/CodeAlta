@@ -83,6 +83,7 @@ public sealed class MobilePushTests
         Assert.AreEqual(1, delivery.Requests.Count);
         var sent = delivery.Requests[0];
         StringAssert.StartsWith(sent.Authorization!, "vapid ");
+        AssertVapid(sent.Authorization!, publicKey, "https://fcm.googleapis.com");
         Assert.AreEqual("aes128gcm", sent.Encoding);
         Assert.AreEqual("600", sent.Ttl);
         var decoded = JsonNode.Parse(Decrypt(sent.Body, receiver, Base64Url.DecodeFromChars((string)subscription["keys"]!["auth"]!)))!;
@@ -121,6 +122,25 @@ public sealed class MobilePushTests
         Assert.AreEqual(1, delivery.Requests.Count, "A 410 removes the expired subscription.");
         var saved = await state.ReadJsonAsync<MobilePushFile>(PluginStateScope.User, MobilePush.FileName);
         Assert.AreEqual(0, saved!.Phones.Count);
+    }
+
+    // Independent RFC 8292 check: the token is an ES256 JWT for the origin of the push service, signed by the key the phone subscribed with.
+    private static void AssertVapid(string authorization, string publicKey, string audience)
+    {
+        var parameters = authorization["vapid ".Length..].Split(", ").Select(static part => part.Split('=', 2)).ToDictionary(static part => part[0], static part => part[1]);
+        Assert.AreEqual(publicKey, parameters["k"]);
+        var parts = parameters["t"].Split('.');
+        Assert.AreEqual(3, parts.Length);
+        var header = JsonNode.Parse(Base64Url.DecodeFromChars(parts[0]))!;
+        Assert.AreEqual("ES256", (string?)header["alg"]);
+        var claims = JsonNode.Parse(Base64Url.DecodeFromChars(parts[1]))!;
+        Assert.AreEqual(audience, (string?)claims["aud"]);
+        Assert.AreEqual("https://codealta.io", (string?)claims["sub"]);
+        var expires = DateTimeOffset.FromUnixTimeSeconds((long)claims["exp"]!);
+        Assert.IsTrue(expires > DateTimeOffset.UtcNow && expires <= DateTimeOffset.UtcNow.AddHours(24), "RFC 8292 allows at most 24 hours.");
+        var key = Base64Url.DecodeFromChars(publicKey);
+        using var verifier = ECDsa.Create(new ECParameters { Curve = ECCurve.NamedCurves.nistP256, Q = new ECPoint { X = key[1..33], Y = key[33..] } });
+        Assert.IsTrue(verifier.VerifyData(Encoding.ASCII.GetBytes($"{parts[0]}.{parts[1]}"), Base64Url.DecodeFromChars(parts[2]), HashAlgorithmName.SHA256));
     }
 
     private static AgentActivityEvent Turn(AgentActivityPhase phase, string id = "turn-1")

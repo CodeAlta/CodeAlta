@@ -1,10 +1,9 @@
 using System.Buffers.Text;
 using System.Net;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Nodes;
 using CodeAlta.Plugins.Abstractions;
-using Lib.Net.Http.WebPush;
-using Lib.Net.Http.WebPush.Authentication;
 
 namespace CodeAlta.Plugin.Mobile;
 
@@ -16,9 +15,10 @@ internal sealed class MobilePush : IDisposable
     private readonly MobileAccess _access;
     private readonly Lock _gate = new();
     private readonly SemaphoreSlim _saving = new(1, 1);
+    // How long, in seconds, a push service keeps a notice for a phone it cannot reach: an older one is no news.
+    private const int TimeToLive = 600;
     private readonly HttpClient _http;
-    private readonly VapidAuthentication _authentication;
-    private readonly PushServiceClient _client;
+    private readonly MobileWebPush _sender;
     private readonly MobilePushFile _file;
 
     private MobilePush(IPluginStateStore state, MobileAccess access, MobilePushFile file, HttpMessageHandler? handler)
@@ -28,8 +28,7 @@ internal sealed class MobilePush : IDisposable
         _file = file;
         // A subscription is supplied by a phone: never follow redirects from a push service to another host.
         _http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(10) };
-        _authentication = new VapidAuthentication(file.PublicKey, file.PrivateKey) { Subject = "https://codealta.github.io" };
-        _client = new PushServiceClient(_http) { DefaultAuthentication = _authentication, DefaultTimeToLive = 600, AutoRetryAfter = false };
+        _sender = new MobileWebPush(_http, file.PublicKey, file.PrivateKey, "https://codealta.io");
     }
 
     internal string PublicKey => _file.PublicKey;
@@ -109,24 +108,23 @@ internal sealed class MobilePush : IDisposable
         MobilePushPhone[] phones;
         lock (_gate) phones = [.. _file.Phones.Where(phone => _access.IsPhoneHash(phone.Phone))];
         if (phones.Length == 0 || await sessions.GetAsync(notice.SessionId, cancellationToken).ConfigureAwait(false) is null) return;
-        var payload = new JsonObject { ["sessionId"] = notice.SessionId, ["kind"] = notice.Kind }.ToJsonString();
+        var payload = Encoding.UTF8.GetBytes(new JsonObject { ["sessionId"] = notice.SessionId, ["kind"] = notice.Kind }.ToJsonString());
         foreach (var phone in phones)
         {
             if (!_access.IsPhoneHash(phone.Phone)) continue;
             lock (_gate) { if (!_file.Phones.Contains(phone)) continue; }
-            var subscription = new PushSubscription { Endpoint = phone.Endpoint, Keys = new Dictionary<string, string> { ["p256dh"] = phone.PublicKey, ["auth"] = phone.Auth } };
             try
             {
-                await _client.RequestPushMessageDeliveryAsync(subscription, new PushMessage(payload) { Urgency = PushMessageUrgency.High }, cancellationToken).ConfigureAwait(false);
+                await _sender.SendAsync(phone.Endpoint, phone.PublicKey, phone.Auth, payload, TimeToLive, cancellationToken).ConfigureAwait(false);
             }
-            catch (PushServiceClientException exception) when (exception.StatusCode is HttpStatusCode.Gone or HttpStatusCode.NotFound)
+            catch (MobileWebPushException exception) when (exception.StatusCode is HttpStatusCode.Gone or HttpStatusCode.NotFound)
             {
                 lock (_gate) _file.Phones.Remove(phone);
                 await SaveAsync(cancellationToken).ConfigureAwait(false);
             }
             // A phone or its push service being unavailable must not stop delivery to the others. Never log the exception:
-            // push errors include the endpoint and keys. No retry loop: the next notice can reach a recovered service.
-            catch (Exception exception) when (exception is HttpRequestException or PushServiceClientException or CryptographicException
+            // an error of HttpClient may name the endpoint. No retry loop: the next notice can reach a recovered service.
+            catch (Exception exception) when (exception is HttpRequestException or MobileWebPushException or CryptographicException or FormatException
                 || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested) { }
         }
     }
@@ -146,7 +144,7 @@ internal sealed class MobilePush : IDisposable
     public void Dispose()
     {
         _http.Dispose();
-        _authentication.Dispose();
+        _sender.Dispose();
     }
 }
 
