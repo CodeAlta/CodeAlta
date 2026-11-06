@@ -38,23 +38,63 @@ internal sealed class BiDiBrowserConnection : IBrowserConnection
     /// <inheritdoc />
     public bool IsClosed => _lost || Volatile.Read(ref _disposed) != 0 || (_process?.HasExited ?? false);
 
-    /// <summary>Starts Firefox on a profile of CodeAlta's and connects to it; the browser ends with the connection.</summary>
-    public static async Task<BiDiBrowserConnection> LaunchAsync(InstalledBrowser browser, BrowserLaunchOptions options, CancellationToken cancellationToken, bool writePreferences = true)
+    /// <summary>How many times a Firefox whose session does not open is started again, the first start included.</summary>
+    internal const int SessionAttempts = 3;
+
+    /// <summary>
+    /// How long a start that is not the last waits for its session. Measured on Windows, 2026-11-06: a Firefox opens its
+    /// session in about 1 s alone and in up to 18 s on a machine busy on every core, but on a machine that runs many test
+    /// suites at once, one start in several waits minutes for <c>session.new</c> or <c>session.subscribe</c>, or never gets an
+    /// answer, while the next start answers in a second. The last start waits as long as any command does.
+    /// </summary>
+    internal static readonly TimeSpan SessionPatience = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Starts Firefox on a profile of CodeAlta's and connects to it; the browser ends with the connection. A Firefox whose
+    /// session does not open in time is ended and started again (<see cref="SessionAttempts"/>).
+    /// </summary>
+    public static Task<BiDiBrowserConnection> LaunchAsync(InstalledBrowser browser, BrowserLaunchOptions options, CancellationToken cancellationToken, bool writePreferences = true)
+        => StartAgainWhenStalledAsync(
+            () => FirefoxLauncher.LaunchAsync(options, writePreferences, cancellationToken),
+            (launch, patience) => ConnectAsync(browser, launch.Endpoint, launch.Process, patience, cancellationToken),
+            launch => launch.Process.DisposeAsync(),
+            SessionAttempts, SessionPatience);
+
+    /// <summary>
+    /// Starts a browser and connects to it, and starts it again when its session times out, for all the starts but the last,
+    /// which gets no patience of its own. A start that fails otherwise is not tried again.
+    /// </summary>
+    /// <exception cref="WebDriverBiDiTimeoutException">The last start did not open its session either.</exception>
+    internal static async Task<TConnection> StartAgainWhenStalledAsync<TLaunch, TConnection>(Func<Task<TLaunch>> launch, Func<TLaunch, TimeSpan?, Task<TConnection>> connect,
+        Func<TLaunch, ValueTask> end, int attempts, TimeSpan patience)
     {
-        var launch = await FirefoxLauncher.LaunchAsync(options, writePreferences, cancellationToken).ConfigureAwait(false);
-        try
+        ArgumentOutOfRangeException.ThrowIfLessThan(attempts, 1);
+        for (var attempt = 1; ; attempt++)
         {
-            return await ConnectAsync(browser, launch.Endpoint, launch.Process, cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            await launch.Process.DisposeAsync().ConfigureAwait(false);
-            throw;
+            var started = await launch().ConfigureAwait(false);
+            var last = attempt == attempts;
+            try
+            {
+                return await connect(started, last ? null : patience).ConfigureAwait(false);
+            }
+            catch (WebDriverBiDiTimeoutException) when (!last)
+            {
+                await end(started).ConfigureAwait(false);
+            }
+            catch
+            {
+                await end(started).ConfigureAwait(false);
+                throw;
+            }
         }
     }
 
     /// <summary>Connects to the BiDi endpoint of a Firefox and opens a session of the protocol on it.</summary>
-    public static async Task<BiDiBrowserConnection> ConnectAsync(InstalledBrowser browser, Uri endpoint, BrowserProcess? process, CancellationToken cancellationToken)
+    public static Task<BiDiBrowserConnection> ConnectAsync(InstalledBrowser browser, Uri endpoint, BrowserProcess? process, CancellationToken cancellationToken)
+        => ConnectAsync(browser, endpoint, process, null, cancellationToken);
+
+    // patience: how long the commands that open the session wait for Firefox; null for as long as any command does.
+    private static async Task<BiDiBrowserConnection> ConnectAsync(InstalledBrowser browser, Uri endpoint, BrowserProcess? process, TimeSpan? patience, CancellationToken cancellationToken)
     {
         var driver = new BiDiDriver(TimeSpan.FromSeconds(60));
         try
@@ -69,12 +109,13 @@ internal sealed class BiDiBrowserConnection : IBrowserConnection
                 {
                     AlwaysMatch = new CapabilityRequest { UnhandledPromptBehavior = new UserPromptHandler { Default = UserPromptHandlerType.Ignore }, Proxy = new SystemProxyConfiguration() },
                 },
-            }).ConfigureAwait(false);
+            }, patience, cancellationToken).ConfigureAwait(false);
             var version = session.Capabilities.BrowserVersion;
             var connection = new BiDiBrowserConnection(browser with { Version = string.IsNullOrEmpty(version) ? browser.Version : version }, driver, process);
             connection.Observe();
             // Only the tabs that open and close are told for every tab: what a tab does is subscribed per tab.
-            await driver.Session.SubscribeAsync(new SubscribeCommandParameters([driver.BrowsingContext.OnContextCreated.EventName, driver.BrowsingContext.OnContextDestroyed.EventName])).ConfigureAwait(false);
+            await driver.Session.SubscribeAsync(new SubscribeCommandParameters([driver.BrowsingContext.OnContextCreated.EventName, driver.BrowsingContext.OnContextDestroyed.EventName]),
+                patience, cancellationToken).ConfigureAwait(false);
             return connection;
         }
         catch
