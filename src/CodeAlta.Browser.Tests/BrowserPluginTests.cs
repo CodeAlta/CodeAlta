@@ -183,6 +183,14 @@ public sealed class BrowserPluginTests
     }
 
     [TestMethod]
+    public void Edge_StaysTheProcessCodeAltaStarted_UnderACompatibilityLayerOfWindows()
+    {
+        var options = new CodeAlta.Browser.Launch.BrowserLaunchOptions { Executable = "msedge", ProfileDirectory = "profile" };
+        CollectionAssert.Contains(CodeAlta.Browser.Launch.ChromiumLauncher.Arguments(options).ToArray(), "--edge-skip-compat-layer-relaunch",
+            "under __COMPAT_LAYER, Edge starts itself again and the process CodeAlta started exits before its DevTools endpoint opens");
+    }
+
+    [TestMethod]
     public void TheBrowsersOfCodeAlta_DoNotStartInGuestMode_WhichEndsTheConnectionAtANewContext()
     {
         var options = new CodeAlta.Browser.Launch.BrowserLaunchOptions { Executable = "chrome", ProfileDirectory = "profile" };

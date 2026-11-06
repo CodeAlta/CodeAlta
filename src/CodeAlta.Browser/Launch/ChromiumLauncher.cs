@@ -37,6 +37,10 @@ internal static class ChromiumLauncher
             // name is resolved ahead of a request, so that a sandboxed session's pages reach the network of its sandbox only.
             "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
             "--dns-prefetch-disable",
+            // A process Windows gives a compatibility layer (__COMPAT_LAYER, such as DetectorsAppHealth) makes Edge start
+            // itself again without it and exit: the process CodeAlta started would end at once, and the browser run on out of
+            // its reach. Other Chromium browsers ignore the switch.
+            "--edge-skip-compat-layer-relaunch",
         };
         // A temporary profile keeps no secret worth the system keychain; a kept one, where the user signs in, uses it.
         if (options.Temporary) arguments.AddRange(["--password-store=basic", "--use-mock-keychain"]);
