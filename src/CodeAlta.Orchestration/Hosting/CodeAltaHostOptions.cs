@@ -255,6 +255,12 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     public ISandboxBackend? SandboxBackend { get; init; }
 
+    /// <summary>
+    /// Gets the profile the sessions of the host run in when no scope sandboxes them, where the sandbox can run
+    /// (<see cref="Runtime.SessionRuntimeService.DefaultSandbox"/>); null, the default, for none.
+    /// </summary>
+    public string? DefaultSandbox { get; init; }
+
     /// <summary>Gets an optional environment map copied for host-created plugin adapter operation options; null preserves the original ambient snapshot.</summary>
     /// <remarks>This does not isolate the process or provider environment.</remarks>
     public IReadOnlyDictionary<string, string?>? PluginEnvironment { get; init; }

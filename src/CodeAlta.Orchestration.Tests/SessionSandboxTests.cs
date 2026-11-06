@@ -43,6 +43,28 @@ public sealed class SessionSandboxTests
     }
 
     [TestMethod]
+    public async Task AHostWithADefaultProfile_SandboxesTheSessionsNoScopeSandboxes_WhereTheSandboxCanRun()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend, defaultSandbox: SandboxProfiles.Node);
+        await f.CreateSessionAsync("s");
+
+        var sandbox = await f.Runtime.GetSessionSandboxAsync("s");
+        Assert.AreEqual(new SandboxChoice(SandboxProfiles.Node, SandboxScope.AllSessions), sandbox.Choice, "the profile of the host is the one of every session");
+        CollectionAssert.IsSubsetOf(new[] { "nuget.org", "github.com", "*.github.com" }, sandbox.Profile!.Hosts.ToArray(), "the registries of workspace, and the git hosts");
+
+        f.WriteConfig("[sandbox]\nall_sessions = \"off\"\n");
+        Assert.AreEqual(new SandboxChoice(null, SandboxScope.AllSessions), (await f.Runtime.GetSessionSandboxAsync("s")).Choice, "the owner turns it off");
+        f.WriteConfig("[sandbox.profiles.node]\nextends = \"node\"\nhosts = [\"git.example.com\"]\n");
+        CollectionAssert.IsSubsetOf(new[] { "github.com", "git.example.com" }, (await f.Runtime.GetSessionSandboxAsync("s")).Profile!.Hosts.ToArray(),
+            "the owner adds the hosts of the machine");
+
+        f.WriteConfig("");
+        backend.Available = false;
+        Assert.IsFalse((await f.Runtime.GetSessionSandboxAsync("s")).IsSandboxed, "where the sandbox cannot run, a session is not left unable to run a command");
+    }
+
+    [TestMethod]
     public async Task AConfigurationThatCannotBeRead_KeepsTheSandboxesReadLast()
     {
         await using var f = await Fixture.CreateAsync();
@@ -643,7 +665,7 @@ public sealed class SessionSandboxTests
 
         public CatalogOptions Options { get; }
 
-        public static async Task<Fixture> CreateAsync(ISandboxBackend? backend = null, Action<ModelProviderRegistry>? providers = null)
+        public static async Task<Fixture> CreateAsync(ISandboxBackend? backend = null, Action<ModelProviderRegistry>? providers = null, string? defaultSandbox = null)
         {
             var temp = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-sandbox-" + Guid.NewGuid().ToString("N"))).FullName;
             var registry = new ModelProviderRegistry();
@@ -657,6 +679,7 @@ public sealed class SessionSandboxTests
                 sessionViewCatalog, new AgentInstructionTemplateProvider(catalogOptions: options), options)
             {
                 SandboxBackend = backend,
+                DefaultSandbox = defaultSandbox,
                 SandboxDataRoot = Path.Combine(temp, "sandbox"),
                 ScratchpadRoot = Path.Combine(temp, "scratchpad"),
             };

@@ -62,6 +62,12 @@ public sealed record NodeHostOptions
     /// </summary>
     public bool RunAutomations { get; init; } = true;
 
+    /// <summary>
+    /// Gets whether a session no scope sandboxes runs in the sandbox of a node (<see cref="Fleet.NodeApi.FleetNodeSandbox"/>)
+    /// where the sandbox can run. Default true; <c>[sandbox] all_sessions</c> of the profile decides first.
+    /// </summary>
+    public bool SandboxByDefault { get; init; } = true;
+
     /// <summary>Gets the options of the automations, for tests (a clock, the credential kinds); null for the defaults.</summary>
     internal NodeAutomationOptions? Automations { get; init; }
 }

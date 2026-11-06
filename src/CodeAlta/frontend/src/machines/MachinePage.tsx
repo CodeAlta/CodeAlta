@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { Button, Callout, HTMLSelect, InputGroup, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { machines, type MachinePeopleView, type MachineAgentsView, type MachineSessionDefaultsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type SecretsList } from "#neoastra";
+import { machines, type MachinePeopleView, type MachineAgentsView, type MachineSandboxView, type MachineSessionDefaultsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type SecretsList } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { SecretsBody, type SecretsActions } from "../secrets/SecretsSettings";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -86,7 +86,7 @@ export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch:
       <DevicesSection view={view} busy={busy} machine={machine}
         onPermission={(device, permission, allowed) => void change(() => api.setDevicePermission({ expectedEpoch: epoch, machineId: machine.id, deviceId: device.id, permission, allowed }))}
         onRevoke={device => void change(() => api.revokeDevice({ expectedEpoch: epoch, machineId: machine.id, deviceId: device.id }))} />
-      <PermissionsSection epoch={epoch} machine={machine} api={api} />
+      <PermissionsSection epoch={epoch} machine={machine} api={api} sandbox={view.sandbox} />
       <AgentsSection epoch={epoch} machine={machine} api={api} />
       <PeopleSection epoch={epoch} machine={machine} api={api} />
       <LabelsSection epoch={epoch} machine={machine} api={api} />
@@ -257,7 +257,7 @@ function PeopleSection({ epoch, machine, api }: { epoch: string; machine: Machin
  * bypass permissions, as a machine installed to run agents does by default, or ask first. A machine of an earlier version
  * has no such choice: its sessions ask first.
  */
-function PermissionsSection({ epoch, machine, api }: { epoch: string; machine: MachineView; api: MachinePageApi }) {
+function PermissionsSection({ epoch, machine, api, sandbox }: { epoch: string; machine: MachineView; api: MachinePageApi; sandbox: MachineSandboxView | null }) {
   const { t } = useShellLanguage();
   const [view, setView] = useState<MachineSessionDefaultsView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -297,7 +297,29 @@ function PermissionsSection({ epoch, machine, api }: { epoch: string; machine: M
         options={[{ value: "bypassPermissions", label: t("Bypass permissions") }, { value: "default", label: t("Ask first") }]}
         onChange={event => { const mode = event.currentTarget.value; void save(mode); }} />
     </label>}
+    {sandbox && <SandboxState machine={machine} sandbox={sandbox} />}
   </section>;
+}
+
+/**
+ * The sandbox the sessions of the machine run in by default: the profile of a node (the package registries and the git
+ * hosts), the one its settings name, or none; when the sandbox cannot run there, why, and what to install for it to run.
+ */
+function SandboxState({ machine, sandbox }: { machine: MachineView; sandbox: MachineSandboxView }) {
+  const { t } = useShellLanguage();
+  if (!sandbox.available) {
+    return <Callout compact intent="warning" className="machine-sandbox" role="status">
+      {sandbox.profile ? t("The sandbox cannot run on {name}: its sessions sandboxed with {profile} run no command until it is set up.", { name: machine.name, profile: sandbox.profile })
+        : t("The sandbox cannot run on {name}: its sessions run without one until it is set up.", { name: machine.name })}
+      {sandbox.reason && <div className="muted-text">{sandbox.reason}</div>}
+      {sandbox.setup && <div className="muted-text">{t("To set it up: {setup}", { setup: sandbox.setup })}</div>}
+    </Callout>;
+  }
+
+  return <p className="muted-text machine-sandbox">{sandbox.profile === "node"
+    ? t("Its sessions run in the sandbox of a machine: the package registries and the git hosts, never its home folder or its credentials.")
+    : sandbox.profile ? t("Its sessions run in the sandbox {profile}.", { profile: sandbox.profile })
+    : t("Its sessions run without a sandbox: its settings turn it off.")}</p>;
 }
 
 /**

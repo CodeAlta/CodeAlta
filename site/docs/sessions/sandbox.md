@@ -49,17 +49,20 @@ In CodeAlta TUI, the sandbox follows the same settings; it is set in CodeAlta De
 
 ## Profiles
 
-Two profiles come with CodeAlta:
+Three profiles come with CodeAlta:
 
 | Profile | Network | Run outside | Other machines |
 | --- | --- | --- | --- |
 | `workspace` | The package registries: NuGet, npm, Yarn, PyPI and crates.io | Asked each time | Allowed |
 | `strict` | None | Never | Never |
+| `node` | The package registries, and GitHub, GitLab, Bitbucket and Azure DevOps | Asked each time | Allowed |
+
+`node` is the one the machines of the fleet run their sessions in (see [On a machine of the fleet](#on-a-machine-of-the-fleet)).
 
 **New profile** makes a profile of your own, which starts from the profile shown and adds to it:
 
 - **Folders**: more folders to read and write, to read only, or never to reach.
-- **Network**: **Allowed hosts** (`*.example.com` for a domain and its subdomains), **Off** or **On**.
+- **Network**: **Allowed hosts** (`*.example.com` for the subdomains of a domain, `example.com` for the domain itself), **Off** or **On**.
 - **Local ports**: ports of this computer it may reach, such as a local database.
 - **MCP servers**: the servers a sandboxed session may use. Others are not offered to it.
 - **Run outside**: **Ask me**, or **Never**.
@@ -124,6 +127,23 @@ Another machine is never a way out of the sandbox. Where its profile allows **Ot
 - does not move sessions, nor run automations.
 
 A session moved to another machine keeps its sandbox and its permission mode there; the machine refuses it when its profile of that name gives more.
+
+## On a machine of the fleet
+
+A [machine of the fleet](../fleet/readme.md) runs its sessions in the sandbox by default, where it can run, with the profile `node`: `workspace` and the hosts of GitHub, GitLab, Bitbucket and Azure DevOps. Its agents fetch, push and open pull requests without leaving the sandbox, and the machine needs nobody to allow them.
+
+- Git reaches these hosts over HTTPS: a remote over SSH (`git@github.com:…`) does not go through the sandbox. To push, give the sessions a token: a variable of the environment of the node, such as `GH_TOKEN`, that the profile names in `env`:
+
+  ```toml
+  [sandbox.profiles.node]
+  extends = "node"
+  hosts = ["git.example.com"]
+  env = ["GH_TOKEN"]
+  ```
+
+  With `extends = "node"`, the hosts and the variables are added to those of the profile; without it, each key it sets replaces the one of the profile.
+- `all_sessions = "off"` in the `[sandbox]` of the machine runs its sessions without a sandbox, and `all_sessions = "strict"` in a stricter one.
+- Where the sandbox cannot run, the sessions run without one: the page of the machine and `altanode status` say why, and what to install.
 
 ## Providers
 

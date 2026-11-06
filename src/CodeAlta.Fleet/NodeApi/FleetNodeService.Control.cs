@@ -117,7 +117,8 @@ public sealed partial class FleetNodeService
         {
             Updating = _options.Updating(),
             Update = _options.UpdateStatus?.Invoke(),
-            Worktrees = _worktreeCleanup.Usage,
+            Worktrees = _worktreeCleanup.Usage,
+            Sandbox = FleetNodeSandbox.Describe(_host.RuntimeService),
         });
     }
 

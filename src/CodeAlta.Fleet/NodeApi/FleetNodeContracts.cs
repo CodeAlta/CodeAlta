@@ -756,6 +756,9 @@ public sealed record FleetNodeStatus(string Name, string DeviceId, string Versio
 
     /// <summary>Gets what the worktrees of its sessions take on its disk; null before their first measure, or for a node that does not say.</summary>
     public FleetWorktreeUsage? Worktrees { get; init; }
+
+    /// <summary>Gets the sandbox its sessions run in by default, and whether it can run there; null for a node that does not say.</summary>
+    public FleetNodeSandboxStatus? Sandbox { get; init; }
 }
 
 /// <summary>A paired device as the owner's local control shows it.</summary>

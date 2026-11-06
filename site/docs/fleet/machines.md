@@ -187,7 +187,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | Section | What you do |
 | --- | --- |
 | **Devices** | Each computer paired with the machine, with a switch per permission: **View**, **Drive**, **Start**, **Move**, **Automate** and **Manage**. **Revoke** (the cross at the end of the row, then **Revoke**) refuses that computer there at once. |
-| **Permissions** | What a session of the machine without a mode of its own does before it runs a command or changes a file: **Bypass permissions** (the default) or **Ask first** (see [What its sessions may do](sessions.md#what-its-sessions-may-do)) |
+| **Permissions** | What a session of the machine without a mode of its own does before it runs a command or changes a file: **Bypass permissions** (the default) or **Ask first**; the sandbox its sessions run in, or why it cannot run there and what to install (see [What its sessions may do](sessions.md#what-its-sessions-may-do)) |
 | **Agents of other machines** | The spaces where agents of other computers may start sessions there and send prompts to its sessions, the sandbox their sessions run in at least, and whether they may bypass permissions ([Let agents start sessions on it](sessions.md#let-agents-start-sessions-on-it)) |
 | **People** | The people of your organization who may use it, each on their own sessions, and who asked to ([People and Access](people-and-access.md#people-on-your-own-machines)) |
 | **Labels** | Its [labels](#label-your-machines), which it publishes to its servers: add them, or remove one with its cross |

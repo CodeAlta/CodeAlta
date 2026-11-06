@@ -119,6 +119,13 @@ public static class SandboxProfiles
     /// <summary>The name of the built-in profile without network.</summary>
     public const string Strict = "strict";
 
+    /// <summary>
+    /// The name of the built-in profile of a machine of the fleet: <see cref="Workspace"/> and the hosts of git hosting, so
+    /// that its agents fetch, push and open pull requests without leaving the sandbox. Every computer knows it, so that a
+    /// session that runs in it moves from one machine to another.
+    /// </summary>
+    public const string Node = "node";
+
     /// <summary>The value of a scope that turns the sandbox off.</summary>
     public const string Off = "off";
 
@@ -136,11 +143,22 @@ public static class SandboxProfiles
         "crl.microsoft.com", "oneocsp.microsoft.com",
     ];
 
-    /// <summary>Gets the built-in profiles: <see cref="Workspace"/> and <see cref="Strict"/>.</summary>
+    // The hosts of git hosting and their subdomains (the API, the content of repositories, the archives): GitHub, GitLab,
+    // Bitbucket and Azure DevOps. A pattern *.example.com does not match example.com itself, which is listed beside it.
+    private static readonly string[] GitHosts =
+    [
+        "github.com", "*.github.com", "*.githubusercontent.com",
+        "gitlab.com", "*.gitlab.com",
+        "bitbucket.org", "*.bitbucket.org",
+        "dev.azure.com", "*.dev.azure.com", "*.visualstudio.com",
+    ];
+
+    /// <summary>Gets the built-in profiles: <see cref="Workspace"/>, <see cref="Strict"/> and <see cref="Node"/>.</summary>
     public static IReadOnlyList<ResolvedSandboxProfile> BuiltIn { get; } =
     [
         new(Workspace, [], [], [], SandboxNetwork.Hosts, RegistryHosts, [], [], [], SandboxOutside.Ask, Fleet: true),
         new(Strict, [], [], [], SandboxNetwork.Off, [], [], [], [], SandboxOutside.Never, Fleet: false),
+        new(Node, [], [], [], SandboxNetwork.Hosts, [.. RegistryHosts, .. GitHosts], [], [], [], SandboxOutside.Ask, Fleet: true),
     ];
 
     /// <summary>Gets whether a name is a valid profile name: letters, digits, <c>-</c> and <c>_</c>, not <see cref="Off"/>.</summary>

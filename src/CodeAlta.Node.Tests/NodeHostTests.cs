@@ -86,6 +86,7 @@ public sealed class NodeHostTests
         Assert.IsNotNull(options.ReviewOwnedPermissionsPolicy);
         Assert.IsFalse(options.ReviewOwnedPermissionsPolicy(), "A machine installed to run agents bypasses permissions until its owner chooses.");
         Assert.IsTrue(options.InheritPermissionModePolicy?.Invoke(), "A session another session creates asks what its creator asks.");
+        Assert.AreEqual(FleetNodeSandbox.ProfileName, options.DefaultSandbox, "Sandboxed by default where the sandbox can run.");
         Assert.IsTrue(options.IsHeadless);
         Assert.IsFalse(options.HasInteractiveUi);
         Assert.IsFalse(options.ReadOnlyGlobalState, "A node owns its profile.");

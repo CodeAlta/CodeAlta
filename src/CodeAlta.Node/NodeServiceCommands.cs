@@ -173,6 +173,7 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
                     await output.WriteLineAsync($"Paired devices: {status.TrustedDevices}{(status.RevokedDevices > 0 ? $" ({status.RevokedDevices} revoked)" : "")}; connected now: {status.Channels}.")
                         .ConfigureAwait(false);
                     await output.WriteLineAsync($"Sessions at work: {status.SessionsAtWork}.").ConfigureAwait(false);
+                    if (status.Sandbox is { } sandbox) await output.WriteLineAsync(SandboxLine(sandbox)).ConfigureAwait(false);
                     reached = true;
                 }
             }
@@ -237,6 +238,14 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
     }
 
     // The manager and the plan of the service the options name, or the exit code of what was reported instead.
+    // The sandbox the sessions run in, and what to install when it cannot run: the owner sets it up from here.
+    internal static string SandboxLine(Fleet.NodeApi.FleetNodeSandboxStatus sandbox)
+        => !sandbox.Available
+            ? $"Sandbox: cannot run ({sandbox.Backend}): {sandbox.Reason}" + (sandbox.Setup is { } setup ? $" To set it up: {setup}" : "")
+                + (sandbox.Profile is { } named ? $" The sessions sandboxed with '{named}' run no command until then." : " Its sessions run without one until then.")
+            : sandbox.Profile is { } profile ? $"Sandbox: its sessions run in the profile '{profile}' ({sandbox.Backend})."
+            : "Sandbox: its sessions run without one ([sandbox] all_sessions = \"off\").";
+
     private async Task<(ServiceManager? Manager, ServicePlan? Plan, int Failure)> PlanAsync(NodeInstallOptions options, string command)
     {
         var run = options.Run;

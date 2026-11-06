@@ -639,6 +639,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
                 SandboxBackend = options.SandboxBackend,
+                DefaultSandbox = options.DefaultSandbox,
                 ScratchpadRoot = instructionTemplateProvider.ScratchpadRoot,
                 Leases = options.SessionLeaseOwner is { } leaseOwner
                     ? new SessionLeaseRegistry(new SessionLeaseStore(catalogOptions), new SessionLeaseOwner(leaseOwner, Guid.NewGuid().ToString("D")))

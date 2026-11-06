@@ -460,7 +460,7 @@ public sealed partial class AltaLiveToolTests
         // The user sees every profile, with what it allows and what is wrong with it.
         var listed = await Records(AltaCallerIdentity.Cli, "sandbox", "list").ConfigureAwait(false);
         var profiles = listed.Where(static record => record.GetProperty("type").GetString() == "alta.sandbox.profile").ToDictionary(static record => record.GetProperty("name").GetString()!);
-        CollectionAssert.AreEquivalent(new[] { "workspace", "strict", "company", "broken" }, profiles.Keys.ToArray());
+        CollectionAssert.AreEquivalent(new[] { "workspace", "strict", "node", "company", "broken" }, profiles.Keys.ToArray());
         Assert.AreEqual(("hosts", "ask", true), (profiles["workspace"].GetProperty("network").GetString(), profiles["workspace"].GetProperty("outside").GetString(), profiles["workspace"].GetProperty("builtIn").GetBoolean()));
         Assert.AreEqual(("off", "never"), (profiles["strict"].GetProperty("network").GetString(), profiles["strict"].GetProperty("outside").GetString()));
         Assert.AreEqual("workspace", profiles["company"].GetProperty("extends").GetString());

@@ -146,7 +146,7 @@ test("the computer that manages a machine sets, rotates and deletes its secrets 
     }, options);
   });
 
-test("the sessions of a machine bypass permissions by default, and the computer that manages it makes them ask first", { skip: !edge, timeout: 90_000 }, async () => {
+test("the sessions of a machine bypass permissions by default, the computer that manages it makes them ask first, and reads why its sandbox cannot run", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     const select = ".machine-session-permissions select";
     await page.until(`document.querySelector('${select}')`, "the default mode of the machine");
@@ -156,6 +156,9 @@ test("the sessions of a machine bypass permissions by default, and the computer 
     await page.evaluate(choose(select, "default"));
     await page.until(`document.querySelector('${select}')?.value === 'default' && !document.querySelector('${select}').disabled`, "ask first");
     assert.deepEqual(await calls(page), [{ sessionMode: "default" }]);
+    // The sandbox cannot run there: the person who manages the machine reads why, and what to install.
+    assert.equal(await page.evaluate(`document.querySelector('.machine-sandbox').textContent`),
+      "The sandbox cannot run on build-box: its sessions run without one until it is set up.bubblewrap (`bwrap` 0.5 or later) is not installed or cannot create user namespaces.To set it up: sudo apt install bubblewrap slirp4netns");
     assert.deepEqual(page.problems, []);
   }, options);
 });

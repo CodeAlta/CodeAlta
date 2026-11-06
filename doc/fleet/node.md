@@ -175,6 +175,11 @@ labels, its local policy).
   machine (`fleet/session-defaults.json`): `bypassPermissions`, since a machine is installed to run agents and nobody
   sits at it, until its owner or a device that manages it chooses to ask first. A policy of the organization narrows it,
   and a session another session creates asks what its creator asks.
+- Where the sandbox can run, a session no scope sandboxes runs in the built-in profile `node`: `workspace` and the
+  hosts of git hosting, so that its agents fetch, push and open pull requests without leaving it. Every computer knows
+  that profile, so a session in it moves from a node to a desktop and back. It is the default of the host, below the
+  settings: `[sandbox] all_sessions` decides first (`off` included), and a profile of that name in them changes it. Where it cannot run, the sessions run without one rather than run no command, and the node
+  says why and what to install (`control.status`, the page of the machine, `altanode status`).
 - Agent-started sessions from other machines are off until the owner turns them on, per space; they have at most the
   mode of their parent, never bypass permissions unless the owner allows it, and run sandboxed when the policy says so.
 - The node's owner can stop everything it runs, from the desktop or with `altanode` locally, and can quarantine the

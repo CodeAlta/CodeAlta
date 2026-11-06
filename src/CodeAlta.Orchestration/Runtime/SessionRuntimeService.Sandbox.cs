@@ -59,8 +59,19 @@ public sealed record SessionSandboxReach(string Profile, IReadOnlyList<string> R
 
 public sealed partial class SessionRuntimeService
 {
+    /// <summary>
+    /// Gets or initializes the profile the sessions of the host run in when no scope sandboxes them, where the sandbox can
+    /// run: a machine of the fleet runs its agents in <see cref="SandboxProfiles.Node"/> by default. Null, the default,
+    /// leaves such a session without a sandbox. The settings come first: a value of every session (<c>off</c> included)
+    /// decides.
+    /// </summary>
+    public string? DefaultSandbox { get; init; }
+
     /// <summary>Reads the sandbox settings of the user: the setting of every session, and the profiles, mapped for the sandbox.</summary>
-    /// <returns>The value of every session (a profile name, <c>off</c>, or null) and the profiles of the user.</returns>
+    /// <returns>
+    /// The value of every session (a profile name, <c>off</c>, or null) and the profiles of the user; with a
+    /// <see cref="DefaultSandbox"/>, its name as the value of every session when the settings name none and the sandbox can run.
+    /// </returns>
     public (string? AllSessions, IReadOnlyList<SandboxProfile> Profiles) ReadSandboxSettings()
     {
         CodeAltaSandboxSettings settings;
@@ -75,7 +86,22 @@ public sealed partial class SessionRuntimeService
             settings = Volatile.Read(ref _lastSandboxSettings) ?? CodeAltaSandboxSettings.Empty;
         }
 
-        return (settings.AllSessions, [.. settings.Profiles.Select(ToSandboxProfile)]);
+        var allSessions = settings.AllSessions;
+        if (DefaultSandbox is { Length: > 0 } host && string.IsNullOrWhiteSpace(allSessions) && SandboxCanRun()) allSessions = host;
+        return (allSessions, [.. settings.Profiles.Select(ToSandboxProfile)]);
+    }
+
+    // Whether the sandbox of this computer can start; a runtime that closes starts none.
+    private bool SandboxCanRun()
+    {
+        try
+        {
+            return GetSandboxAvailability().IsAvailable;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
     }
 
     // The sandbox settings and the providers read last: what applies while the configuration cannot be read, so that

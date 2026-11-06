@@ -50,6 +50,7 @@ internal sealed partial class MachinesService
                 ThisDevice = self,
                 Worktrees = status.Worktrees is { } worktrees
                     ? new MachineWorktreesView(worktrees.Count, (int)Math.Min(int.MaxValue, worktrees.Bytes / 1024), worktrees.IdleDays, Format(worktrees.MeasuredAt)) : null,
+                Sandbox = status.Sandbox is { } sandbox ? new MachineSandboxView(sandbox.Profile, sandbox.Available, sandbox.Backend, sandbox.Reason, sandbox.Setup) : null,
             };
         }
         catch (ObjectDisposedException) { return MachineManagement.Refused(RemoteSessionHost.Describe(host.State)); }
@@ -204,6 +205,9 @@ internal sealed record MachineManagement(string Status, string? Message, string?
     /// <summary>Gets what the worktrees of its sessions take on its disk; null before the machine measured them, or for one that does not say.</summary>
     public MachineWorktreesView? Worktrees { get; init; }
 
+    /// <summary>Gets the sandbox its sessions run in by default, and whether it can run there; null for a machine that does not say.</summary>
+    public MachineSandboxView? Sandbox { get; init; }
+
     internal static MachineManagement Refused(string status) => new(status, null, null, 0, false, null, [], [], []);
 }
 
@@ -213,6 +217,14 @@ internal sealed record MachineManagement(string Status, string? Message, string?
 /// <param name="IdleDays">How many days a session is idle before the machine removes its worktree.</param>
 /// <param name="MeasuredAt">When the machine measured them.</param>
 internal sealed record MachineWorktreesView(int Count, int Kilobytes, int IdleDays, string MeasuredAt);
+
+/// <summary>The sandbox the sessions of a machine run in by default, as the machine says it.</summary>
+/// <param name="Profile">The profile a session no scope sandboxes runs in; null when such a session runs without a sandbox.</param>
+/// <param name="Available">Whether the sandbox can run there.</param>
+/// <param name="Backend">The sandbox of its system.</param>
+/// <param name="Reason">Why it cannot run; null when it can.</param>
+/// <param name="Setup">What to install or set up there for it to run; null when nothing is known.</param>
+internal sealed record MachineSandboxView(string? Profile, bool Available, string Backend, string? Reason, string? Setup);
 
 /// <summary>Where the self-update of a machine stands.</summary>
 /// <param name="Running">The version that runs.</param>

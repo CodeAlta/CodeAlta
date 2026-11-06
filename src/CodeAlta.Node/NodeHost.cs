@@ -189,6 +189,8 @@ public sealed class NodeHost : IAsyncDisposable
             ReviewOwnedPermissionsPolicy = () => FleetSessionDefaults.AsksByDefault(catalog.FleetRoot),
             SessionPermissionModes = true,
             InheritPermissionModePolicy = static () => true,
+            // Sandboxed by default where the sandbox can run: workspace and the hosts of git hosting.
+            DefaultSandbox = options.SandboxByDefault ? FleetNodeSandbox.ProfileName : null,
             // A session works under the Git, GitHub and CLI identity of its space, as in CodeAlta Desktop.
             AppliesSpaceIdentities = true,
             // The sessions it runs are leased, so that the command line does not run them meanwhile; the sessions the

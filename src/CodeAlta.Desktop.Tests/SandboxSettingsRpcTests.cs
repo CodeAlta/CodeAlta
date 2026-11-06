@@ -20,7 +20,7 @@ public sealed class SandboxSettingsRpcTests
         var read = await f.Service.ReadAsync(new(Epoch), CancellationToken.None);
         Assert.AreEqual("ok", read.Status);
         Assert.IsNotNull(read.Availability);
-        CollectionAssert.AreEqual(new[] { "workspace", "strict" }, read.Profiles.Where(static profile => profile.BuiltIn).Select(static profile => profile.Name).ToArray());
+        CollectionAssert.AreEqual(new[] { "workspace", "strict", "node" }, read.Profiles.Where(static profile => profile.BuiltIn).Select(static profile => profile.Name).ToArray());
         Assert.Contains("nuget.org", read.Profiles[0].Hosts);
 
         var mine = new SandboxProfileItem("mine", false, "workspace", null, "never", ["pkgs.dev.azure.com"], [], [], [], [], [], []);
@@ -63,7 +63,7 @@ public sealed class SandboxSettingsRpcTests
 
         var draft = await f.Service.DraftAsync(new(Epoch, null, null, project.Id, SpaceDescriptor.DefaultId, null), CancellationToken.None);
         Assert.AreEqual(("strict", "project"), (draft.Profile, draft.Source), "the project comes before its space");
-        CollectionAssert.AreEqual(new[] { "off", "workspace", "strict" }, draft.Choices.ToArray());
+        CollectionAssert.AreEqual(new[] { "off", "workspace", "strict", "node" }, draft.Choices.ToArray());
         var own = await f.Service.DraftAsync(new(Epoch, null, null, project.Id, SpaceDescriptor.DefaultId, "off"), CancellationToken.None);
         Assert.AreEqual((null, "session"), (own.Profile, own.Source));
 
