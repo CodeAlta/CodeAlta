@@ -87,7 +87,7 @@ A plugin can give a trigger together with the code that handles it, so that "whe
 ### Editor, RPC and CLI
 
 - An RPC lists the trigger types with their descriptors. One generic component draws the fields of a source trigger; the events are a multi-select. The script form gets **Run without a model**.
-- `alta automation create|update --trigger project@added,archived` and `--trigger-setting space=work`; `--script-mode direct`. An automation an agent creates stays disabled.
+- `alta automation create --trigger project@added,archived`, with settings in the table of the trigger; `--script-mode direct`, `--script-access write`, `--sandbox`. An automation an agent creates stays disabled.
 
 ## Steps
 
@@ -100,7 +100,7 @@ A plugin can give a trigger together with the code that handles it, so that "whe
 - [x] 7. Scripts without a model: `script_mode` and `script_access` (read, validate, fingerprint; write without a sandbox only in the user's configuration); the tools of a run without a session, in the sandbox of the automation (the sandbox router of the runtime takes the sandbox it is given); the unattended runner in `CodeAlta.LiveTool` (`alta` read-only and plugin commands, `tools.*` by access, discovery, `present()`); the runner of the automation that uses it; tests.
 - [x] 8. Scripts of a plugin: `PluginBase.GetScripts()`, the `Plugin` scope of the library and its names, read-only; a trigger contribution that names its script, arguments and mode; tests.
 - [x] 9. RPC and editor: trigger descriptors, the generic fields, the events multi-select, **Run without a model**, a plugin's trigger offered with its script as a ready-made automation; frontend tests; checked in the developer instance, both themes and a narrow window.
-- [ ] 10. `alta automation`: `--trigger <type>@<events>`, `--trigger-setting`, `--script-mode`; tests.
+- [x] 10. `alta automation`: `--trigger <type>@<events>`, `--script-mode`, `--script-access`, `--sandbox`; tests. Deviation: no `--trigger-setting`; the settings of a trigger are written in its table, `--trigger '{ type = "project", on = ["added"], space = "work" }'`, which `alta` already read.
 - [ ] 11. Documentation:
   - `site/docs/automations.md`: the two triggers, a "CodeAlta events" section, scripts without a model, the automations a plugin offers;
   - the plugin runtime skill (`src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime`): how to write a trigger and its script, and an `automation-trigger` sample (a local git branch that moves, with a script that writes a line through the plugin's `alta` command);

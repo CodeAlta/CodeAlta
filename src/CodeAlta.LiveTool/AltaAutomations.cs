@@ -168,6 +168,15 @@ public sealed record AltaAutomationRequest(string Name, string Prompt)
     /// <summary>Gets the arguments of its script, a JSON object; null for none.</summary>
     public string? ScriptArguments { get; init; }
 
+    /// <summary>Gets <c>direct</c> to run its script without a model, with no session; null for a session a model runs it in.</summary>
+    public string? ScriptMode { get; init; }
+
+    /// <summary>Gets, for a script without a model, <c>read</c> (null) or <c>write</c> to let it edit files and run commands.</summary>
+    public string? ScriptAccess { get; init; }
+
+    /// <summary>Gets the sandbox it runs in: a profile, <c>off</c>, or null for what the settings give.</summary>
+    public string? Sandbox { get; init; }
+
     /// <summary>Gets the project it runs in; null to run as a chat.</summary>
     public string? ProjectId { get; init; }
 

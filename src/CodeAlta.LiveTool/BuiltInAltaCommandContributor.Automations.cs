@@ -155,6 +155,9 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add("stdin", "Read the prompt from stdin.", value => options.UseStdin = value is not null);
         command.Add("script=", "Run this script of the library (`alta script list`) in place of a prompt: its session runs it with `exec`.", value => options.Script = value);
         command.Add("script-args=", "The arguments of the script, a JSON object such as `{\"lenses\":[\"security\"]}`. A script that declares an `event` parameter gets what started the run (the issue, the pull request).", value => options.ScriptArguments = value);
+        command.Add("script-mode=", "`direct` to run the script without a model, with no session: it calls the alta commands that change nothing, those of plugins, and the tools that read.", value => options.ScriptMode = value);
+        command.Add("script-access=", "For a script without a model: `read` (default) or `write`, to let it edit files and run commands in its sandbox.", value => options.ScriptAccess = value);
+        command.Add("sandbox=", "The sandbox it runs in: a profile, or `off`. Defaults to what the settings give.", value => options.Sandbox = value);
         command.Add("trigger=", "A trigger; repeat the option for several. Without one the automation is run by hand.", value => { if (value is not null) options.Triggers.Add(value); });
         command.Add("project=", "The project it runs in: id, slug or path. Defaults to the caller's project.", value => options.Project = value);
         command.Add("chat", "Run as a chat, in no project.", value => options.Chat = value is not null);
@@ -167,7 +170,9 @@ internal sealed partial class BuiltInAltaCommandContributor
         AddHelpText(
             command,
             "Write the prompt for a session that starts with nothing else: say what to look at and what to produce.",
-            "Examples: `alta automation create --name \"Issue triage\" --trigger daily@09:00 --content \"Triage the issues opened since yesterday.\"`; `--trigger issue@opened` to run for every issue a maintainer opens; `--trigger \"command@gh run watch 123 --exit-status\"` to run each time that command succeeds; `--chat` for one that needs no project; `alta automation create --name \"PR review\" --trigger pull_request@opened --script review-pr` to run a script on each pull request.");
+            "Examples: `alta automation create --name \"Issue triage\" --trigger daily@09:00 --content \"Triage the issues opened since yesterday.\"`; `--trigger issue@opened` to run for every issue a maintainer opens; `--trigger \"command@gh run watch 123 --exit-status\"` to run each time that command succeeds; `--chat` for one that needs no project; `alta automation create --name \"PR review\" --trigger pull_request@opened --script review-pr` to run a script on each pull request.",
+            "Triggers of CodeAlta and of plugins: `--trigger project@added,archived` when a project is added or archived, `--trigger automation@failed` when a run of another automation fails, `--trigger acme.deploys/deploy@succeeded` for a trigger of a plugin; with settings, write the table of the configuration file: `--trigger '{ type = \"project\", on = [\"added\"], space = \"work\" }'`.",
+            "`--script <name> --script-mode direct` runs the script without a model, when the event only calls back into a plugin: `alta automation create --name \"Log deploys\" --chat --trigger acme.deploys/deploy@succeeded --script acme.deploys/log --script-mode direct`.");
         return command;
     }
 
@@ -483,6 +488,18 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.invalidScriptArgs", "--script-args is a JSON object, such as {\"pr\": 42}.", "alta automation create");
         }
 
+        var scriptMode = NormalizeOptionalText(options.ScriptMode)?.ToLowerInvariant();
+        var scriptAccess = NormalizeOptionalText(options.ScriptAccess)?.ToLowerInvariant();
+        if (scriptMode is not (null or "direct") || scriptAccess is not (null or "read" or "write"))
+        {
+            return UsageError(context, "usage.invalidScriptMode", "--script-mode is `direct`, and --script-access is `read` or `write`.", "alta automation create");
+        }
+
+        if ((scriptMode ?? scriptAccess) is not null && script is null || scriptAccess is not null && scriptMode is null)
+        {
+            return UsageError(context, "usage.scriptModeWithoutScript", "--script-mode is for --script, and --script-access for --script-mode direct.", "alta automation create");
+        }
+
         var prompt = script is not null ? string.Empty
             : options.UseStdin ? await context.Stdin.ReadToEndAsync(context.CancellationToken).ConfigureAwait(false) : options.Content;
         if (script is null && string.IsNullOrWhiteSpace(prompt))
@@ -557,6 +574,9 @@ internal sealed partial class BuiltInAltaCommandContributor
         {
             Script = script,
             ScriptArguments = scriptArguments,
+            ScriptMode = scriptMode,
+            ScriptAccess = scriptAccess == "read" ? null : scriptAccess,
+            Sandbox = NormalizeOptionalText(options.Sandbox),
             ProjectId = projectId,
             StoreInProject = store == "project",
             Model = NormalizeOptionalText(options.Model),
@@ -747,6 +767,12 @@ internal sealed partial class BuiltInAltaCommandContributor
         public string? Script { get; set; }
 
         public string? ScriptArguments { get; set; }
+
+        public string? ScriptMode { get; set; }
+
+        public string? ScriptAccess { get; set; }
+
+        public string? Sandbox { get; set; }
     }
 
     private static bool IsJsonObject(string json)

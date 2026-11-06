@@ -113,6 +113,9 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
             Prompt = request.Script is null ? request.Prompt ?? string.Empty : string.Empty,
             Script = request.Script,
             ScriptArguments = request.Script is null ? null : request.ScriptArguments,
+            ScriptMode = request.Script is null ? null : request.ScriptMode,
+            ScriptAccess = request.Script is null ? null : request.ScriptAccess,
+            Sandbox = string.IsNullOrWhiteSpace(request.Sandbox) ? null : request.Sandbox.Trim(),
             Enabled = request.Enabled,
             Project = request.StoreInProject ? null : folder,
             Model = model,
@@ -174,6 +177,8 @@ internal static class AutomationTriggerText
             AutomationTriggerKind.Weekly => "weekly@" + string.Join(',', trigger.Days.Select(static day => AutomationTrigger.DayNames[(int)day])) + "@" + string.Join(',', trigger.At),
             AutomationTriggerKind.Cron => "cron@" + trigger.Expression,
             AutomationTriggerKind.Command => "command@" + trigger.Command,
+            // A trigger of a source without settings is its type and its events, as it is written.
+            _ when trigger is { IsSource: true, Settings.Count: 0 } => trigger.Source + (trigger.On.Count > 0 ? "@" + string.Join(',', trigger.On) : string.Empty),
             // A trigger of another tool or of a source has settings of its own: the inline table of a configuration file.
             _ when trigger.IsIntegration || trigger.IsSource => AutomationConfig.Format(trigger),
             _ => trigger.KindName + "@" + trigger.Event + (trigger.Authors == AutomationAuthors.Anyone ? "+anyone" : string.Empty),
@@ -191,9 +196,23 @@ internal static class AutomationTriggerText
         var name = (at < 0 ? value : value[..at]).Trim().ToLowerInvariant();
         var rest = at < 0 ? string.Empty : value[(at + 1)..].Trim();
         if (name == "pr") name = "pull_request";
+        // The trigger of a source, of CodeAlta or of a plugin: its type and the events it starts on, project@added,archived.
+        if (!AutomationTrigger.TryParseKind(name, out _) && AutomationSourceTypes.IsType(name))
+        {
+            trigger = new AutomationTrigger(AutomationTriggerKind.Source)
+            {
+                Source = name,
+                On = [.. rest.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(static on => on.ToLowerInvariant()).Distinct(StringComparer.Ordinal)],
+            };
+            problem = AutomationConfig.Validate(new AutomationDefinition(AutomationDefinition.NewId(), "trigger") { Prompt = "trigger", Triggers = [trigger] });
+            if (problem is null) return true;
+            trigger = null;
+            return false;
+        }
+
         if (!AutomationTrigger.TryParseKind(name, out var kind))
         {
-            problem = $"'{text}' is not a trigger. Write daily@09:00, hourly@15, weekly@mon,thu@08:30, cron@0 9 * * 1-5, issue@opened, pull_request@opened, jira@created, command@<command line>, or a trigger of another tool as a table, such as {{ type = \"slack\", channel = \"C0123ABCDEF\", app_token = \"${{secret:SLACK_APP}}\", bot_token = \"${{secret:SLACK_BOT}}\" }}.";
+            problem = $"'{text}' is not a trigger. Write daily@09:00, hourly@15, weekly@mon,thu@08:30, cron@0 9 * * 1-5, issue@opened, pull_request@opened, jira@created, command@<command line>, project@added, automation@failed, <prefix>/<name>@<event> for a trigger of a plugin, or a trigger of another tool as a table, such as {{ type = \"slack\", channel = \"C0123ABCDEF\", app_token = \"${{secret:SLACK_APP}}\", bot_token = \"${{secret:SLACK_BOT}}\" }}.";
             return false;
         }
 

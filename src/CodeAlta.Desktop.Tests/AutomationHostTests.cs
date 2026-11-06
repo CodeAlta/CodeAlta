@@ -304,6 +304,38 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
+    public async Task ASession_CreatesAnAutomationOnATriggerOfASource_ThatRunsAScriptWithoutAModel()
+    {
+        await using var fixture = await Fixture.CreateAsync(withLibrary: true);
+
+        var created = await fixture.One("alta.automation.created", "automation", "create", "--name", "Onboard", "--chat", "--trigger", "project@added,archived",
+            "--trigger", """{ type = "automation", on = ["failed"], automations = ["Nightly"] }""", "--script", "review-pr", "--script-mode", "direct", "--script-access", "write", "--sandbox", "off");
+
+        var definition = fixture.Service.Snapshot.Find(Text(created, "id")!)!.Definition;
+        Assert.AreEqual(("review-pr", "direct", "write", "off"), (definition.Script, definition.ScriptMode, definition.ScriptAccess, definition.Sandbox));
+        CollectionAssert.AreEqual(new[] { "project", "automation" }, definition.Triggers.Select(static trigger => trigger.Source).ToArray());
+        CollectionAssert.AreEqual(new[] { "added", "archived" }, definition.Triggers[0].On.ToArray());
+        CollectionAssert.AreEqual(new[] { "Nightly" }, definition.Triggers[1].Settings.Texts("automations").ToArray());
+        Assert.AreEqual("project@added,archived", AutomationTriggerText.Format(definition.Triggers[0]), "a trigger of a source without settings is written as it is typed");
+        Assert.IsFalse(definition.Enabled, "an agent enables nothing");
+
+        foreach (var (arguments, expected) in new (string[], string)[]
+                 {
+                     (["automation", "create", "--name", "x", "--content", "y", "--script-mode", "direct"], "usage.scriptModeWithoutScript"),
+                     (["automation", "create", "--name", "x", "--script", "review-pr", "--script-access", "write"], "usage.scriptModeWithoutScript"),
+                     (["automation", "create", "--name", "x", "--script", "review-pr", "--script-mode", "fast"], "usage.invalidScriptMode"),
+                     (["automation", "create", "--name", "x", "--content", "y", "--trigger", "project@was-added"], "was-added"),
+                     // Kept with its project, a script that writes without a model names its sandbox.
+                     (["automation", "create", "--name", "x", "--store", "project", "--script", "review-pr", "--script-mode", "direct", "--script-access", "write"], "sandbox profile"),
+                 })
+        {
+            var refused = await fixture.Run(arguments);
+            Assert.AreEqual(AltaExitCodes.Usage, refused.Code, string.Join(' ', arguments));
+            StringAssert.Contains(refused.Text, expected);
+        }
+    }
+
+    [TestMethod]
     public async Task ASession_CreatesAnAutomationThatRunsAScript_OnEachPullRequest()
     {
         await using var fixture = await Fixture.CreateAsync(withLibrary: true);
