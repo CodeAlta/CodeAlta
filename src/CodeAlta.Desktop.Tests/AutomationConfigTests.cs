@@ -219,6 +219,39 @@ public sealed class AutomationConfigTests
     }
 
     [TestMethod]
+    public void AScriptWithoutAModel_SaysWhatItMayDo_AndWritesWithoutASandboxOnlyInTheConfigurationOfTheUser()
+    {
+        var direct = $$"""
+            [automations.{{First}}]
+            name = "Log"
+            script = "log-it"
+            script_mode = "Direct"
+            script_access = "write"
+            sandbox = "off"
+            """;
+        var read = AutomationConfig.Read(direct, Global).Definitions.Single();
+        Assert.AreEqual(("direct", "write", true), (read.ScriptMode, read.ScriptAccess, read.IsDirect));
+        var written = AutomationConfig.Write(string.Empty, read);
+        StringAssert.Contains(written, "script_mode = \"direct\"");
+        StringAssert.Contains(written, "script_access = \"write\"");
+        Assert.AreEqual(read.Fingerprint(), AutomationConfig.Read(written, Global).Definitions.Single().Fingerprint());
+        // A change of what it may do asks to allow it again.
+        Assert.AreNotEqual(read.Fingerprint(), (read with { ScriptAccess = null }).Fingerprint());
+        Assert.AreNotEqual(read.Fingerprint(), (read with { ScriptMode = null, ScriptAccess = null }).Fingerprint());
+
+        // In a project, writing without a sandbox is refused; with a profile, it is not.
+        StringAssert.Contains(AutomationConfig.Read(direct, Project).Faults.Single().Message, "sandbox profile");
+        StringAssert.Contains(AutomationConfig.Read(direct.Replace("sandbox = \"off\"\n", string.Empty, StringComparison.Ordinal), Project).Faults.Single().Message, "sandbox profile");
+        Assert.AreEqual(1, AutomationConfig.Read(direct.Replace("\"off\"", "\"strict\"", StringComparison.Ordinal), Project).Definitions.Count);
+        Assert.AreEqual(1, AutomationConfig.Read(direct.Replace("\"write\"", "\"read\"", StringComparison.Ordinal), Project).Definitions.Count);
+
+        StringAssert.Contains(AutomationConfig.Validate(read with { ScriptMode = "fast" }), "direct");
+        StringAssert.Contains(AutomationConfig.Validate(read with { ScriptAccess = "all" }), "read or write");
+        StringAssert.Contains(AutomationConfig.Validate(read with { ScriptMode = null }), "without a model");
+        StringAssert.Contains(AutomationConfig.Validate(new AutomationDefinition(First, "n") { Prompt = "p", ScriptMode = "direct" }), "runs a script");
+    }
+
+    [TestMethod]
     public void Write_ReplacesOnlyTheTextOfItsAutomation()
     {
         var before = $"""

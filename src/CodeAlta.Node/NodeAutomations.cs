@@ -150,6 +150,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     private const int MaximumRuns = 200;
 
     private readonly CodeAltaHost _host;
+    private readonly AutomationRunner _runner;
     private readonly NodeAutomationOptions _options;
     private readonly string _fleetRoot;
     // The worktree each run works in, as each session started on the node does.
@@ -181,7 +182,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         _assignments = LoadAssignments(Path.Combine(_fleetRoot, AssignmentsFileName));
         Engine = new AutomationService(catalog.ConfigPath, token => host.ProjectCatalog.LoadAsync(token),
             new AutomationStateStore(Path.Combine(catalog.StateRoot, "automations.json"), pausedByDefault: false),
-            new AutomationRunner(host, this), _options.TimeProvider, _options.TimeZone,
+            _runner = new AutomationRunner(host, this), _options.TimeProvider, _options.TimeZone,
             _options.WatchRepositories ? new GitAutomationFeed() : null,
             () => [.. (host.PluginRuntime?.ActivePlugins ?? []).Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugins.Abstractions.IIssueEventSource>()],
             // A command runs with the identity of the space of its project, as in CodeAlta Desktop.
@@ -200,6 +201,25 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         host.RuntimeService.ProviderGate = CheckSessionProviderAsync;
         // So do the tools the policy turns off, which the runtime holds in memory only: also once the node started again.
         host.RuntimeService.ToolPatternGate = PolicyToolsOffAsync;
+    }
+
+    /// <summary>Runs the scripts of automations without a model with the <c>alta</c> commands of the node and the plugins that run.</summary>
+    /// <param name="dispatcher">The <c>alta</c> commands of the node.</param>
+    internal void RunScriptsWith(CodeAlta.LiveTool.AltaCommandDispatcher dispatcher)
+    {
+        ArgumentNullException.ThrowIfNull(dispatcher);
+        var plugins = new CodeAlta.LiveTool.RuntimeAltaPluginCatalog(_host.PluginRuntime);
+        var runner = new CodeAlta.LiveTool.Scripts.UnattendedScriptRunner(dispatcher, _host.CodeModeScripts, _host.RuntimeService,
+            () => [.. plugins.ListCommandContributions().Select(static contribution => contribution.Command.Path)]);
+        _runner.Unattended = async (run, cancellationToken) =>
+        {
+            var result = await runner.RunAsync(new CodeAlta.LiveTool.Scripts.UnattendedScriptRequest(run.RunId, run.Script)
+            {
+                ArgumentsJson = run.ArgumentsJson, EventText = run.EventText, EventJson = run.EventJson, ProjectId = run.ProjectId, ProjectPath = run.ProjectPath,
+                Spaces = run.Spaces, Sandbox = run.Sandbox, Write = run.Write, Environment = run.Environment,
+            }, cancellationToken).ConfigureAwait(false);
+            return new AutomationScriptOutcome(result.Succeeded, result.Value, result.Error, result.Presented);
+        };
     }
 
     /// <summary>

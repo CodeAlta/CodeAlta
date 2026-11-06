@@ -81,10 +81,13 @@ internal static class AutomationConfig
                 return "The script of an automation is the name of a script of the library: lowercase letters, digits and hyphens.";
             if (definition.Prompt.Length > 0) return "An automation runs a prompt or a script, not both.";
             if (definition.ScriptArguments is { } arguments && !IsObject(arguments)) return "The arguments of a script are a JSON object, such as { \"pr\": 42 }.";
+            if (definition.ScriptMode is not (null or AutomationDefinition.DirectMode)) return "The mode of a script is direct, to run it without a model, or nothing.";
+            if (definition.ScriptAccess is not (null or AutomationDefinition.ReadAccess or AutomationDefinition.WriteAccess)) return "The access of a script is read or write.";
+            if (definition.ScriptAccess is not null && definition.ScriptMode is null) return "The access of a script is for a script that runs without a model (script_mode = \"direct\").";
         }
-        else if (definition.ScriptArguments is not null)
+        else if (definition.ScriptArguments is not null || definition.ScriptMode is not null || definition.ScriptAccess is not null)
         {
-            return "Arguments are for an automation that runs a script.";
+            return "Arguments, a mode and an access are for an automation that runs a script.";
         }
         else if (string.IsNullOrWhiteSpace(definition.Prompt))
         {
@@ -259,7 +262,8 @@ internal static class AutomationConfig
             || !TryText(table, "sandbox", out var sandbox, out problem) || !TryText(table, "script", out var script, out problem)
             || !TryText(table, "script_args", out var scriptArguments, out problem) || !TryFlag(table, "sub_sessions", true, out var subSessions, out problem)
             || !TryText(table, "runs_on", out var runsOn, out problem) || !TryText(table, "environment", out var environment, out problem)
-            || !TryText(table, "publish_to", out var publishTo, out problem)) return false;
+            || !TryText(table, "publish_to", out var publishTo, out problem) || !TryText(table, "script_mode", out var scriptMode, out problem)
+            || !TryText(table, "script_access", out var scriptAccess, out problem)) return false;
         bool? review = null;
         if (table.ContainsKey("review_before_commit"))
         {
@@ -312,6 +316,8 @@ internal static class AutomationConfig
             Prompt = (prompt ?? string.Empty).ReplaceLineEndings("\n").Trim(),
             Script = Blank(script),
             ScriptArguments = Blank(scriptArguments),
+            ScriptMode = Blank(scriptMode)?.ToLowerInvariant(),
+            ScriptAccess = Blank(scriptAccess)?.ToLowerInvariant(),
             // The folder a project automation runs in is the one of its file.
             Project = source.IsGlobal ? Blank(project) : null,
             // Only an automation of the user is placed on another machine; one a device assigned here runs here.
@@ -328,8 +334,20 @@ internal static class AutomationConfig
             CatchUp = catchUp,
             Triggers = triggers,
         };
-        problem = Validate(definition);
+        problem = Validate(definition) ?? SourceProblem(definition, source);
         return problem is null;
+    }
+
+    /// <summary>What an automation may not do in the file it is in, or null.</summary>
+    internal static string? SourceProblem(AutomationDefinition definition, AutomationSource source)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(source);
+        // Edits and commands without a sandbox, with nobody to approve them, are what the user says in their own file only.
+        if (!source.IsGlobal && definition is { IsDirect: true, ScriptAccess: AutomationDefinition.WriteAccess }
+            && (definition.Sandbox is null || string.Equals(definition.Sandbox, "off", StringComparison.OrdinalIgnoreCase)))
+            return "An automation of a project that writes without a model names its sandbox profile: only your own configuration runs one without a sandbox.";
+        return null;
     }
 
     // autonomy = { allowed_tools = [...], max_calls_per_hour = N, approval_timeout = minutes, on_timeout = "stop", approvers = "owner" }
@@ -559,6 +577,8 @@ internal static class AutomationConfig
         {
             builder.Append("script = ").Append(Quote(script)).Append(newline);
             if (definition.ScriptArguments is { } arguments) builder.Append("script_args = ").Append(Quote(arguments.ReplaceLineEndings(" "))).Append(newline);
+            if (definition.ScriptMode is { } scriptMode) builder.Append("script_mode = ").Append(Quote(scriptMode)).Append(newline);
+            if (definition.ScriptAccess is { } access) builder.Append("script_access = ").Append(Quote(access)).Append(newline);
             return builder.ToString();
         }
 

@@ -223,7 +223,41 @@ public sealed partial class SessionRuntimeService
 
     // The router of the built-in tools of a session, which reads its sandbox at each call.
     internal IAgentBuiltInToolRouter CreateSandboxToolRouter(string sessionId, string providerId, IReadOnlyList<string> projectRoots)
-        => new SandboxToolRouter(this, sessionId, providerId, projectRoots);
+        => new SandboxToolRouter(this, sessionId, providerId, projectRoots, token => GetSessionSandboxAsync(sessionId, token));
+
+    /// <summary>
+    /// Gets the built-in tools of a script that runs with no session (a script of an automation without a model), in the
+    /// sandbox it is given: the tools that read, write and execute run in the worker of that sandbox when it is one, and
+    /// here otherwise, as those of a session do.
+    /// </summary>
+    /// <param name="runId">The run, which names its sandbox worker and its scratchpad.</param>
+    /// <param name="sandbox">The sandbox of the run, as <see cref="ResolveSandboxAsync"/> gives it.</param>
+    /// <param name="options">The options of its tools: its folder, its environment, what answers their permissions.</param>
+    /// <param name="projectRoots">The folders of its project, whose repositories its sandbox may write.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The tools, or why its sandbox cannot run them.</returns>
+    /// <exception cref="ArgumentException"><paramref name="runId"/> is blank.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="sandbox"/>, <paramref name="options"/> or <paramref name="projectRoots"/> is null.</exception>
+    public async Task<(IReadOnlyList<AgentToolDefinition>? Tools, string? Refusal)> CreateUnattendedToolsAsync(string runId, SessionSandbox sandbox, AgentBuiltInToolOptions options,
+        IReadOnlyList<string> projectRoots, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(runId);
+        ArgumentNullException.ThrowIfNull(sandbox);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(projectRoots);
+        var router = new SandboxToolRouter(this, runId, options.ProviderId.Value, projectRoots, _ => Task.FromResult(sandbox));
+        if (await router.RefuseRunAsync(providerRunsItsOwnTools: false, cancellationToken).ConfigureAwait(false) is { } refusal) return (null, refusal);
+        return (router.Route(options, AgentBuiltInToolFactory.CreateDefaultTools(options)), null);
+    }
+
+    /// <summary>Lets go of the sandbox worker of a run of <see cref="CreateUnattendedToolsAsync"/>, once it ended.</summary>
+    /// <param name="runId">The run.</param>
+    /// <exception cref="ArgumentException"><paramref name="runId"/> is blank.</exception>
+    public void ReleaseUnattendedTools(string runId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(runId);
+        StopUnusedSandboxWorker(runId);
+    }
 
     private string WorkerCommandLine()
         => SandboxWorkerCommandLine ?? $"\"{Environment.ProcessPath}\" {SandboxWorker.Option}";
@@ -366,7 +400,8 @@ public sealed partial class SessionRuntimeService
     /// the sandbox when the session is sandboxed at the moment of the call, and run here otherwise; <c>webget</c> runs
     /// here, with the network of the sandbox.
     /// </summary>
-    private sealed class SandboxToolRouter(SessionRuntimeService runtime, string sessionId, string providerId, IReadOnlyList<string> projectRoots) : IAgentBuiltInToolRouter
+    private sealed class SandboxToolRouter(SessionRuntimeService runtime, string sessionId, string providerId, IReadOnlyList<string> projectRoots,
+        Func<CancellationToken, Task<SessionSandbox>> sandboxOf) : IAgentBuiltInToolRouter
     {
         private const string WebGet = "webget";
         private const string ShellCommand = "shell_command";
@@ -397,7 +432,7 @@ public sealed partial class SessionRuntimeService
 
         public async ValueTask<string?> RefuseRunAsync(bool providerRunsItsOwnTools, CancellationToken cancellationToken)
         {
-            var sandbox = await runtime.GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            var sandbox = await sandboxOf(cancellationToken).ConfigureAwait(false);
             Volatile.Write(ref _runProfile, sandbox.IsSandboxed ? sandbox.Profile : null);
             Volatile.Write(ref _processHost, null);
             if (!sandbox.IsSandboxed) return null;
@@ -416,7 +451,7 @@ public sealed partial class SessionRuntimeService
 
         private async Task<AgentToolResult> RunInWorkerAsync(AgentToolDefinition tool, AgentBuiltInToolOptions options, AgentToolInvocation invocation, CancellationToken cancellationToken)
         {
-            var sandbox = await runtime.GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            var sandbox = await sandboxOf(cancellationToken).ConfigureAwait(false);
             if (!sandbox.IsSandboxed) return await tool.Handler(invocation, cancellationToken).ConfigureAwait(false);
             if (sandbox.Profile is not { } profile) return Refused(tool, SandboxProblem(sandbox));
             try
@@ -452,7 +487,7 @@ public sealed partial class SessionRuntimeService
             }
 
             if (!taken) return await RunInWorkerAsync(tool, options, inside, cancellationToken).ConfigureAwait(false);
-            var sandbox = await runtime.GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            var sandbox = await sandboxOf(cancellationToken).ConfigureAwait(false);
             // A session that is no longer sandboxed runs its commands here, as it asks for them.
             if (!sandbox.IsSandboxed) return await tool.Handler(inside, cancellationToken).ConfigureAwait(false);
             if (sandbox.Profile is not { } profile) return Refused(tool, SandboxProblem(sandbox));
@@ -478,7 +513,7 @@ public sealed partial class SessionRuntimeService
 
         private async Task<AgentToolResult> WebGetAsync(AgentToolDefinition tool, AgentBuiltInToolOptions options, AgentToolInvocation invocation, CancellationToken cancellationToken)
         {
-            var sandbox = await runtime.GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            var sandbox = await sandboxOf(cancellationToken).ConfigureAwait(false);
             if (!sandbox.IsSandboxed) return await tool.Handler(invocation, cancellationToken).ConfigureAwait(false);
             if (sandbox.Profile is not { } profile) return Refused(tool, SandboxProblem(sandbox));
             if (profile.Network == SandboxNetwork.Off) return Refused(tool, $"the sandbox of this session (profile '{profile.Name}') has no network.");

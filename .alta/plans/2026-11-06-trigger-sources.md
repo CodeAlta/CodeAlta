@@ -23,7 +23,7 @@ This plan adds **trigger sources**: a trigger type that describes its events and
 | Project events | `added`, `archived`, `removed` |
 | Landing | A worktree branch, one commit per step, no push |
 | Existing triggers | Unchanged: no refactor of the 13 kinds |
-| Script without a model | Runs with no session: `alta` commands (plugins' included) and `agent()`, no `tools.*`; it calls back into plugins behind the scenes |
+| Script without a model | Runs with no session, its rules declared on the automation: `alta` read-only and plugin commands, nothing that starts an agent; `tools.*` by `script_access` (read or write), in the sandbox of the automation; write without a sandbox only in the user's configuration |
 | Scripts of a plugin | A plugin contributes scripts to the library, and a trigger can come with its script as a ready-made automation; the user still saves and enables it |
 
 ## What changes
@@ -68,13 +68,13 @@ This plan adds **trigger sources**: a trigger type that describes its events and
 
 What it is for: an event that should only call back into a plugin, behind the scenes: send an email, write a line to a log, update another tool. No model turn, and no session in the sidebar for each run.
 
-- A script automation gets `script_mode = "direct"` (in the editor, **Run without a model**). The host runs the script itself, in Code Mode, with no session and no model.
-- **What the script can call:** the `alta` commands, which include those contributed by plugins (`GetAltaCommands`): that is how it reaches a plugin. These commands run with no calling session and with the guards of an automation's sessions; for example, a prompt goes only to a session of the same run. There is no `tools.*`: a shell command or a file edit needs the permissions and the sandbox of a session. A plugin writes its own files.
-- **When a model is needed after all:** `agent()` starts a session of the automation, as a run with a prompt does, and the script gets its answer. So a script can decide on its own and call a model only when it has to.
-- **The run's record:** the run stays in the Automations tab with its status, its return value and what it showed with `present()` (both bounded), or the error of a script that fails. The return value is the answer of the run, also for **Write the answer back**.
-- **Autonomy and Allow:** an automation from a project waits for **Allow** of the script, as today. A plugin's `alta` command is subject to the automation's autonomy, as a plugin's tool is.
-- **First task of the step:** check that `AltaScriptBinding` and `CodeModeRunRegistry` can run a script without a session, and how a plugin's `alta` command behaves with no session in its context. That decides the shape of this step.
-
+- A script automation gets `script_mode = "direct"` (in the editor, **Run without a model**). The host runs the script itself, in Code Mode, with no session and no model. Its rules are declared on the automation, since nobody is there to approve a call.
+- **`alta`:** the commands that change nothing, and the commands plugins contribute (`GetAltaCommands`): that is how it reaches a plugin. Nothing that starts or drives an agent: no `session create/send/steer`, `job`, `reminder`, `automation run`; no `agent()` nor `session()`. A command it does not get is not in its API.
+- **`tools.*`:** the built-in tools, in the folder of the project (the home folder for a chat). `script_access = "read"`, the default, gives those that read; `"write"` also gives the edits and `shell_command`. They run in the sandbox of the automation (`sandbox`, else what the settings give), and as they are with `sandbox = "off"`. A command that asks to run outside the sandbox is refused: nobody can allow it.
+- **Without a sandbox:** `script_access = "write"` without a sandbox is read only in the configuration of the user, which may say so for a plugin too; an automation of a project that writes names a sandbox profile, or is refused.
+- **The run's record:** the run stays in the Automations tab with its status, its return value and what it showed with `present()` (both bounded), or the error of a script that fails. The return value is the answer of the run, also for **Write the answer back**. No session is created.
+- **Allow:** an automation from a project waits for **Allow** of the script, and asks again when the script, its mode or its access changes.
+- **Not in such a run:** `agent()`, `session()`, MCP tools and approvals. A script that needs a model stays a script automation of the usual mode, with its one model turn.
 ### Scripts of a plugin, and a trigger that comes with its script
 
 A plugin can give a trigger together with the code that handles it, so that "when X happens, do Y" ships built into the plugin, with no script for the user to write.
@@ -97,7 +97,7 @@ A plugin can give a trigger together with the code that handles it, so that "whe
 - [x] 4. Engine: polled sources with cursors, push listeners, claims, the prompt section, the JSON `event`; a missing source reported; tests with a fake source (`AutomationServiceTests`).
 - [x] 5. Project trigger, with the origin reported by the in-process add paths; tests.
 - [x] 6. Automation trigger, with the self and chain-depth guards; tests.
-- [ ] 7. Scripts without a model or a session: the run in Code Mode without a session, the `alta` binding with the guards of an automation, `agent()` starting a session of the automation, the run's record; tests, including a fake plugin `alta` command that the script calls.
+- [ ] 7. Scripts without a model: `script_mode` and `script_access` (read, validate, fingerprint; write without a sandbox only in the user's configuration); the tools of a run without a session, in the sandbox of the automation (the sandbox router of the runtime takes the sandbox it is given); the unattended runner in `CodeAlta.LiveTool` (`alta` read-only and plugin commands, `tools.*` by access, discovery, `present()`); the runner of the automation that uses it; tests.
 - [ ] 8. Scripts of a plugin: `PluginBase.GetScripts()`, the `Plugin` scope of the library and its names, read-only; a trigger contribution that names its script, arguments and mode; tests.
 - [ ] 9. RPC and editor: trigger descriptors, the generic fields, the events multi-select, **Run without a model**, a plugin's trigger offered with its script as a ready-made automation; frontend tests; checked in the developer instance, both themes and a narrow window.
 - [ ] 10. `alta automation`: `--trigger <type>@<events>`, `--trigger-setting`, `--script-mode`; tests.

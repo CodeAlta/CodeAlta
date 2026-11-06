@@ -319,6 +319,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         Fleet.DesktopNode? desktopNode = null;
         Fleet.DesktopRemoteChildren? remoteChildren = null;
         Automations.AutomationService? automations = null;
+        Automations.AutomationRunner? automationRunner = null;
         Fleet.DesktopAutomationPlacement? placement = null;
         DesktopChangesView? changesView = null;
         DesktopEditorView? editorView = null;
@@ -893,7 +894,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // instance starts paused, so that it does not run again what the normal one already runs.
                 automations = new Automations.AutomationService(host.CatalogOptions.ConfigPath, token => host.ProjectCatalog.LoadAsync(token),
                     new Automations.AutomationStateStore(Path.Combine(host.CatalogOptions.StateRoot, "automations.json"), pausedByDefault: options.Developer),
-                    new Automations.AutomationRunner(host), TimeProvider.System, TimeZoneInfo.Local, new Automations.GitAutomationFeed(),
+                    automationRunner = new Automations.AutomationRunner(host), TimeProvider.System, TimeZoneInfo.Local, new Automations.GitAutomationFeed(),
                     () => [.. (host.PluginRuntime?.ActivePlugins ?? []).Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugins.Abstractions.IIssueEventSource>()],
                     // A command runs with the identity of the space its runs go to (AutomationRunner): the space of its project.
                     new Automations.ShellAutomationCommands(projectId => host.Identities.ResolveAsync(null, projectId).GetAwaiter().GetResult().Environment),
@@ -1002,6 +1003,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         Servers = fleetServers, Moves = fleet.Moves, Automations = automations, Placement = placement, Host = host,
                     });
+                // A script of an automation without a model runs with these commands, as the automation allows them.
+                if (automationRunner is not null) automationRunner.Unattended = DesktopUnattendedScripts.Create(altaCommands, host);
                 search.AttachCommands(altaCommands);
                 search.AttachSettings(desktopSettings);
                 projectOpening.Attach(async arguments => await altaCommands.InvokeAsync(arguments).ConfigureAwait(false));

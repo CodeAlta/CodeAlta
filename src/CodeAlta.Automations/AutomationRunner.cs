@@ -187,6 +187,46 @@ internal sealed record AutomationRunFolder(string? Worktree, string? Root, strin
     public static AutomationRunFolder Project { get; } = new(null, null, null);
 }
 
+/// <summary>A script without a model that a run asks the host to run itself, with what it may do.</summary>
+/// <param name="RunId">The run.</param>
+/// <param name="Script">The name of the script of the library.</param>
+internal sealed record AutomationScriptRun(string RunId, string Script)
+{
+    /// <summary>Gets its arguments, a JSON object; null for none.</summary>
+    public string? ArgumentsJson { get; init; }
+
+    /// <summary>Gets what started the run, as the text the prompt of a session would get.</summary>
+    public string? EventText { get; init; }
+
+    /// <summary>Gets what started the run, as a JSON object; null for none.</summary>
+    public string? EventJson { get; init; }
+
+    /// <summary>Gets the project it runs in; null for a chat.</summary>
+    public string? ProjectId { get; init; }
+
+    /// <summary>Gets the folder of that project.</summary>
+    public string? ProjectPath { get; init; }
+
+    /// <summary>Gets the space it runs in.</summary>
+    public SpaceFilter? Spaces { get; init; }
+
+    /// <summary>Gets the sandbox its automation asks for: a profile, <c>off</c>, or null for what the settings give.</summary>
+    public string? Sandbox { get; init; }
+
+    /// <summary>Gets whether its tools may edit files and run commands.</summary>
+    public bool Write { get; init; }
+
+    /// <summary>Gets the environment of its commands: the identity of its space.</summary>
+    public CodeAlta.Agent.AgentProcessEnvironment? Environment { get; init; }
+}
+
+/// <summary>What a script without a model did.</summary>
+/// <param name="Succeeded">Whether it ended without an error.</param>
+/// <param name="Value">What it returned, as JSON; null for nothing.</param>
+/// <param name="Error">Why it failed; null when it succeeded.</param>
+/// <param name="Presented">What it showed with <c>present()</c>.</param>
+internal sealed record AutomationScriptOutcome(bool Succeeded, string? Value, string? Error, IReadOnlyList<string> Presented);
+
 /// <summary>Starts the session of a run and sends it the prompt.</summary>
 internal interface IAutomationRunner
 {
@@ -343,6 +383,30 @@ internal sealed class AutomationRunner : IAutomationRunner
         }
     }
 
+    /// <summary>
+    /// Gets or sets what runs a script without a model (<see cref="AutomationDefinition.IsDirect"/>), with no session; null for a
+    /// host that runs none: such an automation then fails to run.
+    /// </summary>
+    internal Func<AutomationScriptRun, CancellationToken, Task<AutomationScriptOutcome>>? Unattended { get; set; }
+
+    // The end of a script without a model, as the run records it: its value is the answer of the run.
+    private static async Task<AutomationOutcome> RunScriptAsync(Func<AutomationScriptRun, CancellationToken, Task<AutomationScriptOutcome>> unattended, AutomationScriptRun run)
+    {
+        try
+        {
+            // The run goes on whatever happens to the start: it ends when the script does.
+            var outcome = await unattended(run, CancellationToken.None).ConfigureAwait(false);
+            var answer = outcome.Value ?? (outcome.Presented.Count > 0 ? string.Join("\n\n", outcome.Presented) : null);
+            return outcome.Succeeded
+                ? new AutomationOutcome(AutomationRun.Completed) { Answer = answer }
+                : new AutomationOutcome(AutomationRun.Failed, AutomationText.Line(outcome.Error ?? "The script failed.", 500)) { Answer = answer };
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return new AutomationOutcome(AutomationRun.Failed, AutomationText.Line(exception.Message, 500));
+        }
+    }
+
     /// <inheritdoc />
     public Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, CancellationToken cancellationToken)
         => StartAsync(entry, runId, prompt, detail, false, cancellationToken);
@@ -377,6 +441,19 @@ internal sealed class AutomationRunner : IAutomationRunner
             // A run starts with a provider of its space: the one the automation names, which must be there, else the
             // default provider of the configuration when it is, else the first enabled provider of the space.
             var inSpace = new SpaceFilter(new CachedSpaceAssignments(new CodeAltaConfigStore(_host.CatalogOptions)).Current(), spaceId);
+            if (definition.IsDirect)
+            {
+                // A script without a model runs here, with no session: what it may do is what its automation declares.
+                if (Unattended is not { } unattended) return Refuse("This host runs no script without a model.");
+                var identity = await _host.Identities.ResolveAsync(spaceId, project?.Id, cancellationToken).ConfigureAwait(false);
+                var run = new AutomationScriptRun(runId, definition.Script!)
+                {
+                    ArgumentsJson = definition.ScriptArguments, EventText = prompt, EventJson = eventJson, ProjectId = project?.Id, ProjectPath = project?.ProjectPath,
+                    Spaces = inSpace, Sandbox = definition.Sandbox, Write = definition.ScriptAccess == AutomationDefinition.WriteAccess, Environment = identity.Environment,
+                };
+                return new AutomationStart(null, null, RunScriptAsync(unattended, run));
+            }
+
             if (definition.Script is { } scriptName)
             {
                 // What started the automation (an issue, the output of a command) is the `event` argument of a script that

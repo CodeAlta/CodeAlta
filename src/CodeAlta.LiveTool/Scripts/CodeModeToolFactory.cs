@@ -476,7 +476,7 @@ public static class CodeModeToolFactory
     // workflow({ scriptPath }) reads the file with the session's own read_file, so its sandbox and its tools apply.
     // workflow("name") runs a script of the library, the project's before the user's; the run records which (Statistics counts
     // runs by the library script they load).
-    private static Func<CodeModeScriptReference, CancellationToken, ValueTask<CodeModeSource>> ResolveWith(IAgentRunToolInvoker? tools, CodeModeScriptLibrary? library, string? cwd,
+    internal static Func<CodeModeScriptReference, CancellationToken, ValueTask<CodeModeSource>> ResolveWith(IAgentRunToolInvoker? tools, CodeModeScriptLibrary? library, string? cwd,
         SpaceFilter? spaces, Action<CodeModeLibraryScript> loaded)
         => async (reference, cancellationToken) =>
         {

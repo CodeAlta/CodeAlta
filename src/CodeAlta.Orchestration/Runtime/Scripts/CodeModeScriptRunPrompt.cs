@@ -54,22 +54,53 @@ public static partial class CodeModeScriptRunPrompt
     /// <exception cref="ArgumentNullException"><paramref name="library"/> or <paramref name="name"/> is null.</exception>
     public static string? Build(CodeModeScriptLibrary library, string name, string? argumentsJson, string? trigger, string? eventJson, string? projectPath, SpaceFilter? spaces,
         out string? problem)
+        => TryArguments(library, name, argumentsJson, trigger, eventJson, projectPath, spaces, out _, out var json, out problem)
+            ? $"""
+                Run the script `{name}` of the library with `exec`, as it is written below, and wait for it to end. Then answer with its result in a few lines: do nothing else.
+
+                ```js
+                // @exec: {"{"}"title": "{name}", "yield_ms": 600000{"}"}
+                return await workflow("{name}", {json});
+                ```
+                """
+            : null;
+
+    /// <summary>
+    /// Checks a script of a space and its arguments, with what started the run as its <c>event</c> argument when it declares one,
+    /// as <see cref="Build(CodeModeScriptLibrary, string, string?, string?, string?, string?, SpaceFilter?, out string?)"/> does
+    /// for a session, and as a host that runs it itself does.
+    /// </summary>
+    /// <param name="library">The library of the host.</param>
+    /// <param name="name">The name of the script.</param>
+    /// <param name="argumentsJson">Its arguments, a JSON object; null for none.</param>
+    /// <param name="trigger">What started the run, as text: its <c>event</c> argument when <paramref name="eventJson"/> is null.</param>
+    /// <param name="eventJson">What started the run as a JSON object; null for the text.</param>
+    /// <param name="projectPath">The folder of its project, whose scripts come first; null for none.</param>
+    /// <param name="spaces">The space it runs in; null for every script.</param>
+    /// <param name="script">The script.</param>
+    /// <param name="json">Its arguments, with its event, as a JSON object.</param>
+    /// <param name="problem">Why the script cannot run so.</param>
+    /// <returns>True when it can run with these arguments.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="library"/> or <paramref name="name"/> is null.</exception>
+    public static bool TryArguments(CodeModeScriptLibrary library, string name, string? argumentsJson, string? trigger, string? eventJson, string? projectPath, SpaceFilter? spaces,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out CodeModeLibraryScript? script, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? json, out string? problem)
     {
         ArgumentNullException.ThrowIfNull(library);
         ArgumentNullException.ThrowIfNull(name);
-        problem = null;
-        if (library.Find(name, projectPath, spaces) is not { } script)
+        (problem, json) = (null, null);
+        script = library.Find(name, projectPath, spaces);
+        if (script is null)
         {
             problem = spaces is not null && library.Find(name, projectPath) is not null
                 ? ResourceNotInSpaceException.MessageOf(SpaceResourceKind.Script, name, spaces.SpaceId)
                 : $"There is no script '{name}' in the library{(projectPath is null ? string.Empty : " of its project")}.";
-            return null;
+            return false;
         }
 
         if (script.Problem is { } error)
         {
             problem = $"The script '{name}' does not parse: {FirstLine(error)}";
-            return null;
+            return false;
         }
 
         JsonObject values;
@@ -80,7 +111,7 @@ public static partial class CodeModeScriptRunPrompt
         catch (JsonException)
         {
             problem = $"The arguments of the script '{name}' are not a JSON object.";
-            return null;
+            return false;
         }
 
         var started = trigger?.Trim() ?? string.Empty;
@@ -92,21 +123,15 @@ public static partial class CodeModeScriptRunPrompt
             else if (started.Length > 0) values["event"] = started;
         }
 
-        var json = values.ToJsonString();
-        if (script.CheckArguments(json) is { } invalid)
+        var text = values.ToJsonString();
+        if (script.CheckArguments(text) is { } invalid)
         {
             problem = $"The script '{name}' refuses its arguments: {invalid}";
-            return null;
+            return false;
         }
 
-        return $"""
-            Run the script `{name}` of the library with `exec`, as it is written below, and wait for it to end. Then answer with its result in a few lines: do nothing else.
-
-            ```js
-            // @exec: {"{"}"title": "{name}", "yield_ms": 600000{"}"}
-            return await workflow("{name}", {json});
-            ```
-            """;
+        json = text;
+        return true;
 
         static JsonObject? EventObject(string? json)
         {

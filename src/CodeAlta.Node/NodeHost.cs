@@ -132,6 +132,7 @@ public sealed class NodeHost : IAsyncDisposable
             if (options.RunAutomations)
             {
                 automations = new NodeAutomations(host, options.Automations);
+                automations.RunScriptsWith(alta.Dispatcher);
                 automations.Start();
             }
 

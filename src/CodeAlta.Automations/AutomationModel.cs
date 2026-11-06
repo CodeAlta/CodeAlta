@@ -586,6 +586,24 @@ internal sealed record AutomationDefinition(string Id, string Name)
     /// <summary>The arguments of its script, a JSON object; null for none.</summary>
     public string? ScriptArguments { get; init; }
 
+    /// <summary><see cref="ScriptMode"/>: the host runs the script itself, with no session and no model.</summary>
+    internal const string DirectMode = "direct";
+
+    /// <summary><see cref="ScriptAccess"/>: the tools of a script without a model that read.</summary>
+    internal const string ReadAccess = "read";
+
+    /// <summary><see cref="ScriptAccess"/>: also the tools that edit files and run commands.</summary>
+    internal const string WriteAccess = "write";
+
+    /// <summary>How its script runs: <see cref="DirectMode"/>, or null for a session that a model asks to run it in.</summary>
+    public string? ScriptMode { get; init; }
+
+    /// <summary>For a script without a model, what its tools may do: <see cref="ReadAccess"/> (null) or <see cref="WriteAccess"/>.</summary>
+    public string? ScriptAccess { get; init; }
+
+    /// <summary>Whether its script runs without a model.</summary>
+    internal bool IsDirect => Script is not null && ScriptMode == DirectMode;
+
     /// <summary>In the configuration of the user only: the folder of the project it runs in. Without one it runs as a chat.</summary>
     public string? Project { get; init; }
 
@@ -656,6 +674,8 @@ internal sealed record AutomationDefinition(string Id, string Name)
         // Nor without options of their own.
         if (AgentSessionOptions.Stored(SessionOptions) is { } options) text += "\noptions\n" + (options.SubSessions ? "1" : "0");
         if (Script is not null) text += "\nscript\n" + Script + "\n" + (ScriptArguments ?? string.Empty);
+        // Nor without a mode of its own.
+        if (ScriptMode is not null || ScriptAccess is not null) text += "\nscript_mode\n" + ScriptMode + "\n" + ScriptAccess;
         // Nor without a machine of their own.
         if (RunsOn is not null) text += "\nruns_on\n" + RunsOn;
         // Nor without a scope of its own.
