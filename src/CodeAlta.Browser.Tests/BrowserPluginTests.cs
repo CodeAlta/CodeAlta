@@ -999,6 +999,14 @@ public sealed class BrowserPluginTests
         // The menu of the session closes its tabs; the start page answers no more once the browser is given back.
         Assert.IsTrue(await plugin.DeactivateAsync("s1"));
         Assert.AreEqual(System.Net.HttpStatusCode.NotFound, (await http.GetAsync(new Uri(start.Url))).StatusCode);
+        // The annotation the user made stays with the session: under its prompt, and in its next browser.
+        StringAssert.Contains(BrowserPlugin.AnnotationsFooter(plugin.AnnotationsOf("s1"))?.Html, "Like this, but blue");
+        (exit, records) = await RunAsync(plugin, folder, "s1", ["browser", "activate"]);
+        Assert.AreEqual(0, exit, records[^1].ToString());
+        var next = plugin.SessionOf("s1")!;
+        Assert.AreNotSame(session, next);
+        Assert.AreSame(annotation, next.Annotations!.Pending.Single(), "the next browser of the session takes it over");
+        Assert.AreSame(next.Annotations, plugin.AnnotationsOf("s1"));
     }
 
     [TestMethod]

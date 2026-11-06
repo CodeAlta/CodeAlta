@@ -61,6 +61,8 @@ public sealed class BrowserPlugin : PluginBase
     private readonly BrowserPool _pool;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, BrowserAgentSession> _sessions = new(StringComparer.Ordinal);
+    // The annotations of sessions that lost their browser while some waited: their next prompt or their next browser takes them.
+    private readonly Dictionary<string, BrowserAnnotations> _parked = new(StringComparer.Ordinal);
     private readonly Lock _canvases = new();
     private readonly List<IPluginCanvasRpc> _settingsPages = [];
     private readonly SemaphoreSlim _settingsWrite = new(1, 1);
@@ -100,6 +102,7 @@ public sealed class BrowserPlugin : PluginBase
         _settings = await ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
         _host.Attach(this);
         _pool.DeleteLeftovers();
+        BrowserAnnotations.DeleteLeftovers(Path.Combine(_host.Root, "annotations"), TimeSpan.FromHours(1));
         _idle = Task.Run(() => CloseIdleAsync(_stopping.Token), CancellationToken.None);
     }
 
@@ -121,13 +124,17 @@ public sealed class BrowserPlugin : PluginBase
         }
 
         BrowserAgentSession[] sessions;
+        BrowserAnnotations[] parked;
         lock (_gate)
         {
             sessions = [.. _sessions.Values];
             _sessions.Clear();
+            parked = [.. _parked.Values];
+            _parked.Clear();
         }
 
         foreach (var session in sessions) await session.DisposeAsync().ConfigureAwait(false);
+        foreach (var annotations in parked) await annotations.DisposeAsync().ConfigureAwait(false);
         await _pool.DisposeAsync().ConfigureAwait(false);
         await _files.DisposeAsync().ConfigureAwait(false);
         _http.Dispose();
@@ -165,7 +172,19 @@ public sealed class BrowserPlugin : PluginBase
         lock (_gate) return _sessions.GetValueOrDefault(sessionId);
     }
 
-    /// <summary>Takes the tools back from a session, and closes its tabs.</summary>
+    /// <summary>
+    /// The annotations of a session: those of its browser, or those kept since it lost its browser while some waited.
+    /// </summary>
+    internal BrowserAnnotations? AnnotationsOf(string? sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return null;
+        lock (_gate) return _sessions.GetValueOrDefault(sessionId)?.Annotations ?? _parked.GetValueOrDefault(sessionId);
+    }
+
+    /// <summary>
+    /// Takes the tools back from a session, and closes its tabs. The annotations that wait for its next prompt stay with the
+    /// session: that prompt carries them, or its next browser takes them over.
+    /// </summary>
     /// <returns>Whether the session had them.</returns>
     public async Task<bool> DeactivateAsync(string sessionId)
     {
@@ -174,6 +193,24 @@ public sealed class BrowserPlugin : PluginBase
         lock (_gate)
         {
             if (!_sessions.Remove(sessionId, out session)) return false;
+        }
+
+        if (session.Annotations is { HasWaiting: true } annotations)
+        {
+            session.Annotations = null;
+            await annotations.DetachAsync().ConfigureAwait(false);
+            BrowserAnnotations? older;
+            lock (_gate)
+            {
+                _parked.Remove(sessionId, out older);
+                _parked[sessionId] = annotations;
+            }
+
+            if (older is not null)
+            {
+                await annotations.TakeOverAsync(older).ConfigureAwait(false);
+                await older.DisposeAsync().ConfigureAwait(false);
+            }
         }
 
         await RetireAsync(session).ConfigureAwait(false);
@@ -515,7 +552,7 @@ public sealed class BrowserPlugin : PluginBase
     public override async ValueTask<PluginPromptResult?> OnPromptSubmittingAsync(PluginPromptSubmittingContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (SessionOf(context.SessionId)?.Annotations is not { } annotations || annotations.Pending.Count == 0) return null;
+        if (AnnotationsOf(context.SessionId) is not { } annotations || annotations.Pending.Count == 0) return null;
         // The prompt carries the annotations waiting: the text of the user first, then what each one is and where it is written.
         if (await annotations.OfferPromptAsync(cancellationToken).ConfigureAwait(false) is not { } text) return null;
         var typed = context.Text.TrimEnd();
@@ -530,7 +567,7 @@ public sealed class BrowserPlugin : PluginBase
     public override async ValueTask OnAgentEventAsync(PluginAgentEventContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (context.Event is not AgentContentCompletedEvent { Kind: AgentContentKind.User } recorded || SessionOf(recorded.SessionId)?.Annotations is not { } annotations) return;
+        if (context.Event is not AgentContentCompletedEvent { Kind: AgentContentKind.User } recorded || AnnotationsOf(recorded.SessionId) is not { } annotations) return;
         await annotations.PromptRecordedAsync(recorded.Content).ConfigureAwait(false);
     }
 
@@ -797,12 +834,22 @@ public sealed class BrowserPlugin : PluginBase
             session = new BrowserAgentSession(_host, _pool, sessionId, target, choice.Source, choice.Reason, sandbox, () => _settings, AllowSiteAlwaysAsync, workingDirectory);
             session.Annotations = CreateAnnotations(session);
             BrowserAgentSession? replaced;
+            BrowserAnnotations? parked;
             lock (_gate)
             {
                 _sessions.Remove(sessionId, out replaced);
+                _parked.Remove(sessionId, out parked);
                 _sessions[sessionId] = session;
             }
 
+            // The annotations the user made in the browser replaced, or kept since the session lost its browser, go on in this one.
+            if (session.Annotations is { } fresh)
+            {
+                if (parked is not null) await fresh.TakeOverAsync(parked).ConfigureAwait(false);
+                if (replaced?.Annotations is { } previous) await fresh.TakeOverAsync(previous).ConfigureAwait(false);
+            }
+
+            if (parked is not null) await parked.DisposeAsync().ConfigureAwait(false);
             if (replaced is not null) await RetireAsync(replaced).ConfigureAwait(false);
         }
 
@@ -1042,13 +1089,16 @@ public sealed class BrowserPlugin : PluginBase
             GetState = context => SessionOf(context.SessionId) is { IsOpen: true } ? PluginButtonState.Default : new PluginButtonState { Hidden = true },
         };
 
-        yield return PluginUi.Content(PluginUiRegion.SessionFooter, context => AnnotationsFooter(SessionOf(context.SessionId)), "annotations");
+        yield return PluginUi.Content(PluginUiRegion.SessionFooter, context => AnnotationsFooter(AnnotationsOf(context.SessionId)), "annotations");
     }
 
     /// <summary>What the prompt of a session shows of the annotations waiting for it: one chip each, and a button that drops them.</summary>
-    internal static PluginRenderResult? AnnotationsFooter(BrowserAgentSession? session)
+    internal static PluginRenderResult? AnnotationsFooter(BrowserAgentSession? session) => AnnotationsFooter(session?.Annotations);
+
+    /// <summary>What the prompt of a session shows of its annotations waiting: one chip each, and a button that drops them.</summary>
+    internal static PluginRenderResult? AnnotationsFooter(BrowserAnnotations? annotations)
     {
-        if (session?.Annotations?.Pending is not { Count: > 0 } pending) return null;
+        if (annotations?.Pending is not { Count: > 0 } pending) return null;
         var html = new System.Text.StringBuilder("<div class=\"alta-row\"><span class=\"alta-tag alta-primary\">")
             .Append(pending.Count == 1 ? "1 annotation" : $"{pending.Count} annotations").Append(" from the browser</span>");
         foreach (var annotation in pending.Take(8))
@@ -1103,7 +1153,7 @@ public sealed class BrowserPlugin : PluginBase
         });
         yield return CodeAlta.Plugins.Abstractions.Command.Session(ClearAnnotationsCommand, "Drops the browser annotations waiting for the next prompt of this session.", async (context, _) =>
         {
-            var count = SessionOf(context.SessionId)?.Annotations is { } annotations ? await annotations.ClearAsync().ConfigureAwait(false) : 0;
+            var count = AnnotationsOf(context.SessionId) is { } annotations ? await annotations.ClearAsync().ConfigureAwait(false) : 0;
             return PluginCommandResult.Message(count == 0 ? "No annotation was waiting." : count == 1 ? "The annotation was dropped." : $"{count} annotations were dropped.");
         });
     }

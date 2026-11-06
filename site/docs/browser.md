@@ -67,7 +67,7 @@ In Chrome and Edge, such a page shows a small **CodeAlta** toolbar at its bottom
    - Paste or drop images into the note, such as a mockup of how it should look: up to 4, large ones are made smaller.
 4. Send the annotations: click **Send** in the toolbar and add a message if you like, or write your prompt in CodeAlta, where the annotations wait above the prompt of the session.
 
-Until they are sent, the number in the toolbar opens the list of the annotations of the session, from every page: **Edit** changes a note, **✕** removes an annotation, and pointing at one shows it on the page. Clicking the number on a mark does the same. In CodeAlta, **Discard** drops them all.
+Until they are sent, the number in the toolbar opens the list of the annotations of the session, from every page: **Edit** changes a note, **✕** removes an annotation, and pointing at one shows it on the page. Clicking the number on a mark does the same. In CodeAlta, **Discard** drops them all. When the browser of the session closes or changes before they are sent, they stay above its prompt, and its next browser shows them again.
 
 When the toolbar covers what you want to mark, drag it by **CodeAlta** to another place. Click **CodeAlta** to collapse or expand the toolbar, and double-click it to put the toolbar back at the bottom right. The sun or moon button at the end switches the toolbar between a dark and a light look, so it stays readable on any page. CodeAlta keeps the place and the look for every page; the page itself does not change.
 

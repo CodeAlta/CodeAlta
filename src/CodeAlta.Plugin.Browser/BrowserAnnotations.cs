@@ -205,6 +205,9 @@ internal sealed class BrowserAnnotations : IAsyncDisposable
     /// <summary>The text sent from the toolbar when the user wrote none and every annotation is a question.</summary>
     internal const string DefaultQuestionText = "Please answer the questions of my annotations below.";
 
+    /// <summary>The file held open in a folder of pictures while it is in use: a CodeAlta that starts never sweeps a folder whose lock is held.</summary>
+    internal const string LockFileName = ".lock";
+
     // The elements of one annotation whose sources are looked for: the first ones, the others are described only.
     private const int LocatedElements = 6;
     private readonly BrowserAnnotationsHost _host;
@@ -219,6 +222,10 @@ internal sealed class BrowserAnnotations : IAsyncDisposable
     private (SessionAnnotation[] Taken, string Text)? _offered;
     private int _next;
     private int _disposed;
+    // The session lost its browser: no tab gets the toolbar, and the annotations wait for its next prompt or its next browser.
+    private int _detached;
+    private readonly Lock _folderGate = new();
+    private FileStream? _folderLock;
 
     private sealed class PageEntry(IBrowserPage page)
     {
@@ -269,7 +276,7 @@ internal sealed class BrowserAnnotations : IAsyncDisposable
     /// <summary>Adds the toolbar to a tab of the session, when its browser can carry it.</summary>
     public void Attach(IBrowserPage page)
     {
-        if (page is not IAnnotatablePage annotatable || Volatile.Read(ref _disposed) != 0) return;
+        if (page is not IAnnotatablePage annotatable || Volatile.Read(ref _disposed) != 0 || Volatile.Read(ref _detached) != 0) return;
         _ = AttachAsync(page, annotatable);
     }
 
@@ -478,7 +485,7 @@ internal sealed class BrowserAnnotations : IAsyncDisposable
         bool taken;
         try
         {
-            Directory.CreateDirectory(_host.PictureFolder);
+            EnsureFolder();
             file = Path.Combine(_host.PictureFolder, $"annotation-{annotation.Number.ToString(CultureInfo.InvariantCulture)}-{name}{image.Extension}");
             await _host.WriteFile(file, image.Bytes, cancellationToken).ConfigureAwait(false);
             lock (_gate)
@@ -690,7 +697,7 @@ internal sealed class BrowserAnnotations : IAsyncDisposable
 
     private async Task KeepPictureAsync(SessionAnnotation annotation, byte[] picture, CancellationToken cancellationToken)
     {
-        Directory.CreateDirectory(_host.PictureFolder);
+        EnsureFolder();
         var file = Path.Combine(_host.PictureFolder, $"annotation-{annotation.Number}.png");
         await _host.WriteFile(file, picture, cancellationToken).ConfigureAwait(false);
         annotation.Picture = file;
@@ -702,7 +709,7 @@ internal sealed class BrowserAnnotations : IAsyncDisposable
     {
         if (await page.PictureAsync(annotation.Area, cancellationToken).ConfigureAwait(false) is { } picture)
         {
-            Directory.CreateDirectory(_host.PictureFolder);
+            EnsureFolder();
             var file = Path.Combine(_host.PictureFolder, $"annotation-{annotation.Number}.png");
             await _host.WriteFile(file, picture, cancellationToken).ConfigureAwait(false);
             annotation.Picture = file;
@@ -874,11 +881,145 @@ internal sealed class BrowserAnnotations : IAsyncDisposable
         }
     }
 
-    /// <summary>Removes the toolbar from the tabs, and the pictures of the elements.</summary>
-    public async ValueTask DisposeAsync()
+    /// <summary>Gets whether annotations wait for the next prompt, or were offered with a prompt not recorded yet.</summary>
+    public bool HasWaiting
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        await _lifetime.CancelAsync().ConfigureAwait(false);
+        get
+        {
+            lock (_gate) return _pending.Count != 0 || _offered is not null;
+        }
+    }
+
+    /// <summary>
+    /// Takes the annotations of the browser this one replaces for the same session (another browser, another profile, a
+    /// sandbox changed, or none for a while): those waiting, the ones offered with a prompt not recorded yet, the last ones
+    /// sent and their numbers, with their pictures and images moved into the folder of this one. The previous one keeps none.
+    /// </summary>
+    /// <param name="previous">The annotations of the browser replaced, which are disposed afterwards.</param>
+    public async Task TakeOverAsync(BrowserAnnotations previous)
+    {
+        ArgumentNullException.ThrowIfNull(previous);
+        Task[] ready;
+        lock (previous._gate) ready = [.. previous._pending.Select(static item => item.Ready)];
+        try
+        {
+            // What the browser tells of the last element saved, or an image pasted last, can still be on its way.
+            await Task.WhenAll(ready).WaitAsync(ReadyWait).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // What is known moves.
+        }
+
+        SessionAnnotation[] pending, sent;
+        (SessionAnnotation[] Taken, string Text)? offered;
+        int next;
+        lock (previous._gate)
+        {
+            (pending, sent, offered, next) = ([.. previous._pending], [.. previous._sent], previous._offered, previous._next);
+            previous._pending.Clear();
+            previous._sent = [];
+            previous._offered = null;
+        }
+
+        foreach (var annotation in pending.Concat(sent).Concat(offered?.Taken ?? []).Distinct()) MoveFiles(annotation);
+        lock (_gate)
+        {
+            _pending.InsertRange(0, pending);
+            _sent = [.. sent, .. _sent];
+            _offered ??= offered;
+            _next = Math.Max(_next, next);
+        }
+
+        Changed();
+    }
+
+    /// <summary>
+    /// Removes the toolbar from the tabs and keeps the annotations with their pictures: the session lost its browser, and
+    /// its next prompt carries them, or its next browser takes them over (<see cref="TakeOverAsync"/>).
+    /// </summary>
+    public async Task DetachAsync()
+    {
+        if (Interlocked.Exchange(ref _detached, 1) != 0) return;
+        await RemoveToolbarsAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Deletes the folders of pictures a CodeAlta that ended without closing its browsers left behind (a crash, a kill):
+    /// those not changed for <paramref name="age"/> whose lock no CodeAlta of the state root holds. The developer instance
+    /// shares the folder of the plugin with the normal one, and holds the lock of each folder it uses.
+    /// </summary>
+    /// <param name="root">The folder that holds the folders of pictures.</param>
+    /// <param name="age">How long a folder is left unchanged before it is swept.</param>
+    internal static void DeleteLeftovers(string root, TimeSpan age)
+    {
+        try
+        {
+            if (!Directory.Exists(root)) return;
+            foreach (var folder in Directory.EnumerateDirectories(root))
+            {
+                // A folder made a moment ago may not hold its lock yet.
+                if (Directory.GetLastWriteTimeUtc(folder) > DateTime.UtcNow - age) continue;
+                try
+                {
+                    using (new FileStream(Path.Combine(folder, LockFileName), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None)) { }
+                    Directory.Delete(folder, recursive: true);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    // In use by the annotations of another CodeAlta, or a picture is open elsewhere: it stays.
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Nothing to sweep, or nothing that can be.
+        }
+    }
+
+    // The folder of the pictures, with its lock held from the first picture until this is disposed.
+    private void EnsureFolder()
+    {
+        Directory.CreateDirectory(_host.PictureFolder);
+        lock (_folderGate)
+        {
+            if (_folderLock is not null || Volatile.Read(ref _disposed) != 0) return;
+            try
+            {
+                _folderLock = new FileStream(Path.Combine(_host.PictureFolder, LockFileName), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Without its lock, the folder is kept from the sweep by its age only.
+            }
+        }
+    }
+
+    // The picture and the images of an annotation taken over, moved into the folder of this one; one that cannot move is lost.
+    private void MoveFiles(SessionAnnotation annotation)
+    {
+        if (annotation.Picture is { } picture) annotation.Picture = MoveFile(picture);
+        if (annotation.Images.Count != 0)
+            annotation.Images = [.. annotation.Images.Select(image => MoveFile(image.File) is { } moved ? image with { File = moved } : null).OfType<AnnotationImage>()];
+    }
+
+    private string? MoveFile(string file)
+    {
+        try
+        {
+            EnsureFolder();
+            var moved = Path.Combine(_host.PictureFolder, Path.GetFileName(file));
+            File.Move(file, moved, overwrite: true);
+            return moved;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private async Task RemoveToolbarsAsync()
+    {
         PageEntry[] entries;
         lock (_gate)
         {
@@ -893,6 +1034,19 @@ internal sealed class BrowserAnnotations : IAsyncDisposable
                 try { await registration.DisposeAsync().ConfigureAwait(false); }
                 catch (Exception exception) when (exception is not OutOfMemoryException) { /* the tab is gone */ }
             }
+        }
+    }
+
+    /// <summary>Removes the toolbar from the tabs, and the pictures of the elements.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        await _lifetime.CancelAsync().ConfigureAwait(false);
+        await RemoveToolbarsAsync().ConfigureAwait(false);
+        lock (_folderGate)
+        {
+            _folderLock?.Dispose();
+            _folderLock = null;
         }
 
         try
