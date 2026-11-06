@@ -34,6 +34,13 @@ public sealed record PluginContributionRegistration
     public string? PluginId { get; init; }
 }
 
+/// <summary>An automation trigger a running plugin gives, with that plugin.</summary>
+/// <param name="Contribution">The trigger.</param>
+/// <param name="PluginId">The id the configuration names the plugin by.</param>
+/// <param name="Scope">The scope of the plugin.</param>
+/// <param name="ScopeProjectId">The project of a plugin of a project: only the automations of that project use its triggers.</param>
+public sealed record PluginAutomationTriggerRegistration(PluginAutomationTriggerContribution Contribution, string PluginId, PluginScope Scope, string? ScopeProjectId);
+
 /// <summary>
 /// Describes a contribution summary for diagnostics and management UI display.
 /// </summary>
@@ -383,6 +390,10 @@ public sealed class PluginContributionRegistry
                 // A card belongs to the plugin that pins it: two plugins with the same identifier do not shadow each other.
                 yield return new ContributionConflictKey("landing-card", $"landing-card:{registration.Handle.PluginRuntimeKey}:{card.Id}", card.Id);
                 yield break;
+            case PluginAutomationTriggerContribution trigger:
+                // A configuration file names a trigger by its type: a second plugin with the same type shadows the first.
+                yield return new ContributionConflictKey("automation-trigger", $"automation-trigger:{trigger.Type}", trigger.Type);
+                yield break;
             case PluginUiContribution ui:
                 yield return new ContributionConflictKey("ui-region", $"ui:{ui.Region}:{ui.Name ?? ui.GetType().Name}", $"{ui.Region}:{ui.Name ?? ui.GetType().Name}");
                 yield break;
@@ -442,6 +453,7 @@ public sealed class PluginContributionRegistry
             PluginCanvasContribution canvas => canvas.Order,
             PluginLandingCardContribution card => card.Order,
             PluginSettingContribution setting => setting.Order,
+            PluginAutomationTriggerContribution trigger => trigger.Order,
             _ => 0,
         };
 
@@ -465,6 +477,7 @@ public sealed class PluginContributionRegistry
             PluginLandingCardContribution card => card.Id,
             PluginModelProviderContribution provider => provider.ProviderType,
             PluginSettingContribution setting => setting.Key,
+            PluginAutomationTriggerContribution trigger => trigger.Type,
             _ => null,
         };
 

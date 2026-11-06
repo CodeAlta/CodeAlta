@@ -52,6 +52,8 @@ public enum PluginPoint
     ModelProvider,
     /// <summary>Setting: a value of the plugin that the user changes in Settings and agents find with <c>alta settings</c>.</summary>
     Settings,
+    /// <summary>Automation trigger: what starts automations, with the source of its events.</summary>
+    AutomationTrigger,
 }
 
 /// <summary>

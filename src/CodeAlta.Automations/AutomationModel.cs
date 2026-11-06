@@ -67,9 +67,6 @@ internal static class AutomationSourceTypes
     /// <summary>The sources of CodeAlta, which a configuration file names without a plugin.</summary>
     internal static readonly string[] BuiltIn = [Project, Automation];
 
-    /// <summary>The longest type of a source kept.</summary>
-    internal const int MaximumLength = 128;
-
     /// <summary>The most events a trigger of a source chooses.</summary>
     internal const int MaximumEvents = 16;
 
@@ -83,15 +80,7 @@ internal static class AutomationSourceTypes
     internal const int MaximumValues = 64;
 
     /// <summary>Whether a text is the type of a source of a plugin: <c>&lt;plugin-id&gt;/&lt;name&gt;</c>.</summary>
-    internal static bool IsPluginType(string? text)
-    {
-        if (text is not { Length: > 2 and <= MaximumLength }) return false;
-        var slash = text.IndexOf('/', StringComparison.Ordinal);
-        if (slash <= 0 || slash != text.LastIndexOf('/')) return false;
-        var plugin = text.AsSpan(0, slash);
-        if (!char.IsAsciiLetterLower(plugin[0]) && !char.IsAsciiDigit(plugin[0])) return false;
-        return plugin.IndexOfAnyExcept("abcdefghijklmnopqrstuvwxyz0123456789._-") < 0 && IsName(text.AsSpan(slash + 1));
-    }
+    internal static bool IsPluginType(string? text) => CodeAlta.Plugins.Abstractions.PluginAutomationTriggerContribution.IsType(text);
 
     /// <summary>Whether a text is the type of a source: one of CodeAlta, or of a plugin.</summary>
     internal static bool IsType(string? text) => BuiltIn.Contains(text, StringComparer.Ordinal) || IsPluginType(text);
@@ -100,8 +89,7 @@ internal static class AutomationSourceTypes
     internal static string? PluginOf(string type) => type.IndexOf('/', StringComparison.Ordinal) is > 0 and var slash ? type[..slash] : null;
 
     /// <summary>Whether a text is the name of an event or of a setting: a lowercase letter, then lowercase letters, digits and underscores.</summary>
-    internal static bool IsName(ReadOnlySpan<char> text)
-        => text.Length is > 0 and <= 64 && char.IsAsciiLetterLower(text[0]) && text.IndexOfAnyExcept("abcdefghijklmnopqrstuvwxyz0123456789_") < 0;
+    internal static bool IsName(ReadOnlySpan<char> text) => CodeAlta.Plugins.Abstractions.PluginAutomationTriggerContribution.IsName(text);
 }
 
 /// <summary>How the sender of a webhook signs what it pushes.</summary>

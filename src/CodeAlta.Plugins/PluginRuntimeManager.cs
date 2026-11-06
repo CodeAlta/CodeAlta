@@ -116,6 +116,17 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
             .OfType<PluginModelProviderContribution>()];
 
     /// <summary>
+    /// Gets the automation triggers the running plugins contribute, in their registration order: for a type that two plugins
+    /// give, the first is the one used.
+    /// </summary>
+    /// <returns>The triggers with the plugin that gives each one.</returns>
+    public IReadOnlyList<PluginAutomationTriggerRegistration> GetAutomationTriggers()
+        => [.. _registry.GetSnapshot()
+            .Where(static registration => registration.Handle.Point == PluginPoint.AutomationTrigger && registration.Contribution is PluginAutomationTriggerContribution)
+            .Select(static registration => new PluginAutomationTriggerRegistration((PluginAutomationTriggerContribution)registration.Contribution,
+                registration.PluginId ?? PluginContributionRegistry.PluginIdOf(registration.Handle.PluginRuntimeKey, null), registration.Scope, registration.ScopeProjectId))];
+
+    /// <summary>
     /// Gets the model provider types one running plugin contributes: the id configuration names it by (the folder of
     /// a source package, the name of a plugin of the application).
     /// </summary>

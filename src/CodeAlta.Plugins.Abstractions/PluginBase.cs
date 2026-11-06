@@ -216,6 +216,13 @@ public abstract class PluginBase : IAsyncDisposable
     public virtual IEnumerable<PluginSettingContribution> GetSettings() => [];
 
     /// <summary>
+    /// Gets the triggers the plugin gives to automations: what starts them, with its events, its settings and the source of
+    /// its events. A configuration file names one by its <see cref="PluginAutomationTriggerContribution.Type"/>.
+    /// </summary>
+    /// <returns>Automation trigger contributions.</returns>
+    public virtual IEnumerable<PluginAutomationTriggerContribution> GetAutomationTriggers() => [];
+
+    /// <summary>
     /// A hook that observes or transforms a prompt when it is submitted.
     /// </summary>
     /// <param name="context">The prompt submission context.</param>
