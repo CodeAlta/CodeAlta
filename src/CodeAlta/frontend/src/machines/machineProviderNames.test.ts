@@ -33,13 +33,14 @@ test("An automation placed on a machine runs with the providers and models of th
   ]);
   assert.equal(machineRunProviders(choices("machine_offline")), null, "a machine that cannot say leaves the providers of this computer");
   assert.equal(machineRunProviders(null), null);
-  const base: SessionSettingsApi = { key: "here", models: async () => [{ id: "local-model", efforts: [], defaultEffort: null }], prompts: async () => null,
+  const base: SessionSettingsApi = { key: "here", models: async () => ({ models: [{ id: "local-model", efforts: [], defaultEffort: null }], order: "name" }), prompts: async () => null,
     permissionModes: async () => null, reviewSetting: async () => null, sandbox: async () => null };
   const placed = onMachine(base, "mac", choices());
   assert.notEqual(placed.key, base.key, "catalogs of another machine are read again");
   assert.deepEqual(await placed.models("claude", new AbortController().signal),
-    [{ id: "opus", name: "Opus", efforts: [], defaultEffort: null }, { id: "haiku", name: "Haiku", efforts: [], defaultEffort: null }]);
-  assert.deepEqual(await placed.models("unknown", new AbortController().signal), []);
+    { models: [{ id: "opus", name: "Opus", efforts: [], defaultEffort: null }, { id: "haiku", name: "Haiku", efforts: [], defaultEffort: null }], order: null },
+    "the machine says nothing of their order: they are listed as it gives them");
+  assert.deepEqual(await placed.models("unknown", new AbortController().signal), { models: [], order: null });
 });
 
 test("Runs in lists the projects of this computer, not the rows that stand for machines", () => {

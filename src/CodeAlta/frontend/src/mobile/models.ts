@@ -1,5 +1,5 @@
 import type { ModelOption, Options, TierOption } from "./contract";
-import { orderModels } from "../modelOrder";
+import { sectionModels } from "../modelOrder";
 
 /** A variant a model id may carry. */
 export type Variant = "thinking" | "fast";
@@ -56,12 +56,12 @@ export const findModel = (options: Options, provider: string | null, id: string 
 export const providerName = (options: Options, provider: string): string => options.models.find(model => model.provider === provider)?.providerName || provider;
 export const providers = (options: Options): string[] => [...new Set(options.models.map(model => model.provider))];
 
-/** A model of the provider, always one it lists: the wanted one, else the configured default when it is this provider's, else the first of the frontier. */
+/** A model of the provider, always one it lists: the wanted one, else the configured default when it is this provider's, else the first it shows. */
 export function pickModel(options: Options, provider: string, wanted?: string | null): ModelOption | undefined {
   const models = modelsOf(options, provider), defaults = options.defaults;
   return models.find(model => model.id === wanted)
     ?? (defaults?.provider === provider ? models.find(model => model.id === defaults.model) : undefined)
-    ?? orderModels(groupVariants(models).map(group => group.entry)).frontier[0] ?? models[0];
+    ?? sectionModels(groupVariants(models).map(group => group.entry), options.modelsOrders?.[provider]).frontier[0] ?? models[0];
 }
 
 /** The effort of a model: the wanted one, else the effort of the settings when it is their model, else the model's default, else its first. */

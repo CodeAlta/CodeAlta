@@ -12,7 +12,7 @@ import { notSandboxed, sessionSandboxSummary } from "../sandbox/sandboxChoices";
 import { useShellLanguage } from "../shellLanguage";
 import type { RunProvider, RunsWith } from "../workItems/runsWith";
 import { chooseEffort, chooseModel, chooseProvider, shownModel, switchDefaults, usesDefaults, type SessionSettings } from "./sessionSettings";
-import type { SessionSettingsApi, SessionSettingsModel } from "./sessionSettingsApi";
+import type { SessionSettingsApi, SessionSettingsModel, SessionSettingsModels } from "./sessionSettingsApi";
 import { SessionOptionsFields } from "./SessionOptionsFields";
 import { changedSessionOptions, sessionOptionsOf } from "./sessionOptions";
 
@@ -42,9 +42,9 @@ export function useSessionSettingsChoices(api: SessionSettingsApi | null, provid
   const scope = api?.key ?? null;
   const resolved = shownModel(providers, null, recorded, settings);
   const providerId = resolved.provider?.id ?? null;
-  const models = useKeyedRead<readonly SessionSettingsModel[]>(scope && providerId ? `${scope}\n${providerId}` : null,
-    api && providerId ? signal => api.models(providerId, signal) : null, []);
-  const shown = shownModel(providers, models.value ?? null, recorded, settings);
+  const models = useKeyedRead<SessionSettingsModels>(scope && providerId ? `${scope}\n${providerId}` : null,
+    api && providerId ? signal => api.models(providerId, signal) : null, { models: [], order: null });
+  const shown = shownModel(providers, models.value?.models ?? null, recorded, settings);
   const prompts = useKeyedRead<Readonly<{ prompts: readonly SessionPromptChoice[]; defaultPromptId: string | null }> | null>(scope, api ? signal => api.prompts(signal) : null, null);
   const permissions = useKeyedRead<Readonly<{ modes: readonly SessionPermissionModeChoice[]; defaultMode: string | null }> | null>(scope && providerId ? `${scope}\n${providerId}` : null,
     api && providerId ? signal => api.permissionModes(providerId, signal) : null, null);
@@ -52,7 +52,7 @@ export function useSessionSettingsChoices(api: SessionSettingsApi | null, provid
   const sandbox = useKeyedRead<SandboxSessionResponse | null>(scope ? `${scope}\n${shown.providerId}\n${shown.modelId}` : null,
     api ? signal => api.sandbox(shown.providerId, shown.modelId, signal) : null, null);
   return {
-    shown, provider: shown.provider, models: models.value ?? [], loadingModels: models.loading,
+    shown, provider: shown.provider, models: models.value?.models ?? [], modelsOrder: models.value?.order ?? null, loadingModels: models.loading,
     prompts: prompts.value?.prompts ?? [], defaultPromptId: prompts.value?.defaultPromptId ?? null, loadingPrompts: prompts.loading,
     permissionModes: permissions.value?.modes ?? [], defaultPermissionMode: permissions.value?.defaultMode ?? null,
     reviewSetting: review.value ?? null, sandbox: sandbox.value ?? null,
@@ -116,7 +116,7 @@ export function SessionSettingsChip({ id, providers, choices, value, onChange, d
       {providers.map(candidate => <option key={candidate.id} value={candidate.id}>{providerLabel(candidate)}</option>)}
     </HTMLSelect>}
     model={<ComposerModelPicker id={`composer-model-${id}`} value={shown.modelId} models={models.map(candidate => ({ ...candidate, name: modelName(candidate)! }))}
-      providerKey={shown.providerId} disabled={locked || !provider} loading={choices.loadingModels} onChange={modelId => onChange(chooseModel(value, modelId, shown))} />}
+      order={choices.modelsOrder} providerKey={shown.providerId} disabled={locked || !provider} loading={choices.loadingModels} onChange={modelId => onChange(chooseModel(value, modelId, shown))} />}
     reasoning={<ReasoningSlider value={shown.reasoningEffort} efforts={model ? model.efforts : null} complete={!!model?.effortsComplete} model={modelName(model)} disabled={locked}
       onChange={effort => onChange(chooseEffort(value, effort, shown))} />}
     permission={choices.permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${id}`} value={value.permissionMode} modes={choices.permissionModes}

@@ -41,6 +41,7 @@ public sealed class AltaSessionSelectionTests
             var models = root.GetProperty("models").EnumerateArray().ToArray();
             CollectionAssert.AreEqual(new[] { "small", "large" }, models.Select(static model => model.GetProperty("id").GetString()).ToArray());
             Assert.AreEqual("Large Model", models[1].GetProperty("name").GetString());
+            Assert.AreEqual("provider", root.GetProperty("modelsOrder").GetString(), "the models are in the order of the provider");
             CollectionAssert.AreEqual(new[] { "medium", "xhigh" }, models[1].GetProperty("efforts").EnumerateArray().Select(static effort => effort.GetString()).ToArray());
             Assert.AreEqual("medium", models[1].GetProperty("startEffort").GetString());
             Assert.IsTrue(root.GetProperty("prompts").EnumerateArray().Any(static prompt => prompt.GetProperty("id").GetString() == "default"));
@@ -58,6 +59,7 @@ public sealed class AltaSessionSelectionTests
             var modes = gated.RootElement.GetProperty("permissionModes").EnumerateArray().ToArray();
             CollectionAssert.AreEqual(new[] { "default", "acceptEdits", "bypassPermissions" }, modes.Select(static mode => mode.GetProperty("id").GetString()).ToArray());
             Assert.AreEqual("Accept edits", modes[1].GetProperty("name").GetString());
+            Assert.AreEqual("provider", gated.RootElement.GetProperty("modelsOrder").GetString());
         }
 
         // The turn runs with what the prompt chooses, and the session keeps it.

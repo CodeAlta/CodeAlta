@@ -122,15 +122,19 @@ internal sealed partial class MobileApi(IPluginAltaService alta, MobileSessions 
 
         // The modes a new session of a provider can start in; a provider that offers none is left out.
         var permissionModes = new JsonObject();
+        // The order the settings of each provider put its models in: a list in the order of the provider keeps it.
+        var modelsOrders = new JsonObject();
         foreach (var provider in providerItems)
         {
-            if (MobileAlta.Text(provider, "providerKey") is { } key && Modes(provider) is { Count: > 0 } modes) permissionModes[key] = modes;
+            if (MobileAlta.Text(provider, "providerKey") is not { } key) continue;
+            if (Modes(provider) is { Count: > 0 } modes) permissionModes[key] = modes;
+            if (MobileAlta.Text(provider, "modelsOrder") is { } order) modelsOrders[key] = order;
         }
 
         var defaults = (await resolved.ConfigureAwait(false)).OfType("alta.model.selection").FirstOrDefault();
         return new JsonObject
         {
-            ["models"] = modelList, ["prompts"] = agents, ["tiers"] = tierList, ["permissionModes"] = permissionModes,
+            ["models"] = modelList, ["prompts"] = agents, ["tiers"] = tierList, ["permissionModes"] = permissionModes, ["modelsOrders"] = modelsOrders,
             // A session that names no model starts on the standard tier, unless the settings say another default.
             ["defaultTier"] = MobileAlta.Text(defaults, "tier") ?? "standard",
             ["defaults"] = new JsonObject
@@ -236,7 +240,7 @@ internal sealed partial class MobileApi(IPluginAltaService alta, MobileSessions 
                 ["agent"] = agent, ["agentName"] = prompts.OfType<JsonObject>().Where(item => (string?)item["id"] == agent).Select(static item => (string?)item["name"]).FirstOrDefault() ?? agent,
                 ["permissionMode"] = MobileAlta.Text(current, "permissionMode"),
             },
-            ["models"] = models, ["prompts"] = prompts, ["permissionModes"] = Modes(choices), ["error"] = null,
+            ["models"] = models, ["modelsOrder"] = MobileAlta.Text(choices, "modelsOrder"), ["prompts"] = prompts, ["permissionModes"] = Modes(choices), ["error"] = null,
         };
     }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { orderModels, parseModel } from "./modelOrder";
+import { orderModels, parseModel, sectionModels } from "./modelOrder";
 
 test("model ids are read as a family, a version and a variant suffix", () => {
   assert.deepEqual(parseModel("claude-opus-4-7"), { family: "claude-opus", version: [4, 7], suffix: "" });
@@ -26,4 +26,18 @@ test("each part is sorted by vendor, then by version descending, then by family"
   assert.deepEqual(other.map(m => m.id), ["gemini-3.5-flash", "gemini-3-argon"]);
   const mixed = orderModels(["gpt-6.1-sol", "gemini-4-argon", "claude-sonnet-4-5", "gemini-3.8-flash"].map(id => ({ id })));
   assert.deepEqual(mixed.frontier.map(m => m.id), ["claude-sonnet-4-5", "gemini-4-argon", "gemini-3.8-flash", "gpt-6.1-sol"], "vendors of a multi-vendor provider stay together");
+});
+
+test("a provider in its own order keeps it: only the orders by name are sorted by family", () => {
+  const ids = ["gpt-5", "claude-opus-4-1", "gpt-6.1", "claude-opus-4-7"];
+  for (const order of ["provider", null, undefined, "unknown"]) {
+    const { frontier, other } = sectionModels(ids.map(id => ({ id })), order);
+    assert.deepEqual(frontier.map(m => m.id), ids, String(order));
+    assert.deepEqual(other, [], "no separator");
+  }
+  for (const order of ["name", "name_version"]) {
+    const { frontier, other } = sectionModels(ids.map(id => ({ id })), order);
+    assert.deepEqual(frontier.map(m => m.id), ["claude-opus-4-7", "gpt-6.1"], order);
+    assert.deepEqual(other.map(m => m.id), ["claude-opus-4-1", "gpt-5"]);
+  }
 });

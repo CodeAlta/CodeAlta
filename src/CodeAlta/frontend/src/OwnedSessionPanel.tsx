@@ -1525,7 +1525,7 @@ ${value}` : value);
           // A provider chosen by hand is not a model of a tier.
           if (value.tier) void recordTier(null);
         }} />}
-      model={<><ComposerModelPicker id={`composer-model-${sessionId}`} value={selected?.modelId ?? null} models={activeChoices?.models ?? noModels} providerKey={selected?.providerKey}
+      model={<><ComposerModelPicker id={`composer-model-${sessionId}`} value={selected?.modelId ?? null} models={activeChoices?.models ?? noModels} order={activeChoices?.modelsOrder} providerKey={selected?.providerKey}
         disabled={invalidEpoch || !!pending} loading={loadingChoices} onChange={modelId => select("modelId", modelId)}
         tiers={composerTiers} currentTier={activeChoices?.adaptive ? adaptiveTier : activeChoices?.tier ?? null} onChooseTier={tier => void chooseTier(tier)}
         adaptive={composerAdaptive} onChooseAdaptive={level => void chooseAdaptive(level)}

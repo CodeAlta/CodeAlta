@@ -30,7 +30,7 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
   const key = JSON.stringify([epoch, projectId, projectPath, provider, spaceId]);
   const [revision, setRevision] = useState(0);
   const [prompts, setPrompts] = useState<{ key: string; rows: readonly SessionPromptChoice[]; defaultId: string | null; loading: boolean; failed: boolean }>();
-  const [models, setModels] = useState<{ key: string; rows: readonly ModelCatalogModel[]; loading: boolean; failed: boolean }>();
+  const [models, setModels] = useState<{ key: string; rows: readonly ModelCatalogModel[]; order?: string | null; loading: boolean; failed: boolean }>();
   useEffect(() => {
     if (!enabled || !epoch || !capability?.canMutate()) return;
     const controller = new AbortController();
@@ -53,7 +53,7 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
         capability.observe(reply);
         if (controller.signal.aborted || !capability.canMutate()) return;
         const valid = reply.status === "ok" && reply.epoch === epoch && reply.providerId === provider && reply.availability === "Ready";
-        setModels({ key, rows: valid ? reply.models : [], loading: false, failed: !valid });
+        setModels({ key, rows: valid ? reply.models : [], order: valid ? reply.modelsOrder : null, loading: false, failed: !valid });
       }).catch(() => { if (!controller.signal.aborted) setModels({ key, rows: [], loading: false, failed: true }); });
     return () => controller.abort();
   }, [epoch, provider, key, enabled, capability, revision]);
@@ -93,6 +93,8 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
   return {
     value, ready, tier,
     prompts: prompts?.key === key ? prompts.rows : [], models: models?.key === key ? models.rows : [],
+    /** The order the settings of the provider put its models in; null while they are not read. */
+    modelsOrder: models?.key === key ? models.order ?? null : null,
     loadingPrompts: enabled && (!prompts || prompts.key !== key || prompts.loading),
     loadingModels: enabled && !!provider && (!models || models.key !== key || models.loading),
     /** The modes the session can be started in; none where its provider offers none, whose composer hides them. */

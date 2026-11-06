@@ -437,7 +437,7 @@ public sealed class MobileSessionsTests
                     new JsonObject { ["id"] = "haiku", ["efforts"] = new JsonArray() }),
                 ["prompts"] = new JsonArray(new JsonObject { ["id"] = "default", ["name"] = "Default" }, new JsonObject { ["id"] = "plan", ["name"] = "Plan" }),
                 ["permissionModes"] = new JsonArray(new JsonObject { ["id"] = "default", ["name"] = "Ask first" }, new JsonObject { ["id"] = "acceptEdits", ["name"] = "Accept edits", ["description"] = "Accept file edits." }),
-                ["defaultPermissionMode"] = "default", ["tier"] = "complex",
+                ["defaultPermissionMode"] = "default", ["tier"] = "complex", ["modelsOrder"] = "name",
             });
         var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces("personal"), new MobileLive()));
 
@@ -453,6 +453,7 @@ public sealed class MobileSessionsTests
         Assert.AreEqual(true, (bool?)models[0]!["imageInput"], "A model that reads images says so, as the composer's choices do.");
         Assert.IsFalse(models[1]!.AsObject().ContainsKey("imageInput"), "A model that does not say is left without the field.");
         CollectionAssert.AreEqual(new[] { "default", "acceptEdits" }, ((JsonArray)choices["permissionModes"]!).Select(static mode => (string?)mode!["id"]).ToArray());
+        Assert.AreEqual("name", (string?)choices["modelsOrder"], "the order the settings of the provider put its models in");
         Assert.IsNull(choices["error"]);
 
         Assert.IsNull(await api.ChoicesAsync("theirs", default), "A session of another space has no choices on the phone.");
@@ -502,6 +503,22 @@ public sealed class MobileSessionsTests
         var modes = (JsonObject)options["permissionModes"]!;
         Assert.AreEqual(1, modes.Count, "A provider that offers no mode is left out.");
         Assert.AreEqual(("default", "Ask first", "acceptEdits", null), ((string?)modes["claude"]![0]!["id"], (string?)modes["claude"]![0]!["name"], (string?)modes["claude"]![1]!["id"], (string?)modes["claude"]![1]!["name"]));
+    }
+
+    [TestMethod]
+    public async Task Options_GiveTheOrderOfTheModelsOfEachProvider()
+    {
+        var alta = new FakeAlta()
+            .Answer("provider list --detailed",
+                new JsonObject { ["type"] = "alta.provider.item", ["providerKey"] = "acp", ["modelsOrder"] = "name_version" },
+                new JsonObject { ["type"] = "alta.provider.item", ["providerKey"] = "codex", ["modelsOrder"] = "provider" },
+                new JsonObject { ["type"] = "alta.provider.item", ["providerKey"] = "older" });
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces(), new MobileLive()));
+
+        var orders = (JsonObject)(await api.OptionsAsync(default))["modelsOrders"]!;
+
+        Assert.AreEqual(("name_version", "provider"), ((string?)orders["acp"], (string?)orders["codex"]));
+        Assert.IsFalse(orders.ContainsKey("older"), "A CodeAlta that does not say leaves the provider in the order it gives.");
     }
 
     [TestMethod]

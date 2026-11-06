@@ -265,6 +265,7 @@ internal sealed class SessionOperationsService
                 PermissionModes = choices.PermissionModes.Select(mode => new SessionPermissionModeChoice(mode)).ToArray(),
                 DefaultPermissionMode = choices.DefaultPermissionMode,
                 SupportsRemoteControl = choices.SupportsRemoteControl ? true : null,
+                ModelsOrder = ModelOrdering.Format(choices.ModelOrder),
                 Tier = choices.Tier,
                 Adaptive = choices.Adaptive ? true : null,
                 AdaptiveLevel = choices.AdaptiveLevel,
@@ -944,6 +945,11 @@ internal sealed record SessionModelOptionRequest(string ExpectedEpoch, string Se
 internal sealed record SessionChoicesResponse(string Status, string? Epoch, string SessionId, SessionSelection? Current,
     IReadOnlyList<SessionPromptChoice> Prompts, IReadOnlyList<SessionModelChoice> Models)
 {
+    // The order the provider's settings put the models in (provider, name, name_version): a list in the order of the
+    // provider keeps it as it is. Absent from a response that is not "ok".
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModelsOrder { get; init; }
+
     // The modes a session of the provider can be given, empty when it has none; the page names them. A response that
     // is not "ok" has none. Optional on the page, as the other fields of the permission mode.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

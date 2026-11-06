@@ -55,6 +55,7 @@ public sealed class ModelCatalogRpcTests
         var result = await service.Models(new("epoch-1", id.Value), CancellationToken.None);
         Assert.AreEqual("ok", result.Status);
         Assert.AreEqual("epoch-1", result.Epoch);
+        Assert.AreEqual("provider", result.ModelsOrder, "the models are in the order of the provider, which the composer keeps");
         Assert.HasCount(1, result.Models);
         Assert.AreEqual(1, probes);
         var actual = result.Models[0];

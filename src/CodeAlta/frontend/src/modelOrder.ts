@@ -1,4 +1,6 @@
-// The order of a provider's model lists, on the desktop and on the phone, read from the model ids. Each id is first
+// The order of a provider's model lists, on the desktop and on the phone, for a provider whose settings list its models by
+// name (models_order name or name_version): one in the order of the provider, the default, keeps it (sectionModels).
+// The order is read from the model ids. Each id is first
 // classified into a family: its words without the version and without the variants ("gemini-argon" for
 // "gemini-4-argon", "claude-opus" for "claude-opus-4-7" and "claude-4.5-opus", "gpt-sol" for "gpt-6.1-sol-fast"); the
 // version is read within it. "Frontier" holds the entries carrying the highest version of their family; all older ones
@@ -37,6 +39,15 @@ const compareVersions = (a: readonly number[], b: readonly number[]) => {
 };
 // Within a family and a version: the base model, then its thinking variant, then the other suffixes by name.
 const suffixKey = (suffix: string) => suffix === "" ? "0" : suffix === "thinking" ? "1" : `2${suffix}`;
+
+/**
+ * The parts a model list shows, for the order the settings of the provider give (`provider`, `name`, `name_version`):
+ * by family and version (`orderModels`) for the orders by name; as given, all in one part, in the order of the provider
+ * or an order that is not known.
+ */
+export function sectionModels<T extends { id: string }>(models: readonly T[], order: string | null | undefined): { frontier: T[]; other: T[] } {
+  return order === "name" || order === "name_version" ? orderModels(models) : { frontier: [...models], other: [] };
+}
 
 /** Splits models into the latest of each family ("frontier") and the older ones, each by vendor, version descending, then family. */
 export function orderModels<T extends { id: string }>(models: readonly T[]): { frontier: T[]; other: T[] } {

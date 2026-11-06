@@ -171,8 +171,9 @@ internal sealed class ModelCatalogService(
                 return new("unavailable", epoch, descriptor.ProviderId.Value, availability, [], false) { Reason = Reason(state) };
             var valid = state.Models.Where(model => ValidId(model.Id)).Take(MaximumModels + 1).ToArray();
             var models = new List<ModelCatalogModel>(Math.Min(valid.Length, MaximumModels));
+            var order = ModelOrdering.Format(descriptor.ModelOrder);
             var bytes = JsonSerializer.SerializeToUtf8Bytes(
-                new ModelCatalogModelsResponse("ok", epoch, descriptor.ProviderId.Value, availability, [], false),
+                new ModelCatalogModelsResponse("ok", epoch, descriptor.ProviderId.Value, availability, [], false) { ModelsOrder = order },
                 DesktopJsonContext.Default.ModelCatalogModelsResponse).Length;
             foreach (var model in valid.Take(MaximumModels))
             {
@@ -198,7 +199,7 @@ internal sealed class ModelCatalogService(
             }
 
             return new("ok", epoch, descriptor.ProviderId.Value, availability,
-                models, valid.Length > models.Count || hiddenModels.Length > hidden.Count) { Hidden = hidden.Count > 0 ? hidden : null };
+                models, valid.Length > models.Count || hiddenModels.Length > hidden.Count) { Hidden = hidden.Count > 0 ? hidden : null, ModelsOrder = order };
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception) { return new("read_failed", epoch, descriptor.ProviderId.Value, "Unknown", [], false); }
@@ -453,6 +454,11 @@ internal sealed record ModelCatalogProbeResponse(string Status, string? Epoch, s
 internal sealed record ModelCatalogModelsRequest(string ExpectedEpoch, string ProviderId);
 internal sealed record ModelCatalogModelsResponse(string Status, string? Epoch, string? ProviderId, string Availability, IReadOnlyList<ModelCatalogModel> Models, bool Truncated)
 {
+    // The order the provider's settings put the models in (provider, name, name_version): a list in the order of the
+    // provider keeps it as it is. Absent from a response that is not "ok".
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModelsOrder { get; init; }
+
     // The models the rules of the provider hide (models_hide, models_show); absent when they hide none.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<ModelCatalogHiddenModel>? Hidden { get; init; }

@@ -3990,6 +3990,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 effortsComplete = model.EffortsComplete ? true : (bool?)null,
                 imageInput = model.ImageInput,
             }).ToArray(),
+            // The order the models are in: provider, name or name_version.
+            modelsOrder = ModelOrdering.Format(choices.ModelOrder),
             prompts = choices.Prompts.Select(static prompt => new { id = prompt.Id, name = prompt.Name }).ToArray(),
             permissionModes = choices.PermissionModes.Select(static mode => PermissionModeNames.TryGetValue(mode, out var known)
                 ? new { id = mode, name = known.Name, description = (string?)known.Description }
@@ -4993,6 +4995,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 providerKey = ProviderId.Value,
                 ProviderId = ProviderId.Value,
                 displayName = descriptor?.DisplayName,
+                // The order its settings put its models in: provider, name or name_version.
+                modelsOrder = descriptor is null ? null : ModelOrdering.Format(descriptor.ModelOrder),
                 permissionModes = modes.Count == 0 ? null : modes.Select(static mode => PermissionModeNames.TryGetValue(mode, out var known)
                     ? new { id = mode, name = known.Name, description = (string?)known.Description }
                     : new { id = mode, name = mode, description = (string?)null }).ToArray(),

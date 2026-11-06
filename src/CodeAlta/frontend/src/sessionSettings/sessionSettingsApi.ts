@@ -5,11 +5,14 @@ import type { RunModel } from "../workItems/runsWith";
 /** A model of a provider, as the form lists it. */
 export type SessionSettingsModel = RunModel & Readonly<{ name?: string; effortsComplete?: boolean | null }>;
 
+/** The models of a provider, with the order its settings put them in (`provider`, `name`, `name_version`; null when not known). */
+export type SessionSettingsModels = Readonly<{ models: readonly SessionSettingsModel[]; order: string | null }>;
+
 /** The catalogs of the form; each answers null (or an empty list) when it cannot be read, and the form then leaves its row out. */
 export type SessionSettingsApi = Readonly<{
   /** Names the host, the project and the space the catalogs are of: catalogs of another key are read again. */
   key: string;
-  models: (providerId: string, signal: AbortSignal) => Promise<readonly SessionSettingsModel[]>;
+  models: (providerId: string, signal: AbortSignal) => Promise<SessionSettingsModels>;
   prompts: (signal: AbortSignal) => Promise<Readonly<{ prompts: readonly SessionPromptChoice[]; defaultPromptId: string | null }> | null>;
   permissionModes: (providerId: string, signal: AbortSignal) => Promise<Readonly<{ modes: readonly SessionPermissionModeChoice[]; defaultMode: string | null }> | null>;
   reviewSetting: (signal: AbortSignal) => Promise<boolean | null>;
@@ -26,7 +29,7 @@ export function sessionSettingsApi(epoch: string, projectId: string | null, proj
   return {
     key: JSON.stringify([epoch, projectId, projectPath, spaceId]),
     models: (providerId, signal) => modelCatalog.models({ expectedEpoch: epoch, providerId }, options(signal))
-      .then(reply => reply.status === "ok" ? reply.models : []),
+      .then(reply => reply.status === "ok" ? { models: reply.models, order: reply.modelsOrder ?? null } : { models: [], order: null }),
     prompts: signal => workspace.draftPrompts({ expectedHostEpoch: epoch, projectId, projectPath, spaceId }, options(signal))
       .then(reply => reply.status === "ok" ? { prompts: reply.prompts, defaultPromptId: reply.defaultPromptId } : null),
     permissionModes: (providerId, signal) => workspace.draftPermissionModes({ expectedHostEpoch: epoch, providerId }, options(signal))

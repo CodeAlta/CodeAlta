@@ -5,8 +5,8 @@ import { ComposerModelPicker } from "./ComposerModelPicker";
 import { createModelPickerPreferences } from "./modelPicker";
 import { ModelPickerSettings } from "./ModelPickerSettings";
 
-// The model list of the composer where it lives, in the form a popover of the selection chip holds, over forty models,
-// with its setting beside it. The chip itself is not drawn: it brings the prompt editor with it.
+// The model list of the composer where it lives, in the form a popover of the selection chip holds, over forty models of a
+// provider that lists them by name, with its setting beside it. The chip itself is not drawn: it brings the prompt editor with it.
 const models = Array.from({ length: 40 }, (_, index) => ({ id: `vendor/model-${index + 1}`, name: `Model ${index + 1}` }));
 const preferences = createModelPickerPreferences(null);
 const state = { chosen: [] as string[], listed: models.length, loading: false, apply: () => { } };
@@ -18,7 +18,7 @@ function Fixture() {
   state.apply = () => draw(count => count + 1);
   const form = <div className="composer-selection-form" role="group" aria-label="Session configuration">
     <FormGroup label="Model" labelFor="composer-model-test">
-      <ComposerModelPicker id="composer-model-test" value={value} models={models.slice(0, state.listed)} loading={state.loading} preferences={preferences}
+      <ComposerModelPicker id="composer-model-test" value={value} models={models.slice(0, state.listed)} order="name_version" loading={state.loading} preferences={preferences}
         onChange={id => { state.chosen.push(id); setValue(id); }} />
     </FormGroup>
   </div>;

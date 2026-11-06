@@ -20,8 +20,9 @@ export function onMachine(api: SessionSettingsApi, machineId: string, choices: P
   return {
     ...api,
     key: JSON.stringify([api.key, machineId]),
-    models: async providerId => choices.providers.find(provider => provider.key === providerId)?.models
-      .map(model => ({ id: model.id, name: model.name, efforts: [], defaultEffort: null })) ?? [],
+    // The machine says nothing of the order of its models: they are listed as it gives them.
+    models: async providerId => ({ models: choices.providers.find(provider => provider.key === providerId)?.models
+      .map(model => ({ id: model.id, name: model.name, efforts: [], defaultEffort: null })) ?? [], order: null }),
   };
 }
 

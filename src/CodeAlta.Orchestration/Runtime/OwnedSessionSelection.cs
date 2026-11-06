@@ -69,6 +69,12 @@ public sealed record OwnedSelectionChoices(OwnedSessionSelection Current, IReadO
     public bool SupportsRemoteControl { get; init; }
 
     /// <summary>
+    /// Gets the order <see cref="Models"/> are in, as the settings of the provider give it: in the order of the provider
+    /// (<see cref="ModelOrder.Provider"/>, also when it is not known), a list keeps it as it is.
+    /// </summary>
+    public ModelOrder ModelOrder { get; init; }
+
+    /// <summary>
     /// Gets the name of the provider of the session as the host that runs it names it (another machine, whose providers
     /// are its own); null when the providers of this computer name it.
     /// </summary>
@@ -213,6 +219,7 @@ public sealed partial class OwnedSessionCommandService
             // What a session without a mode runs in: the mode of its provider, else the one that names the policy of the host.
             DefaultPermissionMode = _runtime.SessionPermissionModes ? _runtime.GetDefaultPermissionMode(provider) : configured?.DefaultPermissionMode,
             SupportsRemoteControl = configured?.SupportsRemoteControl ?? false,
+            ModelOrder = configured?.ModelOrder ?? ModelOrder.Provider,
             Tier = tier is { } recorded ? Catalog.ModelTiers.ModelTiers.NameOf(recorded) : null,
             Adaptive = adaptive,
             AdaptiveLevel = adaptive && await _runtime.GetSessionAdaptiveLevelAsync(sessionId, cancellationToken).ConfigureAwait(false) is { } level

@@ -4910,7 +4910,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         {!draftChoices.prompts.some(prompt => prompt.id === value.agentPromptId) && <option value={value.agentPromptId}>{t(draftChoices.loadingPrompts ? "Loading…" : "Host default")}</option>}
         {draftChoices.prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.name}</option>)}
       </HTMLSelect>} provider={select}
-      model={<><ComposerModelPicker id={`composer-model-${choiceId}`} value={value.modelId || null} models={draftChoices.models} providerKey={usedProvider || null}
+      model={<><ComposerModelPicker id={`composer-model-${choiceId}`} value={value.modelId || null} models={draftChoices.models} order={draftChoices.modelsOrder} providerKey={usedProvider || null}
         disabled={locked} loading={draftChoices.loadingModels} onChange={modelId => change("modelId", modelId)}
         tiers={composerTierEntries(draftChoices.tiers, t)} currentTier={draftChoices.tier}
         onChooseTier={tier => { invalidateCreation(); draftChoices.chooseTier(tier); }}

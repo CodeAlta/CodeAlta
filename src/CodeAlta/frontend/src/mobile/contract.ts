@@ -213,6 +213,8 @@ export type Options = Readonly<{
   defaults: Readonly<{ provider: string | null; model: string | null; reasoning: string | null; prompt: string | null }> | null;
   /** The modes a new session of each provider can start in; a provider that offers none is not there. */
   permissionModes?: Readonly<Record<string, readonly PermissionModeOption[]>>;
+  /** The order the settings of each provider put its models in (`provider`, `name`, `name_version`); a provider not there keeps the order given. */
+  modelsOrders?: Readonly<Record<string, string>>;
   error: string | null;
 }>;
 
@@ -227,6 +229,8 @@ export type SessionChoices = Readonly<{
     agent: string | null; agentName: string | null; permissionMode: string | null;
   }>;
   models: readonly ChoiceModel[];
+  /** The order the settings of the provider put the models in (`provider`, `name`, `name_version`); null keeps the order given. */
+  modelsOrder?: string | null;
   prompts: readonly Readonly<{ id: string; name: string }>[];
   /** Empty when the provider offers no mode. */
   permissionModes: readonly PermissionModeOption[];

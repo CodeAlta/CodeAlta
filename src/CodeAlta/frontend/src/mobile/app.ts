@@ -18,7 +18,7 @@ import {
   providerName, providers, rememberChoice, tierChoice, tierLabel, tierReady, tierText, variantLabels, type Choice, type ProjectPreferences,
 } from "./models";
 import { createPhoneFiles, newSessionFiles } from "./phoneFiles";
-import { orderModels } from "../modelOrder";
+import { sectionModels } from "../modelOrder";
 import {
   appliedSelection, chipText, modeDescription, modeName, pickedChanges, pickSessionModel, providerPermissionMode, queueFirstKey, shownSelection, type Picked,
 } from "./selection";
@@ -799,7 +799,8 @@ export function startMobile(window: Window & typeof globalThis) {
     const before = JSON.stringify(choicesOf.get(id) ?? null);
     try {
       const read = await api.choices(id);
-      choicesOf.set(id, { current: read.current, models: read.models ?? [], prompts: read.prompts ?? [], permissionModes: read.permissionModes ?? [], error: read.error ?? null });
+      choicesOf.set(id, { current: read.current, models: read.models ?? [], modelsOrder: read.modelsOrder ?? null, prompts: read.prompts ?? [], permissionModes: read.permissionModes ?? [],
+        error: read.error ?? null });
       files.reconcile(id);
     } catch (error) {
       if (error instanceof SignedOutError) return;
@@ -856,7 +857,7 @@ export function startMobile(window: Window & typeof globalThis) {
     const models = choices && !choices.error ? choices.models : [];
     const query = modelSearch.value.trim().toLowerCase();
     modelSearch.hidden = models.length <= 8;
-    const { frontier, other } = orderModels(models.filter(m => !query || `${m.name} ${m.id}`.toLowerCase().includes(query)));
+    const { frontier, other } = sectionModels(models.filter(m => !query || `${m.name} ${m.id}`.toLowerCase().includes(query)), choices?.modelsOrder);
     $("model-list").replaceChildren(...modelItems(frontier, other, m => m.id === shown.model, m => m.name, m => m.id, m => {
       if (choices) pick(id, pickSessionModel(choices, picks.get(id) ?? {}, shown, m.id));
       renderSessionModels();
@@ -1206,7 +1207,8 @@ export function startMobile(window: Window & typeof globalThis) {
       return check;
     }));
     modelSearch.hidden = groups.length <= 8;
-    const { frontier, other } = orderModels(groups.filter(g => !query || g.members.some(x => `${x.model.name} ${x.model.id}`.toLowerCase().includes(query))).map(g => g.entry));
+    const { frontier, other } = sectionModels(groups.filter(g => !query || g.members.some(x => `${x.model.name} ${x.model.id}`.toLowerCase().includes(query))).map(g => g.entry),
+      o.modelsOrders?.[choice.provider]);
     $("model-list").replaceChildren(...modelItems(frontier, other, m => !choice.tier && byEntry.get(m.id)!.members.some(x => x.model.id === choice.model), entryName,
       m => m.id + (byEntry.get(m.id)!.options.length ? ` (${[...byEntry.get(m.id)!.options].sort().map(f => `+${f}`).join(", ")})` : ""),
       m => { if (choice.tier || !byEntry.get(m.id)!.members.some(x => x.model.id === choice.model)) setChoice({ tier: null, provider: choice.provider, model: m.id, effort: pickEffort(o, m, choice.effort) }); }));
@@ -1290,7 +1292,7 @@ export function startMobile(window: Window & typeof globalThis) {
       const [, read] = await Promise.all([readProjects(), options ? Promise.resolve(options) : api.options()]);
       options = {
         models: read.models ?? [], prompts: read.prompts ?? [], tiers: read.tiers ?? [], defaultTier: read.defaultTier ?? null, defaults: read.defaults ?? null,
-        permissionModes: read.permissionModes ?? {}, error: read.error ?? null,
+        permissionModes: read.permissionModes ?? {}, modelsOrders: read.modelsOrders ?? {}, error: read.error ?? null,
       };
       newAgent.replaceChildren(...options.prompts.map(p => option(p.id, p.name, p.id === options!.defaults?.prompt)));
       if (!newText.value) newText.value = drafts.get(newSessionDraft);

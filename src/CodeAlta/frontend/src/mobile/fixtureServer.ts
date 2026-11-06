@@ -369,6 +369,8 @@ export const fixtureChoices: Omit<SessionChoices, "current"> = {
     { id: "gpt-6.1-argon", name: "GPT-6.1 Argon", efforts: ["medium", "high", "xhigh"], startEffort: "high", imageInput: true },
     { id: "gpt-5.5", name: "GPT-5.5", efforts: ["low", "medium", "high"], startEffort: "medium" },
   ],
+  // A provider whose settings list its models by name: the latest of each family first.
+  modelsOrder: "name_version",
   prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }, { id: "review", name: "Review" }],
   permissionModes: [{ id: "default", name: "Ask first" }, { id: "acceptEdits", name: "Accept edits" }, { id: "bypassPermissions", name: "Bypass permissions" }],
   error: null,
