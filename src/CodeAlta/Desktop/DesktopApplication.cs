@@ -498,6 +498,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // The tabs that plugins provide: created with the plugins, which start before the window has a page, and attached to their runtime once it exists.
             canvases = pluginAlta is null ? null : new DesktopCanvases(pluginUi);
             pluginUi.Modules = canvases?.Modules;
+            // What plugins ask goes to one window: the one of the session, the one the command came from, the one used last.
+            pluginUi.SessionWindow = session => windows.WindowOfSession(session) is { } owner ? Windows.DesktopWindows.LabelOf(owner) : null;
+            pluginUi.FocusedWindow = () => windows.FocusedLabel;
+            pluginUi.WindowOpen = label => windows.Current(label) is not null;
+            windows.Changed += pluginUi.WindowsChanged;
             // A configuration file that cannot be loaded is repaired in the window before anything reads it: the
             // host would fail on it. A missing file is created with the defaults.
             var configRecovery = new ConfigRecoveryService(options.CatalogRoot!, new TextFileCodec());
