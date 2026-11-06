@@ -16,18 +16,33 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
 {
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.OpenAI");
 
+    // The waits before a response that a transient failure stopped is asked again: five more requests over half a
+    // minute. The retries of the SDK only cover a request whose answer has not started.
+    private static ReadOnlySpan<int> RetryDelaySeconds => [1, 2, 4, 8, 15];
+
+    // A provider that asks to wait longer than this is not asked again within the turn.
+    private static readonly TimeSpan MaxRetryAfter = TimeSpan.FromMinutes(1);
+
     public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
         ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken = default)
         => OpenAIProviderSdkFactory.ListModelsAsync(provider, providerDescriptor, cancellationToken);
 
+    public Task<AgentTurnResponse> ExecuteTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        CancellationToken cancellationToken = default)
+        => ExecuteTurnAsync(request, onUpdate, static (_, _) => ValueTask.CompletedTask, cancellationToken);
+
     public async Task<AgentTurnResponse> ExecuteTurnAsync(
         AgentTurnRequest request,
         Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(onUpdate);
+        ArgumentNullException.ThrowIfNull(onSessionUpdate);
 
         try
         {
@@ -38,149 +53,27 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                 OpenAIRequestHeaderPlaceholders.ForTurn(provider.ExtraHeaders, modelRequest, request));
             var messages = CreateMessages(request);
             var options = CreateOptions(request);
-            var streamedToolCalls = new Dictionary<int, StreamingToolCallState>();
-            var streamedAssistantContent = new StringBuilder();
-            var streamedReasoning = new StringBuilder();
-            var assistantContentId = $"assistant:{Guid.CreateVersion7()}";
-            var reasoningContentId = $"reasoning:{Guid.CreateVersion7()}";
-            ChatTokenUsage? usage = null;
-            string? completionId = null;
-            string? modelId = null;
-
-            await foreach (var update in client.CompleteChatStreamingAsync(messages, options, cancellationToken).ConfigureAwait(false))
+            for (var attemptNumber = 1; ; attemptNumber++)
             {
-                completionId ??= update.CompletionId;
-                modelId ??= update.Model;
-                usage = update.Usage ?? usage;
-
-                // A provider that fails after the stream started (OpenRouter) sends its error as a chunk of the stream.
-                if (TryCreateStreamError(update) is { } streamError)
+                // What an attempt streams is a draft until its response is complete: tools only run then, so a response
+                // cut anywhere, in a tool call too, is asked again and its draft discarded.
+                var attempt = new StreamAttempt(string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"{request.RunId.Value}:{attemptNumber}"));
+                try
                 {
-                    throw streamError;
+                    return await StreamAsync(request, client, messages, options, attempt, onUpdate, protocolTrace, cancellationToken).ConfigureAwait(false);
                 }
-
-                foreach (var contentPart in update.ContentUpdate)
+                catch (Exception exception) when (ShouldAskAgain(exception, attempt, attemptNumber - 1, cancellationToken, out var delay, out var reason))
                 {
-                    if (contentPart.Kind == ChatMessageContentPartKind.Text && !string.IsNullOrEmpty(contentPart.Text))
-                    {
-                        streamedAssistantContent.Append(contentPart.Text);
-                        await onUpdate(
-                            new AgentTurnDelta
-                            {
-                                Kind = AgentContentKind.Assistant,
-                                ContentId = assistantContentId,
-                                Text = contentPart.Text,
-                            },
-                            cancellationToken).ConfigureAwait(false);
-                    }
-                }
-
-                if (!string.IsNullOrEmpty(update.RefusalUpdate))
-                {
-                    streamedAssistantContent.Append(update.RefusalUpdate);
-                    await onUpdate(
-                        new AgentTurnDelta
-                        {
-                            Kind = AgentContentKind.Assistant,
-                            ContentId = assistantContentId,
-                            Text = update.RefusalUpdate,
-                        },
+                    Logger.Warn($"The response of an OpenAI chat turn stopped; asking again provider={request.Provider.ProviderKey} model={request.ModelId ?? "(none)"} session={request.SessionId} run={request.RunId.Value} attempt={attemptNumber}: {AgentErrorData.RedactText(exception.Message)}");
+                    protocolTrace?.WriteLine($"!!! retry attempt={attemptNumber} reason={reason} error={SanitizeProtocolTraceValue(exception.Message)}");
+                    await onSessionUpdate(
+                        CreateRetrySessionUpdate(provider.ProviderKey, request, attempt, attemptNumber, exception, reason, delay),
                         cancellationToken).ConfigureAwait(false);
-                }
-
-                if (TryGetReasoningDelta(
-                    update,
-                    request.Provider.Profile?.ReasoningFieldNames,
-                    streamedReasoning,
-                    out var reasoningDelta))
-                {
-                    streamedReasoning.Append(reasoningDelta);
-                    await onUpdate(
-                        new AgentTurnDelta
-                        {
-                            Kind = AgentContentKind.Reasoning,
-                            ContentId = reasoningContentId,
-                            Text = reasoningDelta,
-                        },
-                        cancellationToken).ConfigureAwait(false);
-                }
-
-                foreach (var toolUpdate in update.ToolCallUpdates)
-                {
-                    if (!streamedToolCalls.TryGetValue(toolUpdate.Index, out var toolState))
-                    {
-                        toolState = new StreamingToolCallState();
-                        streamedToolCalls.Add(toolUpdate.Index, toolState);
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(toolUpdate.ToolCallId))
-                    {
-                        toolState.CallId = toolUpdate.ToolCallId;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(toolUpdate.FunctionName))
-                    {
-                        toolState.Name = toolUpdate.FunctionName;
-                    }
-
-                    var argumentDelta = toolUpdate.FunctionArgumentsUpdate?.ToString();
-                    if (!string.IsNullOrEmpty(argumentDelta))
-                    {
-                        toolState.Arguments.Append(argumentDelta);
-                    }
+                    await (provider.RetryDelayAsync?.Invoke(delay, cancellationToken) ?? Task.Delay(delay, cancellationToken)).ConfigureAwait(false);
                 }
             }
-
-            var parts = new List<AgentMessagePart>();
-            var assistantPartContentIds = new List<string?>();
-            if (streamedAssistantContent.Length > 0)
-            {
-                parts.Add(new AgentMessagePart.Text(streamedAssistantContent.ToString()));
-                assistantPartContentIds.Add(assistantContentId);
-            }
-
-            if (streamedReasoning.Length > 0)
-            {
-                parts.Add(new AgentMessagePart.Reasoning(
-                    streamedReasoning.ToString(),
-                    ProtectedData: null,
-                    AgentReasoningReplay.CreateProvenance(request)));
-                assistantPartContentIds.Add(reasoningContentId);
-            }
-
-            foreach (var toolState in streamedToolCalls.OrderBy(static pair => pair.Key).Select(static pair => pair.Value))
-            {
-                parts.Add(new AgentMessagePart.ToolCall(
-                    toolState.CallId ?? $"tool:{Guid.CreateVersion7()}",
-                    toolState.Name ?? string.Empty,
-                    DeserializeToolArguments(
-                        toolState.Arguments.ToString(),
-                        toolState.Name,
-                        toolState.CallId,
-                        request,
-                        protocolTrace)));
-                assistantPartContentIds.Add(null);
-            }
-
-            if (parts.Count == 0)
-            {
-                throw new OpenAIChatProtocolException(
-                    OpenAIChatProtocolErrorCode.StreamCompletedWithoutAssistantContent,
-                    "OpenAI chat stream completed without assistant content, refusal, reasoning, or tool calls.");
-            }
-
-            var assistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, parts);
-            protocolTrace?.WriteLine(
-                $"### turn end provider={request.Provider.ProviderKey} session={request.SessionId} run={request.RunId.Value} completion={completionId ?? "<none>"} model={modelId ?? "<none>"}");
-            return new AgentTurnResponse
-            {
-                AssistantMessage = assistantMessage,
-                AssistantPartContentIds = assistantPartContentIds,
-                Usage = CreateUsage(request, modelId, usage),
-                ProviderSessionId = string.IsNullOrWhiteSpace(completionId) ? null : completionId,
-                ProviderState = CreateProviderState(completionId),
-                Summary = ExtractSummary(assistantMessage),
-            };
         }
         catch (OperationCanceledException)
         {
@@ -194,6 +87,249 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         {
             throw CreateTurnExecutionException(ex, provider.BaseUri);
         }
+    }
+
+    private static async Task<AgentTurnResponse> StreamAsync(
+        AgentTurnRequest request,
+        ChatClient client,
+        IReadOnlyList<ChatMessage> messages,
+        ChatCompletionOptions options,
+        StreamAttempt attempt,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        OpenAIProtocolTraceLogger? protocolTrace,
+        CancellationToken cancellationToken)
+    {
+        var streamedToolCalls = new Dictionary<int, StreamingToolCallState>();
+        var streamedAssistantContent = new StringBuilder();
+        var streamedReasoning = new StringBuilder();
+        var assistantContentId = $"assistant:{Guid.CreateVersion7()}";
+        var reasoningContentId = $"reasoning:{Guid.CreateVersion7()}";
+        ChatTokenUsage? usage = null;
+        string? completionId = null;
+        string? modelId = null;
+
+        await foreach (var update in client.CompleteChatStreamingAsync(messages, options, cancellationToken).ConfigureAwait(false))
+        {
+            attempt.Started = true;
+            completionId ??= update.CompletionId;
+            modelId ??= update.Model;
+            usage = update.Usage ?? usage;
+
+            // A provider that fails after the stream started (OpenRouter) sends its error as a chunk of the stream.
+            if (TryCreateStreamError(update) is { } streamError)
+            {
+                throw streamError;
+            }
+
+            foreach (var contentPart in update.ContentUpdate)
+            {
+                if (contentPart.Kind == ChatMessageContentPartKind.Text && !string.IsNullOrEmpty(contentPart.Text))
+                {
+                    streamedAssistantContent.Append(contentPart.Text);
+                    await EmitAsync(AgentContentKind.Assistant, assistantContentId, contentPart.Text).ConfigureAwait(false);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(update.RefusalUpdate))
+            {
+                streamedAssistantContent.Append(update.RefusalUpdate);
+                await EmitAsync(AgentContentKind.Assistant, assistantContentId, update.RefusalUpdate).ConfigureAwait(false);
+            }
+
+            if (TryGetReasoningDelta(
+                update,
+                request.Provider.Profile?.ReasoningFieldNames,
+                streamedReasoning,
+                out var reasoningDelta))
+            {
+                streamedReasoning.Append(reasoningDelta);
+                await EmitAsync(AgentContentKind.Reasoning, reasoningContentId, reasoningDelta).ConfigureAwait(false);
+            }
+
+            foreach (var toolUpdate in update.ToolCallUpdates)
+            {
+                if (!streamedToolCalls.TryGetValue(toolUpdate.Index, out var toolState))
+                {
+                    toolState = new StreamingToolCallState();
+                    streamedToolCalls.Add(toolUpdate.Index, toolState);
+                }
+
+                if (!string.IsNullOrWhiteSpace(toolUpdate.ToolCallId))
+                {
+                    toolState.CallId = toolUpdate.ToolCallId;
+                }
+
+                if (!string.IsNullOrWhiteSpace(toolUpdate.FunctionName))
+                {
+                    toolState.Name = toolUpdate.FunctionName;
+                }
+
+                var argumentDelta = toolUpdate.FunctionArgumentsUpdate?.ToString();
+                if (!string.IsNullOrEmpty(argumentDelta))
+                {
+                    toolState.Arguments.Append(argumentDelta);
+                }
+            }
+        }
+
+        var parts = new List<AgentMessagePart>();
+        var assistantPartContentIds = new List<string?>();
+        if (streamedAssistantContent.Length > 0)
+        {
+            parts.Add(new AgentMessagePart.Text(streamedAssistantContent.ToString()));
+            assistantPartContentIds.Add(assistantContentId);
+        }
+
+        if (streamedReasoning.Length > 0)
+        {
+            parts.Add(new AgentMessagePart.Reasoning(
+                streamedReasoning.ToString(),
+                ProtectedData: null,
+                AgentReasoningReplay.CreateProvenance(request)));
+            assistantPartContentIds.Add(reasoningContentId);
+        }
+
+        foreach (var toolState in streamedToolCalls.OrderBy(static pair => pair.Key).Select(static pair => pair.Value))
+        {
+            parts.Add(new AgentMessagePart.ToolCall(
+                toolState.CallId ?? $"tool:{Guid.CreateVersion7()}",
+                toolState.Name ?? string.Empty,
+                DeserializeToolArguments(
+                    toolState.Arguments.ToString(),
+                    toolState.Name,
+                    toolState.CallId,
+                    request,
+                    protocolTrace)));
+            assistantPartContentIds.Add(null);
+        }
+
+        if (parts.Count == 0)
+        {
+            throw new OpenAIChatProtocolException(
+                OpenAIChatProtocolErrorCode.StreamCompletedWithoutAssistantContent,
+                "OpenAI chat stream completed without assistant content, refusal, reasoning, or tool calls.");
+        }
+
+        var assistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, parts);
+        protocolTrace?.WriteLine(
+            $"### turn end provider={request.Provider.ProviderKey} session={request.SessionId} run={request.RunId.Value} completion={completionId ?? "<none>"} model={modelId ?? "<none>"}");
+        return new AgentTurnResponse
+        {
+            AssistantMessage = assistantMessage,
+            AssistantPartContentIds = assistantPartContentIds,
+            Usage = CreateUsage(request, modelId, usage),
+            ProviderSessionId = string.IsNullOrWhiteSpace(completionId) ? null : completionId,
+            ProviderState = CreateProviderState(completionId),
+            Summary = ExtractSummary(assistantMessage),
+        };
+
+        ValueTask EmitAsync(AgentContentKind kind, string contentId, string text)
+        {
+            attempt.EmittedDelta = true;
+            return onUpdate(
+                new AgentTurnDelta
+                {
+                    Kind = kind,
+                    ContentId = contentId,
+                    Text = text,
+                    AttemptId = attempt.Id,
+                },
+                cancellationToken);
+        }
+    }
+
+    // A response a transient failure stopped: the connection broke or could not be made, a gateway failed, or the
+    // provider reported in the stream an outage, a throttle, or the finish reason of a failure. A request the endpoint
+    // refused, a quota, a context overflow, a cancellation, or a wait over a minute the provider asks for end the turn.
+    private bool ShouldAskAgain(
+        Exception exception,
+        StreamAttempt attempt,
+        int retries,
+        CancellationToken cancellationToken,
+        out TimeSpan delay,
+        out string reason)
+    {
+        delay = TimeSpan.Zero;
+        reason = string.Empty;
+        if (cancellationToken.IsCancellationRequested ||
+            retries >= RetryDelaySeconds.Length ||
+            exception is AgentTurnExecutionException or OpenAIChatProtocolException)
+        {
+            return false;
+        }
+
+        if (OpenAIResponsesTurnExecutor.TryGetConnectionFailureReason(exception, out _))
+        {
+            reason = "The connection to the provider failed";
+        }
+        else if (OpenAIResponsesTurnExecutor.IsGatewayFailure(exception))
+        {
+            reason = "The gateway of the provider failed";
+        }
+        else if (OpenAIResponsesTurnExecutor.IsTransportFailure(exception))
+        {
+            reason = "The response of the provider was cut off";
+        }
+        else if (attempt.Started &&
+                 exception is not OperationCanceledException &&
+                 CreateTurnExecutionException(exception, provider.BaseUri).Failure is { IsContextOverflow: false, Failure.Kind: var kind } &&
+                 kind is AgentFailureKind.Unavailable or AgentFailureKind.RateLimited)
+        {
+            reason = kind is AgentFailureKind.RateLimited
+                ? "The provider is rate limiting the requests"
+                : "The provider is unavailable";
+        }
+        else
+        {
+            return false;
+        }
+
+        if (OpenAIResponsesTurnExecutor.GetRetryAfterDelay(exception) is { } retryAfter)
+        {
+            delay = retryAfter;
+            return retryAfter <= MaxRetryAfter;
+        }
+
+        delay = TimeSpan.FromSeconds(RetryDelaySeconds[retries]);
+        return true;
+    }
+
+    // The shape the session reads to discard the draft of the attempt that failed (discardDraft, draftAttemptId).
+    private static AgentTurnSessionUpdate CreateRetrySessionUpdate(
+        string providerKey,
+        AgentTurnRequest request,
+        StreamAttempt attempt,
+        int attemptNumber,
+        Exception exception,
+        string reason,
+        TimeSpan delay)
+    {
+        var seconds = Math.Max(1, (int)Math.Ceiling(delay.TotalSeconds));
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("provider", providerKey);
+            writer.WriteString("runId", request.RunId.Value);
+            writer.WriteNumber("attempt", attemptNumber);
+            writer.WriteNumber("nextAttempt", attemptNumber + 1);
+            writer.WriteNumber("maxRetries", RetryDelaySeconds.Length);
+            writer.WriteNumber("delaySeconds", seconds);
+            writer.WriteString("draftAttemptId", attempt.Id);
+            writer.WriteBoolean("discardDraft", attempt.EmittedDelta);
+            writer.WriteString("reason", exception.GetType().Name);
+            AgentErrorData.WriteDiagnostics(writer, exception);
+            writer.WriteEndObject();
+        }
+
+        return new AgentTurnSessionUpdate
+        {
+            Kind = AgentSessionUpdateKind.Reconnecting,
+            Message = string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"{reason}: asking again in {seconds} s... {attemptNumber}/{RetryDelaySeconds.Length}"),
+            Details = JsonDocument.Parse(stream.ToArray()).RootElement.Clone(),
+        };
     }
 
     // The `error` object of a chunk: its code is an HTTP status (OpenRouter) or a code of the provider.
@@ -800,6 +936,16 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
            (message.Contains("context length", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("maximum context length", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("too many tokens", StringComparison.OrdinalIgnoreCase));
+
+    // One request of a turn: whether its response started, and whether it streamed a draft that a retry discards.
+    private sealed class StreamAttempt(string id)
+    {
+        public string Id { get; } = id;
+
+        public bool Started { get; set; }
+
+        public bool EmittedDelta { get; set; }
+    }
 
     private sealed class StreamingToolCallState
     {

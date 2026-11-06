@@ -239,6 +239,8 @@ api_url = "https://api.openai.com/v1"
 
 Use `openai-chat` for an endpoint that speaks the Chat Completions API. A reasoning model of the OpenAI API shows its reasoning summary in the timeline.
 
+When the answer of an `openai-chat` provider (DeepSeek, OpenRouter, llama.cpp) stops in the middle, because the connection broke or the provider reported an outage or a rate limit in the stream, CodeAlta asks again up to five times over about half a minute, or after the wait the provider gives when it is under a minute. What the cut answer wrote is replaced by the new one; no tool of it ran.
+
 ## Anthropic
 
 ```toml

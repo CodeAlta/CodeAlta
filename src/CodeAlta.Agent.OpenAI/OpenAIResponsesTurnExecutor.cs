@@ -3301,17 +3301,17 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return true;
     }
 
-    private static bool IsTransportFailure(Exception exception)
+    internal static bool IsTransportFailure(Exception exception)
         => TryGetConnectionFailureReason(exception, out _) || IsPrematureResponseEnded(exception) || IsGatewayFailure(exception);
 
     // The statuses Cloudflare, in front of api.openai.com, answers when it cannot reach OpenAI: 520 (unknown error),
     // 521 (down), 522 (connection timed out), 523 (unreachable), 524 (timeout). Transient, like a 502 or a 503, but
     // the SDK's retry policy does not ask them again.
-    private static bool IsGatewayFailure(Exception exception)
+    internal static bool IsGatewayFailure(Exception exception)
         => GetHttpStatusCode(exception) is { } status && (int)status is >= 520 and <= 524;
 
     // Why a connection could not be made, from the errors .NET gives for it.
-    private static bool TryGetConnectionFailureReason(Exception exception, [NotNullWhen(true)] out string? reason)
+    internal static bool TryGetConnectionFailureReason(Exception exception, [NotNullWhen(true)] out string? reason)
     {
         for (var current = exception; current is not null; current = current.InnerException)
         {
@@ -4137,7 +4137,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return false;
     }
 
-    private static TimeSpan? GetRetryAfterDelay(Exception exception)
+    internal static TimeSpan? GetRetryAfterDelay(Exception exception)
     {
         if (exception is OpenAIResponsesStreamErrorException { RetryAfter: { } retryAfter })
         {

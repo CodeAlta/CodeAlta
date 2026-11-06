@@ -600,35 +600,31 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     // OpenRouter reports a failure after the start of the stream inside it, after HTTP 200: the turn fails with the kind
-    // of its code instead of ending as an answer cut short.
+    // of its code instead of ending as an answer cut short, once a throttle or an outage was asked again in vain.
     [TestMethod]
-    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","error":{"code":429,"message":"Rate limit exceeded upstream."},"choices":[]}""", AgentFailureKind.RateLimited)]
-    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","error":{"code":402,"message":"Insufficient credits."},"choices":[]}""", AgentFailureKind.QuotaExhausted)]
-    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","error":{"code":"server_error","message":"Provider returned error"},"choices":[]}""", AgentFailureKind.Unavailable)]
-    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","error":{"code":502,"message":"Provider returned error"},"choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]}""", AgentFailureKind.Unavailable)]
-    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"insufficient_system_resource"}]}""", AgentFailureKind.Unavailable)]
-    public async Task OpenAIChatTurnExecutor_AnErrorInTheStream_EndsTheTurnWithItsKind(string errorChunk, AgentFailureKind expected)
+    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","error":{"code":429,"message":"Rate limit exceeded upstream."},"choices":[]}""", AgentFailureKind.RateLimited, 6)]
+    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","error":{"code":402,"message":"Insufficient credits."},"choices":[]}""", AgentFailureKind.QuotaExhausted, 1)]
+    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","error":{"code":"server_error","message":"Provider returned error"},"choices":[]}""", AgentFailureKind.Unavailable, 6)]
+    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","error":{"code":502,"message":"Provider returned error"},"choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]}""", AgentFailureKind.Unavailable, 6)]
+    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"insufficient_system_resource"}]}""", AgentFailureKind.Unavailable, 6)]
+    public async Task OpenAIChatTurnExecutor_AnErrorInTheStream_EndsTheTurnWithItsKind(string errorChunk, AgentFailureKind expected, int requests)
     {
-        var handler = new StaticHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent(
-                $$"""
-                data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Partial"},"finish_reason":null}]}
+        var handler = new SequenceHttpMessageHandler(Enumerable.Range(0, 6).Select(_ => (Func<HttpResponseMessage>)(() => CreateSseResponse(
+            $$"""
+            data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Partial"},"finish_reason":null}]}
 
-                {{errorChunk}}
+            {{errorChunk}}
 
-                data: [DONE]
+            data: [DONE]
 
-                """,
-                Encoding.UTF8,
-                "text/event-stream"),
-        });
+            """))).ToArray());
         var executor = new OpenAIChatTurnExecutor(new OpenAIProviderOptions
         {
             ProviderKey = "openrouter",
             ApiKey = "test-key",
             BaseUri = new Uri("https://openrouter.ai/api/v1/"),
             HttpClient = new HttpClient(handler),
+            RetryDelayAsync = static (_, _) => Task.CompletedTask,
         });
 
         var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
@@ -638,6 +634,156 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             .ConfigureAwait(false);
 
         Assert.AreEqual(expected, exception.Failure.Failure?.Kind, exception.Failure.Message);
+        Assert.AreEqual(requests, handler.Requests);
+    }
+
+    // DeepSeek cut a response after HTTP 200, in the middle of its reasoning: the answer is asked again, and what the
+    // first attempt streamed is a draft the session discards.
+    [TestMethod]
+    public async Task OpenAIChatTurnExecutor_AResponseCutInTheMiddle_IsAskedAgain_AndItsDraftDiscarded()
+    {
+        var handler = new SequenceHttpMessageHandler(
+            () => CreateSseResponse(
+                """
+                data: {"id":"c-1","object":"chat.completion.chunk","created":1744060800,"model":"deepseek-flash","choices":[{"index":0,"delta":{"role":"assistant","content":null,"reasoning_content":"Let me think"},"finish_reason":null}]}
+
+                data: {"id":"c-1","object":"chat.completion.chunk","created":1744060800,"model":"deepseek-flash","choices":[{"index":0,"delta":{"content":"Half an "},"finish_reason":null}]}
+
+
+                """,
+                CreatePrematureResponseEndException()),
+            () => CreateSseResponse(
+                """
+                data: {"id":"c-2","object":"chat.completion.chunk","created":1744060800,"model":"deepseek-flash","choices":[{"index":0,"delta":{"role":"assistant","content":null,"reasoning_content":"Thought again"},"finish_reason":null}]}
+
+                data: {"id":"c-2","object":"chat.completion.chunk","created":1744060800,"model":"deepseek-flash","choices":[{"index":0,"delta":{"content":"Whole answer."},"finish_reason":"stop"}]}
+
+                data: [DONE]
+
+                """));
+        var delays = new List<TimeSpan>();
+        var executor = new OpenAIChatTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "deepseek",
+            ApiKey = "test-key",
+            BaseUri = new Uri("https://api.deepseek.com/"),
+            HttpClient = new HttpClient(handler),
+            RetryDelayAsync = (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            },
+        });
+        var deltas = new List<AgentTurnDelta>();
+        var updates = new List<AgentTurnSessionUpdate>();
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateChatTurnRequest(),
+            (delta, _) => { deltas.Add(delta); return ValueTask.CompletedTask; },
+            (update, _) => { updates.Add(update); return ValueTask.CompletedTask; }).ConfigureAwait(false);
+
+        Assert.AreEqual(2, handler.Requests);
+        Assert.AreEqual("Whole answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        Assert.AreEqual("Thought again", response.AssistantMessage.Parts.OfType<AgentMessagePart.Reasoning>().Single().Value);
+        CollectionAssert.AreEqual(new[] { TimeSpan.FromSeconds(1) }, delays);
+        var reconnect = updates.Single();
+        Assert.AreEqual(AgentSessionUpdateKind.Reconnecting, reconnect.Kind);
+        Assert.AreEqual("The response of the provider was cut off: asking again in 1 s... 1/5", reconnect.Message);
+        Assert.AreEqual(deltas[0].AttemptId, reconnect.Details!.Value.GetProperty("draftAttemptId").GetString());
+        Assert.IsTrue(reconnect.Details!.Value.GetProperty("discardDraft").GetBoolean());
+        Assert.AreEqual("deepseek", reconnect.Details!.Value.GetProperty("provider").GetString());
+        Assert.AreNotEqual(deltas[0].AttemptId, deltas[^1].AttemptId);
+        // The second attempt streams into contents of its own.
+        var first = deltas.Where(delta => delta.AttemptId == deltas[0].AttemptId).Select(static delta => delta.ContentId).ToHashSet();
+        Assert.IsFalse(deltas.Where(delta => delta.AttemptId == deltas[^1].AttemptId).Any(delta => first.Contains(delta.ContentId)));
+    }
+
+    // A tool call that a cut stream left unfinished never ran: tools run once the response is complete. The answer is
+    // asked again, and only the tool call of the complete one is kept.
+    [TestMethod]
+    public async Task OpenAIChatTurnExecutor_AResponseCutInAToolCall_IsAskedAgain()
+    {
+        var handler = new SequenceHttpMessageHandler(
+            () => CreateSseResponse(
+                """
+                data: {"id":"c-1","object":"chat.completion.chunk","created":1744060800,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"read_file","arguments":"{\"pa"}}]},"finish_reason":null}]}
+
+
+                """,
+                new IOException("Unable to read data from the transport connection: An existing connection was forcibly closed by the remote host.",
+                    new SocketException((int)SocketError.ConnectionReset))),
+            () => CreateSseResponse(
+                """
+                data: {"id":"c-2","object":"chat.completion.chunk","created":1744060800,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call-2","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"a.txt\"}"}}]},"finish_reason":"tool_calls"}]}
+
+                data: [DONE]
+
+                """));
+        var executor = new OpenAIChatTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ApiKey = "test-key",
+            BaseUri = new Uri("https://example.test/v1/"),
+            HttpClient = new HttpClient(handler),
+            RetryDelayAsync = static (_, _) => Task.CompletedTask,
+        });
+
+        var response = await executor.ExecuteTurnAsync(CreateChatTurnRequest(), static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        Assert.AreEqual(2, handler.Requests);
+        var toolCall = response.AssistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().Single();
+        Assert.AreEqual("call-2", toolCall.CallId);
+        Assert.AreEqual("a.txt", toolCall.Arguments.GetProperty("path").GetString());
+    }
+
+    // A failure that asking again cannot fix (a request the endpoint refuses) ends the turn at once, and a stream that
+    // keeps breaking ends it after five more requests, with the error of the last one.
+    [TestMethod]
+    public async Task OpenAIChatTurnExecutor_DoesNotAskAgainARefusedRequest_NorMoreThanFiveTimes()
+    {
+        var refused = new SequenceHttpMessageHandler(
+            () => new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent("""{"error":{"message":"Invalid request","type":"invalid_request_error"}}""", Encoding.UTF8, "application/json"),
+            },
+            () => CreateSseResponse("data: [DONE]\n\n"));
+        var refusedExecutor = new OpenAIChatTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ApiKey = "test-key",
+            BaseUri = new Uri("https://example.test/v1/"),
+            HttpClient = new HttpClient(refused),
+            RetryDelayAsync = static (_, _) => Task.CompletedTask,
+        });
+        await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+            () => refusedExecutor.ExecuteTurnAsync(CreateChatTurnRequest(), static (_, _) => ValueTask.CompletedTask)).ConfigureAwait(false);
+        Assert.AreEqual(1, refused.Requests);
+
+        var broken = new SequenceHttpMessageHandler(Enumerable.Range(0, 7).Select(_ => (Func<HttpResponseMessage>)(() => CreateSseResponse(
+            """
+            data: {"id":"c-1","object":"chat.completion.chunk","created":1744060800,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Half"},"finish_reason":null}]}
+
+
+            """,
+            CreatePrematureResponseEndException()))).ToArray());
+        var delays = new List<TimeSpan>();
+        var brokenExecutor = new OpenAIChatTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ApiKey = "test-key",
+            BaseUri = new Uri("https://example.test/v1/"),
+            HttpClient = new HttpClient(broken),
+            RetryDelayAsync = (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            },
+        });
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+            () => brokenExecutor.ExecuteTurnAsync(CreateChatTurnRequest(), static (_, _) => ValueTask.CompletedTask)).ConfigureAwait(false);
+        Assert.AreEqual(6, broken.Requests);
+        CollectionAssert.AreEqual(new[] { 1, 2, 4, 8, 15 }.Select(static seconds => TimeSpan.FromSeconds(seconds)).ToArray(), delays);
+        Assert.AreEqual(AgentFailureKind.Unavailable, exception.Failure.Failure?.Kind);
     }
 
     [TestMethod]
@@ -7157,6 +7303,14 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     private static string SerializeJsonStringOrNull(string? value)
         => value is null ? "null" : JsonSerializer.Serialize(value);
 
+    // An event stream with the events of `sse`, then the failure of its connection when there is one.
+    private static HttpResponseMessage CreateSseResponse(string sse, Exception? failure = null)
+    {
+        var content = new StreamContent(new BrokenStream(Encoding.UTF8.GetBytes(sse), failure));
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream");
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+    }
+
     private static HttpResponseMessage CreateChatStreamingResponse(string completionId, string content)
     {
         var escapedCompletionId = JsonSerializer.Serialize(completionId);
@@ -7936,6 +8090,51 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 ? Task.FromResult(responses[index]())
                 : throw new InvalidOperationException($"No answer is scripted for request {index + 1}.");
         }
+    }
+
+    // Reads its bytes, then throws `failure` as a connection that breaks; ends as a complete body when there is none.
+    private sealed class BrokenStream(byte[] data, Exception? failure) : Stream
+    {
+        private readonly MemoryStream _data = new(data, writable: false);
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+            => Read(buffer.AsSpan(offset, count));
+
+        public override int Read(Span<byte> buffer)
+        {
+            var read = _data.Read(buffer);
+            return read > 0 || failure is null ? read : throw failure;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => Task.FromResult(Read(buffer.AsSpan(offset, count)));
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(Read(buffer.Span));
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class StaticHttpMessageHandler(HttpResponseMessage response) : HttpMessageHandler
