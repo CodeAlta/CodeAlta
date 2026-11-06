@@ -240,8 +240,11 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
                 next = RemoteMachineState.Unauthorized;
                 problem = exception.Message;
             }
+            // A machine that stops listening while it is reached closes the WebSocket of the handshake without its close
+            // handshake: a machine that does not answer, tried again later.
             catch (Exception exception) when (exception is IOException or FleetException or TimeoutException or AuthenticationException
-                or System.Net.Sockets.SocketException or ObjectDisposedException or InvalidOperationException or OperationCanceledException)
+                or System.Net.Sockets.SocketException or System.Net.WebSockets.WebSocketException or ObjectDisposedException or InvalidOperationException
+                or OperationCanceledException)
             {
                 problem = exception.Message;
             }

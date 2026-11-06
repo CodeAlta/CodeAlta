@@ -187,6 +187,23 @@ public sealed class RemoteSessionHostTests
     }
 
     [TestMethod]
+    public async Task RemoteHost_ConnectsAgain_WhenTheMachineClosesTheWebSocketDuringTheHandshake()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        var machine = await fixture.PairViewerAsync(token);
+        var attempts = 0;
+        // A machine that stops listening while it is reached: the handshake meets a WebSocket closed without its close handshake.
+        await using var host = new RemoteSessionHost(machine, cancellation => Interlocked.Increment(ref attempts) == 1
+            ? throw new System.Net.WebSockets.WebSocketException(System.Net.WebSockets.WebSocketError.ConnectionClosedPrematurely)
+            : FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, cancellation), Quick);
+        host.Start();
+
+        await WaitForAsync(() => host.State == RemoteMachineState.Online, "the machine to be online after the failed handshake", token);
+        Assert.IsTrue(Volatile.Read(ref attempts) >= 2, "the host tried again");
+    }
+
+    [TestMethod]
     public async Task RemoteHost_AdmitsNothing_AndReadsNothing_WhileTheMachineIsOffline()
     {
         var token = TestContext.CancellationToken;
