@@ -18,20 +18,58 @@ public sealed class CodeAltaModelSettingsDocument
     public CodeAltaModelAdaptiveDocument? Adaptive { get; set; }
 }
 
-/// <summary>Represents the <c>[models.adaptive]</c> table.</summary>
+/// <summary>
+/// Represents the <c>[models.adaptive]</c> table: the levels of Adaptive (<c>low</c>, <c>medium</c>, <c>high</c>,
+/// <c>max</c>), each a model and the critics that review its changes, and the level a session takes when none is chosen.
+/// </summary>
 public sealed class CodeAltaModelAdaptiveDocument
 {
-    /// <summary>Gets or sets the tier the turns of a session on Adaptive run on; <c>quick</c> when absent.</summary>
+    /// <summary>Gets or sets the level a session put on Adaptive takes when none is chosen; <c>medium</c> when absent.</summary>
+    [JsonPropertyName("level")]
+    public string? Level { get; set; }
+
+    /// <summary>Gets or sets the <c>low</c> level.</summary>
+    [JsonPropertyName("low")]
+    public CodeAltaModelAdaptiveLevelDocument? Low { get; set; }
+
+    /// <summary>Gets or sets the <c>medium</c> level.</summary>
+    [JsonPropertyName("medium")]
+    public CodeAltaModelAdaptiveLevelDocument? Medium { get; set; }
+
+    /// <summary>Gets or sets the <c>high</c> level.</summary>
+    [JsonPropertyName("high")]
+    public CodeAltaModelAdaptiveLevelDocument? High { get; set; }
+
+    /// <summary>Gets or sets the <c>max</c> level.</summary>
+    [JsonPropertyName("max")]
+    public CodeAltaModelAdaptiveLevelDocument? Max { get; set; }
+
+    /// <summary>Gets or sets the tier of the turns of the first Adaptive; read so that an older file loads, and ignored.</summary>
     [JsonPropertyName("code")]
     public string? Code { get; set; }
 
-    /// <summary>Gets or sets the tier a turn that ends in visible trouble continues on; <c>complex</c> when absent.</summary>
+    /// <summary>Gets or sets the escalation tier of the first Adaptive; read so that an older file loads, and ignored.</summary>
     [JsonPropertyName("escalate")]
     public string? Escalate { get; set; }
 
-    /// <summary>Gets or sets whether a turn that changed code is asked once to check its change against the request; true when absent.</summary>
+    /// <summary>Gets or sets the recheck switch of the first Adaptive; read so that an older file loads, and ignored.</summary>
     [JsonPropertyName("recheck")]
     public bool? Recheck { get; set; }
+}
+
+/// <summary>Represents a level of <c>[models.adaptive]</c>, such as <c>[models.adaptive.medium]</c>.</summary>
+public sealed class CodeAltaModelAdaptiveLevelDocument
+{
+    /// <summary>Gets or sets the model the turns run on, written <c>provider:model@reasoning</c>.</summary>
+    [JsonPropertyName("model")]
+    public string? Model { get; set; }
+
+    /// <summary>
+    /// Gets or sets the models that review, read-only, each change of code of a turn, written as <see cref="Model"/>; none
+    /// asks the model of the turns to recheck its change itself.
+    /// </summary>
+    [JsonPropertyName("critics")]
+    public List<string>? Critics { get; set; }
 }
 
 /// <summary>

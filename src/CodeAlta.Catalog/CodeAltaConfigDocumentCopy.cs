@@ -85,7 +85,17 @@ internal static class CodeAltaConfigDocumentCopy
                         ? new CodeAltaModelFallbackDocument { Enabled = fallback.Enabled, On = Copy(fallback.On), Resume = fallback.Resume, MaxResumes = fallback.MaxResumes }
                         : null,
                     Adaptive = models.Adaptive is { } adaptive
-                        ? new CodeAltaModelAdaptiveDocument { Code = adaptive.Code, Escalate = adaptive.Escalate, Recheck = adaptive.Recheck }
+                        ? new CodeAltaModelAdaptiveDocument
+                        {
+                            Level = adaptive.Level,
+                            Low = CopyLevel(adaptive.Low),
+                            Medium = CopyLevel(adaptive.Medium),
+                            High = CopyLevel(adaptive.High),
+                            Max = CopyLevel(adaptive.Max),
+                            Code = adaptive.Code,
+                            Escalate = adaptive.Escalate,
+                            Recheck = adaptive.Recheck,
+                        }
                         : null,
                 }
                 : null,
@@ -248,6 +258,9 @@ internal static class CodeAltaConfigDocumentCopy
     };
 
     private static List<string>? Copy(List<string>? list) => list is null ? null : [.. list];
+
+    private static CodeAltaModelAdaptiveLevelDocument? CopyLevel(CodeAltaModelAdaptiveLevelDocument? level)
+        => level is null ? null : new CodeAltaModelAdaptiveLevelDocument { Model = level.Model, Critics = Copy(level.Critics) };
 
     // The same comparer and the same order of the keys.
     private static Dictionary<string, TValue>? Copy<TValue>(Dictionary<string, TValue>? dictionary, Func<TValue, TValue> copy)

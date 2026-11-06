@@ -171,42 +171,116 @@ public sealed class ModelTierSettingsTests
     }
 
     [TestMethod]
-    public void Adaptive_IsSetUpByItsTable_RoundTrips_AndIsReadyOnlyWithModelsInItsTiers()
+    public void Adaptive_IsSetUpByItsTable_RoundTripsItsLevels_AndIsReadyOnceALevelIsSet()
     {
+        var medium = Level(AdaptiveLevel.Medium, "codex:gpt-6.1-sol@low", "claude-code:sonnet@high");
+        var max = Level(AdaptiveLevel.Max, "codex:gpt-6.1-sol@high", "claude-code:sonnet@high", "claude-code:opus@high");
         WithStore(store =>
         {
-            var tiers = Read(complex: ["claude-code:opus@xhigh"], standard: [], quick: ["claude-code:haiku@high"]);
             Assert.IsNull(store.LoadGlobalModelSettings().Adaptive);
 
-            store.SaveGlobalModelSettings(new ModelSettings(tiers, ModelFallbackSettings.Default) { Adaptive = AdaptiveModelSettings.Recommended });
+            var adaptive = new AdaptiveModelSettings(AdaptiveLevel.Max, [medium, max]);
+            store.SaveGlobalModelSettings(ModelSettings.Default with { Adaptive = adaptive });
             var content = File.ReadAllText(store.ConfigPath);
-            StringAssert.Contains(content, "[models.adaptive]");
-            StringAssert.Contains(content, "code = \"quick\"");
-            StringAssert.Contains(content, "escalate = \"complex\"");
+            StringAssert.Contains(content, "level = \"max\"");
+            StringAssert.Contains(content, "[models.adaptive.medium]");
+            StringAssert.Contains(content, "model = \"codex:gpt-6.1-sol@low\"");
+            StringAssert.Contains(content, "\"claude-code:opus@high\"");
             var loaded = store.LoadGlobalModelSettings();
-            Assert.AreEqual(AdaptiveModelSettings.Recommended, loaded.Adaptive);
-            Assert.IsTrue(loaded.Adaptive!.IsReadyIn(loaded.Tiers));
-            // A tier it names without a model: Adaptive is set up but cannot be chosen.
-            Assert.IsFalse((loaded.Adaptive with { Code = ModelTier.Standard }).IsReadyIn(loaded.Tiers));
+            Assert.AreEqual(adaptive, loaded.Adaptive);
+            Assert.IsTrue(loaded.Adaptive!.IsReady);
             Assert.IsTrue(ModelTierScope.Of(loaded, null, SpaceAssignments.Empty).IsAdaptiveReady);
+            Assert.IsFalse(ModelTierScope.Of(loaded with { Adaptive = AdaptiveModelSettings.Empty }, null, SpaceAssignments.Empty).IsAdaptiveReady);
             Assert.IsFalse(ModelTierScope.Of(loaded with { Adaptive = null }, null, SpaceAssignments.Empty).IsAdaptiveReady);
 
             // Saving the tiers again keeps it; taking it out writes no table.
             store.SaveGlobalModelSettings(loaded with { Tiers = Read(complex: ["claude-code:opus@high"], standard: [], quick: ["claude-code:haiku@high"]) });
-            Assert.AreEqual(AdaptiveModelSettings.Recommended, store.LoadGlobalModelSettings().Adaptive);
+            Assert.AreEqual(adaptive, store.LoadGlobalModelSettings().Adaptive);
             store.SaveGlobalModelSettings(loaded with { Adaptive = null });
             Assert.DoesNotContain("adaptive", File.ReadAllText(store.ConfigPath));
         });
 
-        // A table that names nothing takes the recommended choices; a tier that is none fails the validation of the file.
-        Assert.AreEqual(AdaptiveModelSettings.Recommended, ModelSettings.Read(new CodeAltaModelSettingsDocument { Adaptive = new() }).Adaptive);
-        Assert.AreEqual(new AdaptiveModelSettings(ModelTier.Standard, ModelTier.Complex, false),
-            ModelSettings.Read(new CodeAltaModelSettingsDocument { Adaptive = new() { Code = "Standard", Recheck = false } }).Adaptive);
-        var result = CodeAltaConfigStore.ValidateGlobalConfigContent("[models.adaptive]\ncode = \"cheap\"\n");
+        // A table that names no level sets Adaptive up without a level: it cannot be chosen yet.
+        Assert.AreEqual(AdaptiveModelSettings.Empty, ModelSettings.Read(new CodeAltaModelSettingsDocument { Adaptive = new() }).Adaptive);
+        var result = CodeAltaConfigStore.ValidateGlobalConfigContent("[models.adaptive]\nlevel = \"huge\"\n[models.adaptive.low]\nmodel = \"haiku\"\ncritics = [\"codex:gpt-6.1-sol@low,high\"]\n");
         Assert.IsFalse(result.IsValid);
-        StringAssert.Contains(result.Message, "models.adaptive.code");
-        Assert.IsTrue(CodeAltaConfigStore.ValidateGlobalConfigContent("[models.adaptive]\ncode = \"standard\"\nescalate = \"complex\"\nrecheck = false\n").IsValid);
+        StringAssert.Contains(result.Message, "models.adaptive.level");
+        StringAssert.Contains(result.Message, "models.adaptive.low.model");
+        StringAssert.Contains(result.Message, "models.adaptive.low.critics[1]");
+        Assert.IsFalse(CodeAltaConfigStore.ValidateGlobalConfigContent("[models.adaptive.high]\ncritics = [\"claude-code:opus@high\"]\n").IsValid);
     }
+
+    [TestMethod]
+    public void Adaptive_ReadsTheKeysOfItsFirstVersion_AndIgnoresThem()
+    {
+        // A file of October 2026 still loads; its tiers no longer drive Adaptive, which needs levels now.
+        const string Older = "[models.adaptive]\ncode = \"quick\"\nescalate = \"complex\"\nrecheck = true\n";
+        Assert.IsTrue(CodeAltaConfigStore.ValidateGlobalConfigContent(Older).IsValid);
+        Assert.IsTrue(CodeAltaConfigStore.ValidateGlobalConfigContent("[models.adaptive]\ncode = \"cheap\"\n").IsValid);
+        Assert.AreEqual(AdaptiveModelSettings.Empty,
+            ModelSettings.Read(new CodeAltaModelSettingsDocument { Adaptive = new() { Code = "standard", Escalate = "complex", Recheck = false } }).Adaptive);
+        WithStore(store =>
+        {
+            File.WriteAllText(store.ConfigPath, Older + "[models.adaptive.medium]\nmodel = \"codex:gpt-6.1-sol@low\"\n");
+            var loaded = store.LoadGlobalModelSettings();
+            Assert.AreEqual(AdaptiveLevel.Medium, loaded.Adaptive!.Levels.Single().Level);
+            // Saved again, the file keeps the levels and drops the keys of the first version.
+            store.SaveGlobalModelSettings(loaded);
+            var content = File.ReadAllText(store.ConfigPath);
+            Assert.DoesNotContain("escalate", content);
+            StringAssert.Contains(content, "[models.adaptive.medium]");
+        });
+    }
+
+    [TestMethod]
+    public void Adaptive_ResolvesTheLevelOfASession_ToTheNearestLevelThatIsSet()
+    {
+        var low = Level(AdaptiveLevel.Low, "codex:gpt-6.1-sol@low");
+        var high = Level(AdaptiveLevel.High, "codex:gpt-6.1-sol@medium", "claude-code:sonnet@high");
+        var adaptive = new AdaptiveModelSettings(AdaptiveLevel.Medium, [low, high]);
+        Assert.AreEqual(high, adaptive.Resolve(AdaptiveLevel.High));
+        // The default level is not set: the nearest one, the cheaper on a tie.
+        Assert.AreEqual(low, adaptive.Resolve(null));
+        Assert.AreEqual(high, adaptive.Resolve(AdaptiveLevel.Max));
+        Assert.IsNull(AdaptiveModelSettings.Empty.Resolve(AdaptiveLevel.Low));
+        Assert.AreEqual(AdaptiveLevel.Max, AdaptiveLevels.Parse(" MAX "));
+        Assert.IsNull(AdaptiveLevels.Parse("xhigh"));
+    }
+
+    [TestMethod]
+    public void AdaptiveProposals_CombineTwoFamilies_PreferSubscriptions_AndFallBackOnOneFamily()
+    {
+        var both = AdaptiveProposals.Propose(
+        [
+            new("openai", "gpt-6.1-sol", Subscription: false),
+            new("codex", "gpt-6.1-sol", Subscription: true),
+            new("claude-code", "sonnet", Subscription: true),
+            new("claude-code", "opus", Subscription: true),
+            new("claude-code", "haiku", Subscription: true),
+        ]);
+        Assert.AreEqual("codex:gpt-6.1-sol@low", both.Single(level => level.Level == AdaptiveLevel.Medium).Model.Format());
+        CollectionAssert.AreEqual(new[] { "claude-code:sonnet@high" }, both.Single(level => level.Level == AdaptiveLevel.Medium).Critics.Select(static c => c.Format()).ToArray());
+        CollectionAssert.AreEqual(new[] { "claude-code:haiku@high" }, both.Single(level => level.Level == AdaptiveLevel.Low).Critics.Select(static c => c.Format()).ToArray());
+        CollectionAssert.AreEqual(new[] { "claude-code:sonnet@high", "claude-code:opus@high" },
+            both.Single(level => level.Level == AdaptiveLevel.Max).Critics.Select(static c => c.Format()).ToArray());
+
+        var openAi = AdaptiveProposals.Propose([new("openai", "gpt-6.1-sol", Subscription: false)]);
+        Assert.AreEqual(4, openAi.Count);
+        Assert.AreEqual(0, openAi.Single(level => level.Level == AdaptiveLevel.Low).Critics.Count);
+        Assert.AreEqual("openai:gpt-6.1-sol@high", openAi.Single(level => level.Level == AdaptiveLevel.High).Critics.Single().Format());
+
+        var claude = AdaptiveProposals.Propose([new("anthropic", "claude-sonnet-5-5", false), new("anthropic", "claude-opus-5-5", false)]);
+        Assert.AreEqual("anthropic:claude-sonnet-5-5@high", claude.Single(level => level.Level == AdaptiveLevel.Medium).Model.Format());
+        Assert.AreEqual("anthropic:claude-opus-5-5@high", claude.Single(level => level.Level == AdaptiveLevel.Medium).Critics.Single().Format());
+
+        Assert.AreEqual(0, AdaptiveProposals.Propose([new("other", "llama", false)]).Count);
+    }
+
+    private static AdaptiveLevelSettings Level(AdaptiveLevel level, string model, params string[] critics)
+        => new(level, Target(model), [.. critics.Select(Target)]);
+
+    private static ModelTierTarget Target(string written)
+        => ModelTierTarget.TryParse(written, out var target, out var error) ? target : throw new AssertFailedException(error ?? written);
 
     [TestMethod]
     public void InvalidTargets_FailTheValidationOfTheFile()

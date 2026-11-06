@@ -316,7 +316,7 @@ import { archivableDescendants, newRestoredNotices, sessionArchiveMessage, setSe
 import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, resourceSpaces, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
   spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, subSessionsAtWork, type Space, type SubSessionAtWork, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
-import { adaptiveChoice, adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierLabels, tierStore } from "./modelTiers";
+import { adaptiveChoice, adaptiveLevelOf, adaptiveTierOf, composerAdaptiveEntry, composerTierEntries, readAdaptiveTier, tierStore } from "./modelTiers";
 import { AdaptiveSetupDialog } from "./AdaptiveSetup";
 import { cloudPlace, deletedSessionWorktree, folderName, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
 import { createSessionFolderSwitch, type FolderSwitchResult, type FolderTarget } from "./worktrees/sessionFolder";
@@ -4875,7 +4875,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     return <ComposerSelectionFields sessionId={choiceId} onOpenCatalog={page => { if (inPopover) setCreatingVisible(false); navigate(page); }}
       summary={{ agent: draftChoices.prompts.find(prompt => prompt.id === value.agentPromptId)?.name ?? t(draftChoices.loadingPrompts ? "Loading…" : "Host default"),
         provider: usedProvider ? providerName(providerLogos, usedProvider) ?? usedProvider : t("No provider"), providerKey: usedProvider || null, modelId: value.modelId || null,
-        model: (draftChoices.tier === adaptiveTier ? `${t("Adaptive")} · ` : "")
+        model: (readAdaptiveTier(draftChoices.tier).adaptive ? `${t("Adaptive")} · ` : "")
           + (value.modelId ? draftChoices.models.find(model => model.id === value.modelId)?.name ?? value.modelId : t(draftChoices.loadingModels ? "Loading…" : "No model")),
         reasoning: reasoning.effort ?? (draftChoices.loadingModels ? t("Loading…") : null),
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: draftModel!.name })
@@ -4905,14 +4905,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         tiers={composerTierEntries(draftChoices.tiers, t)} currentTier={draftChoices.tier}
         onChooseTier={tier => { invalidateCreation(); draftChoices.chooseTier(tier); }}
         adaptive={composerAdaptiveEntry(draftChoices.tiers, t)}
-        onChooseAdaptive={() => {
+        currentAdaptiveLevel={readAdaptiveTier(draftChoices.tier).adaptive ? adaptiveLevelOf(draftChoices.tiers?.adaptive, readAdaptiveTier(draftChoices.tier).level)?.level ?? null : null}
+        onChooseAdaptive={level => {
           const tiers = draftChoices.tiers;
           if (!tiers?.adaptive || !tiers.adaptiveReady) { setDraftAdaptiveSetup(true); return; }
-          if (!adaptiveChoice(tiers)) {
-            showToast({ message: t("No model of the {tier} tier is ready.", { tier: t(tierLabels[tiers.adaptive.code]) }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+          if (!adaptiveChoice(tiers, level)) {
+            showToast({ message: t("No model of this level of Adaptive is ready."), intent: "warning", icon: "warning-sign", timeout: 6000 });
             return;
           }
-          invalidateCreation(); draftChoices.chooseTier(adaptiveTier);
+          invalidateCreation(); draftChoices.chooseTier(adaptiveTierOf(level));
         }} />
         <AdaptiveSetupDialog isOpen={draftAdaptiveSetup} onClose={() => setDraftAdaptiveSetup(false)} /></>}
       reasoning={<ReasoningSlider value={value.reasoningEffort ?? null} efforts={efforts} complete={!!draftModel?.effortsComplete} model={draftModel?.name} disabled={locked}
@@ -5222,8 +5223,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           && choices.current && validSelection(choices, creationSelection) ? choices : undefined;
         // A session that starts with the model of the standard tier runs on that tier, and falls back along it. One that
         // starts on Adaptive is put on it before its first prompt, whose turn CodeAlta then follows.
-        if (offered && creationTier === adaptiveTier) await sessionOperations.setAdaptive({ expectedEpoch: epoch!, sessionId: selection.sessionId },
-          { timeoutMilliseconds: 15000 }).catch(() => { /* The session keeps the model of the tier of its turns, without Adaptive. */ });
+        if (offered && readAdaptiveTier(creationTier).adaptive) await sessionOperations.setAdaptive({ expectedEpoch: epoch!, sessionId: selection.sessionId,
+          level: readAdaptiveTier(creationTier).level }, { timeoutMilliseconds: 15000 }).catch(() => { /* The session keeps the model of its level, without Adaptive. */ });
         else if (offered && creationTier) void sessionOperations.setTier({ expectedEpoch: epoch!, sessionId: selection.sessionId, tier: creationTier },
           { timeoutMilliseconds: 15000 }).catch(() => { /* The session keeps its model; only its fallback is not set. */ });
         if (!creationAlive.current) return;

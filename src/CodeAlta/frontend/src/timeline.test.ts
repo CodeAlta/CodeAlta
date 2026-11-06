@@ -581,9 +581,11 @@ test("the cards of Adaptive are shown and titled by what it did, other informati
     entry({ eventType: "sessionUpdate", kind: "Warning", offset: "22", text: "Adaptive did not continue the turn: no model of the complex tier is ready.",
       details: JSON.stringify({ adaptive: "escalation" }) }),
     entry({ eventType: "sessionUpdate", kind: "Info", offset: "23", text: "Something else.", details: JSON.stringify({ adaptive: "other" }) }),
+    entry({ eventType: "sessionUpdate", kind: "Info", offset: "24", text: "Adaptive review: the change was approved by claude-code:sonnet@high.",
+      details: JSON.stringify({ adaptive: "review" }) }),
   ]);
   assert.deepEqual(items.map(item => [item.title, item.icon, item.category]),
-    [["Adaptive · Recheck", "model", "status"], ["Adaptive · Escalation", "model", "status"], ["Adaptive · Escalation", "model", "error"]]);
+    [["Adaptive · Recheck", "model", "status"], ["Adaptive · Escalation", "model", "status"], ["Adaptive · Escalation", "model", "error"], ["Adaptive · Review", "eye", "status"]]);
   assert.equal(items[0].markdown, "The turn changed code: Haiku 5.5 checks the change against the request.");
 });
 

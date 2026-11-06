@@ -123,6 +123,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
         _codeModeAgents = new Lazy<CodeModeAgents>(() => new CodeModeAgents(this), LazyThreadSafetyMode.ExecutionAndPublication);
         // The sessions a run kept open close with it.
         CodeModeRuns.RunEnded += runId => { if (_codeModeAgents.IsValueCreated) _ = _codeModeAgents.Value.ForgetRunAsync(runId); };
+        // The critics of Adaptive review the change of a turn in read-only child sessions, through a driver made at the first review.
+        _adaptiveCritics = new Lazy<AdaptiveCritics>(() => new AdaptiveCritics(this), LazyThreadSafetyMode.ExecutionAndPublication);
+        Commands.Adaptive.Critic = (request, token) => _adaptiveCritics.Value.ReviewAsync(request, token);
         CodeModeQuestions = new CodeModeQuestions(this);
         // The approval of a call of a script, in its turn or in the background, takes its turn among the questions of its run;
         // its card says that the run waits for it, and the exec that waits for the run does not count that time.
@@ -296,6 +299,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
     public Runtime.Scripts.CodeModeRunRegistry CodeModeRuns { get; }
 
     private readonly Lazy<CodeModeAgents> _codeModeAgents;
+    private readonly Lazy<AdaptiveCritics> _adaptiveCritics;
 
     /// <summary>
     /// Keeps the runs of scripts under the state root (<c>codemode/runs</c>) with the results of their steps, so that a run
@@ -873,6 +877,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         // The scripts stop first: their calls run on the sessions that close next.
         await CodeModeRuns.DisposeAsync().ConfigureAwait(false);
         if (_codeModeAgents.IsValueCreated) await _codeModeAgents.Value.DisposeAsync().ConfigureAwait(false);
+        if (_adaptiveCritics.IsValueCreated) await _adaptiveCritics.Value.DisposeAsync().ConfigureAwait(false);
         // Nothing is listed or followed any more while the sessions close.
         if (ExternalSessions is { } follower) await follower.DisposeAsync().ConfigureAwait(false);
         BeginShutdownControls();

@@ -1101,12 +1101,13 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .composer-tier-name { font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
 .composer-tier-model { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .composer-tier.bp6-button.bp6-active .composer-tier-name { color: var(--accent); }
-/* Adaptive beside the tiers, with its Experimental tag; muted while it is not set up. */
+/* Adaptive under the tiers: its levels on a line of their own; muted while it is not set up. */
 .composer-tier.composer-adaptive.bp6-button { grid-column: 1 / -1; justify-content: start; }
 .composer-tier.composer-adaptive.bp6-button .bp6-button-text { justify-items: start; }
-.composer-adaptive .composer-tier-name { display: inline-flex; align-items: center; gap: 6px; }
+.composer-adaptive-levels { grid-column: 1 / -1; display: grid; align-items: center; gap: 4px; padding-top: 4px; border-top: 1px dashed var(--line); }
+.composer-adaptive-levels .composer-tier.composer-adaptive.bp6-button { grid-column: auto; }
+.composer-adaptive-name { padding: 0 4px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
 .composer-adaptive[data-ready="false"] .composer-tier-model { font-style: italic; }
-.adaptive-experimental.bp6-tag { min-height: 0; padding: 0 6px; font-size: 10px; font-weight: 500; letter-spacing: 0; line-height: 16px; text-transform: none; }
 .adaptive-setup-title { margin: 0 0 6px; font-size: 14px; }
 /* Adaptive on Settings > Models, under the tiers. */
 .adaptive-settings { display: grid; justify-items: start; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
@@ -1117,6 +1118,16 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .adaptive-field { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
 .adaptive-fields .bp6-checkbox { margin: 0; font-size: 12px; }
 .adaptive-missing { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; font-style: italic; }
+.adaptive-proposal { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12px; }
+.adaptive-levels { flex-basis: 100%; display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.adaptive-level { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: start; gap: 8px; }
+.adaptive-level h3 { margin: 4px 0 0; font-size: 12px; font-weight: 600; }
+.adaptive-level-models { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px 8px; min-width: 0; }
+.adaptive-role { color: var(--muted); font-size: 11px; }
+.adaptive-critics { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.adaptive-model { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.adaptive-effort.bp6-html-select select { font-size: 12px; }
+.adaptive-recheck { color: var(--muted); font-size: 12px; font-style: italic; }
 .adaptive-guidance { max-width: 72ch; color: var(--muted); font-size: 12px; }
 .adaptive-guidance h3 { margin: 4px 0; color: var(--text); font-size: 12px; }
 .adaptive-guidance p { margin: 0 0 4px; }

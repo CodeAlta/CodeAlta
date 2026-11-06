@@ -331,11 +331,21 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
         timeout = null;
         schema = null;
         ModelTier? tier = null;
-        // Adaptive is named as a tier: CodeAlta then chooses the model of each turn ([models.adaptive]).
-        var adaptive = string.Equals(options.Tier?.Trim(), "adaptive", StringComparison.OrdinalIgnoreCase);
+        // Adaptive is named as a tier, with its level after a colon (adaptive:max): CodeAlta then runs each turn on the
+        // model of the level and has its critics review each change of code ([models.adaptive]).
+        var written = options.Tier?.Trim();
+        var adaptive = written is not null && (string.Equals(written, "adaptive", StringComparison.OrdinalIgnoreCase)
+            || written.StartsWith("adaptive:", StringComparison.OrdinalIgnoreCase));
+        AdaptiveLevel? level = null;
+        if (adaptive && written!.Length > "adaptive".Length && (level = AdaptiveLevels.Parse(written["adaptive:".Length..])) is null)
+        {
+            error = $"'{options.Tier}' names no level of Adaptive: use adaptive, or adaptive:low, medium, high or max.";
+            return false;
+        }
+
         if (options.Tier is not null && !adaptive && (tier = ModelTiers.Parse(options.Tier)) is null)
         {
-            error = $"'{options.Tier}' is not a tier: use complex, standard, quick or adaptive.";
+            error = $"'{options.Tier}' is not a tier: use complex, standard, quick, adaptive or adaptive:<level>.";
             return false;
         }
 
@@ -394,6 +404,7 @@ internal sealed class CliRunCommand(CliStreams streams, CliOutput output, CliEnv
             ModelRef = options.Model,
             Tier = tier,
             Adaptive = adaptive,
+            AdaptiveLevel = level,
             Reasoning = reasoning,
             AgentPromptId = options.PromptId,
             Title = options.Title,

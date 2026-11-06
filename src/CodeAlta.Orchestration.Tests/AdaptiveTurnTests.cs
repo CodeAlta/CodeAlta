@@ -14,30 +14,44 @@ using CodeAlta.Orchestration.Runtime;
 namespace CodeAlta.Orchestration.Tests;
 
 /// <summary>
-/// A session on Adaptive: CodeAlta runs the turns of the user on the turn tier, has a turn that changed code recheck its
-/// change, and continues a turn that ends in visible trouble on the escalation tier. The real host, runtime and command
-/// owner, with a scripted provider whose runs say what they did.
+/// A session on Adaptive: CodeAlta runs the turns of the user on the model of the level of the session, has the critics
+/// of the level review a turn that changed code and the session revise it with what they found, or has it rechecked on a
+/// level without critics. The real host, runtime and command owner, with a scripted provider whose runs say what they did.
 /// </summary>
 [TestClass]
 public sealed class AdaptiveTurnTests
 {
     private static readonly TimeSpan Timeout = TestDeadlines.Hang;
 
+    // Low has no critic: its changes are rechecked. Medium is reviewed by model-c, High runs on model-c.
     private const string Config = """
-        [models.tiers]
-        complex = ["prov-a:model-c@high"]
-        quick = ["prov-a:model-a@high"]
-
         [models.adaptive]
-        code = "quick"
-        escalate = "complex"
+        level = "medium"
+
+        [models.adaptive.low]
+        model = "prov-a:model-a@high"
+
+        [models.adaptive.medium]
+        model = "prov-a:model-a@medium"
+        critics = ["prov-a:model-c@high"]
+
+        [models.adaptive.high]
+        model = "prov-a:model-c@high"
+        critics = ["prov-a:model-a@high"]
+        """;
+
+    private const string WithoutAdaptive = """
+        [models.tiers]
+        quick = ["prov-a:model-a@high"]
         """;
 
     [TestMethod]
-    public async Task ATurnThatChangedCode_IsRecheckedOnce_OnTheSameModel()
+    public async Task ALevelWithoutCritics_RechecksATurnThatChangedCode_OnceOnTheModelOfTheLevel()
     {
         await using var f = await Fixture.CreateAsync(Config);
-        Assert.AreEqual(("ok", (ModelTier?)ModelTier.Quick), await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId));
+        var (status, level) = await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Low);
+        Assert.AreEqual("ok", status);
+        Assert.AreEqual("prov-a:model-a@high", level!.Model.Format());
         f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
         // The recheck changes code too: a recheck is not rechecked.
         f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
@@ -45,6 +59,7 @@ public sealed class AdaptiveTurnTests
         f.Send("add the feature");
         var first = await f.Provider.NextSendAsync();
         Assert.AreEqual("add the feature", first.Text);
+        Assert.AreEqual("model-a", first.Options.Model, "The turn runs on the model of the level.");
         var recheck = await f.Provider.NextSendAsync();
 
         Assert.AreEqual(AgentPromptProvenance.AdaptiveRecheck, recheck.Provenance);
@@ -52,14 +67,17 @@ public sealed class AdaptiveTurnTests
         Assert.AreEqual("model-a", recheck.Options.Model, "The recheck runs on the model of the turn.");
         await f.SettleAsync();
         Assert.AreEqual(2, f.Provider.SendCount);
-        Assert.IsTrue((await f.StateAsync()).Adaptive);
+        var state = await f.StateAsync();
+        Assert.IsTrue(state.Adaptive);
+        Assert.AreEqual("low", state.AdaptiveLevel);
+        Assert.IsNull(state.Tier, "A session on Adaptive has no tier: its level names its models.");
     }
 
     [TestMethod]
-    public async Task ATurnThatChangedOnlyDocs_OrNothing_IsNotRechecked()
+    public async Task ATurnThatChangedOnlyDocs_OrNothing_IsNotChecked()
     {
         await using var f = await Fixture.CreateAsync(Config);
-        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId);
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Low);
         f.Provider.Scripts.Enqueue(static run => run.Edit("doc/readme.md"));
 
         f.Send("explain it in the readme");
@@ -73,81 +91,97 @@ public sealed class AdaptiveTurnTests
     }
 
     [TestMethod]
-    public async Task ATurnWhoseLastTestRunFailed_ContinuesOnTheEscalationTier_AndTheNextTurnRunsOnTheTurnTierAgain()
+    public async Task TheCriticsOfTheLevel_ReviewTheChange_AndTheSessionRevisesItOnceWithWhatTheyFound()
     {
         await using var f = await Fixture.CreateAsync(Config);
-        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId);
-        f.Provider.Scripts.Enqueue(static run => run.Test("npm test", "exit_code: 1\n1 failing"));
-
-        f.Send("fix the failing test");
-        await f.Provider.NextSendAsync();
-        var escalation = await f.Provider.NextSendAsync();
-
-        Assert.AreEqual(AgentPromptProvenance.AdaptiveEscalation, escalation.Provenance);
-        StringAssert.Contains(escalation.Text, "the last test run failed.");
-        Assert.AreEqual("model-c", escalation.Options.Model, "The turn continues on the model of the escalation tier.");
-        StringAssert.Contains(escalation.Text, "CodeAlta moved this session to PROV-A model-c high");
-        await f.SettleAsync();
-        Assert.AreEqual("quick", (await f.StateAsync()).Tier, "Once the escalation answered, the session is back on the turn tier.");
-
-        // The next turn of the user runs on the turn tier, whatever model the session ran last.
-        f.Send("thanks, now rename it", "second");
-        var next = await f.Provider.NextSendAsync();
-        Assert.AreEqual("model-a", next.Options.Model);
-        await f.SettleAsync();
-        Assert.AreEqual(3, f.Provider.SendCount);
-    }
-
-    [TestMethod]
-    public async Task ATestRunWhoseOutputSaysItFailed_IsEscalated_ThoughAPipeHidItsExitCode()
-    {
-        // As Claude Code runs it: `npm test | grep`, no exit code in the output, the summary of the runner.
-        await using var f = await Fixture.CreateAsync(Config);
-        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId);
-        f.Provider.Scripts.Enqueue(static run => run.Test("npm test 2>&1 | grep -E \"^ℹ (tests|pass|fail)\"", "ℹ tests 3\nℹ pass 2\nℹ fail 1"));
-
-        f.Send("run the tests");
-        await f.Provider.NextSendAsync();
-        var escalation = await f.Provider.NextSendAsync();
-
-        Assert.AreEqual(AgentPromptProvenance.AdaptiveEscalation, escalation.Provenance);
-        StringAssert.Contains(escalation.Text, "the last test run failed");
-    }
-
-    [TestMethod]
-    public async Task ATestRunThatPassedLast_OrATurnWithoutTests_IsNotEscalated()
-    {
-        await using var f = await Fixture.CreateAsync(Config);
-        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId);
-        f.Provider.Scripts.Enqueue(static run =>
+        var asked = new ConcurrentQueue<AdaptiveCriticRequest>();
+        f.Host.Commands.Adaptive.Critic = (request, _) =>
         {
-            run.Test("dotnet test", "exit_code: 1\nfailed");
-            run.Test("dotnet test", "exit_code: 0\npassed");
-        });
+            asked.Enqueue(request);
+            return Task.FromResult(new AdaptiveCriticAnswer("1. `parse` drops the last field (src/app.cs:42).\n\nVERDICT: REVISE", null));
+        };
+        Assert.AreEqual("ok", (await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId)).Status);
+        Assert.AreEqual("medium", (await f.StateAsync()).AdaptiveLevel, "Without a level asked, the default level of the settings.");
+        f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
+        f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
 
-        f.Send("fix it");
+        f.Send("parse the CSV export");
+        Assert.AreEqual("model-a", (await f.Provider.NextSendAsync()).Options.Model);
+        var revision = await f.Provider.NextSendAsync();
+        await f.SettleAsync();
+
+        var review = asked.Single();
+        Assert.AreEqual("prov-a:model-c@high", review.Critic.Format());
+        StringAssert.Contains(review.Prompt, "parse the CSV export", "The critic checks the change against the request.");
+        StringAssert.Contains(review.Prompt, "src/app.cs");
+        StringAssert.Contains(review.Prompt, "VERDICT: APPROVE");
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveReview, revision.Provenance);
+        StringAssert.Contains(revision.Text, "`parse` drops the last field");
+        StringAssert.Contains(revision.Text, "prov-a:model-c@high");
+        Assert.DoesNotContain("VERDICT", revision.Text);
+        Assert.AreEqual("model-a", revision.Options.Model, "The revision runs on the model of the turn, which keeps its cache.");
+        Assert.AreEqual(2, f.Provider.SendCount, "A revision is not reviewed again.");
+    }
+
+    [TestMethod]
+    public async Task AnApprovedChange_IsNotRevised_AndACardSaysWhoApprovedIt()
+    {
+        await using var f = await Fixture.CreateAsync(Config);
+        f.Host.Commands.Adaptive.Critic = static (_, _) => Task.FromResult(new AdaptiveCriticAnswer("All requirements are met.\n**VERDICT: APPROVE**", null));
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
+        f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
+
+        f.Send("add the feature");
         await f.Provider.NextSendAsync();
         await f.SettleAsync();
 
         Assert.AreEqual(1, f.Provider.SendCount);
+        var card = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.Info, "approval");
+        StringAssert.Contains(card.Message, "approved by prov-a:model-c@high");
     }
 
     [TestMethod]
-    public async Task ATurnThatEndsWithoutAnAnswer_IsEscalated()
+    public async Task ACriticThatGivesNoVerdict_LeavesTheChangeToARecheck_AndACardSaysSo()
     {
         await using var f = await Fixture.CreateAsync(Config);
-        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId);
-        f.Provider.Scripts.Enqueue(static run => run.Silent = true);
+        f.Host.Commands.Adaptive.Critic = static (_, _) => Task.FromResult(new AdaptiveCriticAnswer(null, "the provider is not ready"));
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
+        f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
 
-        f.Send("do the work");
+        f.Send("add the feature");
         await f.Provider.NextSendAsync();
-        var escalation = await f.Provider.NextSendAsync();
+        var recheck = await f.Provider.NextSendAsync();
+        await f.SettleAsync();
 
-        StringAssert.Contains(escalation.Text, "the turn ended without an answer");
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveRecheck, recheck.Provenance);
+        var card = await f.WaitForCardAsync(static card => card.Kind == AgentSessionUpdateKind.Warning, "review");
+        StringAssert.Contains(card.Message, "the provider is not ready");
     }
 
     [TestMethod]
-    public async Task ASessionThatIsNotOnAdaptive_IsNeitherRecheckedNorEscalated()
+    public async Task TheCriticOfTheHost_OpensAReadOnlyChildSession_OnItsOwnModel()
+    {
+        await using var f = await Fixture.CreateAsync(Config);
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
+        f.Provider.Scripts.Enqueue(static run => run.Edit("src/app.cs"));
+        f.Provider.Scripts.Enqueue(static run => run.Answer = "The change does what the request asks.\nVERDICT: APPROVE");
+
+        f.Send("add the feature");
+        await f.Provider.NextSendAsync();
+        var review = await f.Provider.NextSendAsync();
+        await f.SettleAsync();
+
+        Assert.AreEqual(AgentPromptProvenance.AdaptiveReview, review.Provenance);
+        Assert.AreEqual("model-c", review.Options.Model, "The critic runs on its own model.");
+        Assert.AreNotEqual(f.Session.SessionId, review.Options.SessionId, "The critic has a session of its own.");
+        StringAssert.Contains(review.Text, "You are read-only");
+        var disabled = review.Options.DisabledToolPatterns?.ToArray() ?? [];
+        foreach (var tool in AdaptiveCritics.ReadOnlyTools) CollectionAssert.Contains(disabled, tool, $"A critic does without {tool}.");
+        // How the answer of a critic decides the turn is told by the tests that give the coordinator a critic of their own.
+    }
+
+    [TestMethod]
+    public async Task ASessionThatIsNotOnAdaptive_IsNeitherRecheckedNorReviewed()
     {
         await using var f = await Fixture.CreateAsync(Config);
         f.Provider.Scripts.Enqueue(static run => { run.Edit("src/app.cs"); run.Test("npm test", "exit_code: 2"); });
@@ -160,10 +194,15 @@ public sealed class AdaptiveTurnTests
     }
 
     [TestMethod]
-    public async Task ChoosingATierByHand_TakesTheSessionOffAdaptive()
+    public async Task ChoosingALevel_RunsTheNextTurnOnItsModel_AndChoosingATierByHand_TakesTheSessionOffAdaptive()
     {
         await using var f = await Fixture.CreateAsync(Config);
-        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId);
+        Assert.AreEqual("prov-a:model-c@high", (await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.High)).Level!.Model.Format());
+        // Max is not set: the nearest level.
+        Assert.AreEqual(AdaptiveLevel.High, (await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Max)).Level!.Level);
+        f.Send("explain it");
+        Assert.AreEqual("model-c", (await f.Provider.NextSendAsync()).Options.Model);
+        await f.SettleAsync();
         Assert.IsTrue((await f.Host.Commands.GetSelectionChoicesAsync(f.Session.SessionId))!.Adaptive);
 
         Assert.AreEqual("ok", await f.Host.Commands.SetSessionTierAsync(f.Session.SessionId, ModelTier.Complex));
@@ -171,63 +210,68 @@ public sealed class AdaptiveTurnTests
         var state = await f.StateAsync();
         Assert.AreEqual("complex", state.Tier);
         Assert.IsNull(state.Adaptive);
+        Assert.IsNull(state.AdaptiveLevel);
         Assert.IsFalse((await f.Host.Commands.GetSelectionChoicesAsync(f.Session.SessionId))!.Adaptive);
     }
 
     [TestMethod]
-    public async Task Adaptive_IsRefused_UntilItIsSetUpWithModelsInItsTiers()
+    public async Task Adaptive_IsRefused_UntilALevelIsSet_AndTheKeysOfItsFirstVersionSetNone()
     {
-        await using (var none = await Fixture.CreateAsync(Config.Replace("[models.adaptive]", "[models.unused]", StringComparison.Ordinal)))
+        await using (var none = await Fixture.CreateAsync(WithoutAdaptive))
         {
-            Assert.AreEqual(("not_ready", (ModelTier?)null), await none.Host.Commands.SetSessionAdaptiveAsync(none.Session.SessionId));
+            Assert.AreEqual(("not_ready", (AdaptiveLevelSettings?)null), await none.Host.Commands.SetSessionAdaptiveAsync(none.Session.SessionId));
             Assert.IsNull((await none.StateAsync()).Adaptive);
         }
 
-        // The escalation tier has no model.
-        await using var empty = await Fixture.CreateAsync(Config.Replace("complex = [\"prov-a:model-c@high\"]", string.Empty, StringComparison.Ordinal));
-        Assert.AreEqual("not_ready", (await empty.Host.Commands.SetSessionAdaptiveAsync(empty.Session.SessionId)).Status);
+        await using var older = await Fixture.CreateAsync(WithoutAdaptive + "\n\n[models.adaptive]\ncode = \"quick\"\nescalate = \"complex\"\n");
+        Assert.AreEqual("not_ready", (await older.Host.Commands.SetSessionAdaptiveAsync(older.Session.SessionId)).Status);
     }
 
     [TestMethod]
-    public async Task InAGitFolder_ATurnThatChangedCode_IsToldByGit_AndOneThatCommittedItsWork_IsNot()
+    public async Task InAGitFolder_ATurnThatChangedCode_IsToldByGit_WithItsDiff_AndOneThatCommittedItsWork_IsNot()
     {
         await using var f = await Fixture.CreateAsync(Config, git: true);
         if (!f.HasGit) Assert.Inconclusive("git is not installed.");
-        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId);
-        // The tools say nothing of the files: git tells the change.
+        var asked = new ConcurrentQueue<AdaptiveCriticRequest>();
+        f.Host.Commands.Adaptive.Critic = (request, _) => { asked.Enqueue(request); return Task.FromResult(new AdaptiveCriticAnswer("VERDICT: APPROVE", null)); };
+        await f.Host.Commands.SetSessionAdaptiveAsync(f.Session.SessionId, AdaptiveLevel.Medium);
+        // The tools say nothing of the files: git tells the change, and gives its diff to the critic.
         f.Provider.Scripts.Enqueue(run => File.WriteAllText(Path.Combine(run.Folder, "app.js"), "export const value = 2;\n"));
 
         f.Send("change the value");
         await f.Provider.NextSendAsync();
-        var recheck = await f.Provider.NextSendAsync();
-        Assert.AreEqual(AgentPromptProvenance.AdaptiveRecheck, recheck.Provenance);
         await f.SettleAsync();
+        StringAssert.Contains(asked.Single().Prompt, "+export const value = 2;");
 
         // A turn that commits what is there changes nothing in the files.
         f.Provider.Scripts.Enqueue(run => Git(run.Folder, "commit", "-qam", "Change the value"));
         f.Send("commit it", "second");
         await f.Provider.NextSendAsync();
         await f.SettleAsync();
-        Assert.AreEqual(3, f.Provider.SendCount);
+        Assert.AreEqual(1, asked.Count);
+        Assert.AreEqual(2, f.Provider.SendCount);
     }
 
     [TestMethod]
-    public async Task AHeadlessSessionOnAdaptive_StartsOnTheTurnTier_AndIsOnAdaptive()
+    public async Task AHeadlessSessionOnAdaptive_StartsOnTheModelOfItsLevel_AndIsOnAdaptive()
     {
         await using var f = await Fixture.CreateAsync(Config);
         await using var driver = new HeadlessSessionDriver(f.Host);
         Assert.AreEqual(HeadlessOpenStatus.InvalidRequest,
             (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = f.Project, Adaptive = true, Tier = ModelTier.Complex })).Status);
-        var opened = await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = f.Project, Adaptive = true });
+        Assert.AreEqual(HeadlessOpenStatus.InvalidRequest,
+            (await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = f.Project, AdaptiveLevel = AdaptiveLevel.High })).Status);
+        var opened = await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = f.Project, Adaptive = true, AdaptiveLevel = AdaptiveLevel.High });
         Assert.AreEqual(HeadlessOpenStatus.Created, opened.Status, opened.Message);
-        Assert.AreEqual("model-a", opened.Session!.ModelId, "A session on Adaptive starts with the model of the tier of its turns.");
-        Assert.AreEqual((ModelTier.Quick, true), await f.Host.RuntimeService.GetSessionModelChoiceAsync(opened.Session.SessionId));
+        Assert.AreEqual("model-c", opened.Session!.ModelId, "A session on Adaptive starts with the model of its level.");
+        Assert.AreEqual(((ModelTier?)null, true), await f.Host.RuntimeService.GetSessionModelChoiceAsync(opened.Session.SessionId));
+        Assert.AreEqual(AdaptiveLevel.High, await f.Host.RuntimeService.GetSessionAdaptiveLevelAsync(opened.Session.SessionId));
     }
 
     [TestMethod]
     public async Task AHeadlessSession_IsNotPutOnAdaptive_WhileItIsNotSetUp()
     {
-        await using var f = await Fixture.CreateAsync(Config.Replace("[models.adaptive]", "[models.unused]", StringComparison.Ordinal));
+        await using var f = await Fixture.CreateAsync(WithoutAdaptive);
         await using var driver = new HeadlessSessionDriver(f.Host);
         var opened = await driver.OpenAsync(new HeadlessSessionRequest { ProjectFolder = f.Project, Adaptive = true });
         Assert.AreEqual(HeadlessOpenStatus.ProviderNotReady, opened.Status);
@@ -235,18 +279,12 @@ public sealed class AdaptiveTurnTests
     }
 
     [TestMethod]
-    public void Trouble_IsWhatTheHostSees_WithoutKnowingTheTask()
+    public void AVerdict_IsTheLastVerdictLine_AndTheFindingsAreWhatSurroundsIt()
     {
-        Assert.AreEqual("the turn ended without an answer", AdaptiveTurnCoordinator.Trouble(null, 3, 0));
-        Assert.AreEqual("the turn ended without an answer", AdaptiveTurnCoordinator.Trouble("  ", 3, null));
-        Assert.AreEqual("the answer says the tools cannot be used, though it called none",
-            AdaptiveTurnCoordinator.Trouble("I cannot run commands in this environment.", 0, null));
-        Assert.AreEqual("the last test run failed (exit code 3)", AdaptiveTurnCoordinator.Trouble("Done.", 5, 3));
-        Assert.AreEqual("the last test run failed", AdaptiveTurnCoordinator.Trouble("Done.", 5, 1));
-        // A plain "cannot" of an answer, a refusal from a turn that used its tools, and a passing last run are no trouble.
-        Assert.IsNull(AdaptiveTurnCoordinator.Trouble("The value cannot be null here, so the check is right.", 0, null));
-        Assert.IsNull(AdaptiveTurnCoordinator.Trouble("I do not have access to the network.", 2, null));
-        Assert.IsNull(AdaptiveTurnCoordinator.Trouble("Done.", 5, 0));
+        Assert.AreEqual(("REVISE", "1. A bug."), AdaptiveTurnCoordinator.ParseVerdict("1. A bug.\n\nVERDICT: REVISE"));
+        Assert.AreEqual("APPROVE", AdaptiveTurnCoordinator.ParseVerdict("VERDICT: REVISE\nwas considered, then:\n**Verdict: approve**").Verdict);
+        Assert.AreEqual(((string?)null, "Looks fine."), AdaptiveTurnCoordinator.ParseVerdict("Looks fine."));
+        Assert.AreEqual(((string?)null, string.Empty), AdaptiveTurnCoordinator.ParseVerdict(null));
     }
 
     [TestMethod]
@@ -258,19 +296,6 @@ public sealed class AdaptiveTurnTests
         Assert.IsFalse(AdaptiveTurnCoordinator.IsCode(@"docs\guide.rst"));
         Assert.IsFalse(AdaptiveTurnCoordinator.IsCode(".alta/plans/plan.md"));
         Assert.IsFalse(AdaptiveTurnCoordinator.IsCode(".alta/tasks/x.json"));
-        Assert.AreEqual(1, AdaptiveTurnCoordinator.ExitCode("exit_code: 1\nboom"));
-        // The summary of the runner tells how the tests ended, whatever the exit code of a pipe.
-        foreach (var failed in new[] { "ℹ tests 3\nℹ pass 2\nℹ fail 1", "# fail 2", "=== 1 failed, 3 passed in 0.2s ===", "  2 passing\n  1 failing",
-            "Tests:       1 failed, 3 passed, 4 total", "Failed!  - Failed:     1, Passed:    41", "--- FAIL: TestParse (0.00s)\nFAIL", "test result: FAILED. 3 passed; 1 failed" })
-            Assert.AreEqual(1, AdaptiveTurnCoordinator.TestOutcome(failed), failed);
-        foreach (var passed in new[] { "ℹ tests 3\nℹ pass 3\nℹ fail 0", "=== 4 passed in 0.1s ===", "Passed!  - Failed:     0, Passed:    42", "ok  \tgithub.com/a/b\t0.01s",
-            "test result: ok. 4 passed; 0 failed", "  4 passing" })
-            Assert.AreEqual(0, AdaptiveTurnCoordinator.TestOutcome(passed), passed);
-        Assert.IsNull(AdaptiveTurnCoordinator.TestOutcome("Compiling..."));
-        Assert.IsNull(AdaptiveTurnCoordinator.ExitCode("no code"));
-        Assert.IsTrue(AdaptiveTurnCoordinator.IsTestCommand("shell_command", Arguments("cd src && dotnet test -c Release")));
-        Assert.IsTrue(AdaptiveTurnCoordinator.IsTestCommand("Bash", Arguments("python -m pytest tests/")));
-        Assert.IsFalse(AdaptiveTurnCoordinator.IsTestCommand("shell_command", Arguments("git status")));
     }
 
     private static JsonElement Arguments(string command)
@@ -298,6 +323,9 @@ public sealed class AdaptiveTurnTests
         public string Folder => session.Folder;
 
         public bool Silent { get; set; }
+
+        // The answer of the run; "Done." unless a script says otherwise.
+        public string Answer { get; set; } = "Done.";
 
         public void Edit(string path)
         {
@@ -552,7 +580,7 @@ public sealed class AdaptiveTurnTests
                 var script = new RunScript(this, run);
                 if (owner.Scripts.TryDequeue(out var steps)) steps(script);
                 if (!script.Silent)
-                    Emit(new AgentContentCompletedEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, run, AgentContentKind.Assistant, "answer-" + number, null, "Done."));
+                    Emit(new AgentContentCompletedEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, run, AgentContentKind.Assistant, "answer-" + number, null, script.Answer));
                 Emit(new AgentSessionUpdateEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, run, AgentSessionUpdateKind.Idle, null));
                 return run;
             }

@@ -48,8 +48,17 @@ public static class AgentPromptProvenance
     /// <summary>The prompt that asks a session on Adaptive to check the change of its turn against the request.</summary>
     public const string AdaptiveRecheck = "adaptive-recheck";
 
-    /// <summary>The prompt that continues on a stronger model a turn of a session on Adaptive that ended in visible trouble.</summary>
+    /// <summary>
+    /// The prompt that continued on a stronger model a turn of a session on the first Adaptive that ended in visible
+    /// trouble; recorded by older sessions.
+    /// </summary>
     public const string AdaptiveEscalation = "adaptive-escalation";
+
+    /// <summary>
+    /// The prompt that gives a session on Adaptive what the critics of its level found in the change of its turn, for it
+    /// to revise; also the prompt of each critic, in the read-only session that reviews the change.
+    /// </summary>
+    public const string AdaptiveReview = "adaptive-review";
 
     /// <summary>The longest identifier, in characters.</summary>
     public const int MaxLength = 64;
@@ -68,6 +77,7 @@ public static class AgentPromptProvenance
         [Workflow] = "Workflow",
         [AdaptiveRecheck] = "Adaptive Recheck",
         [AdaptiveEscalation] = "Adaptive Escalation",
+        [AdaptiveReview] = "Adaptive Review",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     /// <summary>Gets the identifiers this version knows, with a display name of their own.</summary>

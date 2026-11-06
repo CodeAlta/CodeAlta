@@ -34,37 +34,40 @@ Once tiers are set:
 - a new session starts on **Standard**, also one an agent creates without naming a model;
 - agents give a tier to the sessions they create, **Quick** for a search and **Complex** for a hard problem, with `alta session create --tier quick`. The instructions of a session list the tiers, and `alta model resolve --tier` answers which model a tier gives now.
 
-## Adaptive (experimental)
+## Adaptive
 
-With **Adaptive**, CodeAlta chooses the model of each turn for you, from your tiers:
+With **Adaptive**, CodeAlta runs each turn you send on the models of a level, which can come from different providers:
 
-- the turns you send run on the tier of the turns, **Quick** unless you choose another;
-- a turn that changed code gets one more message from CodeAlta, on the same model: check the change against each requirement of the request, with a test or a run for each rule, and fix what is missing. The timeline shows it as **Adaptive recheck**;
-- a turn that ends in visible trouble (no answer, an answer that says it cannot use its tools though it called none, or a last test run that failed) continues once on the escalation tier, **Complex** unless you choose another. The timeline shows it as **Adaptive escalation**, with the reason and the model. The next turn runs on the tier of the turns again.
+- the turn runs on the model of the level of the session: **Low**, **Medium**, **High** or **Max**;
+- when the turn changed code, the critics of the level review the change, each in a session of its own: they get the request and the diff, read the code and run the tests, and never edit. The timeline shows each review as a child session;
+- when a critic finds a problem, the session gets one more message from CodeAlta with what the critics found, shown as **Adaptive review**: it checks each finding, fixes the real ones and answers. When they all approve, a card says so;
+- a level without critics, or whose critics could not answer, has the model of the turn recheck its change against each requirement of the request instead, shown as **Adaptive recheck**.
 
-The model chip below the prompt says **Adaptive** and the model of the next turn. A test run counts as failed when the summary of the test runner says so (node, Jest, Vitest, Mocha, pytest, `dotnet test`, Go, Cargo), even when the command piped its output.
+Critics of another family of models see other mistakes: in November 2026, GPT-6.1 Sol for the turns with Claude Sonnet 5.5 as the critic solved as many hard tasks of real repositories as Claude Opus 5.5 alone, for about a quarter of its cost, and more Terminal-Bench tasks than any model alone.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-adaptive.webp" alt="The Adaptive section of Settings > Models, tagged Experimental: Set up Adaptive turned on, turns on Quick, a turn in trouble continues on Complex, the recheck ticked, and how to choose the models" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Settings > Models > Adaptive: the tier of the turns, the tier a turn in trouble continues on, and the recheck.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-adaptive.webp" alt="The Adaptive section of Settings > Models: Set up Adaptive turned on, the tested combinations, the level new sessions start at, and the four levels with the model of their turns and their critics" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Settings > Models > Adaptive: the model and the critics of each level.</figcaption>
 </figure>
 
-Set it up in **Settings > Models**, in the **Adaptive** section under the tiers: turn on **Set up Adaptive**, then choose **Turns run on**, **A turn in trouble continues on**, and whether to **Recheck each change of code against the request**. The tiers it names need models; the section says when one has none, and how to choose the models.
+### Set up the levels
 
-Then choose **Adaptive** in the model list of the **Agent** chip, after the tiers. While it is not set up, choosing it says so and offers **Open Settings**. Choosing a model or a tier yourself takes the session off Adaptive.
+In **Settings > Models**, in the **Adaptive** section under the tiers, turn on **Set up Adaptive**.
 
-- Whether a turn changed code is read from git: CodeAlta compares the files of the project before and after the turn, so a turn that only edits documentation or commits what was there is not rechecked. Without git, it goes by the files the tool calls say they changed, which not every provider reports.
-- Adaptive chooses the model of the turns you send. A prompt that comes from elsewhere (a reminder, a background job, another agent) runs on the model the session has.
-- The turns run on a model of the tier that the provider of the session has; an escalation can move the session to another provider, and it comes back after.
+- When the providers you signed in to have models CodeAlta tested (such as Codex and Claude Code), the section shows the **tested combinations**; **Use these combinations** sets the four levels with them.
+- Otherwise, give each level you want its model with **Choose its model**, and its critics with **Add a critic**, up to three; the reasoning effort of each model is beside it. A level needs only its model: without critics, its changes are rechecked.
+- **New sessions on Adaptive start at** sets the level a session takes when you choose Adaptive without a level.
 
-Combinations tested in October 2026:
+To choose the models yourself: for the turns, a strong model that is inexpensive per task (one that uses few tokens, whatever its price per token); for the critics, models of another family. Independent leaderboards such as [Artificial Analysis](https://artificialanalysis.ai/) compare models by their results on coding tasks and their price.
 
-| Models from | Quick (turns) | Complex (on trouble) |
-| --- | --- | --- |
-| Anthropic (API or Claude Code) | Claude Haiku 5.5 | Claude Opus 5.5 |
-| Codex | GPT-6.1 Terra | GPT-6.1 Sol |
+### Use Adaptive
 
-On 51 hard tasks of real repositories (SWE-bench Pro), Haiku with the recheck and escalation to Opus solved 44 to 48 of them, against 50 for Opus alone, for 6 to 9% of the cost; the patches were judged close to those of Opus. GPT-6 Luna wrote clearly weaker code than GPT-6.1 Terra in the same tests, so Terra is the model of the turns for Codex. To compare other models by their results on coding tasks and their price, see independent leaderboards such as [Artificial Analysis](https://artificialanalysis.ai/).
+In the model list of the **Agent** chip, Adaptive comes after the tiers, with its levels and what each runs. Choose a level: the session moves to the model of that level, of another provider when it needs to, and its next turns run on it. While Adaptive is not set up, choosing it says so and offers **Open Settings**. Choosing a model or a tier yourself takes the session off Adaptive.
+
+- Whether a turn changed code is read from git: CodeAlta compares the files of the project before and after the turn, so a turn that only edits documentation or commits what was there is not reviewed. Without git, it goes by the files the tool calls say they changed, which not every provider reports.
+- Adaptive reviews the turns you send. A prompt that comes from elsewhere (a reminder, a background job, another agent) runs on the model the session has, unreviewed.
+- A critic is read-only: it has no tool that writes files. If it changed files anyway (through a command), a warning card names them; CodeAlta never undoes changes behind your back.
+- CodeAlta CLI runs a session on Adaptive with `--tier adaptive`, or `--tier adaptive:high` for a level (see [CodeAlta CLI](command-line.md)).
 
 ## Tiers of a space
 
@@ -144,14 +147,26 @@ new_sessions:
 
 A space without `tiers` takes the tiers and the fallback of `config.toml`; one with `tiers` and no `fallback` takes the fallback of `config.toml`.
 
-Adaptive is the `[models.adaptive]` table, for every space: it takes its models from the tiers of the space of each session.
+Adaptive is the `[models.adaptive]` table, for every space: a table for each level, with the model of its turns and its critics, written as the targets of a tier with one reasoning effort.
 
 ```toml
 [models.adaptive]
-code = "quick"       # the tier of the turns; quick by default
-escalate = "complex" # the tier a turn in trouble continues on; complex by default
-recheck = true       # recheck a turn that changed code; on by default
+level = "medium"   # the level of a session put on Adaptive without one; medium by default
+
+[models.adaptive.low]
+model = "codex:gpt-6.1-sol@low"
+critics = ["claude-code:haiku@high"]
+
+[models.adaptive.medium]
+model = "codex:gpt-6.1-sol@low"
+critics = ["claude-code:sonnet@high"]   # none: the model rechecks its change
+
+[models.adaptive.max]
+model = "codex:gpt-6.1-sol@high"
+critics = ["claude-code:sonnet@high", "claude-code:opus@high"]
 ```
+
+The keys `code`, `escalate` and `recheck` of the first Adaptive are read and ignored: such a file still loads, and Adaptive needs its levels.
 
 ## CodeAlta TUI
 

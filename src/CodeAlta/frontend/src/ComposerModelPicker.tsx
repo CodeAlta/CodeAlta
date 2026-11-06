@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Button, InputGroup, Menu, MenuItem, PopoverNext, Tag } from "@blueprintjs/core";
+import { Button, InputGroup, Menu, MenuItem, PopoverNext } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { matchingModels, modelAfterKey, modelPickerPreferences, useModelPickerRows, type ModelPickerChoice, type ModelPickerPreferenceStore } from "./modelPicker";
 import { ModelIcon } from "./ProviderIcon";
@@ -8,8 +8,12 @@ import { useShellLanguage } from "./shellLanguage";
 /** A tier of models as the list of the composer offers it: its name, and the model it gives now (null when none is ready). */
 export type ComposerTier = Readonly<{ tier: string; label: string; detail: string | null; title?: string | null }>;
 
-/** Adaptive as the list of the composer offers it: what it runs on, or that it is not set up (choosing it then offers to). */
-export type ComposerAdaptive = Readonly<{ ready: boolean; detail: string; title?: string | null }>;
+/**
+ * Adaptive as the list of the composer offers it: what its levels run on, or that it is not set up (choosing it then
+ * offers to). A level whose model is not ready has no detail.
+ */
+export type ComposerAdaptive = Readonly<{ ready: boolean; detail: string; title?: string | null;
+  levels?: readonly Readonly<{ level: string; label: string; detail: string | null; title?: string | null }>[] }>;
 
 /**
  * The model of the next Send as a searchable list: the focus stays in the search box, the arrows move through the
@@ -17,24 +21,28 @@ export type ComposerAdaptive = Readonly<{ ready: boolean; detail: string; title?
  * for the rest. A saved model the provider does not list is named on the button, never in the list.
  */
 export function ComposerModelPicker({ id, value, models, providerKey, disabled = false, loading = false, title, onChange, preferences = modelPickerPreferences,
-  tiers, currentTier = null, onChooseTier, adaptive = null, onChooseAdaptive }: {
+  tiers, currentTier = null, onChooseTier, adaptive = null, onChooseAdaptive, currentAdaptiveLevel = null }: {
   id: string; value: string | null; models: readonly ModelPickerChoice[]; providerKey?: string | null;
   disabled?: boolean; loading?: boolean; title?: string; onChange: (modelId: string) => void;
   preferences?: ModelPickerPreferenceStore;
   /** The tiers of the settings, shown at the top of the list with the model each gives; none when the user set none. */
   tiers?: readonly ComposerTier[];
-  /** The tier the session runs on, `adaptive` on Adaptive, or null for a model chosen by hand. */
+  /** The tier the session runs on, `adaptive` or `adaptive:<level>` on Adaptive, or null for a model chosen by hand. */
   currentTier?: string | null;
   onChooseTier?: (tier: string) => void;
   /** Adaptive, offered after the tiers; none where it cannot be chosen. */
   adaptive?: ComposerAdaptive | null;
-  onChooseAdaptive?: () => void;
+  /** Chooses Adaptive at a level, or at the usual one without. */
+  onChooseAdaptive?: (level?: string) => void;
+  /** The level of Adaptive the session runs on, when it is on Adaptive. */
+  currentAdaptiveLevel?: string | null;
 }) {
   const { t } = useShellLanguage();
   const rows = useModelPickerRows(preferences);
   const [open, setOpen] = useState(false), [query, setQuery] = useState(""), [active, setActive] = useState(0);
   const list = useRef<HTMLUListElement>(null), search = useRef<HTMLInputElement>(null);
   const listId = useId();
+  const onAdaptive = currentTier === "adaptive" || !!currentTier?.startsWith("adaptive:");
   const shown = useMemo(() => matchingModels(models, query), [models, query]);
   const current = models.find(model => model.id === value);
   const label = current?.name ?? (value ? loading ? t("Loading…") : `${value} · ${t("Unverified")}` : t(loading ? "Loading…" : "No model"));
@@ -58,13 +66,25 @@ export function ComposerModelPicker({ id, value, models, providerKey, disabled =
         <span className="composer-tier-name">{tier.label}</span>
         <span className="composer-tier-model">{tier.detail ?? t("No model ready")}</span>
       </Button>)}
-      {/* Adaptive that is not set up stays offered: choosing it says so and leads to its settings. */}
-      {adaptive && onChooseAdaptive && <Button variant="minimal" size="small" className="composer-tier composer-adaptive" active={currentTier === "adaptive"}
-        aria-pressed={currentTier === "adaptive"} data-ready={adaptive.ready ? "true" : "false"}
-        title={adaptive.title ?? t("CodeAlta chooses the model of each turn")} onClick={() => { setOpen(false); onChooseAdaptive(); }}>
-        <span className="composer-tier-name">{t("Adaptive")}<Tag minimal round className="adaptive-experimental">{t("Experimental")}</Tag></span>
-        <span className="composer-tier-model">{adaptive.detail}</span>
-      </Button>}
+      {/* Adaptive that is not set up stays offered: choosing it says so and leads to its settings. Set up, it offers its levels. */}
+      {adaptive && onChooseAdaptive && (adaptive.ready && adaptive.levels && adaptive.levels.length > 0
+        ? <div className="composer-adaptive-levels" role="group" aria-label={t("Adaptive")} style={{ gridTemplateColumns: `auto repeat(${adaptive.levels.length}, minmax(0, 1fr))` }}>
+          <span className="composer-adaptive-name" title={t("CodeAlta chooses the models of each turn")}>{t("Adaptive")}</span>
+          {adaptive.levels.map(level => {
+            const chosen = onAdaptive && (currentAdaptiveLevel ?? null) === level.level;
+            return <Button key={level.level} variant="minimal" size="small" className="composer-tier composer-adaptive" data-level={level.level} active={chosen}
+              aria-pressed={chosen} disabled={!level.detail} title={level.title ?? undefined} onClick={() => { setOpen(false); onChooseAdaptive(level.level); }}>
+              <span className="composer-tier-name">{level.label}</span>
+              <span className="composer-tier-model">{level.detail ?? t("No model ready")}</span>
+            </Button>;
+          })}
+        </div>
+        : <Button variant="minimal" size="small" className="composer-tier composer-adaptive" active={onAdaptive}
+          aria-pressed={onAdaptive} data-ready={adaptive.ready ? "true" : "false"}
+          title={adaptive.title ?? t("CodeAlta chooses the models of each turn")} onClick={() => { setOpen(false); onChooseAdaptive(); }}>
+          <span className="composer-tier-name">{t("Adaptive")}</span>
+          <span className="composer-tier-model">{adaptive.detail}</span>
+        </Button>)}
     </div>}
     <InputGroup type="search" inputRef={search} role="combobox" aria-label={t("Search models")} placeholder={t("Search models")} value={query}
       aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={shown.length ? option(active) : undefined}

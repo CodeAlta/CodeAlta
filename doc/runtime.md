@@ -444,20 +444,26 @@ next target of its tier. `SessionFallbackCoordinator` (owned by `OwnedSessionCom
 
 ## Adaptive turns
 
-A session on Adaptive (`adaptive` in its local state, `[models.adaptive]`; see
-[catalog and config](catalog-and-config.md#model-tiers-and-fallback)) has the model of its turns chosen by the host, not
-by its agent. `AdaptiveTurnCoordinator` (owned by `OwnedSessionCommandService`) does it.
+A session on Adaptive (`adaptive` and `adaptive_level` in its local state, `[models.adaptive]`; see
+[catalog and config](catalog-and-config.md#model-tiers-and-fallback)) has the models of its turns chosen by the host,
+not by its agent. `AdaptiveTurnCoordinator` (owned by `OwnedSessionCommandService`) does it.
 
-- A send the user started takes the model of the turn tier on the session's provider, at preparation. The command
-  service starts the run of each send it makes (`BeginRun`): a provider that runs its own loop publishes no prompt.
-- What a run does is followed on the actor of the session (`SessionRuntimeService.RunEventObserver`), so in order: tool
-  calls, test commands and their exit code, the files the tools report, the answer. Its idle event starts the decision,
-  beside the events, which the settlement of the session waits for.
+- Choosing a level selects the model of that level (a switch of provider when it is another one) and records the
+  level; the session then has no tier. A send the user started takes the model of its level on the session's provider,
+  at preparation. The command service starts the run of each send it makes (`BeginRun`, with the text of the request):
+  a provider that runs its own loop publishes no prompt.
+- What a run does is followed on the actor of the session (`SessionRuntimeService.RunEventObserver`), so in order: the
+  request, the files the tools report, the answer. Its idle event starts the decision, beside the events, which the
+  settlement of the session waits for.
 - A user turn that changed code (a git tree of the working folder before and after, docs and `.alta` left out; the
-  reported files without git) gets one recheck prompt on the same model. A turn that ends in visible trouble (no
-  answer, a refusal to use tools it did not call, a failed last test run, read from the summary of the runner before the
-  exit code, which a pipe hides) continues once on the escalation tier, then the session returns to the turn tier. Both
-  are host prompts with their own provenance: they are the cards of Adaptive in the timeline.
+  reported files without git) is reviewed by the critics of its level, in parallel: each is a child session of its own
+  (`AdaptiveCritics` in the host, through a headless driver), on its model, without the tools that write files nor
+  sessions of its own, created as a workflow child so that its answer comes back to the coordinator and never to the
+  session as a prompt. It gets the request and the diff of the turn only, so that the session keeps its cache; it ends
+  with a verdict. Findings become one revision prompt on the model of the turn; approvals a card; a change of the files
+  during the reviews a warning card, never an undo. A level without critics, or whose critics gave no verdict, gets one
+  recheck prompt instead. The prompts are host prompts with their own provenance: they are the cards of Adaptive in the
+  timeline.
 - Choosing a model or a tier takes the session off Adaptive; a run that fails is the fallback's.
 
 ## Session retention
