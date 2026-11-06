@@ -398,10 +398,12 @@ public sealed class BrowserPlugin : PluginBase
 
     // The annotations of a session: none without a user, since nobody marks a page then. Where an element is written is
     // looked for as the session may look: in the folders its tools read (those of its sandbox), never on a port of CodeAlta.
+    // Each has a folder of its own for its pictures: the annotations of a session replaced (another browser, a sandbox
+    // changed) delete theirs while those of the new one are written.
     internal BrowserAnnotations? CreateAnnotations(BrowserAgentSession session)
         => !_host.HasUser ? null : new BrowserAnnotations(new BrowserAnnotationsHost(_projectPages,
             new SourceLocator(SourceLocator.LoopbackFetch(_http, () => _host.ReservedPorts?.Invoke() ?? []), session.FilesAsync), session.WorkFolderAsync,
-            Path.Combine(_host.Root, "annotations", BrowserAgentSession.SafeName(session.SessionId)), AnnotationsChanged, session.KeepAlive,
+            Path.Combine(_host.Root, "annotations", BrowserAgentSession.SafeName(session.SessionId) + "-" + Guid.NewGuid().ToString("N")[..8]), AnnotationsChanged, session.KeepAlive,
             () => _settings.ToolbarTheme, SaveToolbarThemeAsync,
             () => _settings.ToolbarPosition is { } position ? (position.Right, position.Bottom) : null, SaveToolbarPositionAsync,
             text => SendFromToolbarAsync(session.SessionId, text), () => session.OpenedByUser, _files.IsPage)

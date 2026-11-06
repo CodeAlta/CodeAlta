@@ -161,6 +161,11 @@ internal sealed class ProjectFileServer : IAsyncDisposable
             {
                 context = await listener.GetContextAsync().ConfigureAwait(false);
             }
+            catch (HttpListenerException) when (listener.IsListening)
+            {
+                // A browser that went away before its request was accepted: the next ones are still answered.
+                continue;
+            }
             catch (Exception exception) when (exception is HttpListenerException or ObjectDisposedException or InvalidOperationException)
             {
                 return;
@@ -190,6 +195,9 @@ internal sealed class ProjectFileServer : IAsyncDisposable
                 response.ContentType = "text/html; charset=utf-8";
                 // A page of CodeAlta loads nothing from elsewhere; its links and its form lead anywhere.
                 response.Headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:";
+                // A page of the project opened from it, of the same origin, would read it again from its referrer: the
+                // commands of the servers of the project and the tokens of the files.
+                response.Headers["Referrer-Policy"] = "no-referrer";
                 response.ContentLength64 = html.Length;
                 if (method == "GET") await response.OutputStream.WriteAsync(html).ConfigureAwait(false);
                 return;
@@ -248,7 +256,8 @@ internal sealed class ProjectFileServer : IAsyncDisposable
         FileStream stream;
         try
         {
-            stream = new FileStream(real, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous);
+            // A dev server or an editor may be writing the file, or replace it, while it is served.
+            stream = new FileStream(real, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

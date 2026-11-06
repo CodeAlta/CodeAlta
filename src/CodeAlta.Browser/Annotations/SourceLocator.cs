@@ -154,6 +154,10 @@ internal sealed partial class SourceLocator
         };
     }
 
+    /// <summary>The file of a <c>/@fs/</c> address of Vite, without <c>/@fs</c>: <c>/home/me/x.js</c>, or <c>/C:/me/x.js</c> on Windows, whose drive comes first.</summary>
+    internal static string FileSystemPath(string path)
+        => path is ['/', var drive, ':', '/', ..] && char.IsAsciiLetter(drive) && OperatingSystem.IsWindows() ? path[1..] : path;
+
     private static bool IsRedirection(System.Net.HttpStatusCode status)
         => status is System.Net.HttpStatusCode.MovedPermanently or System.Net.HttpStatusCode.Found or System.Net.HttpStatusCode.SeeOther
             or System.Net.HttpStatusCode.TemporaryRedirect or System.Net.HttpStatusCode.PermanentRedirect;
@@ -270,7 +274,7 @@ internal sealed partial class SourceLocator
             if (query.LocalFile?.Invoke(uri) is { } served) return Existing(served);
             if (uri.Scheme is not ("http" or "https")) return null;
             var path = Uri.UnescapeDataString(uri.AbsolutePath);
-            if (path.StartsWith("/@fs/", StringComparison.Ordinal)) return Existing(path["/@fs".Length..]);
+            if (path.StartsWith("/@fs/", StringComparison.Ordinal)) return Existing(FileSystemPath(path["/@fs".Length..]));
             return InRoots(path.TrimStart('/'));
         }
 
@@ -502,7 +506,8 @@ internal sealed partial class SourceLocator
         {
             try
             {
-                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096);
+                // A dev server or an editor may be writing the file, or replace it, while it is read.
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096);
                 var opened = BrowserFileHandles.PathOf(stream.SafeFileHandle) ?? BrowserFiles.RealPath(path);
                 if (!Allows(opened)) return null;
                 using var bytes = new MemoryStream();

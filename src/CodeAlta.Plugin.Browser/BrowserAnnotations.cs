@@ -578,12 +578,14 @@ internal sealed class BrowserAnnotations : IAsyncDisposable
         var folder = await _host.ProjectFolder(cancellationToken).ConfigureAwait(false);
         var project = folder is null ? null : await _host.Pages.FindAsync(url, folder, cancellationToken).ConfigureAwait(false);
         // A page of the project has the toolbar; another page only in a browser the user opened to browse in.
-        if (project is null && !_host.EveryPage()) return;
+        // Messages are handled as they come: a document of the tab that said it was ready since then owns the entry.
+        if (project is null && !_host.EveryPage() || entry.Context != message.ContextId) return;
         entry.Project = project;
         if (project is not null && !entry.Recording)
         {
             // This document was made before: the next ones of the tab tell which script creates each node.
             await PrepareAsync(entry.Page, cancellationToken).ConfigureAwait(false);
+            if (entry.Context != message.ContextId) return;
         }
 
         object[] pending;
@@ -602,8 +604,10 @@ internal sealed class BrowserAnnotations : IAsyncDisposable
             ["pending"] = pending, ["theme"] = _host.ToolbarTheme(), ["position"] = PositionValue(_host.ToolbarPosition()),
             ["details"] = _host.PageDetails(),
         });
-        entry.Enabled = await page.CallToolbarAsync(message.ContextId, $"enable({options})", cancellationToken).ConfigureAwait(false);
-        if (entry.Enabled) await page.CallToolbarAsync(message.ContextId, $"list({ListJson()})", cancellationToken).ConfigureAwait(false);
+        var enabled = await page.CallToolbarAsync(message.ContextId, $"enable({options})", cancellationToken).ConfigureAwait(false);
+        if (entry.Context != message.ContextId) return;
+        entry.Enabled = enabled;
+        if (enabled) await page.CallToolbarAsync(message.ContextId, $"list({ListJson()})", cancellationToken).ConfigureAwait(false);
     }
 
     private async Task AnnotateAsync(IAnnotatablePage page, PageEntry entry, ToolbarMessage message, CancellationToken cancellationToken)
@@ -983,7 +987,8 @@ internal static class AnnotationPrompt
                 .AppendLine(Lines(annotation.Note).Replace("\n", "\n  ", StringComparison.Ordinal));
         }
 
-        return builder.ToString().TrimEnd();
+        // The same text on every system: AppendLine writes \r\n on Windows.
+        return builder.ToString().TrimEnd().ReplaceLineEndings("\n");
     }
 
     // The first lines of the prompt: what the user made, with which tools of the toolbar, and what they want of it. A

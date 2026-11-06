@@ -239,7 +239,7 @@ public sealed class BrowserAnnotationsTests
         }
 
         var texts = AnnotationRedactionTests.LabelledCredentials.Select(static vector => vector.Text).ToArray();
-        var script = string.Join('\n', "() => {", Part("const REDACTED = ", "\n"), Part("const SECRET_VALUE = ", "\n"), Part("const URL_IN_TEXT = ", "\n"),
+        var script = string.Join('\n', "() => {", Part("const REDACTED = ", "\n"), Part("const SECRET_VALUE = ", "\n"), Part("const URL_IN_TEXT = ", "\n"), Part("const USER_INFO = ", "\n"),
             Part("function safeText(", "\n  }"), $"return {System.Text.Json.JsonSerializer.Serialize(texts)}.map(safeText);", "}");
         await using var session = Host.NewSession();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));

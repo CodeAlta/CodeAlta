@@ -135,11 +135,13 @@
   // Bearer …", or after "Bearer": it goes whatever it looks like, since a weak password is a password all the same.
   const SECRET_VALUE = /((?:access[_-]?token|auth[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key|apikey|client[_-]?secret|session[_-]?id|sessionid|csrf[_-]?token|xsrf[_-]?token|authorization|auth|secret|password|passwd|pwd|token|session|cookie|bearer)["']?\s*[:=]\s*["']?(?:(?:bearer|basic)\s+)?|\bbearer\s+)([^\s"'&<>,;]+)/gi;
   const URL_IN_TEXT = /\b((?:https?|file):\/\/[^\s?#"'<>]*)[?#][^\s"'<>]*/gi;
+  // The user name and password an address may carry before its host (https://user:password@host/).
+  const USER_INFO = /\b((?:https?|file):\/\/)[^\/@\s?#"'<>]*@/gi;
   const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
   // Elements whose content is code or hidden markup, never what the element shows.
   const OPAQUE = /^(script|style|noscript|template)$/;
 
-  // An address without its query and fragment; of another scheme than http, https or file only the scheme is kept
+  // An address without its user, password, query and fragment; of another scheme than http, https or file only the scheme is kept
   // (javascript:…, data:…, mailto:…). A link to an anchor of the page keeps its anchor.
   function safeUrl(value) {
     const text = String(value).trim();
@@ -147,7 +149,7 @@
     const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(text);
     if (scheme && !/^(https?|file)$/i.test(scheme[1])) return scheme[1].toLowerCase() + ':…';
     const cut = text.search(/[?#]/);
-    return cut < 0 ? text : text.slice(0, cut);
+    return (cut < 0 ? text : text.slice(0, cut)).replace(USER_INFO, '$1');
   }
 
   function safeAttribute(name, value) {
@@ -157,9 +159,9 @@
     return clip(squash(text), MAX_ATTRIBUTE);
   }
 
-  // A text of the page: its addresses lose their query and fragment, and the values of credentials written in it go.
+  // A text of the page: its addresses lose their user, password, query and fragment, and the values of credentials written in it go.
   function safeText(text) {
-    return String(text).replace(URL_IN_TEXT, '$1').replace(SECRET_VALUE, '$1' + REDACTED);
+    return String(text).replace(URL_IN_TEXT, '$1').replace(USER_INFO, '$1').replace(SECRET_VALUE, '$1' + REDACTED);
   }
 
   function escapeHtml(text, quote) {

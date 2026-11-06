@@ -52,6 +52,10 @@ internal static partial class AnnotationRedaction
     [GeneratedRegex(@"\b((?:https?|file)://[^\s?#""'<>]*)[?#][^\s""'<>]*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 200)]
     private static partial Regex UrlInText();
 
+    // The user name and password an address may carry before its host (https://user:password@host/).
+    [GeneratedRegex(@"\b((?:https?|file)://)[^/@\s?#""'<>]*@", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 200)]
+    private static partial Regex UserInfo();
+
     [GeneratedRegex(@"^([a-zA-Z][a-zA-Z0-9+.-]*):", RegexOptions.CultureInvariant)]
     private static partial Regex Scheme();
 
@@ -73,8 +77,8 @@ internal static partial class AnnotationRedaction
     }
 
     /// <summary>
-    /// A text of the page on one line: its whitespace collapsed, its addresses without query and fragment, and the values
-    /// of credentials written in it replaced.
+    /// A text of the page on one line: its whitespace collapsed, its addresses without user, password, query and fragment,
+    /// and the values of credentials written in it replaced.
     /// </summary>
     public static string Text(string text)
     {
@@ -82,7 +86,7 @@ internal static partial class AnnotationRedaction
         var line = OneLine(text);
         try
         {
-            line = UrlInText().Replace(line, "$1");
+            line = UserInfo().Replace(UrlInText().Replace(line, "$1"), "$1");
             return SecretValue().Replace(line, "$1" + Redacted);
         }
         catch (RegexMatchTimeoutException)
@@ -92,8 +96,8 @@ internal static partial class AnnotationRedaction
     }
 
     /// <summary>
-    /// An address in an attribute without its query and fragment; of another scheme than http, https or file only the
-    /// scheme is kept (<c>javascript:…</c>, <c>data:…</c>, <c>mailto:…</c>). A link to an anchor of the page keeps it.
+    /// An address in an attribute without its user, password, query and fragment; of another scheme than http, https or
+    /// file only the scheme is kept (<c>javascript:…</c>, <c>data:…</c>, <c>mailto:…</c>). A link to an anchor of the page keeps it.
     /// </summary>
     public static string Url(string value)
     {
@@ -102,17 +106,25 @@ internal static partial class AnnotationRedaction
         if (Anchor().IsMatch(text) && !LooksSecret(text)) return text;
         if (Scheme().Match(text) is { Success: true } scheme && scheme.Groups[1].Value.ToLowerInvariant() is var name && name is not ("http" or "https" or "file")) return name + ":…";
         var cut = text.IndexOfAny(['?', '#']);
-        return cut < 0 ? text : text[..cut];
+        try
+        {
+            return UserInfo().Replace(cut < 0 ? text : text[..cut], "$1");
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return Redacted;
+        }
     }
 
     /// <summary>
-    /// The address of a page as a prompt shows it: without its query and fragment, where tokens travel, and with <c>?…</c>
-    /// or <c>#…</c> when it had one. The browser tools still show the whole address of the tab.
+    /// The address of a page as a prompt shows it: without its user, password, query and fragment, where tokens travel, and
+    /// with <c>?…</c> or <c>#…</c> when it had one. The browser tools still show the whole address of the tab.
     /// </summary>
     public static string PageAddress(Uri url)
     {
         ArgumentNullException.ThrowIfNull(url);
         if (!url.IsAbsoluteUri) return Url(url.OriginalString);
+        if (url.UserInfo.Length != 0) url = new UriBuilder(url) { UserName = string.Empty, Password = string.Empty }.Uri;
         var address = url.GetLeftPart(UriPartial.Path);
         return url.Query.Length > 1 ? address + "?…" : url.Fragment.Length > 1 ? address + "#…" : address;
     }
@@ -276,7 +288,7 @@ internal static partial class AnnotationRedaction
         string safe;
         try
         {
-            safe = SecretValue().Replace(UrlInText().Replace(decoded, "$1"), "$1" + Redacted);
+            safe = SecretValue().Replace(UserInfo().Replace(UrlInText().Replace(decoded, "$1"), "$1"), "$1" + Redacted);
         }
         catch (RegexMatchTimeoutException)
         {

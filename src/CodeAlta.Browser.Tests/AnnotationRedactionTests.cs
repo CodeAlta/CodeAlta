@@ -24,6 +24,8 @@ public sealed class AnnotationRedactionTests
         ("access-token=a, session=b; cookie: c", "access-token=[redacted], session=[redacted]; cookie: [redacted]"),
         ("auth=hunter", "auth=[redacted]"),
         ("Key: api_key=sk-12345678 here", "Key: api_key=[redacted] here"),
+        // The user and the password of an address go with its query.
+        ("see https://admin:hunter2@stage.example.com/x?t=1 now", "see https://stage.example.com/x now"),
         // A name alone, or a word that only starts like one, is no credential.
         ("Forgot password?", "Forgot password?"),
         ("Author: Jane", "Author: Jane"),
@@ -39,5 +41,15 @@ public sealed class AnnotationRedactionTests
             // The text between the tags of the HTML of an element follows the same rule.
             Assert.AreEqual("<p>" + redacted + "</p>", AnnotationRedaction.Html("<p>" + text + "</p>", 1000), text);
         }
+    }
+
+    [TestMethod]
+    public void TheUserAndThePasswordOfAnAddress_NeverReachThePrompt()
+    {
+        Assert.AreEqual("https://stage.example.com:8443/a/b", AnnotationRedaction.Url("https://admin:hunter2@stage.example.com:8443/a/b?q=1"));
+        Assert.AreEqual("https://cdn.example.com/lib.js", AnnotationRedaction.Url("https://token@cdn.example.com/lib.js"));
+        Assert.AreEqual("https://example.com/users/@me", AnnotationRedaction.Url("https://example.com/users/@me"), "an @ of the path stays");
+        Assert.AreEqual("https://stage.example.com:8443/a/b?…", AnnotationRedaction.PageAddress(new Uri("https://admin:hunter2@stage.example.com:8443/a/b?q=1")));
+        Assert.AreEqual("http://localhost:5173/", AnnotationRedaction.PageAddress(new Uri("http://localhost:5173/")));
     }
 }

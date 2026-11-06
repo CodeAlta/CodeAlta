@@ -48,6 +48,22 @@ public sealed class ProjectFileServerTests
     }
 
     [TestMethod]
+    public async Task AFileADevServerIsWriting_IsServedStill()
+    {
+        using var folder = new BrowserPluginTests.TempFolder();
+        var root = BrowserFiles.RealPath(Directory.CreateDirectory(Path.Combine(folder.Path, "project")).FullName);
+        var page = Path.Combine(root, "page.html");
+        await File.WriteAllTextAsync(page, "inside");
+        Assert.IsTrue(ProjectFileServer.Readable(root, page, out var real));
+
+        // A watcher or an editor keeps it open for writing, and may replace it, as Vite and tsc do on Windows.
+        using var writer = new FileStream(page, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+        using var stream = ProjectFileServer.OpenChecked(root, real);
+        Assert.IsNotNull(stream);
+        Assert.AreEqual("inside", await new StreamReader(stream).ReadToEndAsync());
+    }
+
+    [TestMethod]
     public async Task AFileReplacedByALinkAfterTheCheck_IsNotServed()
     {
         using var folder = new BrowserPluginTests.TempFolder();

@@ -15,6 +15,14 @@ public sealed class SourceLocatorTests
 {
     private string _project = string.Empty;
 
+    [TestMethod]
+    public void AViteAddressOfTheFileSystem_NamesTheFileOfThisSystem()
+    {
+        Assert.AreEqual("/home/me/app/main.ts", SourceLocator.FileSystemPath("/home/me/app/main.ts"));
+        // Vite writes /@fs/C:/… on Windows: the drive comes first there.
+        Assert.AreEqual(OperatingSystem.IsWindows() ? "C:/me/app/main.ts" : "/C:/me/app/main.ts", SourceLocator.FileSystemPath("/C:/me/app/main.ts"));
+    }
+
     [TestInitialize]
     public void CreateProject()
         => _project = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-locator-tests", Guid.NewGuid().ToString("N")[..8])).FullName;
@@ -237,7 +245,8 @@ public sealed class SourceLocatorTests
     public async Task AnAnswerOfUnknownLengthIsReadOnlyUpToTheLimit()
     {
         // 64 MB in chunks, without a Content-Length: the reader has to stop near the limit of 8 MB, not take it all first.
-        // What the sockets and the client buffer beyond it is a few megabytes.
+        // What the sockets and the client buffer beyond it is a few megabytes, and more on Windows, whose loopback sockets
+        // grow their buffers further (about 27 MB written in all there).
         var written = 0L;
         var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = await LocalServer.StartAsync(app =>
@@ -276,7 +285,7 @@ public sealed class SourceLocatorTests
         Assert.IsNull(await fetch(new Uri(server.Origin + "/big.js"), CancellationToken.None));
         await ended.Task.WaitAsync(TimeSpan.FromSeconds(10));
         var read = Interlocked.Read(ref written);
-        Assert.IsTrue(read < 24L * 1024 * 1024, $"The answer was read past the limit before it was refused: {read} bytes.");
+        Assert.IsTrue(read < 48L * 1024 * 1024, $"The answer was read past the limit before it was refused: {read} bytes.");
     }
 
     [TestMethod]
