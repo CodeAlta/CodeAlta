@@ -1012,6 +1012,12 @@ button.mcp-app-heading:focus-visible { outline: 2px solid var(--accent); outline
 .settings-field > .notice { grid-column: 1 / -1; margin: 0; color: var(--muted); line-height: 1.5; }
 /* What a preference carries below its control, over the whole width of the row. */
 .settings-field > .settings-field-wide { grid-column: 1 / -1; min-width: 0; }
+/* A text in Markdown, such as the instruction about what agents write elsewhere: an editor as wide as the card. */
+.attribution-instruction > .settings-field-label { grid-column: 1 / -1; }
+.attribution-markdown { display: grid; gap: 8px; }
+.attribution-markdown-editor { height: 180px; overflow: hidden; border: 1px solid var(--line); border-radius: 4px; }
+.attribution-markdown-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.attribution-markdown-limit { margin-right: auto; color: var(--red); font-size: 12px; }
 /* A card too narrow for a name beside a list or a group of buttons: the control goes below its name and takes
    the width of the row. A switch is small enough to stay beside its name. */
 @container (max-width: 480px) {

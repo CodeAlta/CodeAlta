@@ -4,6 +4,7 @@ import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { locales, messages, translate } from "./localization";
 import { AttributionText, SessionSettings } from "./SessionSettings";
+import { attributionSaved } from "./attributionText";
 import { sessionTitleChoice, sessionTitleModes } from "./sessionTitles";
 import { ShellLanguageContext } from "./shellLanguage";
 
@@ -46,15 +47,22 @@ test("the card of the prompt suggestions is named and explained in every languag
 test("the cards of the attribution are named and explained in every language, and their texts start as the ones of CodeAlta", () => {
   for (const key of ["Commits", "Add CodeAlta as co-author", "Co-author line", "The trailer agents add, such as Co-authored-by: Name <email>. Empty for the one of CodeAlta.",
     "Comments and messages", "Say that CodeAlta wrote it", "When an agent writes a pull request comment, an issue, a chat message or an email for you, it ends the text with a line saying that it comes from CodeAlta.",
-    "Instruction to agents", "What agents are told about that line, on one line. Empty for the one of CodeAlta."] as const) {
+    "Instruction to agents", "What agents are told about that line, in Markdown. Its line breaks become spaces.", "Use CodeAlta's text", "At most {count} characters."] as const) {
     assert.ok(key in messages, key);
     for (const locale of locales) assert.ok(translate(locale, key).trim(), `${locale}: ${key}`);
   }
-  // The text of CodeAlta is the placeholder of an empty field; one of the user is its value.
-  const field = (value: string, multiline?: boolean) => render(createElement(AttributionText, { id: "f", value, defaultValue: "Co-authored-by: CodeAlta <noreply@codealta.io>",
-    maxLength: 200, disabled: false, multiline, onSave: never }));
-  const own = field("Co-authored-by: CodeAlta <noreply@codealta.io>");
-  assert.match(own, /<input[^>]*placeholder="Co-authored-by: CodeAlta &lt;noreply@codealta.io&gt;"[^>]*value=""/);
-  assert.match(field("Assisted-by: Contoso"), /<input[^>]*value="Assisted-by: Contoso"/);
-  assert.match(field("Sign it.", true), /<textarea[^>]*maxLength="200"[^>]*>Sign it\.<\/textarea>/);
+  // The field starts with the text agents get, the one of CodeAlta until the user writes another, to be tweaked; only a
+  // text of the user has the button that goes back to the one of CodeAlta.
+  const codeAlta = "Co-authored-by: CodeAlta <noreply@codealta.io>";
+  const field = (value: string) => render(createElement(AttributionText, { id: "f", value, defaultValue: codeAlta, maxLength: 200, disabled: false, onSave: never }));
+  const own = field(codeAlta);
+  assert.match(own, /<input[^>]*value="Co-authored-by: CodeAlta &lt;noreply@codealta.io&gt;"/);
+  assert.equal(own.includes("Use CodeAlta&#x27;s text"), false);
+  const tweaked = field("Assisted-by: Contoso");
+  assert.match(tweaked, /<input[^>]*value="Assisted-by: Contoso"/);
+  assert.match(tweaked, /aria-label="Use CodeAlta&#x27;s text"/);
+  // What is saved is on one line, and the text of CodeAlta, or no text, saves none of the user.
+  assert.equal(attributionSaved("  End with\n_Posted by the Contoso agent._  ", codeAlta), "End with _Posted by the Contoso agent._");
+  assert.equal(attributionSaved(` ${codeAlta} `, codeAlta), "");
+  assert.equal(attributionSaved("   ", codeAlta), "");
 });

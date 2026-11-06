@@ -391,7 +391,7 @@ def cmd_nuget(args: argparse.Namespace) -> int:
         time.sleep(60)
 
 
-FOOTER = "_This comment was written by [CodeAlta](https://codealta.io), an AI coding agent._"
+FOOTER = "_This comment was written by [CodeAlta](https://codealta.io)._"
 
 
 def comment_message(path: Path) -> str:

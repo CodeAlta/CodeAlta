@@ -222,7 +222,7 @@ Agents end each commit message with this line, beside the lines their provider a
 Co-authored-by: CodeAlta <noreply@codealta.io>
 ```
 
-GitHub then shows CodeAlta as a co-author. To turn it off, clear **Settings > Sessions > Commits > Add CodeAlta as co-author**. To have agents add another line, write it in **Co-author line**, such as `Assisted-by: Contoso Agent <agents@contoso.example>`: one Git trailer, a name, a colon and a value, of 200 characters at most. Empty, the field is the line of CodeAlta. Both are in `~/.alta/config.toml`:
+GitHub then shows CodeAlta as a co-author. To turn it off, clear **Settings > Sessions > Commits > Add CodeAlta as co-author**. To have agents add another line, write it in **Co-author line**, such as `Assisted-by: Contoso Agent <agents@contoso.example>`: one Git trailer, a name, a colon and a value, of 200 characters at most. The field starts with the line of CodeAlta, and its reset button goes back to it. Both are in `~/.alta/config.toml`:
 
 ```toml
 [commits]
@@ -237,13 +237,13 @@ A session takes the change with its next prompt. Commits you make yourself do no
 When an agent writes for you in another system, such as a pull request comment or review, an issue, a chat message or an email, it ends the text with a short italic line saying that it comes from CodeAlta, so that readers do not take it for your own words:
 
 ```markdown
-_This review was written by [CodeAlta](https://codealta.io), an AI coding agent._
+_This review was written by [CodeAlta](https://codealta.io)._
 ```
 
 **Settings > Sessions > Comments and messages** changes it:
 
 - Clear **Say that CodeAlta wrote it**, and agents are told nothing about it.
-- Write in **Instruction to agents** what they are told instead, on one line of 1000 characters at most, such as ``End what you post for me with `_Posted by the Contoso agent._` ``. Empty, the field is the instruction of CodeAlta.
+- Change in **Instruction to agents** what they are told instead, such as ``End what you post for me with `_Posted by the Contoso agent._` ``. The editor starts with the instruction of CodeAlta, in Markdown, for you to tweak; **Save** or Ctrl+S keeps it, on one line of 1000 characters at most, and **Use CodeAlta's text** goes back to the instruction of CodeAlta.
 
 Both are in `~/.alta/config.toml`, and a session takes them with its next prompt:
 

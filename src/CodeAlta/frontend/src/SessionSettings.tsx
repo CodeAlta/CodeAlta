@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Card, HTMLSelect, InputGroup, Switch, TextArea } from "@blueprintjs/core";
+import { lazy, Suspense } from "react";
+import { Button, Card, HTMLSelect, InputGroup, Switch } from "@blueprintjs/core";
 import { globalConfig, type GlobalConfigSaveAttributionSettingsRequest } from "#neoastra";
 import { SettingsField as Field } from "./SettingsField";
 import { SettingsFileLocations } from "./SettingsFileLocation";
@@ -7,6 +7,10 @@ import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "./SettingsPage";
 import { sessionTitleChoice, sessionTitleModes } from "./sessionTitles";
 import { useShellLanguage } from "./shellLanguage";
+import { useAttributionDraft } from "./attributionText";
+
+// The Markdown editor loads with the card that shows it: the rest of the page does not wait for Monaco.
+const AttributionMarkdown = lazy(() => import("./AttributionMarkdown").then(module => ({ default: module.AttributionMarkdown })));
 
 /**
  * Settings page for the sessions: how a session nobody named is titled, whether the model suggests the next prompt,
@@ -109,12 +113,15 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
           <Switch id="settings-external-writing-attribution" className="settings-checkbox" checked={attribution.externalWriting} disabled={busy}
             onChange={event => saveAttribution({ externalWriting: event.currentTarget.checked })} />
         </Field>
-        <Field setting="external_writing.instruction" label={t("Instruction to agents")} htmlFor="settings-external-writing-instruction"
-          notice={<p className="settings-field-help">{t("What agents are told about that line, on one line. Empty for the one of CodeAlta.")}</p>}>
-          <AttributionText id="settings-external-writing-instruction" multiline value={attribution.externalWritingInstruction}
-            defaultValue={attribution.defaultExternalWritingInstruction} maxLength={1000} disabled={busy || !attribution.externalWriting}
-            onSave={externalWritingInstruction => saveAttribution({ externalWritingInstruction })} />
-        </Field>
+        {/* The instruction is Markdown, often long: its editor is as wide as the card, under its label and its help. */}
+        <div className="settings-field attribution-instruction" data-setting="external_writing.instruction">
+          <span className="settings-field-label">{t("Instruction to agents")}</span>
+          <p className="settings-field-help">{t("What agents are told about that line, in Markdown. Its line breaks become spaces.")}</p>
+          <Suspense fallback={<div className="settings-field-wide attribution-markdown"><div className="attribution-markdown-editor" /></div>}>
+            <AttributionMarkdown label={t("Instruction to agents")} value={attribution.externalWritingInstruction} defaultValue={attribution.defaultExternalWritingInstruction}
+              maxLength={1000} disabled={busy || !attribution.externalWriting} onSave={externalWritingInstruction => saveAttribution({ externalWritingInstruction })} />
+          </Suspense>
+        </div>
       </Card>}
       {tabs && <Card className="appearance-settings" aria-labelledby="settings-session-tabs-title">
         <h2 id="settings-session-tabs-title">{t("Session tabs")}</h2>
@@ -129,20 +136,22 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
 
 
 /**
- * A text of the user that takes the place of the one of CodeAlta: empty while it is that one, which the field shows
- * as its placeholder. It is saved on Enter or when the field loses the focus, if it changed; an empty field is the
- * text of CodeAlta. It stays on one line, even where it wraps.
+ * A text of the user on one line that takes the place of the one of CodeAlta. The field starts with the text agents get,
+ * the one of CodeAlta until the user writes another, so that a change is a tweak of it; the button at its end goes back
+ * to the one of CodeAlta. It is saved on Enter or when the field loses the focus, if it changed; an empty field, or the
+ * text of CodeAlta, saves no text of the user.
  */
-export function AttributionText({ id, value, defaultValue, maxLength, disabled, multiline, onSave }: {
-  id: string; value: string; defaultValue: string; maxLength: number; disabled: boolean; multiline?: boolean; onSave: (text: string) => void;
+export function AttributionText({ id, value, defaultValue, maxLength, disabled, onSave }: {
+  id: string; value: string; defaultValue: string; maxLength: number; disabled: boolean; onSave: (text: string) => void;
 }) {
-  const shown = value === defaultValue ? "" : value;
-  const [draft, setDraft] = useState(shown);
-  useEffect(() => setDraft(shown), [shown]);
-  const save = () => { const text = draft.replace(/\s+/g, " ").trim(); if (text !== shown) onSave(text); };
-  const common = { id, value: draft, placeholder: defaultValue, maxLength, disabled, onBlur: save,
-    onKeyDown: (event: { key: string; preventDefault: () => void }) => { if (event.key === "Enter") { event.preventDefault(); save(); } } };
-  return multiline
-    ? <TextArea {...common} fill autoResize rows={3} onChange={event => setDraft(event.currentTarget.value)} />
-    : <InputGroup {...common} fill onValueChange={setDraft} />;
+  const { t } = useShellLanguage();
+  const text = useAttributionDraft(value, defaultValue, onSave);
+  const restore = text.own || text.draft !== defaultValue
+    ? <Button variant="minimal" icon="reset" aria-label={t("Use CodeAlta's text")} title={t("Use CodeAlta's text")} disabled={disabled}
+      // The press comes before the blur of the field, which would save the draft first.
+      onMouseDown={event => event.preventDefault()} onClick={text.restore} />
+    : undefined;
+  return <InputGroup id={id} value={text.draft} placeholder={defaultValue} maxLength={maxLength} disabled={disabled} fill rightElement={restore}
+    onValueChange={text.setDraft} onBlur={text.save}
+    onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); text.save(); } }} />;
 }
