@@ -141,7 +141,8 @@ Plan 2 (`2026-11-07-fleet-sign-in-on-a-machine-from-the-desktop`) makes every si
 
 ## How it is verified
 
-- [ ] Build in the configuration "Debug or Release" of `AGENTS.md` gives, then `dotnet test --no-build` and `npm test` as two jobs, and `lunet build` in `site/`: all pass.
+- [x] Build in the configuration "Debug or Release" of `AGENTS.md` gives, then `dotnet test --no-build` and `npm test` as two jobs, and `lunet build` in `site/`: all pass.
+   > Release, after four passes of an adversarial review (Codex GPT-6.1 Sol, max) whose findings are fixed: no High finding left.
 - [ ] Windows VM: a node as a virtual account and one "as me"; restart with nobody signing in. The paired desktop reaches the node, and `altanode status` says it starts at boot. Stopping the service lets running turns end and resume.
 - [ ] From the desktop, **Add a machine** over SSH reaches a Windows host, installs the node, pairs it.
 - [ ] Mac: **Always on** over SSH, then restart; with FileVault on macOS 26, unlock over SSH and see the node come back.

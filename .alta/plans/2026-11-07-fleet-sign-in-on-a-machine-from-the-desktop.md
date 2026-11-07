@@ -141,7 +141,8 @@ The readiness of an automation ("Why can't this machine run it?") names a missin
 
 ## How it is verified
 
-- [ ] Build in the configuration "Debug or Release" of `AGENTS.md` gives, then `dotnet test --no-build` and `npm test` as two jobs, and `lunet build` in `site/`: all pass.
+- [x] Build in the configuration "Debug or Release" of `AGENTS.md` gives, then `dotnet test --no-build` and `npm test` as two jobs, and `lunet build` in `site/`: all pass.
+   > Release, after four passes of an adversarial review (Codex GPT-6.1 Sol, max) whose findings are fixed: no High finding left.
 - [ ] A Linux node in a VM, with no SSH session open. From the desktop, sign in Codex, an MCP server with OAuth and dynamic registration, `gh`, `az` and Claude Code. The tokens are on the node only (`~/.alta/auth/`, `gh`'s profile); neither the desktop's files nor its log hold one.
 - [ ] A fixed address whose port another program holds on the desktop: a clear message, and the node keeps no half-done attempt.
 - [ ] A member's device reached through a relay cannot start a sign-in.
