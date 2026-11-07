@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using CodeAlta.Agent;
 using CodeAlta.Fleet;
 using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.Identity;
@@ -138,6 +139,44 @@ public sealed class TeamMachineSessionsTests
         var identity = await fixture.Host.RuntimeService.GetSessionIdentityAsync(created.SessionId, token);
         Assert.IsFalse(identity.Environment.Variables.Any(static variable => variable.Value.Contains("owner-token-value", StringComparison.Ordinal)),
             "the session an agent of a member's machine starts never gets the owner's secrets");
+    }
+
+    // Subscriptions are personal (doc/fleet/security-and-privacy.md): a session another person starts on a team machine, and every
+    // session it starts, keeps to account credentials, whatever provider it names or changes to; the owner's own work keeps them all.
+    [TestMethod]
+    public async Task AMembersSession_AndItsSubSessions_AreRefusedAPersonalPlan_TheOwnersWorkIsNot()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, null, null, appliesSpaceIdentities: false, admitEnvironment: null,
+            isPersonalProvider: static provider => provider.ProviderId.Value == "personal");
+        // A provider of the machine that runs with the plan of the person who enrolled it (only its descriptor is read here).
+        fixture.Host.ModelProviderRegistry.RegisterOrReplace(new ModelProviderDescriptor(new ModelProviderId("personal"), "Personal"), static () => throw new NotSupportedException());
+        using var maxKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "max"));
+        var trust = new TeamTrust();
+        trust.Members[maxKey.Fingerprint] = ("max", maxKey.DeviceId);
+        await using var max = await ConnectAsync(fixture, trust, maxKey, token);
+
+        // Named at the start: refused, with the providers that would run it.
+        var refused = await Assert.ThrowsExactlyAsync<FleetException>(() => max.CreateSessionAsync(new FleetCreateSessionParams(Title: "On a plan",
+            Selection: new FleetModelSelection("personal")), "create-personal", token));
+        Assert.AreEqual(FleetErrorCodes.Forbidden, refused.Error.Code);
+        StringAssert.Contains(refused.Error.Message, "personal plan");
+        StringAssert.Contains(refused.Error.Message, "scripted", "it names the providers of an account");
+
+        // A change of provider at an attachment, and a sub-session it starts: refused too.
+        var created = await max.CreateSessionAsync(new FleetCreateSessionParams(Title: "Max's work"), "create-max", token);
+        var gate = fixture.Host.RuntimeService.ProviderGate!;
+        var session = (await fixture.Host.RuntimeService.TryGetRecoverableSessionAsync(created.SessionId, token))!;
+        StringAssert.Contains(await gate(session, "personal", token), "personal plan");
+        Assert.IsNull(await gate(session, fixture.Provider.Descriptor.ProviderId.Value, token), "an account provider runs it");
+        var child = await fixture.Host.Commands.CreateDraftSessionAsync(null, fixture.Provider.Descriptor, "Max's sub-agent", null, null, null, null,
+            Guid.NewGuid().ToString(), created.SessionId);
+        StringAssert.Contains(await gate(child, "personal", token), "personal plan", "a sub-session of a member's session");
+
+        // The owner's own work keeps the personal plan of the machine.
+        var own = await fixture.Host.Commands.CreateDraftSessionAsync(null, fixture.Provider.Descriptor, "The owner's work", null, null, null, null,
+            Guid.NewGuid().ToString(), null);
+        Assert.IsNull(await gate(own, "personal", token));
     }
 
     [TestMethod]

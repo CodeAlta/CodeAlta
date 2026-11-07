@@ -133,6 +133,9 @@ internal sealed class NodeFleet : IAsyncDisposable
                 AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses, RequestStop = requestStop, CloneRoot = node.Options.CloneRoot,
                 Updating = () => node.AdmissionPaused, UpdateStatus = updateStatus, Metrics = metrics, Automations = node.Automations,
                 Management = management,
+                // A personal plan serves the owner's own work only: the sessions other people start here keep to account credentials.
+                IsPersonalProvider = provider => (node.Automations?.CredentialKindOf(provider) ?? NodeAutomations.Classify(catalog, provider))
+                    == CodeAlta.Automations.AutomationCredentialKind.Personal,
                 // Its providers, their readiness, a key typed on the desktop kept in the secrets of the machine, and their device-code sign-in.
                 Providers = new NodeProviders(node.Host, node.ModelCatalog),
                 // A session that names an environment is admitted as a run of an automation is, once the node joined a server.

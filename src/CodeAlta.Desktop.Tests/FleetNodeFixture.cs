@@ -80,9 +80,16 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         => StartAsync(cancellationToken, automations, admitBudget, time, appliesSpaceIdentities, null);
 
     /// <summary>Starts the node as above, with what admits its sessions to an environment; null runs none in an environment.</summary>
-    public static async Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
+    public static Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
         Func<FleetNodeBudgetRun, Action, CancellationToken, Task<CodeAlta.Fleet.Server.FleetBudgetAdmission>>? admitBudget, TimeProvider? time, bool appliesSpaceIdentities,
         Func<string, string, string?, CancellationToken, Task<CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult>>? admitEnvironment)
+        => StartAsync(cancellationToken, automations, admitBudget, time, appliesSpaceIdentities, admitEnvironment, null);
+
+    /// <summary>Starts the node as above, with what tells the providers that run with a personal plan; null tells none.</summary>
+    public static async Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
+        Func<FleetNodeBudgetRun, Action, CancellationToken, Task<CodeAlta.Fleet.Server.FleetBudgetAdmission>>? admitBudget, TimeProvider? time, bool appliesSpaceIdentities,
+        Func<string, string, string?, CancellationToken, Task<CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult>>? admitEnvironment,
+        Func<ModelProviderDescriptor, bool>? isPersonalProvider)
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-desktop-fleet-tests", Guid.NewGuid().ToString("N"));
         var provider = new ScriptedFleetProvider();
@@ -94,7 +101,7 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         {
             Host = on, Identity = identity, TrustedDevices = new TrustedDeviceStore(nodeFleet, TimeProvider.System), Name = "test-node", Version = "1.0.0",
             PairingAddresses = () => addresses, Automations = automations, AdmitBudget = admitBudget, TimeProvider = time ?? TimeProvider.System,
-            AdmitEnvironment = admitEnvironment,
+            AdmitEnvironment = admitEnvironment, IsPersonalProvider = isPersonalProvider,
         });
         var service = Service(host);
         var listener = FleetDirectListener.Start(new IPEndPoint(IPAddress.Loopback, 0), service.ServeAsync);

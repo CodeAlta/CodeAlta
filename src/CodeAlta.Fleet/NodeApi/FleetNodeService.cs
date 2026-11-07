@@ -40,6 +40,13 @@ public sealed class FleetNodeServiceOptions
     /// <summary>Gets what reads the versions of the node and its self-update; null for a host that does not update itself.</summary>
     public Func<Protocol.FleetUpdateStatus?>? UpdateStatus { get; init; }
 
+    /// <summary>
+    /// Gets what tells whether a provider of the machine runs with a personal plan (a subscription signed in by a person): such a
+    /// provider serves only the owner's own work, so a session another person started here, and every session it starts, is
+    /// refused it (<c>doc/fleet/security-and-privacy.md</c>, "Subscriptions are personal"). Null refuses nothing.
+    /// </summary>
+    public Func<CodeAlta.Agent.ModelProviderDescriptor, bool>? IsPersonalProvider { get; init; }
+
     /// <summary>Gets the addresses a pairing offer names: those the node listens on, as <c>host:port</c>.</summary>
     public Func<IReadOnlyList<string>> PairingAddresses { get; init; } = static () => [];
 
@@ -183,6 +190,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         options.Host.Identities.InheritWork = (sessionId, parentSessionId) => Principals.Inherit(sessionId, parentSessionId);
         // A session deleted is gone for sure: whose work it was is forgotten then, never because it is not found now.
         options.Host.RuntimeService.SessionDeleted += ForgetPrincipalOfDeleted;
+        // A personal plan serves its owner's own work only: at every attachment of a session of another person, of their sub-sessions too.
+        if (options.IsPersonalProvider is not null) options.Host.RuntimeService.AddProviderGate(CheckOthersWorkProviderAsync);
         _worktreeCleanup.Start();
         if (options.AdmitBudget is not null)
         {

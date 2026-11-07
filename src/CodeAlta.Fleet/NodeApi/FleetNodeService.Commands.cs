@@ -49,7 +49,7 @@ public sealed partial class FleetNodeService
         if (parameters.Environment is { } named && (_options.AdmitEnvironment is null || named.Length is 0 or > 64 || named.Any(char.IsControl)))
             throw new FleetException(FleetErrorCodes.InvalidParams, null, _options.AdmitEnvironment is null ? "This node runs no session in an environment." : "The name of an environment has 1 to 64 characters.");
 
-        var provider = ResolveProvider(parameters.Selection?.ProviderKey, project?.ProjectPath);
+        var provider = ResolveProvider(parameters.Selection?.ProviderKey, project?.ProjectPath, device);
         // The policy of the organization of the space, before the session exists: who starts, the provider, the model, the mode.
         var rules = RequirePolicyStart(parameters.SpaceId, provider, parameters.Selection?.ModelId, agent: false);
         var permissionMode = PolicyPermissionMode(provider.ProviderId.Value, rules?.PermissionMode);
@@ -172,15 +172,19 @@ public sealed partial class FleetNodeService
     }
 
     // The provider a request names, or the default of the node for the project, as the desktop chooses it: the one the
-    // configuration names, else the registry's default, else the first enabled one.
-    private ModelProviderDescriptor ResolveProvider(string? providerKey, string? projectPath)
+    // configuration names, else the registry's default, else the first enabled one. The work of another person than the owner
+    // keeps to the providers that run with the key of an account.
+    private ModelProviderDescriptor ResolveProvider(string? providerKey, string? projectPath, Identity.TrustedDevice? device)
     {
-        var providers = _host.ModelProviderRegistry.ListProviders();
+        var all = _host.ModelProviderRegistry.ListProviders();
         if (providerKey is not null)
         {
-            return providers.FirstOrDefault(value => value.IsEnabled && string.Equals(value.ProviderId.Value, providerKey, StringComparison.Ordinal))
+            var named = all.FirstOrDefault(value => value.IsEnabled && string.Equals(value.ProviderId.Value, providerKey, StringComparison.Ordinal))
                 ?? throw new FleetException(FleetNodeErrorCodes.Unavailable, null, $"The node has no enabled provider '{providerKey}'.");
+            return AllowsProvider(device, named) ? named : throw new FleetException(FleetErrorCodes.Forbidden, null, PersonalPlanRefusal(named));
         }
+
+        var providers = all.Where(value => AllowsProvider(device, value)).ToArray();
 
         string? configured = null;
         try

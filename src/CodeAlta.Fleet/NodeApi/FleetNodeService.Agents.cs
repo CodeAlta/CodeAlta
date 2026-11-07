@@ -146,7 +146,7 @@ public sealed partial class FleetNodeService
                 throw new FleetException(FleetNodeErrorCodes.AgentRequestInvalid, null, $"The tools the agent request does without do not read: {error}");
         }
 
-        var provider = ResolveProvider(parameters.Selection?.ProviderKey, project?.ProjectPath);
+        var provider = ResolveProvider(parameters.Selection?.ProviderKey, project?.ProjectPath, call.Device);
         // The policy of the organization of the space narrows what the node allows: never more than either.
         var rules = RequirePolicyStart(request.SpaceId, provider, parameters.Selection?.ModelId, agent: true);
         var permissionMode = AgentPermissionMode(provider.ProviderId.Value, Server.FleetPolicyGuard.NarrowerMode(limits.PermissionMode, rules?.PermissionMode), policy);

@@ -29,6 +29,52 @@ public sealed partial class SessionRuntimeService
     public Func<SessionViewDescriptor, string, CancellationToken, ValueTask<string?>>? ProviderGate { get; set; }
 
     /// <summary>
+    /// Adds a check to <see cref="ProviderGate"/>, after those already there: the first that refuses gives the reason. Several
+    /// parts of a host refuse providers for reasons of their own (the runs of automations, the work of other people).
+    /// </summary>
+    /// <param name="gate">The check: the session and the key of the provider; why it may not, or <see langword="null"/>.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="gate"/> is null.</exception>
+    public void AddProviderGate(Func<SessionViewDescriptor, string, CancellationToken, ValueTask<string?>> gate)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        if (ProviderGate is not { } before)
+        {
+            ProviderGate = gate;
+            return;
+        }
+
+        ProviderGate = async (session, providerKey, cancellationToken)
+            => await before(session, providerKey, cancellationToken).ConfigureAwait(false) ?? await gate(session, providerKey, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Tells whether a session or a session of its lineage matches a condition: the session itself first, then its parent (or the
+    /// session that created it), up its lineage, read from the store.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="match">The condition.</param>
+    /// <param name="cancellationToken">Cancels the reads.</param>
+    /// <returns>Whether one matches, up to the start of the lineage (a session without a parent, or a parent this machine does not have).</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="SessionLineageException">The lineage is deeper than <see cref="SessionToolGuards.MaximumLineageDepth"/>, or its
+    /// links make a cycle.</exception>
+    public async Task<bool> AnyInLineageAsync(SessionViewDescriptor session, Func<SessionViewDescriptor, bool> match, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(match);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var current = session; current is not null;)
+        {
+            if (!seen.Add(current.SessionId) || seen.Count > SessionToolGuards.MaximumLineageDepth) throw new SessionLineageException(session.SessionId);
+            if (match(current)) return true;
+            if ((NormalizeOptionalText(current.ParentSessionId) ?? NormalizeOptionalText(current.CreatedBy?.SourceSessionId)) is not { } parent) return false;
+            current = await TryGetRecoverableSessionAsync(parent, cancellationToken).ConfigureAwait(false);
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Gets or sets what gives the patterns over tool names the host requires a session to do without, read at every preparation
     /// of an attachment of the session: they are added to those set on it (<see cref="SetDisabledToolPatterns"/>), which this
     /// runtime holds in memory only, so that a session resumed after a restart of the process, and every session it starts, does

@@ -41,7 +41,7 @@ public sealed partial class FleetNodeService
             [.. projects.Select((project, index) => FleetProjectEditor.Describe(project, locations[index]))],
             Describe(call.Device!.Permissions))
         {
-            Providers = await ReadyProvidersAsync(cancellationToken).ConfigureAwait(false),
+            Providers = await ReadyProvidersAsync(call.Device, cancellationToken).ConfigureAwait(false),
             Diagnostics = diagnostics,
             Update = _options.UpdateStatus?.Invoke(),
         };
@@ -74,7 +74,7 @@ public sealed partial class FleetNodeService
     // session first needs it: the enabled ones not prepared yet are prepared now, for a while, so that a person who starts
     // a session from another machine chooses among them. The default is the one a creation that names no provider takes
     // (ResolveProvider).
-    private async Task<IReadOnlyList<FleetProviderInfo>> ReadyProvidersAsync(CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<FleetProviderInfo>> ReadyProvidersAsync(Identity.TrustedDevice? device, CancellationToken cancellationToken)
     {
         var initialization = _host.ModelProviderInitializationService;
         var preparing = initialization.CurrentStates
@@ -86,7 +86,7 @@ public sealed partial class FleetNodeService
             catch (TimeoutException) { /* Listed once ready, by a later call. */ }
         }
 
-        return ReadyProviders();
+        return ReadyProviders(device);
 
         async Task PrepareAsync(ModelProviderId provider)
         {
@@ -102,13 +102,14 @@ public sealed partial class FleetNodeService
         }
     }
 
-    private IReadOnlyList<FleetProviderInfo> ReadyProviders()
+    // The work of another person than the owner is offered only the providers it may run with.
+    private IReadOnlyList<FleetProviderInfo> ReadyProviders(Identity.TrustedDevice? device)
     {
         string? defaultKey;
-        try { defaultKey = ResolveProvider(null, null).ProviderId.Value; }
+        try { defaultKey = ResolveProvider(null, null, device).ProviderId.Value; }
         catch (FleetException) { defaultKey = null; }
         return [.. _host.ModelProviderInitializationService.CurrentStates
-            .Where(static state => state.Descriptor.IsEnabled && state.Availability == ModelProviderAvailability.Ready)
+            .Where(state => state.Descriptor.IsEnabled && state.Availability == ModelProviderAvailability.Ready && AllowsProvider(device, state.Descriptor))
             .Take(MaxListedProviders)
             .Select(state => new FleetProviderInfo(state.ProviderId.Value,
                 string.IsNullOrWhiteSpace(state.Descriptor.DisplayName) ? state.ProviderId.Value : state.Descriptor.DisplayName,

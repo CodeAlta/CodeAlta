@@ -200,7 +200,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         Engine.AddProjectTrigger(host.ProjectCatalog);
         Engine.Sources.Plugins = () => host.PluginRuntime?.GetAutomationTriggers() ?? [];
         // The credential rules of a run hold at every attachment of its sessions and of those they start.
-        host.RuntimeService.ProviderGate = CheckSessionProviderAsync;
+        host.RuntimeService.AddProviderGate(CheckSessionProviderAsync);
         // So do the tools the policy turns off, which the runtime holds in memory only: also once the node started again.
         host.RuntimeService.ToolPatternGate = PolicyToolsOffAsync;
     }
@@ -958,12 +958,18 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     /// <returns>Its kind.</returns>
     internal AutomationCredentialKind CredentialKindOf(ModelProviderDescriptor provider) => _options.CredentialKind?.Invoke(provider) ?? Classify(provider);
 
-    private AutomationCredentialKind Classify(ModelProviderDescriptor provider)
+    private AutomationCredentialKind Classify(ModelProviderDescriptor provider) => Classify(_host.CatalogOptions, provider);
+
+    /// <summary>Tells the credential kind a provider runs with, from its type and the configuration of the profile.</summary>
+    /// <param name="catalog">The folders of the profile.</param>
+    /// <param name="provider">The provider.</param>
+    /// <returns>Its kind.</returns>
+    internal static AutomationCredentialKind Classify(CatalogOptions catalog, ModelProviderDescriptor provider)
     {
         CodeAltaProviderDocument? configuration = null;
         try
         {
-            configuration = new CodeAltaConfigStore(_host.CatalogOptions).LoadGlobalProviderDefinitions(includeDisabled: true)
+            configuration = new CodeAltaConfigStore(catalog).LoadGlobalProviderDefinitions(includeDisabled: true)
                 .FirstOrDefault(candidate => string.Equals(candidate.ProviderKey, provider.ProviderId.Value, StringComparison.OrdinalIgnoreCase));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
