@@ -95,6 +95,7 @@ model and one permission path.
 | --- | --- |
 | `IAgentProviderToolHost` | The provider runs tools itself; the session shows and records each call and supplies host handlers (permissions, user input). Tools never run twice. |
 | `IAgentProviderKeptConversation` | The provider keeps the conversation (a CLI transcript): a resumed session does not read its history, and passes `AgentTurnRequest.EarlierConversation` unread, loaded only if the provider cannot continue its own. It compacts itself (`IAgentProviderCompaction`). |
+| `IAgentProviderStandaloneTurns` | The provider that keeps its conversation can still run a turn of no session: no tool, nothing kept, nothing changed. A side question about a session is asked that way; a provider without it does not answer side questions. |
 | `IAgentProviderInstructionsChannel` | Instructions reach the model another way than system/developer messages (appended system prompt, first prompt); recorded with the system prompt. |
 | `IAgentProviderExternalTurns`, `IAgentProviderSharedConversation` | The conversation is shared with other programs (see "Turns made outside CodeAlta"). |
 

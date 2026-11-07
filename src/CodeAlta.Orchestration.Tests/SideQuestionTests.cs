@@ -46,6 +46,38 @@ public sealed class SideQuestionTests
     }
 
     [TestMethod]
+    public async Task AProviderThatKeepsItsConversation_AnswersInAStandaloneTurn_NeverInATurnOfASession()
+    {
+        var runtime = new KeptConversationProvider(standalone: true);
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplace(runtime.Descriptor, () => runtime);
+        await using var hub = new AgentHub(registry, Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
+        var chunks = new List<string>();
+        var answer = await hub.AskSideQuestionAsync("kept", "chosen", null, Environment.CurrentDirectory,
+            [new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("context")])], "question",
+            (text, _) => { chunks.Add(text); return ValueTask.CompletedTask; }, CancellationToken.None);
+        Assert.AreEqual("standalone answer", answer);
+        CollectionAssert.AreEqual(new[] { "standalone answer" }, chunks);
+        Assert.AreEqual(0, runtime.SessionTurns, "a turn of a session would be kept by the agent, with its tools");
+        Assert.IsNotNull(runtime.StandaloneRequest);
+        Assert.IsTrue(runtime.StandaloneRequest.IsStandalone);
+        Assert.AreEqual(0, runtime.StandaloneRequest.Tools.Count);
+        StringAssert.Contains(((AgentMessagePart.Text)runtime.StandaloneRequest.Conversation.Single().Parts.Single()).Value, "context");
+    }
+
+    [TestMethod]
+    public async Task AProviderThatKeepsItsConversation_WithoutStandaloneTurns_DoesNotAnswer()
+    {
+        var runtime = new KeptConversationProvider(standalone: false);
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplace(runtime.Descriptor, () => runtime);
+        await using var hub = new AgentHub(registry, Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
+        await Assert.ThrowsExactlyAsync<NotSupportedException>(() => hub.AskSideQuestionAsync("kept", "chosen", null, Environment.CurrentDirectory, [], "question",
+            static (_, _) => ValueTask.CompletedTask, CancellationToken.None));
+        Assert.AreEqual(0, runtime.SessionTurns);
+    }
+
+    [TestMethod]
     public async Task ProviderTurn_CancellationReachesProvider()
     {
         var runtime = new StreamingProvider { WaitForCancellation = true };
@@ -104,6 +136,55 @@ public sealed class SideQuestionTests
         {
             release.TrySetResult();
             await send.WaitAsync(TestDeadlines.Hang);
+        }
+    }
+
+    // A provider that keeps the conversation of its sessions, as an agent CLI does; with standalone turns or not.
+    private sealed class KeptConversationProvider(bool standalone) : IAgentModelProviderRuntime
+    {
+        public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("kept"), "Kept") { DefaultModelId = "default" };
+        public ModelProviderRuntimeDescriptor RuntimeDescriptor { get; } = new()
+        {
+            ProtocolFamily = "test",
+            ProviderKey = "kept",
+            DisplayName = "Kept",
+            TransportKind = AgentTransportKind.OpenAIResponses,
+        };
+        public IModelProviderModelCatalog? ModelCatalog => null;
+        public int SessionTurns { get; set; }
+        public AgentTurnRequest? StandaloneRequest { get; set; }
+        public AgentRuntimeProviderRegistration CreateProviderRegistration()
+            => new() { Provider = RuntimeDescriptor, TurnExecutor = standalone ? new StandaloneExecutor(this) : new KeptExecutor(this) };
+        public IModelProviderTurnExecutor CreateTurnExecutor() => CreateProviderRegistration().TurnExecutor;
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new ModelProviderProbeResult { ProviderId = Descriptor.ProviderId, Availability = ModelProviderAvailability.Ready });
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        private class KeptExecutor(KeptConversationProvider owner) : IModelProviderTurnExecutor, IAgentProviderCompaction
+        {
+            protected KeptConversationProvider Owner => owner;
+            public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+                CancellationToken cancellationToken = default)
+            {
+                owner.SessionTurns++;
+                return Task.FromResult(ScriptedTurnProvider.Answer("session answer"));
+            }
+
+            public Task<AgentCompactionOutcome> CompactAsync(AgentTurnRequest request, CancellationToken cancellationToken)
+                => throw new NotSupportedException();
+        }
+
+        private sealed class StandaloneExecutor(KeptConversationProvider owner) : KeptExecutor(owner), IAgentProviderStandaloneTurns
+        {
+            public async Task<AgentTurnResponse> ExecuteStandaloneTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+                CancellationToken cancellationToken)
+            {
+                Owner.StandaloneRequest = request;
+                await onUpdate(new AgentTurnDelta { Kind = AgentContentKind.Assistant, ContentId = "a", Text = "standalone answer" }, cancellationToken);
+                return ScriptedTurnProvider.Answer("standalone answer");
+            }
         }
     }
 

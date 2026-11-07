@@ -28,7 +28,7 @@ public sealed partial class AgentHub
     /// <param name="cancellationToken">Stops the request.</param>
     /// <returns>The whole answer.</returns>
     /// <exception cref="KeyNotFoundException">The provider is not configured.</exception>
-    /// <exception cref="NotSupportedException">The provider runs an agent of its own, which keeps what it is asked.</exception>
+    /// <exception cref="NotSupportedException">The provider runs an agent of its own, which keeps what it is asked, and runs no turn that it does not keep (<see cref="IAgentProviderStandaloneTurns" />).</exception>
     /// <exception cref="InvalidOperationException">Neither the session nor the provider names a model.</exception>
     /// <exception cref="OperationCanceledException">The request was stopped.</exception>
     internal async Task<string> AskSideQuestionAsync(string providerKey, string? modelId, AgentReasoningEffort? reasoningEffort,
@@ -47,9 +47,11 @@ public sealed partial class AgentHub
         if (runtime is not IAgentModelProviderRuntime agent)
             throw new NotSupportedException($"The provider '{providerKey}' does not answer side questions.");
         var registration = agent.CreateProviderRegistration();
-        // A provider that keeps the context of its sessions runs an agent of its own (Claude Code, an ACP agent): a
-        // request would start a session of that agent, which it keeps.
-        if (registration.TurnExecutor is IAgentProviderCompaction)
+        // A provider that keeps the context of its sessions runs an agent of its own (Claude Code, Codex CLI, an ACP agent):
+        // a turn of it would start a session of that agent, which it keeps, with its tools. Such a provider answers in a
+        // turn it does not keep, without tools, when it can run one.
+        var standalone = registration.TurnExecutor is IAgentProviderCompaction ? registration.TurnExecutor as IAgentProviderStandaloneTurns : null;
+        if (registration.TurnExecutor is IAgentProviderCompaction && standalone is null)
             throw new NotSupportedException($"The provider '{providerKey}' runs an agent of its own and does not answer side questions.");
 
         var model = string.IsNullOrWhiteSpace(modelId) ? descriptor.DefaultModelId : modelId.Trim();
@@ -67,36 +69,37 @@ public sealed partial class AgentHub
 
         var sessionId = $"side-question:{Guid.CreateVersion7():N}";
         var transcript = SideQuestionTranscript.Build(conversation, SideQuestionTranscript.BudgetFor(modelInfo?.GetContextSize()));
-        var response = await registration.TurnExecutor.ExecuteTurnAsync(
-                new AgentTurnRequest
-                {
-                    Provider = registration.Provider,
-                    ProviderId = providerId,
-                    SessionId = sessionId,
-                    RunId = new AgentRunId(sessionId),
-                    ModelId = model,
-                    ModelInfo = modelInfo,
-                    WorkingDirectory = workingDirectory,
-                    SystemMessage = SideQuestionSystemMessage,
-                    ReasoningEffort = reasoningEffort,
-                    Conversation =
-                    [
-                        new AgentConversationMessage(AgentConversationRole.User,
-                            [new AgentMessagePart.Text(SideQuestionTranscript.Prompt(transcript, question.Trim()))]),
-                    ],
-                    Tools = [],
-                    IsStandalone = true,
-                    State = new AgentSessionState
-                    {
-                        SessionId = sessionId,
-                        ProtocolFamily = registration.Provider.ProtocolFamily,
-                        ProviderKey = registration.Provider.ProviderKey,
-                        UpdatedAt = DateTimeOffset.UtcNow,
-                    },
-                },
-                (delta, token) => delta.Kind == AgentContentKind.Assistant && delta.Text.Length > 0 ? onText(delta.Text, token) : ValueTask.CompletedTask,
-                cancellationToken)
-            .ConfigureAwait(false);
+        var request = new AgentTurnRequest
+        {
+            Provider = registration.Provider,
+            ProviderId = providerId,
+            SessionId = sessionId,
+            RunId = new AgentRunId(sessionId),
+            ModelId = model,
+            ModelInfo = modelInfo,
+            WorkingDirectory = workingDirectory,
+            SystemMessage = SideQuestionSystemMessage,
+            ReasoningEffort = reasoningEffort,
+            Conversation =
+            [
+                new AgentConversationMessage(AgentConversationRole.User,
+                    [new AgentMessagePart.Text(SideQuestionTranscript.Prompt(transcript, question.Trim()))]),
+            ],
+            Tools = [],
+            IsStandalone = true,
+            State = new AgentSessionState
+            {
+                SessionId = sessionId,
+                ProtocolFamily = registration.Provider.ProtocolFamily,
+                ProviderKey = registration.Provider.ProviderKey,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            },
+        };
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onDelta =
+            (delta, token) => delta.Kind == AgentContentKind.Assistant && delta.Text.Length > 0 ? onText(delta.Text, token) : ValueTask.CompletedTask;
+        var response = standalone is not null
+            ? await standalone.ExecuteStandaloneTurnAsync(request, onDelta, cancellationToken).ConfigureAwait(false)
+            : await registration.TurnExecutor.ExecuteTurnAsync(request, onDelta, cancellationToken).ConfigureAwait(false);
         return string.Concat(response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Select(static part => part.Value)).Trim();
     }
 }

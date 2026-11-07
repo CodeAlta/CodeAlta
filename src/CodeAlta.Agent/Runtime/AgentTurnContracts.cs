@@ -209,6 +209,31 @@ public interface IAgentProviderToolHost
 }
 
 /// <summary>
+/// A turn executor whose provider keeps the conversation of its sessions (<see cref="IAgentProviderCompaction" />) and
+/// can still run a turn that belongs to no session: one prompt, answered without tools, in a conversation of the provider
+/// that is not kept and changes nothing. A side question about a session is asked that way.
+/// </summary>
+public interface IAgentProviderStandaloneTurns
+{
+    /// <summary>
+    /// Runs <paramref name="request" /> on its own. Its <see cref="AgentTurnRequest.Conversation" /> is the whole context;
+    /// the provider is given no tool, keeps nothing of it once it ends (no transcript, no session it lists), and changes no
+    /// file; a request of permission of its agent is refused. Its <see cref="AgentTurnRequest.SessionId" /> names no
+    /// session of the provider, and is not resumed.
+    /// </summary>
+    /// <param name="request">The request, with <see cref="AgentTurnRequest.IsStandalone" /> set and no tool.</param>
+    /// <param name="onUpdate">Receives the deltas of the answer as they stream.</param>
+    /// <param name="cancellationToken">Stops the turn, with what the provider started for it (a process, a conversation).</param>
+    /// <returns>The answer.</returns>
+    /// <exception cref="NotSupportedException">The provider cannot run such a turn (its version, its configuration).</exception>
+    /// <exception cref="OperationCanceledException">The turn was stopped.</exception>
+    Task<AgentTurnResponse> ExecuteStandaloneTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// A turn executor whose provider keeps the context of a session and compacts it itself.
 /// </summary>
 public interface IAgentProviderCompaction
