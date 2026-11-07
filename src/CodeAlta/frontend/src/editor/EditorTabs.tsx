@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { AppIcon } from "../AppIcon";
 import { fileAppearance } from "../fileAppearance";
 import { useShellLanguage } from "../shellLanguage";
+import { keepMiddleButtonFromTab } from "../tabMiddleButton";
 import { editorTabNames, type EditorFile } from "./editorWorkbench";
 
 /** What is known of an open file beyond its path, for its tab. */
@@ -71,7 +72,8 @@ export function EditorTabs({ files, active, state, tooltip, leading, trailing, o
           title={tooltip ? tooltip(file.path) : file.path}
           onDragStart={event => { event.dataTransfer.setData(dragType, file.path); event.dataTransfer.effectAllowed = "move"; }}
           onDragEnd={() => setDrop(null)}
-          onMouseDown={event => { if (event.button === 1) event.preventDefault(); }}
+          onMouseDown={event => keepMiddleButtonFromTab(event, ".editor-tab")}
+          onMouseUp={event => keepMiddleButtonFromTab(event, ".editor-tab")}
           onClick={() => onSelect(file.path)} onDoubleClick={() => onPin(file.path)}
           onAuxClick={event => { if (event.button === 1) { event.preventDefault(); onClose(file.path); } }}
           onContextMenu={event => { event.preventDefault(); onMenu(file.path, { x: event.clientX, y: event.clientY }); }}>

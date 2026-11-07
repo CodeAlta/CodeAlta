@@ -18,6 +18,7 @@ import { ActivitySpinner } from "./ActivitySpinner";
 import { CanvasIcon } from "./canvases/CanvasIcon";
 import { terminalTabLabel } from "./terminal/terminals";
 import { useSessionTabDrag } from "./useSessionTabDrag";
+import { keepMiddleButtonFromTab } from "./tabMiddleButton";
 import { plainTitle } from "./sessionTitle";
 import { useDraftIndicator, type DraftIndicators } from "./SessionDraftBadge";
 import { dockTab, dockTabs, tabsToClose, type DockTab, type DockTabs, type TabCloseCommand } from "./sessionTabClosing";
@@ -429,10 +430,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       if (twice) keepNode(clicked!);
     }}
     onPointerCancelCapture={drag.end} onLostPointerCapture={drag.end}
-    onMouseDownCapture={event => {
-      // A middle press on a tab closes it when released: it does not start scrolling the page.
-      if (event.button === 1 && (event.target as HTMLElement).closest(".flexlayout__tab_button")) event.preventDefault();
-    }}
+    onMouseDownCapture={event => keepMiddleButtonFromTab(event, ".flexlayout__tab_button")}
+    onMouseUpCapture={event => keepMiddleButtonFromTab(event, ".flexlayout__tab_button")}
     onDragStartCapture={event => {
       if ((event.target as HTMLElement).closest('.flexlayout__tab_button')) { event.preventDefault(); event.stopPropagation(); }
     }} onClickCapture={event => {
