@@ -1954,16 +1954,17 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     {
                         switch (content.Kind)
                         {
-                            case ResponseContentPartKind.OutputText when !string.IsNullOrWhiteSpace(content.Text):
+                            // A part of only whitespace stays: it separates the parts around it.
+                            case ResponseContentPartKind.OutputText when !string.IsNullOrEmpty(content.Text):
                                 textBuilder.Append(content.Text);
                                 break;
-                            case ResponseContentPartKind.Refusal when !string.IsNullOrWhiteSpace(content.Refusal):
+                            case ResponseContentPartKind.Refusal when !string.IsNullOrEmpty(content.Refusal):
                                 textBuilder.Append(content.Refusal);
                                 break;
                         }
                     }
 
-                    if (textBuilder.Length > 0)
+                    if (textBuilder.Length > 0 && !string.IsNullOrWhiteSpace(textBuilder.ToString()))
                     {
                         parts.Add(new AgentMessagePart.Text(textBuilder.ToString()));
                         partContentIds.Add(stableItemId);

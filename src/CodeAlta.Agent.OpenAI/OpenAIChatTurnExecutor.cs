@@ -623,7 +623,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                 case AgentMessagePart.Data data:
                     contentParts.Add(ChatMessageContentPart.CreateTextPart(data.Name ?? data.MediaType ?? "attachment"));
                     break;
-                case AgentMessagePart.Reasoning reasoning when !string.IsNullOrWhiteSpace(reasoning.Value) &&
+                case AgentMessagePart.Reasoning reasoning when !string.IsNullOrEmpty(reasoning.Value) &&
                     reasoningInputFieldName is not null:
                     reasoningInput ??= new StringBuilder();
                     if (reasoningInput.Length > 0)
@@ -805,8 +805,10 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                 continue;
             }
 
+            // A chunk of only a space or a newline is reasoning too: what goes back to the provider is what the model
+            // wrote, byte for byte, or its cache of the previous answer stops at the first chunk left out.
             reasoningText = ComputeReasoningDelta(accumulatedReasoning, reasoningValue);
-            if (!string.IsNullOrWhiteSpace(reasoningText))
+            if (!string.IsNullOrEmpty(reasoningText))
             {
                 return true;
             }
@@ -834,13 +836,13 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             : $"$.choices[0].delta.{normalizedFieldName}";
 
         return update.Patch.TryGetValue(Encoding.UTF8.GetBytes(jsonPath), out reasoningValue) &&
-            !string.IsNullOrWhiteSpace(reasoningValue);
+            !string.IsNullOrEmpty(reasoningValue);
     }
 
     private static string? ComputeReasoningDelta(StringBuilder accumulatedReasoning, string reasoningValue)
     {
         ArgumentNullException.ThrowIfNull(accumulatedReasoning);
-        ArgumentException.ThrowIfNullOrWhiteSpace(reasoningValue);
+        ArgumentException.ThrowIfNullOrEmpty(reasoningValue);
 
         if (accumulatedReasoning.Length == 0)
         {

@@ -736,6 +736,105 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual("a.txt", toolCall.Arguments.GetProperty("path").GetString());
     }
 
+    // DeepSeek streams its reasoning in small chunks, some of them only a space or a newline. Each one is kept, and the
+    // reasoning goes back exactly as the model wrote it: the provider's cache matches the next request only up to the
+    // first byte that differs, and the model reads its own reasoning with its line breaks.
+    [TestMethod]
+    public async Task OpenAIChatTurnExecutor_KeepsReasoningChunksOfWhitespace_AndReplaysTheReasoningExactly()
+    {
+        static StreamingChatCompletionUpdate Reasoning(string text)
+            => DeserializeStreamingChatCompletionUpdate(
+                """{"id":"c-1","object":"chat.completion.chunk","created":1744060800,"model":"deepseek-flash","choices":[{"index":0,"delta":{"reasoning_content":"""
+                + JsonSerializer.Serialize(text) + "}}]}");
+        var chatClient = RecordingOpenAIChatClient.ForBatches(
+        [
+            [
+                Reasoning("Look"), Reasoning("\n"), Reasoning("at"), Reasoning(" "), Reasoning("the file."),
+                DeserializeStreamingChatCompletionUpdate(
+                    """{"id":"c-1","object":"chat.completion.chunk","created":1744060800,"model":"deepseek-flash","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"a.txt\"}"}}]},"finish_reason":"tool_calls"}]}"""),
+            ],
+            [
+                DeserializeStreamingChatCompletionUpdate(
+                    """{"id":"c-2","object":"chat.completion.chunk","created":1744060801,"model":"deepseek-flash","choices":[{"index":0,"delta":{"content":"Done."},"finish_reason":"stop"}]}"""),
+            ],
+        ]);
+        var executor = new OpenAIChatTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "deepseek",
+            ChatClientFactory = _ => chatClient,
+        });
+        var request = CreateChatTurnRequest();
+        request = request with
+        {
+            Provider = request.Provider with
+            {
+                Profile = new AgentProviderProfile { ReasoningFieldNames = ["reasoning_content"], ReasoningInputFieldName = "reasoning_content" },
+            },
+        };
+        var reasoningDeltas = new List<string>();
+
+        var first = await executor.ExecuteTurnAsync(
+            request,
+            (delta, _) =>
+            {
+                if (delta.Kind == AgentContentKind.Reasoning)
+                {
+                    reasoningDeltas.Add(delta.Text);
+                }
+
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+
+        Assert.AreEqual("Look\nat the file.", first.AssistantMessage.Parts.OfType<AgentMessagePart.Reasoning>().Single().Value);
+        CollectionAssert.AreEqual(new[] { "Look", "\n", "at", " ", "the file." }, reasoningDeltas);
+
+        _ = await executor.ExecuteTurnAsync(
+            request with
+            {
+                Conversation =
+                [
+                    .. request.Conversation,
+                    first.AssistantMessage,
+                    new AgentConversationMessage(
+                        AgentConversationRole.Tool,
+                        [new AgentMessagePart.ToolResult("call-1", new AgentToolResult(true, [new AgentToolResultItem.Text("text")]))]),
+                ],
+            },
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var replayed = chatClient.Requests[1].Messages.OfType<AssistantChatMessage>().Single();
+        Assert.IsTrue(replayed.Patch.TryGetValue("$.reasoning_content"u8, out string? replayedReasoning));
+        Assert.AreEqual("Look\nat the file.", replayedReasoning);
+    }
+
+    // A message of the Responses API whose text comes in several parts keeps the parts of only whitespace between them.
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_KeepsTheTextPartsOfWhitespace_OfAMessage()
+    {
+        var response = new ResponseResult
+        {
+            Id = "response-parts",
+            CreatedAt = DateTimeOffset.UtcNow,
+            Model = "gpt-test",
+        };
+        response.OutputItems.Add(ResponseItem.CreateAssistantMessageItem(
+        [
+            ResponseContentPart.CreateOutputTextPart("Hello", []),
+            ResponseContentPart.CreateOutputTextPart("\n\n", []),
+            ResponseContentPart.CreateOutputTextPart("world", []),
+        ]));
+        var client = new RecordingOpenAIResponseClient([[CreateCompletedUpdate(response)]]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => client,
+        });
+
+        var result = await executor.ExecuteTurnAsync(CreateTurnRequest(), static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        Assert.AreEqual("Hello\n\nworld", result.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+    }
+
     // A failure that asking again cannot fix (a request the endpoint refuses) ends the turn at once, and a stream that
     // keeps breaking ends it after five more requests, with the error of the last one.
     [TestMethod]
