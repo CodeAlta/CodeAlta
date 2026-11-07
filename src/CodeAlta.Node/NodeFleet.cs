@@ -73,6 +73,14 @@ internal sealed class NodeFleet : IAsyncDisposable
     /// <exception cref="SocketException">The address cannot be bound.</exception>
     public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version) => Start(node, listen, name, version, null);
 
+    /// <summary>
+    /// Whether a provider of a credential kind serves only the owner's own work: all but the key of an account. Fails closed:
+    /// credentials CodeAlta cannot tell (a provider of a plugin, a key read from nowhere) are not taken for an account's.
+    /// </summary>
+    /// <param name="kind">The credential kind of the provider.</param>
+    /// <returns>Whether the sessions other people start here are refused it.</returns>
+    internal static bool ServesOwnerOnly(CodeAlta.Automations.AutomationCredentialKind kind) => kind != CodeAlta.Automations.AutomationCredentialKind.Account;
+
     /// <summary>Starts the node API and its listener, with a way for the owner's local control to stop the node.</summary>
     /// <param name="node">The running node.</param>
     /// <param name="listen">Where to listen.</param>
@@ -135,8 +143,7 @@ internal sealed class NodeFleet : IAsyncDisposable
                 Updating = () => node.AdmissionPaused, UpdateStatus = updateStatus, Metrics = metrics, Automations = node.Automations,
                 Management = management,
                 // A personal plan serves the owner's own work only: the sessions other people start here keep to account credentials.
-                IsPersonalProvider = provider => (node.Automations?.CredentialKindOf(provider) ?? NodeAutomations.Classify(catalog, provider))
-                    == CodeAlta.Automations.AutomationCredentialKind.Personal,
+                IsPersonalProvider = provider => ServesOwnerOnly(node.Automations?.CredentialKindOf(provider) ?? NodeAutomations.Classify(catalog, provider)),
                 // Its providers, their readiness, a key typed on the desktop kept in the secrets of the machine, and their device-code sign-in.
                 Providers = providers,
                 // Whether the node still runs after a restart or a logout, for the page of the machine.

@@ -72,7 +72,8 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
     public async Task<FleetMachineSignInPrompt> StartAsync(FleetMachineSignInStartParams parameters, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(parameters);
-        var targetKey = $"{parameters.Kind}\n{parameters.Space}\n{parameters.Key}";
+        parameters = parameters with { Space = CanonicalSpace(parameters.Kind, parameters.Space) };
+        var targetKey = TargetKey(parameters.Kind, parameters.Space, parameters.Key);
         Attempt attempt;
         lock (_gate)
         {
@@ -162,6 +163,16 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
     public async Task<FleetMachineSignInItem> SignOutAsync(FleetMachineSignInTarget target, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(target);
+        target = target with { Space = CanonicalSpace(target.Kind, target.Space) };
+        // A sign-in of the target that still waits would store a credential again after the sign-out: it ends first.
+        var targetKey = TargetKey(target.Kind, target.Space, target.Key);
+        string[] pending;
+        lock (_gate)
+        {
+            pending = [.. _attempts.Values.Where(attempt => !attempt.Completion.IsCompleted && attempt.Target == targetKey).Select(static attempt => attempt.Id)];
+        }
+
+        foreach (var id in pending) await CancelAsync(id).ConfigureAwait(false);
         switch (target.Kind)
         {
             case FleetMachineSignInKinds.Provider when ClaudeProvider(target.Key) is { } claude:
@@ -186,6 +197,15 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
         return (await ListAsync(cancellationToken).ConfigureAwait(false)).Items
             .First(item => item.Kind == target.Kind && string.Equals(item.Key, target.Key, StringComparison.OrdinalIgnoreCase) && item.Space == target.Space);
     }
+
+    // A provider and an MCP server are the machine's, whatever space a request names; a tool is of a space, the default one when none is named.
+    private static string? CanonicalSpace(string kind, string? space)
+        => kind == FleetMachineSignInKinds.Cli ? (string.IsNullOrWhiteSpace(space) ? SpaceDescriptor.DefaultId : space) : null;
+
+    // One identity per target, by the rule its kind compares keys with: a provider's key is one key whatever its case (the
+    // invariant upper case, which OrdinalIgnoreCase compares by), an MCP server's and a tool's are compared as written.
+    private static string TargetKey(string kind, string? space, string key)
+        => $"{kind}\n{space}\n{(kind == FleetMachineSignInKinds.Provider ? key.ToUpperInvariant() : key)}";
 
     /// <summary>The ways the desktop signs a provider type in.</summary>
     /// <param name="type">The type.</param>

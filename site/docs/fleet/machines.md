@@ -242,10 +242,11 @@ A machine signs in to its providers, MCP servers and tools itself; nothing is co
 
 | What | How it signs in |
 | --- | --- |
-| Codex, Mistral Vibe, and MCP servers with OAuth | The page opens in the browser of this computer. When you have signed in, the browser sends its answer back to the machine, which finishes the sign-in |
+| Codex and MCP servers with OAuth | The page opens in the browser of this computer. When you have signed in, the browser sends its answer back to the machine, which finishes the sign-in |
 | GitHub Copilot, xAI, Codex CLI | A code shows here with **Copy**: enter it on the page it names |
 | `gh` of each space, and the tools whose login a space names in its CLI profiles (`gh`, `glab`, `az`, `aws`, `gcloud`) | The machine runs the login with the identity of the space and shows its page and code here, or asks for the code its page gives |
 | Claude Code | The machine runs `claude setup-token`: its page opens here, and you paste the code it shows. The machine keeps the token it gets as a secret and Claude Code uses it. On a Windows machine, sign in there |
+| Mistral Vibe, ACP agents | They sign in on the machine itself, or over SSH |
 
 **Sign out** removes the sign-in of a provider or an MCP server. A tool keeps its own login on the machine, and Claude Code's token goes with its **Sign out**.
 

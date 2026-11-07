@@ -78,6 +78,13 @@ public sealed class ServiceEnvironment
     /// </summary>
     public Action<string, string, string>? SetServiceLogon { get; init; }
 
+    /// <summary>
+    /// Gets what gives a folder, in one write, the administrators as its owner and a protected access list of SYSTEM, the
+    /// administrators and an account (the folder, the account): whatever it allowed before, nothing of it remains, and nothing
+    /// is inherited. Null where there is none.
+    /// </summary>
+    public Action<string, string>? ProtectFolder { get; init; }
+
     /// <summary>Gets what reads the lines of a small text file (the batch file of a .NET tool); no lines when it cannot be read.</summary>
     public Func<string, IReadOnlyList<string>> ReadLines { get; init; } = static path =>
     {
@@ -113,7 +120,7 @@ public sealed class ServiceEnvironment
                 IsRoot = new System.Security.Principal.WindowsPrincipal(identity).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator),
                 ProgramData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
                 // The task gets the environment of the user's logon: nothing to copy.
-                Run = RunProcess, AutoLoginUser = ReadWindowsAutoLogin, HomeOfAccount = ReadWindowsHome, SetServiceLogon = WindowsServiceLogon.Set,
+                Run = RunProcess, AutoLoginUser = ReadWindowsAutoLogin, HomeOfAccount = ReadWindowsHome, SetServiceLogon = WindowsServiceLogon.Set, ProtectFolder = WindowsServiceLogon.ProtectFolder,
             };
         }
 

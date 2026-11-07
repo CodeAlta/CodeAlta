@@ -37,8 +37,11 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
     /// <summary>Gets or sets what stops a call to the node, for tests; none by default.</summary>
     public CancellationToken Stop { get; init; }
 
-    /// <summary>Gets or sets what reads the password of <c>--password-stdin</c>: the first line of standard input by default.</summary>
-    public Func<Task<string?>> ReadPassword { get; init; } = static async () => await Console.In.ReadLineAsync().ConfigureAwait(false);
+    /// <summary>
+    /// Gets or sets what reads the password of <c>--password-stdin</c>: the first line of standard input when it is redirected,
+    /// else typed at a prompt that does not show it.
+    /// </summary>
+    public Func<Task<string?>> ReadPassword { get; init; } = ServicePassword.ReadAsync;
 
     /// <summary>Gets or sets the version of the installed entry point (this executable); null when this process runs a staged version.</summary>
     public string? InstalledVersion { get; init; }
@@ -258,7 +261,9 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
             try
             {
                 var plan = manager.Plan(Request(profile, options, new NodeRunOptions(), ServiceScope.User, null, executable() ?? new ServiceExecutable(ServiceExecutableKind.Executable, "altanode", [])));
-                foreach (var line in ServiceManager.Describe(manager.Query(plan))) await output.WriteLineAsync(line).ConfigureAwait(false);
+                // The system service of install --system first, as the page of the machine reads it.
+                foreach (var line in ServiceManager.Describe(manager.QueryInstalled(plan, ServiceDefinition.ServiceName(UpdateProduct.Node, profile.StateRoot, true, profile.IsDeveloper),
+                    profile.GlobalRoot))) await output.WriteLineAsync(line).ConfigureAwait(false);
             }
             catch (ServiceException exception)
             {

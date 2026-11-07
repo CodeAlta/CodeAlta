@@ -21,12 +21,15 @@ internal sealed partial class NodeSignIns
 
     /// <summary>The name of the secret that keeps the token of a Claude Code provider.</summary>
     /// <param name="key">The key of the provider.</param>
-    /// <returns>The name, such as <c>CLAUDE_CODE_OAUTH_TOKEN_CLAUDE</c>.</returns>
+    /// <returns>The name, such as <c>CLAUDE_CODE_OAUTH_TOKEN_CLAUDE_1A2B3C4D</c>: the key as letters, then 128 bits of a hash of the key, so that two keys never share one.</returns>
     internal static string ClaudeSecretName(string key)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
         var name = new StringBuilder(ClaudeTokenVariable).Append('_');
-        foreach (var character in key) name.Append(char.IsAsciiLetterOrDigit(character) ? char.ToUpperInvariant(character) : '_');
-        return name.Length > 128 ? name.ToString(0, 128) : name.ToString();
+        foreach (var character in key.Length > 64 ? key[..64] : key) name.Append(char.IsAsciiLetterOrDigit(character) ? char.ToUpperInvariant(character) : '_');
+        // Provider keys are one key whatever their case.
+        var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(key.ToLowerInvariant()));
+        return name.Append('_').Append(Convert.ToHexString(hash, 0, 16)).ToString();
     }
 
     /// <summary>Reads what <c>claude setup-token</c> printed in its terminal: the page to open, once it asks for the code; null before.</summary>
@@ -41,10 +44,11 @@ internal sealed partial class NodeSignIns
     internal static string? ReadClaudeToken(string output) => ClaudeTokenPattern().Match(Plain(output)) is { Success: true } token ? token.Value : null;
 
     // A link of the terminal (OSC 8): ESC ] 8 ; params ; URI, ended by BEL or ESC \.
-    [GeneratedRegex(@"\u001b\]8;[^;\u0007\u001b]*;(?<page>https://[^\u0007\u001b\s]+)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\u001b\]8;[^;\u0007\u001b]*;(?<page>https://[^\u0007\u001b\s]+)(?=\u0007|\u001b\\)", RegexOptions.CultureInvariant)]
     private static partial Regex ClaudeLinkPattern();
 
-    [GeneratedRegex(@"sk-ant-oat\d{2}-[A-Za-z0-9_\-]{20,}", RegexOptions.CultureInvariant)]
+    // The whole token: what follows it ends it (a line end, a space), so that a read that stops within it gives none yet.
+    [GeneratedRegex(@"sk-ant-oat\d{2}-[A-Za-z0-9_\-]{20,}(?=\s)", RegexOptions.CultureInvariant)]
     private static partial Regex ClaudeTokenPattern();
 
     // The escapes of a terminal: CSI sequences, OSC sequences, and the other ESC pairs.

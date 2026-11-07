@@ -21,6 +21,16 @@ public sealed class NodeAutomationTests
 
     public TestContext TestContext { get; set; } = null!;
 
+    // Other people's sessions on a machine keep to the key of an account: a provider whose credentials cannot be told (Codex CLI,
+    // an ACP agent) is refused to them as a personal plan is.
+    [TestMethod]
+    public void OthersWork_KeepsToAccounts_AndFailsClosedOnCredentialsThatCannotBeTold()
+    {
+        Assert.IsTrue(NodeFleet.ServesOwnerOnly(CodeAlta.Automations.AutomationCredentialKind.Personal));
+        Assert.IsTrue(NodeFleet.ServesOwnerOnly(CodeAlta.Automations.AutomationCredentialKind.Unknown));
+        Assert.IsFalse(NodeFleet.ServesOwnerOnly(CodeAlta.Automations.AutomationCredentialKind.Account));
+    }
+
     [TestMethod]
     public async Task PairedDevice_AssignsAnAutomation_TheNodeFiresItsScheduleOnce_AndKeepsItAcrossARestart()
     {

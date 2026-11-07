@@ -41,6 +41,14 @@ public sealed class NodePluginSignInTests
         var ended = await signIns.WaitAsync(prompt.AttemptId, TimeSpan.FromSeconds(10), token);
         Assert.AreEqual(FleetMachineSignInStates.Completed, ended.Status);
 
+        // A sign-out while a sign-in of the target waits ends that sign-in first: it cannot store its credential afterwards.
+        var waiting = new CodeAccount();
+        types.Attach(() => [Contribution("fake-agent", waiting), Contribution("terminal-agent", new TerminalAccount())]);
+        var pending = await signIns.StartAsync(new FleetMachineSignInStartParams(FleetMachineSignInKinds.Provider, "cli", null, null), token);
+        await Assert.ThrowsExactlyAsync<KeyNotFoundException>(() => signIns.SignOutAsync(new FleetMachineSignInTarget(FleetMachineSignInKinds.Provider, "cli", null), token),
+            "a provider of a plugin keeps its own login");
+        Assert.AreEqual((FleetMachineSignInStates.Failed, "canceled"), ((await signIns.WaitAsync(pending.AttemptId, TimeSpan.FromSeconds(10), token)) is var state ? (state.Status, state.Code) : default));
+
         var refused = await Assert.ThrowsExactlyAsync<NotSupportedException>(() => signIns.StartAsync(
             new FleetMachineSignInStartParams(FleetMachineSignInKinds.Provider, "terminal", null, null), token));
         StringAssert.Contains(refused.Message, "on the machine itself");

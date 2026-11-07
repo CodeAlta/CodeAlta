@@ -112,6 +112,9 @@ public sealed record ServicePlan
     /// <summary>Gets the folder of the data of a service of its own account, made by <c>install</c> before the service is given it; null for none.</summary>
     public string? DataRoot { get; init; }
 
+    /// <summary>Gets the account the data root is protected for (the virtual account of a Windows service), once the service exists; null for none.</summary>
+    public string? ProtectDataRootFor { get; init; }
+
     /// <summary>
     /// Gets the command that tells whether the login session the service is loaded into exists (the <c>gui</c> domain of launchd):
     /// without one, the definition is written and the service starts at the next login; null for none.
@@ -273,26 +276,33 @@ public sealed class ServiceManager(ServiceEnvironment environment)
         var virtualAccount = spec.Account is null ? ServiceDefinition.WindowsVirtualAccount(name) : null;
         var binPath = ServiceDefinition.WindowsCommandLine([executable, .. spec.Arguments, ServiceDefinition.WindowsServiceOption]);
         var display = $"{ServiceDefinition.DisplayName(spec.Product)} ({name})";
-        string[] settings = ["binPath=", binPath, "start=", "delayed-auto", "DisplayName=", display, .. virtualAccount is null ? Array.Empty<string>() : ["obj=", virtualAccount]];
+        // A named account is given to Windows after the service exists: until then the service runs as nothing more than its
+        // virtual account (sc.exe would make it LocalSystem) and starts only on demand, so that a logon Windows refuses
+        // leaves no service that starts at boot.
+        string[] settings = ["binPath=", binPath, "start=", virtualAccount is null ? "demand" : "delayed-auto", "DisplayName=", display];
         var install = new List<ServiceCommand>
         {
             // Created when it is not there yet; configured in every case, so that install again changes one that exists.
-            new("sc.exe", ["create", name, .. settings], MayFail: true),
-            new("sc.exe", ["config", name, .. settings]),
+            new("sc.exe", ["create", name, .. settings, "obj=", ServiceDefinition.WindowsVirtualAccount(name)], MayFail: true),
+            new("sc.exe", ["config", name, .. settings, .. virtualAccount is null ? Array.Empty<string>() : ["obj=", virtualAccount]]),
             new("sc.exe", ["description", name, $"{ServiceDefinition.DisplayName(spec.Product)} ({spec.Product.AssemblyName} run). Written by {spec.Product.AssemblyName} install --system; {spec.Product.AssemblyName} uninstall --system removes it."]),
             new("sc.exe", ["failure", name, "reset=", "86400", "actions=", "restart/60000/restart/60000/restart/60000"]),
         };
-        // The virtual account of the service owns the data it writes; it exists once the service does.
-        if (virtualAccount is not null && dataRoot is not null) install.Add(new("icacls.exe", [dataRoot, "/grant", $"{virtualAccount}:(OI)(CI)M", "/T", "/Q"]));
+        // The virtual account of the service owns the data it writes; it exists once the service does. Nothing is inherited
+        // from %ProgramData%, which every user reads: only the service, SYSTEM and the administrators open its tokens.
+        // Its data root is protected once the account exists (Install): its access list is replaced in one write, so that
+        // nothing a folder made there before allowed remains and its tokens are never open to others meanwhile.
         return new ServicePlan
         {
             Platform = ServicePlatform.Windows, Spec = spec with { Executable = executable }, Kind = $"a Windows service run as {virtualAccount ?? spec.Account}",
             Location = $"Services {name}", DefinitionPath = binPath, DefinitionIsTemporary = true, Definition = $"sc.exe config {name} binPath= {binPath} start= delayed-auto"
                 + (virtualAccount is null ? "" : $" obj= \"{virtualAccount}\""),
             Install = install,
-            Start = [new("sc.exe", ["start", name])],
+            // A named account starts at boot once Windows took its logon.
+            Start = virtualAccount is null ? [new("sc.exe", ["config", name, "start=", "delayed-auto"]), new("sc.exe", ["start", name])] : [new("sc.exe", ["start", name])],
             LogonAccount = spec.Account,
             DataRoot = dataRoot,
+            ProtectDataRootFor = virtualAccount is not null && dataRoot is not null ? virtualAccount : null,
             // Stopped (the launcher drains the version that runs), then deleted: Windows removes it once it stopped.
             Uninstall = [new("sc.exe", ["stop", name], MayFail: true), new("sc.exe", ["delete", name])],
             Query = new("sc.exe", ["qc", name]),
@@ -419,6 +429,24 @@ public sealed class ServiceManager(ServiceEnvironment environment)
         {
             if (plan.DataRoot is { } dataRoot) Directory.CreateDirectory(dataRoot);
             if (!RunAll(command, plan.Install, "install", error)) return Failure;
+            if (plan.ProtectDataRootFor is { } owner && plan.DataRoot is { } protectedRoot)
+            {
+                try
+                {
+                    // The root first, in one write: what it holds then inherits from it alone (reset), never from %ProgramData%.
+                    (Environment.ProtectFolder ?? throw new InvalidOperationException("This machine cannot protect a folder."))(protectedRoot, owner);
+                }
+                catch (Exception exception) when (exception is UnauthorizedAccessException or InvalidOperationException or IOException or ArgumentException
+                    or System.Security.Principal.IdentityNotMappedException or System.Security.AccessControl.PrivilegeNotHeldException)
+                {
+                    error.WriteLine($"{command} install: cannot protect {protectedRoot} for {owner}: {exception.Message}");
+                    return Failure;
+                }
+
+                // A folder without content has nothing to reset.
+                if (!RunAll(command, [new ServiceCommand("icacls.exe", [Path.Combine(protectedRoot, "*"), "/reset", "/T", "/C", "/Q"], MayFail: true)], "install", error)) return Failure;
+            }
+
             if (plan.LogonAccount is { } account)
             {
                 try
@@ -427,7 +455,8 @@ public sealed class ServiceManager(ServiceEnvironment environment)
                 }
                 catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
                 {
-                    error.WriteLine($"{command} install: Windows refused {account} with its password for the service: {exception.Message}");
+                    error.WriteLine($"{command} install: Windows refused {account} with its password for the service: {exception.Message} "
+                        + "The service does not start at boot until install with the right password succeeds.");
                     return Failure;
                 }
             }
@@ -624,12 +653,22 @@ public sealed class ServiceManager(ServiceEnvironment environment)
     /// <returns>What it is; not installed when there is none.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="product"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="name"/> or <paramref name="account"/> is empty.</exception>
-    public ServiceFacts QuerySystemService(UpdateProduct product, string name, string account)
+    public ServiceFacts QuerySystemService(UpdateProduct product, string name, string account) => QuerySystemService(product, name, account, null);
+
+    /// <summary>Reads the system service registered for a service name, on Windows only one whose command line names a folder.</summary>
+    /// <param name="product">The product it runs.</param>
+    /// <param name="name">The name of the service.</param>
+    /// <param name="account">On macOS and Linux, the account it runs as; ignored on Windows, which names it.</param>
+    /// <param name="runsWith">On Windows, a folder its command line must name (its data root); null for any.</param>
+    /// <returns>What it is; not installed when there is none.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="product"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> or <paramref name="account"/> is empty.</exception>
+    public ServiceFacts QuerySystemService(UpdateProduct product, string name, string account, string? runsWith)
     {
         ArgumentNullException.ThrowIfNull(product);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         var env = Environment;
-        if (env.Platform == ServicePlatform.Windows) return QueryWindowsService(product, name);
+        if (env.Platform == ServicePlatform.Windows) return QueryWindowsService(product, name, runsWith, allowNoDataRoot: false);
         ArgumentException.ThrowIfNullOrWhiteSpace(account);
         var systemName = ServiceDefinition.SystemServiceName(name, account);
         bool installed, enabled;
@@ -654,7 +693,65 @@ public sealed class ServiceManager(ServiceEnvironment environment)
         return new ServiceFacts(product, env.Platform, ServiceScope.System, kind, location, account, installed, enabled, null, null);
     }
 
-    private ServiceFacts QueryWindowsService(UpdateProduct product, string name)
+    /// <summary>
+    /// Reads the service that runs a product, as <c>status</c> answers it: the system service <c>install --system</c> registered
+    /// for the name of the plan (run as this user on macOS and Linux), else the one of another name that runs the same data root,
+    /// else the service of the user the plan names.
+    /// </summary>
+    /// <param name="userPlan">The plan of the service of the user.</param>
+    /// <param name="alsoNamed">Another name the system service may have (the default name of a Windows service whose data root moved under %ProgramData%); null for none.</param>
+    /// <param name="runsWith">The data root a service of <paramref name="alsoNamed"/> runs with; null for any.</param>
+    /// <returns>What it is.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="userPlan"/> is null.</exception>
+    public ServiceFacts QueryInstalled(ServicePlan userPlan, string? alsoNamed = null, string? runsWith = null)
+    {
+        ArgumentNullException.ThrowIfNull(userPlan);
+        var product = userPlan.Spec.Product;
+        var user = Environment.UserName;
+        if (Environment.Platform != ServicePlatform.Windows)
+            return QuerySystemService(product, userPlan.Spec.Name, user) is { Installed: true } system ? system : Query(userPlan);
+        // On Windows a service of this name may run another data root (one of its own account under %ProgramData%): it is this
+        // one's only when it runs this data root, or none, which is the profile of its account.
+        if (QueryWindowsService(product, userPlan.Spec.Name, runsWith, allowNoDataRoot: true) is { Installed: true } named) return named;
+        if (alsoNamed is not null && alsoNamed != userPlan.Spec.Name && runsWith is not null
+            && QueryWindowsService(product, alsoNamed, runsWith, allowNoDataRoot: false) is { Installed: true } other) return other;
+        return Query(userPlan);
+    }
+
+    /// <summary>The data root a Windows service runs with, as <c>--data-root</c> of its command line (<c>sc qc</c>); null for none.</summary>
+    /// <param name="query">What <c>sc qc</c> printed.</param>
+    /// <returns>The data root.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="query"/> is null.</exception>
+    public static string? WindowsDataRoot(string query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var line = query.ReplaceLineEndings("\n").Split('\n').Select(static value => value.Trim())
+            .FirstOrDefault(static value => value.StartsWith("BINARY_PATH_NAME", StringComparison.Ordinal));
+        if (line is null || line.IndexOf(':') is not (var colon and > 0)) return null;
+        var words = new List<string>();
+        var word = new System.Text.StringBuilder();
+        var quoted = false;
+        foreach (var character in line[(colon + 1)..].Trim())
+        {
+            if (character == '"') { quoted = !quoted; continue; }
+            if (character == ' ' && !quoted)
+            {
+                if (word.Length > 0) { words.Add(word.ToString()); word.Clear(); }
+                continue;
+            }
+
+            word.Append(character);
+        }
+
+        if (word.Length > 0) words.Add(word.ToString());
+        var at = words.IndexOf("--data-root");
+        return at >= 0 && at + 1 < words.Count ? words[at + 1] : null;
+    }
+
+    private static bool SamePath(string left, string right)
+        => string.Equals(Path.GetFullPath(left).TrimEnd('\\', '/'), Path.GetFullPath(right).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
+
+    private ServiceFacts QueryWindowsService(UpdateProduct product, string name, string? runsWith, bool allowNoDataRoot)
     {
         var query = Environment.Run("sc.exe", ["qc", name]);
         var account = ServiceDefinition.WindowsVirtualAccount(name);
@@ -664,6 +761,11 @@ public sealed class ServiceManager(ServiceEnvironment environment)
             if (trimmed.StartsWith("SERVICE_START_NAME", StringComparison.Ordinal) && trimmed.IndexOf(':') is var colon and > 0)
                 account = trimmed[(colon + 1)..].Trim();
         }
+
+        // A service runs this data root when its command line names it, or names none and runs as this user (its default profile).
+        if (query.Succeeded && runsWith is not null && WindowsDataRoot(query.Output) is var root
+            && (root is null ? !allowNoDataRoot || !SameUser(account, Environment.UserDisplayName ?? Environment.UserName) : !SamePath(root, runsWith)))
+            return new ServiceFacts(product, ServicePlatform.Windows, ServiceScope.System, "", $"Services {name}", "", false, false, null, null);
 
         return new ServiceFacts(product, ServicePlatform.Windows, ServiceScope.System, $"a Windows service run as {account}", $"Services {name}", account,
             query.Succeeded, query.Succeeded && query.Output.Contains("AUTO_START", StringComparison.Ordinal), null, null);

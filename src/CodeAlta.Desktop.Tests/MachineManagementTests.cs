@@ -19,20 +19,17 @@ public sealed class MachineManagementTests
 
     public TestContext TestContext { get; set; } = null!;
 
-    // The page of a machine whose node does not start at boot gives the command that makes it, for the OS of the machine.
+    // The page of a machine whose node does not start at boot shows the commands the node gives, run as administrator on Windows.
     [TestMethod]
-    public void Service_GivesTheCommandThatStartsTheNodeAtBoot_ForItsOS()
+    public void Service_ShowsTheCommandsTheNodeGives_ToStartAtBoot()
     {
-        var unit = new CodeAlta.Fleet.NodeApi.FleetNodeServiceStatus(true, false, ["Service: a systemd user unit."], "linux", "alice");
-        Assert.AreEqual("sudo loginctl enable-linger alice", MachineServiceView.Of(unit).Fix);
-        Assert.AreEqual("altanode install", MachineServiceView.Of(unit with { Installed = false }).Fix);
-        var task = MachineServiceView.Of(unit with { Platform = "windows", User = @"PC\alice" });
-        Assert.AreEqual("altanode install --system", task.Fix);
-        Assert.AreEqual("elevated", task.FixWhere);
-        Assert.AreEqual("sudo altanode install --system --account alice", MachineServiceView.Of(unit with { Platform = "macos" }).Fix);
+        var unit = new CodeAlta.Fleet.NodeApi.FleetNodeServiceStatus(true, false, ["Service: a systemd user unit."], "linux", "alice") { Fix = "sudo loginctl enable-linger alice" };
+        Assert.AreEqual(("sudo loginctl enable-linger alice", "terminal"), (MachineServiceView.Of(unit).Fix, MachineServiceView.Of(unit).FixWhere));
+        Assert.AreEqual("elevated", MachineServiceView.Of(unit with { Platform = "windows" }).FixWhere);
         var atBoot = MachineServiceView.Of(unit with { StartsAtBoot = true });
         Assert.IsNull(atBoot.Fix);
         Assert.IsNull(atBoot.FixWhere);
+        Assert.IsNull(MachineServiceView.Of(unit with { Fix = null }).FixWhere);
     }
 
     [TestMethod]

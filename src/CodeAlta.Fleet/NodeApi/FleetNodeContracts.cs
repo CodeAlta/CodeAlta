@@ -818,7 +818,11 @@ public sealed record FleetNodeStatus(string Name, string DeviceId, string Versio
 /// <param name="Lines">What it is and what happens after a restart and a logout, in words (as <c>altanode status</c> says it).</param>
 /// <param name="Platform">The OS: <c>windows</c>, <c>macos</c> or <c>linux</c>.</param>
 /// <param name="User">The user the node runs as.</param>
-public sealed record FleetNodeServiceStatus(bool Installed, bool StartsAtBoot, IReadOnlyList<string> Lines, string Platform, string User);
+public sealed record FleetNodeServiceStatus(bool Installed, bool StartsAtBoot, IReadOnlyList<string> Lines, string Platform, string User)
+{
+    /// <summary>Gets the commands, one per line, that make the node start at boot as the same person with the same options; null when it does.</summary>
+    public string? Fix { get; init; }
+}
 
 /// <summary>A paired device as the owner's local control shows it.</summary>
 /// <param name="DeviceId">Its device id.</param>

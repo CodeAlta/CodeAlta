@@ -58,6 +58,7 @@ export function setupProblem(code: string): MessageKey {
     case "service_failed": return "The service of CodeAlta Node could not be installed on the machine.";
     case "sudo_password_needed": return "Always on installs a service that starts with {host}: give your password on the machine once, for sudo. It is not kept.";
     case "sudo_refused": return "sudo refused the password on the machine: give it again.";
+    case "secrets_key_failed": return "The key of the secrets of the machine could not leave its Keychain or keyring, so nothing was changed: log in at the machine once (it unlocks them), then try again.";
     case "sudo_missing": return "Always on needs sudo on the machine, which it does not have: run this command there as an administrator, or set it up without Always on.";
     case "pair_failed": return "The node did not start, or made no pairing link.";
     case "pair_unreachable": return "This computer could not reach the node: check that the machine accepts connections on its port (a firewall), then try again.";

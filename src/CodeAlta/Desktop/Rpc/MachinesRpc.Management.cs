@@ -240,14 +240,8 @@ internal sealed record MachineServiceView(bool Installed, bool StartsAtBoot, str
 {
     internal static MachineServiceView Of(FleetNodeServiceStatus service)
     {
-        // The command that makes the node start at boot, for its OS: a Windows service, a launchd daemon, lingering.
-        var user = service.User;
-        var fix = service.StartsAtBoot ? null : service.Platform switch
-        {
-            "windows" => "altanode install --system",
-            "macos" => $"sudo altanode install --system --account {user}",
-            _ => service.Installed ? $"sudo loginctl enable-linger {user}" : "altanode install",
-        };
+        // The node says the commands, with its own options and profile: the desktop shows them as they are.
+        var fix = service.StartsAtBoot || string.IsNullOrWhiteSpace(service.Fix) ? null : service.Fix.Length <= 4096 ? service.Fix : null;
         return new(service.Installed, service.StartsAtBoot, [.. service.Lines], fix, fix is null ? null : service.Platform == "windows" ? "elevated" : "terminal");
     }
 }

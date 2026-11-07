@@ -13,6 +13,18 @@ internal sealed class FakeServiceMachine : IDisposable
     private readonly Lock _gate = new();
     private readonly HashSet<string> _registered = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _leaving = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _binPaths = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _accounts = new(StringComparer.Ordinal);
+
+    // The command line sc.exe create or config gives a service, which sc.exe qc prints.
+    private void KeepBinPath(IReadOnlyList<string> arguments)
+    {
+        for (var index = 2; index + 1 < arguments.Count; index++)
+        {
+            if (arguments[index] == "binPath=") _binPaths[arguments[1]] = arguments[index + 1];
+            if (arguments[index] == "obj=") _accounts[arguments[1]] = arguments[index + 1];
+        }
+    }
 
     public FakeServiceMachine(ServicePlatform platform)
     {
@@ -102,9 +114,19 @@ internal sealed class FakeServiceMachine : IDisposable
         ProgramData = ProgramData,
         SetServiceLogon = (service, account, password) =>
         {
-            lock (_gate) Logons.Add((service, account, password));
+            // Windows refuses a logon with this password, as it does a wrong one.
+            if (password == "wrong") throw new System.ComponentModel.Win32Exception(1326, "The user name or password is incorrect.");
+            lock (_gate)
+            {
+                Logons.Add((service, account, password));
+                _accounts[service] = account;
+            }
         },
         ReadLines = static path => File.Exists(path) ? File.ReadAllLines(path) : [],
+        ProtectFolder = (folder, account) =>
+        {
+            lock (_gate) Commands.Add($"protect {folder} {account}");
+        },
     };
 
     public bool IsRegistered(string name)
@@ -162,10 +184,15 @@ internal sealed class FakeServiceMachine : IDisposable
                     return new(0, "state = stopping");
                 }
                 case ("sc.exe", "create"):
-                    return _registered.Add(arguments[1]) ? new(0, "[SC] CreateService SUCCESS") : new(1073, "[SC] CreateService FAILED 1073: The specified service already exists.");
+                    if (!_registered.Add(arguments[1])) return new(1073, "[SC] CreateService FAILED 1073: The specified service already exists.");
+                    KeepBinPath(arguments);
+                    return new(0, "[SC] CreateService SUCCESS");
+                case ("sc.exe", "config"):
+                    KeepBinPath(arguments);
+                    return new(0, "[SC] ChangeServiceConfig SUCCESS");
                 case ("sc.exe", "qc"):
                     return _registered.Contains(arguments[1])
-                        ? new(0, $"SERVICE_NAME: {arguments[1]}\n        START_TYPE         : 2   AUTO_START  (DELAYED)\n")
+                        ? new(0, $"SERVICE_NAME: {arguments[1]}\n        START_TYPE         : 2   AUTO_START  (DELAYED)\n        BINARY_PATH_NAME   : {_binPaths.GetValueOrDefault(arguments[1])}\n        SERVICE_START_NAME : {_accounts.GetValueOrDefault(arguments[1], "LocalSystem")}\n")
                         : new(1060, "[SC] OpenService FAILED 1060: The specified service does not exist as an installed service.");
                 case ("sc.exe", "delete"):
                     return _registered.Remove(arguments[1]) ? new(0, "[SC] DeleteService SUCCESS") : new(1060, "[SC] OpenService FAILED 1060");

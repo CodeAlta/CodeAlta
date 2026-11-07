@@ -173,7 +173,7 @@ public sealed class SshNodeInstallerTests
         await new SshNodeInstaller(ssh, "4.1.0").RunAsync(new SshNodeSetupRequest { Target = new SshTarget("me", "mac", null), AlwaysOn = true, SudoPassword = "it's s3cret" },
             (_, _) => Task.FromResult("m"), steps.Add, TestContext.CancellationToken);
         var service = ssh.Scripts[2];
-        StringAssert.Contains(service, "\"$TOOLS/altanode\" secrets key-file --data-root \"$ROOT\" 1>&2 || true\n\"$TOOLS/altanode\" uninstall --data-root \"$ROOT\" >/dev/null 2>&1 || true\n",
+        StringAssert.Contains(service, "\"$TOOLS/altanode\" secrets key-file --data-root \"$ROOT\" 1>&2 || { echo 'secrets_key_failed' >&2; exit 3; }\n\"$TOOLS/altanode\" uninstall --data-root \"$ROOT\" >/dev/null 2>&1 || true\n",
             "the key of the secrets leaves the Keychain as the person, before the daemon");
         StringAssert.Contains(service, "printf '%s\\n' 'it'\\''s s3cret' | sudo -S -p '' env \"DOTNET_ROOT=$DOTNET_ROOT\" \"PATH=$PATH\" \"$TOOLS/altanode\" install --system --account \"$ME\" --listen-all --port 2585 --data-root \"$ROOT\"\n");
         Assert.AreEqual(1, ssh.Scripts.Count(static script => script.Contains("s3cret", StringComparison.Ordinal)), "only the step that needs it has it");
@@ -185,6 +185,10 @@ public sealed class SshNodeInstallerTests
             (_, _) => Task.FromResult("m"), static _ => { }, TestContext.CancellationToken);
         StringAssert.Contains(ssh.Scripts[2], "\"$TOOLS/altanode\" install --listen-all --port 2585\n");
         StringAssert.Contains(ssh.Scripts[2], "!= yes ]; then sudo -n loginctl enable-linger \"$ME\"; fi\n");
+
+        // The key of the secrets that cannot leave the Keychain stops the setup before the service is replaced.
+        Assert.AreEqual("secrets_key_failed", await FailureAsync(new SshNodeSetupRequest { Target = new SshTarget("me", "mac", null), AlwaysOn = true, SudoPassword = "pw" },
+            new SshResult(0, mac, ""), new SshResult(0, "", ""), new SshResult(3, "", "altanode: The key of the secrets of this machine is missing from its Keychain.\nsecrets_key_failed\n")));
 
         // A wrong password, or no sudo there: the page says so, with the command to run there.
         Assert.AreEqual("sudo_refused", await FailureAsync(new SshNodeSetupRequest { Target = new SshTarget("me", "mac", null), AlwaysOn = true, SudoPassword = "wrong" },

@@ -41,9 +41,10 @@ public sealed class FleetNodeServiceOptions
     public Func<Protocol.FleetUpdateStatus?>? UpdateStatus { get; init; }
 
     /// <summary>
-    /// Gets what tells whether a provider of the machine runs with a personal plan (a subscription signed in by a person): such a
-    /// provider serves only the owner's own work, so a session another person started here, and every session it starts, is
-    /// refused it (<c>doc/fleet/security-and-privacy.md</c>, "Subscriptions are personal"). Null refuses nothing.
+    /// Gets what tells whether a provider of the machine may run with a personal plan (a subscription signed in by a person), which
+    /// is true too for one whose credentials cannot be told: such a provider serves only the owner's own work, so a session another
+    /// person started here, and every session it starts, is refused it (<c>doc/fleet/security-and-privacy.md</c>, "Subscriptions
+    /// are personal"). Null refuses nothing.
     /// </summary>
     public Func<CodeAlta.Agent.ModelProviderDescriptor, bool>? IsPersonalProvider { get; init; }
 

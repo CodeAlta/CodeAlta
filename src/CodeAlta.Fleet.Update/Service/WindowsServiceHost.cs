@@ -58,9 +58,25 @@ public static class WindowsServiceHost
 
         protected override void OnStop()
         {
-            Interlocked.Exchange(ref _stopping, 1);
             // The node gives its turns 30 s, then its host 15 s: the stop is waited for as long as a service manager gives it.
-            RequestAdditionalTime((ServiceDefinition.StopTimeoutSeconds + 10) * 1000);
+            try
+            {
+                RequestAdditionalTime((ServiceDefinition.StopTimeoutSeconds + 10) * 1000);
+            }
+            catch (InvalidOperationException)
+            {
+                // Only a stop that is pending gets more time.
+            }
+
+            Drain();
+        }
+
+        // A shutdown of Windows is no pending stop: there is no time to ask for, the drain runs in the time Windows gives.
+        protected override void OnShutdown() => Drain();
+
+        private void Drain()
+        {
+            Interlocked.Exchange(ref _stopping, 1);
             _stop.Cancel();
             try
             {
@@ -73,8 +89,6 @@ public static class WindowsServiceHost
 
             if (_running is { IsCompletedSuccessfully: true } done) ExitCode = Result = done.Result;
         }
-
-        protected override void OnShutdown() => OnStop();
 
         protected override void Dispose(bool disposing)
         {

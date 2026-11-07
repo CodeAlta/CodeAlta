@@ -24,6 +24,10 @@ public sealed class NodeCliSignInTests
         Assert.AreEqual((FleetMachineSignInWays.Code, "https://accounts.example.com/o/oauth2/auth?client_id=x&state=y", (string?)null), NodeSignIns.ReadPrompt(pasted));
         Assert.IsNull(NodeSignIns.ReadPrompt("! First copy your one-time code: EB71-6B69\n"), "no page yet");
         Assert.IsNull(NodeSignIns.ReadPrompt("Visit https://example.com/docs for help.\n"), "a page without a code or a question");
+        // A read that stops within the page or the code gives nothing yet: the next one gives them whole.
+        Assert.IsNull(NodeSignIns.ReadPrompt("! First copy your one-time code: EB71-6B69\nOpen this URL to continue in your web browser: https://git"));
+        Assert.IsNull(NodeSignIns.ReadPrompt("To sign in, use a web browser to open the page https://microsoft.com/devicelogin and enter the code ABCD"));
+        Assert.AreEqual("ABCD12345", NodeSignIns.ReadPrompt(az)?.Code);
     }
 
     // What claude setup-token prints in a terminal (macOS, Claude Code 2.1): a link of the terminal, words placed by moves of the
@@ -39,7 +43,13 @@ public sealed class NodeCliSignInTests
         Assert.IsNull(NodeSignIns.ReadClaudeToken(asked));
         const string Token = "sk-ant-oat01-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA_BBBBBBBBBBBBBBBB-CCCCCCCC";
         Assert.AreEqual(Token, NodeSignIns.ReadClaudeToken(asked + $"\u001b[32m\u001b[2G{Token}\u001b[0m\r\n\u001b[2GStore\u001b[8Gthis\u001b[13Gtoken\r\n"));
-        Assert.AreEqual("CLAUDE_CODE_OAUTH_TOKEN_CLAUDE_WORK", NodeSignIns.ClaudeSecretName("claude-work"));
+        Assert.IsNull(NodeSignIns.ReadClaudeToken(asked + $"\u001b[2G{Token[..40]}"), "a read that stops within the token gives none yet");
+        StringAssert.StartsWith(NodeSignIns.ClaudeSecretName("claude-work"), "CLAUDE_CODE_OAUTH_TOKEN_CLAUDE_WORK_");
+        Assert.AreNotEqual(NodeSignIns.ClaudeSecretName("claude-work"), NodeSignIns.ClaudeSecretName("claude_work"), "two providers never share a token");
+        Assert.AreEqual(NodeSignIns.ClaudeSecretName("Claude"), NodeSignIns.ClaudeSecretName("claude"), "a key is one key whatever its case");
+        Assert.IsTrue(CodeAlta.Catalog.Secrets.LocalSecretStore.IsName(NodeSignIns.ClaudeSecretName(new string('k', 200))));
+        Assert.IsFalse(NodeSignIns.IsPlainForCmd("login & calc"), "cmd.exe would run what follows &");
+        Assert.IsTrue(NodeSignIns.IsPlainForCmd("--tenant=contoso.onmicrosoft.com"));
     }
 
     [TestMethod]

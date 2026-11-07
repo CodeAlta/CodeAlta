@@ -34,10 +34,12 @@ internal sealed partial class NodeSignIns
     }
 
     // "First copy your one-time code: EB71-6B69" (gh), "enter the code ABCD12345 to authenticate" (az), "user code: ABCD-EFGH".
-    [GeneratedRegex(@"(?:one-time code|user code|enter the code|code)\s*[:\s]\s*(?<code>[A-Z0-9]{4,10}(?:-[A-Z0-9]{4,10})?)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // The code ends where something follows it: a read that stops within it gives none yet.
+    [GeneratedRegex(@"(?:one-time code|user code|enter the code|code)\s*[:\s]\s*(?<code>[A-Z0-9]{4,10}(?:-[A-Z0-9]{4,10})?)(?=[\s.,;)])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DeviceCodePattern();
 
-    [GeneratedRegex(@"https://[^\s""'<>]+", RegexOptions.CultureInvariant)]
+    // The page ends where a space or a line end follows it: a read that stops within it gives none yet.
+    [GeneratedRegex(@"https://[^\s""'<>]+(?=\s)", RegexOptions.CultureInvariant)]
     private static partial Regex PagePattern();
 
     // A tool that asks for a code it shows on its page: "Paste code here", "Enter the authorization code:", "Enter verification code:".
@@ -99,22 +101,31 @@ internal sealed partial class NodeSignIns
         if (target.Check is null) return (FleetMachineSignInStates.Unknown, null);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(CheckTimeout);
+        Process? process = null;
         try
         {
-            using var process = Start(target.Check, target.Environment);
+            process = Start(target.Check, target.Environment);
             if (process is null) return (FleetMachineSignInStates.Unknown, null);
             process.StandardInput.Close();
-            var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
-            var error = process.StandardError.ReadToEndAsync(timeout.Token);
+            var text = new StringBuilder();
+            var reading = Task.WhenAll(ReadBoundedAsync(process.StandardOutput, text, timeout.Token), ReadBoundedAsync(process.StandardError, text, timeout.Token));
             await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
-            var text = await output.ConfigureAwait(false) + await error.ConfigureAwait(false);
+            await reading.ConfigureAwait(false);
             if (process.ExitCode != 0) return (FleetMachineSignInStates.SignedOut, null);
-            var account = target.Key == GitHubKey && GitHubAccountPattern().Match(text) is { Success: true } match ? match.Groups["account"].Value : null;
+            string output;
+            lock (text) output = text.ToString();
+            var account = target.Key == GitHubKey && GitHubAccountPattern().Match(output) is { Success: true } match ? match.Groups["account"].Value : null;
             return (FleetMachineSignInStates.SignedIn, account);
         }
-        catch (Exception exception) when (exception is OperationCanceledException or System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        catch (Exception exception) when (exception is OperationCanceledException or System.ComponentModel.Win32Exception or InvalidOperationException or IOException or NotSupportedException)
         {
+            // A check that hangs is ended with what it started: a list read again does not leave one more behind.
+            Kill(process);
             return (FleetMachineSignInStates.Unknown, null);
+        }
+        finally
+        {
+            process?.Dispose();
         }
     }
 
@@ -137,7 +148,7 @@ internal sealed partial class NodeSignIns
                 started.StandardInput.WriteLine(code);
                 started.StandardInput.Flush();
             };
-            using var kill = attempt.Lifetime.Token.Register(() => { try { started.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } });
+            using var kill = attempt.Lifetime.Token.Register(() => Kill(started));
             var output = new StringBuilder();
             var reading = Task.WhenAll(ReadAsync(process.StandardOutput), ReadAsync(process.StandardError));
             await process.WaitForExitAsync(attempt.Lifetime.Token).ConfigureAwait(false);
@@ -152,15 +163,17 @@ internal sealed partial class NodeSignIns
             attempt.Prompt.TrySetException(new InvalidOperationException("It is signed in already."));
             return new FleetMachineSignInState(attempt.Id, FleetMachineSignInStates.Completed, account, null, null);
 
-            // Reads what the tool prints, line by line, and gives the desktop its page and its code once both are there.
+            // Reads what the tool prints as it comes, not line by line: a question that waits for the code ends no line. Gives the
+            // desktop its page and its code once both are there.
             async Task ReadAsync(StreamReader reader)
             {
-                while (await reader.ReadLineAsync(attempt.Lifetime.Token).ConfigureAwait(false) is { } line)
+                var buffer = new char[4096];
+                while (await reader.ReadAsync(buffer, attempt.Lifetime.Token).ConfigureAwait(false) is var read and > 0)
                 {
                     string text;
                     lock (output)
                     {
-                        if (output.Length < MaxOutput) output.AppendLine(line);
+                        if (output.Length < MaxOutput) output.Append(buffer, 0, Math.Min(read, MaxOutput - output.Length));
                         text = output.ToString();
                     }
 
@@ -179,6 +192,37 @@ internal sealed partial class NodeSignIns
             process?.Dispose();
         }
     });
+
+    // Reads what a process prints into a shared text, at most MaxOutput characters; the rest is read and dropped.
+    private static async Task ReadBoundedAsync(StreamReader reader, StringBuilder text, CancellationToken cancellationToken)
+    {
+        var buffer = new char[4096];
+        while (await reader.ReadAsync(buffer, cancellationToken).ConfigureAwait(false) is var read and > 0)
+        {
+            lock (text)
+            {
+                if (text.Length < MaxOutput) text.Append(buffer, 0, Math.Min(read, MaxOutput - text.Length));
+            }
+        }
+    }
+
+    // Ends a process this node started, with the processes it started.
+    private static void Kill(Process? process)
+    {
+        try
+        {
+            if (process is { HasExited: false }) process.Kill(entireProcessTree: true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            // It ended meanwhile, or was never started.
+        }
+    }
+
+    /// <summary>Whether a word passes through <c>cmd.exe /c</c> as itself: none of the characters cmd reads (<c>&amp; | &lt; &gt; ^ % ! " ( )</c>, line ends).</summary>
+    /// <param name="word">The word.</param>
+    /// <returns>Whether it does.</returns>
+    internal static bool IsPlainForCmd(string word) => word.IndexOfAny(['&', '|', '<', '>', '^', '%', '!', '"', '(', ')', '\r', '\n']) < 0;
 
     /// <summary>The login command a tool runs without a browser of its own: <c>az login</c> with its device code.</summary>
     /// <param name="words">The words of the login command.</param>
@@ -233,6 +277,12 @@ internal sealed partial class NodeSignIns
         };
         if (batch)
         {
+            // cmd.exe reads its command line, and quoting does not stop it: a word it would read as more than a word is refused, the
+            // folder of the tool included. The message names the place of the word, never the word: it may be a credential.
+            if (!IsPlainForCmd(executable))
+                throw new NotSupportedException($"The folder of {words[0]} holds a character cmd.exe reads: this machine does not run its login from another computer.");
+            if (words.Skip(1).Select(static (word, index) => (word, index)).FirstOrDefault(static pair => !IsPlainForCmd(pair.word)) is { word: not null } refused)
+                throw new NotSupportedException($"Word {refused.index + 1} of the login of {words[0]} holds a character cmd.exe reads, which a command of a CLI profile does not pass on Windows.");
             foreach (var word in new[] { "/d", "/s", "/c", executable }) start.ArgumentList.Add(word);
         }
 

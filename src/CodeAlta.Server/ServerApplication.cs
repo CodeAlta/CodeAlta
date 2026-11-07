@@ -664,7 +664,10 @@ public sealed class ServerApplication
         {
             var executable = (ServiceExecutable ?? LocateExecutable)() ?? new ServiceExecutable(ServiceExecutableKind.Executable, UpdateProduct.Server.AssemblyName, []);
             var plan = manager.Plan(ServiceRequestOf(new InstallOptions { DataRoot = options.DataRoot }, paths, ServiceScope.User, executable));
-            foreach (var line in ServiceManager.Describe(manager.Query(plan))) await _output.WriteLineAsync(line).ConfigureAwait(false);
+            // The system service of install --system first: the one a server started at boot runs under.
+            // A Windows service of its own account keeps the default name and runs a data root under %ProgramData%: this one, when it names it.
+            foreach (var line in ServiceManager.Describe(manager.QueryInstalled(plan, ServiceDefinition.ServiceName(UpdateProduct.Server, paths.DataRoot, true, developer: false),
+                paths.DataRoot))) await _output.WriteLineAsync(line).ConfigureAwait(false);
         }
         catch (ServiceException exception)
         {
@@ -730,7 +733,8 @@ public sealed class ServerApplication
         options.TryResolve(_error, out var paths);
         var running = CoordinatorServer.IsRunning(paths!) ? CoordinatorServer.ReadState(paths!) : null;
         // The password goes to Windows only: read here, never printed, never written.
-        var password = options.PasswordStdin ? await Console.In.ReadLineAsync().ConfigureAwait(false) : null;
+        // Read here, never printed, never written: typed at a prompt that does not show it, or the first line of a pipe.
+        var password = options.PasswordStdin ? await ServicePassword.ReadAsync().ConfigureAwait(false) : null;
         var code = manager.Install(plan, _output, _error, password);
         if (code != ServiceManager.Success) return ServerExitCodes.Failure;
         await _output.WriteLineAsync(ServiceExecutableLocator.Describe(UpdateProduct.Server, (ServiceExecutable ?? LocateExecutable)()!)).ConfigureAwait(false);

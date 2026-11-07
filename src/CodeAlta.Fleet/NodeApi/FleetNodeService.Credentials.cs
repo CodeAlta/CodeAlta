@@ -47,7 +47,7 @@ public sealed partial class FleetNodeService
         var choose = accounts.Length > 0
             ? $" Choose one that runs with the key of an account: {string.Join(", ", accounts)}."
             : " This machine has no provider that runs with the key of an account: its owner adds one.";
-        return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, which serves only the work of the owner of this machine: " +
-            "a session someone else started here keeps to account credentials." + choose;
+        return $"The provider '{provider.ProviderId.Value}' does not run with the key of an account (a personal plan, or credentials CodeAlta cannot tell), " +
+            "which serves only the work of the owner of this machine: a session someone else started here keeps to account credentials." + choose;
     }
 }

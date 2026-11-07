@@ -224,7 +224,8 @@ CodeAlta holds a credential only where it signs in itself, and never hands one t
   organization or the team, or a model gateway. Providers declare their credential kind, and both the scheduler and
   the node check it ([orchestration](orchestration.md#credentials-of-unattended-runs)). The same holds for a session
   another person starts on a shared machine: the node refuses it, its sub-sessions, fallbacks and model tiers a
-  provider that runs with a personal plan, whoever signed that plan in.
+  provider that runs with a personal plan, whoever signed that plan in, and one whose credentials cannot be told (it
+  fails closed).
 - **Organization providers** keep their keys sealed to the keys of the machines allowed to use them; the server relays
   ciphertext and never holds a key in clear.
 

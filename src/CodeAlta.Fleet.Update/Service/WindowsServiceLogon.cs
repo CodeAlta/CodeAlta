@@ -19,6 +19,36 @@ internal static partial class WindowsServiceLogon
     private const uint PolicyLookupNames = 0x00000800;
     private const int ErrorInsufficientBuffer = 122;
 
+    /// <summary>
+    /// Gives a folder, in one write, the administrators as its owner and a protected access list: SYSTEM and the administrators
+    /// with full control, the account with modify, inherited by what it holds. Nothing it allowed before remains.
+    /// </summary>
+    /// <param name="folder">The folder.</param>
+    /// <param name="account">The account, such as <c>NT SERVICE\altanode</c>.</param>
+    /// <exception cref="UnauthorizedAccessException">This process may not change the folder (not elevated).</exception>
+    /// <exception cref="System.Security.Principal.IdentityNotMappedException">The account does not exist.</exception>
+    public static void ProtectFolder(string folder, string account)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(account);
+        const System.Security.AccessControl.InheritanceFlags inherit = System.Security.AccessControl.InheritanceFlags.ContainerInherit
+            | System.Security.AccessControl.InheritanceFlags.ObjectInherit;
+        var administrators = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+        var system = new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.LocalSystemSid, null);
+        var service = (System.Security.Principal.SecurityIdentifier)new System.Security.Principal.NTAccount(account).Translate(typeof(System.Security.Principal.SecurityIdentifier));
+        var security = new System.Security.AccessControl.DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.SetOwner(administrators);
+        foreach (var (identity, rights) in new[] { (system, System.Security.AccessControl.FileSystemRights.FullControl),
+            (administrators, System.Security.AccessControl.FileSystemRights.FullControl), (service, System.Security.AccessControl.FileSystemRights.Modify) })
+        {
+            security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(identity, rights, inherit,
+                System.Security.AccessControl.PropagationFlags.None, System.Security.AccessControl.AccessControlType.Allow));
+        }
+
+        new DirectoryInfo(folder).SetAccessControl(security);
+    }
+
     /// <summary>Makes a service log on as an account, with its password, and gives the account the right to.</summary>
     /// <param name="serviceName">The service.</param>
     /// <param name="account">The account: <c>.\name</c>, <c>DOMAIN\name</c> or <c>name@domain</c>.</param>

@@ -119,7 +119,7 @@ Each node signs in by itself; the desktop drives the sign-ins so that nobody has
 
 | Need | How the node gets it |
 | --- | --- |
-| Providers CodeAlta signs in (Codex subscription, Mistral Vibe, Copilot, xAI) | Signed in from the desktop ([below](#signing-in-from-the-desktop)); tokens stay in the node's `~/.alta/auth/` |
+| Providers CodeAlta signs in (Codex subscription, Copilot, xAI) | Signed in from the desktop ([below](#signing-in-from-the-desktop)); tokens stay in the node's `~/.alta/auth/`. Mistral Vibe signs in on the machine |
 | Providers with an API key, and any other token a run needs | A secret of the node's store ([secrets](secrets.md)): typed by the person from the desktop and sent over the end-to-end channel, or a secret of a space, a team or the organization sealed to the node; kept in its protected store (DPAPI, Keychain, libsecret), or named as an environment variable of the service |
 | Claude Code | `claude setup-token` run by the node; the token it prints is a secret of the node's store, named by the provider's `CLAUDE_CODE_OAUTH_TOKEN` (`${secret:NAME}`) |
 | Codex CLI, ACP agents | The sign-in method of their plugin; Codex CLI's device code is shown by the desktop, ACP agents sign in with a command on the machine |

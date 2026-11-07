@@ -52,6 +52,12 @@ export const addMachineMessages = {
   "it starts with the machine, with nobody logged in (needs sudo there)": ["se inicia con la máquina, sin que nadie inicie sesión (necesita sudo allí)",
     "elle démarre avec la machine, sans que personne ne se connecte (il faut sudo là-bas)", "startet mit der Maschine, ohne Anmeldung (braucht dort sudo)",
     "マシンの起動時に開始し、ログイン不要 (マシンで sudo が必要)", "随机器启动，无需登录（需要该机器上的 sudo）"],
+  "The key of the secrets of the machine could not leave its Keychain or keyring, so nothing was changed: log in at the machine once (it unlocks them), then try again.": [
+    "La clave de los secretos de la máquina no pudo salir de su Llavero o anillo de claves, así que no se cambió nada: inicia sesión una vez en la máquina (los desbloquea) y vuelve a intentarlo.",
+    "La clé des secrets de la machine n’a pas pu quitter son trousseau, donc rien n’a changé : ouvrez une session une fois sur la machine (cela le déverrouille), puis réessayez.",
+    "Der Schlüssel der Geheimnisse der Maschine konnte ihren Schlüsselbund nicht verlassen, daher wurde nichts geändert: Melde dich einmal an der Maschine an (das entsperrt ihn) und versuche es erneut.",
+    "マシンのシークレットのキーをキーチェーンまたはキーリングから移せなかったため、何も変更していません。マシンに一度ログインして (ロックが解除されます)、もう一度お試しください。",
+    "机器机密的密钥无法离开其钥匙串或密钥环，因此未做任何更改：请在该机器上登录一次（这会解锁它们），然后重试。"],
   "Password on the machine": ["Contraseña en la máquina", "Mot de passe sur la machine", "Passwort auf der Maschine", "マシンのパスワード", "机器上的密码"],
   "Always on installs a service that starts with {host}: give your password on the machine once, for sudo. It is not kept.": [
     "Siempre activa instala un servicio que se inicia con {host}: da tu contraseña de la máquina una vez, para sudo. No se guarda.",

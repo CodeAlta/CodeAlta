@@ -190,7 +190,8 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, dataRoot, request.Port, request.Name, request.AlwaysOn, request.SudoPassword),
             request.TrustedHostKey, null, cancellationToken).ConfigureAwait(false);
         if (!service.Succeeded)
-            throw Fail(SshSetupSteps.Service, SudoRefused(service.Error + service.Output) ? "sudo_refused" : "service_failed", FirstLines(service.Error + service.Output, 6));
+            throw Fail(SshSetupSteps.Service, (service.Error + service.Output).Contains(SecretsKeyFailed, StringComparison.Ordinal) ? SecretsKeyFailed
+                : SudoRefused(service.Error + service.Output) ? "sudo_refused" : "service_failed", FirstLines(service.Error + service.Output, 6));
         progress(new(SshSetupSteps.Service, "done", ServiceDetail(facts, request.Port, service.Output)));
 
         progress(new(SshSetupSteps.Pair, "running"));
@@ -425,7 +426,8 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         var sudo = Sudo(facts, sudoPassword);
         // A node started at boot has no login session, where the Keychain and libsecret answer: the key of its secrets
         // moves into a file only the person reads, as them, while those still answer.
-        if (alwaysOn) script.Append("\"$TOOLS/altanode\" secrets key-file").Append(root).Append(" 1>&2 || true\n");
+        // When it cannot move, nothing is replaced: the service that runs keeps reading its secrets.
+        if (alwaysOn) script.Append("\"$TOOLS/altanode\" secrets key-file").Append(root).Append(" 1>&2 || { echo '").Append(SecretsKeyFailed).Append("' >&2; exit 3; }\n");
         if (alwaysOn && facts.Os == "Darwin")
         {
             // One service per profile: the LaunchAgent of the person goes, and the daemon runs their tool, with their .NET and PATH.
@@ -443,6 +445,9 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         script.Append("echo '").Append(StatusMarker).Append("'\n\"$TOOLS/altanode\" status").Append(root).Append(" 2>/dev/null || true\n");
         return script.ToString();
     }
+
+    // What the service step prints when the key of the secrets cannot leave the Keychain or libsecret.
+    private const string SecretsKeyFailed = "secrets_key_failed";
 
     // The marker before what altanode status says, in the output of the service step.
     internal const string StatusMarker = "--- altanode status";

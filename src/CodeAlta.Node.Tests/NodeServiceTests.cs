@@ -419,11 +419,15 @@ public sealed class NodeServiceTests
         Assert.AreEqual(ServiceManager.Success, manager.Install(plan, new StringWriter(), new StringWriter()));
         Assert.IsTrue(Directory.Exists(root), "its profile is made before the service is given it");
         Assert.IsTrue(machine.IsRegistered("altanode"));
-        CollectionAssert.AreEqual(new[] { "create", "config", "description", "failure", "icacls.exe", "start" },
-            machine.Commands.Select(static command => command.StartsWith("icacls.exe", StringComparison.Ordinal) ? "icacls.exe" : command.Split(' ')[1]).ToArray());
+        CollectionAssert.AreEqual(new[] { "create", "config", "description", "failure", "protect", "icacls.exe", "start" },
+            machine.Commands.Select(static command => command.StartsWith("icacls.exe", StringComparison.Ordinal) ? "icacls.exe"
+                : command.StartsWith("protect", StringComparison.Ordinal) ? "protect" : command.Split(' ')[1]).ToArray());
         StringAssert.Contains(machine.Commands[0], @"obj= NT SERVICE\altanode");
         StringAssert.Contains(machine.Commands[0], "start= delayed-auto");
-        StringAssert.Contains(machine.Commands[4], @"NT SERVICE\altanode:(OI)(CI)M");
+        // Its access list is replaced in one write once the account exists (nothing a folder made there before allowed remains,
+        // nothing inherited from %ProgramData%), then what it holds inherits from it alone.
+        Assert.AreEqual($@"protect {root} NT SERVICE\altanode", machine.Commands[4]);
+        Assert.AreEqual($@"icacls.exe {Path.Combine(root, "*")} /reset /T /C /Q", machine.Commands[5]);
         Assert.AreEqual(0, machine.Logons.Count, "a virtual account has no password");
         var answer = string.Join('\n', ServiceManager.Describe(manager.Query(plan)));
         StringAssert.Contains(answer, @"it starts at boot as NT SERVICE\altanode, without a login");
@@ -445,6 +449,13 @@ public sealed class NodeServiceTests
         Assert.AreEqual((@"altanode", @".\codealta", "s3cret-pass"), machine.Logons.Single());
         Assert.IsFalse(machine.Commands.Any(static command => command.Contains("s3cret-pass", StringComparison.Ordinal)), "never on a command line");
         Assert.IsFalse(machine.Commands.Any(static command => command.StartsWith("icacls", StringComparison.Ordinal)), "its own profile is the account's");
+        // Never LocalSystem, never at boot before Windows took the logon of the account.
+        Assert.IsTrue(machine.Commands.Where(static command => command.Contains(" config altanode binPath=", StringComparison.Ordinal)).All(static command => command.Contains("start= demand", StringComparison.Ordinal)));
+        Assert.IsFalse(machine.Commands.Any(static command => command.Contains("LocalSystem", StringComparison.OrdinalIgnoreCase)));
+        Assert.AreEqual("sc.exe config altanode start= delayed-auto", machine.Commands[^2]);
+        machine.Commands.Clear();
+        Assert.AreEqual(ServiceManager.Failure, manager.Install(named, new StringWriter(), new StringWriter(), "wrong"), "the fake Windows refuses this password");
+        Assert.IsFalse(machine.Commands.Any(static command => command.Contains("delayed-auto", StringComparison.Ordinal)), "a refused logon leaves a service started on demand only");
 
         Assert.AreEqual(ServiceManager.Success, manager.Uninstall(plan, new StringWriter(), new StringWriter()));
         Assert.IsFalse(machine.IsRegistered("altanode"));
@@ -460,6 +471,65 @@ public sealed class NodeServiceTests
         Assert.IsTrue(ServiceManager.IsTaskEnabled("<Task><Settings><Enabled>true</Enabled></Settings></Task>"));
         Assert.IsFalse(ServiceManager.IsTaskEnabled("<Task xmlns=\"x\"><Settings><Enabled>false</Enabled></Settings></Task>"));
         Assert.IsFalse(ServiceManager.IsTaskEnabled("not xml"));
+    }
+
+    // The node of a Windows service of its own account runs a profile under %ProgramData% but keeps the default name: its page
+    // finds it by the profile its command line names, and a service of another profile is not taken for it.
+    [TestMethod]
+    public void TheNodeOfAWindowsService_FindsItsService_ByTheProfileItRuns()
+    {
+        using var machine = new FakeServiceMachine(ServicePlatform.Windows) { IsRoot = true };
+        var exe = Path.Combine(machine.Root, "tools", "altanode.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(exe)!);
+        File.WriteAllText(exe, "");
+        var manager = new ServiceManager(machine.Environment);
+        var plan = manager.Plan(Request(machine) with { Scope = ServiceScope.System, Account = null, StateRoot = null, Executable = new ServiceExecutable(ServiceExecutableKind.Executable, exe, []) });
+        Assert.AreEqual(ServiceManager.Success, manager.Install(plan, new StringWriter(), new StringWriter()));
+        var root = Path.Combine(machine.ProgramData, "CodeAlta", "Node", "altanode");
+        var userPlan = manager.Plan(Request(machine) with { Name = "altanode-1a2b3c", StateRoot = root });
+
+        Assert.IsTrue(manager.QueryInstalled(userPlan, "altanode", root).Installed);
+        Assert.IsFalse(manager.QueryInstalled(userPlan, "altanode", Path.Combine(machine.Home, ".alta-other")).Installed, "another profile's service");
+        Assert.IsFalse(manager.QueryInstalled(userPlan, "altanode", root[..^1]).Installed, "a data root that only starts the same is another one");
+        // The default profile of the person is not the one of the service of its own account, which has the same name.
+        var personal = manager.Plan(Request(machine) with { StateRoot = Path.Combine(machine.Home, ".alta") });
+        Assert.IsFalse(manager.QueryInstalled(personal, null, Path.Combine(machine.Home, ".alta")).Installed);
+        Assert.AreEqual(root, ServiceManager.WindowsDataRoot($"BINARY_PATH_NAME   : C:\\tools\\altanode.exe run --data-root \"{root}\" --service\n"));
+
+        // A service of the default profile of another person (no data root, their account) is not this person's.
+        Assert.AreEqual(ServiceManager.Success, manager.Uninstall(plan, new StringWriter(), new StringWriter()));
+        var other = manager.Plan(Request(machine) with { Scope = ServiceScope.System, Account = @".\codealta", StateRoot = null, Executable = new ServiceExecutable(ServiceExecutableKind.Executable, exe, []) });
+        Assert.AreEqual(ServiceManager.Success, manager.Install(other, new StringWriter(), new StringWriter(), "pw"));
+        Assert.IsFalse(manager.QueryInstalled(personal, null, Path.Combine(machine.Home, ".alta")).Installed, "the service of the account codealta");
+    }
+
+    // The commands that make a node start at boot keep its options and its profile, and on Windows its person: a service of
+    // its own account would start another profile, with another identity and none of its pairings.
+    [TestMethod]
+    public void TheCommandsToStartAtBoot_KeepTheOptionsAndTheProfileOfTheNode()
+    {
+        CollectionAssert.AreEqual(new[] { "--listen-all", "--port", "2585", "--data-root", "/home/alice/.alta node" },
+            NodeServiceStatus.RunOptions(["/opt/altanode.dll", "run", "--listen-all", "--port", "2585", "--data-root", "/home/alice/.alta node", "--service"]).ToArray());
+        string[] options = ["--listen-all", "--port", "2585", "--data-root", "/Users/alice/.alta node"];
+        using var mac = new FakeServiceMachine(ServicePlatform.MacOS);
+        var agent = new ServiceFacts(UpdateProduct.Node, ServicePlatform.MacOS, ServiceScope.User, "a LaunchAgent", "x", "alice", true, true, null, null);
+        Assert.AreEqual("altanode secrets key-file --data-root '/Users/alice/.alta node' && altanode uninstall --data-root '/Users/alice/.alta node' && "
+            + "sudo altanode install --system --account alice --listen-all --port 2585 --data-root '/Users/alice/.alta node'", NodeServiceStatus.Fix(mac.Environment, agent, options),
+            "each step only once the one before succeeded, on the same profile");
+        StringAssert.StartsWith(NodeServiceStatus.Fix(mac.Environment, agent, ["--dev"]), "altanode secrets key-file --dev && altanode uninstall --dev && ", "the developer instance, not the normal one");
+        using var windows = new FakeServiceMachine(ServicePlatform.Windows);
+        var task = agent with { Platform = ServicePlatform.Windows };
+        var fix = NodeServiceStatus.Fix(windows.Environment, task, ["--port", "2585"]);
+        StringAssert.StartsWith(fix, "altanode uninstall\naltanode install --system --account ");
+        StringAssert.EndsWith(fix, " --password-stdin --port 2585");
+        // A name of the node is a word for PowerShell, never a statement.
+        StringAssert.EndsWith(NodeServiceStatus.Fix(windows.Environment, task, ["--name", "lab;Write-Output 'x'", "--data-root", @"C:\n odes\a"]),
+            @" --name 'lab;Write-Output ''x''' --data-root 'C:\n odes\a'");
+        StringAssert.StartsWith(NodeServiceStatus.Fix(windows.Environment, task, ["--data-root", @"C:\n odes\a"]), @"altanode uninstall --data-root 'C:\n odes\a'" + "\n");
+        Assert.IsNull(NodeServiceStatus.Fix(windows.Environment, task, ["--name", "lab&echo.x"]), "the batch file of a .NET tool would run what follows &");
+        StringAssert.StartsWith(NodeServiceStatus.Fix(mac.Environment, agent, ["--data-root=/Users/alice/n"]), "altanode secrets key-file --data-root=/Users/alice/n && altanode uninstall --data-root=/Users/alice/n && ");
+        using var linux = new FakeServiceMachine(ServicePlatform.Linux);
+        Assert.AreEqual("sudo loginctl enable-linger alice", NodeServiceStatus.Fix(linux.Environment, agent with { Platform = ServicePlatform.Linux }, options));
     }
 
     [TestMethod]
