@@ -103,6 +103,31 @@ test("the computer that manages a machine sees why each provider is not ready, g
   }, options);
 });
 
+test("the computer that manages a machine signs it in from here: the page opens in this browser, and the machine keeps the sign-in", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    const section = ".machine-signins-section";
+    await page.until(`document.querySelectorAll('${section} li').length === 2`, "the sign-ins of the machine");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('${section} li')].map(row => row.dataset.state)`), ["signed_out", "signed_in"]);
+    await page.evaluate(`document.querySelector('${section}').scrollIntoView({ block: "nearest" })`);
+    await page.shot("machine-signins");
+
+    // Codex signs in with the browser of this computer: the dialog follows the machine until it is signed in.
+    await page.clickText(`${section} .bp6-button`, "Sign in…");
+    await page.until(`document.querySelector('.machine-provider-signin-dialog [role=status]')?.textContent.includes('browser that opened on this computer')`, "the browser opened");
+    await page.until(`document.querySelector('.machine-provider-signin-dialog [role=status]')?.textContent.includes('signed in on build-box as me@example.com')`, "signed in");
+    await page.clickText(".machine-provider-signin-dialog .bp6-button", "Done");
+    await page.until(`document.querySelector('${section} li')?.dataset.state === 'signed_in'`, "Codex signed in");
+
+    // Sign out: the machine deletes the tokens of the MCP server.
+    await page.clickText(`${section} li:nth-child(2) .bp6-button`, "Sign out");
+    await page.until(`window.machineFixture.calls.some(call => call.includes('signOut'))`, "the sign-out asked");
+    const asked = (await calls(page)).filter(call => call.signInStart || call.signOut);
+    assert.deepEqual(asked.filter((call, index, all) => all.findIndex(other => JSON.stringify(other) === JSON.stringify(call)) === index),
+      [{ signInStart: ["provider", "codex"] }, { signOut: ["mcp", "linear"] }]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the computer that manages a machine sets, rotates and deletes its secrets and edits its variables, never seeing a value back", { skip: !edge, timeout: 90_000 },
   async () => {
     await withCanvas(async page => {

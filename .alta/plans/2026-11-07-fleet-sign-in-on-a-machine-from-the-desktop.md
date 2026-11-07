@@ -115,20 +115,20 @@ The readiness of an automation ("Why can't this machine run it?") names a missin
 ## Steps
 
 - [x] 1. Team machines, regression test first: a session another person starts on a team machine with a provider of the personal kind is refused with the reason, and so are its sub-sessions, fallbacks and tiers. Then refuse it at the node (`FleetNodeService` start and prompt paths, reusing `NodeAutomations.CredentialKindOf`), and list only account providers in the desktop's start dialog for such a machine. Tests in `TeamMachineSessionsTests`. Independent of the rest; can land first.
-- [ ] 2. `FleetLoopbackRedirect`: listen on a given loopback address and path, return the whole callback address; ports of 1024 and up on loopback only. Tests in `FleetLoopbackRedirectTests`.
-- [ ] 3. Node API:
+- [x] 2. `FleetLoopbackRedirect`: listen on a given loopback address and path, return the whole callback address; ports of 1024 and up on loopback only. Tests in `FleetLoopbackRedirectTests`.
+- [x] 3. Node API:
    - contracts (`FleetNodeContracts.cs`), client methods (`FleetNodeClient.cs`), JSON context;
    - handlers in `FleetNodeService.SignIns.cs`, with the access of providers and secrets, logging;
    - `control.providers.signin` kept as a shortcut;
    - the node side in `src/CodeAlta.Node/NodeSignIns.cs`, which dispatches by kind;
    - tests in `FleetNodeManagementTests`.
-- [ ] 4. Providers: forwarded browser sign-in for Codex (an overload of `OpenAICodexSubscriptionLoginManager.BeginBrowserLoginAsync` that takes the redirect and starts no listener) and Mistral Vibe (`MistralVibeLogin`). `ConfiguredProviderLogin` gains the forwarded mode. Tests with fake authorization servers.
-- [ ] 5. MCP: `McpRuntimeRequest` takes a redirect and a forwarded authorization; overload of `McpManagementService.LoginOAuthAsync`; the node lists its servers and their token state (`RefreshSnapshot`, `OAuthTokenCached`). Tests with a fake authorization server with dynamic registration (built like `FakeOidcProvider` of `CodeAlta.Server.Tests`) and `CodeAlta.Tests.TinyMcpServer`.
+- [x] 4. Providers: forwarded browser sign-in for Codex (an overload of `OpenAICodexSubscriptionLoginManager.BeginBrowserLoginAsync` that takes the redirect and starts no listener) and Mistral Vibe (`MistralVibeLogin`). `ConfiguredProviderLogin` gains the forwarded mode. Tests with fake authorization servers.
+- [x] 5. MCP: `McpRuntimeRequest` takes a redirect and a forwarded authorization; overload of `McpManagementService.LoginOAuthAsync`; the node lists its servers and their token state (`RefreshSnapshot`, `OAuthTokenCached`). Tests with a fake authorization server with dynamic registration (built like `FakeOidcProvider` of `CodeAlta.Server.Tests`) and `CodeAlta.Tests.TinyMcpServer`.
 - [ ] 6. Plugin providers: Codex CLI and ACP agents sign in through `IPluginProviderAccount.SignInAsync` with prompts.
 - [ ] 7. CLI sign-ins: first record, for `gh`, `az`, `codex` and `claude`, the flags and what each prints without a terminal. Then the allowlist runner with the space's identity environment, the parsing, the input relay and the loopback relay. Tests with fake CLIs that print what the real ones print.
 - [ ] 8. Claude Code: `claude setup-token` on the node; the token kept as a secret of the node and referenced from the provider's environment (`${secret:NAME}` resolved there); masked.
-- [ ] 9. Desktop: `MachinesRpc.SignIns.cs` (list, start, open the page, listen, forward, wait, cancel, sign out). Tests in `MachineManagementTests`.
-- [ ] 10. Machine page: the **Sign-ins** section (`MachinePage.tsx`, `machines.ts`); the automation readiness links to a missing sign-in. Tests in `machinePage.browser.test.ts` and `machines.test.ts`.
+- [x] 9. Desktop: `MachinesRpc.SignIns.cs` (list, start, open the page, listen, forward, wait, cancel, sign out). Tests in `MachineManagementTests`.
+- [x] 10. Machine page: the **Sign-ins** section (`MachinePage.tsx`, `machines.ts`); the automation readiness links to a missing sign-in. Tests in `machinePage.browser.test.ts` and `machines.test.ts`.
 - [ ] 11. Docs:
    - `site/docs/fleet/machines.md`: signing a machine in;
    - `doc/mcp.md`: OAuth on a node;

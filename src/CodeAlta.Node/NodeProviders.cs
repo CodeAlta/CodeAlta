@@ -195,6 +195,28 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
         }
     }
 
+    /// <summary>Makes a provider that was just signed in ready: enabled, and the providers started again, without a restart.</summary>
+    /// <param name="definition">The provider.</param>
+    internal void SignedIn(CodeAltaProviderDocument definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        lock (_gate)
+        {
+            var store = Store;
+            if (definition.Enabled == false)
+            {
+                var raw = (store.LoadGlobal().Providers ?? []).Select(static pair => { pair.Value.ProviderKey = pair.Key; return pair.Value; }).ToList();
+                if (raw.FirstOrDefault(value => string.Equals(value.ProviderKey, definition.ProviderKey, StringComparison.OrdinalIgnoreCase)) is { } written)
+                {
+                    written.Enabled = true;
+                    store.SaveGlobalProviderDefinitions(raw);
+                }
+            }
+
+            Apply(store, definition.ProviderKey);
+        }
+    }
+
     // The sign-in, run beside the calls that started it: its first prompt is the code the desktop shows; once signed in, the
     // provider is enabled and the providers are started again, so that it is ready without a restart. Never throws.
     private Task<FleetProviderSignInState> RunSignInAsync(CodeAltaProviderDocument definition, SignIn signIn) => Task.Run(async () =>
@@ -207,24 +229,7 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
                 signIn.Prompt.TrySetResult(prompt);
                 return ValueTask.CompletedTask;
             }, lifetime.Token).ConfigureAwait(false);
-            if (status.Usable)
-            {
-                lock (_gate)
-                {
-                    var store = Store;
-                    if (definition.Enabled == false)
-                    {
-                        var raw = (store.LoadGlobal().Providers ?? []).Select(static pair => { pair.Value.ProviderKey = pair.Key; return pair.Value; }).ToList();
-                        if (raw.FirstOrDefault(value => string.Equals(value.ProviderKey, definition.ProviderKey, StringComparison.OrdinalIgnoreCase)) is { } written)
-                        {
-                            written.Enabled = true;
-                            store.SaveGlobalProviderDefinitions(raw);
-                        }
-                    }
-
-                    Apply(store, definition.ProviderKey);
-                }
-            }
+            if (status.Usable) SignedIn(definition);
 
             return new FleetProviderSignInState(definition.ProviderKey, status.SignedIn ? "completed" : "failed", status.Account, status.SignedIn ? null : "login_failed");
         }

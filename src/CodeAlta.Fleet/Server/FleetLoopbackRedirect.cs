@@ -35,12 +35,73 @@ public sealed class FleetLoopbackRedirect : IDisposable
     private const int PortAttempts = 8;
 
     private readonly TcpListener[] _listeners;
+    private readonly string _path;
     private int _disposed;
 
     private FleetLoopbackRedirect(TcpListener[] listeners, string host)
     {
         _listeners = listeners;
+        _path = CallbackPath;
         RedirectUri = $"http://{host}:{((IPEndPoint)listeners[0].LocalEndpoint).Port}{CallbackPath}";
+    }
+
+    private FleetLoopbackRedirect(TcpListener[] listeners, Uri redirect)
+    {
+        _listeners = listeners;
+        _path = redirect.AbsolutePath;
+        RedirectUri = redirect.GetLeftPart(UriPartial.Path);
+    }
+
+    /// <summary>
+    /// Starts a listener on the exact loopback address a sign-in of another machine names (a node that a desktop signs in): its
+    /// port and its path. <c>localhost</c> is listened on for IPv4 and IPv6, as the browser may resolve either.
+    /// </summary>
+    /// <param name="redirect">The address: <c>http</c>, a loopback host, a port of 1024 and up.</param>
+    /// <returns>The listener.</returns>
+    /// <exception cref="ArgumentException">The address is not an <c>http</c> loopback address with a port of 1024 and up.</exception>
+    /// <exception cref="SocketException">The port is taken on this computer.</exception>
+    public static FleetLoopbackRedirect StartAt(Uri redirect)
+    {
+        ArgumentNullException.ThrowIfNull(redirect);
+        if (!redirect.IsAbsoluteUri || redirect.Scheme != Uri.UriSchemeHttp || !redirect.IsLoopback || redirect.IsDefaultPort || redirect.Port < 1024)
+            throw new ArgumentException("A sign-in comes back to an http loopback address with a port of 1024 and up.", nameof(redirect));
+        var addresses = redirect.HostNameType switch
+        {
+            UriHostNameType.IPv4 => [IPAddress.Loopback],
+            UriHostNameType.IPv6 => [IPAddress.IPv6Loopback],
+            _ => Socket.OSSupportsIPv6 ? new[] { IPAddress.Loopback, IPAddress.IPv6Loopback } : [IPAddress.Loopback],
+        };
+        var listeners = new List<TcpListener>(addresses.Length);
+        try
+        {
+            foreach (var address in addresses)
+            {
+                var listener = new TcpListener(address, redirect.Port);
+                listener.Start();
+                listeners.Add(listener);
+            }
+        }
+        catch
+        {
+            foreach (var listener in listeners) listener.Stop();
+            throw;
+        }
+
+        return new FleetLoopbackRedirect([.. listeners], redirect);
+    }
+
+    /// <summary>
+    /// Waits for the browser to come back with the state of the sign-in, as <see cref="WaitAsync(string, CancellationToken)"/> does, and gives the whole
+    /// address it came back to (its path and its query), for a sign-in another machine completes.
+    /// </summary>
+    /// <param name="state">The state the browser must bring back.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <returns>What the browser brought back, and the address with its query.</returns>
+    /// <exception cref="OperationCanceledException">The wait was cancelled.</exception>
+    public async Task<(FleetLoopbackAnswer Answer, Uri Callback)> WaitForCallbackAsync(string state, CancellationToken cancellationToken)
+    {
+        var (answer, target) = await WaitCoreAsync(state, cancellationToken).ConfigureAwait(false);
+        return (answer, new Uri(new Uri(RedirectUri), target));
     }
 
     /// <summary>Gets the address the browser comes back to.</summary>
@@ -90,6 +151,9 @@ public sealed class FleetLoopbackRedirect : IDisposable
     /// <returns>What the browser brought back.</returns>
     /// <exception cref="OperationCanceledException">The wait was cancelled.</exception>
     public async Task<FleetLoopbackAnswer> WaitAsync(string state, CancellationToken cancellationToken)
+        => (await WaitCoreAsync(state, cancellationToken).ConfigureAwait(false)).Answer;
+
+    private async Task<(FleetLoopbackAnswer Answer, string Target)> WaitCoreAsync(string state, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(state);
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -110,7 +174,7 @@ public sealed class FleetLoopbackRedirect : IDisposable
         }
     }
 
-    private async Task<FleetLoopbackAnswer> WaitAsync(string state, Task<TcpClient>[] accepting, CancellationToken acceptToken, CancellationToken cancellationToken)
+    private async Task<(FleetLoopbackAnswer Answer, string Target)> WaitAsync(string state, Task<TcpClient>[] accepting, CancellationToken acceptToken, CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -132,7 +196,7 @@ public sealed class FleetLoopbackRedirect : IDisposable
                 continue;
             }
 
-            var answer = Parse(line);
+            var (answer, target) = Parse(line, _path);
             if (answer is null || !string.Equals(answer.State, state, StringComparison.Ordinal))
             {
                 await RespondAsync(stream, 404, "This is not the sign-in CodeAlta waits for.", reading.Token).ConfigureAwait(false);
@@ -141,7 +205,7 @@ public sealed class FleetLoopbackRedirect : IDisposable
 
             await RespondAsync(stream, 200, answer.Error is null ? "You are signed in. You can close this window and go back to CodeAlta."
                 : "The sign-in did not complete. You can close this window and go back to CodeAlta.", reading.Token).ConfigureAwait(false);
-            return answer;
+            return (answer, target!);
         }
     }
 
@@ -152,12 +216,13 @@ public sealed class FleetLoopbackRedirect : IDisposable
         foreach (var listener in _listeners) listener.Stop();
     }
 
-    private static FleetLoopbackAnswer? Parse(string? line)
+    private static (FleetLoopbackAnswer? Answer, string? Target) Parse(string? line, string path)
     {
         // GET /callback?code=...&state=... HTTP/1.1
         var parts = line?.Split(' ');
-        if (parts is not { Length: 3 } || parts[0] != "GET" || !parts[1].StartsWith(CallbackPath, StringComparison.Ordinal)) return null;
-        var query = parts[1].Length > CallbackPath.Length && parts[1][CallbackPath.Length] == '?' ? parts[1][(CallbackPath.Length + 1)..] : string.Empty;
+        if (parts is not { Length: 3 } || parts[0] != "GET" || !parts[1].StartsWith(path, StringComparison.Ordinal)
+            || parts[1].Length > path.Length && parts[1][path.Length] != '?') return (null, null);
+        var query = parts[1].Length > path.Length ? parts[1][(path.Length + 1)..] : string.Empty;
         string? code = null, state = null, error = null;
         foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -172,7 +237,7 @@ public sealed class FleetLoopbackRedirect : IDisposable
             }
         }
 
-        return state is null || code is null && error is null ? null : new FleetLoopbackAnswer(code, state, error);
+        return state is null || code is null && error is null ? (null, null) : (new FleetLoopbackAnswer(code, state, error), parts[1]);
     }
 
     private static async Task<string?> ReadRequestLineAsync(NetworkStream stream, CancellationToken cancellationToken)

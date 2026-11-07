@@ -52,6 +52,13 @@ internal sealed record McpRuntimeRequest
 
     /// <summary>How long a browser login waits for the browser; the connection's startup budget is extended by as much.</summary>
     public TimeSpan OAuthBrowserTimeout { get; init; } = McpOAuthBrowserAuthorization.DefaultTimeout;
+
+    /// <summary>
+    /// The browser of another computer (a desktop that signs a node in), in place of the browser and the listener of this one:
+    /// it is given the page to open and the loopback address its browser comes back to, and returns the callback it caught.
+    /// The code verifier stays here, where the code is exchanged and the tokens kept. Null for this computer's browser.
+    /// </summary>
+    public McpOAuthForwardedAuthorize? OAuthForwarded { get; init; }
 }
 
 internal sealed record McpRuntimeDiagnostic
@@ -1239,7 +1246,11 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
                 }
                 : null,
         };
-        if (request.AllowOAuthBrowserLogin)
+        if (request.AllowOAuthBrowserLogin && request.OAuthForwarded is { } forwarded)
+        {
+            options.AuthorizationCallbackHandler = (authorization, cancellationToken) => McpOAuthForwarding.AuthorizeAsync(authorization, forwarded, request.OAuthStatus, cancellationToken);
+        }
+        else if (request.AllowOAuthBrowserLogin)
         {
             var browser = new McpOAuthBrowserAuthorization(request.OAuthStatus, request.OAuthPrompt, request.OpenOAuthBrowser, request.OAuthBrowserTimeout);
             options.AuthorizationCallbackHandler = browser.AuthorizeAsync;

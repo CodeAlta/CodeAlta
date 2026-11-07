@@ -13,10 +13,39 @@ internal sealed class OpenAICodexSubscriptionLoginManager(
 {
     public async ValueTask<OpenAICodexSubscriptionBrowserLogin> BeginBrowserLoginAsync(string hostId, CancellationToken cancellationToken = default)
     {
+        var listener = StartListener();
+        try
+        {
+            return await BeginBrowserLoginAsync(hostId, listener.Prefixes.Single() + "auth/callback", listener, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            listener.Close();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Begins a sign-in whose browser comes back to another computer (a desktop that signs a node in): no listener here, the
+    /// callback that computer forwards completes it (<see cref="CompleteBrowserLoginAsync"/>).
+    /// </summary>
+    public ValueTask<OpenAICodexSubscriptionBrowserLogin> BeginForwardedBrowserLoginAsync(string hostId, string redirectUri, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(redirectUri);
+        // Dynamic registrations permit the loopback port to vary, but not its host/path.
+        var redirect = new Uri(redirectUri);
+        if (redirect.Host != "127.0.0.1" || redirect.AbsolutePath != CallbackPath)
+            throw new ArgumentException($"A ChatGPT sign-in comes back to http://127.0.0.1:<port>{CallbackPath}.", nameof(redirectUri));
+        return BeginBrowserLoginAsync(hostId, redirectUri, null, cancellationToken);
+    }
+
+    /// <summary>The path a ChatGPT sign-in comes back to on the loopback.</summary>
+    public const string CallbackPath = "/auth/callback";
+
+    private async ValueTask<OpenAICodexSubscriptionBrowserLogin> BeginBrowserLoginAsync(string hostId, string redirectUri, HttpListener? listener, CancellationToken cancellationToken)
+    {
         var saved = await credentialStore.LoadAsync(providerKey, cancellationToken).ConfigureAwait(false);
         var registration = IsRegistration(saved) || IsPendingRegistration(saved, hostId) ? saved : null;
-        var listener = StartListener();
-        var redirectUri = listener.Prefixes.Single() + "auth/callback";
         var pkce = OpenAICodexSubscriptionOAuthClient.CreatePkce();
         var state = OpenAICodexSubscriptionOAuthClient.CreateState();
         var nonce = OpenAICodexSubscriptionOAuthClient.CreateState();
@@ -97,7 +126,8 @@ internal sealed class OpenAICodexSubscriptionLoginManager(
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(10));
-        return await WaitForBrowserCallbackAsync(login.Listener.GetContextAsync, login.Listener.Stop, login.Dispose,
+        var listener = login.Listener ?? throw new InvalidOperationException("This sign-in comes back to another computer: its callback completes it.");
+        return await WaitForBrowserCallbackAsync(listener.GetContextAsync, listener.Stop, login.Dispose,
             (uri, token) => CompleteBrowserLoginAsync(login, uri, token), timeout.Token, cancellationToken).ConfigureAwait(false);
     }
 
@@ -245,7 +275,7 @@ internal sealed class OpenAICodexSubscriptionLoginManager(
 
 internal sealed class OpenAICodexSubscriptionBrowserLogin(
     Uri authorizeUri, OpenAICodexSubscriptionPkce pkce, string state, string nonce, string hostId,
-    string redirectUri, OpenAICodexSubscriptionCredential? registration, HttpListener listener) : IDisposable
+    string redirectUri, OpenAICodexSubscriptionCredential? registration, HttpListener? listener) : IDisposable
 {
     private int _consumed;
     private readonly DateTimeOffset _expiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
@@ -256,7 +286,8 @@ internal sealed class OpenAICodexSubscriptionBrowserLogin(
     public string HostId { get; } = hostId;
     public string RedirectUri { get; } = redirectUri;
     public OpenAICodexSubscriptionCredential? Registration { get; } = registration;
-    public HttpListener Listener { get; } = listener;
+    /// <summary>Gets the listener the browser comes back to; null for a sign-in whose browser comes back to another computer.</summary>
+    public HttpListener? Listener { get; } = listener;
 
     public void Consume()
     {
@@ -266,5 +297,5 @@ internal sealed class OpenAICodexSubscriptionBrowserLogin(
         }
     }
 
-    public void Dispose() => Listener.Close();
+    public void Dispose() => Listener?.Close();
 }

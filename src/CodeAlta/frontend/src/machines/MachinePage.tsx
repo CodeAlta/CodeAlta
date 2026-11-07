@@ -10,6 +10,7 @@ import type { MessageKey } from "../localization";
 import { machineIntent, machineState, machineStateLabel } from "./machines";
 import { parseLabels } from "../fleet/fleetSecrets";
 import { MachineProviders } from "./MachineProviders";
+import { MachineSignIns } from "./MachineSignIns";
 import { formatSize } from "../search/SearchSettings";
 import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, isMachineLabel, managementProblem, orderedDevices, permissionLabel, permissionsEditable, projectSource,
   updateSummary, type DevicePermission } from "./machineManagement";
@@ -17,7 +18,8 @@ import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devic
 /** The calls of the page of a machine. */
 export type MachinePageApi = Pick<typeof machines, "management" | "setDevicePermission" | "revokeDevice" | "addProject" | "cloneProject" | "removeProject"
   | "readLog" | "updateMachine" | "secrets" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable"
-  | "sessionDefaults" | "setSessionPermissionMode" | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "people" | "setMachinePerson" | "labels" | "setLabels" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait">;
+  | "sessionDefaults" | "setSessionPermissionMode" | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "people" | "setMachinePerson" | "labels" | "setLabels" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait"
+  | "signIns" | "signInStart" | "signInWait" | "signInCode" | "signInCancel" | "signOut">;
 
 type Problem = { key: MessageKey; detail?: string | null } | null;
 
@@ -98,6 +100,7 @@ export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch:
     </>}
     {/* A computer that manages the machine sees each provider, why it is not ready, and gives it a key or signs it in; the others see the ready ones. */}
     {view?.status === "ok" && <MachineProviders epoch={epoch} machine={machine} api={api} />}
+    {view?.status === "ok" && <MachineSignIns epoch={epoch} machine={machine} api={api} />}
     {view?.status === "not_manager" && <ProvidersSection view={view} machine={machine} />}
     {view?.status === "ok" && <>
       <SecretsSection epoch={epoch} machine={machine} api={api} />

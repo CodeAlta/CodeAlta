@@ -38,6 +38,28 @@ public sealed class FleetLoopbackRedirectTests
         Assert.AreEqual("the-code", (await AnswerAsync(other, IPAddress.IPv6Loopback)).Code, "a browser that resolved localhost to [::1]");
     }
 
+    // A machine signed in from this computer names the address its sign-in comes back to: the listener takes that port and that
+    // path, and gives the whole callback, which goes back to the machine.
+    [TestMethod]
+    public async Task TheRedirectAMachineNames_IsListenedOnExactly_AndGivesTheWholeCallback()
+    {
+        var token = TestContext.CancellationToken;
+        int port;
+        using (var free = new TcpListener(IPAddress.Loopback, 0)) { free.Start(); port = ((IPEndPoint)free.LocalEndpoint).Port; }
+        Assert.ThrowsExactly<ArgumentException>(() => FleetLoopbackRedirect.StartAt(new Uri($"https://127.0.0.1:{port}/auth/callback")));
+        using var redirect = FleetLoopbackRedirect.StartAt(new Uri($"http://127.0.0.1:{port}/auth/callback"));
+        Assert.AreEqual($"http://127.0.0.1:{port}/auth/callback", redirect.RedirectUri);
+        Assert.ThrowsExactly<SocketException>(() => FleetLoopbackRedirect.StartAt(new Uri($"http://127.0.0.1:{port}/auth/callback")), "the port is taken");
+
+        var waiting = redirect.WaitForCallbackAsync("s1", token);
+        using var browser = new HttpClient();
+        Assert.AreEqual(HttpStatusCode.NotFound, (await browser.GetAsync($"http://127.0.0.1:{port}/callback?code=c&state=s1", token)).StatusCode, "another path");
+        Assert.AreEqual(HttpStatusCode.OK, (await browser.GetAsync($"http://127.0.0.1:{port}/auth/callback?code=c&state=s1&client_id=app", token)).StatusCode);
+        var (answer, callback) = await waiting;
+        Assert.AreEqual("c", answer.Code);
+        Assert.AreEqual($"http://127.0.0.1:{port}/auth/callback?code=c&state=s1&client_id=app", callback.AbsoluteUri);
+    }
+
     // The browser coming back: one request on the port of the redirect, at the address given.
     private async Task<FleetLoopbackAnswer> AnswerAsync(FleetLoopbackRedirect redirect, IPAddress address)
     {

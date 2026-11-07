@@ -733,6 +733,60 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.ControlProvidersSignInWait, new FleetProviderSignInWaitParams(key, waitSeconds), FleetNodeJsonContext.Default.FleetProviderSignInWaitParams,
             FleetNodeJsonContext.Default.FleetProviderSignInState, null, cancellationToken);
 
+    /// <summary>The owner's local control, or a paired device that manages the machine: what the machine signs in and how each stands.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Its providers, MCP servers and tools.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetMachineSignInList> ListSignInsAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlSignInsList, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMachineSignInList, null,
+            cancellationToken);
+
+    /// <summary>The owner's local control, or a paired device that manages the machine: starts a sign-in the machine keeps.</summary>
+    /// <param name="parameters">What to sign in, and how.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>What this computer does: open a page and catch its redirect, show a code, or ask for a pasted code.</returns>
+    /// <exception cref="FleetException">The node refused the call (<see cref="FleetNodeErrorCodes.SignInUnsupported"/>, <see cref="FleetNodeErrorCodes.SignInTargetNotFound"/>).</exception>
+    public Task<FleetMachineSignInPrompt> StartSignInAsync(FleetMachineSignInStartParams parameters, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlSignInsStart, parameters, FleetNodeJsonContext.Default.FleetMachineSignInStartParams,
+            FleetNodeJsonContext.Default.FleetMachineSignInPrompt, null, cancellationToken);
+
+    /// <summary>The owner's local control, or a paired device that manages the machine: gives a sign-in the callback of the browser or a pasted code.</summary>
+    /// <param name="parameters">The attempt, and what it is given.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Where the sign-in stands.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetMachineSignInState> CompleteSignInAsync(FleetMachineSignInCompleteParams parameters, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlSignInsComplete, parameters, FleetNodeJsonContext.Default.FleetMachineSignInCompleteParams,
+            FleetNodeJsonContext.Default.FleetMachineSignInState, null, cancellationToken);
+
+    /// <summary>The owner's local control, or a paired device that manages the machine: waits a while for a sign-in to end.</summary>
+    /// <param name="attemptId">The attempt.</param>
+    /// <param name="waitSeconds">How long the node waits before it answers <c>waiting</c>: 0 to 25.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Where the sign-in stands.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetMachineSignInState> WaitSignInAsync(string attemptId, int waitSeconds, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlSignInsWait, new FleetMachineSignInWaitParams(attemptId, waitSeconds), FleetNodeJsonContext.Default.FleetMachineSignInWaitParams,
+            FleetNodeJsonContext.Default.FleetMachineSignInState, null, cancellationToken);
+
+    /// <summary>The owner's local control, or a paired device that manages the machine: ends a sign-in that waits.</summary>
+    /// <param name="attemptId">The attempt.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Where the sign-in stands.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetMachineSignInState> CancelSignInAsync(string attemptId, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlSignInsCancel, new FleetMachineSignInAttemptRef(attemptId), FleetNodeJsonContext.Default.FleetMachineSignInAttemptRef,
+            FleetNodeJsonContext.Default.FleetMachineSignInState, null, cancellationToken);
+
+    /// <summary>The owner's local control, or a paired device that manages the machine: signs a provider, an MCP server or a tool out on the machine.</summary>
+    /// <param name="target">What to sign out.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>It as it stands now.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetMachineSignInItem> SignOutAsync(FleetMachineSignInTarget target, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlSignInsSignOut, target, FleetNodeJsonContext.Default.FleetMachineSignInTarget,
+            FleetNodeJsonContext.Default.FleetMachineSignInItem, null, cancellationToken);
+
     /// <summary>The owner's local control: revokes a device and closes its channels.</summary>
     /// <param name="device">The device: its id, its name, or the start of its id.</param>
     /// <param name="cancellationToken">Cancels the call.</param>

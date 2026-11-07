@@ -217,6 +217,51 @@ public sealed class FleetNodeManagementTests
         }
     }
 
+    // The sign-ins a node keeps for itself, made from the desktop (doc/fleet/node.md, credentials on a node): the node starts a
+    // browser sign-in and names the loopback address of the desktop its browser comes back to; the code verifier stays here.
+    [TestMethod]
+    public async Task Manager_StartsABrowserSignInOnTheMachine_WhoseRedirectIsALoopbackOfTheDesktop()
+    {
+        await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        var store = new CodeAlta.Catalog.CodeAltaConfigStore(fixture.Node.Host.CatalogOptions);
+        store.SaveGlobalProviderDefinitions([new CodeAlta.Catalog.CodeAltaProviderDocument { ProviderKey = "codex", ProviderType = "codex", Enabled = false }]);
+        var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: true, token);
+        var otherMachine = await fixture.PairAsync(fixture.Other, "phone", manages: false, token);
+        await using var manager = await FleetNodeClient.ConnectAsync(ownerMachine, fixture.Owner, token);
+        await using var other = await FleetNodeClient.ConnectAsync(otherMachine, fixture.Other, token);
+
+        var codex = (await manager.ListSignInsAsync(token)).Items.Single(static item => item.Kind == FleetMachineSignInKinds.Provider && item.Key == "codex");
+        Assert.AreEqual(FleetMachineSignInStates.SignedOut, codex.State);
+        CollectionAssert.AreEqual(new[] { FleetMachineSignInWays.Browser }, codex.Ways.ToArray(), "Codex signs in with a browser, which can be the desktop's");
+
+        var prompt = await manager.StartSignInAsync(new FleetMachineSignInStartParams(FleetMachineSignInKinds.Provider, "codex"), token);
+        Assert.AreEqual(FleetMachineSignInWays.Browser, prompt.Way);
+        var redirect = new Uri(prompt.Redirect!);
+        Assert.AreEqual(("127.0.0.1", "/auth/callback"), (redirect.Host, redirect.AbsolutePath), "the desktop listens there");
+        var page = new Uri(prompt.Page!);
+        Assert.AreEqual(Uri.UriSchemeHttps, page.Scheme);
+        StringAssert.Contains(Uri.UnescapeDataString(page.Query), "redirect_uri=" + redirect.AbsoluteUri);
+        StringAssert.Contains(page.Query, "code_challenge=", "the verifier stays on the machine: only its challenge goes");
+        Assert.AreEqual(prompt.AttemptId, (await manager.StartSignInAsync(new FleetMachineSignInStartParams(FleetMachineSignInKinds.Provider, "codex"), token)).AttemptId,
+            "a start while one waits gives it again");
+
+        // A callback that is not the one it waits for is refused; a cancelled sign-in ends.
+        Assert.AreEqual(FleetNodeErrorCodes.SignInFailed, (await Assert.ThrowsExactlyAsync<FleetException>(() => manager.CompleteSignInAsync(
+            new FleetMachineSignInCompleteParams(prompt.AttemptId, $"http://127.0.0.1:{redirect.Port}/elsewhere?code=x&state=y"), token))).Error.Code);
+        Assert.AreEqual(FleetMachineSignInStates.Waiting, (await manager.WaitSignInAsync(prompt.AttemptId, 0, token)).Status);
+        var cancelled = await manager.CancelSignInAsync(prompt.AttemptId, token);
+        Assert.AreEqual((FleetMachineSignInStates.Failed, "canceled"), (cancelled.Status, cancelled.Code));
+
+        // What has no sign-in from here, or is not there, says so; a device that does not manage the machine signs nothing in.
+        Assert.AreEqual(FleetNodeErrorCodes.SignInTargetNotFound, (await Assert.ThrowsExactlyAsync<FleetException>(() => manager.StartSignInAsync(
+            new FleetMachineSignInStartParams(FleetMachineSignInKinds.Provider, "nothing"), token))).Error.Code);
+        Assert.AreEqual(FleetNodeErrorCodes.SignInUnsupported, (await Assert.ThrowsExactlyAsync<FleetException>(() => manager.StartSignInAsync(
+            new FleetMachineSignInStartParams(FleetMachineSignInKinds.Provider, "codex", Way: FleetMachineSignInWays.Device), token))).Error.Code);
+        Assert.AreEqual(FleetErrorCodes.Forbidden, (await Assert.ThrowsExactlyAsync<FleetException>(() => other.StartSignInAsync(
+            new FleetMachineSignInStartParams(FleetMachineSignInKinds.Provider, "codex"), token))).Error.Code);
+    }
+
     [TestMethod]
     public async Task AProviderThatFails_NeverGivesItsKeyBackInWhyItFailed()
     {

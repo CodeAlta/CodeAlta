@@ -47,6 +47,9 @@ public sealed class FleetNodeServiceOptions
     /// </summary>
     public Func<CodeAlta.Agent.ModelProviderDescriptor, bool>? IsPersonalProvider { get; init; }
 
+    /// <summary>Gets the sign-ins the node keeps for itself, made from the desktop that manages it; null for a host that has none.</summary>
+    public IFleetNodeSignIns? SignIns { get; init; }
+
     /// <summary>Gets the addresses a pairing offer names: those the node listens on, as <c>host:port</c>.</summary>
     public Func<IReadOnlyList<string>> PairingAddresses { get; init; } = static () => [];
 
@@ -422,6 +425,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             // The secrets of the machine: its owner, on the machine, manages them.
             RegisterSecrets(caller, Access.Owner);
             RegisterProviders(caller, Access.Owner, Access.Owner);
+            RegisterSignIns(caller, Access.Owner, Access.Owner);
             RegisterAgentPolicy(caller, Access.Owner);
             RegisterSessionDefaults(caller, Access.Owner);
             RegisterLabels(caller, Access.Owner);
@@ -500,6 +504,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         RegisterSecrets(caller, Access.ManagePaired);
         // Its providers are read by any device that manages it; a key or a sign-in, a credential of the machine, by a paired one only.
         RegisterProviders(caller, Access.Manage, Access.ManagePaired);
+        RegisterSignIns(caller, Access.Manage, Access.ManagePaired);
         RegisterAgentPolicy(caller, Access.Manage);
         RegisterSessionDefaults(caller, Access.Manage);
         RegisterLabels(caller, Access.Manage);

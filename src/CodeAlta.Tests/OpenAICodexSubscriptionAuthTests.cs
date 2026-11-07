@@ -94,7 +94,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         var manager = new OpenAICodexSubscriptionLoginManager(store, new(http), "codex");
         using var first = await manager.BeginBrowserLoginAsync(HostId);
         using var second = await manager.BeginBrowserLoginAsync(HostId);
-        Assert.IsTrue(first.Listener.IsListening);
+        Assert.IsTrue(first.Listener!.IsListening);
         var query = ParseQuery(first.AuthorizeUri.Query);
         Assert.AreEqual(IssuedClientId, query["client_id"]);
         Assert.IsFalse(query.ContainsKey("agent_name_hint"));
@@ -121,7 +121,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         var browserResponse = await browser.GetAsync(login.RedirectUri + $"?code=auth-code&state={login.State}&client_id={IssuedClientId}");
         Assert.AreEqual(HttpStatusCode.OK, browserResponse.StatusCode);
         var credential = await wait;
-        Assert.ThrowsExactly<ObjectDisposedException>(login.Listener.Start);
+        Assert.ThrowsExactly<ObjectDisposedException>(login.Listener!.Start);
         Assert.AreEqual("subject", credential.Subject);
         Assert.AreEqual("user@example.test", credential.AccountLabel);
         Assert.AreEqual(HostId, credential.AgentHostId);
@@ -134,6 +134,36 @@ public sealed class OpenAICodexSubscriptionAuthTests
         Assert.AreEqual(OpenAICodexSubscriptionOAuthDefaults.TokenEndpoint, handler.Requests[0].Uri?.AbsoluteUri);
         Assert.IsFalse(form.ContainsKey("client_secret"));
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => manager.CompleteBrowserLoginAsync(login, new(login.RedirectUri + "?state=" + login.State)).AsTask());
+    }
+
+    // A node signed in from a desktop (doc/fleet/node.md, credentials on a node): no listener here, the browser comes back to the
+    // desktop, which forwards the callback; the verifier stayed here, where the code is exchanged and the credential saved.
+    [TestMethod]
+    public async Task LoginManager_ForwardedBrowser_ExchangesTheCallbackAnotherComputerCaught()
+    {
+        using var temp = TempDirectory.Create();
+        using var signer = new IdTokenSigner();
+        using var handler = new QueueHttpMessageHandler();
+        using var http = new HttpClient(handler);
+        var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
+        var manager = new OpenAICodexSubscriptionLoginManager(store, new(http), "codex");
+        Assert.ThrowsExactly<ArgumentException>(() => { _ = manager.BeginForwardedBrowserLoginAsync(HostId, "http://127.0.0.1:50123/callback"); }, "ChatGPT comes back to /auth/callback");
+        var forwarded = new CodeAlta.Hosting.ForwardedBrowserCallback(new Uri("http://127.0.0.1:50123/auth/callback"));
+        using var login = await manager.BeginForwardedBrowserLoginAsync(HostId, forwarded.RedirectUri.AbsoluteUri);
+        Assert.IsNull(login.Listener, "nothing listens on this computer");
+        Assert.AreEqual("http://127.0.0.1:50123/auth/callback", ParseQuery(login.AuthorizeUri.Query.TrimStart('?'))["redirect_uri"]);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => manager.WaitForBrowserCallbackAsync(login).AsTask());
+
+        // The desktop caught the browser on its own loopback and forwards what it brought.
+        Assert.IsFalse(forwarded.TryComplete(new Uri($"http://127.0.0.1:50123/elsewhere?code=auth-code&state={login.State}")), "another path is not the callback");
+        Assert.IsTrue(forwarded.TryComplete(new Uri($"http://127.0.0.1:50123/auth/callback?code=auth-code&state={login.State}&client_id={IssuedClientId}")));
+        handler.Enqueue(TokenResponse(signer.Sign(login.Nonce)), JsonResponse(signer.Jwks));
+        var credential = await manager.CompleteBrowserLoginAsync(login, await forwarded.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None));
+        Assert.AreEqual("subject", credential.Subject);
+        var form = ParseQuery(handler.Requests[0].Body);
+        Assert.AreEqual("http://127.0.0.1:50123/auth/callback", form["redirect_uri"]);
+        Assert.AreEqual(login.Pkce.Verifier, form["code_verifier"], "the verifier never left this computer");
+        Assert.AreEqual(IssuedClientId, (await store.LoadAsync("codex"))?.ClientId);
     }
 
     [TestMethod]

@@ -50,10 +50,52 @@ public static class ConfiguredCodexAuthentication
                     var hostId = await new OpenAICodexSubscriptionHostIdProvider(getRoot()).GetOrCreateAsync(token);
                     using var login = await manager.BeginBrowserLoginAsync(hostId, token);
                     var waitForCallbackTask = manager.WaitForBrowserCallbackAsync(login, token).AsTask();
-                    await PresentAuthorizationAndWaitAsync(login.AuthorizeUri, waitForCallbackTask, report, open, login.Listener.Stop);
+                    await PresentAuthorizationAndWaitAsync(login.AuthorizeUri, waitForCallbackTask, report, open, login.Listener!.Stop);
                     return Project(await waitForCallbackTask);
                 };
             }, cancellationToken);
+
+    /// <summary>
+    /// Signs a configured Codex provider in with a browser of another computer (<see cref="ForwardedBrowserCallback"/>): the
+    /// authorization page is reported for that computer to open, and the callback it forwards completes the sign-in here, where
+    /// the code verifier stayed and the tokens are kept.
+    /// </summary>
+    /// <param name="definition">The configured Codex provider.</param>
+    /// <param name="getStateRootPath">Caller-owned lazy global state root selection.</param>
+    /// <param name="formatInvalidProvider">Formats an error only for a provider-type mismatch.</param>
+    /// <param name="forwarded">Where the browser comes back to, and the callback the other computer forwards.</param>
+    /// <param name="reportAuthorization">Reports the authorization page to open.</param>
+    /// <param name="cancellationToken">Cancels the sign-in.</param>
+    /// <returns>Validated registration metadata.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentException">The redirect of <paramref name="forwarded"/> is not one ChatGPT accepts.</exception>
+    /// <exception cref="InvalidOperationException">The provider type is not Codex, or authorization fails.</exception>
+    /// <exception cref="TimeoutException">The browser did not come back in time.</exception>
+    /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
+    public static async Task<CodexAccountMetadata> LoginWithForwardedBrowserAsync(
+        CodeAltaProviderDocument definition,
+        Func<string> getStateRootPath,
+        Func<string> formatInvalidProvider,
+        ForwardedBrowserCallback forwarded,
+        Action<Uri> reportAuthorization,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(getStateRootPath);
+        ArgumentNullException.ThrowIfNull(formatInvalidProvider);
+        ArgumentNullException.ThrowIfNull(forwarded);
+        ArgumentNullException.ThrowIfNull(reportAuthorization);
+        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal)) throw new InvalidOperationException(formatInvalidProvider());
+        var manager = CreateLoginManager(definition, getStateRootPath);
+        var hostId = await new OpenAICodexSubscriptionHostIdProvider(getStateRootPath()).GetOrCreateAsync(cancellationToken).ConfigureAwait(false);
+        using var login = await manager.BeginForwardedBrowserLoginAsync(hostId, forwarded.RedirectUri.AbsoluteUri, cancellationToken).ConfigureAwait(false);
+        reportAuthorization(login.AuthorizeUri);
+        var callback = await forwarded.WaitAsync(TimeSpan.FromMinutes(10), cancellationToken).ConfigureAwait(false);
+        return Project(await manager.CompleteBrowserLoginAsync(login, callback, cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>The path a forwarded Codex sign-in comes back to, on a loopback address of <c>127.0.0.1</c>.</summary>
+    public const string ForwardedCallbackPath = OpenAICodexSubscriptionLoginManager.CallbackPath;
 
     internal static async Task PresentAuthorizationAndWaitAsync(
         Uri authorizeUri, Task callbackWait, Action<Uri> report, Action<Uri> open, Action stopCallbackWait)

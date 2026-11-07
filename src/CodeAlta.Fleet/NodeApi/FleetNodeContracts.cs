@@ -120,6 +120,24 @@ public static class FleetNodeMethods
     /// <summary>The owner's local control, or a paired device that manages the node: waits a while for the sign-in of a provider to end.</summary>
     public const string ControlProvidersSignInWait = "control.providers.signin.wait";
 
+    /// <summary>The owner's local control, or a paired device that manages the node: what the node signs in (providers, MCP servers, tools) and how each stands.</summary>
+    public const string ControlSignInsList = "control.signins.list";
+
+    /// <summary>The owner's local control, or a paired device that manages the node: starts a sign-in the node keeps, completed from the desktop.</summary>
+    public const string ControlSignInsStart = "control.signins.start";
+
+    /// <summary>The owner's local control, or a paired device that manages the node: gives a sign-in the callback of the browser or a pasted code.</summary>
+    public const string ControlSignInsComplete = "control.signins.complete";
+
+    /// <summary>The owner's local control, or a paired device that manages the node: waits a while for a sign-in to end.</summary>
+    public const string ControlSignInsWait = "control.signins.wait";
+
+    /// <summary>The owner's local control, or a paired device that manages the node: ends a sign-in that waits.</summary>
+    public const string ControlSignInsCancel = "control.signins.cancel";
+
+    /// <summary>The owner's local control, or a paired device that manages the node: signs a provider, an MCP server or a tool out on the node.</summary>
+    public const string ControlSignInsSignOut = "control.signins.signout";
+
     /// <summary>A target: takes the offer of a session (or, as a probe, only says whether it would).</summary>
     public const string MovesOffer = "moves.offer";
 
@@ -270,6 +288,18 @@ public static class FleetNodeErrorCodes
 
     /// <summary>The sign-in of the provider could not start on the node (what failed is in the message).</summary>
     public const string ProviderSignInFailed = "provider.sign_in_failed";
+
+    /// <summary>The node has no such thing to sign in (<c>control.signins.*</c>).</summary>
+    public const string SignInTargetNotFound = "signin.not_found";
+
+    /// <summary>What to sign in does not sign in that way from another computer.</summary>
+    public const string SignInUnsupported = "signin.unsupported";
+
+    /// <summary>The sign-in could not start, or what it was given does not fit it.</summary>
+    public const string SignInFailed = "signin.failed";
+
+    /// <summary>This node does not sign in from the desktop (<see cref="FleetNodeServiceOptions.SignIns"/> is null).</summary>
+    public const string SignInsUnavailable = "signin.unavailable";
 
     /// <summary>The node cannot change its providers (its host has none to change).</summary>
     public const string ProvidersUnavailable = "provider.unavailable";
@@ -993,6 +1023,15 @@ public sealed record FleetAgentDeliveryAckParams(IReadOnlyList<string> Ids);
 [JsonSerializable(typeof(FleetProviderSignInPrompt))]
 [JsonSerializable(typeof(FleetProviderSignInState))]
 [JsonSerializable(typeof(FleetProviderSignInWaitParams))]
+[JsonSerializable(typeof(FleetMachineSignInList))]
+[JsonSerializable(typeof(FleetMachineSignInItem))]
+[JsonSerializable(typeof(FleetMachineSignInTarget))]
+[JsonSerializable(typeof(FleetMachineSignInStartParams))]
+[JsonSerializable(typeof(FleetMachineSignInPrompt))]
+[JsonSerializable(typeof(FleetMachineSignInCompleteParams))]
+[JsonSerializable(typeof(FleetMachineSignInWaitParams))]
+[JsonSerializable(typeof(FleetMachineSignInAttemptRef))]
+[JsonSerializable(typeof(FleetMachineSignInState))]
 [JsonSerializable(typeof(FleetDeviceRef))]
 [JsonSerializable(typeof(FleetDevicePermissionsParams))]
 [JsonSerializable(typeof(FleetDeviceChange))]

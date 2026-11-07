@@ -619,12 +619,13 @@ public sealed class McpManagementService
 
     /// <summary>
     /// Initializes a management service whose tests of a server tell it what the plugin of the host tells it: that the host
-    /// shows views (MCP Apps) and loads skills; a test of a server that publishes skills then lists them.
+    /// shows views (MCP Apps) and loads skills; a test of a server that publishes skills then lists them. It reads the
+    /// configuration, the policy and the tokens of the home or the CodeAlta folder the options name, as that plugin does.
     /// </summary>
     /// <param name="options">What the host does with MCP servers beyond their tools.</param>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
     public McpManagementService(McpPluginOptions options)
-        : this(home: default, configCache: null, (options ?? throw new ArgumentNullException(nameof(options))).ShowsApps, options.LoadsSkills)
+        : this(new McpHome((options ?? throw new ArgumentNullException(nameof(options))).UserHomeDirectory, options.CodeAltaRoot), configCache: null, options.ShowsApps, options.LoadsSkills)
     {
     }
 
@@ -1170,6 +1171,72 @@ public sealed class McpManagementService
                 OpenOAuthBrowser = true,
                 OAuthStatus = reportStatus,
                 OAuthPrompt = reportPrompt,
+            },
+            serverKey.Trim(),
+            cancellationToken).ConfigureAwait(false);
+        var result = MapTestResult(runtimeResult);
+        RefreshSnapshot(request with { ProjectDirectory = projectDirectory });
+        UpdateCachedSnapshotWithTestResult(result);
+        return result;
+    }
+
+    /// <summary>
+    /// Runs an OAuth login for one MCP HTTP server with the browser of another computer (a desktop that signs a node in):
+    /// <paramref name="forwarded"/> is given the page to open and the loopback address that browser comes back to, and returns
+    /// the callback that computer caught. The code is exchanged and the tokens are kept here.
+    /// </summary>
+    /// <param name="serverKey">The MCP server key.</param>
+    /// <param name="forwarded">The browser of the other computer.</param>
+    /// <param name="reportStatus">An optional callback that receives redacted progress messages.</param>
+    /// <param name="request">Optional path request used to resolve config and token-cache paths.</param>
+    /// <param name="cancellationToken">A token that cancels the login.</param>
+    /// <returns>The server test result produced after login/list-tools completes or fails.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="serverKey" /> is empty.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="forwarded" /> is null.</exception>
+    public async Task<McpManagementServerTestResult> LoginOAuthForwardedAsync(
+        string serverKey,
+        McpOAuthForwardedAuthorize forwarded,
+        Action<string>? reportStatus,
+        McpManagementRequest? request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
+        ArgumentNullException.ThrowIfNull(forwarded);
+        request ??= _lastRequest;
+        request = WithDefaultHome(request);
+        var projectDirectory = NormalizeProjectDirectory(request.ProjectDirectory);
+        var effective = ResolveEffectiveServer(serverKey.Trim(), request with { ProjectDirectory = projectDirectory });
+        if (effective is null)
+        {
+            return new McpManagementServerTestResult
+            {
+                Server = serverKey.Trim(),
+                Status = McpManagementTestStatus.Failed,
+                Diagnostics = [$"MCP server '{serverKey.Trim()}' is not configured in the effective MCP configuration."],
+            };
+        }
+
+        if (effective.Definition.Transport != McpTransportKind.Http)
+        {
+            return new McpManagementServerTestResult
+            {
+                Server = serverKey.Trim(),
+                Status = McpManagementTestStatus.Unsupported,
+                Diagnostics = [$"MCP server '{serverKey.Trim()}' does not use HTTP/SSE transport; browser OAuth is only available for remote HTTP MCP servers."],
+            };
+        }
+
+        await using var runtime = new McpRuntimeService(_home, configCache: null, _advertiseApps, _loadsSkills);
+        var runtimeResult = await runtime.TestServerAsync(
+            new McpRuntimeRequest
+            {
+                ProjectDirectory = projectDirectory,
+                Home = request.Home,
+                ForceOAuth = true,
+                AllowOAuthBrowserLogin = true,
+                OpenOAuthBrowser = false,
+                OAuthStatus = reportStatus,
+                OAuthForwarded = forwarded,
             },
             serverKey.Trim(),
             cancellationToken).ConfigureAwait(false);

@@ -132,6 +132,55 @@ public static class ConfiguredProviderLogin
         }
     }
 
+    /// <summary>
+    /// Tells whether a provider type signs in with a browser that can be on another computer (<see cref="ForwardedBrowserCallback"/>):
+    /// one whose redirect accepts any port of the loopback, so that the other computer listens on one of its own.
+    /// </summary>
+    /// <param name="providerType">The canonical provider type.</param>
+    /// <returns>True for <c>codex</c>.</returns>
+    public static bool SupportsForwardedBrowser(string? providerType) => providerType is "codex";
+
+    /// <summary>Gets the address a forwarded browser sign-in of a provider type comes back to, on a port of the other computer.</summary>
+    /// <param name="providerType">A type of <see cref="SupportsForwardedBrowser"/>.</param>
+    /// <param name="port">The port, 1024 and up.</param>
+    /// <returns>The address.</returns>
+    /// <exception cref="ArgumentException">The type has no forwarded sign-in, or the port is not one.</exception>
+    public static Uri ForwardedRedirect(string? providerType, int port)
+    {
+        if (!SupportsForwardedBrowser(providerType)) throw new ArgumentException($"'{providerType}' does not sign in with a browser of another computer.", nameof(providerType));
+        if (port is < 1024 or > 65535) throw new ArgumentException("A loopback port is 1024 to 65535.", nameof(port));
+        return new Uri($"http://127.0.0.1:{port.ToString(System.Globalization.CultureInfo.InvariantCulture)}{ConfiguredCodexAuthentication.ForwardedCallbackPath}");
+    }
+
+    /// <summary>
+    /// Signs in to the account of a configured provider with a browser of another computer: <paramref name="onPrompt"/> gets the
+    /// page that computer opens, and the callback it forwards to <paramref name="forwarded"/> completes the sign-in here, where the
+    /// credential is stored.
+    /// </summary>
+    /// <param name="definition">The type-completed provider definition, of a type of <see cref="SupportsForwardedBrowser"/>.</param>
+    /// <param name="stateRootPath">The global state root that holds provider credentials.</param>
+    /// <param name="forwarded">The redirect of the other computer, and the callback it forwards.</param>
+    /// <param name="onPrompt">Receives the page to open.</param>
+    /// <param name="cancellationToken">Cancels the sign-in.</param>
+    /// <returns>The signed-in state.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentException">The provider type has no forwarded sign-in.</exception>
+    /// <exception cref="InvalidOperationException">Authorization or token exchange fails.</exception>
+    /// <exception cref="TimeoutException">The browser did not come back in time.</exception>
+    /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
+    public static Task<ProviderLoginStatus> LoginWithForwardedBrowserAsync(CodeAltaProviderDocument definition, string stateRootPath, ForwardedBrowserCallback forwarded,
+        Func<ProviderLoginPrompt, CancellationToken, ValueTask> onPrompt, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
+        ArgumentNullException.ThrowIfNull(forwarded);
+        ArgumentNullException.ThrowIfNull(onPrompt);
+        if (!SupportsForwardedBrowser(definition.ProviderType))
+            throw new ArgumentException($"'{definition.ProviderType}' does not sign in with a browser of another computer.", nameof(definition));
+        return LoginCodexAsync(onPrompt, (report, token) => ConfiguredCodexAuthentication.LoginWithForwardedBrowserAsync(
+            definition, () => stateRootPath, InvalidProvider, forwarded, report, token), cancellationToken);
+    }
+
     /// <summary>Reads the stored sign-in state of a configured provider without network authentication.</summary>
     /// <param name="definition">The type-completed provider definition.</param>
     /// <param name="stateRootPath">The global state root that holds provider credentials.</param>

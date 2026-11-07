@@ -14,6 +14,24 @@ namespace CodeAlta.Node;
 /// </summary>
 internal static class NodeBuiltInPlugins
 {
+    /// <summary>The id of the MCP plugin.</summary>
+    public const string McpId = "mcp";
+
+    /// <summary>The options of the MCP plugin of a node, which its sign-ins use too (<see cref="NodeSignIns"/>).</summary>
+    /// <param name="root">The CodeAlta folder of the profile of the node; null for <c>~/.alta</c>.</param>
+    /// <returns>The options.</returns>
+    // No window shows the views of MCP Apps, and the skills of servers, whose load always asks, are left out until the node can
+    // route the question to a person.
+    internal static McpPluginOptions McpOptions(string? root) => new() { ShowsApps = false, LoadsSkills = false, CodeAltaRoot = root };
+
+    private static BuiltInPluginDefinition Mcp(string? root) => new()
+    {
+        Id = McpId, DisplayName = "MCP",
+        Description = "Connects CodeAlta to configured Model Context Protocol servers.",
+        PluginType = typeof(McpPlugin), Factory = () => new McpPlugin(McpOptions(root)),
+        Frontends = PluginFrontends.All | PluginFrontends.Cli,
+    };
+
     /// <summary>The id of the Statistics plugin.</summary>
     public const string StatisticsId = "statistics";
 
@@ -27,7 +45,8 @@ internal static class NodeBuiltInPlugins
         var journals = new CodeAlta.Agent.Runtime.FileSystemSessionJournalCatalog(new CodeAlta.Agent.Runtime.AgentRuntimePathLayout(catalog.StateRoot));
         return
         [
-            .. All,
+            // The MCP servers, their tokens and their caches of the node's own profile, also when it is not ~/.alta (--data-root).
+            .. All.Select(plugin => plugin.Id == McpId ? Mcp(catalog.GlobalRoot) : plugin),
             new()
             {
                 Id = StatisticsId, DisplayName = "Statistics",
@@ -49,15 +68,7 @@ internal static class NodeBuiltInPlugins
             PluginType = typeof(GitPlugin), Factory = static () => new GitPlugin(),
             Frontends = PluginFrontends.All | PluginFrontends.Cli,
         },
-        new()
-        {
-            Id = "mcp", DisplayName = "MCP",
-            Description = "Connects CodeAlta to configured Model Context Protocol servers.",
-            // No window shows the views of MCP Apps, and the skills of servers, whose load always asks, are left out
-            // until the node can route the question to a person.
-            PluginType = typeof(McpPlugin), Factory = static () => new McpPlugin(new McpPluginOptions { ShowsApps = false, LoadsSkills = false }),
-            Frontends = PluginFrontends.All | PluginFrontends.Cli,
-        },
+        Mcp(null),
         new()
         {
             Id = "jira", DisplayName = "Jira",

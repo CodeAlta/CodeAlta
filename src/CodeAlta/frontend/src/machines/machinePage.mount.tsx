@@ -119,11 +119,30 @@ const api: MachinePageApi = {
     providerList = providerList.map(provider => provider.key === request.key ? { ...provider, state: "ready", reason: null } : provider);
     return { status: "completed", account: "octocat", code: null };
   },
+  signIns: async () => ({ status: "ok", message: null, items: [
+    { kind: "provider", key: "codex", space: null, title: "Codex", state: mcpSignedIn ? "signed_in" : "signed_out", account: mcpSignedIn ? "me@example.com" : null, expiresAt: null,
+      ways: ["browser"], detail: null },
+    { kind: "mcp", key: "linear", space: null, title: "Linear", state: "signed_in", account: null, expiresAt: null, ways: ["browser"], detail: null },
+  ] }),
+  signInStart: async request => {
+    calls.push(JSON.stringify({ signInStart: [request.kind, request.key] }));
+    return { status: "ok", message: null, attemptId: "a1", way: "browser", page: "https://auth.example.com/authorize?state=s1", userCode: null, ask: null,
+      expiresAt: "2026-11-07T15:00:00Z" };
+  },
+  signInWait: async () => {
+    if (++signInWaits < 2) { await new Promise(resolve => setTimeout(resolve, 800)); return { status: "waiting", account: null, code: null, message: null }; }
+    mcpSignedIn = true;
+    return { status: "completed", account: "me@example.com", code: null, message: null };
+  },
+  signInCode: async () => ({ status: "completed", account: null, code: null, message: null }),
+  signInCancel: async () => ({ status: "failed", account: null, code: "canceled", message: null }),
+  signOut: async request => { calls.push(JSON.stringify({ signOut: [request.kind, request.key] })); return { status: "ok", item: null, message: null }; },
   labels: async () => ({ status: "ok", message: null, labels: [...labels] }),
   setLabels: async request => { calls.push(JSON.stringify({ labels: request.labels })); labels = [...request.labels]; return { status: "ok", message: null }; },
 };
 let labels: string[] = ["gpu"];
 let signInWaits = 0;
+let mcpSignedIn = false;
 let providerList: MachineProviderStatusView[] = [
   { key: "codex", name: "Codex", type: "codex", enabled: true, state: "ready", reason: null, detail: null, credential: "sign_in", keySecret: null, signIn: false, isDefault: true,
     model: "gpt-6.1", apiUrl: null },

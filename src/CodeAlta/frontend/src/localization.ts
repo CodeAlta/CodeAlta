@@ -60,6 +60,7 @@ import { settingsSearchMessages } from "./settings/messages";
 import { startPromptMessages } from "./startPrompts/messages";
 import { machineMessages } from "./machines/messages";
 import { machineManageMessages } from "./machines/manageMessages";
+import { machineSignInMessages } from "./machines/signInMessages";
 import { addMachineMessages } from "./machines/addMachineMessages";
 import { createServerMessages } from "./fleet/createServerMessages";
 import { secretMessages } from "./secrets/messages";
@@ -2974,6 +2975,7 @@ export const messages = dictionary({
   ...worktreeMessages,
   ...machineMessages,
   ...machineManageMessages,
+  ...machineSignInMessages,
   ...addMachineMessages,
   ...createServerMessages,
   ...secretMessages,

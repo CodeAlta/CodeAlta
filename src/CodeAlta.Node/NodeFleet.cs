@@ -127,6 +127,7 @@ internal sealed class NodeFleet : IAsyncDisposable
         {
             IReadOnlyList<string> addresses = [];
             var trusted = new TrustedDeviceStore(catalog);
+            var providers = new NodeProviders(node.Host, node.ModelCatalog);
             service = new FleetNodeService(new FleetNodeServiceOptions
             {
                 Host = node.Host, Identity = identity, TrustedDevices = trusted, Name = name, Version = version,
@@ -137,7 +138,9 @@ internal sealed class NodeFleet : IAsyncDisposable
                 IsPersonalProvider = provider => (node.Automations?.CredentialKindOf(provider) ?? NodeAutomations.Classify(catalog, provider))
                     == CodeAlta.Automations.AutomationCredentialKind.Personal,
                 // Its providers, their readiness, a key typed on the desktop kept in the secrets of the machine, and their device-code sign-in.
-                Providers = new NodeProviders(node.Host, node.ModelCatalog),
+                Providers = providers,
+                // The sign-ins the node keeps for itself, made from the desktop: the node starts each one and keeps its tokens.
+                SignIns = new NodeSignIns(node.Host, providers),
                 // A session that names an environment is admitted as a run of an automation is, once the node joined a server.
                 // What the session is about stays here: the approval it asks names the run only.
                 AdmitEnvironment = (environment, runId, _, token) => node.Automations?.Environments is { } gate
