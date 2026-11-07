@@ -74,6 +74,11 @@ function Frame() {
     start: () => { state.machines = []; state.servers = []; setGeneration(value => value + 1); },
     run: () => { state.machines = fleet; state.servers = [server]; state.failing = false; setGeneration(value => value + 1); },
     fail: () => { state.failing = true; setGeneration(value => value + 1); },
+    // A fleet of the size of a large organization, for the pages of its tables.
+    many: (count: number) => {
+      state.machines = Array.from({ length: count }, (_, index) => machine(`node-${String(index + 1).padStart(3, "0")}`, index % 9 === 0 ? "offline" : "online", "Ubuntu 24.04", "4.1.0", index % 5));
+      setGeneration(value => value + 1);
+    },
   } });
   return <AppWindow storageKey="fixture.settings" className="settings-dialog" titleId="settings-title" title="Settings" closeLabel="Close settings" onClose={() => { }}
     preferredSize={viewport => ({ width: viewport.width * 0.8, height: viewport.height * 0.8 })} minimumSize={{ width: 560, height: 360 }}>

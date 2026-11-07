@@ -1,4 +1,5 @@
-import { Fragment, useMemo, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Button } from "@blueprintjs/core";
 import { AppIcon } from "../../AppIcon";
 import { useShellLanguage } from "../../shellLanguage";
 import type { MessageKey } from "../../localization";
@@ -19,12 +20,15 @@ export type DataColumn<T> = Readonly<{
   hiddenLabel?: boolean;
 }>;
 
+/** How many rows a table shows at first, and how many more each "Show more" adds: an organization's fleet stays light. */
+export const tablePageSize = 100;
+
 /**
  * A table of the Fleet console: a header that sorts by a column (again: the other way), a row per item that says what
  * matters of it, and the details of the selected row opened right under it. The arrow keys move the selection, Enter and
  * Space open or close the details of a row, Escape closes them.
  */
-export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selected, onSelect, details, empty, rowState, rowProps }: {
+export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selected, onSelect, details, empty, rowState, rowProps, pageSize = tablePageSize }: {
   label: string;
   rows: readonly T[];
   columns: readonly DataColumn<T>[];
@@ -42,6 +46,8 @@ export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selec
   rowState?: (row: T) => string | undefined;
   /** A class and data attributes of the row of an item (`data-person`...), for what finds it. */
   rowProps?: (row: T) => Readonly<{ className?: string; data?: Readonly<Record<string, string>> }>;
+  /** How many rows it shows at first, and adds at each "Show more". */
+  pageSize?: number;
 }) {
   const { t, locale } = useShellLanguage();
   const sorted = useMemo(() => {
@@ -49,15 +55,25 @@ export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selec
     return sortRows(rows, column?.sort ?? null, sort?.direction ?? "asc", locale);
   }, [rows, columns, sort, locale]);
   const keys = sorted.map(rowKey);
+  // The rows past the pages shown are not drawn; the selected row always is, with what comes before it.
+  const [pages, setPages] = useState(1);
+  const chosen = selected === null ? -1 : keys.indexOf(selected);
+  const limit = Math.max(pages * pageSize, chosen + 1);
+  const shown = sorted.length > limit ? sorted.slice(0, limit) : sorted;
+  const more = sorted.length - shown.length;
   // One row is in the order of Tab, the selected one or the first: the arrows move between the others, as in a list.
-  const entry = selected !== null && keys.includes(selected) ? selected : keys[0];
+  const entry = chosen >= 0 ? selected : keys[0];
+  const focusRow = (body: Element | null, key: string) => body?.querySelector<HTMLElement>(`tr[data-row-key="${CSS.escape(key)}"]`)?.focus();
   function move(event: KeyboardEvent<HTMLTableRowElement>, key: string) {
     const index = keys.indexOf(key);
     const next = event.key === "ArrowDown" ? keys[index + 1] : event.key === "ArrowUp" ? keys[index - 1] : undefined;
     if (next !== undefined) {
       event.preventDefault();
       if (selected !== null) onSelect(next);
-      event.currentTarget.closest("tbody")?.querySelector<HTMLElement>(`tr[data-row-key="${CSS.escape(next)}"]`)?.focus();
+      const body = event.currentTarget.closest("tbody");
+      // Past the last row shown, the next page comes, and the row below it takes the focus once it is drawn.
+      if (keys.indexOf(next) >= shown.length) { setPages(value => value + 1); requestAnimationFrame(() => focusRow(body, next)); }
+      else focusRow(body, next);
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       onSelect(selected === key ? null : key);
@@ -84,7 +100,7 @@ export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selec
       </thead>
       <tbody>
         {sorted.length === 0 ? <tr className="fleet-table-empty"><td colSpan={columns.length}>{empty}</td></tr>
-          : sorted.map(row => {
+          : shown.map(row => {
             const key = rowKey(row);
             const open = selected === key && !!details;
             const extra = rowProps?.(row);
@@ -100,5 +116,10 @@ export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selec
           })}
       </tbody>
     </table>
+    {more > 0 && <div className="fleet-table-more" role="status">
+      <span className="muted-text">{t("{shown} of {total}", { shown: shown.length, total: sorted.length })}</span>
+      <Button size="small" variant="outlined" onClick={() => setPages(Math.ceil(shown.length / pageSize) + 1)}>{t("Show {count} more", { count: Math.min(pageSize, more) })}</Button>
+      <Button size="small" variant="minimal" onClick={() => setPages(Math.ceil(sorted.length / pageSize))}>{t("Show all")}</Button>
+    </div>}
   </div>;
 }

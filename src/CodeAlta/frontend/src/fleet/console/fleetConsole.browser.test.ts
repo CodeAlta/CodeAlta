@@ -97,6 +97,30 @@ test("the machines are filtered, sorted, and a row opens its details in place", 
   }, options);
 });
 
+test("a large fleet shows its machines a page at a time, and the arrows and the details go past a page", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`window.fleetConsoleFixture.many(250); window.fleetConsoleFixture.show('machines')`);
+    await page.until(`${rows}.length === 100`, "the first page");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-filters-total').textContent`), "250 in all", "the filters count every machine, drawn or not");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-table-more .muted-text').textContent`), "100 of 250");
+    await page.clickText(".fleet-table-more .bp6-button", "Show 100 more");
+    await page.until(`${rows}.length === 200`, "the second page");
+    // The arrow past the last row drawn brings the next page, and the row below takes the focus.
+    await page.evaluate(`${rows}[199].focus()`);
+    await page.key("ArrowDown", 40);
+    await page.until(`${rows}.length === 250 && document.activeElement === ${rows}[200]`, "the next page, and the focus on its first row");
+    assert.equal(await page.evaluate(`!!document.querySelector('.fleet-table-more')`), false, "nothing more to show");
+
+    // A narrower filter shows all it finds; a row opens its details whatever page it is on.
+    await page.evaluate(`(() => { const input = document.querySelector('.fleet-filters-search input'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      set.call(input, 'node-2'); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await page.until(`${rows}.length === 51`, "node-2 and node-200 to node-250");
+    await page.evaluate(`${rows}.at(-1).click()`);
+    await page.until(`document.querySelector('.fleet-table-details .machine-row-details')`, "the details of the last row");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the machines table is taken whole, with a row open, for the guide", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.fleetConsoleFixture.show('machines')`);

@@ -4,6 +4,7 @@ type Row = readonly [string, string, string, string, string];
 
 export const fleetConsoleMessages = {
   "{count} in all": ["{count} en total", "{count} au total", "{count} insgesamt", "全 {count} 件", "共 {count} 个"],
+  "Show {count} more": ["Mostrar {count} más", "Afficher {count} de plus", "{count} weitere anzeigen", "さらに {count} 件表示", "再显示 {count} 个"],
   "{shown} of {total}": ["{shown} de {total}", "{shown} sur {total}", "{shown} von {total}", "{total} 件中 {shown} 件", "{shown} / {total}"],
   "Open the guide": ["Abrir la guía", "Ouvrir le guide", "Anleitung öffnen", "ガイドを開く", "打开指南"],
   "Run sessions on another computer of yours.": ["Ejecuta sesiones en otro de tus ordenadores.", "Exécutez des sessions sur un autre de vos ordinateurs.",
