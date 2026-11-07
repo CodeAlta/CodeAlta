@@ -194,8 +194,9 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
                 throw new NotSupportedException($"A {target.Kind} is not signed out from another computer yet.");
         }
 
+        // The item of this target, by the rule its kind compares keys with.
         return (await ListAsync(cancellationToken).ConfigureAwait(false)).Items
-            .First(item => item.Kind == target.Kind && string.Equals(item.Key, target.Key, StringComparison.OrdinalIgnoreCase) && item.Space == target.Space);
+            .First(item => item.Kind == target.Kind && item.Space == target.Space && TargetKey(item.Kind, item.Space, item.Key) == targetKey);
     }
 
     // A provider and an MCP server are the machine's, whatever space a request names; a tool is of a space, the default one when none is named.

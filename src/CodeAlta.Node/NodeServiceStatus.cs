@@ -83,14 +83,22 @@ internal static class NodeServiceStatus
         };
     }
 
-    // The options of run that choose the profile: --data-root and its folder, --dev.
-    private static IEnumerable<string> ProfileOptions(IReadOnlyList<string> runOptions)
+    // The options of run that take a value, whose value is never read as an option (a node named --dev).
+    private static readonly HashSet<string> ValueOptions = new(["--data-root", "--port", "--bind", "--name"], StringComparer.Ordinal);
+
+    // The options of run that choose the profile, as the command line reads them: --data-root and its folder, --dev.
+    internal static IEnumerable<string> ProfileOptions(IReadOnlyList<string> runOptions)
     {
         for (var index = 0; index < runOptions.Count; index++)
         {
-            if (runOptions[index] == "--dev") yield return "--dev";
-            else if (runOptions[index] == "--data-root" && index + 1 < runOptions.Count) { yield return "--data-root"; yield return runOptions[++index]; }
-            else if (runOptions[index].StartsWith("--data-root=", StringComparison.Ordinal)) yield return runOptions[index];
+            var word = runOptions[index];
+            if (word == "--dev") yield return word;
+            else if (word.StartsWith("--data-root=", StringComparison.Ordinal)) yield return word;
+            else if (ValueOptions.Contains(word) && index + 1 < runOptions.Count)
+            {
+                var value = runOptions[++index];
+                if (word == "--data-root") { yield return word; yield return value; }
+            }
         }
     }
 

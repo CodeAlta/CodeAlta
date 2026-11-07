@@ -276,10 +276,11 @@ public sealed class ServiceManager(ServiceEnvironment environment)
         var virtualAccount = spec.Account is null ? ServiceDefinition.WindowsVirtualAccount(name) : null;
         var binPath = ServiceDefinition.WindowsCommandLine([executable, .. spec.Arguments, ServiceDefinition.WindowsServiceOption]);
         var display = $"{ServiceDefinition.DisplayName(spec.Product)} ({name})";
-        // A named account is given to Windows after the service exists: until then the service runs as nothing more than its
-        // virtual account (sc.exe would make it LocalSystem) and starts only on demand, so that a logon Windows refuses
-        // leaves no service that starts at boot.
-        string[] settings = ["binPath=", binPath, "start=", virtualAccount is null ? "demand" : "delayed-auto", "DisplayName=", display];
+        // A service starts only on demand until install made it safe: a named account is given to Windows after the service
+        // exists (until then it runs as nothing more than its virtual account; sc.exe would make it LocalSystem), and the data
+        // root of a virtual account is protected once that account exists. Only then does it start at boot, so that a step
+        // that fails leaves no service that starts at boot.
+        string[] settings = ["binPath=", binPath, "start=", "demand", "DisplayName=", display];
         var install = new List<ServiceCommand>
         {
             // Created when it is not there yet; configured in every case, so that install again changes one that exists.
@@ -298,8 +299,8 @@ public sealed class ServiceManager(ServiceEnvironment environment)
             Location = $"Services {name}", DefinitionPath = binPath, DefinitionIsTemporary = true, Definition = $"sc.exe config {name} binPath= {binPath} start= delayed-auto"
                 + (virtualAccount is null ? "" : $" obj= \"{virtualAccount}\""),
             Install = install,
-            // A named account starts at boot once Windows took its logon.
-            Start = virtualAccount is null ? [new("sc.exe", ["config", name, "start=", "delayed-auto"]), new("sc.exe", ["start", name])] : [new("sc.exe", ["start", name])],
+            // It starts at boot once Windows took the logon of its account, or its data root is protected.
+            Start = [new("sc.exe", ["config", name, "start=", "delayed-auto"]), new("sc.exe", ["start", name])],
             LogonAccount = spec.Account,
             DataRoot = dataRoot,
             ProtectDataRootFor = virtualAccount is not null && dataRoot is not null ? virtualAccount : null,
@@ -443,8 +444,15 @@ public sealed class ServiceManager(ServiceEnvironment environment)
                     return Failure;
                 }
 
-                // A folder without content has nothing to reset.
-                if (!RunAll(command, [new ServiceCommand("icacls.exe", [Path.Combine(protectedRoot, "*"), "/reset", "/T", "/C", "/Q"], MayFail: true)], "install", error)) return Failure;
+                // What it holds becomes the administrators', so that nobody who made a folder there before can give it back
+                // its access, then inherits from it alone. A folder without content has nothing to change; any other failure
+                // stops the install, which leaves a service started on demand only.
+                if (Directory.EnumerateFileSystemEntries(protectedRoot).Any())
+                {
+                    var contents = Path.Combine(protectedRoot, "*");
+                    if (!RunAll(command, [new ServiceCommand("icacls.exe", [contents, "/setowner", "*S-1-5-32-544", "/T", "/C", "/Q"]),
+                        new ServiceCommand("icacls.exe", [contents, "/reset", "/T", "/C", "/Q"])], "install", error)) return Failure;
+                }
             }
 
             if (plan.LogonAccount is { } account)
@@ -764,7 +772,7 @@ public sealed class ServiceManager(ServiceEnvironment environment)
 
         // A service runs this data root when its command line names it, or names none and runs as this user (its default profile).
         if (query.Succeeded && runsWith is not null && WindowsDataRoot(query.Output) is var root
-            && (root is null ? !allowNoDataRoot || !SameUser(account, Environment.UserDisplayName ?? Environment.UserName) : !SamePath(root, runsWith)))
+            && (root is null ? !allowNoDataRoot || !SameAccount(account, Environment.UserDisplayName ?? Environment.UserName) : !SamePath(root, runsWith)))
             return new ServiceFacts(product, ServicePlatform.Windows, ServiceScope.System, "", $"Services {name}", "", false, false, null, null);
 
         return new ServiceFacts(product, ServicePlatform.Windows, ServiceScope.System, $"a Windows service run as {account}", $"Services {name}", account,
@@ -841,6 +849,14 @@ public sealed class ServiceManager(ServiceEnvironment environment)
     };
 
     // DOMAIN\alice and alice are the same user for automatic sign-in, which records the name alone.
+    // Whether a Windows account (SERVICE_START_NAME) is this user, domain or computer included: .\name is an account of this
+    // computer, the one this user's own name gives (HOST\name); a bare name is compared as it is.
+    private static bool SameAccount(string account, string user)
+    {
+        if (account.StartsWith(".\\", StringComparison.Ordinal) && user.LastIndexOf('\\') is var slash and > 0) account = user[..slash] + account[1..];
+        return string.Equals(account, user, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool SameUser(string autoLogin, string user)
     {
         static string Bare(string name) => name[(name.LastIndexOf('\\') + 1)..];

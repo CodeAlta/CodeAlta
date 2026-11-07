@@ -77,6 +77,9 @@ internal sealed class FakeServiceMachine : IDisposable
     /// <summary>Gets the commands run, as typed.</summary>
     public List<string> Commands { get; } = [];
 
+    /// <summary>Gets or sets whether protecting a folder fails, as it does when this process may not change it.</summary>
+    public bool ProtectFails { get; set; }
+
     /// <summary>Gets the logons given to Windows services (service, account, password), through the API, never a command.</summary>
     public List<(string Service, string Account, string Password)> Logons { get; } = [];
 
@@ -125,6 +128,7 @@ internal sealed class FakeServiceMachine : IDisposable
         ReadLines = static path => File.Exists(path) ? File.ReadAllLines(path) : [],
         ProtectFolder = (folder, account) =>
         {
+            if (ProtectFails) throw new UnauthorizedAccessException("Access is denied.");
             lock (_gate) Commands.Add($"protect {folder} {account}");
         },
     };

@@ -419,15 +419,27 @@ public sealed class NodeServiceTests
         Assert.AreEqual(ServiceManager.Success, manager.Install(plan, new StringWriter(), new StringWriter()));
         Assert.IsTrue(Directory.Exists(root), "its profile is made before the service is given it");
         Assert.IsTrue(machine.IsRegistered("altanode"));
-        CollectionAssert.AreEqual(new[] { "create", "config", "description", "failure", "protect", "icacls.exe", "start" },
-            machine.Commands.Select(static command => command.StartsWith("icacls.exe", StringComparison.Ordinal) ? "icacls.exe"
-                : command.StartsWith("protect", StringComparison.Ordinal) ? "protect" : command.Split(' ')[1]).ToArray());
+        CollectionAssert.AreEqual(new[] { "create", "config", "description", "failure", "protect", "config", "start" },
+            machine.Commands.Select(static command => command.StartsWith("protect", StringComparison.Ordinal) ? "protect" : command.Split(' ')[1]).ToArray());
         StringAssert.Contains(machine.Commands[0], @"obj= NT SERVICE\altanode");
-        StringAssert.Contains(machine.Commands[0], "start= delayed-auto");
+        StringAssert.Contains(machine.Commands[0], "start= demand", "on demand only until its data root is protected");
         // Its access list is replaced in one write once the account exists (nothing a folder made there before allowed remains,
-        // nothing inherited from %ProgramData%), then what it holds inherits from it alone.
+        // nothing inherited from %ProgramData%); only then does it start at boot.
         Assert.AreEqual($@"protect {root} NT SERVICE\altanode", machine.Commands[4]);
-        Assert.AreEqual($@"icacls.exe {Path.Combine(root, "*")} /reset /T /C /Q", machine.Commands[5]);
+        Assert.AreEqual("sc.exe config altanode start= delayed-auto", machine.Commands[5]);
+
+        // What a folder made there before holds becomes the administrators', then inherits from it alone; a protection that
+        // fails leaves a service started on demand only.
+        Directory.CreateDirectory(Path.Combine(root, "auth"));
+        machine.Commands.Clear();
+        Assert.AreEqual(ServiceManager.Success, manager.Install(plan, new StringWriter(), new StringWriter()));
+        CollectionAssert.AreEqual(new[] { $@"icacls.exe {Path.Combine(root, "*")} /setowner *S-1-5-32-544 /T /C /Q", $@"icacls.exe {Path.Combine(root, "*")} /reset /T /C /Q" },
+            machine.Commands.Where(static command => command.StartsWith("icacls", StringComparison.Ordinal)).ToArray());
+        machine.Commands.Clear();
+        machine.ProtectFails = true;
+        Assert.AreEqual(ServiceManager.Failure, manager.Install(plan, new StringWriter(), new StringWriter()));
+        Assert.IsFalse(machine.Commands.Any(static command => command.Contains("delayed-auto", StringComparison.Ordinal)), "no start at boot on an unprotected root");
+        machine.ProtectFails = false;
         Assert.AreEqual(0, machine.Logons.Count, "a virtual account has no password");
         var answer = string.Join('\n', ServiceManager.Describe(manager.Query(plan)));
         StringAssert.Contains(answer, @"it starts at boot as NT SERVICE\altanode, without a login");
@@ -527,6 +539,9 @@ public sealed class NodeServiceTests
             @" --name 'lab;Write-Output ''x''' --data-root 'C:\n odes\a'");
         StringAssert.StartsWith(NodeServiceStatus.Fix(windows.Environment, task, ["--data-root", @"C:\n odes\a"]), @"altanode uninstall --data-root 'C:\n odes\a'" + "\n");
         Assert.IsNull(NodeServiceStatus.Fix(windows.Environment, task, ["--name", "lab&echo.x"]), "the batch file of a .NET tool would run what follows &");
+        // A value is never read as an option: a node named --dev is not the developer instance.
+        Assert.AreEqual(0, NodeServiceStatus.ProfileOptions(["--name", "--dev", "--port", "--data-root=x"]).Count());
+        CollectionAssert.AreEqual(new[] { "--dev", "--data-root", "/n" }, NodeServiceStatus.ProfileOptions(["--dev", "--name", "a", "--data-root", "/n"]).ToArray());
         StringAssert.StartsWith(NodeServiceStatus.Fix(mac.Environment, agent, ["--data-root=/Users/alice/n"]), "altanode secrets key-file --data-root=/Users/alice/n && altanode uninstall --data-root=/Users/alice/n && ");
         using var linux = new FakeServiceMachine(ServicePlatform.Linux);
         Assert.AreEqual("sudo loginctl enable-linger alice", NodeServiceStatus.Fix(linux.Environment, agent with { Platform = ServicePlatform.Linux }, options));
