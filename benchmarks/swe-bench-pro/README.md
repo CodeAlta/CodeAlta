@@ -1,6 +1,6 @@
 # SWE-bench Pro v2 HARD-51: reproduction kit
 
-Runs the 51 tasks of HARD-51 of [SWE-bench Pro v2](https://github.com/scaleapi/SWE-bench_Pro-os/blob/main/v2/README.md) with [Harbor](https://github.com/laude-institute/harbor), under its locked protocol, for four harness/model pairs, and optionally a fifth, one job at a time:
+Runs the 51 tasks of HARD-51 of [SWE-bench Pro v2](https://github.com/scaleapi/SWE-bench_Pro-os/blob/main/v2/README.md) with [Harbor](https://github.com/laude-institute/harbor), under its locked protocol, for four harness/model pairs, and optionally others, one job at a time:
 
 | Run (`-Runs` name) | Harness | Model |
 |---|---|---|
@@ -9,10 +9,14 @@ Runs the 51 tasks of HARD-51 of [SWE-bench Pro v2](https://github.com/scaleapi/S
 | `codealta-astra` | CodeAlta's own agent loop, `openai-responses` provider | GPT-6 Astra, `xhigh` |
 | `codex-astra` | Codex CLI 0.155.1 (code mode) | GPT-6 Astra, `xhigh` |
 | `codealta-cc-opus` (optional) | CodeAlta driving the Claude Code CLI 2.1.309, `claude-code` provider | Claude Opus 5.5 (`opus`), `xhigh` |
+| `codealta-deepseek-flash` (optional) | CodeAlta's own agent loop, `openai-chat` provider on DeepSeek's API | DeepSeek V4.1 Flash, `high` |
+| `opencode-deepseek-flash` (optional) | OpenCode 1.19.5 (Harbor's `opencode` agent) | DeepSeek V4.1 Flash, `high` |
 
 CodeAlta runs through its adapter, [`../harbor/locked_codealta.py`](../harbor/README.md), which maps `-m anthropic/<model>` to the `anthropic` provider type. CodeAlta / Opus is therefore not CodeAlta driving the Claude Code CLI. The native harnesses use the locked adapters of SWE-bench Pro (`v2/tooling`).
 
 `codealta-cc-opus` is CodeAlta driving the Claude Code CLI (`--ak provider_type=claude-code`): the adapter installs the version of Claude Code that CodeAlta pins during setup, and the CLI makes the model requests with `ANTHROPIC_API_KEY`. Beside `claude-code-opus`, it tells what CodeAlta adds or costs on top of Claude Code's own loop. It is not in the default `-Runs`: name it (`-Runs codealta-cc-opus`, alone or with the others). See [CodeAlta on the Claude Code CLI](../harbor/README.md#codealta-on-the-claude-code-cli).
+
+The two DeepSeek runs need `DEEPSEEK_API_KEY`. Harbor's `opencode` agent captures no patch: its replay applies nothing, and its score is the verifier of each trial's own sandbox ([the DeepSeek report](../2026-11-07-swe-bench-pro-v2-hard51-deepseek-flash.md)). `-IncludeTask <task name>` runs a job on some tasks only, to check it before the whole run.
 
 Each model job is followed by a pristine replay of its captured patches, which gives the authoritative score. The summaries of a run are written under `results\` (see [Summary](#summary)); the repository keeps only the final report of the benchmark: [`../2026-10-28-swe-bench-pro-v2-hard51-final.md`](../2026-10-28-swe-bench-pro-v2-hard51-final.md).
 
