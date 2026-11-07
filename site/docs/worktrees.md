@@ -90,7 +90,7 @@ Run `/worktree`, or right-click a project in the Explorer and choose **Worktrees
 
 You cannot remove a worktree, or change its branch, while a session works in it.
 
-Deleting a session keeps its worktree and branch, unless you tick **Also remove the worktree** in the question, which follows the same rules. Its `alta/` branch goes only when it has no commit of its own.
+Deleting a session keeps its worktree and branch, unless you tick **Also remove the worktree** in the question, which follows the same rules. Its `alta/` branch goes only when it has no commit of its own. Deleting a session with its [child sessions](sessions/delegation.md#child-sessions) asks the same about every worktree they work in. A worktree that a session you keep works in is never offered.
 
 ### In the Changes tab
 

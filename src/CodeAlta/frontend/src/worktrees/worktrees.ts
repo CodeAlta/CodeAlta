@@ -84,6 +84,35 @@ export function deletedSessionWorktree<T extends Pick<WorkspaceSession, "id" | "
     && sameFolder(other.worktreeRoot ?? other.worktreePath, worktree.root)) };
 }
 
+/** A worktree that sessions deleted together work in: `sessionIds` are those of them that work in it. */
+export type DeletedWorktree = Readonly<{ projectId: string; name: string; path: string; shared: boolean; sessionIds: readonly string[] }>;
+
+/**
+ * The worktrees that sessions deleted together leave, each once: several of them often work in the same one. Only the
+ * worktrees of this computer are named: a machine of the fleet removes those of its own sessions. `shared` says a
+ * session that is not deleted works in it too: it is not offered for removal with them.
+ */
+export function deletedSessionsWorktrees<T extends Pick<WorkspaceSession, "id" | "scopeKind" | "projectId" | "machineId" | "worktreePath" | "worktreeRoot" | "worktreeName" | "worktreeMissing">>(
+  sessions: readonly T[], deleted: readonly T[]): readonly DeletedWorktree[] {
+  const ids = new Set(deleted.map(session => session.id));
+  const found: { projectId: string; name: string; path: string; shared: boolean; sessionIds: string[] }[] = [];
+  for (const session of deleted) {
+    const worktree = sessionWorktree(session);
+    if (!worktree || worktree.missing || session.machineId || session.scopeKind !== "project" || !session.projectId) continue;
+    const known = found.find(item => sameFolder(item.path, worktree.root));
+    if (known) { known.sessionIds.push(session.id); continue; }
+    found.push({ projectId: session.projectId, name: worktree.name, path: worktree.root, sessionIds: [session.id],
+      shared: sessions.some(other => !ids.has(other.id) && !other.machineId && !!other.worktreePath && sameFolder(other.worktreeRoot ?? other.worktreePath, worktree.root)) });
+  }
+  return found;
+}
+
+/** The worktrees that are left by the sessions that were deleted: a worktree of a session that is still there stays. */
+export function worktreesLeft(worktrees: readonly DeletedWorktree[], deleted: readonly string[]): readonly DeletedWorktree[] {
+  const gone = new Set(deleted.map(id => id.toLowerCase()));
+  return worktrees.filter(worktree => !worktree.shared && worktree.sessionIds.every(id => gone.has(id.toLowerCase())));
+}
+
 /** The last part of a folder. */
 export function folderName(path: string): string {
   const parts = path.split(/[\\/]+/u).filter(Boolean);

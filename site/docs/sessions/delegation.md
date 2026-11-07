@@ -57,6 +57,7 @@ A child session can be in another project, in the chats, or in another space tha
 - **Open parent session** in the menu of a child session opens the session that started it.
 - **Delete** deletes one session only, and never one with child sessions: it shows the child sessions instead.
 - **Delete with all child sessions…**, in that list, deletes the session and every session below it, after a confirmation. Nothing is deleted while one of them is at work. Projects and their files are kept.
+- The confirmation names the [worktrees](../worktrees.md) these sessions work in, each once. They are kept, unless you tick **Also remove the worktree** (**Also remove the N worktrees** for several); a worktree that another session works in stays.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-child-sessions.webp" alt="The Child sessions window of a session with five sub-agents: the tree of its child sessions with their project and space, the ones at work, and Delete with all child sessions" loading="lazy">
