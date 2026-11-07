@@ -20,6 +20,8 @@ import {
 } from "./models";
 import { createPhoneFiles, newSessionFiles } from "./phoneFiles";
 import { sectionModels } from "../modelOrder";
+import { promptSuggestionText } from "../promptSuggestion";
+import { phoneSuggestion } from "./suggestion";
 import {
   appliedSelection, chipText, modeDescription, modeName, pickedChanges, pickSessionModel, providerPermissionMode, queueFirstKey, shownSelection, type Picked,
 } from "./selection";
@@ -730,6 +732,9 @@ export function startMobile(window: Window & typeof globalThis) {
   const composer = $<HTMLFormElement>("composer"), promptBox = $<HTMLTextAreaElement>("prompt");
   const sendButton = $<HTMLButtonElement>("send"), queueButton = $<HTMLButtonElement>("queue"), abortButton = $<HTMLButtonElement>("abort");
   const hint = $("composer-hint");
+  // What the model suggests as the next prompt, as a chip over the box; for each session, the suggestion a prompt was sent after.
+  const suggestionChip = $<HTMLButtonElement>("suggestion"), suggestionText = $("suggestion-text");
+  const answeredSuggestions = new Map<string, string>();
   let composerFor: string | null = null;
   // Files and photos held with a prompt, for each session and the new one (phoneFiles.ts).
   const files = createPhoneFiles({
@@ -807,7 +812,33 @@ export function startMobile(window: Window & typeof globalThis) {
     composer.dataset.submit = state.submit;
     showSelection();
     showAsk();
+    showSuggestion(id, view?.live);
   }
+
+  // The chip shows only over an empty box, while nothing runs or waits for the person (showAsk tells what waits).
+  function showSuggestion(id: string | null, live: Live | null | undefined) {
+    const waiting = !approvalRoot.hidden || !askBar.hidden || composer.classList.contains("sending");
+    const suggestion = id ? phoneSuggestion(live, { text: promptBox.value, files: files.get(id).length, waiting, answered: answeredSuggestions.get(id) ?? null }) : null;
+    const was = !suggestionChip.hidden;
+    suggestionChip.hidden = !suggestion;
+    if (suggestion) {
+      suggestionText.textContent = suggestion;
+      suggestionChip.title = `Use suggestion: ${suggestion}`;
+      suggestionChip.setAttribute("aria-label", suggestionChip.title);
+    }
+    if (was !== !!suggestion) padComposer();
+  }
+  // A tap writes the suggestion in the box, to change or send: it never sends.
+  suggestionChip.addEventListener("click", () => {
+    const id = composerFor, suggestion = suggestionText.textContent ?? "";
+    if (!id || suggestionChip.hidden || !suggestion) return;
+    promptBox.value = suggestion;
+    drafts.set(id, suggestion);
+    grow();
+    showComposer();
+    promptBox.focus();
+    promptBox.setSelectionRange(suggestion.length, suggestion.length);
+  });
 
   function showAsk() {
     const was = !askBar.hidden;
@@ -952,6 +983,7 @@ export function startMobile(window: Window & typeof globalThis) {
     if (!id || (!text && !held.length)) return;
     if (hasImages(held) && sessionReadsImages(id) === false) { files.note(id, "This model does not read images."); return; }
     const sent = held.length ? files.take(id) : held;
+    const offered = promptSuggestionText(sessions.view(id)?.live?.suggestion);
     composer.classList.add("sending");
     // The prompt leaves the input (and its draft) as it is sent: the request can take a while to return while the
     // turn already runs. If it fails, the text goes back to the session it was written for.
@@ -970,6 +1002,8 @@ export function startMobile(window: Window & typeof globalThis) {
     const picked = picks.get(id) ?? {}, selection = mode === "steer" ? {} : pickedChanges(choicesOf.get(id), picked);
     try {
       const answer = await api.prompt(id, text, mode, selection, sent);
+      // The prompt answers the suggestion: it is not offered again, before the session says that its next turn started.
+      if (offered) answeredSuggestions.set(id, offered);
       // What takes the prompt back, once it waits; a send to a session that works was queued.
       if (answer.queueItemId || answer.withdrawalId) {
         changePrompt(id, prompt.key, {
@@ -1539,6 +1573,8 @@ export function startMobile(window: Window & typeof globalThis) {
   function onSession(update: Live) {
     link.at = new Date();
     if (link.state === "live") showLink();
+    // A session that suggests nothing any more starts again: the same words, suggested after another turn, are offered.
+    if (!promptSuggestionText(update.suggestion)) answeredSuggestions.delete(update.id);
     const decision = sessions.applyLive(update);
     if (decision === "reload") scheduleListRead(500);
     else if (decision === "listed" && !$("home").hidden) renderList();

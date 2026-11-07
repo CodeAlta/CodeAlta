@@ -58,6 +58,8 @@ internal sealed class MobileLive
         // alta steers a session whose turn runs, as `isRunning` says it.
         ["at"] = null, ["activity"] = null, ["canSteer"] = running, ["asking"] = _asking.TryGetValue(sessionId, out var ask) ? MobileAsks.Mark(ask) : null,
         ["approving"] = _approving.TryGetValue(sessionId, out var approval) ? MobilePermissions.Mark(approval) : null,
+        // A suggestion is only an event: one made before the plugin saw the session is not known.
+        ["suggestion"] = null,
     };
 
     /// <summary>Follows one event of a session.</summary>
@@ -74,7 +76,12 @@ internal sealed class MobileLive
             switch (agentEvent)
             {
                 case AgentActivityEvent { Kind: AgentActivityKind.Turn } turn:
-                    if (turn.Phase is AgentActivityPhase.Started or AgentActivityPhase.Progressed) session.Set(Running, session.Kind, session.Line);
+                    if (turn.Phase is AgentActivityPhase.Started or AgentActivityPhase.Progressed)
+                    {
+                        // What was suggested answered the turn before the one that starts.
+                        session.Suggestion = null;
+                        session.Set(Running, session.Kind, session.Line);
+                    }
                     else if (turn.Phase is AgentActivityPhase.Completed or AgentActivityPhase.Failed or AgentActivityPhase.Canceled)
                     {
                         session.Tools.Clear();
@@ -116,6 +123,7 @@ internal sealed class MobileLive
                             session.SetActivity(session.State == Idle ? Idle : session.Tools.Count > 0 ? Tools : Running);
                             break;
                         case AgentContentKind.User:
+                            session.Suggestion = null;
                             session.Activity.Reset();
                             session.Set(Running, "user", Concise(completed.Content));
                             break;
@@ -129,7 +137,21 @@ internal sealed class MobileLive
                     else session.Set(Idle, session.Kind, session.Line);
                     break;
                 case AgentErrorEvent:
+                    session.Suggestion = null;
                     session.Set(session.State, "error", "Error");
+                    break;
+                case AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Shutdown }:
+                    if (session.Suggestion is null) return;
+                    session.Suggestion = null;
+                    session.Dirty = true;
+                    break;
+                // The session tells a suggestion once its run said it is idle, as the runtime keeps it: one that comes
+                // while a turn is seen running answers nothing any more.
+                case AgentPromptSuggestionEvent suggested:
+                    var suggestion = session.State == Idle ? AgentPromptSuggestionEvent.Normalize(suggested.Suggestion) : null;
+                    if (suggestion is null || suggestion == session.Suggestion) return;
+                    session.Suggestion = suggestion;
+                    session.Dirty = true;
                     break;
                 default:
                     return;
@@ -295,6 +317,8 @@ internal sealed class MobileLive
         internal bool CanSteer, Probing;
         internal PluginAskSummary? Asking;
         internal PluginPermissionSummary? Approving;
+        // What the model suggested as the next prompt once the last turn ended; null once another one started.
+        internal string? Suggestion;
         internal int NotRunning;
         internal DateTimeOffset ProbedAt;
 
@@ -319,6 +343,7 @@ internal sealed class MobileLive
             ["activity"] = Kind == "activity" ? Activity.ToJson(State != Idle) : null,
             ["canSteer"] = CanSteer, ["asking"] = Asking is { } ask ? MobileAsks.Mark(ask) : null,
             ["approving"] = Approving is { } approval ? MobilePermissions.Mark(approval) : null,
+            ["suggestion"] = Suggestion,
         };
     }
 }

@@ -45,7 +45,7 @@ public sealed class MobileLiveTests
     {
         var live = new MobileLive();
         var quiet = live.Quiet("s2", "p2", running: true);
-        CollectionAssert.AreEquivalent(new[] { "id", "projectId", "live", "kind", "line", "at", "activity", "canSteer", "asking", "approving" }, quiet.Select(static property => property.Key).ToArray());
+        CollectionAssert.AreEquivalent(new[] { "id", "projectId", "live", "kind", "line", "at", "activity", "canSteer", "asking", "approving", "suggestion" }, quiet.Select(static property => property.Key).ToArray());
         Assert.AreEqual(("running", true), ((string?)quiet["live"], (bool)quiet["canSteer"]!));
         Assert.IsNull(quiet["asking"]);
         live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-1"), "p1");
@@ -121,6 +121,59 @@ public sealed class MobileLiveTests
         live.Flush(null, [new PluginPermissionSummary("s2", "r3", 1)]);
         Assert.AreEqual("r3", (string?)live.Quiet("s2", null, true)["approving"]!["id"], "A session not seen run says it when it is listed.");
     }
+
+    [TestMethod]
+    public void TheSuggestedNextPrompt_IsPushedAfterTheTurn_AndEndsWithTheNextOne()
+    {
+        var live = new MobileLive();
+        live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-1"), "p1");
+        live.Observe(Suggested("too early"));
+        Assert.IsNull(Suggestion(live), "A suggestion that comes while a turn runs answers nothing.");
+        live.Observe(new AgentSessionUpdateEvent(Provider, "s1", At, new AgentRunId("run-1"), AgentSessionUpdateKind.Idle, null));
+        var phone = live.Subscribe();
+        live.Flush();
+        while (phone.Reader.TryRead(out _))
+        {
+        }
+
+        live.Observe(Suggested("  go ahead "));
+        live.Flush();
+        Assert.IsTrue(phone.Reader.TryRead(out var suggested));
+        Assert.AreEqual("go ahead", (string?)Data(suggested)["suggestion"]);
+        live.Observe(Suggested("go ahead"));
+        live.Flush();
+        Assert.IsFalse(phone.Reader.TryRead(out _), "The same suggestion is not pushed again.");
+        live.Observe(Suggested("two\nlines"));
+        Assert.AreEqual("go ahead", Suggestion(live), "What is not one line is not a suggestion.");
+
+        live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-2"), "p1");
+        Assert.IsNull(Suggestion(live), "The next turn ends it.");
+        live.Observe(new AgentSessionUpdateEvent(Provider, "s1", At, new AgentRunId("run-2"), AgentSessionUpdateKind.Idle, null));
+        live.Observe(Suggested("run the tests"));
+        Assert.AreEqual("run the tests", Suggestion(live));
+        live.Observe(new AgentContentCompletedEvent(Provider, "s1", At, null, AgentContentKind.User, "prompt-3", null, "run the tests"));
+        Assert.IsNull(Suggestion(live), "A prompt of the user ends it.");
+
+        live.Observe(new AgentSessionUpdateEvent(Provider, "s1", At, new AgentRunId("run-3"), AgentSessionUpdateKind.Idle, null));
+        live.Observe(Suggested("commit"));
+        live.Observe(new AgentErrorEvent(Provider, "s1", At, "failed"));
+        Assert.IsNull(Suggestion(live), "An error ends it.");
+        live.Observe(new AgentSessionUpdateEvent(Provider, "s1", At, new AgentRunId("run-3"), AgentSessionUpdateKind.Idle, null));
+        live.Observe(Suggested("commit"));
+        live.Flush();
+        while (phone.Reader.TryRead(out _))
+        {
+        }
+
+        live.Observe(new AgentSessionUpdateEvent(Provider, "s1", At, null, AgentSessionUpdateKind.Shutdown, null));
+        live.Flush();
+        Assert.IsTrue(phone.Reader.TryRead(out var shut));
+        Assert.IsNull(Data(shut)["suggestion"], "A session that ends suggests nothing.");
+    }
+
+    private static AgentPromptSuggestionEvent Suggested(string text) => new(Provider, "s1", At, text);
+
+    private static string? Suggestion(MobileLive live) => (string?)live.Describe("s1")!["suggestion"];
 
     [TestMethod]
     public void TheSameAsks_AreKept_NotBuiltAgain()

@@ -9,7 +9,11 @@ const maximumPromptSuggestionLength = 256;
  */
 export function entryPromptSuggestion(entry: SessionRuntimeStateEntry | null | undefined): string | null {
   if (!entry || entry.isTerminated || entry.isRetiring || entry.activeRunId) return null;
-  const value = entry.promptSuggestion;
+  return promptSuggestionText(entry.promptSuggestion);
+}
+
+/** A suggestion as a prompt can take it: one line of text, trimmed; null for anything else. */
+export function promptSuggestionText(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const text = value.trim();
   return text.length > 0 && text.length <= maximumPromptSuggestionLength && !/[\p{Cc}\p{Zl}\p{Zp}]/u.test(text) ? text : null;
