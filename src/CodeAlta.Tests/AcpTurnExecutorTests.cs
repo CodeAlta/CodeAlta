@@ -1033,6 +1033,11 @@ public sealed class AcpTurnExecutorTests
         var newSession = agent.RequestsOf("session/new").Last()!;
         Assert.IsEmpty(newSession["mcpServers"]!.AsArray(), "no tool of CodeAlta");
         Assert.IsNull(newSession["systemPrompt"]);
+        // An empty folder of its own, gone with the turn: the agent reads nothing of the project, and keeps nothing under it.
+        var folder = newSession["cwd"]!.GetValue<string>();
+        Assert.AreNotEqual(fixture.WorkingDirectory, folder);
+        StringAssert.StartsWith(folder, Path.Combine(Path.GetTempPath(), "codealta-side-questions"));
+        Assert.IsFalse(Directory.Exists(folder), "the folder of the turn is deleted with it");
         Assert.AreEqual(SideSystemMessage + "\nWhat did the session do?", PromptText(agent.RequestsOf("session/prompt").Last()), "no instructions of a session, no tools");
         var capabilities = agent.ClientCapabilities!;
         Assert.IsFalse(capabilities["fs"]!["readTextFile"]!.GetValue<bool>());

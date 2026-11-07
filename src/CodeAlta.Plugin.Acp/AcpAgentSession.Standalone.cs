@@ -15,6 +15,10 @@ internal sealed partial class AcpAgentSession
     /// </summary>
     public bool Standalone { get; init; }
 
+    // The empty folder the agent of a standalone turn works in, deleted with the turn; null when it works in the folder of
+    // the request (in a sandbox).
+    private string? _standaloneFolder;
+
     /// <summary>
     /// Runs a turn that belongs to no session: the agent is started for it, without the tools of CodeAlta and without a
     /// file system or a terminal of the client, in a read-only mode when it offers one, and every permission it asks is
@@ -22,8 +26,10 @@ internal sealed partial class AcpAgentSession
     /// is cancelled.
     /// </summary>
     /// <remarks>
-    /// The agent may still run the tools of its own that it runs without asking (reading a file, searching), as the
-    /// protocol leaves that to the agent; an agent that cannot delete a session keeps it in its own history.
+    /// The agent works in an empty folder of its own, deleted with the turn: the question needs no file (its conversation
+    /// is the whole context), the tools the agent runs without asking (reading a file, searching) find nothing of the
+    /// project, and an agent that cannot delete a session keeps it in its history under that folder, not the project's.
+    /// In a sandbox, whose profile names the folders it allows, it works in the folder of the request.
     /// </remarks>
     public async Task<AgentTurnResponse> ExecuteStandaloneTurnAsync(
         AgentTurnRequest request,
@@ -81,6 +87,13 @@ internal sealed partial class AcpAgentSession
     {
         var executable = ResolveExecutable();
         var workingDirectory = WorkingDirectoryOf(request);
+        if (request.ProcessHost is null)
+        {
+            _standaloneFolder = Path.Combine(Path.GetTempPath(), "codealta-side-questions", Guid.CreateVersion7().ToString("N"));
+            Directory.CreateDirectory(_standaloneFolder);
+            workingDirectory = _standaloneFolder;
+        }
+
         var connection = await StartAgentAsync(
                 new AcpConnectionRequest(executable, _options.Agent.Arguments, CreateEnvironment(request), workingDirectory, _options.InitializeTimeout)
                 {
@@ -220,6 +233,15 @@ internal sealed partial class AcpAgentSession
         }
 
         await CloseConnectionAsync().ConfigureAwait(false);
+        if (Interlocked.Exchange(ref _standaloneFolder, null) is { } folder)
+        {
+            try { Directory.Delete(folder, recursive: true); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // What the agent left there goes with the temporary files of the system.
+                _logger?.Debug($"The folder {folder} of a turn without a session could not be deleted: {ex.Message}");
+            }
+        }
     }
 
     private async Task EndRequestAsync(string method, Func<CancellationToken, Task> send)

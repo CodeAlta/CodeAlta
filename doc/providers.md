@@ -203,7 +203,9 @@ schema types, JSON-RPC transport, client, process, registry and installer) and n
 - A side question (`IAgentProviderStandaloneTurns`) runs in an agent process and session of its own: no MCP server,
   a read-only (`read-only`, `ask`, `plan`) mode when the agent offers one, every permission request refused, then
   `session/close` and `session/delete` when the agent supports them and the process ended, also on failure or
-  cancellation. The agent may still run the tools it runs without asking, and keeps a session it cannot delete.
+  cancellation. It works in an empty folder of its own, deleted with the turn (the folder of the request in a
+  sandbox): the tools it runs without asking find nothing of the project, and a session it cannot delete is not kept
+  under the project.
 - Models and efforts are the agent's config options; the probe selects each model once to learn its efforts, then
   restores the selection, since some agents remember the last choice. What an agent does beyond the protocol is a
   subclass of `AcpAgentQuirks`, chosen from the registry id or the command.
