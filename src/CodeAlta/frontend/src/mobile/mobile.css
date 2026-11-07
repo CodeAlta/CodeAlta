@@ -777,3 +777,41 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .output-viewer-note:empty { display: none; }
 /* A table scrolls sideways in its message: its cells keep their words whole, as the rest of the message does not. */
 .markdown-content :is(th, td) { min-width: 4ch; overflow-wrap: normal; word-break: normal; }
+
+/* The search in a session or in a file (findBar.ts): its box, the count, "Aa" and its menu, the arrows and the close button,
+   and under them the button that reads more to search. The session's bar covers the top bar, in place of the composer; the
+   viewer's takes the place of its title. Fixed px, as the top bar. */
+.find-bar { display: flex; flex-direction: column; gap: 4px; padding: calc(6px + env(safe-area-inset-top)) calc(8px + var(--safe-right)) 6px calc(12px + var(--safe-left));
+  background: var(--panel); border-bottom: 1px solid var(--line); }
+.find-bar.session-find { position: fixed; top: 0; left: 0; right: 0; z-index: 4; }
+.find-bar-row { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; }
+.find-bar-query { flex: 1 1 auto; width: 0; min-width: 0; height: 40px; margin-right: 4px; padding: 0 .625rem; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--text); font: inherit; font-size: 16px; }
+.find-bar-query:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.find-bar-query[aria-invalid="true"] { border-color: var(--red); outline-color: var(--red); }
+.find-bar-count { flex: none; min-width: 3.25rem; padding: 0 2px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
+.find-bar-count:empty { min-width: 0; }
+.find-bar-count[data-empty] { color: var(--red); }
+.find-bar .icon-btn { flex: none; min-width: 44px; padding: 0; }
+.find-bar .icon-btn:disabled { opacity: .4; cursor: default; }
+.find-bar .icon-btn .ico svg { width: 22px; height: 22px; }
+.find-bar-options { color: var(--muted); font-size: 15px; }
+.find-bar-options[data-on] { color: var(--accent); }
+.find-bar-menu { position: absolute; top: calc(100% + 6px); right: 88px; z-index: 1; display: flex; flex-direction: column; min-width: 14rem; padding: 4px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+.find-bar-toggle { display: flex; align-items: center; gap: .625rem; min-height: 44px; padding: 0 .75rem; border: 0; border-radius: 8px; background: transparent;
+  color: var(--text); font: inherit; font-size: 15px; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.find-bar-toggle:active { background: var(--panel-2); }
+.find-bar-toggle .ico { visibility: hidden; color: var(--accent); }
+.find-bar-toggle[aria-checked="true"] .ico { visibility: visible; }
+.find-bar-more { align-self: center; min-height: 36px; padding: 0 .75rem; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2);
+  color: var(--text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.find-bar-more:disabled { color: var(--muted); cursor: default; }
+/* While a session is searched, its composer, its approvals and its ask make room for what is found. */
+body.session-finding :is(#composer, #ask) { display: none !important; }
+.output-viewer[data-finding] .output-viewer-bar { display: none; }
+/* The places found, as the desktop marks them; the place shown brighter. */
+::highlight(find-in-page) { background-color: #5c4a14; }
+::highlight(find-in-page-current) { background-color: #b07d0e; color: #fff; }
+:root[data-theme="light"] ::highlight(find-in-page) { background-color: #f5df9a; }
+:root[data-theme="light"] ::highlight(find-in-page-current) { background-color: #f0b726; color: #111; }

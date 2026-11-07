@@ -32,6 +32,7 @@ import {
 } from "./timeline";
 import { createImageViewer } from "./imageViewer";
 import { createOutputViewer } from "./outputViewer";
+import { createSessionFind } from "./sessionFind";
 import { createTimelineView } from "./timelineView";
 
 /** Starts the phone page in a window whose document is `mobile.html`. */
@@ -373,7 +374,7 @@ export function startMobile(window: Window & typeof globalThis) {
         subject.replaceChildren(folders, file);
       }
       return page;
-    }, false, { label: `File ${linkedFileName(href)}`, drawn: linksMarkdown(href) ? drawnMarkdown() : undefined });
+    }, false, { label: `File ${linkedFileName(href)}`, file: true, drawn: linksMarkdown(href) ? drawnMarkdown() : undefined });
   }
 
   markdown.handle(timeline, text => showToast(text), openLinkedFile);
@@ -393,6 +394,12 @@ export function startMobile(window: Window & typeof globalThis) {
     },
     withdraw: (key, then) => void withdrawPrompt(key, then),
   });
+  // The search in the timeline (sessionFind.ts), from the magnifier of the head of the session.
+  const sessionFind = createSessionFind({
+    window, timeline, hasOlder: () => detail.hasOlder, readOlder, firstHeld: () => detail.before,
+    redraw: () => drawTimeline(), layout: () => padComposer(),
+  });
+  $<HTMLButtonElement>("detail-find").addEventListener("click", () => sessionFind.bar.open());
 
   const nearBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 40;
   const toBottom = () => window.scrollTo(0, document.documentElement.scrollHeight);
@@ -406,7 +413,7 @@ export function startMobile(window: Window & typeof globalThis) {
     blocksView.know(blocks);
     type Entry = { block: TimelineBlock | DayBlock; live: boolean; open: boolean; key: string; version: string; prompt?: PendingPrompt };
     const entries: Entry[] = blocks.map((block, index) => {
-      const live = liveBlock(blocks, index, busy), open = detail.expanded.has(block.key);
+      const live = liveBlock(blocks, index, busy), open = detail.expanded.has(block.key) || sessionFind.opens(block, detail.expanded);
       return { block, live, open, key: block.key, version: blockVersion(block, live, open) };
     });
     const pending = stillPending(pendingPrompts.get(detail.id) ?? [], detail.events, busy, Date.now());
@@ -417,7 +424,8 @@ export function startMobile(window: Window & typeof globalThis) {
     // A day line says "Today" until midnight: its label is its version, so that it is drawn again after.
     const all: Entry[] = withDays(held.map(entry => entry.block as TimelineBlock), new Date())
       .map(block => block.kind === "day" ? { block, live: false, open: false, key: block.key, version: block.label } : byBlock.get(block)!);
-    const follow = nearBottom();
+    // While a text is looked for, the place shown stays where it is as the agent writes.
+    const follow = nearBottom() && !sessionFind.bar.isOpen();
     const plan = planTimeline(new Map([...detail.drawn].map(([key, drawn]) => [key, drawn.version])), all);
     for (const key of plan.removed) { detail.drawn.get(key)?.element.remove(); detail.drawn.delete(key); }
     let previous: Element | null = null;
@@ -495,6 +503,8 @@ export function startMobile(window: Window & typeof globalThis) {
     const toggle = (event.target as Element | null)?.closest<HTMLButtonElement>("button.act-toggle");
     const key = toggle?.closest<HTMLElement>("li.activity")?.dataset.key;
     if (!key) return;
+    const block = detail.blocks.find(item => item.key === key);
+    if (block && sessionFind.toggle(block, detail.expanded)) { drawTimeline(); return; }
     if (detail.expanded.has(key)) detail.expanded.delete(key); else detail.expanded.add(key);
     drawTimeline();
   });
@@ -580,6 +590,7 @@ export function startMobile(window: Window & typeof globalThis) {
     older.hidden = !detail.id || !detail.hasOlder;
     older.disabled = detail.readingOlder;
     older.textContent = detail.readingOlder ? "Loading older messages…" : "Load older messages";
+    sessionFind.bar.changed();
   }
   const olderWatch = new window.IntersectionObserver(items => {
     if (!items.some(item => item.isIntersecting)) return;
@@ -589,7 +600,13 @@ export function startMobile(window: Window & typeof globalThis) {
   // Watching it again says at once whether it is near: a short page reads the next one by itself. A read that failed does
   // not come here, so that it is not made again and again: a tap makes it again.
   function watchOlder() { olderWatch.unobserve(older); if (detail.id && detail.hasOlder) olderWatch.observe(older); }
-  async function readOlder() {
+  // A read of older messages asked for while one runs waits for that one.
+  let olderRead: Promise<void> | null = null;
+  function readOlder(): Promise<void> {
+    olderRead ??= readOlderPage().finally(() => { olderRead = null; });
+    return olderRead;
+  }
+  async function readOlderPage() {
     const id = detail.id, generation = detail.generation, before = detail.before;
     if (!id || signedOut || detail.readingOlder || !detail.hasOlder || before === null) return;
     const current = () => detail.id === id && detail.generation === generation;
@@ -641,6 +658,7 @@ export function startMobile(window: Window & typeof globalThis) {
   }
 
   function openDetail(id: string) {
+    sessionFind.bar.dismiss();
     detail.id = id;
     detail.generation++;
     detail.since = 0;
@@ -669,6 +687,7 @@ export function startMobile(window: Window & typeof globalThis) {
     void readDetail().then(() => { if (detail.id === id) toBottom(); });
   }
   function closeDetail() {
+    sessionFind.bar.dismiss();
     bindComposer(null);
     detail.id = null;
     detail.generation++;
