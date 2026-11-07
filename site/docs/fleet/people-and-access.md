@@ -8,6 +8,8 @@ A [CodeAlta Server](server.md) knows the people of your household or company, wh
 
 At home, the page shows your people and your machines: everything is yours, and the people you invite see what you share with them. Teams, grants and service identities appear when your organization uses them, or with **Show teams, grants and service identities**.
 
+The people are a table: narrow it with **Filter** and the **Role**, **Team** and **Status** menus, change a role in its cell, and click a row for their teams.
+
 ## Invite a person
 
 1. Click **Invite a person…**, give their name and a role (**Member** by default), and click **Invite**.

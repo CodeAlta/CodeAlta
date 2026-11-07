@@ -191,6 +191,7 @@ CodeAlta Desktop starts on a **Welcome** tab with:
 - **Get started**, while a model provider or a first project is missing;
 - **Recent sessions** and **Recent projects** of the space;
 - the cards of your plugins, such as the [Statistics](../plugins/statistics.md) of the last seven days;
+- **Fleet**: how many of your machines are online and your server, or how to start a fleet, with **Open Fleet** ([Fleet](../fleet/readme.md#open-fleet));
 - **Explore**: the documentation, Canvases, Plugins, Model Providers, Settings and the keyboard shortcuts.
 
 Open it with the **Home** icon of the title bar, **Welcome** in the search or `/landing`; an agent uses `alta landing open`. The switches at its bottom, also in **Settings > General > Welcome page**, choose whether it opens at startup and whether it is animated (it never moves when your system asks for reduced motion). To remove it, turn off the **Landing page** plugin in **Settings > Plugins**. A plugin can add [its own card](../plugins/ui.md#welcome-page-cards).

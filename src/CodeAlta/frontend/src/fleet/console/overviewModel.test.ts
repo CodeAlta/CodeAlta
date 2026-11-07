@@ -11,12 +11,14 @@ const server = (more: Partial<FleetServerView> = {}): FleetServerView => ({ id: 
 test("Without a machine or a server, the steps start with both, and the parts of an organization wait for a server", () => {
   assert.equal(hasFleet([], []), false);
   const steps = fleetSteps([], []);
-  assert.deepEqual(steps.map(step => [step.id, step.done, step.ready]), [["machines", false, true], ["server", false, true], ["people", false, false],
-    ["policies", false, false], ["secrets", false, false], ["budgets", false, false]]);
+  assert.deepEqual(steps.map(step => [step.id, step.done, step.ready, step.waitsFor]), [["machines", false, true, null], ["server", false, true, null], ["people", false, false, "server"],
+    ["policies", false, false, "server"], ["secrets", false, false, "server"], ["budgets", false, false, "server"]]);
   const linked = fleetSteps([machine("m", "online")], [server()]);
   assert.deepEqual(linked.filter(step => step.done).map(step => step.id), ["machines", "server"]);
   assert.ok(linked.every(step => step.ready), "a server opens every part");
   assert.equal(fleetSteps([], [server({ link: "pending" })])[2].ready, false, "a server that has not approved this computer opens nothing yet");
+  const member = fleetSteps([], [server({ controller: false })]);
+  assert.deepEqual([member[1].done, member[2].ready, member[2].waitsFor], [true, false, "administrator"], "a member's computer is linked, but administers nothing");
 });
 
 test("The totals count machines online, their sessions, and those reached through the server", () => {
@@ -28,8 +30,9 @@ test("What needs attention: a stopped fleet first, a server not connected, then 
   const items = fleetAttention([machine("connecting", "connecting"), machine("gone", "offline"), machine("locked", "unauthorized")],
     [server({ connection: "offline", stop: { scope: "fleet", reason: "Incident", machines: 0, teams: 0, since: null, number: 3 } })]);
   assert.deepEqual(items.map(item => [item.kind, item.name, item.severity]), [["stopped", "Acme", "danger"], ["server", "Acme", "danger"],
-    ["offline", "gone", "warning"], ["unauthorized", "locked", "danger"]]);
-  assert.equal(items[2].page, "machines/gone", "the row opens the page of the machine");
+    ["unauthorized", "locked", "danger"], ["offline", "gone", "warning"]], "a machine that refuses comes before one that is gone, whatever their order");
+  assert.equal(items[3].page, "machines/gone", "the row opens the page of the machine");
+  assert.equal(fleetAttention([], [server({ stop: { scope: "machines", reason: null, machines: 2, teams: 0, since: null, number: 4 } })])[0].kind, "stoppedPart", "a stop of some machines is not the whole fleet's");
   assert.deepEqual(fleetAttention([machine("a", "online")], [server()]), [], "a fleet that runs needs nothing");
 });
 

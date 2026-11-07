@@ -10,7 +10,7 @@ export type DataColumn<T> = Readonly<{
   label: MessageKey;
   cell: (row: T) => ReactNode;
   sort?: (row: T) => SortValue;
-  /** Its width, as CSS; the rest share what is left. */
+  /** The width it asks, as CSS; the others share what is left, and the table scrolls sideways before a column has no room. */
   width?: string;
   align?: "start" | "end";
   /** A column a narrow window leaves out: what it says is in the details of the row. */
@@ -49,6 +49,8 @@ export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selec
     return sortRows(rows, column?.sort ?? null, sort?.direction ?? "asc", locale);
   }, [rows, columns, sort, locale]);
   const keys = sorted.map(rowKey);
+  // One row is in the order of Tab, the selected one or the first: the arrows move between the others, as in a list.
+  const entry = selected !== null && keys.includes(selected) ? selected : keys[0];
   function move(event: KeyboardEvent<HTMLTableRowElement>, key: string) {
     const index = keys.indexOf(key);
     const next = event.key === "ArrowDown" ? keys[index + 1] : event.key === "ArrowUp" ? keys[index - 1] : undefined;
@@ -68,13 +70,12 @@ export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selec
 
   return <div className="fleet-table-frame">
     <table className="fleet-table" aria-label={label}>
-      <colgroup>{columns.map(column => <col key={column.id} data-secondary={column.secondary || undefined} style={column.width ? { width: column.width } : undefined} />)}</colgroup>
       <thead>
         <tr>{columns.map(column => {
           const sorting = sort?.column === column.id ? sort.direction : null;
-          return <th key={column.id} scope="col" data-align={column.align} data-secondary={column.secondary || undefined}
+          return <th key={column.id} scope="col" data-align={column.align} data-secondary={column.secondary || undefined} style={column.width ? { width: column.width } : undefined}
             aria-sort={sorting === "asc" ? "ascending" : sorting === "desc" ? "descending" : undefined}>
-            {column.sort ? <button type="button" className="fleet-table-sort" onClick={() => onSort(toggledSort(sort, column.id))}>
+            {column.sort ? <button type="button" className="fleet-table-sort settings-own-button" onClick={() => onSort(toggledSort(sort, column.id))}>
               <span>{t(column.label)}</span>
               <AppIcon name={sorting === "desc" ? "arrowDown" : sorting === "asc" ? "arrowUp" : "sort"} size={12} className={sorting ? undefined : "fleet-table-sort-idle"} />
             </button> : <span className={column.hiddenLabel ? "visually-hidden" : undefined}>{t(column.label)}</span>}
@@ -89,7 +90,7 @@ export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selec
             const extra = rowProps?.(row);
             const data = Object.fromEntries(Object.entries(extra?.data ?? {}).map(([name, value]) => [`data-${name}`, value]));
             return <Fragment key={key}>
-              <tr {...data} className={extra?.className} data-row-key={key} tabIndex={0} aria-selected={selected === key} aria-expanded={details ? open : undefined} data-state={rowState?.(row)}
+              <tr {...data} className={extra?.className} data-row-key={key} tabIndex={key === entry ? 0 : -1} aria-selected={selected === key} aria-expanded={details ? open : undefined} data-state={rowState?.(row)}
                 onClick={event => { if (!(event.target as HTMLElement).closest("button, a, input, label, select, [role=switch]")) onSelect(open ? null : key); }}
                 onKeyDown={event => { if (event.target === event.currentTarget) move(event, key); }}>
                 {columns.map(column => <td key={column.id} data-align={column.align} data-secondary={column.secondary || undefined}>{column.cell(row)}</td>)}

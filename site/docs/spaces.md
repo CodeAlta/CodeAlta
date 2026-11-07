@@ -272,6 +272,8 @@ With more than one space, the foot of the Explorer has a button for each space. 
 
 When a session waits for you or fails in a space that is not shown, a line above the buttons names it (click it to open the session), a dot appears on the space switch, and a message with **Show** says so once.
 
+At the end of the buttons, **Fleet** opens [Fleet](fleet/readme.md#open-fleet), with how many of your machines are online beside it; it shows even with one space. Its Overview says which server each space publishes to.
+
 <figure class="alta-figure my-4" style="max-width: 30rem;">
   <img src="{{site.basepath}}/img/alta-desktop-space-activity.webp" alt="The foot of the Explorer: a line that says the session Draft the release notes waits in the Work space, above the buttons of the four spaces with their marks" loading="lazy">
   <figcaption class="small text-secondary mt-2">The foot of the Explorer: a session waits for you in Work, sessions run in Personal, and Open source is the space shown.</figcaption>

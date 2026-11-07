@@ -7,8 +7,10 @@ export type FleetStep = Readonly<{
   id: "machines" | "server" | "people" | "policies" | "secrets" | "budgets";
   page: "machines" | "fleetServer" | "fleetAccess" | "fleetPolicies" | "fleetSecrets" | "fleetBudgets";
   done: boolean;
-  /** Whether it can be set up now: the parts of an organization need a server. */
+  /** Whether it can be set up now: the parts of an organization need a server, and this computer to administer it. */
   ready: boolean;
+  /** What it waits for while it is not ready: a server, or the computer of an administrator (this one is a member). */
+  waitsFor: "server" | "administrator" | null;
 }>;
 
 /** Whether this computer has a fleet at all: a machine, or a server. */
@@ -20,13 +22,15 @@ export const hasFleet = (machines: readonly MachineView[], servers: readonly Fle
  */
 export function fleetSteps(machines: readonly MachineView[], servers: readonly FleetServerView[]): FleetStep[] {
   const linked = servers.some(server => server.link === "approved");
+  // The pages of an organization administer it from a computer that controls it; a member's computer has nothing to set there.
+  const administered = servers.some(server => server.link === "approved" && server.controller);
+  const waitsFor = administered ? null : linked ? "administrator" : "server";
+  // What an organization has set up is not read here: its parts are offered, never counted as done.
+  const organization = (id: "people" | "policies" | "secrets" | "budgets", page: FleetStep["page"]): FleetStep => ({ id, page, done: false, ready: administered, waitsFor });
   return [
-    { id: "machines", page: "machines", done: machines.length > 0, ready: true },
-    { id: "server", page: "fleetServer", done: linked, ready: true },
-    { id: "people", page: "fleetAccess", done: false, ready: linked },
-    { id: "policies", page: "fleetPolicies", done: false, ready: linked },
-    { id: "secrets", page: "fleetSecrets", done: false, ready: linked },
-    { id: "budgets", page: "fleetBudgets", done: false, ready: linked },
+    { id: "machines", page: "machines", done: machines.length > 0, ready: true, waitsFor: null },
+    { id: "server", page: "fleetServer", done: linked, ready: true, waitsFor: null },
+    organization("people", "fleetAccess"), organization("policies", "fleetPolicies"), organization("secrets", "fleetSecrets"), organization("budgets", "fleetBudgets"),
   ];
 }
 
@@ -43,13 +47,15 @@ export function machineTotals(machines: readonly MachineView[]) {
 
 /** Something of the fleet that needs the person: what it is about, and the page that fixes it. */
 export type FleetAttention = Readonly<{
-  kind: "stopped" | "server" | "unauthorized" | "offline";
+  kind: "stopped" | "stoppedPart" | "server" | "unauthorized" | "offline";
   /** The machine or the server it is about. */
   name: string;
   detail: string | null;
   page: string;
   severity: "danger" | "warning";
 }>;
+
+const kindRank: Readonly<Record<FleetAttention["kind"], number>> = { stopped: 0, stoppedPart: 1, server: 2, unauthorized: 3, offline: 4 };
 
 /**
  * What needs the person, the most pressing first: a server whose kill switch stopped the work, a server this computer is
@@ -60,7 +66,7 @@ export function fleetAttention(machines: readonly MachineView[], servers: readon
   const items: FleetAttention[] = [];
   for (const server of servers) {
     const name = server.organization ?? server.url;
-    if (server.stop) items.push({ kind: "stopped", name, detail: server.stop.reason ?? null, page: "fleetPolicies", severity: "danger" });
+    if (server.stop) items.push({ kind: server.stop.scope === "fleet" ? "stopped" : "stoppedPart", name, detail: server.stop.reason ?? null, page: "fleetPolicies", severity: "danger" });
     const connection = serverConnection(server);
     if (connection !== "online" && connection !== "connecting")
       items.push({ kind: "server", name, detail: server.problem ?? null, page: "fleetServer", severity: connection === "pending" ? "warning" : "danger" });
@@ -72,7 +78,8 @@ export function fleetAttention(machines: readonly MachineView[], servers: readon
     else if (state === "offline") items.push({ kind: "offline", name: machine.name, detail: machine.problem ?? null, page: `machines/${machine.id}`, severity: "warning" });
   }
 
-  return items;
+  // The most pressing first, whatever the order of the lists: what is stopped, then a server, a machine that refuses, one that is gone.
+  return items.map((item, index) => ({ item, index })).sort((a, b) => kindRank[a.item.kind] - kindRank[b.item.kind] || a.index - b.index).map(entry => entry.item);
 }
 
 /** A space as Fleet sees it: the server its sessions publish to, if any. */

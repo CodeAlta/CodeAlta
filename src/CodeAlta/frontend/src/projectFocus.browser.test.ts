@@ -169,7 +169,7 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     // The settings show what was remembered, and bring the question back.
     await evaluate(`document.querySelector('button.activity-settings').click()`);
     assert.equal(await wait("!!document.querySelector('.settings-dialog-navigation')"), true);
-    await evaluate(`[...document.querySelectorAll('.settings-dialog-navigation button')].find(button=>button.textContent==='General').click()`);
+    await evaluate(`[...document.querySelectorAll('.settings-dialog-navigation button[data-settings-section]')].find(button=>button.textContent==='General').click()`);
     assert.equal(await wait("document.querySelector('#settings-on-close')?.value==='exit'"), true);
     assert.deepEqual(await evaluate("Array.from(document.querySelector('#settings-on-close').options,option=>option.textContent)"), ["Ask each time", "Keep running", "Exit CodeAlta"]);
     await evaluate(`(()=>{const select=document.querySelector('#settings-on-close');

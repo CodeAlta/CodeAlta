@@ -13,9 +13,9 @@ test("the Overview of a fleet that runs says how it stands, what needs the perso
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-tile')].map(tile => tile.querySelector('.fleet-tile-value').textContent)`),
       ["17 / 22", "50", "Northwind Labs", "2 / 4"]);
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-attention li strong')].map(name => name.textContent)`),
-      ["mac-mini-qa", "win-legacy", "perf-lab", "home-nas"], "the machines that refuse or do not answer; one still connecting is not counted");
+      ["win-legacy", "mac-mini-qa", "perf-lab", "home-nas"], "the machine that refuses first, then those that do not answer; one still connecting is not counted");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-mini-table tbody tr')].map(row => row.textContent)`),
-      ["DefaultThis computer and its machines", "WorkNorthwind Labs", "Open sourceNorthwind Labs", "PersonalThis computer and its machines"]);
+      ["DefaultThis computer and its machines", "WorkNorthwind LabsOnline", "Open sourceNorthwind LabsOnline", "PersonalThis computer and its machines"]);
     await page.shot("fleet-overview");
     assert.deepEqual(page.problems, []);
   }, options);
@@ -31,6 +31,33 @@ test("with nothing set up, the Overview starts with a machine and a server, and 
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-step-grid .fleet-step')].map(step => [step.querySelector('strong').textContent, step.disabled])`),
       [["Invite people", true], ["Set policies", true], ["Share secrets", true], ["Set budgets", true]]);
     await page.shot("fleet-start");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("a fleet that cannot be read says so, instead of offering to start one", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-tiles')`, "the fleet");
+    await page.evaluate(`window.fleetConsoleFixture.fail()`);
+    await page.until(`document.querySelector('.fleet-overview .bp6-non-ideal-state')?.textContent.includes('The fleet could not be read.')`, "the failure");
+    assert.equal(await page.evaluate(`!!document.querySelector('.fleet-onboarding, .fleet-tiles')`), false, "neither the first steps nor figures that are not known");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-overview .bp6-callout')?.getAttribute('role')`), "alert");
+  }, options);
+});
+
+test("a narrow window keeps the name and the state of each machine, and the header of the table in view", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`window.fleetConsoleFixture.show('machines')`);
+    await page.until(`${rows}.length === 22`, "the table of machines");
+    for (const [width, height] of [[1200, 850], [900, 650]]) {
+      await page.resize(width, height);
+      await page.until(`${rows}.every(row => row.cells[0].getBoundingClientRect().width >= 120 && row.querySelector('strong').getBoundingClientRect().width > 40)`, `the names at ${width}`);
+      assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-table thead th')].filter(th => th.getBoundingClientRect().width > 0).map(th => th.textContent)`).then(names => (names as string[]).slice(0, 2)),
+        ["Machine", "State"], `the first columns at ${width}`);
+    }
+    // The table scrolls in its frame: its header stays at the top of it.
+    await page.evaluate(`document.querySelector('.fleet-table-frame').scrollTop = 400`);
+    assert.ok(await page.evaluate(`Math.abs(document.querySelector('.fleet-table thead th').getBoundingClientRect().top - document.querySelector('.fleet-table-frame').getBoundingClientRect().top) < 2`), "the header in view");
     assert.deepEqual(page.problems, []);
   }, options);
 });
@@ -61,7 +88,7 @@ test("the machines are filtered, sorted, and a row opens its details in place", 
 
     // A row opens its details under it, with the page of its machine.
     await page.click(".fleet-table tbody tr[data-row-key]");
-    await page.until(`document.querySelector('.fleet-table-details .machine-details')`, "the details");
+    await page.until(`document.querySelector('.fleet-table-details .machine-row-details')`, "the details");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-table-details').previousElementSibling.getAttribute('aria-selected')`), "true");
     assert.ok(await page.evaluate(`[...document.querySelectorAll('.machine-details-actions .bp6-button')].some(button => button.textContent === 'Open its page')`));
     await page.key("Escape", 27);
@@ -75,7 +102,7 @@ test("the machines table is taken whole, with a row open, for the guide", { skip
     await page.evaluate(`window.fleetConsoleFixture.show('machines')`);
     await page.until(`${rows}.length === 22`, "the table of machines");
     await page.click(".fleet-table tbody tr[data-row-key]", 1);
-    await page.until(`document.querySelector('.fleet-table-details .machine-details')`, "the details");
+    await page.until(`document.querySelector('.fleet-table-details .machine-row-details')`, "the details");
     await page.evaluate(`document.activeElement?.blur()`);
     await page.shot("fleet-machines");
     assert.deepEqual(page.problems, []);

@@ -11,6 +11,25 @@ CodeAlta works on one computer and needs nothing else. Fleet adds two steps for 
   <figcaption class="small text-secondary mt-2">Three ways to use CodeAlta. Each one is optional.</figcaption>
 </figure>
 
+## Open Fleet
+
+In CodeAlta Desktop, open **Settings** and choose its **Fleet** tab, or click **Fleet** at the foot of the Explorer or on the welcome page. Fleet opens on its **Overview**:
+
+- With nothing set up, two cards start your fleet: **Add a machine** and **Create or join a server**. What a server adds (people, policies, secrets, budgets) waits for one.
+- Once you have a fleet, it shows how many machines are online and the sessions they run, the server, what needs your attention (a machine that does not answer, a server you are not connected to), the server each [space](../spaces.md) publishes to, and what is left to set up.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-overview.webp" alt="Settings > Fleet > Overview: 17 of 22 machines online, 50 sessions, the server Northwind Labs online and 2 of 4 spaces on it; four machines that need attention; the server of each space; and the parts left to set up" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Overview of a fleet that runs: its figures, what needs you, and the server of each space.</figcaption>
+</figure>
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-start.webp" alt="Settings > Fleet > Overview with nothing set up: Start your fleet, then Add a machine and Create or join a server; Invite people, Set policies, Share secrets and Set budgets wait for a server" loading="lazy">
+  <figcaption class="small text-secondary mt-2">With nothing set up, the Overview starts with a machine and a server.</figcaption>
+</figure>
+
+Each page of Fleet has a **?** button that says what it is for and opens its page of this guide. The lists that grow, such as machines and people, are tables: click a column to sort them, narrow them with **Filter** and the menus beside it, and click a row for its details.
+
 ## One computer
 
 This is CodeAlta as you know it. CodeAlta Desktop, or CodeAlta TUI in a terminal, runs your sessions on this computer with your providers and your keys. There is no account and no server, and nothing leaves this computer except what your providers receive.

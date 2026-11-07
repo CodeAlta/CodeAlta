@@ -28,7 +28,7 @@ export function FilterBar({ label, query, onQuery, facets, values, onValues, sho
       onKeyDown={event => { if (event.key === "Escape" && query) { event.preventDefault(); event.stopPropagation(); onQuery(""); } }} />
     {facets.filter(facet => facet.options.length > 0).map(facet => {
       const picked = values[facet.id] ?? [];
-      return <PopoverNext key={facet.id} placement="bottom-start" content={<Menu className="fleet-filters-menu" aria-label={t(facet.label)}>
+      return <PopoverNext key={facet.id} placement="bottom-start" content={<Menu className="fleet-filters-menu" role="listbox" aria-multiselectable aria-label={t(facet.label)}>
         <MenuDivider title={t(facet.label)} />
         {facet.options.map(option => <MenuItem key={option.value} roleStructure="listoption" shouldDismissPopover={false} selected={picked.includes(option.value)}
           text={option.label} labelElement={<span className="muted-text">{option.count}</span>} onClick={() => onValues(toggledFacet(values, facet.id, option.value))} />)}

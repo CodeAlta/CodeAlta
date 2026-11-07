@@ -8,7 +8,7 @@ Settings holds your preferences and the pages that manage providers, models, pro
 
 ## Settings window
 
-Open it with `Ctrl+,`, the gear of the title bar, `Ctrl+G Ctrl+W` or `/settings`. CodeAlta Desktop has one window with a page per area: **Appearance**, **General**, **Windows**, **Speech**, **Sessions**, **Permissions**, **Code Mode**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**, plus a page for each [space](../spaces.md). It opens on Appearance, and closes with `Esc`, its close button or a click outside it.
+Open it with `Ctrl+,`, the gear of the title bar, `Ctrl+G Ctrl+W` or `/settings`. CodeAlta Desktop has one window with a page per area: **Appearance**, **General**, **Windows**, **Speech**, **Sessions**, **Permissions**, **Code Mode**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**, plus a page for each [space](../spaces.md). It opens on Appearance, and closes with `Esc`, its close button or a click outside it. Its **Fleet** tab, beside **General** at the top of the pages, holds those of [Fleet](../fleet/readme.md#open-fleet): its Overview, your machines, the server and what your organization shares.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-settings.webp" alt="CodeAlta Desktop Settings window showing the Appearance page" loading="lazy">

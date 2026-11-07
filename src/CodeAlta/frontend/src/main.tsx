@@ -6605,10 +6605,10 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) onClose(); }}>
     <div className="settings-dialog-body">
       <nav className="settings-dialog-navigation" aria-label={t("Settings pages")} ref={navigation} data-searching={counts !== null || undefined} data-fleet={inFleet || undefined}>
-        <div className="settings-mode" role="tablist" aria-label={t("Settings")}>
-          <button type="button" role="tab" aria-selected={!inFleet} data-settings-mode="general" onClick={() => { if (inFleet) onSection(lastPage.current.general); }}>
+        <div className="settings-mode" role="group" aria-label={t("Settings")}>
+          <button type="button" aria-pressed={!inFleet} data-settings-mode="general" onClick={() => { if (inFleet) onSection(lastPage.current.general); }}>
             <AppIcon name="settings" size={15} /><span>{t("General")}</span></button>
-          <button type="button" role="tab" aria-selected={inFleet} data-settings-mode="fleet" onClick={() => { if (!inFleet) onSection(lastPage.current.fleet); }}>
+          <button type="button" aria-pressed={inFleet} data-settings-mode="fleet" onClick={() => { if (!inFleet) onSection(lastPage.current.fleet); }}>
             <AppIcon name="fleet" size={15} /><span>{t("Fleet")}</span></button>
         </div>
         <div className="settings-search-bar"><InputGroup inputRef={searchField} className="settings-search-field" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />}

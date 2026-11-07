@@ -41,12 +41,13 @@ const space = (id: string, name: string, icon: string | null, color: string | nu
 const spaces = [space("default", "Default", null, null), space("work", "Work", "briefcase", "#4c90f0"), space("open-source", "Open source", "github", "#9881f3"),
   space("personal", "Personal", "home", "#32a467")];
 
-const state = { machines: fleet, servers: [server] as FleetServerView[] };
+const state = { machines: fleet, servers: [server] as FleetServerView[], failing: false };
+const failing = () => { if (state.failing) throw new Error("The bridge did not answer."); };
 const never = async (_request: unknown, options?: { signal?: AbortSignal }) => (async function* () {
   await new Promise(resolve => options?.signal?.addEventListener("abort", resolve));
 })();
 const machinesApi = {
-  list: async () => ({ status: "ok", hostEpoch: epoch, machines: state.machines }),
+  list: async () => { failing(); return { status: "ok", hostEpoch: epoch, machines: state.machines }; },
   watch: never,
   previewPairing: async () => ({ status: "invalid" }),
   pair: async () => ({ status: "invalid" }),
@@ -56,7 +57,7 @@ const machinesApi = {
   // What this computer lets the others do is not the subject of these pictures.
   thisComputer: async () => ({ status: "unavailable" }),
 } as unknown as FleetOverviewApi["machines"] & Parameters<typeof MachinesSettings>[0]["api"];
-const api: FleetOverviewApi = { machines: machinesApi, servers: { status: async () => ({ status: "ok", servers: state.servers, deviceId: "me", words: "a b c d e f" }) } as unknown as FleetOverviewApi["servers"] };
+const api: FleetOverviewApi = { machines: machinesApi, servers: { status: async () => { failing(); return { status: "ok", servers: state.servers, deviceId: "me", words: "a b c d e f" }; }, watch: never } as unknown as FleetOverviewApi["servers"] };
 
 const pages: readonly Readonly<{ id: string; label: string; icon: IconName }>[] = [
   { id: "fleet", label: "Overview", icon: "fleet" }, { id: "machines", label: "Machines", icon: "remote" }, { id: "fleetServer", label: "Server", icon: "server" },
@@ -71,15 +72,16 @@ function Frame() {
   Object.assign(window, { fleetConsoleFixture: {
     show: (next: string) => setPage(next),
     start: () => { state.machines = []; state.servers = []; setGeneration(value => value + 1); },
-    run: () => { state.machines = fleet; state.servers = [server]; setGeneration(value => value + 1); },
+    run: () => { state.machines = fleet; state.servers = [server]; state.failing = false; setGeneration(value => value + 1); },
+    fail: () => { state.failing = true; setGeneration(value => value + 1); },
   } });
   return <AppWindow storageKey="fixture.settings" className="settings-dialog" titleId="settings-title" title="Settings" closeLabel="Close settings" onClose={() => { }}
     preferredSize={viewport => ({ width: viewport.width * 0.8, height: viewport.height * 0.8 })} minimumSize={{ width: 560, height: 360 }}>
     <div className="settings-dialog-body">
       <nav className="settings-dialog-navigation" aria-label="Settings pages" data-fleet>
-        <div className="settings-mode" role="tablist" aria-label="Settings">
-          <button type="button" role="tab" aria-selected={false}><AppIcon name="settings" size={15} /><span>General</span></button>
-          <button type="button" role="tab" aria-selected data-settings-mode="fleet"><AppIcon name="fleet" size={15} /><span>Fleet</span></button>
+        <div className="settings-mode" role="group" aria-label="Settings">
+          <button type="button" aria-pressed={false} data-settings-mode="general"><AppIcon name="settings" size={15} /><span>General</span></button>
+          <button type="button" aria-pressed data-settings-mode="fleet"><AppIcon name="fleet" size={15} /><span>Fleet</span></button>
         </div>
         <div className="settings-search-bar"><InputGroup className="settings-search-field" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />}
           placeholder="Search settings" aria-label="Search settings" /></div>

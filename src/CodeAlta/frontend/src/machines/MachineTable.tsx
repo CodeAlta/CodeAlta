@@ -62,7 +62,7 @@ export function MachineTable({ machines, busy, onOpen, onForget }: {
   const columns: DataColumn<MachineView>[] = [
     { id: "name", label: "Machine", sort: machine => machine.name, cell: machine => <span className="machine-cell-name">
       <AppIcon name="remote" size={15} /><strong>{machine.name}</strong>
-      {managesMachine(machine) && <AppIcon name="shield" size={12} className="machine-cell-managed" aria-label={t("Managed from here")} />}
+      {managesMachine(machine) && <span role="img" className="machine-cell-managed" aria-label={t("Managed from here")} title={t("Managed from here")}><AppIcon name="shield" size={12} /></span>}
     </span> },
     { id: "state", label: "State", width: "8.5rem", sort: machine => stateRank[machineState(machine)], cell: machine => {
       const state = machineState(machine);
@@ -89,17 +89,20 @@ export function MachineTable({ machines, busy, onOpen, onForget }: {
 
 /** What else is known of a machine, under its row: its key, its address, why it does not answer; its page, and Forget. */
 export function MachineDetails({ machine, busy, time, onOpen, onForget }: { machine: MachineView; busy: boolean; time: Intl.DateTimeFormat; onOpen: () => void; onForget: () => void }) {
+  // Everything a narrow table leaves out of the row is here, with the name in full.
   const { t } = useShellLanguage();
   const state = machineState(machine);
   const facts: [MessageKey, React.ReactNode][] = [
+    ["Machine", machine.name],
     ["System", machine.os ?? "—"],
     ["Version", machine.version ? `CodeAlta ${machine.version}` : "—"],
     ["Address", machine.address ?? "—"],
     ["Reached", t(reachLabels[machineReach(machine)])],
     ["Key", <span className="machine-details-key" title={machine.words}>{pairingWords(machine.words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</span>],
+    ["Last seen", machine.lastSeen ? time.format(new Date(machine.lastSeen)) : "—"],
     ["Paired", machine.paired ? time.format(new Date(machine.pairedAt)) : t("Through your server")],
   ];
-  return <div className="machine-details">
+  return <div className="machine-row-details">
     {machine.problem && state !== "online" && <p className="machine-details-problem"><AppIcon name="warning" size={14} />{machine.problem}</p>}
     <dl>{facts.map(([label, value]) => <div key={label}><dt>{t(label)}</dt><dd>{value}</dd></div>)}</dl>
     <div className="machine-details-actions">

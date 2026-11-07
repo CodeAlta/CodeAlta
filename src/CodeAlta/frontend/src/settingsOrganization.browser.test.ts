@@ -67,7 +67,7 @@ test("Settings navigation preserves preferences, shell capabilities and manual c
       await until("document.querySelector('.settings-dialog-content h1')?.textContent==='Appearance'");
     };
     const select = async (page: string) => {
-      await evaluate(`[...document.querySelectorAll('.settings-dialog-navigation button')].find(button=>button.textContent===${JSON.stringify(page)}).click()`);
+      await evaluate(`[...document.querySelectorAll('.settings-dialog-navigation button[data-settings-section]')].find(button=>button.textContent===${JSON.stringify(page)}).click()`);
       await until(`document.querySelector('.settings-dialog-content h1')?.textContent===${JSON.stringify(page)}`); await frames();
     };
     const close = async () => { await evaluate("document.querySelector('button[aria-label=\"Close settings\"]').click()"); await until("!document.querySelector('.settings-dialog')"); };

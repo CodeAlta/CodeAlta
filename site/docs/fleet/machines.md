@@ -10,6 +10,13 @@ Two computers that both run CodeAlta Desktop pair in a minute, with nothing to i
 
 Each machine keeps its own sessions, providers and sign-ins. Nothing is copied from one computer to another, and no server is needed: your computers talk to each other directly. A [CodeAlta Server](server.md) adds machines you reach from anywhere.
 
+**Settings** > **Fleet** > **Machines** lists them in a table: their state, system, version and sessions, how this computer reaches them, and when they last answered. Click a column to sort them, narrow them with **Filter** and the **State**, **System**, **Reached** and **Access** menus, and click a row for its key, its address, **Open its page** and **Forget**.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-machines.webp" alt="Settings > Fleet > Machines: a table of 22 machines with their state, system, version, sessions, how they are reached and when they were last seen, filters above it, and the row of build-02 open on its details" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The machines as a table: filters, sorting, and the details of a row in place.</figcaption>
+</figure>
+
 ## Add a machine
 
 In CodeAlta Desktop, open **Settings** > **Fleet** > **Machines** and click **Add a machine…**. Choose how this computer reaches the machine:
