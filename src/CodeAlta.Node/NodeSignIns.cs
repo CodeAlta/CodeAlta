@@ -62,6 +62,7 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
                 [FleetMachineSignInWays.Browser], null));
         }
 
+        items.AddRange(await PluginItemsAsync(cancellationToken).ConfigureAwait(false));
         items.AddRange(await CliItemsAsync(cancellationToken).ConfigureAwait(false));
         return new FleetMachineSignInList(items);
     }
@@ -95,7 +96,8 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
         }
 
         var first = await Task.WhenAny(attempt.Prompt.Task, attempt.Completion).WaitAsync(PromptWait, cancellationToken).ConfigureAwait(false);
-        if (first == attempt.Prompt.Task) return await attempt.Prompt.Task.ConfigureAwait(false);
+        // A failure cancels the prompt before the attempt ends: the reason is in how it ended.
+        if (first == attempt.Prompt.Task && attempt.Prompt.Task.IsCompletedSuccessfully) return await attempt.Prompt.Task.ConfigureAwait(false);
         var ended = await attempt.Completion.ConfigureAwait(false);
         // What fails before a prompt (no such target, a way it does not have) is said as the start's own failure.
         if (attempt.StartFailure is { } failure) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failure);
@@ -197,6 +199,7 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
     {
         try
         {
+            if (PluginAccount(parameters.Key) is { } plugin) return await RunPluginAsync(attempt, parameters, plugin).ConfigureAwait(false);
             var definition = Provider(parameters.Key);
             var ways = ProviderWays(definition.ProviderType);
             var way = parameters.Way ?? ways.FirstOrDefault()

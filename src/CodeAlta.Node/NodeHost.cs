@@ -38,8 +38,10 @@ public sealed class NodeHost : IAsyncDisposable
     private int _admissionPaused;
 
     private NodeHost(NodeHostOptions options, CodeAltaSingleInstanceGuard guard, CodeAltaHost host, HeadlessAltaTools alta,
-        ModelsDevCatalogService modelsDev, LoopbackHarnessToolEndpoints toolEndpoints, Logger logger, NodeAutomations? automations)
+        ModelsDevCatalogService modelsDev, LoopbackHarnessToolEndpoints toolEndpoints, Logger logger, NodeAutomations? automations,
+        PluginModelProviderTypes? pluginProviderTypes)
     {
+        PluginProviderTypes = pluginProviderTypes;
         _options = options;
         _guard = guard;
         Host = host;
@@ -52,6 +54,9 @@ public sealed class NodeHost : IAsyncDisposable
 
     /// <summary>Gets the runtime of the node.</summary>
     public CodeAltaHost Host { get; }
+
+    /// <summary>Gets the provider types of the plugins of the node (Codex CLI, ACP agents); null when a test gives its providers.</summary>
+    internal PluginModelProviderTypes? PluginProviderTypes { get; }
 
     /// <summary>Gets the catalog of models the providers of the node are started with.</summary>
     internal ModelsDevCatalogService ModelCatalog => _modelsDev;
@@ -137,7 +142,7 @@ public sealed class NodeHost : IAsyncDisposable
             }
 
             logger.Info($"CodeAlta Node started on {profile.StateRoot} (PID {Environment.ProcessId}).");
-            return new NodeHost(options, guard, host, alta, modelsDev, toolEndpoints, logger, automations);
+            return new NodeHost(options, guard, host, alta, modelsDev, toolEndpoints, logger, automations, options.ConfigureModelProviders is null ? pluginProviderTypes : null);
         }
         catch
         {

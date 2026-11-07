@@ -240,6 +240,12 @@ public sealed record PluginProviderSignInMethod(string Id, string Label, string?
 
     /// <summary>Gets the environment variables the terminal command runs with, or <see langword="null" />.</summary>
     public IReadOnlyDictionary<string, string>? TerminalEnvironment { get; init; }
+
+    /// <summary>
+    /// Gets whether the method shows a code to enter on a page that any computer opens (a device flow), without a redirect
+    /// back to the computer that runs the sign-in: another computer completes it, as the desktop does for a machine.
+    /// </summary>
+    public bool ShowsCode { get; init; }
 }
 
 /// <summary>What the user opens, and for a device flow enters, to continue a sign-in a plugin runs.</summary>

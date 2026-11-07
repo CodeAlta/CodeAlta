@@ -142,7 +142,7 @@ internal sealed class NodeFleet : IAsyncDisposable
                 // Whether the node still runs after a restart or a logout, for the page of the machine.
                 ServiceStatus = () => NodeServiceStatus.Read(node.Options.Profile),
                 // The sign-ins the node keeps for itself, made from the desktop: the node starts each one and keeps its tokens.
-                SignIns = new NodeSignIns(node.Host, providers),
+                SignIns = new NodeSignIns(node.Host, providers) { PluginProviderTypes = node.PluginProviderTypes },
                 // A session that names an environment is admitted as a run of an automation is, once the node joined a server.
                 // What the session is about stays here: the approval it asks names the run only.
                 AdmitEnvironment = (environment, runId, _, token) => node.Automations?.Environments is { } gate

@@ -24,7 +24,10 @@ internal sealed class CodexCliAccount(CodexCliPlugin plugin) : IPluginProviderAc
         => Task.FromResult<IReadOnlyList<PluginProviderSignInMethod>>(
         [
             new PluginProviderSignInMethod(BrowserMethod, "Sign in with ChatGPT", "Opens the ChatGPT sign-in of Codex in the browser. It works for ChatGPT Business and Enterprise workspaces."),
-            new PluginProviderSignInMethod(DeviceMethod, "Sign in with a device code", "Shows a code to enter on the ChatGPT sign-in page, for a computer whose browser cannot return to CodeAlta."),
+            new PluginProviderSignInMethod(DeviceMethod, "Sign in with a device code", "Shows a code to enter on the ChatGPT sign-in page, for a computer whose browser cannot return to CodeAlta.")
+            {
+                ShowsCode = true,
+            },
         ]);
 
     public Task SignInAsync(PluginProviderSettings settings, string methodId, CancellationToken cancellationToken)
