@@ -335,7 +335,7 @@ import { typeResumeCommand } from "./claudeCodeOpen/claudeCodeOpen";
 import { shellTakesCliCommand } from "./claudeCli/claudeCli";
 import { createPreparedWorktrees } from "./worktrees/preparedWorktrees";
 import { WorktreePreparation } from "./worktrees/WorktreePreparation";
-import { editorFailure, removalReason, removalReply } from "./worktrees/worktreeInventory";
+import { checkedWorktrees, editorFailure, inventoryReply, removalReason, removalReply, type Inventory } from "./worktrees/worktreeInventory";
 import type { ComposerChromeValue } from "./composerChrome";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
@@ -1058,6 +1058,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [deletingMessage, setDeletingMessage] = useState("");
   // The question of a deletion also asks to remove the worktree of the session; off each time it is asked.
   const [deletingWorktree, setDeletingWorktree] = useState(false);
+  // What the host says of the worktree of the session asked about: whether another session works in it, null while it checks.
+  const [deletingWorktreeCheck, setDeletingWorktreeCheck] = useState<{ id: string; shared: boolean | null } | null>(null);
   const deletingPending = useRef(false);
   const uncertainDelete = useRef<DeletedTarget | null>(null);
   const [deleteLocked, setDeleteLocked] = useState(false);
@@ -4395,8 +4397,16 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     setDeletingWorktree(false);
     // A session that others come from is not deleted alone: what is below it is shown, with the choice to delete it all.
     if (knownChildren(row.id)) { showSessionChildren(row, true); return; }
-    if (confirms.sessionDelete) setDeletingId(row.id);
-    else { setDeletingId(null); void deleteSessionRow(row, false); }
+    setDeletingWorktreeCheck(null);
+    if (!confirms.sessionDelete) { setDeletingId(null); void deleteSessionRow(row, false); return; }
+    setDeletingId(row.id);
+    // The window may not list every session that works in the worktree: the host is asked while the question is open.
+    const worktree = selectedProject && !selectedProject.archived ? deletedSessionWorktree(catalog.current?.sessions ?? [], row) : null;
+    if (!worktree || worktree.shared || !selectedProject) return;
+    setDeletingWorktreeCheck({ id: row.id, shared: null });
+    void checkDeletedWorktrees([{ projectId: selectedProject.id, name: worktree.name, path: worktree.path, shared: false, sessionIds: [row.id] }], [row.id])
+      .catch(() => null)
+      .then(checked => { if (creationAlive.current) setDeletingWorktreeCheck(value => value?.id === row.id ? { id: row.id, shared: checked?.[0]?.shared ?? false } : value); });
   }
 
   // Delete on the row of a session does what **Delete** of its menu does.
@@ -5508,6 +5518,20 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     rows[Math.min(deletedRow.index, rows.length - 1)]?.focus();
   }, [deletedRow]);
 
+  // Who works in the worktrees of sessions about to be deleted, as the host knows it from all its sessions: one
+  // inventory for each project. A project that cannot be read keeps what the window found.
+  async function checkDeletedWorktrees(worktrees: readonly DeletedWorktree[], deleted: readonly string[]): Promise<readonly DeletedWorktree[]> {
+    const epoch = status?.hostEpoch;
+    if (!epoch) return worktrees;
+    const inventories = new Map<string, Inventory>();
+    await Promise.all([...new Set(worktrees.map(worktree => worktree.projectId))].map(async projectId => {
+      const reply = await worktreesApi.inventory({ expectedEpoch: epoch, projectId }, { timeoutMilliseconds: 30_000 })
+        .then(value => inventoryReply(value, projectId), () => "read_failed");
+      if (typeof reply !== "string") inventories.set(projectId, reply);
+    }));
+    return checkedWorktrees(worktrees, inventories, deleted);
+  }
+
   // The worktrees of deleted sessions go when their question asked it: one that holds changes that are not committed
   // stays, and its branch goes only when its commits are all in another branch. What became of them is told in a toast.
   async function removeDeletedWorktrees(epoch: string, worktrees: readonly Readonly<{ projectId: string; name: string; path: string }>[]) {
@@ -6069,7 +6093,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 onSubmit={() => void renameSelectedSession()} onCancel={() => setRenamingId(null)} />}
               {deletingId === session.id && (() => {
                 // A session that works in a worktree leaves it, with its branch: the question says where, and can remove it.
-                const worktree = selectedProject && !selectedProject.archived ? deletedSessionWorktree(catalog.current?.sessions ?? [], session) : null;
+                const found = selectedProject && !selectedProject.archived ? deletedSessionWorktree(catalog.current?.sessions ?? [], session) : null;
+                const check = deletingWorktreeCheck?.id === session.id ? deletingWorktreeCheck : null;
+                const worktree = found && check?.shared ? { ...found, shared: true } : found;
+                const checking = !!found && !found.shared && check?.shared === null;
                 return <ConfirmPopover title={t("Delete this session?")} subject={plainTitle(session.title)}
                   detail={inCloud(session) ? `${t("Its history is deleted and cannot be restored. The files of the project are kept.")} ${t("The cloud session stays on claude.ai: archive or delete it there.")}`
                     : t("Its history is deleted and cannot be restored. The files of the project are kept.")}
@@ -6080,9 +6107,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   {worktree && <div className="confirm-worktree">
                     <p>{t("Its worktree {name} is kept in {path}, with its branch.", { name: worktree.name, path: worktree.path })}</p>
                     {worktree.shared ? <p>{t("Other sessions work in this worktree: it stays.")}</p>
-                      : <Checkbox checked={deletingWorktree} disabled={deletingBusy} label={t("Also remove the worktree")}
-                        onChange={event => setDeletingWorktree(event.currentTarget.checked)} />}
-                    {deletingWorktree && !worktree.shared && <p className="muted-text">
+                      : <>{checking && <p className="muted-text" role="status">{t("Checking which sessions still work in it…")}</p>}
+                        <Checkbox checked={deletingWorktree} disabled={deletingBusy || checking} label={t("Also remove the worktree")}
+                          onChange={event => setDeletingWorktree(event.currentTarget.checked)} /></>}
+                    {deletingWorktree && !worktree.shared && !checking && <p className="muted-text">
                       {t("A worktree that holds changes that are not committed is kept, and its branch is deleted only when its commits are all in another branch.")}</p>}
                   </div>}
                 </ConfirmPopover>;
@@ -6509,6 +6537,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     {childrenView && <SessionChildrenDialog key={childrenView.id} title={childrenView.title} deleting={childrenView.deleting}
       read={() => readSessionChildren(workspace.sessionChildren, status?.hostEpoch, childrenView.id)}
       projects={catalog.current?.projects ?? []} sessions={catalog.current?.sessions ?? []} spaces={spacesState.spaces} canDelete={owned && !!mutation?.capability.canMutate()}
+      checkWorktrees={checkDeletedWorktrees}
       onOpen={session => { setChildrenView(null); revealSession(session); }} onDelete={deleteChildrenTree} onClose={() => setChildrenView(null)} />}
     {movingSession && snapshot && <MoveSessionDialog title={movingSession.title} projectId={movingSession.from.projectId}
       projects={snapshot.projects} busy={movingBusy} onMove={project => void moveSessionTo(movingSession, project)}

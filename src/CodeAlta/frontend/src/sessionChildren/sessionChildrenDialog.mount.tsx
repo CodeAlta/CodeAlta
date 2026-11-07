@@ -33,10 +33,11 @@ const spaces = readSpaces([
   { id: "work", name: "Work", description: null, icon: null, color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] },
   { id: "personal", name: "Personal", description: null, icon: null, color: null, isDefault: false, projectIds: ["p1"], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] },
 ]);
-const state = { reads: 0, deletes: [] as string[][], worktrees: [] as string[][], opened: [] as string[], closed: 0 };
+const state = { reads: 0, deletes: [] as string[][], worktrees: [] as string[][], checked: [] as string[][], opened: [] as string[], closed: 0 };
 let working = false;
-// Another session, outside the tree, works in the same worktree.
+// Another session, outside the tree, works in the same worktree: one the window lists, or one only the host knows of.
 let shared = false;
+let hostShares = false;
 // What the next deletion answers: an error code, or nothing for a deletion that is made.
 let answer: string | null = null;
 
@@ -50,6 +51,12 @@ function Fixture() {
       read={async () => { state.reads++; return { kind: "read", value: tree(working) }; }}
       projects={[{ id: "p1", name: "Parser", path: "/parser", archived: false }]} spaces={spaces}
       sessions={shared ? [session("outside", "Fix the lexer", { scopeKind: "project", projectId: "p1", workspacePath: "/parser", ...worktree })] : []}
+      checkWorktrees={async (worktrees, deleted) => {
+        state.checked.push([...deleted]);
+        if (!hostShares) return worktrees;
+        await new Promise(resolve => setTimeout(resolve, 150));
+        return worktrees.map(item => ({ ...item, shared: true }));
+      }}
       onOpen={value => { state.opened.push(value.id); setShown(null); }}
       onDelete={async (value, worktrees) => {
         state.deletes.push([...value.descendantIds]);
@@ -63,7 +70,7 @@ function Fixture() {
 // As the application does: a press outside a window dismisses it.
 dismissDialogsOnOutsidePress(document);
 Object.assign(window, { childrenFixture: { state,
-  show(deleting: boolean, atWork = false, sharedWorktree = false) { working = atWork; shared = sharedWorktree; flushSync(() => show!({ deleting, revision: ++revision })); },
+  show(deleting: boolean, atWork = false, sharedWorktree = false, sharedByHost = false) { working = atWork; shared = sharedWorktree; hostShares = sharedByHost; flushSync(() => show!({ deleting, revision: ++revision })); },
   /** What the next deletion answers. */
   answer(code: string | null) { answer = code; },
 } });
