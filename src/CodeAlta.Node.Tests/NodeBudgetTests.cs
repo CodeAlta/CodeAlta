@@ -372,24 +372,42 @@ public sealed class NodeBudgetTests
         try
         {
             // Damaged before the links are read once: the first run asked at once does not start.
-            File.WriteAllText(links, "{ damaged");
+            await ChangeAsync(() => File.WriteAllText(links, "{ damaged"), token);
             servers = NodeServers.Start(node, null, "test-node", "1.0.0", Fast);
             var run = new CodeAlta.Fleet.NodeApi.FleetNodeBudgetRun("run-1", null, null, null);
             Assert.IsNotNull((await node.Budgets!.AdmitAsync(run, null, token)).Problem, "a run asked before the first reload of damaged links does not start");
 
             // Read once (no link), then damaged between two reloads: the next run does not start either, whatever the reload saw last.
-            File.Delete(links);
+            await ChangeAsync(() => File.Delete(links), token);
             var deadline = DateTime.UtcNow + Patience;
             while (servers.Connections.LoadProblem is not null && DateTime.UtcNow < deadline) await Task.Delay(50, token);
             await servers.Connections.Loaded.WaitAsync(Patience, token);
             Assert.IsNull((await node.Budgets.AdmitAsync(run with { RunId = "run-2" }, null, token)).Problem, "no link, no budget");
-            File.WriteAllText(links, "{ damaged");
+            await ChangeAsync(() => File.WriteAllText(links, "{ damaged"), token);
             Assert.IsNotNull((await node.Budgets.AdmitAsync(run with { RunId = "run-3" }, null, token)).Problem, "a run asked between two reloads of damaged links does not start");
         }
         finally
         {
             if (servers is not null) await servers.DisposeAsync();
             await node.DisposeAsync();
+        }
+    }
+
+    // Changes the file of the links while the reload reads it now and then: on Windows a write or a delete that meets its read
+    // fails (the file is open), and the next try, once the read is over, does not.
+    private static async Task ChangeAsync(Action change, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                change();
+                return;
+            }
+            catch (IOException) when (attempt < 100)
+            {
+                await Task.Delay(20, cancellationToken);
+            }
         }
     }
 
