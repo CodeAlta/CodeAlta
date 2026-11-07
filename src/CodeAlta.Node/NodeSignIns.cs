@@ -62,6 +62,7 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
                 [FleetMachineSignInWays.Browser], null));
         }
 
+        items.AddRange(ClaudeItems());
         items.AddRange(await PluginItemsAsync(cancellationToken).ConfigureAwait(false));
         items.AddRange(await CliItemsAsync(cancellationToken).ConfigureAwait(false));
         return new FleetMachineSignInList(items);
@@ -163,6 +164,9 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
         ArgumentNullException.ThrowIfNull(target);
         switch (target.Kind)
         {
+            case FleetMachineSignInKinds.Provider when ClaudeProvider(target.Key) is { } claude:
+                SignOutClaude(claude);
+                break;
             case FleetMachineSignInKinds.Provider:
             {
                 var definition = Provider(target.Key);
@@ -200,6 +204,7 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
         try
         {
             if (PluginAccount(parameters.Key) is { } plugin) return await RunPluginAsync(attempt, parameters, plugin).ConfigureAwait(false);
+            if (ClaudeProvider(parameters.Key) is { } claude) return await RunClaudeAsync(attempt, parameters, claude).ConfigureAwait(false);
             var definition = Provider(parameters.Key);
             var ways = ProviderWays(definition.ProviderType);
             var way = parameters.Way ?? ways.FirstOrDefault()

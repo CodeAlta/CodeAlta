@@ -46,6 +46,39 @@ public sealed class NodePluginSignInTests
         StringAssert.Contains(refused.Message, "on the machine itself");
     }
 
+    // Claude Code keeps a token of the account as a secret of the machine, which its CLAUDE_CODE_OAUTH_TOKEN names; signing it out
+    // from the desktop takes both away.
+    [TestMethod]
+    public async Task ClaudeCode_IsSignedInByItsTokenSecret_AndSignedOutFromTheDesktop()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options(), token);
+        File.WriteAllText(node.Host.CatalogOptions.ConfigPath, "[providers.claude]\ntype = \"claude-code\"\n");
+        var providers = new NodeProviders(node.Host, null);
+        var signIns = new NodeSignIns(node.Host, providers);
+
+        var item = (await signIns.ListAsync(token)).Items.Single(static value => value.Key == "claude");
+        Assert.AreEqual(FleetMachineSignInStates.Unknown, item.State, "the CLI may keep its own login on the machine");
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.AreEqual(0, item.Ways.Count);
+            StringAssert.Contains(item.Detail, "macOS or Linux");
+        }
+
+        var name = NodeSignIns.ClaudeSecretName("claude");
+        new CodeAlta.Catalog.Secrets.LocalSecretStore(node.Host.CatalogOptions.GlobalRoot).SetSecret(name, "sk-ant-oat01-test-token-value-0123456789", "test");
+        Assert.IsTrue(providers.SetEnvironment("claude", NodeSignIns.ClaudeTokenVariable, $"${{secret:{name}}}"));
+        item = (await signIns.ListAsync(token)).Items.Single(static value => value.Key == "claude");
+        Assert.AreEqual(FleetMachineSignInStates.SignedIn, item.State);
+        Assert.IsNotNull(item.ExpiresAt, "a token of claude setup-token lasts a year");
+
+        var signedOut = await signIns.SignOutAsync(new FleetMachineSignInTarget(FleetMachineSignInKinds.Provider, "claude", null), token);
+        Assert.AreEqual(FleetMachineSignInStates.Unknown, signedOut.State);
+        Assert.IsFalse(new CodeAlta.Catalog.Secrets.LocalSecretStore(node.Host.CatalogOptions.GlobalRoot).ListSecrets().Any(secret => secret.Name == name));
+        Assert.IsFalse(File.ReadAllText(node.Host.CatalogOptions.ConfigPath).Contains(NodeSignIns.ClaudeTokenVariable, StringComparison.Ordinal));
+    }
+
     private static PluginModelProviderContribution Contribution(string type, IPluginProviderAccount account) => new()
     {
         ProviderType = type,

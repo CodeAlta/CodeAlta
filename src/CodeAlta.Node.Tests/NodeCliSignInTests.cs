@@ -26,6 +26,22 @@ public sealed class NodeCliSignInTests
         Assert.IsNull(NodeSignIns.ReadPrompt("Visit https://example.com/docs for help.\n"), "a page without a code or a question");
     }
 
+    // What claude setup-token prints in a terminal (macOS, Claude Code 2.1): a link of the terminal, words placed by moves of the
+    // cursor, then the question; once the code is given, the token.
+    [TestMethod]
+    public void WhatClaudeSetupTokenPrints_GivesItsPage_ThenItsToken()
+    {
+        const string Page = "https://claude.com/cai/oauth/authorize?code=true&client_id=x&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&state=s";
+        var link = $"\u001b[2GBrowser\u001b[10Gdidn't\u001b[17Gopen?\r\n\u001b]8;id=6oappq;{Page}\u0007{Page}\u001b]8;;\u0007\r\n";
+        Assert.IsNull(NodeSignIns.ReadClaudePage(link), "not before it asks for the code");
+        var asked = link + "\r\r\n\u001b[2GPaste\u001b[8Gcode\u001b[13Ghere\u001b[18Gif\u001b[21Gprompted\u001b[30G>\r\r\n";
+        Assert.AreEqual(Page, NodeSignIns.ReadClaudePage(asked));
+        Assert.IsNull(NodeSignIns.ReadClaudeToken(asked));
+        const string Token = "sk-ant-oat01-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA_BBBBBBBBBBBBBBBB-CCCCCCCC";
+        Assert.AreEqual(Token, NodeSignIns.ReadClaudeToken(asked + $"\u001b[32m\u001b[2G{Token}\u001b[0m\r\n\u001b[2GStore\u001b[8Gthis\u001b[13Gtoken\r\n"));
+        Assert.AreEqual("CLAUDE_CODE_OAUTH_TOKEN_CLAUDE_WORK", NodeSignIns.ClaudeSecretName("claude-work"));
+    }
+
     [TestMethod]
     public void ALoginCommand_IsSplitIntoItsWords_AndAzureSignsInWithItsDeviceCode()
     {

@@ -217,6 +217,32 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
         }
     }
 
+    /// <summary>
+    /// Sets or removes a variable of the environment of a provider (a <c>${secret:NAME}</c> reference), then starts the
+    /// providers again, without a restart.
+    /// </summary>
+    /// <param name="key">The key of the provider.</param>
+    /// <param name="variable">The name of the variable.</param>
+    /// <param name="value">Its value; null to remove it.</param>
+    /// <returns>Whether the provider exists.</returns>
+    internal bool SetEnvironment(string key, string variable, string? value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(variable);
+        lock (_gate)
+        {
+            var store = Store;
+            var raw = (store.LoadGlobal().Providers ?? []).Select(static pair => { pair.Value.ProviderKey = pair.Key; return pair.Value; }).ToList();
+            if (raw.FirstOrDefault(provider => string.Equals(provider.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) is not { } written) return false;
+            var environment = written.Env is { } current ? new Dictionary<string, string>(current, StringComparer.Ordinal) : new Dictionary<string, string>(StringComparer.Ordinal);
+            if (value is null) environment.Remove(variable); else environment[variable] = value;
+            written.Env = environment.Count > 0 ? environment : null;
+            store.SaveGlobalProviderDefinitions(raw);
+            Apply(store, written.ProviderKey);
+            return true;
+        }
+    }
+
     // The sign-in, run beside the calls that started it: its first prompt is the code the desktop shows; once signed in, the
     // provider is enabled and the providers are started again, so that it is ready without a restart. Never throws.
     private Task<FleetProviderSignInState> RunSignInAsync(CodeAltaProviderDocument definition, SignIn signIn) => Task.Run(async () =>
