@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { centeredWindowGeometry, clampWindowGeometry, parseWindowGeometry } from "./windowGeometry";
+import { canStepWindow, centeredWindowGeometry, clampWindowGeometry, parseWindowGeometry, steppedWindowGeometry } from "./windowGeometry";
 
 const minimum = { width: 480, height: 320 };
 
@@ -42,4 +42,20 @@ test("malformed stored geometry is refused", () => {
   for (const text of [null, "", "{bad", "null", "[]", '{"x":1,"y":2,"width":640}', '{"x":"1","y":2,"width":640,"height":480}',
     '{"x":1,"y":2,"width":0,"height":480}', '{"x":1,"y":2,"width":640,"height":-1}', '{"x":1e999,"y":2,"width":640,"height":480}'])
     assert.equal(parseWindowGeometry(text), null, String(text));
+});
+
+test("Larger and Smaller change a window a step at a time around its center, within its bounds and its minimum", () => {
+  const bounds = { width: 2000, height: 1000 };
+  const window = { x: 600, y: 300, width: 800, height: 400 };
+  // A step is a tenth of the bounds each way: the center stays where it was.
+  assert.deepEqual(steppedWindowGeometry(window, bounds, minimum, 0, 1), { x: 500, y: 250, width: 1000, height: 500 });
+  assert.deepEqual(steppedWindowGeometry(window, bounds, minimum, 0, -1), { x: 700, y: 350, width: 600, height: 300 + 20 }, "never under its minimum height");
+  // Near an edge, the larger window takes the room there is, inside the bounds.
+  assert.deepEqual(steppedWindowGeometry({ x: 0, y: 0, width: 1900, height: 950 }, bounds, minimum, 0, 1), { x: 0, y: 0, width: 2000, height: 1000 });
+  // Below a native title bar of 40 px, the step is a tenth of the room under it.
+  assert.deepEqual(steppedWindowGeometry({ x: 600, y: 340, width: 800, height: 400 }, bounds, minimum, 40, 1), { x: 500, y: 292, width: 1000, height: 496 });
+  // At the size of the bounds there is nothing larger; at the minimum, nothing smaller.
+  assert.equal(canStepWindow({ x: 0, y: 0, width: 2000, height: 1000 }, bounds, minimum, 0, 1), false);
+  assert.equal(canStepWindow({ x: 0, y: 0, width: 2000, height: 1000 }, bounds, minimum, 0, -1), true);
+  assert.equal(canStepWindow({ x: 10, y: 10, width: 480, height: 320 }, bounds, minimum, 0, -1), false);
 });

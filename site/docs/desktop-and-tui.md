@@ -205,7 +205,7 @@ The TUI opens a dialog for each area. The desktop app has them as pages of one w
 
 ### Floating windows
 
-Tool details, file diffs, context usage, session info, the session browser and the Notes of a session open as windows you can move and resize over the workspace. The window of a tool call follows it while it runs: a command shows its output in a terminal, a file its lines or its diff, and a patch a tab per file. See [Tool calls](workspace/prompt.md#tool-calls).
+Tool details, file diffs, context usage, session info, the session browser and the Notes of a session open as windows you can move and resize over the workspace. **Smaller** and **Larger** in the title bar of a window, Settings included, change its size a step at a time around its center; **Restore** gives back its first size. The window of a tool call follows it while it runs: a command shows its output in a terminal, a file its lines or its diff, and a patch a tab per file. See [Tool calls](workspace/prompt.md#tool-calls).
 
 ### Runs in the background
 

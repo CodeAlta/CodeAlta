@@ -34,6 +34,26 @@ export function centeredWindowGeometry(bounds: WindowSize, preferred: WindowSize
   return clampWindowGeometry({ width, height, x: (bounds.width - width) / 2, y: band + (free - height) / 2 }, bounds, minimum, top);
 }
 
+/** What a step of the title bar's Larger and Smaller changes: this share of the bounds, in width and in height. */
+export const sizeStep = 0.1;
+
+/**
+ * The window one step larger (`direction` 1) or smaller (-1), around its center, kept inside its bounds and above its
+ * minimum size: a step that would leave the bounds takes what room is left there.
+ */
+export function steppedWindowGeometry(value: WindowGeometry, bounds: WindowSize, minimum: WindowSize, top: number, direction: 1 | -1): WindowGeometry {
+  const band = bandOf(bounds, minimum, top), free = bounds.height - band;
+  const width = value.width + direction * bounds.width * sizeStep, height = value.height + direction * free * sizeStep;
+  const centerX = value.x + value.width / 2, centerY = value.y + value.height / 2;
+  return clampWindowGeometry({ width, height, x: centerX - width / 2, y: centerY - height / 2 }, bounds, minimum, top);
+}
+
+/** Whether a step that way changes the size of the window: not at the size of its bounds, nor at its minimum. */
+export function canStepWindow(value: WindowGeometry, bounds: WindowSize, minimum: WindowSize, top: number, direction: 1 | -1): boolean {
+  const next = steppedWindowGeometry(value, bounds, minimum, top, direction);
+  return next.width !== value.width || next.height !== value.height;
+}
+
 /** Reads a stored geometry; anything malformed or non-finite is refused. */
 export function parseWindowGeometry(text: string | null): WindowGeometry | null {
   try {

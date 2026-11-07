@@ -4,7 +4,7 @@ import { Rnd } from "react-rnd";
 import { AppIcon } from "./AppIcon";
 import { keptOnOutsidePress } from "./modalDialogs";
 import { useShellLanguage } from "./shellLanguage";
-import { centeredWindowGeometry, clampWindowGeometry, loadWindowGeometry, saveWindowGeometry, type WindowGeometry, type WindowSize } from "./windowGeometry";
+import { canStepWindow, centeredWindowGeometry, clampWindowGeometry, loadWindowGeometry, saveWindowGeometry, steppedWindowGeometry, type WindowGeometry, type WindowSize } from "./windowGeometry";
 
 /** Tracks an element's client size; zero until it is mounted and measured. */
 export function useElementSize(element: HTMLElement | null): WindowSize {
@@ -50,7 +50,8 @@ type SurfaceProps = {
  * The movable, resizable surface of a desktop-style window (react-rnd). It must be the only child of a
  * full-viewport layer, normally a modal `dialog`: `AppWindow` supplies one, and an existing
  * `dialog.app-dialog` becomes such a layer when this surface is its direct child. The geometry is
- * remembered per `storageKey`; the title bar's restore button (or a double-click on it) resets it.
+ * remembered per `storageKey`; the title bar's Smaller and Larger change its size a step at a time, around its center,
+ * and its restore button (or a double-click on it) resets it.
  */
 export function AppWindowSurface({ storageKey, title, titleId, preferredSize, minimumSize = { width: 360, height: 220 },
   onClose, closeLabel, headerActions, children, closeRef }: SurfaceProps) {
@@ -84,9 +85,15 @@ export function AppWindowSurface({ storageKey, title, titleId, preferredSize, mi
     <header className="app-window-titlebar" onDoubleClick={event => { if (!(event.target as HTMLElement).closest("button")) update(null); }}>
       <h2 id={titleId}>{title}</h2>
       <div className="app-window-actions">{headerActions}
+        <span className="app-window-size" role="group" aria-label={t("Window size")}>
+          <Button variant="minimal" size="small" icon={<AppIcon name="windowShrink" size={15} />} disabled={!canStepWindow(geometry, viewport, minimumSize, titleBar, -1)}
+            aria-label={t("Smaller")} title={t("Make the window smaller")} onClick={() => update(steppedWindowGeometry(geometry, viewport, minimumSize, titleBar, -1))} />
+          <Button variant="minimal" size="small" icon={<AppIcon name="windowGrow" size={15} />} disabled={!canStepWindow(geometry, viewport, minimumSize, titleBar, 1)}
+            aria-label={t("Larger")} title={t("Make the window larger")} onClick={() => update(steppedWindowGeometry(geometry, viewport, minimumSize, titleBar, 1))} />
+        </span>
         <Button variant="minimal" size="small" icon={<AppIcon name="reset" size={15} />} disabled={!stored}
           aria-label={t("Restore default size and position")} title={t("Restore default size and position")} onClick={() => update(null)} />
-        <Button ref={closeRef} variant="minimal" size="small" icon={<AppIcon name="close" size={16} />} aria-label={closeLabel} title={closeLabel} onClick={onClose} />
+        <Button ref={closeRef} className="app-window-close" variant="minimal" size="small" icon={<AppIcon name="close" size={16} />} aria-label={closeLabel} title={closeLabel} onClick={onClose} />
       </div>
     </header>
     <div className="app-window-body">{children}</div>
@@ -110,6 +117,9 @@ export function AppWindow({ storageKey, title, titleId, className, preferredSize
   useLayoutEffect(() => {
     if (!layer) return;
     layer.showModal();
+    // The dialog focuses its first control: not a size of the window, which Enter would change, but its close button.
+    if (document.activeElement instanceof HTMLElement && document.activeElement.closest(".app-window-size"))
+      layer.querySelector<HTMLElement>(".app-window-close")?.focus();
     return () => { if (layer.open) layer.close(); };
   }, [layer]);
   const opened = useRef(false);
