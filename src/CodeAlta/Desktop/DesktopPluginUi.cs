@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Desktop.Rpc;
+using CodeAlta.Desktop.Windows;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
 
@@ -23,6 +24,9 @@ internal sealed class DesktopPluginScope
     /// <summary>Gets the space the window showed when the operation started, or null when it has none.</summary>
     public string? SpaceId { get; init; }
 
+    /// <summary>Gets the label of the view of the window the operation was started in, or null when it is not known.</summary>
+    public string? WindowLabel { get; init; }
+
     /// <summary>Gets a value indicating whether the session was running when the operation started.</summary>
     public bool SessionBusy { get; init; }
 
@@ -38,6 +42,10 @@ internal sealed class DesktopPluginScope
 /// Plugins start with the host, before the window has a page. What is asked before a page watches is kept
 /// and given to the page when it arrives; a dialog that is still open is given again to a page that
 /// reloads. Nothing here touches the window: the page shows every request with its own components.
+/// With several windows, a request goes to the page of one window: a prompt to the window that holds the tab
+/// of its session, a dialog or a notification to the window its command was started in, else to the window
+/// used last. It waits for the page of that window while the page reloads; what was asked of a window that
+/// closes goes to the main one. What changes for every page (buttons, contents, cards) goes to each.
 /// </remarks>
 internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionService, IPluginPromptService, IDisposable
 {
@@ -57,10 +65,10 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
     private readonly AsyncLocal<DesktopPluginScope?> _scope = new();
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Pending> _pending = new(StringComparer.Ordinal);
-    private readonly Queue<PluginUiEvent> _backlog = new();
+    private readonly List<(PluginUiEvent Event, string? Window)> _backlog = [];
     private readonly ISessionRetentionAdmission? _sessionRetentionAdmission;
     private readonly List<(IDisposable? Protection, Exception Failure, object? Dependencies)> _retainedWork = [];
-    private Action<PluginUiEvent>? _watcher;
+    private readonly DesktopPageWatchers<PluginUiEvent> _pages = new();
     private long _next;
     private bool _closed;
 
@@ -90,6 +98,21 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
     /// <summary>Gets or sets the server of the scripts of dialogs: set once, when the window has plugins.</summary>
     internal DesktopPluginModules? Modules { get; set; }
 
+    /// <summary>
+    /// Gets or sets what gives the label of the view of the window that holds the tab of a session, or null when no
+    /// window holds it; null when the host has one window.
+    /// </summary>
+    internal Func<string, string?>? SessionWindow { get; set; }
+
+    /// <summary>Gets or sets what gives the label of the view of the window used last; null when the host has one window.</summary>
+    internal Func<string>? FocusedWindow { get; set; }
+
+    /// <summary>
+    /// Gets or sets what says whether the window of a label is open; null when the host has one window: a window whose
+    /// page goes away is then closed.
+    /// </summary>
+    internal Func<string, bool>? WindowOpen { get; set; }
+
     /// <inheritdoc />
     public IPluginUiService ForPlugin(string pluginRuntimeKey)
     {
@@ -108,27 +131,47 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
     }
 
     /// <summary>
-    /// Gives the page every request from now on, after the ones it missed and the dialogs still open.
+    /// Gives the page of the main window every request for it from now on, after the ones it missed and the dialogs
+    /// still open.
     /// </summary>
     /// <returns>A registration to dispose when the page goes away.</returns>
-    internal IDisposable Watch(Action<PluginUiEvent> watcher)
+    internal IDisposable Watch(Action<PluginUiEvent> watcher) => Watch(null, watcher);
+
+    /// <summary>
+    /// Gives the page of a window every request for that window from now on, after the ones it missed and the
+    /// dialogs still open there.
+    /// </summary>
+    /// <param name="label">The label of the view of the window of the page; null for the main one.</param>
+    /// <param name="watcher">What receives the requests.</param>
+    /// <returns>A registration to dispose when the page goes away.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="watcher"/> is null.</exception>
+    internal IDisposable Watch(string? label, Action<PluginUiEvent> watcher)
     {
         ArgumentNullException.ThrowIfNull(watcher);
+        var window = string.IsNullOrWhiteSpace(label) ? DesktopWindows.MainLabel : label;
         lock (_gate)
         {
-            _watcher = watcher;
-            while (_backlog.TryDequeue(out var missed)) watcher(missed);
+            var registration = _pages.Watch(window, watcher);
+            // What was asked while the page of its window was not there: the requests for this window, and those for every page.
+            for (var index = 0; index < _backlog.Count; index++)
+            {
+                var (missed, target) = _backlog[index];
+                if (target is not null && target != window) continue;
+                _backlog.RemoveAt(index--);
+                watcher(missed);
+            }
+
             foreach (var pending in _pending.Values)
             {
                 // A prompt is a command, not a dialog. A previous page may still own its captured
                 // handoff: never schedule the same request again after reconnection.
-                if (pending.Event.Kind == "prompt" && pending.Published) continue;
+                if (pending.Event.Kind == "prompt" && pending.Published || pending.Target != window) continue;
                 pending.Published = true;
                 watcher(pending.Event);
             }
-        }
 
-        return new Registration(this, watcher);
+            return new Registration(this, window, registration);
+        }
     }
 
     /// <summary>Takes the page's answer to a dialog or a prompt.</summary>
@@ -201,7 +244,7 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
         cancellationToken.ThrowIfCancellationRequested();
-        Post(new PluginUiEvent("notify") { Message = Cut(message, MaximumMessageUnits) });
+        Post(new PluginUiEvent("notify") { Message = Cut(message, MaximumMessageUnits) }, routed: true);
         return ValueTask.CompletedTask;
     }
 
@@ -213,7 +256,7 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
     {
         lock (_gate)
         {
-            if (!_closed && _watcher is { } watcher) watcher(new PluginUiEvent("refresh"));
+            if (!_closed) _pages.Publish(new PluginUiEvent("refresh"), null);
         }
     }
 
@@ -226,7 +269,7 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         // A page that is not there reads the buttons when it arrives.
         lock (_gate)
         {
-            if (!_closed && _watcher is { } watcher) watcher(new PluginUiEvent("buttons"));
+            if (!_closed) _pages.Publish(new PluginUiEvent("buttons"), null);
         }
     }
 
@@ -236,13 +279,13 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         // A landing page that is not there reads the cards when it is shown.
         lock (_gate)
         {
-            if (!_closed && _watcher is { } watcher) watcher(new PluginUiEvent("landing"));
+            if (!_closed) _pages.Publish(new PluginUiEvent("landing"), null);
         }
     }
 
     /// <summary>Shows a notification with the tone of a problem.</summary>
     internal void NotifyProblem(string message)
-        => Post(new PluginUiEvent("notify") { Message = Cut(message, MaximumMessageUnits), Tone = "warning" });
+        => Post(new PluginUiEvent("notify") { Message = Cut(message, MaximumMessageUnits), Tone = "warning" }, routed: true);
 
     /// <inheritdoc />
     public async ValueTask<bool> ConfirmAsync(string title, string message, CancellationToken cancellationToken = default)
@@ -413,7 +456,7 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         cancellationToken.ThrowIfCancellationRequested();
         var scope = _scope.Value;
         if (scope is not null) scope.DraftText = text;
-        Post(new PluginUiEvent("draft") { Text = Cut(text, MaximumTextUnits), SessionId = scope?.SessionId, ProjectId = scope?.ProjectId });
+        Post(new PluginUiEvent("draft") { Text = Cut(text, MaximumTextUnits), SessionId = scope?.SessionId, ProjectId = scope?.ProjectId }, routed: true);
         return ValueTask.CompletedTask;
     }
 
@@ -444,13 +487,12 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
                 if (entry.Protection is not null && entry.Published)
                 {
                     entry.Event = new PluginUiEvent("close") { RequestId = entry.Event.RequestId };
-                    _watcher?.Invoke(entry.Event);
+                    _pages.Publish(entry.Event, null);
                 }
                 else
                     _pending.Remove(entry.Event.RequestId!);
             }
             _backlog.Clear();
-            _watcher = null;
         }
 
         foreach (var entry in pending)
@@ -460,21 +502,25 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         }
     }
 
-    private void Post(PluginUiEvent value)
+    // A routed request goes to the page of one window (see WindowOf); another one, to every page.
+    private void Post(PluginUiEvent value, bool routed = false)
     {
+        var window = routed ? WindowOf(value) : null;
         lock (_gate)
         {
             if (_closed) return;
-            if (_watcher is { } watcher) { watcher(value); return; }
+            // Not to the main window in the place of another one: a draft or a prompt finds the composer of its session only in its window.
+            if (window is null ? _pages.Publish(value, null) : _pages.Watches(window) && _pages.Publish(value, window)) return;
             // A page that is not there yet gets the newest notifications when it arrives.
-            if (_backlog.Count == MaximumBacklog) _backlog.Dequeue();
-            _backlog.Enqueue(value);
+            if (_backlog.Count == MaximumBacklog) _backlog.RemoveAt(0);
+            _backlog.Add((value, window));
         }
     }
 
     private async ValueTask<PluginUiAnswer?> AskAsync(PluginUiEvent value, PluginDialogActionHandler? onAction, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var window = WindowOf(value);
         Pending pending;
         lock (_gate)
         {
@@ -484,13 +530,9 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
                 protection = (value.SessionId is { } sessionId ? admission.TryProtectSession(sessionId) : admission.TryProtectAll())
                     ?? throw new InvalidOperationException("Session retirement prevents publishing this plugin prompt.");
             var id = "ui-" + Interlocked.Increment(ref _next).ToString(System.Globalization.CultureInfo.InvariantCulture);
-            pending = new Pending(value with { RequestId = id }, onAction, protection);
+            pending = new Pending(value with { RequestId = id }, onAction, protection) { Target = window };
             _pending.Add(id, pending);
-            if (_watcher is { } watcher)
-            {
-                pending.Published = true;
-                watcher(pending.Event);
-            }
+            Publish(pending);
         }
 
         await using var registration = cancellationToken.Register(() =>
@@ -513,11 +555,85 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         return await pending.Answer.ConfigureAwait(false);
     }
 
-    private void Unwatch(Action<PluginUiEvent> watcher)
+    /// <summary>
+    /// The window a request goes to: a prompt or a draft to the window that holds the tab of its session, else the one
+    /// its command was started in; a dialog or a notification to the window its command was started in, else the one
+    /// of its session; then the window used last. Only an open window is chosen.
+    /// </summary>
+    private string WindowOf(PluginUiEvent value)
+    {
+        // Asked before the gate is taken: the windows have a lock of their own.
+        var scope = _scope.Value;
+        var session = Open(value.SessionId is { } sessionId ? SessionWindow?.Invoke(sessionId) : null);
+        var origin = Open(scope?.WindowLabel);
+        var window = value.Kind is "prompt" or "draft" ? session ?? origin : origin ?? session;
+        return window
+            ?? Open(scope?.SessionId is { } paneSession && paneSession != value.SessionId ? SessionWindow?.Invoke(paneSession) : null)
+            ?? Open(FocusedWindow?.Invoke())
+            ?? DesktopWindows.MainLabel;
+    }
+
+    private string? Open(string? window)
+        => window is null || window == DesktopWindows.MainLabel || WindowOpen is not { } open || open(window) ? window : null;
+
+    /// <summary>
+    /// Gives what was asked of the windows that closed since to the main one. Called when the windows change: a window
+    /// whose page reloads keeps its requests, they wait for its page.
+    /// </summary>
+    internal void WindowsChanged()
+    {
+        string[] targets;
+        lock (_gate)
+        {
+            if (_closed) return;
+            targets = [.. _pending.Values.Select(static pending => pending.Target).Concat(_backlog.Select(static missed => missed.Window ?? DesktopWindows.MainLabel))
+                .Where(static target => target != DesktopWindows.MainLabel).Distinct(StringComparer.Ordinal)];
+        }
+
+        foreach (var target in targets)
+        {
+            if (Open(target) is null) MoveToMain(target);
+        }
+    }
+
+    // Under the gate: gives a request to the page of its window; it waits there while that window has no page.
+    private void Publish(Pending pending)
+    {
+        if (_pages.Watches(pending.Target) && _pages.Publish(pending.Event, pending.Target)) pending.Published = true;
+    }
+
+    private void Unwatch(string window, IDisposable registration)
     {
         lock (_gate)
         {
-            if (ReferenceEquals(_watcher, watcher)) _watcher = null;
+            registration.Dispose();
+            if (_closed || window == DesktopWindows.MainLabel || _pages.Watches(window)) return;
+        }
+
+        // A page that reloads gets its requests again; those of a window that closed go to the main one.
+        if (WindowOpen is null || Open(window) is null) MoveToMain(window);
+    }
+
+    private void MoveToMain(string window)
+    {
+        lock (_gate)
+        {
+            if (_closed || _pages.Watches(window)) return;
+            for (var index = 0; index < _backlog.Count; index++)
+            {
+                var (missed, target) = _backlog[index];
+                if (target != window) continue;
+                if (_pages.Watches(DesktopWindows.MainLabel) && _pages.Publish(missed, DesktopWindows.MainLabel)) _backlog.RemoveAt(index--);
+                else _backlog[index] = (missed, DesktopWindows.MainLabel);
+            }
+
+            foreach (var pending in _pending.Values)
+            {
+                // A prompt the closed window took is not given again: its page may have sent it.
+                if (pending.Target != window || pending.Event.Kind == "prompt" && pending.Published) continue;
+                pending.Target = DesktopWindows.MainLabel;
+                Publish(pending);
+            }
         }
     }
 
@@ -531,6 +647,9 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         private IDisposable? _protection = protection;
 
         public PluginUiEvent Event { get; set; } = value;
+
+        /// <summary>The label of the view of the window whose page shows the request.</summary>
+        public string Target { get; set; } = DesktopWindows.MainLabel;
 
         public bool Published { get; set; }
 
@@ -588,8 +707,13 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         public void InvalidateContent() => owner.Refresh();
     }
 
-    private sealed class Registration(DesktopPluginUi owner, Action<PluginUiEvent> watcher) : IDisposable
+    private sealed class Registration(DesktopPluginUi owner, string window, IDisposable registration) : IDisposable
     {
-        public void Dispose() => owner.Unwatch(watcher);
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0) owner.Unwatch(window, registration);
+        }
     }
 }
