@@ -71,12 +71,13 @@ $runDefinitions = [ordered]@{
     "codealta-haiku" = [ordered]@{ Name = "codealta-haiku55-high"; Harness = "CodeAlta"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-haiku-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=high", "disable_tools=web") }
     "codealta-haiku-recheck-escalate" = [ordered]@{ Name = "codealta-haiku55-high-recheck-escalate-opus55-xhigh"; Harness = "CodeAlta Adaptive"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-haiku-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=high", "disable_tools=web", "recheck=true", "escalate_to=claude-opus-5-5", "escalate_effort=xhigh") }
     "codealta-haiku-escalate" = [ordered]@{ Name = "codealta-haiku55-high-escalate-opus55-xhigh"; Harness = "CodeAlta Adaptive"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-haiku-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=high", "disable_tools=web", "escalate_to=claude-opus-5-5", "escalate_effort=xhigh") }
-    # DeepSeek V4.1 Flash on DeepSeek's API, CodeAlta against OpenCode (Harbor's own opencode agent, pinned). Both send
+    # DeepSeek V4.1 Flash on DeepSeek's API, CodeAlta against OpenCode (Harbor's own opencode agent, pinned, with the patch
+    # capture of the locked adapters: captured_opencode.py). Both send
     # thinking with effort high, replay the reasoning of earlier turns (reasoning_content) and cap an answer at 32,000
     # tokens; neither starts sub-agents nor has web tools. The OpenCode provider uses the OpenAI-compatible SDK with
     # interleaved reasoning: its @ai-sdk/deepseek package drops the reasoning between turns.
     "codealta-deepseek-flash" = [ordered]@{ Name = "codealta-deepseek-flash-high"; Harness = "CodeAlta"; Agent = "locked_codealta:LockedCodeAlta"; Model = "deepseek/deepseek-flash"; Host = "api.deepseek.com"; Kwargs = @("reasoning_effort=high", "disable_tools=web", "provider_type=openai-chat", "api_key_env=DEEPSEEK_API_KEY", "api_url=https://api.deepseek.com", "extra_args=-c providers.deepseek.extra_body.max_tokens=32000") }
-    "opencode-deepseek-flash" = [ordered]@{ Name = "opencode-deepseek-flash-high"; Harness = "OpenCode"; Agent = "opencode"; Model = "deepseek/deepseek-flash"; Host = "api.deepseek.com"; Kwargs = @("version=1.19.5", "disable_web_search=true", ("opencode_config=" + (ConvertTo-Json -Compress -Depth 10 ([ordered]@{
+    "opencode-deepseek-flash" = [ordered]@{ Name = "opencode-deepseek-flash-high"; Harness = "OpenCode"; Agent = "captured_opencode:CapturedOpenCode"; Model = "deepseek/deepseek-flash"; Host = "api.deepseek.com"; Kwargs = @("version=1.19.5", "disable_web_search=true", ("opencode_config=" + (ConvertTo-Json -Compress -Depth 10 ([ordered]@{
         autoupdate = $false; share = "disabled"; enabled_providers = @("deepseek"); small_model = "deepseek/deepseek-flash"
         permission = [ordered]@{ task = "deny" }; tools = [ordered]@{ task = $false }
         provider = [ordered]@{ deepseek = [ordered]@{
@@ -171,6 +172,7 @@ foreach ($pair in @(
     @($tarball, "Dual-runtime altacli package"),
     @("$tarball.sha256", "Dual-runtime package checksum"),
     @((Join-Path $adapter "locked_codealta.py"), "CodeAlta Harbor adapter"),
+    @((Join-Path $adapter "captured_opencode.py"), "OpenCode Harbor adapter with patch capture"),
     @((Join-Path $tooling "locked_claude_code.py"), "Locked Claude Code adapter"),
     @((Join-Path $tooling "locked_codex.py"), "Locked Codex adapter"),
     @((Join-Path $tooling "patch_replay.py"), "Patch replay adapter")
@@ -241,12 +243,28 @@ if (-not $DryRun) {
         throw "The altacli package changed since setup ($($config.altacli_sha256) -> $actualTarball): run scripts\setup.ps1 again so the manifest records what runs."
     }
 
-    if (Test-Path -LiteralPath $datasetRoot) {
-        Remove-Item -Recurse -Force -LiteralPath $datasetRoot
-    }
+    # The dataset is made in a folder of its own, then kept only when the one in place differs: a run that goes on at
+    # the same time reads its tasks from the dataset in place.
     New-Item -ItemType Directory -Force -Path (Split-Path $datasetRoot -Parent) | Out-Null
-    & $python $makeSubset $tasksRoot $hardIds $datasetRoot
+    $newDataset = "$datasetRoot.new-$PID"
+    if (Test-Path -LiteralPath $newDataset) {
+        Remove-Item -Recurse -Force -LiteralPath $newDataset
+    }
+    & $python $makeSubset $tasksRoot $hardIds $newDataset
     Assert-ExitCode "Creating official HARD-51 dataset"
+    function Get-DatasetFingerprint([string]$Root) {
+        Get-ChildItem -LiteralPath $Root -Recurse -File | Sort-Object FullName |
+            ForEach-Object { "$($_.FullName.Substring($Root.Length)) $((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash)" }
+    }
+    if ((Test-Path -LiteralPath $datasetRoot) -and
+        -not (Compare-Object @(Get-DatasetFingerprint $datasetRoot) @(Get-DatasetFingerprint $newDataset))) {
+        Remove-Item -Recurse -Force -LiteralPath $newDataset
+    } else {
+        if (Test-Path -LiteralPath $datasetRoot) {
+            Remove-Item -Recurse -Force -LiteralPath $datasetRoot
+        }
+        Move-Item -LiteralPath $newDataset -Destination $datasetRoot
+    }
     $datasetTasks = @(Get-ChildItem -LiteralPath $datasetRoot -Directory | Select-Object -ExpandProperty Name | Sort-Object)
     $differences = @(Compare-Object @($taskIds | Sort-Object) $datasetTasks)
     if ($datasetTasks.Count -ne 51 -or $differences.Count) {
@@ -329,7 +347,7 @@ $preflights = [ordered]@{
     "Codex" = [ordered]@{ Name = "codex-install-preflight"; Agent = "locked_codex:LockedCodex"; Model = "openai/gpt-6-astra"; Kwargs = @("reasoning_effort=xhigh", "web_search=disabled") }
     # altacli and the Claude Code CLI the claude-code provider runs.
     "CodeAlta on Claude Code" = [ordered]@{ Name = "codealta-cc-install-preflight"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-opus-5-5"; Kwargs = @("reasoning_effort=xhigh", "provider_type=claude-code") }
-    "OpenCode" = [ordered]@{ Name = "opencode-install-preflight"; Agent = "opencode"; Model = "deepseek/deepseek-flash"; Kwargs = @("version=1.19.5") }
+    "OpenCode" = [ordered]@{ Name = "opencode-install-preflight"; Agent = "captured_opencode:CapturedOpenCode"; Model = "deepseek/deepseek-flash"; Kwargs = @("version=1.19.5") }
 }
 $harnesses = @($selectedRuns | ForEach-Object { $runDefinitions[$_].Harness } | Select-Object -Unique)
 foreach ($harness in $preflights.Keys) {
