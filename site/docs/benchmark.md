@@ -6,7 +6,7 @@ title: Harness Benchmark
 
 A coding agent is a model and a harness: the loop that sends the model its instructions, runs its tools, edits the files and keeps the context. The model is the same wherever you use it; the harness makes the difference in what it gets done and what it costs.
 
-We measure CodeAlta's harness against the harnesses the model vendors make for their own models: **Claude Code** for Claude Opus, **Codex** for GPT. Same models, same tasks, same machine: only the harness changes.
+We measure CodeAlta's harness against the harnesses the model vendors make for their own models: **Claude Code** for Claude Opus, **Codex** for GPT; and against **OpenCode**, an open-source harness, with DeepSeek. Same models, same tasks, same machine: only the harness changes.
 
 ## Results
 
@@ -34,6 +34,21 @@ We measure CodeAlta's harness against the harnesses the model vendors make for t
 - **With GPT-6 Astra**, CodeAlta solves one task more than Codex and passes more of the required tests, at about the same cost (4% more).
 - Costs are computed from the tokens each harness used, at the providers' list prices, the same way for every run. On the 51 tasks, the cache served 92 to 95% of the input of every harness.
 
+## CodeAlta and OpenCode with DeepSeek
+
+| DeepSeek V4.1 Flash | CodeAlta | OpenCode |
+|---|---:|---:|
+| Tasks resolved | **47 / 51** | 46 / 51 |
+| Required tests passed | 3,808 / 3,852 | **3,826** / 3,852 |
+| Cost of the 51 tasks | $2.24 | **$1.87** |
+| Input tokens | 160.1M | **138.5M** |
+| Output tokens | 2.24M | **1.83M** |
+| Time per task (median) | 8.2 min | **6.4 min** |
+
+- **Scores on par.** CodeAlta resolves one task more; OpenCode passes 18 more required tests, as the tasks it misses, it misses by fewer tests. Both differences are within what a run varies.
+- **CodeAlta costs 20% more, because it does more than the fix.** Its instructions ask the agent to add or update tests and documentation when behavior changes: it changed tests in 37 of the 51 tasks, OpenCode in 9. Writing and running those tests accounts for much of its extra output and requests. A benchmark grades the fix with its own tests, so it counts that work only as cost; in a project you keep, the tests that come with a change are what keep it working.
+- **What a harness sends with every request counts too.** With Claude Opus the difference goes the other way: Claude Code's instructions and tool descriptions are larger than CodeAlta's, and CodeAlta sends 18% fewer tokens and costs 12% less for the same tasks.
+
 ## What it means for you
 
 - **Results on par with the vendors' own agents.** On hard tasks of real projects, CodeAlta resolves as many tasks as Claude Code with Claude, and one more than Codex with GPT: you do not trade quality for an open, provider-agnostic harness.
@@ -45,9 +60,9 @@ We measure CodeAlta's harness against the harnesses the model vendors make for t
 
 - **Benchmark:** SWE-bench Pro v2, the HARD-51 set: 51 tasks among the hardest of the benchmark, in Python, Go, TypeScript and JavaScript projects (Ansible, Teleport, Element, Flipt, Open Library, Qutebrowser, Navidrome, Proton Mail and others).
 - **Protocol:** the locked protocol of SWE-bench Pro, run with [Harbor](https://github.com/laude-institute/harbor). Each task runs in a sandbox of its own whose network reaches only the model's endpoint. A task is resolved when all its required tests pass: after each run, the patch of every task is applied to a clean copy of its project and graded again.
-- **Models:** Claude Opus 5.5 and GPT-6 Astra, both at the `xhigh` reasoning effort, through the Anthropic and OpenAI APIs.
-- **Harnesses:** CodeAlta with Code Mode on, one agent per task (no sub-agents, so that every request goes to the model being measured); Claude Code 2.1.310 and Codex 0.155.1 with their own settings.
-- **Machine:** one Windows workstation, Docker on WSL 2, 8 tasks at a time.
-- **When:** in the same week of October 2026, one attempt per harness and model. Between attempts of the same harness, the score can vary by one or two tasks: compare the trend, not a single task.
+- **Models:** Claude Opus 5.5 and GPT-6 Astra, both at the `xhigh` reasoning effort, through the Anthropic and OpenAI APIs; DeepSeek V4.1 Flash at the `high` reasoning effort, through the DeepSeek API.
+- **Harnesses:** CodeAlta with Code Mode on, one agent per task (no sub-agents, so that every request goes to the model being measured); Claude Code 2.1.310, Codex 0.155.1 and OpenCode 1.19.5 with their own settings. OpenCode's patches were not kept: its tasks are graded in their own sandbox, which gave the same result as the clean copy for every task of CodeAlta.
+- **Machine:** one Windows workstation, Docker on WSL 2, 8 tasks at a time (4 for CodeAlta with DeepSeek).
+- **When:** in the same week of October 2026 for Claude and GPT, on one day of November 2026 for DeepSeek, one attempt per harness and model. Between attempts of the same harness, the score can vary by one or two tasks: compare the trend, not a single task.
 
 The kit that reproduces these runs, its scripts and the detailed report are in the [CodeAlta repository](https://github.com/CodeAlta/CodeAlta/tree/main/benchmarks).
