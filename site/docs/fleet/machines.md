@@ -46,17 +46,28 @@ The link works once and expires after 10 minutes. Each computer is then listed a
 
 ### Over SSH
 
-1. Type the computer as you would after `ssh`: `user@host`, `user@host:port`, or a host of your SSH configuration. **Name** is optional: the machine's own name by default. Tick **Manage it from this computer** to change its devices, projects, secrets and updates from here.
+1. Type the computer as you would after `ssh`: `user@host`, `user@host:port`, or a host of your SSH configuration. **Name** is optional: the machine's own name by default. Tick **Manage it from this computer** to change its devices, projects, secrets and updates from here. Tick **Always on** to have the node start with the machine, with nobody logged in (see [Always on](#always-on)).
 2. Click **Add the machine**. CodeAlta signs in with your SSH keys and agent (the OpenSSH client of your system, without asking for a password), then shows each step as it goes:
-   - **Connect over SSH**, and **Check the system and .NET**: Linux or macOS, x64 or Arm64, and .NET 10 there;
+   - **Connect over SSH**, and **Check the system and .NET**: Linux or macOS, x64 or Arm64, and .NET 10 there, and `sudo` with **Always on**;
    - **Install CodeAlta Node**: the .NET tool in `~/.dotnet/tools`, or the package of its system where only the .NET runtime is;
-   - **Start it as a service**: `altanode install --listen-all`, a `systemd --user` unit (with lingering) on Linux, a LaunchAgent on macOS;
+   - **Start it as a service**: `altanode install --listen-all`, a `systemd --user` unit (with lingering) on Linux, a LaunchAgent on macOS; with **Always on**, a service that starts at boot;
    - **Pair it with this computer**: the node makes a pairing link for this computer, which pairs at once (and manages the machine, when you ticked it). The six words of its key are shown.
 3. Click **Open its page** to give it projects and look at its providers (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
 
 When a step fails, it says why and what to do: add your key to the SSH agent (`ssh-add`) or copy it to the machine (`ssh-copy-id`), install .NET 10 there, open the port of the node in its firewall. On a Mac, macOS asks once to let CodeAlta reach your local network, and keeps it from your machines until you allow it (**System Settings** > **Privacy & Security** > **Local Network**). **Start over** runs every step again from the first and changes only what is missing. A computer whose SSH key this one does not know yet shows the fingerprint of that key (`SHA256:…`): compare it with the one of the machine, then click **Trust it and start over**.
 
 Where CodeAlta Desktop runs on the machine too, the node gets a profile of its own, `~/.alta-node`. **Advanced** sets the port of the node (2585), its profile, the folder it is installed in, and a folder of this computer to install the packages from.
+
+### Always on
+
+Without it, the node starts when you log in on the machine, and after a restart nothing runs until you do. **Always on** makes the node come back by itself, and needs `sudo` there:
+
+- **On a Mac**, a LaunchDaemon that runs as you replaces the LaunchAgent. A LaunchDaemon cannot read your login Keychain, so the setup first moves the key of the node's secrets into a file only you read (`altanode secrets key-file`). Logins kept in the Keychain are not available to the node: sign them in again from its page (see [Sign in on a machine](#sign-in-on-a-machine)).
+- **On Linux**, lingering is turned on for your account, so that the `systemd --user` unit starts at boot and survives a logout.
+
+CodeAlta asks for your password on the machine once, only when `sudo` needs it. It goes to `sudo` through the SSH connection and is never kept; a wrong one is asked again. When you have no `sudo` there, the step shows the command to run on the machine as an administrator. A Mac with FileVault waits for its disk to be unlocked after a restart, with or without **Always on**; macOS 26 lets an Apple Silicon Mac with Remote Login on be unlocked over SSH before it starts, and the node then comes back.
+
+Without **Always on**, on a Mac nobody is logged in to, the setup writes the LaunchAgent and says that it starts at the next login. The page of the machine tells whether it starts at boot (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
 
 ## Install CodeAlta Node by hand
 
@@ -107,15 +118,19 @@ To have the node start by itself, install it as a service with the options it ru
 altanode install --listen-all
 ```
 
-| System | What `altanode install` sets up |
-| --- | --- |
-| Windows | A Task Scheduler task at your logon, without administrator rights |
-| macOS | A LaunchAgent in `~/Library/LaunchAgents` |
-| Linux | A `systemd --user` unit, with lingering so that it runs without a login |
+| System | What `altanode install` sets up | What `altanode install --system` sets up |
+| --- | --- | --- |
+| Windows | A Task Scheduler task at your logon, without administrator rights | A Windows service, from a terminal run as administrator |
+| macOS | A LaunchAgent in `~/Library/LaunchAgents` | A LaunchDaemon that runs as `--account`, with `sudo` |
+| Linux | A `systemd --user` unit, with lingering so that it runs without a login | A system unit that runs as `--account`, with `sudo` |
 
 The service runs as you, with your sign-ins. Run `altanode install` again to change its options, and `altanode uninstall` to remove it: your profile and sessions stay. `altanode install --dry-run` prints what it would set up without changing anything.
 
-For a machine that should start the node at boot under an account of its own (one that uses deploy keys and tokens only), use `altanode install --system --account <name>`, with `sudo` on macOS and Linux.
+`--system` starts the node at boot, whoever is logged in, under an account of its own (a machine that uses deploy keys and tokens only) or as you. `altanode status` says which and whether it will still run after a restart.
+
+- **macOS and Linux**: `sudo altanode install --system --account <name>`. When the account is a person whose secrets key is in the Keychain (macOS) or libsecret (Linux), that person first runs `altanode secrets key-file`, without `sudo`: it moves the key into a file only they read, which a service without a login can use. `install` says when.
+- **Windows**: `altanode install --system` registers a Windows service that starts at boot and starts again when it stops. It runs as its own account, `NT SERVICE\altanode`, which needs no password, with its profile under `%ProgramData%\CodeAlta`: sign it in from its page in CodeAlta Desktop (see [Sign in on a machine](#sign-in-on-a-machine)). To run as you instead, with your own sign-ins, give your Windows password once on standard input: `altanode install --system --account <you> --password-stdin`. Windows keeps the password; CodeAlta does not. After you change your Windows password, run the same `install` again. Stopping the service lets running turns end first.
+- Installed as a .NET tool, the Windows service runs the program of the tool: stop the service before `dotnet tool update` and run `install --system` again after it. `altanode update` keeps working under the service.
 
 ## Update it
 
@@ -194,8 +209,10 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | **People** | The people of your organization who may use it, each on their own sessions, and who asked to ([People and Access](people-and-access.md#people-on-your-own-machines)) |
 | **Labels** | Its [labels](#label-your-machines), which it publishes to its servers: add them, or remove one with its cross |
 | **Projects** | Clone a repository there, add a folder, remove a project; how many [worktrees](sessions.md#start-a-session-on-it) its sessions work in, and what they take on its disk |
-| **Providers** | Each provider of the machine and whether it is ready; when it is not, why: no key, the secret of the machine it waits for, not signed in. **Add a provider…** and **Add its key…** take its key here: it goes to the machine encrypted from end to end and is kept in its secrets (`PROVIDER_<KEY>_API_KEY`), never in its configuration. **Sign in…** signs in a provider such as GitHub Copilot or xAI on the machine: its code shows here with **Copy**; enter it on the provider's page in your browser. A provider with its own login on the machine (Codex, Claude Code) is signed in there |
+| **Providers** | Each provider of the machine and whether it is ready; when it is not, why: no key, the secret of the machine it waits for, not signed in. **Add a provider…** and **Add its key…** take its key here: it goes to the machine encrypted from end to end and is kept in its secrets (`PROVIDER_<KEY>_API_KEY`), never in its configuration. **Sign in…** signs in a provider such as GitHub Copilot or xAI on the machine: its code shows here with **Copy**; enter it on the provider's page in your browser |
+| **Sign-ins** | What the machine signs in to by itself, and as whom: Codex and the other providers that sign in through a browser, MCP servers with OAuth, and the tools of its spaces. **Sign in…** does it from here ([Sign in on a machine](#sign-in-on-a-machine)) |
 | **Secrets** | Its [secrets and variables](../secrets.md), as **Settings** > **Secrets** shows those of this computer: **Add a secret…**, **Rotate** and **Delete** a secret, edit or delete a variable. A value goes to the machine and is never shown back |
+| **Start at boot** | Whether the node starts when the machine does, with nobody logged in, in the words of `altanode status`; when it does not, the command to run on the machine that makes it so |
 | **Updates** | The version it runs. **Check for updates**, then **Update to** the version found: it switches once no session works |
 | **Log** | **Show the log** reads its last lines |
 
@@ -218,3 +235,20 @@ On the machine itself, the same is done with:
 **Forget** on the row of a machine removes it from this computer; its sessions go on there. To make sure a lost or replaced computer can no longer reach a node, revoke it on the page of the machine, from a computer that manages it.
 
 From a terminal, `altanode connect <link>` pairs another profile with a node, and `altanode remote <machine> sessions`, `history`, `send`, `create` and `watch` read and drive the sessions of a paired machine. `altanode remote <machine> move <session>` moves one of them to the node of that profile.
+
+## Sign in on a machine
+
+A machine signs in to its providers, MCP servers and tools itself; nothing is copied from your desktop. Its page lists them under **Sign-ins**, with whether each is signed in and as whom, and **Sign in…** does it in one click, with no terminal and no SSH on the machine:
+
+| What | How it signs in |
+| --- | --- |
+| Codex, Mistral Vibe, and MCP servers with OAuth | The page opens in the browser of this computer. When you have signed in, the browser sends its answer back to the machine, which finishes the sign-in |
+| GitHub Copilot, xAI, Codex CLI | A code shows here with **Copy**: enter it on the page it names |
+| `gh` of each space, and the tools whose login a space names in its CLI profiles (`gh`, `glab`, `az`, `aws`, `gcloud`) | The machine runs the login with the identity of the space and shows its page and code here, or asks for the code its page gives |
+| Claude Code | The machine runs `claude setup-token`: its page opens here, and you paste the code it shows. The machine keeps the token it gets as a secret and Claude Code uses it. On a Windows machine, sign in there |
+
+**Sign out** removes the sign-in of a provider or an MCP server. A tool keeps its own login on the machine, and Claude Code's token goes with its **Sign out**.
+
+The machine exchanges the code and keeps the token: this computer only opens the page and relays the code or the address the browser returns, which is useless without what the machine holds. If another program holds the port the browser comes back to, the sign-in says it cannot start and the machine keeps nothing half done. A sign-in waits 15 minutes at most for you, and closing its window cancels it.
+
+Only a computer that manages the machine signs it in (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)). A person reached through your server never does.

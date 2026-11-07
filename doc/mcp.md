@@ -76,6 +76,11 @@ timeouts, output bounds and finite diagnostics. Every request is bounded: no ser
 - **OAuth.** HTTP servers that follow MCP authorization sign in through the browser with a loopback callback. Tokens
   live in `~/.alta/auth/mcp/`, never in `mcp.json` or policy, and no output shows a token. Agent runs and ordinary
   commands only use cached or refreshable tokens: they never open a browser by surprise.
+- **OAuth on a node.** A headless node has no browser, so its sign-in is forwarded: the runtime takes the redirect
+  address the node names, a loopback address of the desktop, and a forwarded authorization callback in place of its own
+  loopback listener. The desktop opens the page and listens at that address, then gives the node the whole callback
+  address; the SDK still registers the client and runs PKCE on the node, which exchanges the code and keeps the token.
+  The desktop never sees a token ([node](fleet/node.md#signing-in-from-the-desktop)).
 - **Results.** Text and structured content are redacted and bounded (`max_tool_output_chars`). Images of a result
   reach the model through the session (see [runtime](runtime.md)); other non-text content is summarized.
 

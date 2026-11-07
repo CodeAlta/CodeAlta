@@ -222,7 +222,9 @@ CodeAlta holds a credential only where it signs in itself, and never hands one t
 - **Subscriptions are personal.** A run that is not a person's own run on their own machine (any run of a team or
   organization automation, any run on a shared or cloud machine) uses account credentials only: API keys of the
   organization or the team, or a model gateway. Providers declare their credential kind, and both the scheduler and
-  the node check it ([orchestration](orchestration.md#credentials-of-unattended-runs)).
+  the node check it ([orchestration](orchestration.md#credentials-of-unattended-runs)). The same holds for a session
+  another person starts on a shared machine: the node refuses it, its sub-sessions, fallbacks and model tiers a
+  provider that runs with a personal plan, whoever signed that plan in.
 - **Organization providers** keep their keys sealed to the keys of the machines allowed to use them; the server relays
   ciphertext and never holds a key in clear.
 

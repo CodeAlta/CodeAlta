@@ -23,8 +23,9 @@ What it is not:
 | Command | What it does |
 | --- | --- |
 | `altanode run [--port <n>] [--bind <address> \| --listen-all \| --no-listen]` | Runs in the foreground (logs to the console). What a service starts. Listens for paired devices on port 2585 of loopback by default. |
-| `altanode install [--user \| --system --account <name>] [run options] [--dry-run]` | Installs and starts the service of this OS (below), which runs `altanode run` with the options given. `--dry-run` prints the definition and the commands. |
-| `altanode uninstall [--system --account <name>]` | Stops and removes the service; keeps the profile. |
+| `altanode install [--user \| --system [--account <name> [--password-stdin]]] [run options] [--dry-run]` | Installs and starts the service of this OS (below), which runs `altanode run` with the options given. `--dry-run` prints the definition and the commands. |
+| `altanode uninstall [--system [--account <name>]]` | Stops and removes the service; keeps the profile. |
+| `altanode secrets key-file` | Moves the key of the node's secrets from the Keychain or libsecret into a private file, for a node started at boot. |
 | `altanode pair` | Shows a pairing code and QR code (in the terminal) for a desktop to scan. The first slice prints the `codealta-pair://` link only, and waits until a device redeems it or it expires. |
 | `altanode join <server-url> [--token <enrollment>]` | Enrolls in a fleet: with an enrollment token, or by a device code a person approves. |
 | `altanode status` | Where the node listens, its paired devices, the sessions at work, its versions and its update, the service, and whether it will still run after a restart or a logout. Later: the fleet connections, the providers' readiness. |
@@ -58,13 +59,13 @@ its channel closes.
 ## Running as a service
 
 Agents run as an OS user, and the credentials they use (Git, SSH, `gh`, the Claude Code login, cloud CLIs) live in
-that user's home folder and keychain. So the node runs **as the user whose credentials it uses**, never as root or
-LocalSystem.
+that user's home folder and keychain. So the node runs **as the user whose credentials it uses**, or as an account of
+its own whose credentials are its own, never as root or LocalSystem.
 
-| OS | A person's machine (their logins) | A machine that uses deploy keys and tokens only (a container, a team machine) |
+| OS | In the login session of a person (`install`) | At boot, without a login (`install --system`) |
 | --- | --- | --- |
-| Windows | A task at logon of the user (Task Scheduler). A Windows service would run in Session 0 and not see the user's Credential Manager, ssh-agent or Git Credential Manager | A Windows service (`Microsoft.Extensions.Hosting.WindowsServices`) under a dedicated account |
-| macOS | A LaunchAgent of the user: it runs in the login session, with the keychain. An always-on Mac mini keeps that user logged in (automatic login conflicts with FileVault; the guide explains the choice) | A LaunchDaemon with `UserName` (no login keychain) |
+| Windows | A task at logon of the user (Task Scheduler). A Windows service would run in Session 0 and not see the user's Credential Manager, ssh-agent or Git Credential Manager | A Windows service, under a virtual account of its own (`NT SERVICE\altanode`, no password, its profile under `%ProgramData%`) or under the person's account, whose password Windows keeps |
+| macOS | A LaunchAgent of the user: it runs in the login session, with the keychain | A LaunchDaemon with `UserName`: the person, or a dedicated account. It has no login keychain |
 | Linux | A `systemd --user` unit with lingering on (`loginctl enable-linger`), so it runs without a login; libsecret needs a session bus, so prefer tokens in files the node protects | A system unit with `User=codealta` (`Microsoft.Extensions.Hosting.Systemd`, `Type=notify`, watchdog) |
 
 **One node per OS user.** A machine several people use runs one node per person, never one privileged node acting
@@ -79,8 +80,21 @@ for everyone. A dedicated machine gets its own OS user (`codealta`) with its own
   node again within 5 minutes if it stopped (`conhost` hides the node's exit code from Task Scheduler). Windows runs
   the `.cmd` shim through `cmd.exe`, so `install` refuses an option `cmd.exe` would change (`"`, `%`, `&` outside a
   quoted value). `uninstall`
-  deletes the task, then stops the node through its local control. `--system` is refused on Windows until the node
-  runs as a Windows service.
+  deletes the task, then stops the node through its local control.
+- **A user service depends on a login** on Windows and macOS: after a restart nothing runs until the person signs in,
+  and signing out stops it. It is right for a workstation that also serves as a node, and for a Mac that signs iOS
+  builds, which needs its login keychain. A machine that must come back by itself gets the system service. The desktop's
+  SSH setup offers it as **Always on**: on macOS the LaunchDaemon as the person, on Linux lingering. On a Mac nobody is
+  logged in to, a user install writes the agent and says it starts at the next login, rather than fail.
+- **The Windows service is the launcher.** The process the service manager starts is always the launcher, which never
+  exits during an update. On Windows it answers the Service Control Manager (`run --service`, `ServiceBase`), and turns a
+  stop or a shutdown into the graceful stop of the version that runs, through its local control, killing it only after a
+  bound. The service is registered with `sc.exe`; the password of a named account goes to Windows through its API and
+  nowhere else: no file, no log, no command line. The Control Manager cannot start the `.cmd` shim of a .NET tool, so a
+  tool install registers the program the shim starts, in the folder of the tool.
+- **A service without a login has no login keychain or session bus.** The secrets key of a person's store moves
+  from the Keychain or libsecret to the store's private file (`secrets key-file`), run as that person: the values keep
+  their key. The SSH setup does it for **Always on**, and `install --system` says when it is needed.
 - A node keeps the machine awake while sessions work (as `DesktopKeepAwake` does), and lets it sleep when idle
   unless the owner says it is always on.
 - Exit is graceful: admission closes, running turns finish or stop after a bound, journals are flushed; a session
@@ -105,19 +119,55 @@ Each node signs in by itself; the desktop drives the sign-ins so that nobody has
 
 | Need | How the node gets it |
 | --- | --- |
-| Providers CodeAlta signs in (Codex subscription, Copilot, xAI) | The device code flow runs on the node; the desktop shows the code and the link; tokens stay in the node's `~/.alta/auth/` |
+| Providers CodeAlta signs in (Codex subscription, Mistral Vibe, Copilot, xAI) | Signed in from the desktop ([below](#signing-in-from-the-desktop)); tokens stay in the node's `~/.alta/auth/` |
 | Providers with an API key, and any other token a run needs | A secret of the node's store ([secrets](secrets.md)): typed by the person from the desktop and sent over the end-to-end channel, or a secret of a space, a team or the organization sealed to the node; kept in its protected store (DPAPI, Keychain, libsecret), or named as an environment variable of the service |
-| Claude Code, Codex CLI, ACP agents | Their own login on that machine, done in a setup terminal of the node opened from the desktop (owner only, audited), or over SSH |
+| Claude Code | `claude setup-token` run by the node; the token it prints is a secret of the node's store, named by the provider's `CLAUDE_CODE_OAUTH_TOKEN` (`${secret:NAME}`) |
+| Codex CLI, ACP agents | The sign-in method of their plugin; Codex CLI's device code is shown by the desktop, ACP agents sign in with a command on the machine |
+| MCP servers with OAuth | Signed in from the desktop; tokens stay in `~/.alta/auth/mcp/` ([MCP](../mcp.md#runtime)) |
 | Git over SSH | A key made on the node; its public key added to the Git host (`gh ssh-key add`, or copied by the person); the space identity names it. Organizations can sign short-lived SSH certificates instead (milestone 5) |
-| GitHub | `gh auth login` with a device code, per space profile as today (`gh auth setup-git` for HTTPS); with a server, the CodeAlta GitHub App's device flow gives the node expiring user tokens (8 hours, refreshed for up to 6 months) |
-| Cloud CLIs | Their device flows (`az login --use-device-code`, `aws sso login --no-browser`, `gcloud auth login --no-browser`), per space CLI profile |
+| GitHub | `gh auth login` with a device code, per space profile, run by the node on behalf of the desktop; with a server, the CodeAlta GitHub App's device flow gives the node expiring user tokens (8 hours, refreshed for up to 6 months) |
+| Cloud CLIs | The login command of the space's CLI profile (`gh`, `glab`, `az`, `aws`, `gcloud`), checked by its check command |
 | Organization providers (API keys or gateway keys for unattended runs) | Sealed by the server to this node's key when an admin allows the node to use them; kept in its protected store; lent only to runs of the scopes that may use them ([orchestration](orchestration.md#credentials-of-unattended-runs)) |
+
+### Signing in from the desktop
+
+Every sign-in a node keeps for itself is made from the machine page, with the browser of the person's computer. The node
+starts and completes it, so that the token is never on the desktop:
+
+```mermaid
+sequenceDiagram
+    participant D as Desktop
+    participant N as Node
+    participant A as Authorization server
+    D->>N: signins.start(target)
+    N->>N: PKCE verifier and state, kept on the node
+    N-->>D: page to open, redirect address, attempt id
+    D->>D: listen on that loopback address, open the page
+    A-->>D: redirect to the loopback address with code and state
+    D->>N: signins.complete(attempt id, callback address)
+    N->>A: exchange the code with the verifier
+    A-->>N: tokens, kept in the node's own store
+```
+
+- **The node names the redirect address**, a loopback address of the desktop, and keeps it per target; the desktop
+  listens there and forwards the whole callback address. The code is useless without the verifier the node holds.
+  A device code or a code the person pastes takes the same path, started and completed by the node.
+- **Tools sign in through an allowlist of login commands, never a shell**, run with the identity environment of the
+  space. The node reads the page and the code from their output and writes the pasted code to their input; when it
+  cannot read a tool, the answer is the command to run on the machine. A tool keeps its own login.
+- **Who.** The owner on the machine, and a device paired with `manage`; never a member reached through a server's relay.
+  One attempt per target at a time, expiring after 15 minutes, logged with the device and never with a token.
+- **Personal plans serve their owner only.** A session another person starts on a machine (`OwnSessionsOnly` devices:
+  a team machine, a person a personal machine lets in) cannot run on a provider that runs with a personal plan, nor can
+  its sub-sessions, fallbacks and model tiers; the node refuses at every attachment of a provider to a session, and the
+  start dialog lists the account providers only ([security](security-and-privacy.md#credentials)).
 
 **Readiness.** For each linked space, the desktop shows whether the node is ready to run its sessions: the identity
 **Check** of the space run on the node (who Git commits as, whether keys exist, which GitHub account), and the
 providers of the space that are ready there, with **Set up…** beside what is missing. It also answers two questions
 a household asks: **Will this still run after a restart or a logout?** (the kind of service, automatic login,
-lingering) and, for an automation, **Why can't this machine run it?** (credential kind, tools, sandbox, project,
+lingering; the node answers it in `control.status`, from what `ServiceManager` reads of its own service, and the page
+shows **Start at boot** with the command that fixes it) and, for an automation, **Why can't this machine run it?** (credential kind, tools, sandbox, project,
 labels, its local policy).
 
 ## Automations and statistics

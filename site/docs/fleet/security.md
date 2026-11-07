@@ -40,6 +40,7 @@ A change reaches the machines once a signer signs the next version: until then t
 - **Keys are pinned.** Each computer has its own key. Pairing records the key of the other side, and every connection checks it: a machine that presents another key is refused. The six words let you check, at pairing, that the link comes from the machine you think. A pairing both ways records each key on the other side after that one check, and each side revokes the other on its own. Through a server, the key comes from the list of devices your own computers signed, never from the server alone, and a device revoked there is refused.
 - **Its sessions bypass permissions unless you choose otherwise.** A machine runs agents while nobody sits at it, so a session without a mode of its own runs commands and changes files without asking. Choose **Ask first** for the machine ([What its sessions may do](sessions.md#what-its-sessions-may-do)): a request then waits for a person, who answers it from a paired computer.
 - **Its sessions are sandboxed where the sandbox can run.** Whatever their mode, they reach the package registries and the git hosts, never the home folder or the credentials of the machine. Where it cannot run, the page of the machine says what to install.
+- **A personal plan serves its owner only.** On a machine shared with other people, a session someone else starts there runs with account credentials only (an API key, a gateway): the subscription its owner signed in on it (Codex, Claude Code, Copilot) is refused to it, to its sub-sessions and to its fallbacks, and the start dialog lists only the providers that fit.
 - **Agents never get more on another machine.** A session an agent starts elsewhere has at most the space, tools, permission mode and sandbox of the session that asked ([Let agents start sessions on it](sessions.md#let-agents-start-sessions-on-it)).
 
 ## Networks
@@ -51,7 +52,7 @@ A change reaches the machines once a signer signs the next version: until then t
 
 ## Secrets and credentials
 
-Each machine signs in to its providers itself; nothing is copied from your desktop. The keys and tokens a machine needs are its own [secrets](../secrets.md#on-a-machine-with-altanode), set on it with `altanode secrets`, or values your computer seals for it through a server, which the server cannot open ([Secrets of your machines with a server](../secrets.md#secrets-of-your-machines-with-a-server)). Outputs and journals mask the values they meet.
+Each machine signs in to its providers itself; nothing is copied from your desktop. CodeAlta Desktop starts the sign-ins from the page of the machine ([Sign in on a machine](machines.md#sign-in-on-a-machine)), but the machine exchanges the code and keeps the token: the desktop sees a page and a code, never a token. The keys and tokens a machine needs are its own [secrets](../secrets.md#on-a-machine-with-altanode), set on it with `altanode secrets`, or values your computer seals for it through a server, which the server cannot open ([Secrets of your machines with a server](../secrets.md#secrets-of-your-machines-with-a-server)). Outputs and journals mask the values they meet.
 
 ## Sign-in
 
