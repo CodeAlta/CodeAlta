@@ -19,6 +19,7 @@ an empty `reasoning_content`, which made the model explore again and again.
 | | CodeAlta `1179e0e6f` | CodeAlta `22b292217`, Code Mode on | CodeAlta `22b292217`, Code Mode off | OpenCode |
 |---|---:|---:|---:|---:|
 | Resolved tasks | **47/51** | **47/51** | 46/51 | 46/51 |
+| Required tests passed | **3,826** / 3,852 | 3,808 / 3,852 | **3,826** / 3,852 | **3,826** / 3,852 |
 | Errored trials, failed runs | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
 | Requests | 2,636 | 2,398 | 2,591 | 2,320 |
 | Input tokens (cache read) | 186.0M (97.7%) | 160.1M (98.3%) | 168.5M (98.3%) | 138.5M (98.2%) |
@@ -33,6 +34,10 @@ an empty `reasoning_content`, which made the model explore again and again.
   `6e889f4a` (Code Mode on and OpenCode), protonmail `715dbd4e` and `c5a2089c` (all but Code Mode on), qutebrowser
   `c09e1439` (the first run and Code Mode off); none solves openlibrary `b67138b3`. One or two tasks is the run-to-run
   variation of HARD-51: the scores are a tie.
+- **Required tests:** a task is resolved when all its required tests pass. Three runs each miss 26 of the 3,852;
+  Code Mode on misses 44, for its four unsolved tasks: openlibrary `b67138b3` (30 of 64 tests, against 50 for the
+  others), protonmail `715dbd4e` (1 of 4) and `c5a2089c` (7 of 13), and qutebrowser `c09e1439` (104 of 105, as
+  OpenCode). The near misses of the other runs: openlibrary `6e889f4a` (16 of 17) and ansible `de5858f4` (49 of 58).
 - **The fixes cost 13–15% less** at the same score, nearly all of it from the input not read from the cache (−35%):
   see [the reasoning sent back](#the-reasoning-sent-back).
 - **Against OpenCode, CodeAlta still costs 17–20% more**, for 16–22% more output: see
