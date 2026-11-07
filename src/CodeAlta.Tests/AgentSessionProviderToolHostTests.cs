@@ -212,22 +212,34 @@ public sealed class AgentSessionProviderToolHostTests
         Assert.AreEqual(2, Volatile.Read(ref cancelled), "No call is left running when the run ends.");
     }
 
+    // A model that calls a tool it was not given (DeepSeek called `replace_file_or_dir`, a mix of two tool names) is told
+    // so in the result of that call, with the tools it has, and goes on: the run does not fail.
     [TestMethod]
-    public async Task UnknownToolCall_StillFailsWhenTheProviderResolvesNothing()
+    public async Task UnknownToolCall_GivesTheModelAnError_AndTheRunGoesOn()
     {
         using var directory = TestTempDirectory.Create();
-        var provider = new ToolHostProvider { Responses = [Call("call-1", "nobody_runs_this", new { })] };
+        var provider = new ToolHostProvider { Responses = [Call("call-1", "nobody_runs_this", new { }), new AgentMessagePart.Text("done")] };
         await using var session = await provider.CreateSessionAsync(new AgentSessionCreateOptions
         {
             ProviderKey = "tool-host-fixture",
             WorkingDirectory = directory.Path,
+            Tools =
+            [
+                new AgentToolDefinition(
+                    new AgentToolSpec("read_file", "Reads a file.", JsonSerializer.SerializeToElement(new { type = "object" })),
+                    static (_, _) => Task.FromResult(new AgentToolResult(true, []))),
+            ],
             OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
         });
 
-        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("go") }));
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("go") });
 
-        StringAssert.Contains(failure.Message, "nobody_runs_this");
+        Assert.AreEqual(2, provider.Turns, "The model is asked again with the result of its call.");
+        var result = provider.LastRequest!.Conversation
+            .SelectMany(static message => message.Parts).OfType<AgentMessagePart.ToolResult>().Single(static part => part.CallId == "call-1").Result;
+        Assert.IsFalse(result.Success);
+        StringAssert.Contains(result.Error, "nobody_runs_this");
+        StringAssert.Contains(result.Error, "read_file");
     }
 
     [TestMethod]

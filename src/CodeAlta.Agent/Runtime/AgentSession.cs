@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
+using CodeAlta.Agent.Harness;
 using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.Runtime.Images;
 using CodeAlta.Agent.ModelCatalog;
@@ -962,6 +963,16 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 : RunTools.FindPending(toolName) is { } pending ? Intercept(pending) : null;
     }
 
+    private static readonly JsonElement UnknownToolInputSchema = JsonDocument.Parse("{\"type\":\"object\"}").RootElement.Clone();
+
+    private static AgentToolDefinition CreateUnknownToolDefinition(string name, IEnumerable<string> tools)
+    {
+        var message = $"There is no tool named '{name}'. The tools are: {string.Join(", ", tools.Order(StringComparer.Ordinal))}.";
+        return new AgentToolDefinition(
+            new AgentToolSpec(HarnessToolCallBridge.SanitizeName(name), message, UnknownToolInputSchema),
+            (_, _) => Task.FromResult(new AgentToolResult(false, [new AgentToolResultItem.Text(message)], message)));
+    }
+
     // Runs the tool calls of an assistant message. The session runs its tools one after the other, in their order.
     // A provider that runs tools itself may run several of them at the same time: such a call is shown from when
     // the provider says it starts, and at the latest when the calls before it ended.
@@ -989,10 +1000,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     toolDefinition = providerToolHost.ResolveTool(SessionId, toolCall, toolDefinition) ?? toolDefinition;
                 }
 
-                if (toolDefinition is null)
-                {
-                    throw new InvalidOperationException($"Tool '{toolCall.Name}' was not registered for session '{SessionId}'.");
-                }
+                // A tool the model was not given (a name it made up) does not end the run: the result of the call tells it
+                // so, with the tools it has, as for a call whose arguments could not be read.
+                toolDefinition ??= CreateUnknownToolDefinition(toolCall.Name, toolMap.Keys);
 
                 // A call whose arguments could not be read does not run: its result tells the model why.
                 if (unrunnableToolCalls?.TryGetValue(toolCall.CallId, out var unrunnable) == true)
