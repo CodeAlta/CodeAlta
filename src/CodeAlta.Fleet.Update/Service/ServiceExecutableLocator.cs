@@ -90,7 +90,8 @@ public static class ServiceExecutableLocator
             if (start < 0) continue;
             var end = line.IndexOf('"', start + 1);
             if (end < 0) continue;
-            var relative = line[(start + "\"%~dp0".Length)..end].TrimStart('\\', '/');
+            // A batch file separates its folders with backslashes: a system that reads the path with another separator gets its own.
+            var relative = line[(start + "\"%~dp0".Length)..end].TrimStart('\\', '/').Replace('\\', System.IO.Path.DirectorySeparatorChar);
             var target = System.IO.Path.GetFullPath(System.IO.Path.Combine(folder, relative));
             if (target.StartsWith(System.IO.Path.GetFullPath(folder), StringComparison.OrdinalIgnoreCase) && target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return target;
         }
