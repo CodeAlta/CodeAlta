@@ -34,6 +34,11 @@ import { installEditorFocus } from "./editorFocus";
 globalThis.MonacoEnvironment = Object.freeze({ getWorker: () => new EditorWorker() });
 // One editor of the page has the text focus, also when the browser announced no change of focus.
 installEditorFocus(monaco);
+// The menu of a right-click is drawn in a shadow root, which takes the colors of the theme only from the elements around
+// it, and the theme gives them to `.monaco-editor` and `.monaco-component`. An editor with its widgets fixed to the window
+// (the prompt, a file) puts that menu in the element it was created in, beside `.monaco-editor`: it had no surface and black
+// entries. That element is a Monaco component too.
+monaco.editor.onDidCreateEditor(editor => editor.getContainerDomNode().classList.add("monaco-component"));
 
 /**
  * The font family of the code editors or of the prompt: the font variable of the page (style.css), resolved,
