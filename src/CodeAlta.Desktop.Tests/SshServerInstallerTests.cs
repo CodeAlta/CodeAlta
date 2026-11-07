@@ -66,6 +66,37 @@ public sealed class SshServerInstallerTests
         Assert.AreEqual((new Uri("https://box:2693"), new Uri("https://127.0.0.1:42693"), (string?)Pin), claimed, "the claim through the forward checks it too, and the link keeps it");
     }
 
+    // Always on: on macOS a LaunchDaemon run as the person replaces the LaunchAgent; the step says what happens after a restart.
+    [TestMethod]
+    public async Task AlwaysOn_OnMacOS_TheServerIsALaunchDaemonOfThePerson_AndThePinIsReadBeforeItsStatus()
+    {
+        const string Pin = "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        const string Mac = "os=Darwin\narch=arm64\nhome=/Users/me\nuser=me\nhostname=mac\ndotnet=/usr/local/share/dotnet/dotnet\nsdk=10.0.402 [x]\nsudo=nopassword\n";
+        var ssh = new SshNodeInstallerTests.ScriptedSsh();
+        ssh.Answers.Enqueue(new SshResult(0, Mac, ""));
+        ssh.Answers.Enqueue(new SshResult(0, "4.1.0\n", ""));
+        ssh.Answers.Enqueue(new SshResult(0, Pin + "\n--- altanode status\nCertificate: sha256:BBBB\nAfter a restart: it starts at boot as me, without a login.\n", ""));
+        ssh.Answers.Enqueue(new SshResult(0, "WXYZ-1234\n", ""));
+        var steps = new List<SshSetupProgress>();
+        string? checkedPin = null;
+
+        await new SshServerInstaller(ssh, "4.1.0").RunAsync(new SshServerSetupRequest { Target = new SshTarget("me", "mac", null), OwnCertificate = true, AlwaysOn = true },
+            (_, pin, _) => { checkedPin = pin; return Task.FromResult<ReachProblem?>(null); }, (_, _, _, _, _) => Task.FromResult("link-1"), steps.Add, TestContext.CancellationToken);
+
+        Assert.AreEqual(Pin, checkedPin);
+        StringAssert.Contains(ssh.Scripts[2], "\"$TOOLS/altaserver\" uninstall >/dev/null 2>&1 || true\n");
+        StringAssert.Contains(ssh.Scripts[2], "sudo -n env \"DOTNET_ROOT=$DOTNET_ROOT\" \"PATH=$PATH\" \"$TOOLS/altaserver\" install --system --account \"$ME\" --urls https://0.0.0.0:2586 --own-certificate 1>&2\n");
+        StringAssert.EndsWith(steps.Single(static step => step is { Step: "service", State: "done" }).Detail, "· After a restart: it starts at boot as me, without a login.");
+
+        // Without sudo there, the check says so with the command to run.
+        var refused = new SshNodeInstallerTests.ScriptedSsh();
+        refused.Answers.Enqueue(new SshResult(0, Mac.Replace("sudo=nopassword\n", "", StringComparison.Ordinal), ""));
+        var missing = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(refused, "4.1.0").RunAsync(
+            new SshServerSetupRequest { Target = new SshTarget("me", "mac", null), AlwaysOn = true }, (_, _, _) => Task.FromResult<ReachProblem?>(null),
+            (_, _, _, _, _) => Task.FromResult("l"), static _ => { }, TestContext.CancellationToken));
+        Assert.AreEqual(("sudo_missing", "sudo altaserver install --system --account me"), (missing.Code, missing.Message));
+    }
+
     [TestMethod]
     public async Task AServerWithItsOwnCertificateThatPrintsNoPin_IsNotClaimed()
     {

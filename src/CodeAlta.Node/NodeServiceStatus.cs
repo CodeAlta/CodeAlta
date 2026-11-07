@@ -7,8 +7,8 @@ namespace CodeAlta.Node;
 
 /// <summary>
 /// The service that runs the node of a profile and whether it still runs after a restart or a logout, as <c>altanode status</c>
-/// says it, for the page of the machine in the desktop (<c>control.status</c>): the Windows service of <c>install --system</c>
-/// when there is one, else the service of the user.
+/// says it, for the page of the machine in the desktop (<c>control.status</c>): the system service of <c>install --system</c>
+/// when there is one (a Windows service, or a LaunchDaemon or system unit run as this user), else the service of the user.
 /// </summary>
 internal static class NodeServiceStatus
 {
@@ -24,8 +24,8 @@ internal static class NodeServiceStatus
         var defaultProfile = string.Equals(Path.GetFullPath(profile.GlobalRoot), Path.GetFullPath(CodeAltaInstanceProfile.GetDefaultGlobalRoot()),
             OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
         var name = ServiceDefinition.ServiceName(UpdateProduct.Node, profile.StateRoot, defaultProfile, profile.IsDeveloper);
-        ServiceFacts? facts = null;
-        if (env.Platform == ServicePlatform.Windows && manager.QueryWindowsService(UpdateProduct.Node, name) is { Installed: true } service) facts = service;
+        // The system service of install --system (Always on) first: a user service of the same profile is a leftover.
+        ServiceFacts? facts = manager.QuerySystemService(UpdateProduct.Node, name, env.UserName) is { Installed: true } service ? service : null;
         if (facts is null)
         {
             var plan = manager.Plan(new ServiceRequest

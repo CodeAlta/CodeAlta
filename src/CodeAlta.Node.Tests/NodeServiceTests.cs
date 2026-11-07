@@ -288,6 +288,13 @@ public sealed class NodeServiceTests
             machine.Commands);
         var answer = string.Join('\n', ServiceManager.Describe(manager.Query(plan)));
         StringAssert.Contains(answer, "After a restart: it starts at boot as codealta, without a login.");
+
+        // The node it runs reads it as that account, without root.
+        machine.IsRoot = false;
+        var read = new ServiceManager(machine.Environment).QuerySystemService(UpdateProduct.Node, "altanode", "codealta");
+        Assert.IsTrue(read.Installed);
+        Assert.IsTrue(ServiceManager.StartsAtBoot(read));
+        Assert.IsFalse(new ServiceManager(machine.Environment).QuerySystemService(UpdateProduct.Node, "altanode", "alice").Installed);
     }
 
     [TestMethod]
@@ -421,11 +428,11 @@ public sealed class NodeServiceTests
         var answer = string.Join('\n', ServiceManager.Describe(manager.Query(plan)));
         StringAssert.Contains(answer, @"it starts at boot as NT SERVICE\altanode, without a login");
         // status reads it without a plan, which needs an administrator for a system service.
-        var read = manager.QueryWindowsService(UpdateProduct.Node, "altanode");
+        var read = manager.QuerySystemService(UpdateProduct.Node, "altanode", "alice");
         Assert.IsTrue(read.Installed);
         Assert.IsTrue(ServiceManager.StartsAtBoot(read));
         Assert.AreEqual(@"NT SERVICE\altanode", read.User);
-        Assert.IsFalse(manager.QueryWindowsService(UpdateProduct.Node, "altanode-other").Installed);
+        Assert.IsFalse(manager.QuerySystemService(UpdateProduct.Node, "altanode-other", "alice").Installed);
 
         // As a named account ("at boot as me"): its password is needed, and goes to Windows through the API only.
         machine.Commands.Clear();

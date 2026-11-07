@@ -39,6 +39,15 @@ internal sealed record SshServerSetupRequest
 
     /// <summary>Gets the fingerprint of the host key the person trusted, as it was shown to them: only that key is accepted; null for the keys ssh knows.</summary>
     public string? TrustedHostKey { get; init; }
+
+    /// <summary>
+    /// Gets whether the server starts when the computer starts, with nobody logged in (<b>Always on</b>, which the dialog
+    /// ticks by default: the machines depend on it): a LaunchDaemon run as the person on macOS, lingering on Linux.
+    /// </summary>
+    public bool AlwaysOn { get; init; }
+
+    /// <summary>Gets the password <c>sudo</c> asks there for <see cref="AlwaysOn"/>; given to <c>sudo -S</c> only, never kept. Null for none.</summary>
+    public string? SudoPassword { get; init; }
 }
 
 /// <summary>The steps of a server set up over SSH.</summary>
@@ -100,6 +109,7 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
         progress(new(SshSetupSteps.Check, "running"));
         if (facts.RuntimeIdentifier is not { } rid || facts.Os is not ("Linux" or "Darwin")) throw new SshSetupException(SshSetupSteps.Check, "unsupported_system", $"{facts.OsName} {facts.Architecture}");
         if (facts.Dotnet is null || facts.Sdk is null) throw new SshSetupException(SshSetupSteps.Check, "dotnet_missing", $"{facts.OsName} {facts.Architecture}");
+        SshNodeInstaller.CheckAlwaysOn(facts, request.AlwaysOn, request.SudoPassword, "altaserver install");
         progress(new(SshSetupSteps.Check, "done", $"{facts.OsName} {facts.Architecture} · .NET SDK {facts.Sdk}"));
 
         progress(new(SshSetupSteps.Install, "running"));
@@ -123,15 +133,18 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
         progress(new(SshSetupSteps.Install, "done", $"CodeAlta Server {version} · {toolPath}"));
 
         progress(new(SshSetupSteps.Service, "running"));
-        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, request.DataRoot, request.Port, onNetwork, encrypted), request.TrustedHostKey, null, cancellationToken)
-            .ConfigureAwait(false);
-        if (!service.Succeeded) throw new SshSetupException(SshSetupSteps.Service, "service_failed", Lines(service.Error + service.Output));
+        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, request.DataRoot, request.Port, onNetwork, encrypted, request.AlwaysOn, request.SudoPassword),
+            request.TrustedHostKey, null, cancellationToken).ConfigureAwait(false);
+        if (!service.Succeeded)
+            throw new SshSetupException(SshSetupSteps.Service, SshNodeInstaller.SudoRefused(service.Error + service.Output) ? "sudo_refused" : "service_failed", Lines(service.Error + service.Output));
         // The pin of the certificate the server made, as its status printed it over SSH: the channel this computer trusts
         // already, so that no one on the network can put a certificate of their own in its place.
-        var pin = encrypted ? service.Output.Split('\n', StringSplitOptions.TrimEntries).LastOrDefault(FleetServerCertificates.IsPin) : null;
+        var marker = service.Output.IndexOf(SshNodeInstaller.StatusMarker, StringComparison.Ordinal);
+        var pin = encrypted ? (marker < 0 ? service.Output : service.Output[..marker]).Split('\n', StringSplitOptions.TrimEntries).LastOrDefault(FleetServerCertificates.IsPin) : null;
         if (encrypted && pin is null) throw new SshSetupException(SshSetupSteps.Service, "service_failed", "The server did not print the pin of its certificate. " + Lines(service.Output));
-        progress(new(SshSetupSteps.Service, "done", (facts.Os == "Linux" ? "systemd --user unit" : "LaunchAgent") + $", port {request.Port}"
-            + (onNetwork ? ", every network of the machine" : ", its loopback") + (encrypted ? ", HTTPS with its own certificate" : "")));
+        var restart = SshNodeInstaller.AfterRestart(service.Output);
+        progress(new(SshSetupSteps.Service, "done", (facts.Os == "Linux" ? "systemd" : "launchd") + $", port {request.Port}"
+            + (onNetwork ? ", every network of the machine" : ", its loopback") + (encrypted ? ", HTTPS with its own certificate" : "") + (restart is null ? "" : $" · {restart}")));
 
         progress(new(SshServerSteps.Reach, "running", address.ToString().TrimEnd('/')));
         if (await reachable(address, pin, cancellationToken).ConfigureAwait(false) is { } blocked)
@@ -171,7 +184,8 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
     // systemd --user unit with lingering, a LaunchAgent), with the PATH and the DOTNET_ROOT of the prelude; then waits until
     // the server answers its own status. The default data root has the service of ~/.altaserver; another one a service
     // named after it, so that two never collide.
-    private static string ServiceScript(SshMachineFacts facts, string toolPath, string? dataRoot, int port, bool onNetwork, bool encrypted)
+    internal static string ServiceScript(SshMachineFacts facts, string toolPath, string? dataRoot, int port, bool onNetwork, bool encrypted, bool alwaysOn = false,
+        string? sudoPassword = null)
     {
         var script = new StringBuilder(SshNodeInstaller.DotnetPrelude(facts));
         script.Append("TOOLS=").Append(SshNodeInstaller.Quote(toolPath)).Append("\nTOOLS=$(cd \"$TOOLS\" && pwd)\n");
@@ -189,8 +203,21 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
             script.Append("if [ -f \"$OLD\" ]; then launchctl bootout \"gui/$(id -u)/io.codealta.altaserver-$ID\" 2>/dev/null || true; rm -f \"$OLD\"; fi\n");
         }
 
-        script.Append("\"$TOOLS/altaserver\" install");
-        if (dataRoot is not null) script.Append(" --data-root \"$ROOT\"");
+        script.Append("ME=$(id -un)\n");
+        var root = dataRoot is not null ? " --data-root \"$ROOT\"" : "";
+        var sudo = SshNodeInstaller.Sudo(facts, sudoPassword);
+        if (alwaysOn && facts.Os == "Darwin")
+        {
+            // One service per data root: the LaunchAgent goes, and a LaunchDaemon runs the person's tool as them.
+            script.Append("\"$TOOLS/altaserver\" uninstall").Append(root).Append(" >/dev/null 2>&1 || true\n");
+            script.Append(sudo).Append("env \"DOTNET_ROOT=$DOTNET_ROOT\" \"PATH=$PATH\" \"$TOOLS/altaserver\" install --system --account \"$ME\"");
+        }
+        else
+        {
+            script.Append("\"$TOOLS/altaserver\" install");
+        }
+
+        script.Append(root);
         // The local network is HTTPS with the server's own certificate, or plain HTTP that the person chose: the server
         // refuses that one unless it is forced.
         // Behind an address of its own, the server stays on its loopback, and what stands in front of it there (Tailscale
@@ -198,12 +225,15 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
         script.Append(" --urls ").Append(!onNetwork ? $"http://127.0.0.1:{port} --trusted-proxy {SshNodeInstaller.Quote(LoopbackProxies)}"
                 : encrypted ? $"https://0.0.0.0:{port} --own-certificate" : $"http://0.0.0.0:{port} --allow-insecure-http")
             .Append(" 1>&2\n");
+        if (alwaysOn && facts.Os == "Linux")
+            script.Append("if [ \"$(loginctl show-user \"$ME\" -p Linger --value 2>/dev/null)\" != yes ]; then ").Append(sudo).Append("loginctl enable-linger \"$ME\"; fi\n");
 
         script.Append("i=0\nwhile [ $i -lt ").Append((int)StartTimeout.TotalSeconds).Append(" ]; do\n");
         // "Health: ok" once it serves: status also prints "Health: no answer ..." while it starts.
         // Once it serves, the pin of its own certificate, on a line of its own (status prints "Certificate: sha256:...").
         script.Append("  if \"$TOOLS/altaserver\" status --data-root \"$ROOT\" 2>/dev/null | grep -q '^Health: ok'; then ")
-            .Append(encrypted ? "\"$TOOLS/altaserver\" status --data-root \"$ROOT\" | sed -n 's/^Certificate: //p'; " : "").Append("exit 0; fi\n  i=$((i+1)); sleep 1\ndone\n");
+            .Append(encrypted ? "\"$TOOLS/altaserver\" status --data-root \"$ROOT\" | sed -n 's/^Certificate: //p'; " : "")
+            .Append("echo '").Append(SshNodeInstaller.StatusMarker).Append("'; \"$TOOLS/altaserver\" status --data-root \"$ROOT\" 2>/dev/null || true; exit 0; fi\n  i=$((i+1)); sleep 1\ndone\n");
         script.Append("\"$TOOLS/altaserver\" status --data-root \"$ROOT\" >&2\nexit 1\n");
         return script.ToString();
     }

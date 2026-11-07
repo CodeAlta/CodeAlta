@@ -613,16 +613,49 @@ public sealed class ServiceManager(ServiceEnvironment environment)
         return lines;
     }
 
-    /// <summary>Reads a Windows service (<c>sc.exe qc</c>) without a plan, as <c>status</c> reads one <c>install --system</c> registered.</summary>
+    /// <summary>
+    /// Reads the system service <c>install --system</c> registered for a service name without a plan, which needs an
+    /// administrator or root: the Windows service (<c>sc.exe qc</c>), or on macOS and Linux the LaunchDaemon or system unit
+    /// run as <paramref name="account"/>.
+    /// </summary>
     /// <param name="product">The product it runs.</param>
     /// <param name="name">The name of the service.</param>
-    /// <returns>What it is; not installed when Windows has no service of that name.</returns>
+    /// <param name="account">On macOS and Linux, the account it runs as; ignored on Windows, which names it.</param>
+    /// <returns>What it is; not installed when there is none.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="product"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
-    public ServiceFacts QueryWindowsService(UpdateProduct product, string name)
+    /// <exception cref="ArgumentException"><paramref name="name"/> or <paramref name="account"/> is empty.</exception>
+    public ServiceFacts QuerySystemService(UpdateProduct product, string name, string account)
     {
         ArgumentNullException.ThrowIfNull(product);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var env = Environment;
+        if (env.Platform == ServicePlatform.Windows) return QueryWindowsService(product, name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(account);
+        var systemName = ServiceDefinition.SystemServiceName(name, account);
+        bool installed, enabled;
+        string kind, location;
+        if (env.Platform == ServicePlatform.MacOS)
+        {
+            var label = ServiceDefinition.LaunchdLabel(systemName);
+            location = Path.Combine(env.LaunchDaemonDirectory, label + ".plist");
+            kind = $"a LaunchDaemon run as {account}";
+            installed = File.Exists(location);
+            enabled = installed && env.Run("launchctl", ["print", $"system/{label}"]).Succeeded;
+        }
+        else
+        {
+            var unit = systemName + ".service";
+            location = Path.Combine(env.SystemUnitDirectory, unit);
+            kind = $"a system unit run as {account}";
+            installed = File.Exists(location);
+            enabled = installed && env.Run("systemctl", ["is-enabled", unit]) is { } state && state.Output.Trim().Split('\n')[0].Trim() is "enabled" or "enabled-runtime";
+        }
+
+        return new ServiceFacts(product, env.Platform, ServiceScope.System, kind, location, account, installed, enabled, null, null);
+    }
+
+    private ServiceFacts QueryWindowsService(UpdateProduct product, string name)
+    {
         var query = Environment.Run("sc.exe", ["qc", name]);
         var account = ServiceDefinition.WindowsVirtualAccount(name);
         foreach (var line in query.Output.ReplaceLineEndings("\n").Split('\n'))

@@ -131,6 +131,78 @@ public sealed class SshNodeInstallerTests
             new SshResult(1, "", "altanode: no node runs on this profile.")));
     }
 
+    // Always on: the setup reads after install what altanode status says, instead of assuming lingering is on.
+    [TestMethod]
+    public async Task Setup_OnLinux_SaysWhatHappensAfterARestart_AsTheNodeReadsIt()
+    {
+        var ssh = new ScriptedSsh();
+        ssh.Answers.Enqueue(new SshResult(0, Ubuntu.ReplaceLineEndings("\n"), ""));
+        ssh.Answers.Enqueue(new SshResult(0, "", ""));
+        ssh.Answers.Enqueue(new SshResult(0, "Lingering is off for me and loginctl enable-linger me needs privileges here.\n--- altanode status\nService: a systemd --user unit of me.\n"
+            + "After a restart: it waits until me logs in (lingering is off: sudo loginctl enable-linger me starts it at boot).\n", ""));
+        ssh.Answers.Enqueue(new SshResult(0, Link + "\n", ""));
+        var steps = new List<SshSetupProgress>();
+        await new SshNodeInstaller(ssh, "4.1.0").RunAsync(new SshNodeSetupRequest { Target = new SshTarget("me", "pc-ai", null) },
+            (_, _) => Task.FromResult("m"), steps.Add, TestContext.CancellationToken);
+
+        Assert.AreEqual("systemd, port 2585 · After a restart: it waits until me logs in (lingering is off: sudo loginctl enable-linger me starts it at boot).",
+            steps.Single(static step => step is { Step: "service", State: "done" }).Detail);
+        Assert.IsFalse(ssh.Scripts[2].Contains("sudo", StringComparison.Ordinal), "without Always on, nothing runs as root");
+        StringAssert.Contains(ssh.Scripts[2], "echo '--- altanode status'\n\"$TOOLS/altanode\" status 2>/dev/null || true\n");
+    }
+
+    [TestMethod]
+    public async Task AlwaysOn_AsksTheSudoPasswordWhenNeeded_AndGivesItToSudoOnly()
+    {
+        var mac = MacWithDesktop.ReplaceLineEndings("\n") + "\nsudo=password\n";
+        // The check stops for the password, before anything is installed.
+        var ssh = new ScriptedSsh();
+        ssh.Answers.Enqueue(new SshResult(0, mac, ""));
+        var asked = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshNodeInstaller(ssh, "4.1.0").RunAsync(
+            new SshNodeSetupRequest { Target = new SshTarget("me", "mac", null), AlwaysOn = true }, (_, _) => Task.FromResult("m"), static _ => { }, TestContext.CancellationToken));
+        Assert.AreEqual(("check", "sudo_password_needed"), (asked.Step, asked.Code));
+        Assert.AreEqual(1, ssh.Scripts.Count);
+
+        // With it: the LaunchAgent goes, and a LaunchDaemon runs the person's tool as them, the password on the standard input of sudo.
+        ssh = new ScriptedSsh();
+        ssh.Answers.Enqueue(new SshResult(0, mac, ""));
+        ssh.Answers.Enqueue(new SshResult(0, "", ""));
+        ssh.Answers.Enqueue(new SshResult(0, "--- altanode status\nAfter a restart: it starts at boot as me, without a login.\n", ""));
+        ssh.Answers.Enqueue(new SshResult(0, Link + "\n", ""));
+        var steps = new List<SshSetupProgress>();
+        await new SshNodeInstaller(ssh, "4.1.0").RunAsync(new SshNodeSetupRequest { Target = new SshTarget("me", "mac", null), AlwaysOn = true, SudoPassword = "it's s3cret" },
+            (_, _) => Task.FromResult("m"), steps.Add, TestContext.CancellationToken);
+        var service = ssh.Scripts[2];
+        StringAssert.Contains(service, "\"$TOOLS/altanode\" uninstall --data-root \"$ROOT\" >/dev/null 2>&1 || true\n");
+        StringAssert.Contains(service, "printf '%s\\n' 'it'\\''s s3cret' | sudo -S -p '' env \"DOTNET_ROOT=$DOTNET_ROOT\" \"PATH=$PATH\" \"$TOOLS/altanode\" install --system --account \"$ME\" --listen-all --port 2585 --data-root \"$ROOT\"\n");
+        Assert.AreEqual(1, ssh.Scripts.Count(static script => script.Contains("s3cret", StringComparison.Ordinal)), "only the step that needs it has it");
+        StringAssert.EndsWith(steps.Single(static step => step is { Step: "service", State: "done" }).Detail, "it starts at boot as me, without a login.");
+
+        // On Linux, sudo turns lingering on when altanode install could not; without a password, sudo -n.
+        ssh = Scripted(new SshResult(0, Ubuntu.ReplaceLineEndings("\n") + "\nsudo=nopassword\n", ""), new SshResult(0, "", ""), new SshResult(0, "", ""), new SshResult(0, Link + "\n", ""));
+        await new SshNodeInstaller(ssh, "4.1.0").RunAsync(new SshNodeSetupRequest { Target = new SshTarget("me", "pc-ai", null), AlwaysOn = true },
+            (_, _) => Task.FromResult("m"), static _ => { }, TestContext.CancellationToken);
+        StringAssert.Contains(ssh.Scripts[2], "\"$TOOLS/altanode\" install --listen-all --port 2585\n");
+        StringAssert.Contains(ssh.Scripts[2], "!= yes ]; then sudo -n loginctl enable-linger \"$ME\"; fi\n");
+
+        // A wrong password, or no sudo there: the page says so, with the command to run there.
+        Assert.AreEqual("sudo_refused", await FailureAsync(new SshNodeSetupRequest { Target = new SshTarget("me", "mac", null), AlwaysOn = true, SudoPassword = "wrong" },
+            new SshResult(0, mac, ""), new SshResult(0, "", ""), new SshResult(1, "", "Sorry, try again.\nsudo: 1 incorrect password attempt\n")));
+        var missing = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshNodeInstaller(Scripted(new SshResult(0, Ubuntu.ReplaceLineEndings("\n"), "")), "4.1.0").RunAsync(
+            new SshNodeSetupRequest { Target = new SshTarget("me", "pc-ai", null), AlwaysOn = true }, (_, _) => Task.FromResult("m"), static _ => { }, TestContext.CancellationToken));
+        Assert.AreEqual(("sudo_missing", "sudo loginctl enable-linger me"), (missing.Code, missing.Message));
+    }
+
+    [TestMethod]
+    public void Probe_ReadsHowACommandRunsAsRoot()
+    {
+        Assert.AreEqual("password", SshNodeInstaller.ReadFacts("os=Darwin\narch=arm64\nsudo=password\n").Sudo);
+        Assert.AreEqual("root", SshNodeInstaller.ReadFacts("os=Linux\narch=x86_64\nsudo=root\n").Sudo);
+        Assert.IsNull(SshNodeInstaller.ReadFacts("os=Linux\narch=x86_64\nsudo=maybe\n").Sudo);
+        Assert.IsFalse(SshNodeInstaller.ReadFacts("os=Linux\narch=x86_64\nlinger=yes\n").AlwaysOnNeedsRoot, "lingering is on already");
+        Assert.IsTrue(SshNodeInstaller.ReadFacts("os=Darwin\narch=arm64\n").AlwaysOnNeedsRoot);
+    }
+
     [TestMethod]
     public void Words_AreQuotedForSh()
     {
@@ -190,13 +262,20 @@ public sealed class SshNodeInstallerTests
         Assert.IsNull(OpenSshRunner.FingerprintOf("not a key\n"));
     }
 
-    private async Task<string> FailureAsync(params SshResult[] answers)
+    private Task<string> FailureAsync(params SshResult[] answers) => FailureAsync(new SshNodeSetupRequest { Target = new SshTarget("me", "box", null) }, answers);
+
+    private async Task<string> FailureAsync(SshNodeSetupRequest request, params SshResult[] answers)
+    {
+        var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshNodeInstaller(Scripted(answers), "4.0.0").RunAsync(
+            request, (_, _) => Task.FromResult("m"), static _ => { }, TestContext.CancellationToken));
+        return failure.Code;
+    }
+
+    private static ScriptedSsh Scripted(params SshResult[] answers)
     {
         var ssh = new ScriptedSsh();
         foreach (var answer in answers) ssh.Answers.Enqueue(answer);
-        var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshNodeInstaller(ssh, "4.0.0").RunAsync(
-            new SshNodeSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _) => Task.FromResult("m"), static _ => { }, TestContext.CancellationToken));
-        return failure.Code;
+        return ssh;
     }
 
     /// <summary>An ssh that answers each script in turn, and prints the lines of its output as they come.</summary>

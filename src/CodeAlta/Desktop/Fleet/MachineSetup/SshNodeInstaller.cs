@@ -37,6 +37,18 @@ internal sealed record SshNodeSetupRequest
     /// </summary>
     public bool Manage { get; init; }
 
+    /// <summary>
+    /// Gets whether the node starts when the computer starts, with nobody logged in (<b>Always on</b>): a LaunchDaemon run as
+    /// the person on macOS (<c>sudo altanode install --system --account</c>), lingering on Linux. Off: the service of the person.
+    /// </summary>
+    public bool AlwaysOn { get; init; }
+
+    /// <summary>
+    /// Gets the password <c>sudo</c> asks there for <see cref="AlwaysOn"/>, which the person gives when the check says it is needed;
+    /// sent through the SSH channel to <c>sudo -S</c> only, never kept, logged or put on a command line. Null for none.
+    /// </summary>
+    public string? SudoPassword { get; init; }
+
     /// <summary>Gets whether the runtime package is installed even where a .NET SDK is (the path of machines without one).</summary>
     internal bool PreferRuntimePackage { get; init; }
 }
@@ -70,6 +82,12 @@ internal sealed record SshMachineFacts(string Os, string Architecture, string? R
 
     /// <summary>Gets whether Tailscale is installed there.</summary>
     public bool Tailscale { get; init; }
+
+    /// <summary>Gets how a command runs as root there: <c>root</c> (the person is), <c>nopassword</c>, <c>password</c> (sudo asks one); null without sudo.</summary>
+    public string? Sudo { get; init; }
+
+    /// <summary>Gets whether <b>Always on</b> needs root there: always on macOS (a LaunchDaemon), on Linux while lingering is off.</summary>
+    public bool AlwaysOnNeedsRoot => Os == "Darwin" || Os == "Linux" && Linger != "yes";
 }
 
 /// <summary>A setup that stopped, with what the person should know and do.</summary>
@@ -143,6 +161,9 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         var dataRoot = request.DataRoot is { Length: > 0 } root ? root : facts.DesktopRuns ? "~/.alta-node" : null;
         var toolPath = request.ToolPath is { Length: > 0 } tools ? tools : "~/.dotnet/tools";
         var dotnetText = useSdk ? $".NET SDK {facts.Sdk}" : $".NET {facts.Runtime}";
+        // Always on needs root there: sudo without a password, or the one the person gives; without either, the page asks it.
+        CheckAlwaysOn(facts, request.AlwaysOn, request.SudoPassword, "altanode install --listen-all");
+
         progress(new(SshSetupSteps.Check, "done", $"{facts.OsName} {facts.Architecture} · {dotnetText}"
             + (dataRoot is not null && request.DataRoot is null ? $" · CodeAlta Desktop runs there: the node gets its own profile, {dataRoot}" : "")));
 
@@ -166,10 +187,11 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         progress(new(SshSetupSteps.Install, "done", $"CodeAlta Node {version} · {toolPath}"));
 
         progress(new(SshSetupSteps.Service, "running"));
-        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, dataRoot, request.Port, request.Name), request.TrustedHostKey, null, cancellationToken)
-            .ConfigureAwait(false);
-        if (!service.Succeeded) throw Fail(SshSetupSteps.Service, "service_failed", FirstLines(service.Error + service.Output, 6));
-        progress(new(SshSetupSteps.Service, "done", ServiceDetail(facts, request.Port)));
+        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, dataRoot, request.Port, request.Name, request.AlwaysOn, request.SudoPassword),
+            request.TrustedHostKey, null, cancellationToken).ConfigureAwait(false);
+        if (!service.Succeeded)
+            throw Fail(SshSetupSteps.Service, SudoRefused(service.Error + service.Output) ? "sudo_refused" : "service_failed", FirstLines(service.Error + service.Output, 6));
+        progress(new(SshSetupSteps.Service, "done", ServiceDetail(facts, request.Port, service.Output)));
 
         progress(new(SshSetupSteps.Pair, "running"));
         using var pairing = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -251,6 +273,9 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet ufw 2>/dev/null; then echo "firewall=ufw"; fi
         if command -v tailscale >/dev/null 2>&1; then echo "tailscale=yes"; fi
         if [ -f /etc/alpine-release ]; then echo "libc=musl"; fi
+        if [ "$(id -u)" = 0 ]; then echo "sudo=root"; elif command -v sudo >/dev/null 2>&1; then
+          if sudo -n true >/dev/null 2>&1; then echo "sudo=nopassword"; else echo "sudo=password"; fi
+        fi
         exit 0
         """.ReplaceLineEndings("\n");
 
@@ -285,6 +310,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
             NullIfEmpty(values.GetValueOrDefault("hostname")))
         {
             Firewall = NullIfEmpty(values.GetValueOrDefault("firewall")), Tailscale = values.GetValueOrDefault("tailscale") == "yes",
+            Sudo = values.GetValueOrDefault("sudo") is "root" or "nopassword" or "password" ? values["sudo"] : null,
         };
 
         static string? Newest(string? current, string candidate)
@@ -385,17 +411,68 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         return script.ToString();
     }
 
-    private static string ServiceScript(SshMachineFacts facts, string toolPath, string? dataRoot, int port, string? name)
+    // The service of the person, or for Always on a LaunchDaemon run as them (macOS) or their lingering (Linux), then what
+    // altanode status says of it after a marker, which the step reads instead of guessing.
+    internal static string ServiceScript(SshMachineFacts facts, string toolPath, string? dataRoot, int port, string? name, bool alwaysOn = false, string? sudoPassword = null)
     {
         var script = new StringBuilder(DotnetPrelude(facts));
         script.Append("TOOLS=").Append(Quote(toolPath)).Append('\n');
         if (dataRoot is not null) script.Append("ROOT=").Append(Quote(dataRoot)).Append("\nmkdir -p \"$ROOT\"\nROOT=$(cd \"$ROOT\" && pwd)\n");
-        script.Append("\"$TOOLS/altanode\" install --listen-all --port ").Append(port.ToString(CultureInfo.InvariantCulture));
-        if (dataRoot is not null) script.Append(" --data-root \"$ROOT\"");
-        if (name is { Length: > 0 }) script.Append(" --name ").Append(Quote(name));
-        script.Append('\n');
+        script.Append("ME=$(id -un)\n");
+        var root = dataRoot is not null ? " --data-root \"$ROOT\"" : "";
+        var options = new StringBuilder(" --listen-all --port ").Append(port.ToString(CultureInfo.InvariantCulture)).Append(root);
+        if (name is { Length: > 0 }) options.Append(" --name ").Append(Quote(name));
+        var sudo = Sudo(facts, sudoPassword);
+        if (alwaysOn && facts.Os == "Darwin")
+        {
+            // One service per profile: the LaunchAgent of the person goes, and the daemon runs their tool, with their .NET and PATH.
+            script.Append("\"$TOOLS/altanode\" uninstall").Append(root).Append(" >/dev/null 2>&1 || true\n");
+            script.Append(sudo).Append("env \"DOTNET_ROOT=$DOTNET_ROOT\" \"PATH=$PATH\" \"$TOOLS/altanode\" install --system --account \"$ME\"").Append(options).Append('\n');
+        }
+        else
+        {
+            script.Append("\"$TOOLS/altanode\" install").Append(options).Append('\n');
+            // altanode install turns lingering on where the person may; Always on asks sudo where they may not.
+            if (alwaysOn && facts.Os == "Linux")
+                script.Append("if [ \"$(loginctl show-user \"$ME\" -p Linger --value 2>/dev/null)\" != yes ]; then ").Append(sudo).Append("loginctl enable-linger \"$ME\"; fi\n");
+        }
+
+        script.Append("echo '").Append(StatusMarker).Append("'\n\"$TOOLS/altanode\" status").Append(root).Append(" 2>/dev/null || true\n");
         return script.ToString();
     }
+
+    // The marker before what altanode status says, in the output of the service step.
+    internal const string StatusMarker = "--- altanode status";
+
+    // How a command runs as root: as is for root, sudo -n without a password, or sudo -S with the password on its standard
+    // input through printf, a builtin of sh, so that it is on no command line there.
+    internal static string Sudo(SshMachineFacts facts, string? password) => facts.Sudo switch
+    {
+        "root" => "",
+        "password" when !string.IsNullOrEmpty(password) => "printf '%s\\n' " + Quote(password) + " | sudo -S -p '' ",
+        _ => "sudo -n ",
+    };
+
+    // What the person runs there for Always on, when the setup cannot.
+    internal static string AlwaysOnCommand(SshMachineFacts facts, string command = "altanode install --listen-all") => facts.Os == "Darwin"
+        ? $"sudo {command.Replace(" install", $" install --system --account {facts.User}", StringComparison.Ordinal)}"
+        : $"sudo loginctl enable-linger {facts.User}";
+
+    /// <summary>
+    /// Checks that <b>Always on</b> can run as root there: sudo without a password, or the one the person gave; without
+    /// either, the check stops so that the page asks it, or gives the command to run there.
+    /// </summary>
+    internal static void CheckAlwaysOn(SshMachineFacts facts, bool alwaysOn, string? sudoPassword, string command)
+    {
+        if (!alwaysOn || !facts.AlwaysOnNeedsRoot) return;
+        if (facts.Sudo is null) throw Fail(SshSetupSteps.Check, "sudo_missing", AlwaysOnCommand(facts, command));
+        if (facts.Sudo == "password" && string.IsNullOrEmpty(sudoPassword)) throw Fail(SshSetupSteps.Check, "sudo_password_needed", facts.User);
+    }
+
+    internal static bool SudoRefused(string text)
+        => text.Contains("incorrect password", StringComparison.OrdinalIgnoreCase) || text.Contains("Sorry, try again", StringComparison.Ordinal)
+            || text.Contains("a password is required", StringComparison.OrdinalIgnoreCase) || text.Contains("not in the sudoers", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("may not run sudo", StringComparison.OrdinalIgnoreCase);
 
     // Waits for the node the service started to listen, then makes a link (for a device that manages it, when asked), and waits for it.
     private static string PairScript(SshMachineFacts facts, string toolPath, string? dataRoot, bool manage)
@@ -416,12 +493,20 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         return script.ToString();
     }
 
-    private static string ServiceDetail(SshMachineFacts facts, int port) => facts.Os switch
+    // The service and what happens after a restart, as altanode status says it once installed: lingering is read, not assumed.
+    internal static string ServiceDetail(SshMachineFacts facts, int port, string output)
     {
-        "Linux" => $"systemd --user unit, port {port}" + (facts.Linger == "yes" ? "" : " · lingering on, so that it runs without a login"),
-        "Darwin" => $"LaunchAgent, port {port}",
-        _ => $"port {port}",
-    };
+        var kind = facts.Os switch { "Linux" => "systemd", "Darwin" => "launchd", _ => "service" };
+        return AfterRestart(output) is { } restart ? $"{kind}, port {port} · {restart}" : $"{kind}, port {port}";
+    }
+
+    /// <summary>The line of <c>status</c> that says what happens after a restart, printed after <see cref="StatusMarker"/>; null without it.</summary>
+    internal static string? AfterRestart(string output)
+    {
+        var marker = output.IndexOf(StatusMarker, StringComparison.Ordinal);
+        return marker < 0 ? null : output[(marker + StatusMarker.Length)..].Split('\n', StringSplitOptions.TrimEntries)
+            .FirstOrDefault(static line => line.StartsWith("After a restart:", StringComparison.Ordinal));
+    }
 
     private static SshSetupException Fail(string step, string code, string message) => new(step, code, message);
 
