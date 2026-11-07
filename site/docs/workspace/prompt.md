@@ -37,7 +37,7 @@ In CodeAlta Desktop, a side question asks the model of the session about it whil
 - The answer appears above the prompt. Ask another one in the field at its foot. Drag its top edge to change its height; double-click it to fit the answer again. `Esc` closes it, and stops an answer still coming.
 - The number on the speech bubbles counts the questions of the session: click them, or send `/ask` alone, for the list of recent questions, with when each was asked and the start of its answer.
 
-These answers stay in the window until it closes. Providers that run their own agent, such as Claude Code, cannot answer side questions.
+These answers stay in the window until it closes. Every provider answers them, those that run their own agent included (Claude Code, Codex CLI, ACP agents): the question goes to the model of the session without tools, and the provider keeps no trace of it.
 
 ## Above the editor
 

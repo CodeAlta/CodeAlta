@@ -138,7 +138,8 @@ export function SideQuestionPanel({ store, sessionId, active }: { store: SideQue
         : <div className="side-question-empty"><AppIcon name="chat" size={26} /><strong>{t("No side questions yet.")}</strong>
           <span>{t("Ask one below: the session goes on, and nothing is added to its conversation.")}</span></div>
       : entry && <><SideQuestionTimeline entry={entry} sessionId={sessionId} />
-        {entry.state === "running" && <p role="status" className="side-question-status"><ActivitySpinner size={14} />{t("Thinking…")}</p>}
+        {/* Until the first words: then the card of the answer says that it streams. */}
+        {entry.state === "running" && !entry.answer && <p role="status" className="side-question-status"><ActivitySpinner size={14} />{t("Thinking…")}</p>}
         {entry.state === "stopped" && <p role="status" className="side-question-status">{t("Question stopped.")}</p>}
         {entry.state === "failed" && <p role="alert" className="side-question-status side-question-failure"><AppIcon name="warning" size={14} />
           <span>{entry.failure && failures[entry.failure.status] ? t(failures[entry.failure.status])
