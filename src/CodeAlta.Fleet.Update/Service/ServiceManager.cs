@@ -613,6 +613,41 @@ public sealed class ServiceManager(ServiceEnvironment environment)
         return lines;
     }
 
+    /// <summary>Reads a Windows service (<c>sc.exe qc</c>) without a plan, as <c>status</c> reads one <c>install --system</c> registered.</summary>
+    /// <param name="product">The product it runs.</param>
+    /// <param name="name">The name of the service.</param>
+    /// <returns>What it is; not installed when Windows has no service of that name.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="product"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
+    public ServiceFacts QueryWindowsService(UpdateProduct product, string name)
+    {
+        ArgumentNullException.ThrowIfNull(product);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var query = Environment.Run("sc.exe", ["qc", name]);
+        var account = ServiceDefinition.WindowsVirtualAccount(name);
+        foreach (var line in query.Output.ReplaceLineEndings("\n").Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("SERVICE_START_NAME", StringComparison.Ordinal) && trimmed.IndexOf(':') is var colon and > 0)
+                account = trimmed[(colon + 1)..].Trim();
+        }
+
+        return new ServiceFacts(product, ServicePlatform.Windows, ServiceScope.System, $"a Windows service run as {account}", $"Services {name}", account,
+            query.Succeeded, query.Succeeded && query.Output.Contains("AUTO_START", StringComparison.Ordinal), null, null);
+    }
+
+    /// <summary>Gets whether the service starts when the machine starts, with nobody logged in.</summary>
+    /// <param name="facts">The service as it is.</param>
+    /// <returns>Whether it does.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="facts"/> is null.</exception>
+    public static bool StartsAtBoot(ServiceFacts facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        if (!facts.Installed || !facts.Enabled) return false;
+        if (facts.Scope == ServiceScope.System) return true;
+        return facts.Platform == ServicePlatform.Linux ? facts.Lingering == true : facts.AutoLoginUser is { } auto && SameUser(auto, facts.User);
+    }
+
     /// <summary>Gets whether the services of a user run without a login (systemd-logind lingering).</summary>
     /// <param name="user">The user.</param>
     /// <returns>Whether lingering is on.</returns>

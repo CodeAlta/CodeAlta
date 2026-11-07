@@ -139,6 +139,8 @@ internal sealed class NodeFleet : IAsyncDisposable
                     == CodeAlta.Automations.AutomationCredentialKind.Personal,
                 // Its providers, their readiness, a key typed on the desktop kept in the secrets of the machine, and their device-code sign-in.
                 Providers = providers,
+                // Whether the node still runs after a restart or a logout, for the page of the machine.
+                ServiceStatus = () => NodeServiceStatus.Read(node.Options.Profile),
                 // The sign-ins the node keeps for itself, made from the desktop: the node starts each one and keeps its tokens.
                 SignIns = new NodeSignIns(node.Host, providers),
                 // A session that names an environment is admitted as a run of an automation is, once the node joined a server.

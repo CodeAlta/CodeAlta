@@ -366,6 +366,11 @@ public sealed class NodeUpdateTests
             var ownStatus = await owner.GetStatusAsync(TestContext.CancellationToken);
             Assert.IsTrue(ownStatus.Updating);
             Assert.AreEqual("99.0.0", ownStatus.Update?.Running);
+            // The node says whether a service runs it, for the page of the machine: none runs the node of a test.
+            Assert.IsNotNull(ownStatus.Service);
+            Assert.IsFalse(ownStatus.Service.Installed);
+            Assert.IsFalse(ownStatus.Service.StartsAtBoot);
+            StringAssert.Contains(ownStatus.Service.Lines[0], "not installed");
         }
 
         node.PauseAdmission(false);

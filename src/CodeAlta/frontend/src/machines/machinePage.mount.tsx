@@ -33,8 +33,10 @@ const view = (id: string): MachineManagement => id === "managed"
     lastVersion: null, lastOutcome: null }, devices, projects, problems: [], providers: [{ key: "codex", name: "Codex", isDefault: true, defaultModel: "GPT-6.1", models: 3 }],
     thisDevice: "me", worktrees: { count: 3, kilobytes: 2.5 * 1024 * 1024, idleDays: 7, measuredAt: "2026-11-06T10:00:00Z" },
     sandbox: { profile: null, available: false, backend: "linux-bubblewrap", reason: "bubblewrap (`bwrap` 0.5 or later) is not installed or cannot create user namespaces.",
-      setup: "sudo apt install bubblewrap slirp4netns" } }
-  : { status: "not_manager", message: null, version: null, sessionsAtWork: 0, updating: false, update: null, devices: [], projects: [], problems: [], providers: [], thisDevice: "me", worktrees: null, sandbox: null };
+      setup: "sudo apt install bubblewrap slirp4netns" },
+    service: { installed: true, startsAtBoot: false, lines: ["Service: a systemd user unit (~/.config/systemd/user/altanode.service).",
+      "After a restart: it waits until me logs in (lingering is off: sudo loginctl enable-linger me starts it at boot)."], fix: "sudo loginctl enable-linger me", fixWhere: "terminal" } }
+  : { status: "not_manager", message: null, version: null, sessionsAtWork: 0, updating: false, update: null, devices: [], projects: [], problems: [], providers: [], thisDevice: "me", worktrees: null, sandbox: null, service: null };
 const api: MachinePageApi = {
   management: async request => view(request.machineId),
   setDevicePermission: async request => {

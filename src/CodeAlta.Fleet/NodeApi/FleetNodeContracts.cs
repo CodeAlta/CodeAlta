@@ -807,7 +807,18 @@ public sealed record FleetNodeStatus(string Name, string DeviceId, string Versio
 
     /// <summary>Gets the sandbox its sessions run in by default, and whether it can run there; null for a node that does not say.</summary>
     public FleetNodeSandboxStatus? Sandbox { get; init; }
+
+    /// <summary>Gets the service that runs the node, and whether it will still run after a restart or a logout; null for a node that does not say.</summary>
+    public FleetNodeServiceStatus? Service { get; init; }
 }
+
+/// <summary>The service that runs a node (<c>altanode install</c>), and whether it will still run after a restart or a logout.</summary>
+/// <param name="Installed">Whether a service runs the node.</param>
+/// <param name="StartsAtBoot">Whether it starts when the machine starts, with nobody logged in.</param>
+/// <param name="Lines">What it is and what happens after a restart and a logout, in words (as <c>altanode status</c> says it).</param>
+/// <param name="Platform">The OS: <c>windows</c>, <c>macos</c> or <c>linux</c>.</param>
+/// <param name="User">The user the node runs as.</param>
+public sealed record FleetNodeServiceStatus(bool Installed, bool StartsAtBoot, IReadOnlyList<string> Lines, string Platform, string User);
 
 /// <summary>A paired device as the owner's local control shows it.</summary>
 /// <param name="DeviceId">Its device id.</param>
@@ -1023,6 +1034,7 @@ public sealed record FleetAgentDeliveryAckParams(IReadOnlyList<string> Ids);
 [JsonSerializable(typeof(FleetProviderSignInPrompt))]
 [JsonSerializable(typeof(FleetProviderSignInState))]
 [JsonSerializable(typeof(FleetProviderSignInWaitParams))]
+[JsonSerializable(typeof(FleetNodeServiceStatus))]
 [JsonSerializable(typeof(FleetMachineSignInList))]
 [JsonSerializable(typeof(FleetMachineSignInItem))]
 [JsonSerializable(typeof(FleetMachineSignInTarget))]

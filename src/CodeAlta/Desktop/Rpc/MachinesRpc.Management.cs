@@ -51,6 +51,7 @@ internal sealed partial class MachinesService
                 Worktrees = status.Worktrees is { } worktrees
                     ? new MachineWorktreesView(worktrees.Count, (int)Math.Min(int.MaxValue, worktrees.Bytes / 1024), worktrees.IdleDays, Format(worktrees.MeasuredAt)) : null,
                 Sandbox = status.Sandbox is { } sandbox ? new MachineSandboxView(sandbox.Profile, sandbox.Available, sandbox.Backend, sandbox.Reason, sandbox.Setup) : null,
+                Service = status.Service is { } service ? MachineServiceView.Of(service) : null,
             };
         }
         catch (ObjectDisposedException) { return MachineManagement.Refused(RemoteSessionHost.Describe(host.State)); }
@@ -208,6 +209,9 @@ internal sealed record MachineManagement(string Status, string? Message, string?
     /// <summary>Gets the sandbox its sessions run in by default, and whether it can run there; null for a machine that does not say.</summary>
     public MachineSandboxView? Sandbox { get; init; }
 
+    /// <summary>Gets the service that runs its node, and whether it still runs after a restart or a logout; null for a machine that does not say.</summary>
+    public MachineServiceView? Service { get; init; }
+
     internal static MachineManagement Refused(string status) => new(status, null, null, 0, false, null, [], [], []);
 }
 
@@ -225,6 +229,28 @@ internal sealed record MachineWorktreesView(int Count, int Kilobytes, int IdleDa
 /// <param name="Reason">Why it cannot run; null when it can.</param>
 /// <param name="Setup">What to install or set up there for it to run; null when nothing is known.</param>
 internal sealed record MachineSandboxView(string? Profile, bool Available, string Backend, string? Reason, string? Setup);
+
+/// <summary>The service that runs the node of a machine, as the machine says it.</summary>
+/// <param name="Installed">Whether a service runs the node.</param>
+/// <param name="StartsAtBoot">Whether it starts when the machine starts, with nobody logged in.</param>
+/// <param name="Lines">What it is and what happens after a restart and a logout, in words.</param>
+/// <param name="Fix">The command that makes it start at boot, run on the machine; null when it does.</param>
+/// <param name="FixWhere">Where to run it: <c>elevated</c> (an administrator terminal on Windows) or <c>terminal</c>; null with no command.</param>
+internal sealed record MachineServiceView(bool Installed, bool StartsAtBoot, string[] Lines, string? Fix, string? FixWhere)
+{
+    internal static MachineServiceView Of(FleetNodeServiceStatus service)
+    {
+        // The command that makes the node start at boot, for its OS: a Windows service, a launchd daemon, lingering.
+        var user = service.User;
+        var fix = service.StartsAtBoot ? null : service.Platform switch
+        {
+            "windows" => "altanode install --system",
+            "macos" => $"sudo altanode install --system --account {user}",
+            _ => service.Installed ? $"sudo loginctl enable-linger {user}" : "altanode install",
+        };
+        return new(service.Installed, service.StartsAtBoot, [.. service.Lines], fix, fix is null ? null : service.Platform == "windows" ? "elevated" : "terminal");
+    }
+}
 
 /// <summary>Where the self-update of a machine stands.</summary>
 /// <param name="Running">The version that runs.</param>

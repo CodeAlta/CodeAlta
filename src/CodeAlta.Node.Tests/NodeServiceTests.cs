@@ -420,6 +420,12 @@ public sealed class NodeServiceTests
         Assert.AreEqual(0, machine.Logons.Count, "a virtual account has no password");
         var answer = string.Join('\n', ServiceManager.Describe(manager.Query(plan)));
         StringAssert.Contains(answer, @"it starts at boot as NT SERVICE\altanode, without a login");
+        // status reads it without a plan, which needs an administrator for a system service.
+        var read = manager.QueryWindowsService(UpdateProduct.Node, "altanode");
+        Assert.IsTrue(read.Installed);
+        Assert.IsTrue(ServiceManager.StartsAtBoot(read));
+        Assert.AreEqual(@"NT SERVICE\altanode", read.User);
+        Assert.IsFalse(manager.QueryWindowsService(UpdateProduct.Node, "altanode-other").Installed);
 
         // As a named account ("at boot as me"): its password is needed, and goes to Windows through the API only.
         machine.Commands.Clear();
@@ -447,6 +453,23 @@ public sealed class NodeServiceTests
         Assert.IsTrue(ServiceManager.IsTaskEnabled("<Task><Settings><Enabled>true</Enabled></Settings></Task>"));
         Assert.IsFalse(ServiceManager.IsTaskEnabled("<Task xmlns=\"x\"><Settings><Enabled>false</Enabled></Settings></Task>"));
         Assert.IsFalse(ServiceManager.IsTaskEnabled("not xml"));
+    }
+
+    [TestMethod]
+    public void StartsAtBoot_OnlyASystemService_ALingeringUnit_OrTheUserTheMachineSignsIn()
+    {
+        var task = new ServiceFacts(UpdateProduct.Node, ServicePlatform.Windows, ServiceScope.User, "a task", @"\CodeAlta\altanode", @"PC\alice", true, true, null, null);
+        Assert.IsFalse(ServiceManager.StartsAtBoot(task), "a logon task waits for a sign-in");
+        Assert.IsTrue(ServiceManager.StartsAtBoot(task with { AutoLoginUser = "alice" }));
+        Assert.IsFalse(ServiceManager.StartsAtBoot(task with { AutoLoginUser = "bob" }));
+        Assert.IsFalse(ServiceManager.StartsAtBoot(task with { Enabled = false, AutoLoginUser = "alice" }));
+        Assert.IsTrue(ServiceManager.StartsAtBoot(task with { Scope = ServiceScope.System }));
+        Assert.IsFalse(ServiceManager.StartsAtBoot(task with { Scope = ServiceScope.System, Installed = false }));
+        var unit = task with { Platform = ServicePlatform.Linux, User = "alice", Lingering = false };
+        Assert.IsFalse(ServiceManager.StartsAtBoot(unit));
+        Assert.IsTrue(ServiceManager.StartsAtBoot(unit with { Lingering = true }));
+        var agent = task with { Platform = ServicePlatform.MacOS, User = "alice" };
+        Assert.IsFalse(ServiceManager.StartsAtBoot(agent), "FileVault or no automatic login");
     }
 
     private static ServiceRequest Request(FakeServiceMachine machine) => new()

@@ -118,8 +118,22 @@ public sealed partial class FleetNodeService
             Updating = _options.Updating(),
             Update = _options.UpdateStatus?.Invoke(),
             Worktrees = _worktreeCleanup.Usage,
-            Sandbox = FleetNodeSandbox.Describe(_host.RuntimeService),
+            Sandbox = FleetNodeSandbox.Describe(_host.RuntimeService),
+            Service = ReadServiceStatus(),
         });
+    }
+
+    // The service is read from the service manager of the OS; one that cannot be read says nothing.
+    private FleetNodeServiceStatus? ReadServiceStatus()
+    {
+        try
+        {
+            return _options.ServiceStatus?.Invoke();
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
     }
 
     private Task<FleetDeviceList> ControlListDevicesAsync(FleetNodeCall call, FleetEmpty parameters, CancellationToken cancellationToken)

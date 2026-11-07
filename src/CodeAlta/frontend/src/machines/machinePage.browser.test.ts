@@ -188,6 +188,17 @@ test("the sessions of a machine bypass permissions by default, the computer that
   }, options);
 });
 
+test("the machine page says whether its node starts at boot, and the command that makes it", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.machine-service .machine-command')`, "the service of the node");
+    assert.equal(await page.evaluate(`document.querySelector('.machine-service [role=status]').textContent`),
+      "After a restart, build-box waits for a login before CodeAlta Node runs again.");
+    assert.equal(await page.evaluate(`document.querySelectorAll('.machine-service-lines li').length`), 2);
+    assert.equal(await page.evaluate(`document.querySelector('.machine-service .machine-command').textContent`), "sudo loginctl enable-linger me");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the computer that manages a machine lets agents of other machines in, space by space, and turning on their bypass asks first", { skip: !edge, timeout: 90_000 },
   async () => {
     await withCanvas(async page => {

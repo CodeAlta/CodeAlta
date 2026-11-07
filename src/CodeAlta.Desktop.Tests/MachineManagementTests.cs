@@ -19,6 +19,22 @@ public sealed class MachineManagementTests
 
     public TestContext TestContext { get; set; } = null!;
 
+    // The page of a machine whose node does not start at boot gives the command that makes it, for the OS of the machine.
+    [TestMethod]
+    public void Service_GivesTheCommandThatStartsTheNodeAtBoot_ForItsOS()
+    {
+        var unit = new CodeAlta.Fleet.NodeApi.FleetNodeServiceStatus(true, false, ["Service: a systemd user unit."], "linux", "alice");
+        Assert.AreEqual("sudo loginctl enable-linger alice", MachineServiceView.Of(unit).Fix);
+        Assert.AreEqual("altanode install", MachineServiceView.Of(unit with { Installed = false }).Fix);
+        var task = MachineServiceView.Of(unit with { Platform = "windows", User = @"PC\alice" });
+        Assert.AreEqual("altanode install --system", task.Fix);
+        Assert.AreEqual("elevated", task.FixWhere);
+        Assert.AreEqual("sudo altanode install --system --account alice", MachineServiceView.Of(unit with { Platform = "macos" }).Fix);
+        var atBoot = MachineServiceView.Of(unit with { StartsAtBoot = true });
+        Assert.IsNull(atBoot.Fix);
+        Assert.IsNull(atBoot.FixWhere);
+    }
+
     [TestMethod]
     public async Task FirstComputer_ManagesTheMachineFromItsPage_TheNextOneIsToldHowToBeGivenIt()
     {

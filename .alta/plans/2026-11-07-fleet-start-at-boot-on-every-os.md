@@ -1,6 +1,6 @@
 ---
 title: Start nodes and servers at boot on every OS
-status: draft
+status: in-progress
 created: 2026-11-07
 summary: A node or a server keeps running after a restart with nobody logged in, on Windows, macOS and Linux. Windows gets a real service, macOS a LaunchDaemon set up by the desktop, Windows machines can be added over SSH, and the machine page says whether a machine will still run after a restart, with the fix.
 ---
@@ -121,7 +121,8 @@ Plan 2 (`2026-11-07-fleet-sign-in-on-a-machine-from-the-desktop`) makes every si
    > - Step 6 is not done: a tool install registers the program its batch file starts, in the folder of the tool, and the install says to stop the service before `dotnet tool update` and to install again after it (`altanode update` keeps working under the service).
    > - Step 7: an existing user data root is not moved; `--data-root <it>` keeps it, and the virtual account is given its ACL.
 - [ ] 8. Re-protection of the secrets store by `install --system` for the same person on macOS and Linux. Test in `LocalSecretStoreTests`.
-- [ ] 9. `FleetNodeStatus.Service`, and the same facts in the server's status, filled from `ServiceManager.Query`. Contract tests.
+- [x] 9. `FleetNodeStatus.Service`, and the same facts in the server's status, filled from `ServiceManager.Query`. Contract tests.
+   > **As built.** The node reads its Windows service with `sc qc` (`ServiceManager.QueryWindowsService`, no administrator needed), else its user service; `ServiceManager.StartsAtBoot` decides. The machine page shows the lines and the command for its OS (the part of step 12 that shows them). The server keeps `altaserver status`: the desktop has no status call to a server yet.
 - [ ] 10. SSH setups: PowerShell path (probe, install, service, pair), elevation and `sudo` check, **Always on**, the server as a boot-time service, lingering read again after install. Tests in `SshNodeInstallerTests`, `SshServerInstallerTests`, `OpenSshRunnerTests`.
 - [ ] 11. Server on this computer (`LocalServerSetup`): the service kind the open decision settles. Tests in `LocalServerSetupTests`.
 - [ ] 12. Desktop:

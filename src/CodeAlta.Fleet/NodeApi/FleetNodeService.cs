@@ -47,6 +47,9 @@ public sealed class FleetNodeServiceOptions
     /// </summary>
     public Func<CodeAlta.Agent.ModelProviderDescriptor, bool>? IsPersonalProvider { get; init; }
 
+    /// <summary>Gets what reads the service that runs the node and whether it starts at boot (<c>control.status</c>); null for a host that has none.</summary>
+    public Func<FleetNodeServiceStatus?>? ServiceStatus { get; init; }
+
     /// <summary>Gets the sign-ins the node keeps for itself, made from the desktop that manages it; null for a host that has none.</summary>
     public IFleetNodeSignIns? SignIns { get; init; }
 

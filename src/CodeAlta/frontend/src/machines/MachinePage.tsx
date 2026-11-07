@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { Button, Callout, HTMLSelect, InputGroup, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { machines, type MachinePeopleView, type MachineAgentsView, type MachineSandboxView, type MachineSessionDefaultsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type SecretsList } from "#neoastra";
+import { machines, type MachinePeopleView, type MachineAgentsView, type MachineSandboxView, type MachineServiceView, type MachineSessionDefaultsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type SecretsList } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { SecretsBody, type SecretsActions } from "../secrets/SecretsSettings";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -104,6 +104,7 @@ export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch:
     {view?.status === "not_manager" && <ProvidersSection view={view} machine={machine} />}
     {view?.status === "ok" && <>
       <SecretsSection epoch={epoch} machine={machine} api={api} />
+      {view.service && <ServiceSection machine={machine} service={view.service} />}
       <UpdatesSection epoch={epoch} machine={machine} view={view} api={api} onChanged={reload} />
       <LogSection epoch={epoch} machine={machine} api={api} />
     </>}
@@ -323,6 +324,26 @@ function SandboxState({ machine, sandbox }: { machine: MachineView; sandbox: Mac
     ? t("Its sessions run in the sandbox of a machine: the package registries and the git hosts, never its home folder or its credentials.")
     : sandbox.profile ? t("Its sessions run in the sandbox {profile}.", { profile: sandbox.profile })
     : t("Its sessions run without a sandbox: its settings turn it off.")}</p>;
+}
+
+/**
+ * Whether the node of the machine still runs after a restart or a logout, in the words of `altanode status` there, and
+ * the command that makes it start at boot, run on the machine itself: it needs the administrator or `sudo` there.
+ */
+function ServiceSection({ machine, service }: { machine: MachineView; service: MachineServiceView }) {
+  const { t } = useShellLanguage();
+  return <section className="machine-section machine-service" aria-label={t("Start at boot")}>
+    <h2>{t("Start at boot")}</h2>
+    {service.startsAtBoot ? <p className="muted-text">{t("{name} starts CodeAlta Node when it starts, with nobody logged in.", { name: machine.name })}</p>
+      : <Callout compact intent="warning" role="status">{service.installed
+        ? t("After a restart, {name} waits for a login before CodeAlta Node runs again.", { name: machine.name })
+        : t("No service runs CodeAlta Node on {name}: after a restart, nothing starts it again.", { name: machine.name })}</Callout>}
+    <ul className="machine-service-lines muted-text">{service.lines.map(line => <li key={line}>{line}</li>)}</ul>
+    {service.fix && <>
+      <p className="muted-text">{service.fixWhere === "elevated" ? t("To start it at boot, run on {name}, in a terminal run as administrator:", { name: machine.name })
+        : t("To start it at boot, run on {name}:", { name: machine.name })}</p>
+      <code className="machine-command">{service.fix}</code></>}
+  </section>;
 }
 
 /**
