@@ -335,6 +335,7 @@ export const sessionOperations = { observeReferences: (request: { text: string }
   compact: unavailable, abortRun: unavailable };
 export const sessionAsks = { answer: unavailable, cancel: unavailable };
 export const sessionNotes = { current: (request: unknown) => { notesCalls.push(request); return unavailable(); }, clear: unavailable };
+export const sideQuestion = { ask: unavailable };
 // Outside the observed set below: plugin cards are an optional decoration of a settled timeline.
 export const sessionPluginEvents = { read: unavailable };
 export const projectFiles = { read: unavailable, write: unavailable };
@@ -351,7 +352,7 @@ export const sessionUserInput = {
 // Observe every fake bridge invocation; language changes must not start backend work.
 for (const [name, service] of Object.entries({ boot, workspace, configuration, applicationLogs, modelCatalog,
   reminder, sessionDisplay, sessionRuntimeState, sessionUsage,
-  sessionPermissions, sessionOperations, sessionAsks, sessionNotes, sessionUserInput })) {
+  sessionPermissions, sessionOperations, sessionAsks, sessionNotes, sideQuestion, sessionUserInput })) {
   for (const [method, invoke] of Object.entries(service)) {
     Object.defineProperty(service, method, { value: (...args: unknown[]) => {
       rpcCalls.push(`${name}.${method}`);

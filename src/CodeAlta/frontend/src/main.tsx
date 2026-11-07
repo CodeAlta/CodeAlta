@@ -34,7 +34,7 @@ import { findWithPatience } from "./sessionLookup";
 import { availableUpdate, installedNotice, runtimeNotification, updateCheckInterval, updateToAnnounce, updateNotification, UpdateToaster, type AvailableUpdate } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, labels as labelsApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
-  sessionAsks, sessionNotes, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, conversationHeld, type BootStatus, type CanvasItem, canvases as canvasesApi, documentation as documentationApi, plugins as pluginsApi,
+  sessionAsks, sessionNotes, sideQuestion as sideQuestionApi, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, conversationHeld, type BootStatus, type CanvasItem, canvases as canvasesApi, documentation as documentationApi, plugins as pluginsApi,
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
@@ -80,6 +80,8 @@ import { UnsavedExitDialog, UnsavedFileDialog } from "./editor/UnsavedDialogs";
 import { ProjectChangesPanel } from "./changes/ProjectChangesPanel";
 import { changeKeyKept } from "./changes/projectChanges";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
+import { createSideQuestions, type SideQuestions } from "./sideQuestion/sideQuestions";
+import { SideQuestionPanel } from "./sideQuestion/SideQuestionPanel";
 import { ReadOnlyComposer } from "./ReadOnlyComposer";
 import { useLocalDraftImages } from "./useLocalDraftImages";
 import { attachmentLimits, imageLimits } from "./promptImages";
@@ -3203,6 +3205,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }, [status?.hostEpoch, owned, draftSandboxProvider, draftSandboxModel, projectId, spacesState.available, spaceId, creatingVisible, settingsSection, settingsOpen]);
   const currentHostEpoch = useRef(status?.hostEpoch);
   currentHostEpoch.current = status?.hostEpoch;
+  // Answers are held only by this window, not by the session, its journal, or a project.
+  const [sideQuestions] = useState(() => createSideQuestions((sessionId, question, signal) => {
+    const epoch = currentHostEpoch.current;
+    if (!epoch) throw new Error("Host unavailable");
+    return sideQuestionApi.ask({ expectedHostEpoch: epoch, sessionId, question }, { signal });
+  }));
+  useEffect(() => () => sideQuestions.dispose(), [sideQuestions]);
   // The external editor and the file manager of the system: the host is asked for the editor when an action first names it.
   const [externalOpener] = useState(() => createExternalOpener({
     list: refresh => externalEditorsApi.list({ refresh }, { timeoutMilliseconds: 15_000 }),
@@ -3558,6 +3567,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "sessionInfo": case "messagePrevious": case "messageNext": case "messageFirst": case "messageLatest": case "toggleNotes": case "findInSession": return session;
       case "bookmarkPrevious": case "bookmarkNext": case "bookmarkSession": return ownedSession && bookmarkHost.hub.getSnapshot().available;
       case "usage": case "reminders": case "nextPrompt": case "modelSelector": case "steer": return ownedSession;
+      case "sideQuestion": return ownedSession && !!selectedSession && !selectedSession.machineId && !selectedSession.archived && !inCloud(selectedSession) && !!activeComposerControl("section.prompt-surface");
       // The control of the composer in front decides: the command runs exactly when pressing it would.
       case "send": case "abort": case "clearQueue": case "compact":
         return ownedSession && composerCommandBlock(command, composerControlState(composerControl(command)), t) === null;
@@ -3633,7 +3643,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
 
   // Commands the active session's composer carries out itself.
-  function composerCommand(command: "nextPrompt") {
+  function composerCommand(command: "nextPrompt" | "sideQuestion") {
     window.dispatchEvent(new CustomEvent("codealta:composer", { detail: command }));
   }
   const activeComposerControl = (selector: string) => Array.from(workspaceShell.current?.querySelectorAll<HTMLButtonElement>(selector) ?? [])
@@ -3727,7 +3737,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "findInSession": timelineCommand.current?.find(); break;
       case "refreshStatuses": runtimeObservationControls().refresh(tabs.open); break;
       case "send": case "abort": case "clearQueue": case "compact": invokeComposerControl(composerControl(command)); break;
-      case "nextPrompt": composerCommand(command); break;
+      case "nextPrompt": case "sideQuestion": composerCommand(command); break;
       case "steer": break;
       case "fork": case "rewind": openSessionBranch(command); break;
       // Its question, when it has child sessions, is asked beside the ⋯ of its composer, which is in front.
@@ -6082,7 +6092,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 && listing.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
                 ? owners.reference({ expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
-              <SessionWorkspace sessionSpaces={sessionSpaces} session={row} canAdmit={admitted} rewinds={rewinds} waitingSubSessions={waitingBelow.get(row.id)} subSessions={workingBelow.get(row.id)}
+              <SessionWorkspace sideQuestions={sideQuestions} sessionSpaces={sessionSpaces} session={row} canAdmit={admitted} rewinds={rewinds} waitingSubSessions={waitingBelow.get(row.id)} subSessions={workingBelow.get(row.id)}
                 heldElsewhere={elsewhereSessions.get(row.id) ?? null}
                 archive={owned && !row.archived && !row.machineId ? { asks: archivableDescendants(catalog.current?.sessions ?? [], row.id).length > 0,
                   run: () => { protectNavigation([row.id], () => beginSessionArchive(row, "composer")); },
@@ -6774,7 +6784,8 @@ function promptBackComposer(sessionId: string): PromptBackComposer {
 // The run of a session whose prompt was last given back to its composer: a prompt is given back once, whatever reads the window again.
 const unsentPromptKey = (sessionId: string) => `codealta.desktop.unsentPrompt.${sessionId}`;
 
-function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, onOpenDocumentation, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, heldReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, notesMemory, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, automation, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null, heldElsewhere = null }: {
+function SessionWorkspace({ sideQuestions, canAdmit, remoteControlRequest = null, cloud = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, onOpenDocumentation, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, heldReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, notesMemory, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, automation, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null, heldElsewhere = null }: {
+  sideQuestions: SideQuestions;
   canAdmit: () => boolean;
   /**
    * The process that holds the session when another one does (the command line, another instance), with the length of
@@ -7141,6 +7152,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null,
         </>
         : null}
         </div>
+        {ownedSession && !session.machineId && <SideQuestionPanel store={sideQuestions} sessionId={session.id} active={active && observing} />}
         <SessionNotesOverlay observing={observing} sessionId={session.id} epoch={ownedSession ? status?.hostEpoch : undefined} capability={mutation?.capability}
           fallbackMarkdown={historyNotes} hidden={notesHidden} reader={notesReader} memory={notesMemory} />
         {workCards}
@@ -7173,6 +7185,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, cloud = null,
                 epoch: status.hostEpoch, sessionId: session.id, createdAt: session.createdAt, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}
               onOpenCatalog={onOpenCatalog} onOpenDocumentation={onOpenDocumentation} timelineNotices={timelineNotices} liveState={ownedSession ? live : null} inputLifetime={infoLifetime} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenCommands={onOpenCommands}
+              onSideQuestion={ownedSession && !session.machineId ? question => { if (question) sideQuestions.ask(session.id, question); else sideQuestions.list(session.id); } : undefined}
               activeReminderCount={activeReminderCount} autoSend={autoSend} archive={ownedSession ? archive : null} reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
           readOnly={<ReadOnlyComposer active={active} sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} infoControl={infoControl} onOpenHelp={onOpenHelp} onOpenCommands={onOpenCommands}
               reason={archivedScope ? t("Archived project; this session is read-only. Sending is unavailable.")

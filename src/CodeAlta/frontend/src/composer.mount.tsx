@@ -1,6 +1,12 @@
 // Test-owned mount of the production composer against a scripted backend: no host and no provider.
 // The fixture plays the host's part: it takes or refuses a Send, starts and ends the run, and takes steering.
-import { createElement } from "react";
+import { createElement, StrictMode } from "react";
+import { createSideQuestions } from "./sideQuestion/sideQuestions";
+import { SideQuestionPanel } from "./sideQuestion/SideQuestionPanel";
+import { TimelineMessage } from "./TimelineMessage";
+import { liveTextItem } from "./liveTimeline";
+import { entryEmphasisProperties, emphasisProperties, restoreTimelineEmphasis } from "./timelineEmphasis/timelineEmphasis";
+import { TimelineEmphasisProvider } from "./timelineEmphasis/useTimelineEmphasis";
 import { createRoot } from "react-dom/client";
 import { OwnedSessionPanel } from "./OwnedSessionPanel";
 import { createMutationCapability, createOwnedSubmissions } from "./sessionOperations";
@@ -64,7 +70,30 @@ const compaction = createCompactionSubmissions(async (request): Promise<SessionA
   return { status: "accepted", epoch: request.expectedEpoch, receipt };
 });
 
+const sideQuestions = createSideQuestions(async (_session, question, signal) => (async function* () {
+  // A provider that runs an agent of its own answers no side question: the host says so by its status.
+  if (question === "unsupported?") { yield { kind: "error", status: "unsupported", value: "The provider 'fixture' runs an agent of its own." }; return; }
+  yield { kind: "text", value: "Answer to " + question + "\n\n### Details\n\n- one\n- two\n\n```ts\nconst n = 1;\n```" };
+  await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+})());
 const fixture = {
+  sideQuestions,
+  // The actual timeline message, beside the panel, for comparing its rendered content and styles.
+  showTimelineReference() {
+    const host = document.createElement("div"); host.id = "timeline-reference";
+    host.className = "timeline-scroll";
+    host.style.cssText = "position:fixed;left:-2000px;top:0;width:500px";
+    document.querySelector(".ide-shell")!.append(host);
+    const emphasis = restoreTimelineEmphasis(() => localStorage.getItem("codealta.desktop.timeline.emphasis.v1"));
+    const row = (kind: "User" | "Assistant", text: string, type: "prompt" | "answer") => {
+      const item = liveTextItem({ runId: "reference", contentId: kind, kind, text, timestamp: null, sequence: null,
+        isComplete: kind === "User", isTruncated: false, startedWithDelta: kind !== "User" });
+      return createElement("div", { className: "timeline-single-row", "data-entry-type": type, style: entryEmphasisProperties(type) },
+        createElement(TimelineMessage, { item }));
+    };
+    createRoot(host).render(createElement("div", { className: `messages${emphasis.enabled ? " timeline-appearance-enabled" : ""}`, style: emphasisProperties(emphasis) },
+      row("User", "why?", "prompt"), row("Assistant", "Answer to why?\n\n### Details\n\n- one\n- two\n\n```ts\nconst n = 1;\n```", "answer")));
+  },
   sendCalls: [] as SessionSendRequest[],
   compactCalls: [] as SessionCompactRequest[],
   attach(value: boolean) { attached = value; },
@@ -121,6 +150,7 @@ Object.assign(window, { fixture });
 
 const props = {
   epoch, sessionId, submissions, steering, queue,
+  onSideQuestion: (question: string) => question ? sideQuestions.ask(sessionId, question) : sideQuestions.list(sessionId),
   compaction, abortRuns,
   capability: createMutationCapability(epoch), draftIndicators: createDraftIndicators(), permissionReviewer: null,
   selections: createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value)),
@@ -133,8 +163,9 @@ const props = {
       pendingAgentPromptId: "default", activity: null },
     runtimeInstanceId: runtime, coordinatorTransitionInProgress: false } satisfies SessionRuntimeStateResponse)),
 };
-const shell = (hidden = false) => createElement("div", { id: "workspace-shell", className: "ide-shell" },
+const shell = (hidden = false) => createElement(TimelineEmphasisProvider, null, createElement("div", { id: "workspace-shell", className: "ide-shell" },
   createElement("div", { className: "session-workspace" },
-    createElement("div", { className: "composer-region" }, createElement(OwnedSessionPanel, { ...props, observing: !hidden, active: !hidden }))));
+    createElement("div", { className: "session-timeline-area" }, createElement(StrictMode, null, createElement(SideQuestionPanel, { store: sideQuestions, sessionId, active: !hidden }))),
+    createElement("div", { className: "composer-region" }, createElement(OwnedSessionPanel, { ...props, observing: !hidden, active: !hidden })))));
 const app = createRoot(document.getElementById("app")!);
 app.render(shell());

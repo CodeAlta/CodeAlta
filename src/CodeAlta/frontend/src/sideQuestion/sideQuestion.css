@@ -1,0 +1,14 @@
+.side-question { position: absolute; inset: auto calc(8px + var(--session-inset, 0px)) 4px; z-index: 5; display: flex; flex-direction: column; min-width: 0; min-height: min(120px, calc(100% - 8px)); max-height: calc(100% - 8px); border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
+.side-question-grip { position: absolute; inset: -5px 0 auto; height: 10px; cursor: row-resize; touch-action: none; outline: 0; }
+.side-question-grip span { display: block; width: 28px; height: 2px; margin: 4px auto; border-radius: 2px; background: var(--line-strong); }
+.side-question-grip:hover span, .side-question-grip:active span, .side-question-grip:focus-visible span { background: var(--accent); }
+.side-question > header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.side-question-icon { flex: none; color: var(--accent); }
+.side-question > header > .side-question-hint { flex: 1; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.side-question-failure { display: flex; align-items: flex-start; gap: 8px; color: var(--red); }
+.side-question-failure > svg { flex: none; margin-top: 3px; }
+.side-question-body { overflow: auto; min-height: 0; padding: 12px 16px; line-height: 1.5; }
+.side-question-body > ul { list-style: none; padding: 0; margin: 0; }
+.side-question-body > ul > li + li { border-top: 1px solid var(--line); }
+.side-question-body > ul > li > button { width: 100%; padding: 10px 4px; text-align: left; white-space: pre-wrap; color: var(--text); background: transparent; border: 0; cursor: pointer; }
+.side-question-body > ul > li > button:hover, .side-question-body > ul > li > button:focus-visible { background: var(--accent-soft); }

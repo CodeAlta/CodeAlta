@@ -5479,6 +5479,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         };
     }
 
+    // The conversation a history holds, as a session reads it again when it resumes: for a reader that does not run it,
+    // such as a side question about the session.
+    internal static IReadOnlyList<AgentConversationMessage> ReadConversation(IReadOnlyList<AgentEvent> history)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+        return ReplayConversation(history, new AgentSessionState { SessionId = string.Empty, UpdatedAt = DateTimeOffset.UtcNow });
+    }
+
     private static List<AgentConversationMessage> ReplayConversation(
         IReadOnlyList<AgentEvent> history,
         AgentSessionState state)

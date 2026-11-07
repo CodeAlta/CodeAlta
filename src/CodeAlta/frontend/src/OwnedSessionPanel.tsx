@@ -42,6 +42,7 @@ import { entryPromptSuggestion, shownPromptSuggestion, takesPromptSuggestion } f
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
 import { equationKey, type PromptInput } from "./PromptEditor";
+import { parseSideQuestion } from "./sideQuestion/sideQuestions";
 import { createPromptHistory, noPromptRecall, recallPrompt } from "./promptHistory";
 import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
@@ -99,7 +100,7 @@ export function sendFailureMessage(status: string, reason?: string): string {
 
 const noWaitingSubSessions: readonly WaitingSubSession[] = [];
 
-export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, heldReviewer = null, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, archive = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, onOpenDocumentation, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null, sessionFolder = null }: {
+export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, heldReviewer = null, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, archive = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, onOpenDocumentation, onSideQuestion, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null, sessionFolder = null }: {
   /** The folder the session works in: the folder dialog of the attach menu opens there, and a folder chosen in it is a project reference. */
   sessionFolder?: string | null;
   /** Live retention claim, checked by programmatic admissions as well as the shell's inert DOM boundary. */
@@ -151,6 +152,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   archive?: Readonly<{ asks: boolean; run: () => void; question?: ReactNode }> | null;
   onOpenHelp?: () => void;
   onOpenCommands?: () => void;
+  /** Handles /ask locally; the question never enters the session or its queue. */
+  onSideQuestion?: (question: string) => void;
   onOpenCatalog?: (page: "models" | "prompts" | "providers") => void;
   /** Opens a page of the user guide at a heading. */
   onOpenDocumentation?: (page: string, anchor: string | null) => void;
@@ -168,6 +171,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // The attachments are images and files; only an image needs a model that reads images.
   const hasImages = images.some(isImageAttachment);
   const [imageNotice, setImageNotice] = useState("");
+  const [sideQuestionNotice, setSideQuestionNotice] = useState("");
   // Each change opens the issue picker at the caret: Add issues of the attach menu.
   const [issueRequest, setIssueRequest] = useState(0);
   const [providerState, setProviderState] = useState<ActiveProviderState>({ ready: 0, errors: 0, detecting: true });
@@ -177,6 +181,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   function editText(value: string) {
     if (!canAdmit() || !scope.current || scope.current.signal.aborted) return;
     setSendFailure("");
+    setSideQuestionNotice("");
     setPluginOutcome(null);
     recall.current = noPromptRecall;
     inputRevision.current++;
@@ -575,6 +580,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // for the running turn. Only the composer's own text takes its images along.
   function stagePrompt(kind: "Queue" | "Steer", value = text, attached = value === latestText.current ? images : []) {
     if (pending || invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted) return false;
+    if (value === latestText.current && takeSideQuestion()) return true;
     if (!queue.add(kind, epoch, sessionId, value, attached.length ? attached : null)) return false;
     if (value === latestText.current) {
       inputRevision.current++; clearText();
@@ -727,6 +733,17 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   function observeEpoch(result: { status: string; epoch: string | null }) {
     if (!capability.observe(result)) setInvalidEpoch(true);
   }
+  // Intercept before queueing, steering, prompt history, or provider selection. Attachments never travel with /ask.
+  function takeSideQuestion(): boolean {
+    const question = parseSideQuestion(latestText.current);
+    if (question === null || !onSideQuestion) return false;
+    if (images.length) { setSideQuestionNotice(t("Remove attachments before asking a side question.")); return true; }
+    if (question.length > 16_384) { setSideQuestionNotice(t("A side question can have at most 16384 characters.")); return true; }
+    setSideQuestionNotice("");
+    onSideQuestion(question);
+    inputRevision.current++; clearText();
+    return true;
+  }
   function submit(queuePrompt = enqueue) {
     if (!canAdmit()) return;
     if (afterDictation(actions => actions.submit(queuePrompt))) return;
@@ -735,6 +752,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       capabilityValid: capability.canMutate(), pending: !!submissions.pending(sessionId),
       inFlight: submissions.pending(sessionId)?.inFlight ?? false, enqueue: queuePrompt, busy: composerBusy, hasImages: images.length > 0 });
     if (!signal || signal.aborted || !capability.canMutate()) return;
+    if (!pending && takeSideQuestion()) return;
     // The provider was taken out of the space of the session: another one is chosen before anything is sent.
     // The status line already says why; it goes once the session has another provider.
     if (spaceProblem) { setSelectionOpenRequest(value => value + 1); return; }
@@ -803,6 +821,14 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     const run = (event: Event) => {
       const command = (event as CustomEvent<string>).detail;
       if (invalidEpoch || !canAdmit()) return;
+      if (command === "sideQuestion" && onSideQuestion && !pending) {
+        if (latestText.current.trim() && parseSideQuestion(latestText.current) === null) {
+          setSideQuestionNotice(t("Clear the prompt before inserting /ask."));
+        } else {
+          if (!latestText.current.trim()) editText("/ask ");
+          requestAnimationFrame(() => { promptInput.current?.focus(); const end = promptInput.current?.value.length ?? 0; promptInput.current?.setSelectionRange(end, end); });
+        }
+      }
       if (command === "nextPrompt") {
         const prompts = activeChoices?.prompts ?? [];
         if (prompts.length > 1 && selected && !selectionDisabled)
@@ -929,8 +955,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // The explicit Steer button targets the running turn; without one the prompt is sent.
   // An empty prompt steers with the first prompt of the queue, as the terminal UI does.
   function steerFromComposer() {
-    if (pending || invalidEpoch) return;
+    if (pending || invalidEpoch || !canAdmit() || !capability.canMutate()) return;
     if (afterDictation(actions => actions.steerFromComposer())) return;
+    if (takeSideQuestion()) return;
     if (!latestText.current.trim() && !images.length) {
       const next = staged.find(item => item.kind === "Queue" && item.state === "waiting" && !queue.isHeld(item));
       if (next && composerBusy) queue.steerNow(next);
@@ -1378,7 +1405,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       && capability.canMutate() && (inputLifetime?.current() ?? true) && imageOwner.get(imageKey) === images;
   }
   const attachmentStrip = <PromptImageAttachments images={pending?.request.images ?? images}
-    disabled={!!pending || invalidEpoch} notice={imageNotice}
+    disabled={!!pending || invalidEpoch} notice={sideQuestionNotice || imageNotice}
     rename={(index, title) => {
       inputRevision.current++;
       if (!canEditImages()) return;

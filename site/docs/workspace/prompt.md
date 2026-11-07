@@ -29,6 +29,12 @@ An empty prompt names the keys that are its own: `?` opens the help and `/` the 
 
 Queued prompts can be edited, repeated, sent at once to steer, or deleted. When a provider cannot steer a running turn, the prompt waits for the next turn. See [Busy sessions and queues](../sessions/readme.md#busy-sessions-and-queues).
 
+### Side questions
+
+In CodeAlta Desktop, choose `/ask` from the commands, type a question after it and press `Enter`. The answer appears above the prompt while the session continues. Drag the top edge of the answer to change its height; double-click it to reset. The question and answer are not added to the conversation. `Esc` closes the answer and stops it if it is still coming.
+
+Send `/ask` without a question to reopen a recent answer. These answers stay in the window only until it closes. Some providers that run their own agent cannot answer side questions.
+
 ## Above the editor
 
 In CodeAlta Desktop, the line above the editor shows:
