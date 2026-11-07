@@ -43,6 +43,7 @@
     <Project Path="CodeAlta.Agent.Mistral/CodeAlta.Agent.Mistral.csproj" />
     <Project Path="CodeAlta.Agent.OpenAI/CodeAlta.Agent.OpenAI.csproj" />
     <Project Path="CodeAlta.Agent/CodeAlta.Agent.csproj" />
+    <Project Path="CodeAlta.Core/CodeAlta.Core.csproj" />
     <Project Path="CodeAlta.Catalog/CodeAlta.Catalog.csproj" />
     <Project Path="CodeAlta.Fleet/CodeAlta.Fleet.csproj" />
     <Project Path="CodeAlta.CodeMode/CodeAlta.CodeMode.csproj" />

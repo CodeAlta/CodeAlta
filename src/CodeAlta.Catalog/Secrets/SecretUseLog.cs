@@ -2,6 +2,7 @@ using System.Text;
 using CodeAlta.Agent.Runtime;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Catalog.Secrets;
 

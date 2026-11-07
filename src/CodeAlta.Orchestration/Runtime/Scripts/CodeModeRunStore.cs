@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Catalog;
 using CodeAlta.CodeMode;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Orchestration.Runtime.Scripts;
 
@@ -412,7 +413,7 @@ public sealed class CodeModeRunStore
         File.WriteAllBytes(temporary, buffer.ToArray());
         // On Windows a file being read cannot be replaced by a plain move: a list of the runs that reads it as the run ends would
         // leave the run without its end. The replacement waits for a reader, which holds it for a moment only.
-        CodeAlta.Agent.Runtime.StagedFileReplacement.MoveOver(temporary, path);
+        CodeAlta.Core.IO.StagedFileReplacement.MoveOver(temporary, path);
     }
 
     private static List<CodeModeReplayStep> ReadSteps(string path)

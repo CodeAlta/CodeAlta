@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Desktop.Terminals;
 
@@ -121,9 +122,7 @@ internal static class TerminalIntegration
             if (File.Exists(path) && string.Equals(File.ReadAllText(path), text, StringComparison.Ordinal)) return path;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             // Written beside and moved in place: a shell that starts now reads the whole script, the old one or the new one.
-            var written = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            File.WriteAllText(written, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            File.Move(written, path, overwrite: true);
+            SafeFile.WriteAllText(path, text);
             return path;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)

@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Text;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Catalog.StartPrompts;
 
@@ -143,7 +144,7 @@ public sealed class StartPromptCatalog
         try
         {
             File.WriteAllText(temporary, body + "\n", new UTF8Encoding(false));
-            File.Move(temporary, path, overwrite: true);
+            StagedFileReplacement.MoveOver(temporary, path);
         }
         finally
         {

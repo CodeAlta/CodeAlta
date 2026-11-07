@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Agent.Runtime;
 
@@ -8,7 +9,8 @@ internal sealed class AgentSessionJournalFile
     private const int SharingViolation = 32;
     private const int LockViolation = 33;
     private static readonly TimeSpan FileRetryDelay = TimeSpan.FromMilliseconds(10);
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _pathLocks = new(StringComparer.Ordinal);
+    // One lock per journal, forgotten once no writer holds or waits for it.
+    private readonly FilePathLocks _pathLocks = new();
     private readonly ConcurrentDictionary<string, NotesScanState> _notesScans = new(StringComparer.Ordinal);
 
     public async Task AppendLinesAsync(
@@ -429,7 +431,7 @@ internal sealed class AgentSessionJournalFile
                 info.Refresh();
                 if (info.Length != expected.Length || info.LastWriteTimeUtc.Ticks != expected.LastWriteUtcTicks)
                     throw new InvalidOperationException("The session changed before journal replacement.");
-                File.Move(temporary, path, overwrite: true);
+                await StagedFileReplacement.MoveOverAsync(temporary, path).ConfigureAwait(false);
                 // Nothing fallible follows the durable decision; caches reproject from the changed stamp.
                 // A replaced header moves every later record, so the notes prefix is dropped rather than left to its guard.
                 _notesScans.TryRemove(notesKey, out _);
@@ -610,16 +612,8 @@ internal sealed class AgentSessionJournalFile
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(action);
 
-        var pathLock = _pathLocks.GetOrAdd(Path.GetFullPath(path), static _ => new SemaphoreSlim(1, 1));
-        await pathLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            return await action().ConfigureAwait(false);
-        }
-        finally
-        {
-            pathLock.Release();
-        }
+        using var held = await _pathLocks.AcquireAsync(path, cancellationToken).ConfigureAwait(false);
+        return await action().ConfigureAwait(false);
     }
 
     internal static async Task RetryFileOperationAsync(Func<Task> action, CancellationToken cancellationToken)

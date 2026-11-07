@@ -2,6 +2,7 @@ using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Catalog.Tests;
 
@@ -50,6 +51,30 @@ public sealed class TextFileCodecTests
         var result = await store.SaveAsync(Request(temp.Path, snapshot, text));
         Assert.IsFalse(result.IsConflict);
         CollectionAssert.AreEqual(Encoding.UTF8.GetBytes(text), await File.ReadAllBytesAsync(temp.Path));
+    }
+
+    [TestMethod]
+    public async Task SaveAsync_WaitsForTheLockOfItsFile_NotForTheLockOfAnother()
+    {
+        using var first = new TemporaryFile();
+        using var second = new TemporaryFile();
+        await File.WriteAllTextAsync(first.Path, "first");
+        await File.WriteAllTextAsync(second.Path, "second");
+        var locks = new FilePathLocks();
+        var store = new TextFileCodec(locks);
+        var firstSnapshot = await store.LoadAsync(first.Path);
+        var secondSnapshot = await store.LoadAsync(second.Path);
+
+        // Another writer of this process holds the first file: a save of the second one does not wait for it.
+        var held = await locks.AcquireAsync(first.Path, CancellationToken.None);
+        var blocked = store.SaveAsync(Request(first.Path, firstSnapshot, "first edited"));
+        Assert.IsFalse((await store.SaveAsync(Request(second.Path, secondSnapshot, "second edited")).WaitAsync(TimeSpan.FromSeconds(30))).IsConflict);
+        Assert.IsFalse(blocked.IsCompleted);
+        Assert.AreEqual("first", await File.ReadAllTextAsync(first.Path));
+
+        held.Dispose();
+        Assert.IsFalse((await blocked.WaitAsync(TimeSpan.FromSeconds(30))).IsConflict);
+        Assert.AreEqual("first edited", await File.ReadAllTextAsync(first.Path));
     }
 
     [TestMethod]

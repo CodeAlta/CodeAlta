@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CodeAlta.Catalog;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Fleet.Server;
@@ -149,9 +150,8 @@ internal sealed class NodeEnvironmentGate
             used.Add(approvalId);
             if (used.Count > MaximumUsed) used.RemoveRange(0, used.Count - MaximumUsed);
             Directory.CreateDirectory(Path.GetDirectoryName(_usedPath)!);
-            var staging = _usedPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(used, NodeEnvironmentJsonContext.Default.ListString));
-            File.Move(staging, _usedPath, overwrite: true);
+            // A missing list takes no approval as used: it is never missing while it is replaced.
+            SafeFile.WriteAllBytesWithoutGap(_usedPath, JsonSerializer.SerializeToUtf8Bytes(used, NodeEnvironmentJsonContext.Default.ListString));
             return true;
         }
     }

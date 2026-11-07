@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog.Worktrees;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Catalog.Reviews;
 

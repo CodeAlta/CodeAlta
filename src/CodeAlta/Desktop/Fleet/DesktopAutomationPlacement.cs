@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Automations;
 using CodeAlta.Catalog.SessionMoves;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
@@ -1193,7 +1194,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             Directory.CreateDirectory(Path.GetDirectoryName(_numbersPath)!);
             var staged = _numbersPath + ".tmp";
             File.WriteAllText(staged, JsonSerializer.Serialize(_numbers, PlacedAutomationJsonContext.Default.DictionaryStringInt64));
-            File.Move(staged, _numbersPath, overwrite: true);
+            StagedFileReplacement.MoveOver(staged, _numbersPath);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -1235,7 +1236,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             Directory.CreateDirectory(Path.GetDirectoryName(_removalsPath)!);
             var staged = _removalsPath + ".tmp";
             File.WriteAllText(staged, JsonSerializer.Serialize([.. _removals.Values], PlacedAutomationJsonContext.Default.ListPendingAutomationRemoval));
-            File.Move(staged, _removalsPath, overwrite: true);
+            StagedFileReplacement.MoveOver(staged, _removalsPath);
             _removalsUnwritten = null;
             return true;
         }
@@ -1271,7 +1272,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             var staged = _path + ".tmp";
             File.WriteAllText(staged, JsonSerializer.Serialize(_placed, PlacedAutomationJsonContext.Default.DictionaryStringPlacedAutomation));
-            File.Move(staged, _path, overwrite: true);
+            StagedFileReplacement.MoveOver(staged, _path);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

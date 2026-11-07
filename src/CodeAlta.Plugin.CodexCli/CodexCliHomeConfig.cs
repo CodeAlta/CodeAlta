@@ -1,4 +1,5 @@
 using System.Text;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Plugin.CodexCli;
 
@@ -47,9 +48,7 @@ internal static class CodexCliHomeConfig
             // Written again below.
         }
 
-        var temporary = path + ".tmp";
-        File.WriteAllText(temporary, Content, new UTF8Encoding(false));
-        File.Move(temporary, path, overwrite: true);
+        SafeFile.WriteAllText(path, Content);
     }
 
     private static string CreateContent()

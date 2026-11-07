@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Catalog.WorkItems;
 
@@ -106,13 +107,7 @@ internal sealed class WorkItemLinkStore
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            var staged = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            using (var stream = File.Create(staged))
-            {
-                JsonSerializer.Serialize(stream, new WorkItemLinkFile { Items = [.. links.Values] }, WorkItemLinkJsonContext.Default.WorkItemLinkFile);
-            }
-
-            File.Move(staged, _path, overwrite: true);
+            SafeFile.WriteAllBytes(_path, JsonSerializer.SerializeToUtf8Bytes(new WorkItemLinkFile { Items = [.. links.Values] }, WorkItemLinkJsonContext.Default.WorkItemLinkFile));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

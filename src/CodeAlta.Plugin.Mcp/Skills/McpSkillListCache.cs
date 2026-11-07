@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Plugin.Mcp;
 
@@ -73,9 +74,7 @@ internal sealed class McpSkillListCache
         // A list with the same entries is not written again: its time would only change the prompt and wake the readers for nothing.
         if (Read(list.Server, list.Fingerprint) is { } previous && Same(previous, list)) return;
         Directory.CreateDirectory(Folder);
-        var temporary = path + "." + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".tmp";
-        File.WriteAllBytes(temporary, bytes);
-        File.Move(temporary, path, overwrite: true);
+        SafeFile.WriteAllBytes(path, bytes);
     }
 
     /// <summary>Deletes the list of a server, when the user removes the server.</summary>

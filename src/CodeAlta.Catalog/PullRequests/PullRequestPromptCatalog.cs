@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Catalog.PullRequests;
 
@@ -120,9 +121,7 @@ public sealed class PullRequestPromptCatalog
         if (OneLine(description) is { } about) text.Append("description: ").Append(Quote(about)).Append('\n');
         text.Append("---\n").Append(body).Append('\n');
         var path = Path.Combine(folder, key + Extension);
-        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllText(temporary, text.ToString(), new UTF8Encoding(false));
-        File.Move(temporary, path, overwrite: true);
+        SafeFile.WriteAllText(path, text.ToString());
         return Parse(key, text.ToString(), projectPath is null ? PullRequestPromptSource.Global : PullRequestPromptSource.Project, path);
     }
 

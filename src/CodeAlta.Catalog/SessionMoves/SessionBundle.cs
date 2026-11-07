@@ -5,6 +5,7 @@ using System.Text.Json;
 
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog.Worktrees;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Catalog.SessionMoves;
 
@@ -221,7 +222,7 @@ public static class SessionBundle
             cancellationToken.ThrowIfCancellationRequested();
             var masked = file + ".masking";
             await CopyMaskedAsync(file, masked, masker, cancellationToken).ConfigureAwait(false);
-            File.Move(masked, file, overwrite: true);
+            await StagedFileReplacement.MoveOverAsync(masked, file).ConfigureAwait(false);
         }
     }
 

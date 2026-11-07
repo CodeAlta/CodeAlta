@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Core.IO;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.Copilot;

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Automations;
 
@@ -454,9 +455,7 @@ internal sealed class AutomationStateStore
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            var staged = _path + ".tmp";
-            using (var stream = File.Create(staged)) JsonSerializer.Serialize(stream, _state, AutomationStateJsonContext.Default.StateFile);
-            File.Move(staged, _path, overwrite: true);
+            SafeFile.WriteAllBytes(_path, JsonSerializer.SerializeToUtf8Bytes(_state, AutomationStateJsonContext.Default.StateFile));
             _aliveSavedAt = _state.AliveAt;
             return true;
         }

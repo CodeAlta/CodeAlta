@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Catalog;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.Identity;
 
 namespace CodeAlta.Fleet.Client;
@@ -121,36 +122,20 @@ public sealed class PairedMachineStore
 
     private static FileStream AcquireLock(string path)
     {
-        var deadline = DateTime.UtcNow + LockWait;
-        while (true)
+        try
         {
-            try
-            {
-                // The lock file stays: deleting it on close would let a waiter open a file being deleted.
-                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1);
-            }
-            catch (IOException) when (DateTime.UtcNow < deadline)
-            {
-                Thread.Sleep(25);
-            }
-            catch (IOException exception)
-            {
-                throw new TimeoutException($"The paired machines file '{path}' stayed locked by another process.", exception);
-            }
+            return LockFile.Acquire(path, LockWait);
+        }
+        catch (TimeoutException exception)
+        {
+            throw new TimeoutException($"The paired machines file '{path}' stayed locked by another process.", exception);
         }
     }
 
     private static IReadOnlyList<PairedMachine> Load(string path)
     {
-        byte[] bytes;
-        try
-        {
-            bytes = File.ReadAllBytes(path);
-        }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
-        {
-            return [];
-        }
+        // A change of another process may replace the file while it is read: it is never missing meanwhile.
+        if (SafeFile.ReadAllBytes(path) is not { } bytes) return [];
 
         PairedMachinesFile? file;
         try

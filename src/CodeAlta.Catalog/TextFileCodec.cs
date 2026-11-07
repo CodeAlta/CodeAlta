@@ -3,25 +3,42 @@ using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Text;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Catalog;
 
 /// <summary>
 /// Reads complete Unicode text files and conditionally saves them without normalizing newlines.
-/// Share one instance among cooperating editors so their check/commit operations are serialized.
+/// Share one instance (or one <see cref="FilePathLocks"/>) among cooperating editors so their check/commit operations on
+/// one file are serialized; operations on different files never wait for each other.
 /// Paths are trusted application inputs; this class does not authorize project or renderer access.
 /// </summary>
 /// <remarks>
 /// Saves stage bytes beside the destination before checking its revision again and replacing it.
-/// Noncooperating writers (including other instances) can still change the file or a path link
-/// between the final check and replacement. This is not cross-process atomic compare-and-swap.
+/// Noncooperating writers (including instances with other locks, and other processes) can still change the file or a
+/// path link between the final check and replacement. This is not cross-process atomic compare-and-swap.
 /// </remarks>
 public sealed class TextFileCodec
 {
-    private readonly SemaphoreSlim _saveGate = new(1, 1);
+    private readonly FilePathLocks _saveLocks;
+
+    /// <summary>Initializes a new instance of the <see cref="TextFileCodec"/> class with locks of its own.</summary>
+    public TextFileCodec()
+        : this(new FilePathLocks())
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="TextFileCodec"/> class that shares the locks of its files.</summary>
+    /// <param name="saveLocks">The locks of the files, shared with the other writers of this process.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="saveLocks"/> is null.</exception>
+    public TextFileCodec(FilePathLocks saveLocks)
+    {
+        ArgumentNullException.ThrowIfNull(saveLocks);
+        _saveLocks = saveLocks;
+    }
 
     /// <summary>Publishes new UTF-8 text without reading an existing destination or its revision.</summary>
-    /// <remarks>Uses the same owner gate, staging and create-only publication as Missing-revision saves.
+    /// <remarks>Uses the same lock of its path, staging and create-only publication as Missing-revision saves.
     /// False means an existing destination was observed. Unix publication requires hard-link support in the
     /// destination filesystem and fails rather than using an overwriting fallback. This is not a path-swap sandbox.</remarks>
     /// <exception cref="ArgumentException">The path is invalid.</exception>
@@ -36,7 +53,7 @@ public sealed class TextFileCodec
         ArgumentNullException.ThrowIfNull(text);
         var path = Path.GetFullPath(fullPath); // Never follow the final link to another create target.
         var bytes = new UTF8Encoding(false, true).GetBytes(text);
-        await _saveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var held = await _saveLocks.AcquireAsync(path, cancellationToken).ConfigureAwait(false);
         string? stagingPath = null;
         try
         {
@@ -57,8 +74,7 @@ public sealed class TextFileCodec
         }
         finally
         {
-            try { if (stagingPath is not null) File.Delete(stagingPath); }
-            finally { _saveGate.Release(); }
+            if (stagingPath is not null) File.Delete(stagingPath);
         }
     }
 
@@ -228,7 +244,7 @@ public sealed class TextFileCodec
         encoding.GetBytes(request.Text, bytes.AsSpan(preamble.Length));
         var revision = TextFileRevision.FromBytes(bytes);
 
-        await _saveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var held = await _saveLocks.AcquireAsync(path, cancellationToken).ConfigureAwait(false);
         string? stagingPath = null;
         try
         {
@@ -268,7 +284,7 @@ public sealed class TextFileCodec
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            // The owner gate covers cooperating saves, not external editors or path-link changes.
+            // The lock of the path covers cooperating saves, not external editors or path-link changes.
             if (current.Exists)
             {
                 // Others read the file while it is replaced (config.toml, by every instance): the rename never leaves
@@ -287,21 +303,14 @@ public sealed class TextFileCodec
         }
         finally
         {
-            try
+            if (stagingPath is not null)
             {
-                if (stagingPath is not null)
-                {
-                    File.Delete(stagingPath);
-                }
-            }
-            finally
-            {
-                _saveGate.Release();
+                File.Delete(stagingPath);
             }
         }
     }
 
-    /// <summary>Conditionally deletes a file entry under the same instance gate used for saves.</summary>
+    /// <summary>Conditionally deletes a file entry under the same lock of its path as saves.</summary>
     /// <remarks>
     /// Revisions describe the bytes read through the path, but deletion unlinks the final entry,
     /// not a symbolic link's target. Dangling links can be deleted with the missing revision.
@@ -322,27 +331,20 @@ public sealed class TextFileCodec
         ArgumentNullException.ThrowIfNull(expectedRevision);
         ArgumentException.ThrowIfNullOrWhiteSpace(fullPath);
         var path = Path.GetFullPath(fullPath);
-        await _saveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        using var held = await _saveLocks.AcquireAsync(path, cancellationToken).ConfigureAwait(false);
+        var current = await ReadRevisionAsync(path, cancellationToken).ConfigureAwait(false);
+        if (current != expectedRevision)
         {
-            var current = await ReadRevisionAsync(path, cancellationToken).ConfigureAwait(false);
-            if (current != expectedRevision)
-            {
-                return new TextFileDeleteResult(true, current);
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            if (current.Exists || new FileInfo(path).LinkTarget is not null)
-            {
-                File.Delete(path);
-            }
-
-            return new TextFileDeleteResult(false, TextFileRevision.Missing);
+            return new TextFileDeleteResult(true, current);
         }
-        finally
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (current.Exists || new FileInfo(path).LinkTarget is not null)
         {
-            _saveGate.Release();
+            File.Delete(path);
         }
+
+        return new TextFileDeleteResult(false, TextFileRevision.Missing);
     }
 
     // The attributes and the creation time of the file, given to the staged file that replaces it; its access rules were

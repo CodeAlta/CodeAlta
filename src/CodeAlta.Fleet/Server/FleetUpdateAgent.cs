@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Update;
 
@@ -1188,7 +1189,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_options.StatePath)!);
             File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(state, FleetUpdateAgentJsonContext.Default.FleetUpdateAgentState));
-            File.Move(staging, _options.StatePath, overwrite: true);
+            StagedFileReplacement.MoveOver(staging, _options.StatePath);
             return null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

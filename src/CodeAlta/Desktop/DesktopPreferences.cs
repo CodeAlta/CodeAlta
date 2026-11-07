@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Desktop;
 
@@ -191,9 +192,8 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
         {
             Directory.CreateDirectory(dataRoot);
             var path = Path.Combine(dataRoot, FileName);
-            var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             // The server runs unless the file says otherwise: only the choice to turn it off is written.
-            File.WriteAllText(temporary, "{\"onClose\":\"" + Name(OnClose) + "\"" + (McpServer ? "" : ",\"mcpServer\":false")
+            SafeFile.WriteAllText(path, "{\"onClose\":\"" + Name(OnClose) + "\"" + (McpServer ? "" : ",\"mcpServer\":false")
                 + (McpTailnet ? ",\"mcpTailnet\":true" : "")
                 + (SessionWidth == DefaultSessionWidth ? "" : ",\"sessionWidth\":" + SessionWidth.ToString(System.Globalization.CultureInfo.InvariantCulture))
                 + (Zoom == DefaultZoom ? "" : ",\"zoom\":" + Zoom.ToString(System.Globalization.CultureInfo.InvariantCulture))
@@ -206,7 +206,6 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
                     + (ExternalEditor.Program is { } program ? ",\"program\":" + Quoted(program) : "")
                     + (ExternalEditor.Arguments is { } arguments ? ",\"arguments\":" + Quoted(arguments) : "") + "}")
                 + "}");
-            File.Move(temporary, path, overwrite: true);
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)

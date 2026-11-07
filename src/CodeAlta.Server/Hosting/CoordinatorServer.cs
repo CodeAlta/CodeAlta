@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Server.Api;
@@ -616,9 +617,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
     {
         var state = new ServerState(Environment.ProcessId, Addresses.Select(static address => address.ToString().TrimEnd('/')).ToArray(), startedAt, ServerVersion.Current,
             CertificatePin);
-        var temporary = _paths.StatePath + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(state, ServerStateJsonContext.Default.ServerState));
-        File.Move(temporary, _paths.StatePath, overwrite: true);
+        SafeFile.WriteAllText(_paths.StatePath, JsonSerializer.Serialize(state, ServerStateJsonContext.Default.ServerState));
     }
 }
 

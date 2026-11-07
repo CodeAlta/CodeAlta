@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Core.IO;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Orchestration.Runtime;
@@ -72,7 +73,7 @@ public sealed class AttachedDocumentConverter
                 return null;
             }
 
-            File.Move(temporary, destination, overwrite: true);
+            await StagedFileReplacement.MoveOverAsync(temporary, destination).ConfigureAwait(false);
             return destination;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Win32Exception or InvalidOperationException or TimeoutException)

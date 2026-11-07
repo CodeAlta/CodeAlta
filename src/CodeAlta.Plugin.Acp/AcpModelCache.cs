@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Agent;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Plugin.Acp;
 
@@ -203,9 +204,7 @@ internal sealed class AcpModelCacheStore(string root)
         try
         {
             Directory.CreateDirectory(root);
-            var temporary = path + ".tmp";
-            File.WriteAllBytes(temporary, JsonSerializer.SerializeToUtf8Bytes(cache, AcpPluginJsonContext.Default.AcpModelCache));
-            File.Move(temporary, path, overwrite: true);
+            SafeFile.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(cache, AcpPluginJsonContext.Default.AcpModelCache));
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

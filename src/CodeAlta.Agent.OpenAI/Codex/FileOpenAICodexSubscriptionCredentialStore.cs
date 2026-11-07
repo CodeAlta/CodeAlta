@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Agent.OpenAI.Codex;
 
@@ -21,13 +22,14 @@ internal sealed class FileOpenAICodexSubscriptionCredentialStore : IOpenAICodexS
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
         var path = GetCredentialPath(providerKey);
-        if (!File.Exists(path))
+        // A refresh may replace the file while it is read: the read finds the previous credential or the new one, never
+        // none, and keeps the content it opened.
+        await using var stream = await StagedFileReplacement.OpenReplacedFileAsync(path, cancellationToken).ConfigureAwait(false);
+        if (stream is null)
         {
             return null;
         }
 
-        // Allow atomic replacement while a request reads the prior credential snapshot.
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 4096, useAsync: true);
         var protectedBytes = new byte[checked((int)stream.Length)];
         await stream.ReadExactlyAsync(protectedBytes, cancellationToken).ConfigureAwait(false);
         var jsonBytes = Unprotect(protectedBytes);
@@ -80,19 +82,7 @@ internal sealed class FileOpenAICodexSubscriptionCredentialStore : IOpenAICodexS
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
         var path = GetCredentialPath(providerKey) + ".lock";
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            }
-            // Held by another owner: a sharing (32) or lock (33) violation on Windows, EWOULDBLOCK on Linux (11) and macOS (35).
-            catch (IOException ex) when ((ex.HResult & 0xffff) is 11 or 32 or 33 or 35)
-            {
-                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
-            }
-        }
+        return await LockFile.AcquireAsync(path, cancellationToken).ConfigureAwait(false);
     }
 
     public ValueTask DeleteAsync(

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Secrets;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
@@ -244,9 +245,7 @@ internal sealed class NodeScopeProviders
         Directory.CreateDirectory(_catalog.FleetRoot);
         // Written whole, then moved over the file: a machine stopped halfway keeps the checkpoints it had.
         var path = Path.Combine(_catalog.FleetRoot, FileName);
-        var temporary = path + ".tmp";
-        File.WriteAllBytes(temporary, JsonSerializer.SerializeToUtf8Bytes(applied, NodeScopeProvidersJson.Default.DictionaryStringScopeProvidersOfLink));
-        File.Move(temporary, path, overwrite: true);
+        SafeFile.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(applied, NodeScopeProvidersJson.Default.DictionaryStringScopeProvidersOfLink));
     }
 }
 

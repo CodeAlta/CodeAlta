@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Catalog.SessionMoves;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.Moves;
@@ -89,9 +90,7 @@ internal sealed class DesktopMoves
         lock (_gate)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
-            var staging = _settingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(new DesktopMoveSettings { ReceiveMoves = enabled }, DesktopMoveJsonContext.Default.DesktopMoveSettings));
-            File.Move(staging, _settingsPath, overwrite: true);
+            SafeFile.WriteAllBytes(_settingsPath, JsonSerializer.SerializeToUtf8Bytes(new DesktopMoveSettings { ReceiveMoves = enabled }, DesktopMoveJsonContext.Default.DesktopMoveSettings));
             _receivesMoves = enabled;
         }
 

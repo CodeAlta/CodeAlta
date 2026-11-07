@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 using CodeAlta.Desktop.Mcp;
 using CodeAlta.Fleet.Channels;
 using CodeAlta.Fleet.Client;
@@ -595,9 +596,7 @@ internal sealed class DesktopNode : IAsyncDisposable
     private static void WriteSettings(string path, DesktopNodeSettings settings)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var staging = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(settings, DesktopNodeJsonContext.Default.DesktopNodeSettings));
-        File.Move(staging, path, overwrite: true);
+        SafeFile.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(settings, DesktopNodeJsonContext.Default.DesktopNodeSettings));
     }
 
     private static void Log(bool warning, string message)

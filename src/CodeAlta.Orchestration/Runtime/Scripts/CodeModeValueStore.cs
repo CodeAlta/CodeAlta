@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CodeAlta.Catalog;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Orchestration.Runtime.Scripts;
 
@@ -155,9 +156,7 @@ public sealed class CodeModeValueStore
         }
 
         // Written whole, then moved over the previous one: a reader never sees half of it.
-        var temporary = path + ".tmp";
-        File.WriteAllBytes(temporary, buffer.ToArray());
-        File.Move(temporary, path, overwrite: true);
+        SafeFile.WriteAllBytes(path, buffer.ToArray());
     }
 
     private static string Kilobytes(int bytes) => bytes >= 1024 * 1024 && bytes % (1024 * 1024) == 0 ? $"{bytes / (1024 * 1024)} MB" : $"{(bytes + 1023) / 1024} KB";

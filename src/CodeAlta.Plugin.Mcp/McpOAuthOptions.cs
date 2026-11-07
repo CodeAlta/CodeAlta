@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 using ModelContextProtocol.Authentication;
 
 namespace CodeAlta.Plugin.Mcp;
@@ -77,26 +78,22 @@ internal sealed partial class McpOAuthTokenCache : ITokenCache
             Scope = token.Scope,
             ObtainedAt = token.ObtainedAt,
         };
-        var tempPath = _path + ".tmp";
-        await using (var stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, useAsync: true))
-        {
-            await JsonSerializer.SerializeAsync(stream, state, McpOAuthJsonContext.Default.McpOAuthTokenState, cancellationToken).ConfigureAwait(false);
-        }
-
-        File.Move(tempPath, _path, overwrite: true);
+        await SafeFile.WriteAllBytesAsync(_path, JsonSerializer.SerializeToUtf8Bytes(state, McpOAuthJsonContext.Default.McpOAuthTokenState), cancellationToken)
+            .ConfigureAwait(false);
         TryHardenTokenFile(_path);
     }
 
     public async ValueTask<TokenContainer?> GetTokensAsync(CancellationToken cancellationToken)
     {
-        if (!File.Exists(_path))
-        {
-            return null;
-        }
-
         try
         {
-            await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
+            // A refresh may replace the file while it is read: the read finds the previous token or the new one, never none.
+            await using var stream = await StagedFileReplacement.OpenReplacedFileAsync(_path, cancellationToken).ConfigureAwait(false);
+            if (stream is null)
+            {
+                return null;
+            }
+
             return ToTokens(await JsonSerializer.DeserializeAsync(stream, McpOAuthJsonContext.Default.McpOAuthTokenState, cancellationToken).ConfigureAwait(false));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)

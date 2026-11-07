@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Catalog;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.Channels;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
@@ -222,9 +223,7 @@ internal sealed class NodeFleet : IAsyncDisposable
     private static void WriteListenerFile(string path, NodeListenerFile file)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var staging = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(file, NodeFleetJsonContext.Default.NodeListenerFile));
-        File.Move(staging, path, overwrite: true);
+        SafeFile.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(file, NodeFleetJsonContext.Default.NodeListenerFile));
     }
 
     /// <summary>Stops the listener and the node API, and removes the listener file.</summary>

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Text.Json;
 using CodeAlta.Agent.Telemetry;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Server;
@@ -205,9 +206,7 @@ internal sealed class NodeTelemetry : IDisposable
         {
             var path = SettingsPath(link.Id);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var staging = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(signed, FleetTelemetryJsonContext.Default.FleetSignedTelemetrySettings));
-            File.Move(staging, path, overwrite: true);
+            SafeFile.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(signed, FleetTelemetryJsonContext.Default.FleetSignedTelemetrySettings));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

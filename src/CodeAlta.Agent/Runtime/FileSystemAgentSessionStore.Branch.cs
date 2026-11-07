@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Agent.Runtime;
 
@@ -308,7 +309,7 @@ public sealed partial class FileSystemAgentSessionStore
                 if (GetFileStamp(path) is not { } before || before.Length != point.Revision.Length
                     || before.LastWriteTimeUtc.Ticks != point.Revision.LastWriteUtcTicks)
                     throw new InvalidOperationException("The session changed before journal replacement.");
-                File.Move(temporary, path, overwrite: true);
+                await StagedFileReplacement.MoveOverAsync(temporary, path).ConfigureAwait(false);
                 // Nothing fallible follows the durable decision; caches reproject from the changed stamp.
                 _journalFile.ForgetLatestNotes(path);
             }

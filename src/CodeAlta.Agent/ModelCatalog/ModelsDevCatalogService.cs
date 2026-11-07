@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
+using CodeAlta.Core.IO;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.ModelCatalog;
@@ -322,7 +323,7 @@ public sealed class ModelsDevCatalogService : IAsyncDisposable
 
         try
         {
-            File.Move(tempPath, _cacheFilePath, overwrite: true);
+            await StagedFileReplacement.MoveOverAsync(tempPath, _cacheFilePath).ConfigureAwait(false);
         }
         catch
         {

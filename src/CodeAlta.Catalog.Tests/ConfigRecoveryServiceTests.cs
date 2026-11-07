@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Catalog.Tests;
 
@@ -144,15 +145,15 @@ public sealed class ConfigRecoveryServiceTests
     [DataRow("@", false)]
     public async Task FirstRun_CompetingCreatorIsNeverOverwrittenAndIsValidated(string content, bool valid)
     {
-        var codec = new TextFileCodec();
-        var gate = (SemaphoreSlim)typeof(TextFileCodec).GetField("_saveGate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(codec)!;
-        await gate.WaitAsync();
+        var locks = new FilePathLocks();
+        var codec = new TextFileCodec(locks);
+        var held = await locks.AcquireAsync(ConfigPath, CancellationToken.None);
         var service = Create(codec);
-        // Reload reaches the shared save gate synchronously after its missing-file read.
+        // Reload reaches the lock of the file synchronously after its missing-file read.
         var reload = service.ReloadAsync();
         Assert.IsFalse(reload.IsCompleted);
         File.WriteAllText(ConfigPath, content);
-        gate.Release();
+        held.Dispose();
         Assert.IsTrue(await reload);
         Assert.AreEqual(content, File.ReadAllText(ConfigPath));
         Assert.AreEqual(content, service.Snapshot!.Text);

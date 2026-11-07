@@ -1,4 +1,5 @@
 using System.Globalization;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Update;
 using Microsoft.Data.Sqlite;
@@ -285,7 +286,7 @@ internal sealed class ServerUpdates : IAsyncDisposable
             if (File.Exists(paths.DatabasePath + suffix)) File.Delete(paths.DatabasePath + suffix);
         }
 
-        File.Move(staging, paths.DatabasePath, overwrite: true);
+        StagedFileReplacement.MoveOver(staging, paths.DatabasePath);
     }
 
     /// <inheritdoc />

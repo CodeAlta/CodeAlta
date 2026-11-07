@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Fleet.Update;
 
@@ -78,7 +79,9 @@ public sealed class UpdateVersionStore
         var path = Path.Combine(Root, StateFileName);
         try
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            // A change replaces the state while it is read: never taken for a missing state meanwhile.
+            using var stream = StagedFileReplacement.OpenReplacedFile(path);
+            if (stream is null) return new UpdateState();
             return JsonSerializer.Deserialize(stream, UpdateJsonContext.Default.UpdateState) ?? new UpdateState();
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException)
@@ -103,7 +106,8 @@ public sealed class UpdateVersionStore
         var path = Path.Combine(Root, StateFileName);
         try
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var stream = StagedFileReplacement.OpenReplacedFile(path);
+            if (stream is null) return new UpdateState();
             return JsonSerializer.Deserialize(stream, UpdateJsonContext.Default.UpdateState)
                 ?? throw new UpdateException(UpdateErrorCodes.StateUnavailable, $"{path} holds no state.");
         }
@@ -133,7 +137,8 @@ public sealed class UpdateVersionStore
         try
         {
             File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(after, UpdateJsonContext.Default.UpdateState));
-            MoveOver(staging, path);
+            // A missing state is the empty one: it is never missing while it is replaced, also while a reader holds it.
+            StagedFileReplacement.MoveOverWithoutGap(staging, path);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -560,8 +565,9 @@ public sealed class UpdateVersionStore
     /// <returns>Whether the text is that version.</returns>
     public static bool Same(string? text, UpdateVersion version) => UpdateVersion.TryParse(text, out var parsed) && parsed.Equals(version);
 
-    // The state a change starts from. A state that is briefly unreadable is read again rather than taken for the empty
-    // state, which the change would then write over the pointer and the trial; a corrupt one is the empty state, as for Read.
+    // The state a change starts from. A state that is briefly unreadable, or being replaced, is read again rather than taken
+    // for the empty state, which the change would then write over the pointer and the trial; a corrupt one is the empty
+    // state, as for Read.
     private UpdateState ReadForChange()
     {
         var path = Path.Combine(Root, StateFileName);
@@ -570,7 +576,8 @@ public sealed class UpdateVersionStore
         {
             try
             {
-                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var stream = StagedFileReplacement.OpenReplacedFile(path);
+                if (stream is null) return new UpdateState();
                 return JsonSerializer.Deserialize(stream, UpdateJsonContext.Default.UpdateState) ?? new UpdateState();
             }
             catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException)
@@ -586,46 +593,17 @@ public sealed class UpdateVersionStore
         }
     }
 
-    // Moves the state written aside onto the state. Windows refuses a plain move onto a file a reader holds open, even one
-    // that shares its deletion: the move is tried again while a reader holds it. (The agent runtime's StagedFileReplacement
-    // does more, but this library references the protocol only.)
-    private static void MoveOver(string staging, string path)
-    {
-        var started = DateTime.UtcNow;
-        for (var delay = 1; ; delay = Math.Min(delay * 2, 50))
-        {
-            try
-            {
-                File.Move(staging, path, overwrite: true);
-                return;
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
-                && File.Exists(path) && DateTime.UtcNow - started < HeldStatePatience)
-            {
-                Thread.Sleep(delay);
-            }
-        }
-    }
-
     private FileStream AcquireLock()
     {
         Directory.CreateDirectory(Root);
         var path = Path.Combine(Root, LockFileName);
-        var deadline = DateTime.UtcNow + LockPatience;
-        while (true)
+        try
         {
-            try
-            {
-                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            }
-            catch (IOException) when (DateTime.UtcNow < deadline)
-            {
-                Thread.Sleep(25);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                throw new UpdateException(UpdateErrorCodes.StateUnavailable, $"{path} stays locked: {exception.Message}", exception);
-            }
+            return LockFile.Acquire(path, LockPatience);
+        }
+        catch (Exception exception) when (exception is TimeoutException or IOException or UnauthorizedAccessException)
+        {
+            throw new UpdateException(UpdateErrorCodes.StateUnavailable, $"{path} stays locked: {exception.Message}", exception);
         }
     }
 

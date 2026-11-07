@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Catalog;
 
@@ -261,12 +262,7 @@ public sealed class SessionLeaseStore
         }
     }
 
-    // A sharing violation or a lock violation on Windows; outside Windows, the lock of another handle (EWOULDBLOCK, 11 on
-    // Linux and 35 on macOS), which .NET reports with the error number as the result code.
-    private static bool IsSharingViolation(IOException exception)
-        => OperatingSystem.IsWindows()
-            ? (exception.HResult & 0xFFFF) is 32 or 33
-            : exception.HResult is 11 or 35;
+    private static bool IsSharingViolation(IOException exception) => LockFile.IsHeldByAnother(exception);
 
     private static DateTimeOffset? ReadProcessStart()
     {

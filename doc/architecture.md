@@ -55,8 +55,9 @@ flowchart LR
 | `CodeAlta.Sandbox` | The optional OS sandbox of sessions: profiles, the policy of a session, the mxc backend. See [sandbox](sandbox.md). |
 | `CodeAlta.CodeMode` | The engine of Code Mode: runs the JavaScript of agents (Jint, one engine per run), with the functions its host binds; prepares sources, reads descriptors, renders declarations and results. See [code mode](codemode.md). |
 | `CodeAlta.Acp` | Agent Client Protocol types, the client (ACP agents as providers) and the agent server (`altacli acp`). |
+| `CodeAlta.Core` | The lowest layer, which references no other project: the file operations the processes of one profile share (a whole file replaced while others read it, the read of a file being replaced, lock files) and the lock of a path within a process. |
 
-Dependencies point down: frontends → Automations/Orchestration/LiveTool/Hosting → Agent, Catalog, Plugins. Nothing below a frontend references a frontend; `CodeAlta.Search`, `CodeAlta.NativeEngines`, `CodeAlta.Sandbox`, `CodeAlta.CodeMode` and `CodeAlta.Browser` know neither the host nor a window. `ArchitectureGuardrailTests` checks the main boundaries.
+Dependencies point down: frontends → Automations/Orchestration/LiveTool/Hosting → Agent, Catalog, Plugins → Core; the server and the self-update of the fleet reference Core too. Nothing below a frontend references a frontend; `CodeAlta.Search`, `CodeAlta.NativeEngines`, `CodeAlta.Sandbox`, `CodeAlta.CodeMode` and `CodeAlta.Browser` know neither the host nor a window. `ArchitectureGuardrailTests` checks the main boundaries.
 
 ## A turn
 

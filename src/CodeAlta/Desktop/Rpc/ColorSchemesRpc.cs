@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using CodeAlta.Core.IO;
 using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;
@@ -154,7 +155,7 @@ internal sealed class ColorSchemesService
                 try
                 {
                     File.WriteAllBytes(staging, Render(name, basis, colors));
-                    File.Move(staging, path, overwrite: true);
+                    StagedFileReplacement.MoveOver(staging, path);
                 }
                 finally
                 {

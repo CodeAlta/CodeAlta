@@ -4,6 +4,7 @@ using CodeAlta.Agent;
 using CodeAlta.Automations;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.SessionMoves;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
@@ -47,8 +48,10 @@ internal sealed record NodeAutomationPolicy
         var path = Path.Combine(fleetRoot, FileName);
         try
         {
-            // Opened at once: a file that is there but cannot be told apart from none (a folder that cannot be read) is not missing.
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            // Opened at once: a file that is there but cannot be told apart from none (a folder that cannot be read) is not
+            // missing, nor is one being replaced.
+            using var stream = StagedFileReplacement.OpenReplacedFile(path);
+            if (stream is null) return new();
             var policy = JsonSerializer.Deserialize(stream, NodeAutomationJsonContext.Default.NodeAutomationPolicy);
             if (policy is null) return Closed($"{path} holds no policy");
             if (policy.Credentials is not (AnyCredentials or AccountCredentials)) return Closed($"{path} names credentials '{policy.Credentials}', neither '{AnyCredentials}' nor '{AccountCredentials}'");
@@ -74,9 +77,8 @@ internal sealed record NodeAutomationPolicy
         ArgumentNullException.ThrowIfNull(policy);
         Directory.CreateDirectory(fleetRoot);
         var path = Path.Combine(fleetRoot, FileName);
-        var staged = path + ".tmp";
-        File.WriteAllText(staged, JsonSerializer.Serialize(policy, NodeAutomationJsonContext.Default.NodeAutomationPolicy));
-        File.Move(staged, path, overwrite: true);
+        // A missing policy is the default one: it is never missing while it is replaced.
+        SafeFile.WriteAllBytesWithoutGap(path, JsonSerializer.SerializeToUtf8Bytes(policy, NodeAutomationJsonContext.Default.NodeAutomationPolicy));
     }
 }
 
@@ -1012,9 +1014,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         {
             Directory.CreateDirectory(_fleetRoot);
             var path = Path.Combine(_fleetRoot, AssignmentsFileName);
-            var staged = path + ".tmp";
-            File.WriteAllText(staged, JsonSerializer.Serialize(_assignments, NodeAutomationJsonContext.Default.DictionaryStringNodeAutomationAssignment));
-            File.Move(staged, path, overwrite: true);
+            SafeFile.WriteAllText(path, JsonSerializer.Serialize(_assignments, NodeAutomationJsonContext.Default.DictionaryStringNodeAutomationAssignment));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

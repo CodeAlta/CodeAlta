@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Catalog.SessionMoves;
 
@@ -204,7 +205,7 @@ public sealed class SessionRelinquishmentStore
                 stream.Flush(flushToDisk: true);
             }
 
-            File.Move(temporary, path, overwrite: true);
+            StagedFileReplacement.MoveOver(temporary, path);
         }
         finally
         {

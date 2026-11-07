@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CodeAlta.Catalog.Worktrees;
+using CodeAlta.Core.IO;
 using NeoAstra;
 
 namespace CodeAlta.Desktop.Ui;
@@ -100,7 +101,7 @@ internal sealed class DesktopUiAutomation : IDesktopUi, IAsyncDisposable
                 try
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(target!)!);
-                    File.Move(staged, target!, overwrite: true);
+                    await StagedFileReplacement.MoveOverAsync(staged, target!).ConfigureAwait(false);
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
                 {

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Catalog;
+using CodeAlta.Core.IO;
 using CodeAlta.LiveTool;
 
 namespace CodeAlta.Tests;
@@ -304,22 +305,21 @@ public sealed class AltaPromptMutationTests
         var path = fixture.PathFor("global", false);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         if (change != "create") await File.WriteAllTextAsync(path, "original");
-        // Test-only access to the existing codec gate, avoiding new production timing hooks.
-        var gate = (SemaphoreSlim)typeof(TextFileCodec).GetField("_saveGate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(fixture.Codec)!;
-        await gate.WaitAsync();
+        // Another writer of this process holds the lock of the file the codec shares.
+        var held = await fixture.Locks.AcquireAsync(path, CancellationToken.None);
         using var input = new ControlledReader(inlineCompletion: true);
         var pending = fixture.InvokeWithReaderAsync(["prompt", "edit", "sample", "--scope", "global", "--stdin"], input, cancellation.Token);
         try
         {
             await input.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            // Keep the shared save gate held as the handler leaves controlled stdin.
+            // Keep the lock of the file held as the handler leaves controlled stdin.
             input.Content.SetResult("replacement");
             Assert.IsFalse(pending.IsCompleted);
             if (change == "cancel") cancellation.Cancel();
             else if (change == "delete") File.Delete(path);
             else await File.WriteAllTextAsync(path, "external");
         }
-        finally { gate.Release(); }
+        finally { held.Dispose(); }
         var result = await pending;
         AssertFailure(result, change == "cancel" ? "runtime.cancelled" : "prompt.conflict");
         if (change == "delete") Assert.IsFalse(File.Exists(path));
@@ -412,11 +412,13 @@ public sealed class AltaPromptMutationTests
             Cwd = Path.Combine(_root, "project");
             Directory.CreateDirectory(GlobalRoot);
             Directory.CreateDirectory(Cwd);
+            Codec = new TextFileCodec(Locks);
             _services = new AltaServiceCollection().Add(new CatalogOptions { GlobalRoot = GlobalRoot }).Add(Codec);
             _dispatcher = new AltaCommandDispatcher(_registry, _services);
         }
 
-        public TextFileCodec Codec { get; } = new();
+        public FilePathLocks Locks { get; } = new();
+        public TextFileCodec Codec { get; }
         public string GlobalRoot { get; }
         public string Cwd { get; }
         public string PathFor(string scope, bool system)

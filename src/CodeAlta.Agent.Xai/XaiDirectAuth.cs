@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Core.IO;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.Xai;
@@ -214,19 +215,7 @@ internal sealed class XaiDirectCredentialStore
     {
         var path = _path + ".lock";
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            }
-            // Held by another owner: a sharing (32) or lock (33) violation on Windows, EWOULDBLOCK on Linux (11) and macOS (35).
-            catch (IOException ex) when ((ex.HResult & 0xffff) is 11 or 32 or 33 or 35)
-            {
-                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
-            }
-        }
+        return await LockFile.AcquireAsync(path, cancellationToken).ConfigureAwait(false);
     }
 
     public ValueTask DeleteAsync(CancellationToken cancellationToken)

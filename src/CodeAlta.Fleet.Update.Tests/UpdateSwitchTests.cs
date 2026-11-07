@@ -22,6 +22,52 @@ public sealed class UpdateSwitchTests
     }
 
     [TestMethod]
+    public async Task TheStateIsNeverReadMissing_WhileChangesOfOtherWritersReplaceIt()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp);
+        store.Change(static state => state with { Current = "4.0.0" });
+
+        // The launcher reads the state every few milliseconds while a version is on trial: a missing state would start the
+        // installed entry point, and a change read from it would write over the pointer.
+        using var stop = new CancellationTokenSource();
+        using var start = new ManualResetEventSlim();
+        var readers = Enumerable.Range(0, 4).Select(reader => Task.Run(() =>
+        {
+            start.Wait();
+            var reads = 0;
+            while (!stop.IsCancellationRequested || reads == 0)
+            {
+                var state = reader % 2 == 0 ? store.Read() : new UpdateVersionStore(store.Root).ReadOrThrow();
+                Assert.IsNotNull(state.Current, "A reader found no state while it was replaced.");
+                reads++;
+            }
+        })).ToArray();
+        var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(() =>
+        {
+            start.Wait();
+            var other = new UpdateVersionStore(store.Root);
+            for (var index = 0; index < 50; index++)
+            {
+                other.Change(state => state with { Current = $"4.0.{writer * 50 + index + 1}" });
+            }
+        })).ToArray();
+
+        start.Set();
+        try
+        {
+            await Task.WhenAll(writers).WaitAsync(TimeSpan.FromSeconds(60));
+        }
+        finally
+        {
+            await stop.CancelAsync();
+        }
+
+        await Task.WhenAll(readers).WaitAsync(TimeSpan.FromSeconds(60));
+        Assert.IsFalse(Directory.EnumerateFiles(store.Root, "*.tmp").Any(), "No staged state is left behind.");
+    }
+
+    [TestMethod]
     public void APendingSwitchIsWithdrawnOrReplacedOnlyAsItsRequesterAllows()
     {
         using var temp = new TempFolder();
@@ -49,26 +95,27 @@ public sealed class UpdateSwitchTests
         var path = Path.Combine(store.Root, "state.json");
 
         // The launcher reads the state every few milliseconds while a version on trial confirms: Windows refuses a plain
-        // move onto a file a reader holds open, even one that shares its deletion.
+        // move onto a file a reader holds open, even one that shares its deletion. The state is renamed over it with POSIX
+        // semantics (elsewhere every rename does so), or the move is tried again until the reader lets it go.
         var reader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         Task confirmed;
         try
         {
             confirmed = Task.Run(() => store.Confirm(V1));
-            // The change has written its state aside: its replace runs against the file the reader holds, and is refused until
-            // the reader lets it go (without the retry, Confirm throws here).
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-            while (Directory.GetFiles(store.Root, "state.json.*.tmp").Length == 0 && !confirmed.IsCompleted && DateTime.UtcNow < deadline) await Task.Delay(5);
-            await Task.Delay(50);
-            // Elsewhere a rename replaces a file that is open: the change is done already.
-            if (OperatingSystem.IsWindows()) Assert.IsFalse(confirmed.IsCompleted, "the replace waits while the reader holds the state");
+            await Task.WhenAny(confirmed, Task.Delay(TimeSpan.FromSeconds(1)));
+            if (confirmed.IsCompleted)
+            {
+                // Replaced while it was held: the reader keeps the state it opened, the trial not confirmed yet.
+                using var text = new StreamReader(reader, leaveOpen: true);
+                StringAssert.Contains(await text.ReadToEndAsync(), "trial", StringComparison.OrdinalIgnoreCase);
+            }
         }
         finally
         {
             await reader.DisposeAsync();
         }
 
-        await confirmed;
+        await confirmed.WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.AreEqual("4.0.1", store.Read().Current);
         Assert.IsNull(store.Read().Trial, "the version confirmed");

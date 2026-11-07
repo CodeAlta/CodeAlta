@@ -1,6 +1,7 @@
 using System.Reflection;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
+using CodeAlta.Core.IO;
 using CodeAlta.Tui.App;
 using CodeAlta.Tui.Presentation.Editing;
 using CodeAlta.Tui.Presentation.Prompting;
@@ -34,7 +35,8 @@ public sealed class FileEditorWorkspaceCoordinatorTests
             File.WriteAllText(path, "---\nname: sample\ndescription: Description\n---\nOriginal");
             var backend = new SkillManagementService(new SkillCatalog([new EditorSkillProvider(Path.GetDirectoryName(root)!)]), temp.FullName, null);
             var document = await backend.GetFileDocumentAsync(path, null, null);
-            var codec = new TextFileCodec();
+            var locks = new FilePathLocks();
+            var codec = new TextFileCodec(locks);
             var snapshot = await codec.LoadAsync(path);
             string? status = null;
             await using var coordinator = new FileEditorWorkspaceCoordinator(codec, NullProjectFileSearchService.Instance,
@@ -47,9 +49,8 @@ public sealed class FileEditorWorkspaceCoordinatorTests
             if (writableFirst)
             {
                 File.WriteAllText(path, "external");
-                // Hold the actual shared codec gate: no timing sleeps or alternative save implementation.
-                var gate = (SemaphoreSlim)typeof(TextFileCodec).GetField("_saveGate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(codec)!;
-                await gate.WaitAsync();
+                // Hold the lock of the file the codec shares: no timing sleeps or alternative save implementation.
+                var held = await locks.AcquireAsync(path, CancellationToken.None);
                 var pendingSave = tab.SaveCurrentTextAsync(snapshot.Revision);
                 try
                 {
@@ -58,7 +59,7 @@ public sealed class FileEditorWorkspaceCoordinatorTests
                     Assert.IsFalse(tab.IsReadOnly);
                     StringAssert.Contains(status, "save is in progress");
                 }
-                finally { gate.Release(); }
+                finally { held.Dispose(); }
                 Assert.IsTrue((await pendingSave).IsConflict);
             }
             using var terminal = new EditorTestTerminal(tab.Root);

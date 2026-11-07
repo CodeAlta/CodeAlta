@@ -1,3 +1,5 @@
+using CodeAlta.Core.IO;
+
 namespace CodeAlta.Fleet.Identity;
 
 /// <summary>
@@ -52,7 +54,7 @@ internal static class FleetFiles
         var directory = Path.GetDirectoryName(Path.GetFullPath(path))
             ?? throw new ArgumentException("A file path with a parent folder is required.", nameof(path));
         EnsurePrivateDirectory(directory);
-        var stagingPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        var stagingPath = StagedFileReplacement.StagedPathOf(Path.Combine(directory, Path.GetFileName(path)));
         var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
         if (!OperatingSystem.IsWindows())
         {
@@ -71,7 +73,7 @@ internal static class FleetFiles
             {
                 // On Windows a file just written may be held a moment by a scanner or a reader: the replace waits for it rather
                 // than fail the write.
-                CodeAlta.Agent.Runtime.StagedFileReplacement.MoveOver(stagingPath, path);
+                StagedFileReplacement.MoveOver(stagingPath, path);
                 return true;
             }
 

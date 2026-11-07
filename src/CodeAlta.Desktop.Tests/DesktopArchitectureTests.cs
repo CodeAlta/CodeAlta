@@ -35,7 +35,9 @@ public sealed class DesktopArchitectureTests
                     // The sessions of the paired machines, through the client of their node API.
                     or "CodeAlta.Fleet" or "CodeAlta.Fleet.Protocol"
                     // The update of the fleet: the hashes of the feed an owner's computer signs, and why a feed was refused.
-                    or "CodeAlta.Fleet.Update", reference.Name);
+                    or "CodeAlta.Fleet.Update"
+                    // The safe file operations every project shares.
+                    or "CodeAlta.Core", reference.Name);
             Assert.AreNotEqual("altatui", reference.Name);
         }
     }

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -178,10 +179,8 @@ public sealed class SessionSecretEnvironments
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            var staging = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes([.. admissions.Values.OrderBy(static admission => admission.AdmittedAt)],
+            SafeFile.WriteAllBytes(_path, JsonSerializer.SerializeToUtf8Bytes([.. admissions.Values.OrderBy(static admission => admission.AdmittedAt)],
                 SessionEnvironmentJson.Default.ListSessionEnvironmentAdmission));
-            File.Move(staging, _path, overwrite: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

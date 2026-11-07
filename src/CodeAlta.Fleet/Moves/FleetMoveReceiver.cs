@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.SessionMoves;
 using CodeAlta.Catalog.Worktrees;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Orchestration.Hosting;
@@ -406,9 +407,7 @@ public sealed class FleetMoveReceiver
     private void WriteIncoming(string moveId, FleetMoveIncoming incoming)
     {
         var path = Path.Combine(IncomingFolder(moveId), OfferFile);
-        var staging = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(incoming, FleetMoveJsonContext.Default.FleetMoveIncoming));
-        File.Move(staging, path, overwrite: true);
+        SafeFile.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(incoming, FleetMoveJsonContext.Default.FleetMoveIncoming));
     }
 
     // Where a repository the target lacks is cloned: <root>/<key> (FleetRepositoryClone.PathFor).

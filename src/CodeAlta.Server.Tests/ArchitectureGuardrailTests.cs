@@ -4,35 +4,35 @@ using CodeAlta.Server.Hosting;
 namespace CodeAlta.Server.Tests;
 
 /// <summary>
-/// The server references the fleet protocol and the self-update only, never the agent runtime
-/// (<c>doc/fleet/architecture.md</c>): it cannot run an agent or read a journal by accident. The self-update references
-/// the protocol alone, so that it brings nothing else in.
+/// The server references the fleet protocol, the self-update and the safe file operations of the core only, never the
+/// agent runtime (<c>doc/fleet/architecture.md</c>): it cannot run an agent or read a journal by accident. The self-update
+/// references the protocol and the core alone, so that it brings nothing else in.
 /// </summary>
 [TestClass]
 public sealed class ArchitectureGuardrailTests
 {
     [TestMethod]
-    public void TheServerAssemblyReferencesNoCodeAltaAssemblyButTheProtocolAndTheSelfUpdate()
+    public void TheServerAssemblyReferencesNoCodeAltaAssemblyButTheCoreTheProtocolAndTheSelfUpdate()
     {
         var references = typeof(CoordinatorServer).Assembly.GetReferencedAssemblies()
             .Select(static name => name.Name!)
             .Where(static name => name.StartsWith("CodeAlta", StringComparison.OrdinalIgnoreCase))
             .ToArray();
-        CollectionAssert.AreEquivalent(new[] { "CodeAlta.Fleet.Protocol", "CodeAlta.Fleet.Update" }, references);
+        CollectionAssert.AreEquivalent(new[] { "CodeAlta.Core", "CodeAlta.Fleet.Protocol", "CodeAlta.Fleet.Update" }, references);
     }
 
     [TestMethod]
-    public void TheSelfUpdateReferencesNoCodeAltaAssemblyButTheProtocol()
+    public void TheSelfUpdateReferencesNoCodeAltaAssemblyButTheCoreAndTheProtocol()
     {
         var references = typeof(CodeAlta.Fleet.Update.UpdateLauncher).Assembly.GetReferencedAssemblies()
             .Select(static name => name.Name!)
             .Where(static name => name.StartsWith("CodeAlta", StringComparison.OrdinalIgnoreCase))
             .ToArray();
-        CollectionAssert.AreEquivalent(new[] { "CodeAlta.Fleet.Protocol" }, references);
+        CollectionAssert.AreEquivalent(new[] { "CodeAlta.Core", "CodeAlta.Fleet.Protocol" }, references);
     }
 
     [TestMethod]
-    public void TheDependencyGraphOfTheServerHoldsNoCodeAltaLibraryButTheProtocolAndTheSelfUpdate()
+    public void TheDependencyGraphOfTheServerHoldsNoCodeAltaLibraryButTheCoreTheProtocolAndTheSelfUpdate()
     {
         // The graph the build wrote for altaserver: a project reference shows here even when no type of it is used.
         var depsFile = Path.ChangeExtension(typeof(CoordinatorServer).Assembly.Location, ".deps.json");
@@ -43,7 +43,7 @@ public sealed class ArchitectureGuardrailTests
             .Where(static name => name.StartsWith("CodeAlta", StringComparison.OrdinalIgnoreCase))
             .Order(StringComparer.Ordinal)
             .ToArray();
-        CollectionAssert.AreEqual(new[] { "CodeAlta.Fleet.Protocol", "CodeAlta.Fleet.Update" }, libraries);
+        CollectionAssert.AreEqual(new[] { "CodeAlta.Core", "CodeAlta.Fleet.Protocol", "CodeAlta.Fleet.Update" }, libraries);
     }
 
     [TestMethod]

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using CodeAlta.Agent.Runtime;
 using System.Security.Cryptography;
 using System.Text;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Catalog.Secrets;
 

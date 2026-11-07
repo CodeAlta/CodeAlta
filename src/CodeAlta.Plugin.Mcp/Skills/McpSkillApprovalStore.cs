@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Plugin.Mcp;
 
@@ -108,8 +109,6 @@ internal sealed class McpSkillApprovalStore
     private void Write(IReadOnlyList<McpSkillApproval> approvals)
     {
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
-        var temporary = Path + "." + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".tmp";
-        File.WriteAllBytes(temporary, JsonSerializer.SerializeToUtf8Bytes(new McpSkillApprovalFile(CurrentVersion, approvals), McpSkillApprovalJsonContext.Default.McpSkillApprovalFile));
-        File.Move(temporary, Path, overwrite: true);
+        SafeFile.WriteAllBytes(Path, JsonSerializer.SerializeToUtf8Bytes(new McpSkillApprovalFile(CurrentVersion, approvals), McpSkillApprovalJsonContext.Default.McpSkillApprovalFile));
     }
 }

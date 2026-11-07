@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Server.Hosting;
 
@@ -150,7 +151,7 @@ public sealed class SetupCodeStore
 
         // The code sets up the owner: only the user of the server reads it.
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        File.Move(temporary, _path, overwrite: true);
+        StagedFileReplacement.MoveOver(temporary, _path);
     }
 
     private static string Normalize(string? code)

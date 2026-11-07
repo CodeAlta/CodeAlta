@@ -1,4 +1,5 @@
 using System.Globalization;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Fleet.Server;
 using NeoAstra.Rpc;
@@ -85,7 +86,7 @@ internal sealed partial class FleetServerService
                     .ConfigureAwait(false);
             }
 
-            File.Move(staging, path, overwrite: true);
+            await StagedFileReplacement.MoveOverAsync(staging, path).ConfigureAwait(false);
             lock (_exportGate) _lastExport = path;
             return new("ok", null, path, Small((bytes + 1023) / 1024));
         }

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Catalog;
 

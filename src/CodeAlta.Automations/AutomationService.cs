@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Automations;
 

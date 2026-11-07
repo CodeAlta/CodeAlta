@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using CodeAlta.Core.IO;
 using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Plugins;
@@ -93,7 +94,7 @@ internal sealed class PluginFileStateStore : IPluginStateStore
                     await JsonSerializer.SerializeAsync(stream, value, _json, cancellationToken).ConfigureAwait(false);
                 }
 
-                File.Move(temporary, path, overwrite: true);
+                await StagedFileReplacement.MoveOverAsync(temporary, path).ConfigureAwait(false);
             }
             finally
             {

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Plugin.Mcp;
 
@@ -150,9 +151,7 @@ public sealed class McpToolListCache
         if (Read(definition.Key, list.Fingerprint) is { } previous && previous.Variant == variant && previous.ServerVersion == list.ServerVersion
             && previous.Tools.SequenceEqual(list.Tools, ToolComparer.Instance)) return;
         Directory.CreateDirectory(Folder);
-        var temporary = path + "." + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".tmp";
-        File.WriteAllBytes(temporary, JsonSerializer.SerializeToUtf8Bytes(list, McpToolListCacheJsonContext.Default.McpCachedToolList));
-        File.Move(temporary, path, overwrite: true);
+        SafeFile.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(list, McpToolListCacheJsonContext.Default.McpCachedToolList));
     }
 
     /// <summary>Gets the variant of a start: a hash of its whole key, so that no value of it is kept.</summary>

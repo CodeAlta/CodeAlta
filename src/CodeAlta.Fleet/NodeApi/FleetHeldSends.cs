@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Fleet.NodeApi;
 
@@ -272,10 +273,8 @@ internal sealed class FleetHeldSends
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var staging = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(new FleetHeldSendsDocument { Sends = [.. written.Values] },
+        SafeFile.WriteAllBytes(_path, JsonSerializer.SerializeToUtf8Bytes(new FleetHeldSendsDocument { Sends = [.. written.Values] },
             FleetHeldSendsJsonContext.Default.FleetHeldSendsDocument));
-        File.Move(staging, _path, overwrite: true);
         _sends = sends;
         _written = written;
     }

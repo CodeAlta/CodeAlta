@@ -8,6 +8,7 @@ using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.GoogleGenAI;
 using CodeAlta.Agent.Mistral;
 using CodeAlta.Agent.OpenAI;
+using CodeAlta.Agent.OpenAI.Codex;
 using CodeAlta.Agent.Xai;
 using CodeAlta.Catalog;
 using CodeAlta.Hosting;
@@ -146,6 +147,38 @@ public sealed class ProviderHttpClientSharingTests
             async () => (await store.ReadAsync(CancellationToken.None))?.AccessToken);
 
         AssertOwnerOnly(Path.Combine(temp.Path, "auth", "xai", "xai.json"));
+    }
+
+    [TestMethod]
+    public async Task CodexCredentialStore_IsNeverMissingWhileItIsReplaced()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
+        await store.SaveAsync("codex", new OpenAICodexSubscriptionCredential { ClientId = "client-0" }, CancellationToken.None);
+
+        await RaceWritersAndReadersAsync(
+            index => store.SaveAsync("codex", new OpenAICodexSubscriptionCredential { ClientId = "client-" + index }, CancellationToken.None),
+            async () => (await store.LoadAsync("codex", CancellationToken.None))?.ClientId);
+
+        var folder = Path.Combine(temp.Path, "auth", "openai-codex-subscription");
+        AssertOwnerOnly(Path.Combine(folder, "codex.credential"));
+        Assert.AreEqual(1, Directory.GetFiles(folder).Length, "No staged file is left behind.");
+    }
+
+    [TestMethod]
+    public async Task MistralVibeCredentialStore_IsNeverMissingWhileItIsReplaced()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new MistralVibeCredentialStore(new MistralVibeLoginOptions("mistral-vibe", temp.Path));
+        await store.WriteAsync(new MistralVibeCredential { ApiKey = "key-0" }, CancellationToken.None);
+
+        await RaceWritersAndReadersAsync(
+            index => store.WriteAsync(new MistralVibeCredential { ApiKey = "key-" + index }, CancellationToken.None),
+            async () => (await store.ReadAsync(CancellationToken.None))?.ApiKey);
+
+        var folder = Path.Combine(temp.Path, "auth", MistralVibeCredentialStore.ProviderType);
+        AssertOwnerOnly(Path.Combine(folder, "mistral-vibe.json"));
+        Assert.AreEqual(1, Directory.GetFiles(folder).Length, "No staged file is left behind.");
     }
 
     [TestMethod]

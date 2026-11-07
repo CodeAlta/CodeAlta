@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using CodeAlta.Core.IO;
 
 namespace CodeAlta.Plugins;
 
@@ -415,7 +416,7 @@ public sealed class PluginRootBuildFileGenerator
 
         var tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         await File.WriteAllTextAsync(tempPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken).ConfigureAwait(false);
-        File.Move(tempPath, path, overwrite: true);
+        await StagedFileReplacement.MoveOverAsync(tempPath, path).ConfigureAwait(false);
         return GeneratedFileWriteStatus.Written;
     }
 

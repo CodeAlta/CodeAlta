@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Core.IO;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Orchestration.Hosting;
@@ -569,9 +570,7 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
     private static void Write(string path, byte[] bytes)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var staging = path + ".tmp";
-        File.WriteAllBytes(staging, bytes);
-        File.Move(staging, path, overwrite: true);
+        SafeFile.WriteAllBytes(path, bytes);
     }
 
     private static List<T> Read<T>(string path, System.Text.Json.Serialization.Metadata.JsonTypeInfo<List<T>> type)

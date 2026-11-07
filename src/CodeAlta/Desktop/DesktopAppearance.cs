@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using CodeAlta.Core.IO;
 using NeoAstra;
 
 namespace CodeAlta.Desktop;
@@ -58,9 +59,7 @@ internal sealed record DesktopAppearance(bool Dark, NeoColor Background)
         {
             Directory.CreateDirectory(dataRoot);
             var path = Path.Combine(dataRoot, FileName);
-            var temporary = path + ".tmp";
-            File.WriteAllText(temporary, $$"""{"theme":"{{(Dark ? "dark" : "light")}}","background":"{{BackgroundText}}"}""");
-            File.Move(temporary, path, overwrite: true);
+            SafeFile.WriteAllText(path, $$"""{"theme":"{{(Dark ? "dark" : "light")}}","background":"{{BackgroundText}}"}""");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {

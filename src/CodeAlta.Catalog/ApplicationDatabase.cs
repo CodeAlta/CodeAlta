@@ -1,4 +1,5 @@
 using System.Globalization;
+using CodeAlta.Core.IO;
 using Microsoft.Data.Sqlite;
 using XenoAtom.Logging;
 
@@ -545,7 +546,7 @@ public sealed class ApplicationDatabase : IApplicationDatabase
                 return null;
             }
 
-            File.Move(temporary, path, overwrite: true);
+            StagedFileReplacement.MoveOver(temporary, path);
         }
         catch
         {
