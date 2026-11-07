@@ -6,6 +6,8 @@ import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ComposerStatus } from "./ComposerStatus";
 import { settingsNavigation, type SettingsTarget } from "./settingsNavigation";
+import { documentationNavigation } from "./documentationNavigation";
+import { FleetOverview } from "./fleet/console/FleetOverview";
 import { settingsGroups, settingsPageOf, type SettingsPageId } from "./settings/settingsPages";
 import { glowSetting } from "./settings/settingsGlow";
 import { createSettingsHub } from "./settings/settingsHub";
@@ -288,7 +290,7 @@ import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
 import { MachinesSettings } from "./machines/MachinesSettings";
 import { SecretsSettings } from "./secrets/SecretsSettings";
-import { readMachinePageLink } from "./machines/machines";
+import { isMachineProject, machineRowState, readMachinePageLink } from "./machines/machines";
 import { FleetServerSettings } from "./fleet/FleetServerSettings";
 import { FleetSecretsSettings } from "./fleet/FleetSecretsSettings";
 import { FleetBudgetsSettings } from "./fleet/FleetBudgetsSettings";
@@ -390,6 +392,7 @@ import "./secrets/secrets.css";
 import "./fleet/fleet.css";
 import "./fleet/fleetSecrets.css";
 import "./fleet/fleetBudgets.css";
+import "./fleet/console/fleetConsole.css";
 import "./fleet/access/fleetAccess.css";
 import "./fleet/audit/fleetAudit.css";
 import "./fleet/policies/fleetPolicies.css";
@@ -790,6 +793,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     focusRestoration.schedule(origin, () => currentView.current === settingsOriginView.current,
       () => !!modalDialogOpen());
   }
+  const closeSettingsLatest = useRef(closeSettings); closeSettingsLatest.current = closeSettings;
   function navigate(next: View) {
     advanceBrowserRevision();
     invalidateCreation();
@@ -847,6 +851,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     cancelGlow.current = setting ? glowSetting(content, setting, () => content()?.querySelector<HTMLElement>(".page-heading h1, h1") ?? null) : null;
   };
   useEffect(() => settingsNavigation.subscribe(target => openSettingsAt.current(target)), []);
+  // A help button of Settings opens its page of the guide in its tab, in the place of Settings.
+  useEffect(() => documentationNavigation.subscribe(target => { closeSettingsLatest.current(); openDocumentationLatest.current(target.page, target.anchor); }), []);
   useEffect(() => () => cancelGlow.current?.(), []);
   // A place that chooses a sandbox, from Settings > Sandbox: the editor of its provider, the page of its space, or the
   // row of its project in the Explorer, where its "Sandbox…" action is.
@@ -5908,7 +5914,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           {projectRenameNotice && !projectRenaming && <p role="alert" className="notice error-text">{workflowNotice(language.locale, projectRenameNotice)}</p>}
           {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>{t("Refresh project name (no retry)")}</button>}
           <SpaceActivityBar spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} calls={calls}
-            onShow={id => { if (showSpace(id)) focusPromptSoon(); }} onOpen={(id, session) => void openSpaceSession(id, session)} />
+            onShow={id => { if (showSpace(id)) focusPromptSoon(); }} onOpen={(id, session) => void openSpaceSession(id, session)}
+            fleet={owned ? fleetBar(snapshot?.projects ?? [], () => navigate("fleet")) : null} />
           <OverflowTip within={projectRail} target=".session-row > button:first-child" label=".session-title" />
         </SessionFamilyContext.Provider></aside>; }}
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
@@ -6338,6 +6345,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
       : settingsSection === "secrets" ? <SecretsSettings epoch={owned ? status!.hostEpoch : null} />
+      : settingsSection === "fleet" ? <FleetOverview epoch={owned ? status!.hostEpoch : null} spaces={spacesState.spaces} />
       : settingsSection === "machines" ? <MachinesSettings key={machineFocus ? `${machineFocus.id}:${machineFocus.ticket}` : ""} epoch={owned ? status!.hostEpoch : null}
         initialMachine={machineFocus?.id ?? null} />
       : settingsSection === "fleetServer" ? <FleetServerSettings epoch={owned ? status!.hostEpoch : null} />
@@ -6543,6 +6551,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></TerminalPasteContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></DiagramSourceEditorContext.Provider></ShellLanguageContext.Provider>;
 }
 
+/** The way to Fleet at the foot of the Explorer, with how many of the machines it lists are online. */
+function fleetBar(projects: readonly WorkspaceProject[], onOpen: () => void) {
+  const machineRows = projects.filter(isMachineProject);
+  return { machines: machineRows.length, online: machineRows.filter(project => machineRowState(project) === "online").length, onOpen };
+}
+
+/** The pages of the Fleet tab of Settings, the Overview first. */
+const fleetSettingsPages: ReadonlySet<string> = new Set(settingsGroups.find(({ group }) => group === "Fleet")?.pages.map(page => page.id) ?? []);
+
 /** The search of Settings: the query, the counts of the pages while one is typed (null otherwise), and the results that take the place of the page. */
 type SettingsSearchControls = Readonly<{ query: string; onQuery(query: string): void; counts: ReadonlyMap<string, number> | null; onSubmit(): void; focusOnOpen: boolean; results: ReactNode | null }>;
 
@@ -6568,6 +6585,11 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
   const counts = search.counts;
   const dimmed = (page: string) => counts !== null && !counts.has(page);
   const count = (page: string) => counts?.get(page) ? <small className="settings-nav-count">{counts.get(page)}</small> : null;
+  // Fleet is a whole of its own: its pages have their tab, and the other pages theirs; a search looks in both.
+  const inFleet = fleetSettingsPages.has(section);
+  const lastPage = useRef<{ general: SettingsSection; fleet: SettingsSection }>({ general: "appearance", fleet: "fleet" });
+  if (inFleet) lastPage.current.fleet = section; else if (section !== "plugin") lastPage.current.general = section;
+  const showGroup = (group: string) => counts !== null || (group === "Fleet") === inFleet;
   return <AppWindow storageKey="codealta.desktop.window.settings.v1" className="settings-dialog" titleId="settings-title" title={t("Settings")}
     preferredSize={viewport => ({ width: viewport.width * 0.8, height: viewport.height * 0.8 })} minimumSize={{ width: 560, height: 360 }}
     onClose={onClose} closeLabel={t("Close settings")}
@@ -6582,7 +6604,13 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
     }} onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) onClose(); }}>
     <div className="settings-dialog-body">
-      <nav className="settings-dialog-navigation" aria-label={t("Settings pages")} ref={navigation} data-searching={counts !== null || undefined}>
+      <nav className="settings-dialog-navigation" aria-label={t("Settings pages")} ref={navigation} data-searching={counts !== null || undefined} data-fleet={inFleet || undefined}>
+        <div className="settings-mode" role="tablist" aria-label={t("Settings")}>
+          <button type="button" role="tab" aria-selected={!inFleet} data-settings-mode="general" onClick={() => { if (inFleet) onSection(lastPage.current.general); }}>
+            <AppIcon name="settings" size={15} /><span>{t("General")}</span></button>
+          <button type="button" role="tab" aria-selected={inFleet} data-settings-mode="fleet" onClick={() => { if (!inFleet) onSection(lastPage.current.fleet); }}>
+            <AppIcon name="fleet" size={15} /><span>{t("Fleet")}</span></button>
+        </div>
         <div className="settings-search-bar"><InputGroup inputRef={searchField} className="settings-search-field" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />}
           placeholder={t("Search settings")} aria-label={t("Search settings")} value={search.query} onValueChange={search.onQuery}
           onKeyDown={event => {
@@ -6595,7 +6623,7 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
               if (first) { event.preventDefault(); first.focus(); }
             }
           }} /></div>
-        {settingsGroups.map(({ group, pages }) => group === "Spaces"
+        {settingsGroups.filter(({ group }) => showGroup(group)).map(({ group, pages }) => group === "Spaces"
           // Each space is a setup of its own: the group lists them after the overview and the labels, right after Personalization.
           ? <div key={group} className="settings-dialog-group settings-dialog-spaces">
             <h3>{t(group)}</h3>

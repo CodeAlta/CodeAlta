@@ -12,6 +12,7 @@ import { cardCommand, documentationCommand, onboardingSteps, readLandingCards, r
 import { landingPreferences, useLandingPreferences, type LandingPreferenceStore } from "./landingPreferences";
 import { landingCardsChangedEvent, type LandingProviders, type LandingShell } from "./landingShell";
 import { LandingAccent } from "./LandingAccent";
+import { LandingFleetCard } from "./LandingFleetCard";
 
 /** How long the page waits for more changes before it reads the cards again: a burst of invalidations is one read. */
 const settleMilliseconds = 60;
@@ -229,6 +230,8 @@ export function LandingCanvas({ shell, visible, dark, openCanvas, preferences = 
         </section>
 
         {cards.map(card => <PluginCard key={card.id} card={card} onAction={activate} onCommand={runCommand} />)}
+
+        <LandingFleetCard epoch={shell.epoch ?? null} visible={visible} />
 
         <section className="landing-card landing-explore" aria-label={t("Explore")}>
           <header className="landing-card-header"><AppIcon name="search" size={16} className="landing-card-icon" aria-hidden="true" /><h2>{t("Explore")}</h2></header>

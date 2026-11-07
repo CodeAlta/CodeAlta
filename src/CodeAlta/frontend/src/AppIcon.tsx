@@ -156,6 +156,10 @@ import {
   ClipboardCheck,
   Trophy,
   Crown,
+  CircleHelp,
+  Waypoints,
+  UsersRound,
+  CircleCheckBig,
 } from "lucide-react";
 
 const icons = {
@@ -319,6 +323,10 @@ const icons = {
   inherit: Layers,
   sandbox: Box,
   secret: KeyRound,
+  help: CircleHelp,
+  fleet: Waypoints,
+  people: UsersRound,
+  done: CircleCheckBig,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof icons;

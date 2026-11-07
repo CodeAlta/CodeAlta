@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Callout, Checkbox, Dialog, DialogBody, DialogFooter, NonIdealState, PopoverNext, Switch, Tag, TextArea } from "@blueprintjs/core";
-import { machines, type MachinePairPreview, type MachineView } from "#neoastra";
+import { Button, Callout, Checkbox, Dialog, DialogBody, DialogFooter, NonIdealState, Switch, Tag, TextArea } from "@blueprintjs/core";
+import { machines, type MachinePairPreview } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../SettingsPage";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
-import { machineIntent, machineState, machineStateLabel, orderedMachines, pairingLinkOf, pairingProblem, pairingWords, throughServer } from "./machines";
+import { pairingLinkOf, pairingProblem, pairingWords } from "./machines";
+import { MachineTable } from "./MachineTable";
+import { FleetHelp } from "../fleet/console/FleetHelp";
 import { MachinePage, type MachinePageApi } from "./MachinePage";
-import { managesMachine } from "./machineManagement";
 import { AddMachineDialog, type AddMachineApi } from "./AddMachineDialog";
 import { ThisComputerSection, type ThisComputerApi } from "./ThisComputer";
 
@@ -54,60 +55,30 @@ export function MachinesSettings({ epoch, api = machines, initialMachine = null 
   const openedMachine = opened ? listing?.machines.find(machine => machine.id === opened) : undefined;
   if (openedMachine && epoch) return <MachinePage epoch={epoch} machine={openedMachine} api={{ ...machines, ...api } as MachinePageApi} onBack={() => setOpened(null)} />;
   return <SettingsPage className="machines-settings" label={t("Machines")} group="Fleet" title="Machines"
-    description="The computers that run sessions for this one: paired with it, or added through your server. Their sessions are listed and driven from here."
+    description="The computers that run sessions for this one."
     notice={notice} loading={loading} busy={busy} onReload={reload}
-    actions={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch || !listing} onClick={() => setAdding(true)}>{t("Add a machine…")}</Button>}>
-    {epoch && <ThisComputerSection epoch={epoch} api={thisComputerApi} generation={changes} />}
+    actions={<>
+      <FleetHelp text="A machine is another computer of yours that runs sessions for this one: paired with it from a link, set up over SSH, or reached through your server." page="fleet/machines.md" />
+      <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch || !listing} onClick={() => setAdding(true)}>{t("Add a machine…")}</Button>
+    </>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="remote" title="Machines unavailable" />
       : listing.machines.length === 0 ? <NonIdealState className="machines-empty" icon={<AppIcon name="remote" size={36} />} title={t("No machine yet.")}
         description={t("Another computer of yours can run sessions for you: another CodeAlta Desktop, a Mac mini that stays on, a build machine, a cloud server. Pair with a CodeAlta Desktop or a CodeAlta Node from its link, or let CodeAlta install CodeAlta Node over SSH.")}
         action={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch} onClick={() => setAdding(true)}>{t("Add a machine…")}</Button>} />
-      : <><ul className="machine-list" aria-label={t("Machines")}>
-        {orderedMachines(listing.machines).map(machine => <MachineRow key={machine.id} machine={machine} busy={busy}
-          onOpen={() => setOpened(machine.id)} onForget={() => void mutate(async () => api.forget({ expectedEpoch: epoch ?? "", machineId: machine.id }, { timeoutMilliseconds: 30_000 }))} />)}
-      </ul>
+      : <><MachineTable machines={listing.machines} busy={busy} onOpen={id => setOpened(id)}
+        onForget={machine => void mutate(async () => api.forget({ expectedEpoch: epoch ?? "", machineId: machine.id }, { timeoutMilliseconds: 30_000 }))} />
       {receive !== null && <div className="machine-receive">
         <Switch checked={receive} disabled={busy} label={t("Receive moved sessions on this computer")}
           onChange={event => { const enabled = event.currentTarget.checked; void api.setReceiveMoves({ expectedEpoch: epoch ?? "", enabled })
             .then(value => { if (value.status === "ok") setReceive(value.receiveMoves); }, () => { }); }} />
         <small className="muted-text">{t("Sessions your paired machines move here then run on this computer.")}</small>
       </div>}</>}
+    {/* What this computer lets the others do comes after the machines it reaches: it is set once. */}
+    {epoch && <ThisComputerSection epoch={epoch} api={thisComputerApi} generation={changes} />}
     {pairing && epoch && <PairMachineDialog epoch={epoch} api={api} guide onClose={paired => { setPairing(false); if (paired) reload(); }} />}
     {adding && epoch && <AddMachineDialog epoch={epoch} api={{ ...machines, ...api } as AddMachineApi} onPairLink={() => { setAdding(false); setPairing(true); }}
       onClose={added => { setAdding(false); if (added) reload(); }} onOpen={machineId => { setAdding(false); reload(); setOpened(machineId); }} />}
   </SettingsPage>;
-}
-
-/** One paired machine: its name, state and what it runs, the start of its key, its page, and Forget. */
-export function MachineRow({ machine, busy, onOpen, onForget }: { machine: MachineView; busy: boolean; onOpen?: () => void; onForget: () => void }) {
-  const { t } = useShellLanguage();
-  const state = machineState(machine);
-  const details = [machine.os, machine.version && `CodeAlta ${machine.version}`, machine.address,
-    t(machine.sessions === 1 ? "{count} session" : "{count} sessions", { count: machine.sessions })].filter(Boolean).join(" · ");
-  return <li className="machine-row" data-state={state}>
-    <span className="machine-icon"><AppIcon name="remote" size={18} /></span>
-    <div className="machine-main">
-      <div className="machine-title">{onOpen ? <button type="button" className="machine-open" onClick={onOpen} title={t("Open the page of {name}", { name: machine.name })}><strong>{machine.name}</strong></button>
-        : <strong>{machine.name}</strong>}
-        <Tag minimal round intent={machineIntent(state)} className="machine-state">{t(machineStateLabel(state))}</Tag>
-        {managesMachine(machine) && <Tag minimal round icon={<AppIcon name="shield" size={11} />} className="machine-manages">{t("Managed from here")}</Tag>}
-        {throughServer(machine) && <Tag minimal round icon={<AppIcon name="server" size={11} />} className="machine-through-server"
-          title={t("Through the server, encrypted from end to end")}>{t("Through your server")}</Tag>}</div>
-      <div className="machine-details muted-text">{details}</div>
-      {machine.problem && state !== "online" && <div className="machine-problem muted-text" title={machine.problem}>{machine.problem}</div>}
-    </div>
-    <code className="machine-fingerprint" title={machine.words}>{machine.fingerprint}</code>
-    {onOpen && <Button variant="minimal" size="small" icon={<AppIcon name="chevronRight" size={15} />} aria-label={t("Open the page of {name}", { name: machine.name })}
-      title={t("Open the page of {name}", { name: machine.name })} onClick={onOpen} />}
-    {/* A machine of the server is not paired here: nothing to forget; leaving the server, or removing it there, takes it away. */}
-    {!throughServer(machine) && <PopoverNext placement="left" content={<div className="machine-forget">
-      <p>{t("Forget {name}?", { name: machine.name })}</p>
-      <p className="muted-text">{t("Its sessions are no longer shown here; they go on on the machine.")}</p>
-      <Button className="bp6-popover-dismiss" intent="danger" disabled={busy} onClick={onForget}>{t("Forget")}</Button></div>}>
-      <Button variant="minimal" size="small" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={busy}
-        aria-label={`${t("Forget")} ${machine.name}`} title={t("Forget")} />
-    </PopoverNext>}
-  </li>;
 }
 
 /**

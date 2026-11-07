@@ -61,6 +61,7 @@ import { startPromptMessages } from "./startPrompts/messages";
 import { machineMessages } from "./machines/messages";
 import { machineManageMessages } from "./machines/manageMessages";
 import { machineSignInMessages } from "./machines/signInMessages";
+import { fleetConsoleMessages } from "./fleet/console/messages";
 import { addMachineMessages } from "./machines/addMachineMessages";
 import { createServerMessages } from "./fleet/createServerMessages";
 import { secretMessages } from "./secrets/messages";
@@ -2976,6 +2977,7 @@ export const messages = dictionary({
   ...machineMessages,
   ...machineManageMessages,
   ...machineSignInMessages,
+  ...fleetConsoleMessages,
   ...addMachineMessages,
   ...createServerMessages,
   ...secretMessages,

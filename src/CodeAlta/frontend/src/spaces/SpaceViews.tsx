@@ -110,16 +110,19 @@ export function SpaceSwitch({ spaces, shownId, activity, canEdit, request, onSho
  * shown marked, with what its sessions are doing. A space where a session waits for the user or failed is also
  * named in a line, which shows that space and opens that session. A click on an icon shows its space.
  */
-export function SpaceActivityBar({ spaces, shownId, activity, calls, onShow, onOpen }: {
+export function SpaceActivityBar({ spaces, shownId, activity, calls, onShow, onOpen, fleet = null }: {
   spaces: readonly Space[]; shownId: string; activity: ReadonlyMap<string, SpaceActivity>;
   /** The sessions that need the user in the spaces that are not shown. */
   calls: readonly SpaceCall[];
   onShow: (id: string) => void;
   /** Shows a space and opens one of its sessions. */
   onOpen: (spaceId: string, session: Readonly<{ sessionId: string; projectId: string | null }>) => void;
+  /** The way to Fleet at the end of the bar, with how its machines stand; null for a window without it. */
+  fleet?: Readonly<{ machines: number; online: number; onOpen: () => void }> | null;
 }) {
   const { t } = useShellLanguage();
-  if (spaces.length < 2) return null;
+  if (spaces.length < 2 && !fleet) return null;
+  const fleetLabel = fleet ? fleet.machines > 0 ? t("Fleet: {online} of {count} machines online", { online: fleet.online, count: fleet.machines }) : t("Fleet") : "";
   return <footer className="space-bar" aria-label={t("Spaces")}>
     {calls.slice(0, 3).map(call => <button type="button" key={call.space.id} className="space-call" data-kind={call.waiting ? "waiting" : "failed"}
       title={t(call.waiting ? "{title} waits for you in {space}" : "{title} failed in {space}", { title: call.title || t("A session"), space: call.space.name })}
@@ -128,7 +131,7 @@ export function SpaceActivityBar({ spaces, shownId, activity, calls, onShow, onO
       <span className="space-call-title">{call.title || t("A session")}</span>
     </button>)}
     <div className="space-chips" role="toolbar" aria-label={t("Show a space")}>
-      {spaces.map(space => {
+      {spaces.length > 1 && spaces.map(space => {
         const doing = activity.get(space.id);
         const words = activityText(t, doing);
         const state = !doing || spaceQuiet(doing) ? undefined : doing.waiting ? "waiting" : doing.failed ? "failed" : doing.running ? "running" : "background";
@@ -138,6 +141,11 @@ export function SpaceActivityBar({ spaces, shownId, activity, calls, onShow, onO
           {state && <span className="space-chip-mark" aria-hidden="true">{state === "running" ? <ActivitySpinner size={9} /> : null}</span>}
         </button>;
       })}
+      {fleet && <button type="button" className="space-chip space-bar-fleet" aria-label={fleetLabel} title={fleetLabel} onClick={fleet.onOpen}
+        data-activity={fleet.machines > 0 && fleet.online < fleet.machines ? "background" : undefined}>
+        <AppIcon name="fleet" size={15} />
+        {fleet.machines > 0 && <span className="space-bar-fleet-count">{fleet.online}</span>}
+      </button>}
     </div>
   </footer>;
 }

@@ -3,7 +3,7 @@ import test from "node:test";
 import { edge, withCanvas } from "../../statistics/browserHarness";
 
 const options = { entry: "../fleet/access/fleetAccess.mount.tsx", fixture: "fleetAccessFixture", rpcFixture: "../demo-api.ts",
-  styles: ["../secrets/secrets.css", "../fleet/fleet.css", "../fleet/fleetSecrets.css", "../fleet/access/fleetAccess.css"], width: 1300, height: 1000, reducedMotion: true } as const;
+  styles: ["../secrets/secrets.css", "../fleet/fleet.css", "../fleet/fleetSecrets.css", "../fleet/access/fleetAccess.css", "../fleet/console/fleetConsole.css"], width: 1300, height: 1000, reducedMotion: true } as const;
 // Types in an input as the user does: React reads the input event.
 const type = (selector: string, value: string) => `(() => { const input = document.querySelector(${JSON.stringify(selector)});
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Callout, Card, Checkbox, HTMLSelect, InputGroup, NonIdealState, PopoverNext, Switch, Tag } from "@blueprintjs/core";
 import { fleetServer, type FleetAccessOverview, type FleetAccessOwnerView, type FleetAccessPersonView, type FleetAccessTeamView, type FleetServerView } from "#neoastra";
 import { AppIcon } from "../../AppIcon";
@@ -8,6 +8,9 @@ import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../../Sett
 import { useShellLanguage } from "../../shellLanguage";
 import type { MessageKey } from "../../localization";
 import { serverProblem } from "../fleetServer";
+import { DataTable, type DataColumn } from "../console/DataTable";
+import { FilterBar, type FilterFacet } from "../console/FilterBar";
+import { facetCounts, filterRows, type Facet, type FacetValues, type TableSort } from "../console/tableRows";
 import { onCallSummary, shiftChoices } from "./access";
 import { assignableRoles, attention, attentionCount, canManagePerson, grantCapabilities, isAdvanced, isContentCapability, managesAccess, nameOf, ownerTargets, parseTarget,
   proposalDetail, providerId, providerTypes, roleHints, roleLabels } from "./access";
@@ -186,10 +189,82 @@ function People({ context }: { context: Context }) {
         onClick={() => setInviting(true)} />}
     </div>
     {inviting && <Invite context={context} onClose={() => setInviting(false)} />}
-    <ul className="secret-list" aria-label={t("People")}>
-      {overview.people.map(person => <PersonRow key={person.id} context={context} person={person} />)}
-    </ul>
+    <PeopleTable context={context} />
   </Card>;
+}
+
+/** Whether a person is in, invited and not joined yet, or suspended. */
+function personStatus(person: FleetAccessPersonView): "active" | "invited" | "suspended" {
+  return person.status === "suspended" ? "suspended" : !person.joined ? "invited" : "active";
+}
+
+const personStatusLabels: Readonly<Record<ReturnType<typeof personStatus>, MessageKey>> = { active: "Active", invited: "Invited", suspended: "Suspended" };
+
+/**
+ * The people of the organization as a table that scales: filtered by role, team and status, sorted by any column; a row
+ * opens their teams in place. Their role is changed in its cell, and their removal is at the end of the row.
+ */
+function PeopleTable({ context }: { context: Context }) {
+  const { t } = useShellLanguage();
+  const { overview } = context;
+  const [query, setQuery] = useState("");
+  const [values, setValues] = useState<FacetValues>({});
+  const [sort, setSort] = useState<TableSort | null>({ column: "name", direction: "asc" });
+  const [selected, setSelected] = useState<string | null>(null);
+  const facets = useMemo<Facet<FleetAccessPersonView>[]>(() => [
+    { id: "role", values: person => [person.role] },
+    { id: "team", values: person => person.teams.map(team => team.teamName) },
+    { id: "status", values: person => [personStatus(person)] },
+  ], []);
+  const shown = useMemo(() => filterRows(overview.people, facets, values, query,
+    person => [person.name, t(roleLabels[person.role] ?? "Member"), ...person.teams.map(team => team.teamName)].join(" ")), [overview.people, facets, values, query, t]);
+  const options = (id: string, label: (value: string) => string): FilterFacet["options"] =>
+    [...facetCounts(overview.people, facets.find(facet => facet.id === id)!)].map(([value, count]) => ({ value, label: label(value), count }));
+  const filters: FilterFacet[] = [
+    { id: "role", label: "Role", icon: "shield", options: options("role", value => t(roleLabels[value] ?? "Member")) },
+    { id: "team", label: "Team", icon: "people", options: options("team", value => value) },
+    { id: "status", label: "Status", icon: "issueOpen", options: options("status", value => t(personStatusLabels[value as ReturnType<typeof personStatus>])) },
+  ];
+  const columns: DataColumn<FleetAccessPersonView>[] = [
+    { id: "name", label: "Person", sort: person => person.name, cell: person => <span className="fleet-person-name">
+      <AppIcon name="user" size={14} /><strong title={person.name}>{person.name}</strong>
+      <span className="fleet-secret-tags">
+        {person.isMe && <Tag minimal intent="primary">{t("You")}</Tag>}
+        {!person.joined && person.status === "active" && <Tag minimal intent="warning">{t("Invited")}</Tag>}
+        {person.status === "suspended" && <Tag minimal intent="danger">{t("Suspended")}</Tag>}
+      </span></span> },
+    { id: "role", label: "Role", width: "11rem", sort: person => t(roleLabels[person.role] ?? "Member"), cell: person => <PersonRole context={context} person={person} /> },
+    { id: "teams", label: "Teams", secondary: true, sort: person => person.teams.map(team => team.teamName).join(", ") || null,
+      cell: person => person.teams.length ? person.teams.map(team => team.teamName).join(", ") : <span className="muted-text">—</span> },
+    { id: "actions", label: "Actions", width: "3.5rem", align: "end", hiddenLabel: true, cell: person => <PersonRemoval context={context} person={person} /> },
+  ];
+  return <section className="fleet-table-section" aria-label={t("People")}>
+    <FilterBar label={t("Filter the people")} query={query} onQuery={setQuery} facets={filters} values={values} onValues={setValues} shown={shown.length} total={overview.people.length} />
+    <DataTable label={t("People")} rows={shown} columns={columns} rowKey={person => person.id} sort={sort} onSort={setSort} selected={selected} onSelect={setSelected}
+      rowState={person => person.status === "suspended" ? "unauthorized" : !person.joined ? "connecting" : undefined}
+      rowProps={person => ({ className: "fleet-access-person", data: { person: person.name, status: person.status } })}
+      empty={<span className="muted-text">{t("No person matches these filters.")}</span>}
+      details={person => <div className="fleet-person-details">
+        <dl>
+          <div><dt>{t("Role")}</dt><dd>{t(roleLabels[person.role] ?? "Member")}<span className="muted-text"> · {t(roleHints[person.role] ?? "Member")}</span></dd></div>
+          <div><dt>{t("Teams")}</dt><dd>{person.teams.length ? person.teams.map(team => <Tag key={team.teamName} minimal round>
+            {team.teamName}{team.role === "maintainer" ? ` · ${t("maintainer")}` : ""}</Tag>) : <span className="muted-text">{t("No team")}</span>}</dd></div>
+          <div><dt>{t("Status")}</dt><dd>{t(personStatusLabels[personStatus(person)])}</dd></div>
+        </dl>
+      </div>} />
+  </section>;
+}
+
+/** The role of a person: a choice for whom may change it, else its name. */
+function PersonRole({ context, person }: { context: Context; person: FleetAccessPersonView }) {
+  const { t } = useShellLanguage();
+  const { overview, api, epoch, linkId, busy, run } = context;
+  const roles = assignableRoles(overview);
+  return <span className="fleet-secret-tags">{canManagePerson(overview, person) && roles.includes(person.role)
+    ? <HTMLSelect minimal value={person.role} disabled={busy} aria-label={t("Role of {name}", { name: person.name })}
+      onChange={event => { const role = event.target.value; void run(() => api.setPersonRole({ expectedEpoch: epoch, linkId, personId: person.id, role }, call)); }}
+      options={roles.map(value => ({ value, label: t(roleLabels[value]) }))} />
+    : <Tag minimal>{t(roleLabels[person.role] ?? "Member")}</Tag>}</span>;
 }
 
 /** The form of an invitation, then the code and the address the person joins with. */
@@ -234,28 +309,14 @@ function Invite({ context, onClose }: { context: Context; onClose: () => void })
   </form>;
 }
 
-/** One person: their name, role, status and teams; their role changed, or their removal from the organization. */
-function PersonRow({ context, person }: { context: Context; person: FleetAccessPersonView }) {
+/** The removal of a person from the organization, for whom may do it: what they owned goes to the one chosen. */
+function PersonRemoval({ context, person }: { context: Context; person: FleetAccessPersonView }) {
   const { t } = useShellLanguage();
   const { overview, api, epoch, linkId, busy, run } = context;
   const [removing, setRemoving] = useState(false);
   const [successor, setSuccessor] = useState("organization:");
   const manage = canManagePerson(overview, person);
-  const roles = assignableRoles(overview);
-  return <li className="secret-row fleet-access-row fleet-access-person" data-person={person.name} data-status={person.status}>
-    <span className="secret-name"><code title={person.name}>{person.name}</code>
-      <span className="secret-reference">{person.teams.map(team => `${team.teamName}${team.role === "maintainer" ? ` (${t("maintainer")})` : ""}`).join(", ")}</span></span>
-    <span className="fleet-secret-tags">
-      {person.isMe && <Tag minimal intent="primary">{t("You")}</Tag>}
-      {!person.joined && person.status === "active" && <Tag minimal intent="warning">{t("Invited")}</Tag>}
-      {person.status === "suspended" && <Tag minimal intent="danger">{t("Suspended")}</Tag>}
-      {manage && roles.includes(person.role)
-        ? <HTMLSelect minimal value={person.role} disabled={busy} aria-label={t("Role of {name}", { name: person.name })}
-          onChange={event => { const role = event.target.value; void run(() => api.setPersonRole({ expectedEpoch: epoch, linkId, personId: person.id, role }, call)); }}
-          options={roles.map(value => ({ value, label: t(roleLabels[value]) }))} />
-        : <Tag minimal>{t(roleLabels[person.role] ?? "Member")}</Tag>}
-    </span>
-    <span className="secret-actions">
+  return <span className="secret-actions">
       {manage && <span className="secret-delete">
         <Button size="small" variant="minimal" intent="danger" icon={<AppIcon name="trash" size={14} />} aria-label={t("Remove {name} from the organization", { name: person.name })}
           disabled={busy} onClick={() => setRemoving(true)} />
@@ -273,8 +334,7 @@ function PersonRow({ context, person }: { context: Context; person: FleetAccessP
           }} />
         </div>}><span /></PopoverNext>}
       </span>}
-    </span>
-  </li>;
+    </span>;
 }
 
 /** The teams: their members and roles, their machines, whether they run the automations of their members. */

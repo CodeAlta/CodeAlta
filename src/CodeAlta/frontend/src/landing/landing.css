@@ -72,3 +72,11 @@
   .landing-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (forced-colors: active) { .landing-pixels { display: none; } }
+
+/* Fleet: its machines and its server at a glance, and the way to its Overview. */
+.landing-fleet .landing-fleet-icon { color: var(--fleet-violet, var(--accent)); }
+.landing-fleet-glance { display: grid; gap: 6px; font-size: 13px; }
+.landing-fleet-glance strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.landing-fleet-server { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.landing-fleet-server > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.landing-fleet .landing-fleet-open { align-self: flex-start; margin-top: auto; }

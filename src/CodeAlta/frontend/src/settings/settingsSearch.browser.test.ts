@@ -69,7 +69,7 @@ test("Settings search shows editable results, opens a setting with a glow, and C
     // Every row with a control on these pages names a setting the catalog knows.
     const known = JSON.stringify(builtInSettings.map(entry => entry.id));
     for (const pageName of ["Appearance", "General", "Permissions", "Sessions"]) {
-      await evaluate(`[...document.querySelectorAll('.settings-dialog-navigation button')].find(button=>button.textContent===${JSON.stringify(pageName)}).click()`);
+      await evaluate(`[...document.querySelectorAll('.settings-dialog-navigation button[data-settings-section]')].find(button=>button.textContent===${JSON.stringify(pageName)}).click()`);
       await until(`document.querySelector('.settings-dialog-content h1')?.textContent===${JSON.stringify(pageName)}`);
       const untagged = await evaluate(`(()=>{const known=new Set(${known});return [...document.querySelectorAll('.settings-dialog-content .settings-field')]
         .filter(field=>field.querySelector('input,select,button'))

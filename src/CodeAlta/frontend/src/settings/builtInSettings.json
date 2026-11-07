@@ -26,6 +26,7 @@
       { "id": "plugins", "label": "Plugins", "icon": "plugin", "keywords": ["plugin", "extension", "enable"] },
       { "id": "mcp", "label": "MCP Servers", "icon": "server", "keywords": ["mcp", "server", "tools"] } ] },
     { "group": "Fleet", "pages": [
+      { "id": "fleet", "label": "Overview", "icon": "fleet", "keywords": ["fleet", "overview", "start", "onboarding", "organization", "attention", "spaces"] },
       { "id": "machines", "label": "Machines", "icon": "remote", "keywords": ["machine", "pair", "altanode", "node", "remote", "fleet"] },
       { "id": "fleetServer", "label": "Server", "icon": "server", "keywords": ["server", "altaserver", "organization", "enrollment", "approve", "join", "fleet"] },
       { "id": "fleetSecrets", "label": "Secrets and environments", "icon": "secret", "keywords": ["secret", "variable", "environment", "approval", "rotate", "token", "fleet"] },

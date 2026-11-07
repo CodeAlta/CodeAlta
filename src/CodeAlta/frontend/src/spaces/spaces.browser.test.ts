@@ -90,7 +90,8 @@ test("the window shows one space at a time: its projects, its sessions and its o
     assert.equal(await wait("localStorage.getItem('codealta.desktop.space.showOthers.v1')==='true'"), true);
     assert.equal(await wait("document.querySelectorAll('#project-list .project-action-row > button:first-child').length===2"), true);
     assert.deepEqual(await projects(), ["Other project", "Project"]);
-    assert.equal(await evaluate("document.querySelectorAll('.space-chip').length"), 2);
+    assert.equal(await evaluate("document.querySelectorAll('.space-chip:not(.space-bar-fleet)').length"), 2);
+    assert.equal(await evaluate("document.querySelectorAll('.space-bar-fleet').length"), 1, "Fleet, at the end of the bar of the spaces");
     assert.equal(await wait("spacesFixture.shown.includes('default')"), true, "The host is told which space the window shows.");
     assert.equal(await wait("[...document.querySelectorAll('.flexlayout__tab_button')].some(tab=>tab.textContent.includes('one'))"), true);
     const defaultTabs = await tabs() as string[];
