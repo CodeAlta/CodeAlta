@@ -284,6 +284,52 @@ public sealed partial class LocalSecretStore : ISecretLookup
         return values;
     }
 
+    /// <summary>
+    /// Moves the key of the store from the Keychain or libsecret into a file only the user can read, for a service that
+    /// runs without a login session (a LaunchDaemon, a system unit, a lingering user unit), where neither answers. The
+    /// values keep their key: nothing is protected again. Run as the user, where the Keychain or libsecret answers.
+    /// </summary>
+    /// <returns>The protection the key left; null when the store had none, or a key file or DPAPI already.</returns>
+    /// <exception cref="SecretStoreUnavailableException">The key cannot be read where it is, or written to its file.</exception>
+    public string? UseKeyFile() => UseKeyFile(KeyStoreOf);
+
+    internal string? UseKeyFile(Func<string, ISecretKeyStore> keyStoreOf)
+    {
+        ArgumentNullException.ThrowIfNull(keyStoreOf);
+        string? moved = null;
+        Change(document =>
+        {
+            if (document.Protection is not { } kind || kind is not (SecretProtectionKinds.Keychain or SecretProtectionKinds.Libsecret)) return false;
+            var key = keyStoreOf(kind).Load()
+                ?? throw new SecretStoreUnavailableException($"The key of the secrets of this machine is missing from its {MasterKeySecretProtector.Describe(kind)}.");
+            try
+            {
+                // The file first: the store names it only once it holds the key.
+                KeyStoreOf(SecretProtectionKinds.File).Save(key);
+            }
+            finally
+            {
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(key);
+            }
+
+            document.Protection = SecretProtectionKinds.File;
+            moved = kind;
+            return true;
+        });
+        if (moved is null) return null;
+        _protector = null;
+        try
+        {
+            keyStoreOf(moved).Delete();
+        }
+        catch (Exception exception) when (exception is SecretStoreUnavailableException or IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // A copy left there protects nothing the store still names.
+        }
+
+        return moved;
+    }
+
     /// <summary>Removes the store: its file, and the key of its protection.</summary>
     public void Delete()
     {

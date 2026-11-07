@@ -209,6 +209,46 @@ public sealed class LocalSecretStoreTests
         Assert.IsFalse(Directory.Exists(store.FolderPath));
     }
 
+    // A node started at boot (a LaunchDaemon, a lingering unit) has no login session: the key leaves the Keychain for a file.
+    [TestMethod]
+    public void UseKeyFile_MovesTheKeyOfTheKeychainIntoAFile_AndTheValuesStayReadable()
+    {
+        using var root = new TempRoot();
+        var keychain = new MemoryKeyStore(SecretProtectionKinds.Keychain);
+        var store = new LocalSecretStore(root.Path, new MasterKeySecretProtector(keychain));
+        store.SetSecret("TOKEN", Value, "a");
+        Assert.AreEqual(SecretProtectionKinds.Keychain, store.Protection);
+
+        Assert.AreEqual(SecretProtectionKinds.Keychain, store.UseKeyFile(_ => keychain));
+        Assert.AreEqual(SecretProtectionKinds.File, new LocalSecretStore(root.Path).Protection);
+        Assert.IsNull(keychain.Key, "the key leaves the Keychain");
+        Assert.IsTrue(new LocalSecretStore(root.Path).TryGetSecret("TOKEN", out var value), "read back without the Keychain");
+        Assert.AreEqual(Value, value);
+        AssertNowhereInClear(root.Path);
+        Assert.IsNull(new LocalSecretStore(root.Path).UseKeyFile(), "a key file already: nothing moves");
+
+        // A key the Keychain does not give (locked over SSH) moves nothing.
+        using var other = new TempRoot();
+        var locked = new MemoryKeyStore(SecretProtectionKinds.Libsecret);
+        new LocalSecretStore(other.Path, new MasterKeySecretProtector(locked)).SetSecret("TOKEN", Value, "a");
+        locked.Key = null;
+        Assert.ThrowsExactly<SecretStoreUnavailableException>(() => new LocalSecretStore(other.Path).UseKeyFile(_ => locked));
+        Assert.AreEqual(SecretProtectionKinds.Libsecret, new LocalSecretStore(other.Path).Protection);
+    }
+
+    private sealed class MemoryKeyStore(string kind) : ISecretKeyStore
+    {
+        public byte[]? Key { get; set; }
+
+        public string Kind => kind;
+
+        public byte[]? Load() => Key?.ToArray();
+
+        public void Save(byte[] key) => Key = key.ToArray();
+
+        public void Delete() => Key = null;
+    }
+
     private static LocalSecretStore FileStore(string root)
         => new(root, new MasterKeySecretProtector(new FileSecretKeyStore(Path.Combine(root, "secrets", "key"))));
 

@@ -69,6 +69,12 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
                     .ConfigureAwait(false);
             }
 
+            if (KeyInALoginSession(plan, options.Run.Profile.DataRoot is not null ? profile.GlobalRoot : Path.Combine(plan.Spec.WorkingDirectory, ".alta")) is { } where)
+            {
+                await output.WriteLineAsync($"The secrets of this profile are kept with a key in the {where}, which a node started at boot cannot read: "
+                    + $"altanode secrets key-file, run as {plan.Spec.Account ?? Environment.UserName} without sudo, moves it into a file only that user reads.").ConfigureAwait(false);
+            }
+
             await output.WriteLineAsync("altanode status tells whether it runs; altanode logs shows its log.").ConfigureAwait(false);
         }
 
@@ -89,6 +95,28 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
         var code = manager.Uninstall(plan, output, error);
         if (code != NodeExitCodes.Success || !installed || !plan.LeavesProcessRunning) return code;
         return await StopNodeAsync(options.Run.Profile.Resolve(out _)!).ConfigureAwait(false);
+    }
+
+    // Where the key of the secrets of a profile is kept when a node that runs without a login session cannot read it: the
+    // Keychain for a LaunchDaemon, libsecret for a unit of Linux (the keyring of a desktop session); null otherwise.
+    internal static string? KeyInALoginSession(ServicePlan plan, string globalRoot)
+    {
+        string? protection;
+        try
+        {
+            protection = new CodeAlta.Catalog.Secrets.LocalSecretStore(globalRoot, null).Protection;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return null;
+        }
+
+        return (plan.Platform, plan.Spec.Scope, protection) switch
+        {
+            (ServicePlatform.MacOS, ServiceScope.System, CodeAlta.Catalog.Secrets.SecretProtectionKinds.Keychain) => "Keychain",
+            (ServicePlatform.Linux, _, CodeAlta.Catalog.Secrets.SecretProtectionKinds.Libsecret) => "keyring (libsecret)",
+            _ => null,
+        };
     }
 
     /// <summary>How long <c>uninstall</c> waits for the node to drain its turns and release the profile.</summary>

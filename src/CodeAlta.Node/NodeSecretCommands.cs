@@ -62,6 +62,10 @@ internal sealed class NodeSecretCommands(TextWriter output, TextWriter error, Te
                     return NodeExitCodes.Success;
                 case "delete-var" when arguments.Count == 1:
                     return await DeleteAsync(store.DeleteVariable(arguments[0]), $"variable {arguments[0]}").ConfigureAwait(false);
+                case "key-file" when arguments.Count == 0:
+                    return await KeyFileAsync(store).ConfigureAwait(false);
+                case "key-file":
+                    return await UsageAsync("secrets key-file takes no argument.").ConfigureAwait(false);
                 case "list" or "set" or "rotate" or "delete" or "set-var" or "delete-var":
                     return await UsageAsync(command switch
                     {
@@ -70,7 +74,7 @@ internal sealed class NodeSecretCommands(TextWriter output, TextWriter error, Te
                         _ => $"secrets {command} takes a name.",
                     }).ConfigureAwait(false);
                 default:
-                    return await UsageAsync($"'{command}' is not a command of secrets: list, set, rotate, delete, set-var or delete-var.").ConfigureAwait(false);
+                    return await UsageAsync($"'{command}' is not a command of secrets: list, set, rotate, delete, set-var, delete-var or key-file.").ConfigureAwait(false);
             }
         }
         catch (ArgumentException exception)
@@ -147,6 +151,20 @@ internal sealed class NodeSecretCommands(TextWriter output, TextWriter error, Te
         await output.WriteLineAsync($"Secret {secret.Name} is set (version {secret.Version}).").ConfigureAwait(false);
         return NodeExitCodes.Success;
     }
+
+    // A node that a LaunchDaemon or a system unit starts has no login session, where the Keychain and libsecret answer:
+    // the key of its secrets moves into a file only this user reads, while they still answer.
+    private async Task<int> KeyFileAsync(LocalSecretStore store)
+    {
+        var moved = KeyFile is { } keyFile ? keyFile(store) : store.UseKeyFile();
+        await output.WriteLineAsync(moved is null
+            ? $"The secrets of this machine need no move: {(store.Protection is { } kind ? $"they are protected by {kind}" : "none is set")}."
+            : $"The key of the secrets of this machine moved from the {(moved == SecretProtectionKinds.Keychain ? "Keychain" : "keyring (libsecret)")} to a file only {Environment.UserName} reads: a node started at boot reads them.").ConfigureAwait(false);
+        return NodeExitCodes.Success;
+    }
+
+    /// <summary>Gets what moves the key of a store into a file, for tests; null for <see cref="LocalSecretStore.UseKeyFile()"/>.</summary>
+    public Func<LocalSecretStore, string?>? KeyFile { get; init; }
 
     private async Task<int> DeleteAsync(bool deleted, string what)
     {

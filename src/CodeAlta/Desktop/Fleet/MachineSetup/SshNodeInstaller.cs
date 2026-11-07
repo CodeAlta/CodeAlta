@@ -423,6 +423,9 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         var options = new StringBuilder(" --listen-all --port ").Append(port.ToString(CultureInfo.InvariantCulture)).Append(root);
         if (name is { Length: > 0 }) options.Append(" --name ").Append(Quote(name));
         var sudo = Sudo(facts, sudoPassword);
+        // A node started at boot has no login session, where the Keychain and libsecret answer: the key of its secrets
+        // moves into a file only the person reads, as them, while those still answer.
+        if (alwaysOn) script.Append("\"$TOOLS/altanode\" secrets key-file").Append(root).Append(" 1>&2 || true\n");
         if (alwaysOn && facts.Os == "Darwin")
         {
             // One service per profile: the LaunchAgent of the person goes, and the daemon runs their tool, with their .NET and PATH.

@@ -90,6 +90,18 @@ public sealed class NodeSecretCommandTests
     private static NodeSecretCommands Commands(TextWriter output, TextWriter error, string? input)
         => new(output, error, new StringReader(input ?? string.Empty)) { InputRedirected = true, SetBy = "tester (altanode)", Protector = FileProtector };
 
+    [TestMethod]
+    public async Task KeyFile_MovesNothingFromAKeyFile_AndTakesNoArgument()
+    {
+        using var root = new NodeTestRoot();
+        await RunAsync(root, Value + "\n", "set", "TOKEN");
+
+        var (code, output, _) = await RunAsync(root, null, "key-file");
+        Assert.AreEqual(NodeExitCodes.Success, code);
+        StringAssert.Contains(output, "need no move: they are protected by file");
+        Assert.AreEqual(NodeExitCodes.InvalidUsage, (await RunAsync(root, null, "key-file", "now")).Code);
+    }
+
     private static async Task<(int Code, string Output, string Error)> RunAsync(NodeTestRoot root, string? input, params string[] words)
     {
         var output = new StringWriter();
