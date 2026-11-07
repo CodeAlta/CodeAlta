@@ -62,7 +62,6 @@ export function activityLine(document: Document, facts: ActivityFacts, live: boo
   const headline = el(document, "span", "act-headline", facts.headline);
   if (facts.names) headline.append(el(document, "small", null, facts.names));
   if (facts.current) headline.append(el(document, "small", "act-current", facts.current));
-  line.append(headline);
   const all = el(document, "span", "act-facts");
   const fact = (name: IconName, value: string | number, label: string, className?: string) => {
     const item = el(document, "span", className);
@@ -77,6 +76,6 @@ export function activityLine(document: Document, facts: ActivityFacts, live: boo
   const start = Date.parse(facts.startedAt ?? ""), end = Date.parse(facts.endedAt ?? "");
   const duration = Number.isFinite(start) ? activityDuration((live ? Math.max(now, Number.isFinite(end) ? end : 0) : end) - start) : null;
   if (duration) fact("timer", duration, "Duration", "dur");
-  line.append(all);
+  line.append(all, headline);
   return line;
 }
