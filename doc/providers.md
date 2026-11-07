@@ -179,6 +179,10 @@ conditions Anthropic sets for running Claude Code from another product. So:
   turns, only its cloud state, and the runtime refuses to attach it to its provider (`in_cloud`). Bringing it back is
   reserved in the journal first, then the teleported transcript is read by the catch-up reader (origin `Cloud`, cut
   at Claude Code's continuation entry) and written in one append.
+- **A turn of no session** (a side question, `IAgentProviderStandaloneTurns`) runs in a CLI process of its own that
+  ends with it (`ClaudeCodeStandaloneTurn`): no transcript (`--no-session-persistence`), no tool (`--tools ""`, no MCP
+  server, `--strict-mcp-config`), no hook, skill, memory or `CLAUDE.md`, its own system prompt; every permission
+  request is refused, and a stop interrupts the request and ends the process.
 - **Fork and rewind** start the CLI on the conversation of the point (`--resume`, `--fork-session`,
   `--resume-session-at <entry>`), so its prompt cache is still read.
 - **The stream is open-ended**: unknown lines and messages are skipped, unhandled control requests answered with an

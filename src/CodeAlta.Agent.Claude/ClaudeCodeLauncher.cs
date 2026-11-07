@@ -372,6 +372,16 @@ internal static class ClaudeCodeLauncher
             _ => null,
         };
 
+    /// <summary>
+    /// The effort level of the CLI for a turn: an effort is only given to a model the CLI lists it for; a model it does
+    /// not list is given what was asked.
+    /// </summary>
+    public static string? ToEffort(AgentTurnRequest request)
+        => request.ModelInfo is { } modelInfo &&
+           (request.ReasoningEffort is not { } requested || modelInfo.SupportedReasoningEfforts?.Contains(requested) != true)
+            ? null
+            : ToEffort(request.ReasoningEffort);
+
     /// <summary>The model option of the CLI for a model of the catalog: the default model takes none.</summary>
     public static string? ToModelOption(string? modelId)
         => string.IsNullOrWhiteSpace(modelId) || string.Equals(modelId.Trim(), ClaudeCodeModelCatalog.DefaultModelId, StringComparison.OrdinalIgnoreCase)

@@ -876,6 +876,18 @@ internal sealed partial class ClaudeCodeSession
     {
         var rejected = _rejectedLimit;
         _rejectedLimit = null;
+        var apiError = _apiError;
+        _apiError = null;
+        return CreateFailure(_options, result, subtype, apiError, rejected, _processHost is not null && OperatingSystem.IsMacOS());
+    }
+
+    /// <summary>
+    /// Creates the failure of a turn the CLI ended with an error: the text of its result, else the API error it wrote as
+    /// an assistant text, with the kind of that error and the limit of the plan it rejected.
+    /// </summary>
+    internal static AgentProviderFailureException CreateFailure(ClaudeCodeModelProviderRuntimeOptions options, JsonElement result, string? subtype,
+        (string Kind, string Text)? apiErrorText, (string? Type, DateTimeOffset? ResetsAt)? rejected, bool sandboxedOnMacOS)
+    {
         var text = ClaudeCodeJson.GetString(result, "result");
         if (string.IsNullOrWhiteSpace(text) && ClaudeCodeJson.TryGetArray(result, "errors", out var errors))
         {
@@ -884,11 +896,10 @@ internal sealed partial class ClaudeCodeSession
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            text = _apiError?.Text;
+            text = apiErrorText?.Text;
         }
 
-        var apiError = _apiError?.Kind;
-        _apiError = null;
+        var apiError = apiErrorText?.Kind;
         if (string.IsNullOrWhiteSpace(text))
         {
             text = subtype switch
@@ -901,7 +912,7 @@ internal sealed partial class ClaudeCodeSession
 
         if (string.Equals(apiError, "authentication_failed", StringComparison.Ordinal))
         {
-            return new AgentProviderFailureException(SignedOutMessage(_options, _processHost is not null && OperatingSystem.IsMacOS(), text.Trim()),
+            return new AgentProviderFailureException(SignedOutMessage(options, sandboxedOnMacOS, text.Trim()),
                 new AgentFailureInfo(AgentFailureKind.Auth));
         }
 

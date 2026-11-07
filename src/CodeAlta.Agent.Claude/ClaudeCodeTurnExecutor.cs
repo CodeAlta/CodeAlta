@@ -23,6 +23,7 @@ internal sealed class ClaudeCodeTurnExecutor :
     IAgentProviderStateUpdates,
     IAgentProviderInstructionsChannel,
     IAgentProviderCloudSessions,
+    IAgentProviderStandaloneTurns,
     IAsyncDisposable
 {
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
@@ -79,6 +80,22 @@ internal sealed class ClaudeCodeTurnExecutor :
         }
 
         return GetSession(request.SessionId).ExecuteTurnAsync(request, onUpdate, onSessionUpdate, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs a turn that belongs to no session in a CLI process of its own, which ends with the turn: without tools,
+    /// MCP servers, hooks, skills, memory or transcript (<see cref="ClaudeCodeStandaloneTurn"/>).
+    /// </summary>
+    /// <inheritdoc />
+    public Task<AgentTurnResponse> ExecuteStandaloneTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(onUpdate);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        return ClaudeCodeStandaloneTurn.RunAsync(_options, OwnProcesses, request, onUpdate, cancellationToken);
     }
 
     /// <inheritdoc />
