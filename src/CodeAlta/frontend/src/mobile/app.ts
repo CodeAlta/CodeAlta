@@ -43,7 +43,7 @@ export function startMobile(window: Window & typeof globalThis) {
   const drafts = createDrafts(store);
   const sessions = createSessionStore();
   let signedOut = false;
-  const api = createApi({ fetch: (input, init) => window.fetch(input, init), store, onSignedOut: () => showSignedOut() });
+  const api = createApi({ fetch: (input, init) => window.fetch(input, init), store, onSignedOut: message => showSignedOut(message) });
   const host = window.location.host;
 
   // ---- Appearance: the theme and the text size, kept on the phone ----
@@ -102,7 +102,7 @@ export function startMobile(window: Window & typeof globalThis) {
   }
   function hideToast() { if (toast) window.clearTimeout(toast.timer); toast = null; toastElement.classList.remove("toast-in"); toastElement.hidden = true; }
 
-  function showSignedOut() {
+  function showSignedOut(message = signedOutMessage) {
     if (signedOut) return;
     signedOut = true;
     stream.stop();
@@ -111,7 +111,7 @@ export function startMobile(window: Window & typeof globalThis) {
     sessions.setFilter(sessions.filter);
     list.replaceChildren();
     moreButton.hidden = true;
-    note.textContent = signedOutMessage;
+    note.textContent = message;
     if (window.location.hash) window.location.hash = "#/";
   }
 

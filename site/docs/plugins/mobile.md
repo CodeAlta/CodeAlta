@@ -84,7 +84,7 @@ A [Dev Tunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/overview)
 1. Install the [Dev Tunnels command line](https://learn.microsoft.com/azure/developer/dev-tunnels/get-started) (`devtunnel`) on the computer, for example with `winget install Microsoft.devtunnel` on Windows or `brew install --cask devtunnel` on macOS.
 2. In **Settings > Extensions > Mobile**, choose **Dev Tunnels** under **Phones connect through**, then **Apply**.
 3. The first time, the Mobile tab asks you to sign in: **Sign in with GitHub** opens the page of GitHub in your browser.
-4. Scan the QR code. The first time, the phone asks you to sign in with the same GitHub account; if the page then asks for the code, scan it again.
+4. Scan the QR code. The first time, the phone asks you to sign in with the same GitHub account, and the code is lost on the way: the page then says the phone is not connected yet. Scan the QR code again.
 
 CodeAlta makes the tunnel once, in your account, and keeps it, open to your account alone: its address stays the same, and the phones connected stay connected. The tunnel serves while CodeAlta runs with the plugin on. Dev Tunnels has [limits](https://learn.microsoft.com/azure/developer/dev-tunnels/faq) on the use of a tunnel; the phone page is light.
 

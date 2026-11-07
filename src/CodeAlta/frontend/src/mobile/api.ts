@@ -3,6 +3,12 @@ import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAns
 /** What the page says when the server no longer knows this phone. */
 export const signedOutMessage = "This phone is no longer connected: scan the QR code of the Mobile tab again.";
 
+/**
+ * What the page says when the server does not know this phone and it never kept a key: it was opened without the token of
+ * the QR link, as after the sign-in a tunnel asks for first (that of a Dev Tunnel loses the `#k=` of the address).
+ */
+export const notConnectedMessage = "This phone is not connected yet: scan the QR code of the Mobile tab. If the phone asked you to sign in first, scan it again now.";
+
 /** The key of the kept key of this phone: an installed app does not share the browser's cookies, so it signs in again with it. */
 export const tokenKey = "alta.token";
 
@@ -41,9 +47,9 @@ export class ApiError extends Error {
   constructor(status: number, message: string) { super(message); this.name = "ApiError"; this.status = status; }
 }
 
-/** The server does not know this phone any more, and the kept token did not sign it in again. */
+/** The server does not know this phone: it kept no token, or the kept token did not sign it in again. */
 export class SignedOutError extends Error {
-  constructor() { super(signedOutMessage); this.name = "SignedOutError"; }
+  constructor(message = signedOutMessage) { super(message); this.name = "SignedOutError"; }
 }
 
 /** What the page tells of a failed call: its message, or what to check when the computer was not reached. */
@@ -57,10 +63,11 @@ type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 /**
  * The one way the page calls the server. A 401 (the cookie expired, or a home-screen app that never had it) signs in
  * again once with the kept token and repeats the call; when that fails too, the token is forgotten, `onSignedOut` is
- * called and the call ends with a `SignedOutError`. Any other status that is not a success ends with an `ApiError`
- * carrying the server's `error`; an empty body is an empty answer, never a JSON error.
+ * called with what to tell the person and the call ends with a `SignedOutError`. A phone that kept no token was never
+ * connected here, which it is told instead. Any other status that is not a success ends with an `ApiError` carrying the
+ * server's `error`; an empty body is an empty answer, never a JSON error.
  */
-export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueStore; onSignedOut: () => void; onSignedIn?: () => void }>) {
+export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueStore; onSignedOut: (message: string) => void; onSignedIn?: () => void }>) {
   const { store } = options;
   let signingIn: Promise<boolean> | null = null;
 
@@ -97,10 +104,10 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     return true;
   }
 
-  function signOut(): never {
+  function signOut(message = signedOutMessage): never {
     store.remove(tokenKey);
-    options.onSignedOut();
-    throw new SignedOutError();
+    options.onSignedOut(message);
+    throw new SignedOutError(message);
   }
 
   // Calls that meet a 401 together share one sign-in.
@@ -112,7 +119,8 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     let response = await request(method, path, body);
     if (response.status === 401) {
       const token = store.get(tokenKey);
-      if (!token || !await signInAgain(token)) signOut();
+      if (!token) signOut(notConnectedMessage);
+      if (!await signInAgain(token)) signOut();
       response = await request(method, path, body);
       if (response.status === 401) signOut();
     }

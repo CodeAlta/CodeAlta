@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiError, createApi, failureText, memoryStore, SignedOutError, signedOutMessage, takeFragmentToken, tokenKey } from "./api";
+import { ApiError, createApi, failureText, memoryStore, notConnectedMessage, SignedOutError, signedOutMessage, takeFragmentToken, tokenKey } from "./api";
 
 type Call = { url: string; method: string; body: unknown };
 
@@ -63,13 +63,23 @@ test("a refused sign-in forgets the token, reports the phone signed out and fail
 });
 
 test("a 401 without a kept token is signed out at once; a second 401 after a sign-in too", async () => {
-  let signedOut = 0;
+  const said: string[] = [];
   const first = server({ "/api/options": [[401]] });
-  await assert.rejects(createApi({ fetch: first.fetch, store: memoryStore(), onSignedOut: () => signedOut++ }).options(), SignedOutError);
+  await assert.rejects(createApi({ fetch: first.fetch, store: memoryStore(), onSignedOut: message => said.push(message) }).options(), SignedOutError);
   assert.equal(first.calls.length, 1);
   const second = server({ "/api/options": [[401], [401]], "/api/login": [[204]] });
-  await assert.rejects(createApi({ fetch: second.fetch, store: memoryStore({ [tokenKey]: "t" }), onSignedOut: () => signedOut++ }).options(), SignedOutError);
-  assert.equal(signedOut, 2);
+  await assert.rejects(createApi({ fetch: second.fetch, store: memoryStore({ [tokenKey]: "t" }), onSignedOut: message => said.push(message) }).options(), SignedOutError);
+  assert.deepEqual(said, [notConnectedMessage, signedOutMessage]);
+});
+
+test("a phone that never kept a key is told to scan the code, not that it is no longer connected", async () => {
+  // The GitHub sign-in of a Dev Tunnel loses the #k= of the QR link: the page opens with neither a token nor a key.
+  const { fetch } = server({ "/api/sessions": [[401]] });
+  const api = createApi({ fetch, store: memoryStore(), onSignedOut: () => { } });
+  await assert.rejects(api.sessions(0, 6, []), (error: Error) => error instanceof SignedOutError && error.message === notConnectedMessage);
+  assert.match(notConnectedMessage, /scan the QR code/);
+  assert.match(notConnectedMessage, /again/, "the person who just signed in to the tunnel scans it again");
+  assert.doesNotMatch(notConnectedMessage, /no longer/);
 });
 
 test("calls that meet a 401 together share one sign-in", async () => {
