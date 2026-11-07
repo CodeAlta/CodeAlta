@@ -14,14 +14,19 @@ const calls: string[] = [];
 const event = (step: string, state: string, detail: string | null = null, code: string | null = null): MachineSetupEvent =>
   ({ step, state, detail, code, machineId: null, machineName: null, words: null, recoveryWords: null });
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// ssh records the key the person trusted: the next connections know it.
+let trusted = false;
 const api: AddMachineApi = {
   addOverSsh: async request => {
-    calls.push(JSON.stringify({ ssh: request.target, trust: request.trustedHostKey, port: request.port }));
+    calls.push(JSON.stringify({ ssh: request.target, trust: request.trustedHostKey, port: request.port, alwaysOn: request.alwaysOn, sudo: request.sudoPassword }));
     return (async function* () {
       yield event("connect", "running", request.target);
       await wait(50);
-      if (request.trustedHostKey !== "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)") { yield event("connect", "failed", "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)", "host_key_unknown"); return; }
+      if (request.trustedHostKey === "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)") trusted = true;
+      if (!trusted) { yield event("connect", "failed", "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)", "host_key_unknown"); return; }
       yield event("connect", "done", "me@pc-ai");
+      // Always on: sudo asks a password there, which the check asks the person once.
+      if (request.alwaysOn && !request.sudoPassword) { yield event("check", "failed", "sudo asks the password of me there.", "sudo_password_needed"); return; }
       for (const [step, detail] of [["check", "Linux x86_64 · .NET SDK 10.0.114"], ["install", "CodeAlta Node 4.0.0 · ~/.dotnet/tools"],
         ["service", "systemd --user unit, port 2585"], ["pair", "apple river stone cloud amber tiger"]]) {
         yield event(step, "running");

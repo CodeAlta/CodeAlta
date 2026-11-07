@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Callout, Collapse, Dialog, DialogBody, DialogFooter, InputGroup, NumericInput, Radio, RadioGroup, Tag } from "@blueprintjs/core";
+import { Button, Callout, Checkbox, Collapse, Dialog, DialogBody, DialogFooter, InputGroup, NumericInput, Radio, RadioGroup, Tag } from "@blueprintjs/core";
 import { fleetServer, machines, type MachineSetupEvent, type MachineView } from "#neoastra";
 import { AppIcon, type IconName } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -9,7 +9,7 @@ import { keyWords } from "./fleetServer";
 import { managesMachine } from "../machines/machineManagement";
 import { sshTargetOf } from "../machines/addMachine";
 import { SetupFailureDetail } from "../machines/AddMachineDialog";
-import { hostKeyOf } from "../machines/addMachine";
+import { asksSudoPassword, hostKeyOf } from "../machines/addMachine";
 import { localServerSteps, organizationUrlOf, serverSetupProblem, serverStepTitle, sshServerSteps } from "./createServer";
 import { ServerSpaces, type ServerSpacesApi, type ServerSpacesListApi } from "./ServerSpaces";
 
@@ -50,6 +50,9 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
   const [dataRoot, setDataRoot] = useState("");
   const [toolPath, setToolPath] = useState("");
   const [packages, setPackages] = useState("");
+  // The machines depend on the server: over SSH it starts with its machine by default (sudo there), its password asked only when needed.
+  const [alwaysOn, setAlwaysOn] = useState(true);
+  const [sudoPassword, setSudoPassword] = useState("");
   const [steps, setSteps] = useState<Record<string, StepState> | null>(null);
   const [failed, setFailed] = useState<{ step: string; code: string; detail?: string | null } | null>(null);
   const [linkId, setLinkId] = useState<string | null>(null);
@@ -82,9 +85,12 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
     setSteps(Object.fromEntries(order.map(step => [step, { state: "waiting" }])));
     const common = { expectedEpoch: epoch, ownerName: owner.trim(), organizationName: organization.trim() || null, port, dataRoot: dataRoot.trim() || null,
       toolPath: toolPath.trim() || null, packageFolder: packages.trim() || null };
+    const password = where === "ssh" && alwaysOn && sudoPassword ? sudoPassword : null;
+    setSudoPassword("");
     try {
-      const events = await api.createServer(where === "local" ? { ...common, target: null, address: null, trustedHostKey: null, ownCertificate: false }
-        : { ...common, target: computer, address: reach === "address" ? url : null, trustedHostKey, ownCertificate: reach === "encrypted" }, { signal: controller.signal });
+      const events = await api.createServer(where === "local" ? { ...common, target: null, address: null, trustedHostKey: null, ownCertificate: false, alwaysOn: false, sudoPassword: null }
+        : { ...common, target: computer, address: reach === "address" ? url : null, trustedHostKey, ownCertificate: reach === "encrypted", alwaysOn, sudoPassword: password },
+        { signal: controller.signal });
       for await (const event of events) {
         if (controller.signal.aborted) return;
         apply(event);
@@ -136,6 +142,8 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
             {reach === "encrypted" && <small className="muted-text create-server-reach-note">{t("The server makes a certificate of its own. No browser trusts it, but CodeAlta reads its fingerprint over SSH and every device checks it at each connection: nothing travels in clear, and no other machine of the network can pass for your server.")}</small>}
             {reach === "network" && <small className="muted-text create-server-reach-note">{t("Anyone on the network can read what your devices send the server. Only on a network you trust.")}</small>}
           </div>
+          <Checkbox className="add-machine-always-on" checked={alwaysOn} onChange={event => setAlwaysOn(event.currentTarget.checked)}
+            labelElement={<span>{t("Always on")} <span className="muted-text">{t("it starts with the machine, with nobody logged in (needs sudo there)")}</span></span>} />
         </>}
         <label className="add-machine-field"><span>{t("Your name")}</span>
           <InputGroup autoFocus={where === "local"} fill value={owner} aria-label={t("Your name")} onChange={event => setOwner(event.currentTarget.value)} /></label>
@@ -171,7 +179,10 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
           </li>)}
         </ol>
         {failed && <Callout compact intent="warning" role="alert" className="add-machine-failure">{t(serverSetupProblem(failed.code), { host: shownHost || computer, port })}
-          <SetupFailureDetail code={failed.code} detail={failed.detail} /></Callout>}
+          <SetupFailureDetail code={failed.code} detail={failed.detail} />
+          {!running && asksSudoPassword(failed.code) && <label className="add-machine-field add-machine-sudo"><span>{t("Password on the machine")}</span>
+            <InputGroup type="password" autoFocus fill value={sudoPassword} autoComplete="off" aria-label={t("Password on the machine")}
+              onChange={event => setSudoPassword(event.currentTarget.value)} onKeyDown={event => { if (event.key === "Enter" && sudoPassword) void create(null); }} /></label>}</Callout>}
         {linkId && <>
           <Callout compact intent="success" role="status">{t(where === "local" ? "Your server runs on this computer, and you are its owner." : "Your server runs on {host}, and you are its owner.",
             { host: shownHost })}</Callout>
@@ -186,7 +197,7 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
         {!running && shownKey && <Button intent="primary" text={t("Trust it and start over")} title={t("Every step runs again from the first one.")}
           onClick={() => void create(shownKey)} />}
         {!running && failed && !shownKey && <Button intent="primary" icon={<AppIcon name="refresh" size={14} />} text={t("Start over")}
-          title={t("Every step runs again from the first one.")} onClick={() => void create(null)} />}
+          disabled={asksSudoPassword(failed.code) && !sudoPassword} title={t("Every step runs again from the first one.")} onClick={() => void create(null)} />}
         {linkId && <Button intent="primary" text={t("Done")} onClick={() => onClose(true, recoveryWords)} />}
       </>} />
     </>}

@@ -466,7 +466,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
     {
         if (!alwaysOn || !facts.AlwaysOnNeedsRoot) return;
         if (facts.Sudo is null) throw Fail(SshSetupSteps.Check, "sudo_missing", AlwaysOnCommand(facts, command));
-        if (facts.Sudo == "password" && string.IsNullOrEmpty(sudoPassword)) throw Fail(SshSetupSteps.Check, "sudo_password_needed", facts.User);
+        if (facts.Sudo == "password" && string.IsNullOrEmpty(sudoPassword)) throw Fail(SshSetupSteps.Check, "sudo_password_needed", $"sudo asks the password of {facts.User} there.");
     }
 
     internal static bool SudoRefused(string text)

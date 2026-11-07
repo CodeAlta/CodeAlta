@@ -54,7 +54,9 @@ internal sealed partial class MachinesService
         {
             Target = target, Name = string.IsNullOrWhiteSpace(request.Name) ? null : request.Name.Trim(), Port = request.Port ?? CodeAlta.Fleet.Channels.FleetChannelProtocol.DefaultPort,
             DataRoot = Blank(request.DataRoot), ToolPath = Blank(request.ToolPath), PackageFolder = Blank(request.PackageFolder), TrustedHostKey = FleetServerService.TrustedHostKey(request.TrustedHostKey),
-            Manage = request.Manage,
+            Manage = request.Manage, AlwaysOn = request.AlwaysOn,
+            // Given to sudo -S on the machine for this setup only: never kept, never logged.
+            SudoPassword = request.AlwaysOn && !string.IsNullOrEmpty(request.SudoPassword) ? request.SudoPassword : null,
         };
         string? words = null;
         var run = Task.Run(async () =>
@@ -110,8 +112,10 @@ internal sealed partial class MachinesService
 /// <param name="PackageFolder">A folder of this computer with the packages to install; null for nuget.org.</param>
 /// <param name="TrustedHostKey">The fingerprint of the host key the person trusted, as it was shown to them; null for the keys ssh knows.</param>
 /// <param name="Manage">Whether this computer manages the machine (its devices, projects, secrets and updates), as the person ticked; off by default.</param>
+/// <param name="AlwaysOn">Whether the node starts with the machine, with nobody logged in (sudo there); off by default.</param>
+/// <param name="SudoPassword">The password sudo asks there for <paramref name="AlwaysOn"/>, given once and never kept; null for none.</param>
 internal sealed record MachineSshRequest(string ExpectedEpoch, string Target, string? Name, int? Port, string? DataRoot, string? ToolPath, string? PackageFolder,
-    string? TrustedHostKey, bool Manage = false);
+    string? TrustedHostKey, bool Manage = false, bool AlwaysOn = false, string? SudoPassword = null);
 
 /// <summary>Where a setup over SSH stands.</summary>
 /// <param name="Step"><c>connect</c>, <c>check</c>, <c>install</c>, <c>service</c>, <c>pair</c>, or <c>finished</c>.</param>

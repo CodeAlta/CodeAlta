@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hostKeyOf, setupProblem, setupSteps, sshTargetOf, stepTitle } from "./addMachine";
+import { asksSudoPassword, hostKeyOf, setupProblem, setupSteps, sshTargetOf, stepTitle } from "./addMachine";
 
 test("The SSH key of an unknown computer is shown before the person trusts it", () => {
   assert.equal(hostKeyOf("host_key_unknown", "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)"), "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)");
   assert.equal(hostKeyOf("host_key_unknown", "Host key verification failed."), null, "an ssh that gave no key: the words of ssh stay");
   assert.equal(hostKeyOf("auth_failed", "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)"), null);
   assert.equal(hostKeyOf("host_key_unknown", null), null);
+});
+
+test("Always on asks the sudo password on the machine only when sudo asks it, or refused it", () => {
+  assert.equal(asksSudoPassword("sudo_password_needed"), true);
+  assert.equal(asksSudoPassword("sudo_refused"), true);
+  assert.equal(asksSudoPassword("sudo_missing"), false, "without sudo, the command to run there is shown instead");
+  assert.notEqual(setupProblem("sudo_missing"), setupProblem("unknown"));
 });
 
 test("A computer is typed as ssh takes it", () => {

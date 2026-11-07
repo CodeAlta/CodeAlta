@@ -131,6 +131,7 @@ Plan 2 (`2026-11-07-fleet-sign-in-on-a-machine-from-the-desktop`) makes every si
    - the Add machine dialog offers **Always on** and accepts Windows hosts (`AddMachineDialog.tsx`, `addMachine.ts`, `MachinesRpc.Setup.cs`);
    - the setup records the SSH destination it used with the paired machine (`PairedMachineStore`);
    - frontend tests (`machinePage.browser.test.ts`, `addMachine.test.ts`).
+   > **As built (partly).** The machine page shows the service lines and the command that makes the node start at boot (step 9). The Add machine and Create my server dialogs offer **Always on** (ticked by default for a server) and ask the sudo password only when the check says so (`sudo_password_needed`, `sudo_refused`), forgotten once sent. Not done: Windows hosts in Add machine (no PowerShell path), and **Start at boot…** re-running the setup with an SSH destination the desktop would remember.
 - [ ] 13. Docs:
    - `site/docs/fleet/machines.md` and `server.md`: service tables, **Always on**, Windows over SSH, FileVault;
    - `doc/fleet/node.md`: running as a service, credentials in each mode;

@@ -35,6 +35,11 @@ export function hostKeyOf(code: string, detail: string | null | undefined): stri
   return match ? match[0] : null;
 }
 
+/** Whether a failure of a setup asks the person for their sudo password on the machine. */
+export function asksSudoPassword(code: string): boolean {
+  return code === "sudo_password_needed" || code === "sudo_refused";
+}
+
 /** What a failure of a setup asks the person to do; `{host}` names the computer. */
 export function setupProblem(code: string): MessageKey {
   switch (code) {
@@ -51,6 +56,9 @@ export function setupProblem(code: string): MessageKey {
     case "tool_install_failed": return "dotnet could not install CodeAlta Node on the machine.";
     case "runtime_install_failed": return "CodeAlta Node could not be unpacked on the machine.";
     case "service_failed": return "The service of CodeAlta Node could not be installed on the machine.";
+    case "sudo_password_needed": return "Always on installs a service that starts with {host}: give your password on the machine once, for sudo. It is not kept.";
+    case "sudo_refused": return "sudo refused the password on the machine: give it again.";
+    case "sudo_missing": return "Always on needs sudo on the machine, which it does not have: run this command there as an administrator, or set it up without Always on.";
     case "pair_failed": return "The node did not start, or made no pairing link.";
     case "pair_unreachable": return "This computer could not reach the node: check that the machine accepts connections on its port (a firewall), then try again.";
     case "local_network_blocked": return "macOS keeps CodeAlta from the local network, so it cannot reach {host}: in System Settings > Privacy & Security > Local Network, turn on CodeAlta, then try again.";

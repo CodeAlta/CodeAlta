@@ -22,6 +22,9 @@ test("over SSH, the assistant shows each step, says what to do when ssh does not
     // Managing the machine from here is asked: off until the person ticks it.
     assert.equal(await page.evaluate(`document.querySelector('.add-machine-manage input').checked`), false);
     await page.evaluate(`document.querySelector('.add-machine-manage input').click()`);
+    // Always on is asked too: it needs sudo there.
+    assert.equal(await page.evaluate(`document.querySelector('.add-machine-always-on input').checked`), false);
+    await page.evaluate(`document.querySelector('.add-machine-always-on input').click()`);
     await page.clickText(".add-machine-dialog .bp6-button", "Add the machine");
 
     // ssh does not know the computer: the step fails with what to do and the key to compare, and the setup starts over trusting it.
@@ -30,13 +33,22 @@ test("over SSH, the assistant shows each step, says what to do when ssh does not
     assert.equal(await page.evaluate(`document.querySelector('.add-machine-host-key code')?.textContent`), "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)");
     await page.shot("add-machine-host-key");
     await page.clickText(".add-machine-dialog .bp6-button", "Trust it and start over");
+
+    // sudo asks a password there: the person gives it once, and the setup starts over with it.
+    await page.until(`document.querySelector('.add-machine-sudo input')`, "the password of sudo");
+    assert.equal(await page.evaluate(`document.querySelector('.add-machine-sudo input').type`), "password");
+    assert.equal(await page.evaluate(`[...document.querySelectorAll('.add-machine-dialog .bp6-button')].find(button => button.textContent === 'Start over').disabled`), true);
+    await page.evaluate(type(".add-machine-sudo input", "s3cret"));
+    await page.clickText(".add-machine-dialog .bp6-button", "Start over");
     await page.until(`document.querySelectorAll('.add-machine-steps li[data-state=done]').length === 5`, "every step done");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.add-machine-steps li small')].map(item => item.textContent)`),
       ["me@pc-ai", "Linux x86_64 · .NET SDK 10.0.114", "CodeAlta Node 4.0.0 · ~/.dotnet/tools", "systemd --user unit, port 2585", "apple river stone cloud amber tiger"]);
     await page.until(`document.querySelector('.add-machine-dialog [role=status]')?.textContent.includes('pc-ai is paired with this computer and managed from here.')`, "the outcome");
     await page.shot("add-machine-ssh-done");
     await page.clickText(".add-machine-dialog .bp6-button", "Open its page");
-    assert.deepEqual(await calls(page), [{ ssh: "me@pc-ai", trust: null, port: 2585 }, { ssh: "me@pc-ai", trust: "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)", port: 2585 }, { open: "pc-ai-id" }]);
+    assert.deepEqual(await calls(page), [{ ssh: "me@pc-ai", trust: null, port: 2585, alwaysOn: true, sudo: null },
+      { ssh: "me@pc-ai", trust: "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)", port: 2585, alwaysOn: true, sudo: null },
+      { ssh: "me@pc-ai", trust: null, port: 2585, alwaysOn: true, sudo: "s3cret" }, { open: "pc-ai-id" }]);
     assert.deepEqual(page.problems, []);
   }, options);
 });

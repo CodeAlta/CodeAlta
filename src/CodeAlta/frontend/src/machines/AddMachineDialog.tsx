@@ -6,7 +6,7 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { joinCommand, keyWords } from "../fleet/fleetServer";
-import { hostKeyOf, setupProblem, setupSteps, sshTargetOf, stepTitle, type SetupStep } from "./addMachine";
+import { asksSudoPassword, hostKeyOf, setupProblem, setupSteps, sshTargetOf, stepTitle, type SetupStep } from "./addMachine";
 
 /** What a failed step of a setup over SSH said: the SSH key of a computer ssh does not know yet, else the words of the step. */
 export function SetupFailureDetail({ code, detail }: { code: string; detail: string | null | undefined }) {
@@ -95,6 +95,9 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
   const [packages, setPackages] = useState("");
   // Managing the machine from here (its devices, secrets, updates) is asked, never implied by being the first.
   const [manage, setManage] = useState(false);
+  // Always on asks sudo there; its password is asked only when the check says so, and forgotten once sent.
+  const [alwaysOn, setAlwaysOn] = useState(false);
+  const [sudoPassword, setSudoPassword] = useState("");
   const [steps, setSteps] = useState<Record<SetupStep, StepState> | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
   const [running, setRunning] = useState(false);
@@ -113,8 +116,10 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
     setOutcome(null);
     setSteps(Object.fromEntries(setupSteps.map(step => [step, { state: "waiting" }])) as Record<SetupStep, StepState>);
     try {
+      const password = alwaysOn && sudoPassword ? sudoPassword : null;
+      setSudoPassword("");
       const events = await api.addOverSsh({ expectedEpoch: epoch, target: parsed, name: name.trim() || null, port, dataRoot: dataRoot.trim() || null,
-        toolPath: toolPath.trim() || null, packageFolder: packages.trim() || null, trustedHostKey, manage }, { signal: controller.signal });
+        toolPath: toolPath.trim() || null, packageFolder: packages.trim() || null, trustedHostKey, manage, alwaysOn, sudoPassword: password }, { signal: controller.signal });
       for await (const event of events) {
         if (controller.signal.aborted) return;
         apply(event);
@@ -153,6 +158,8 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
       </label>
       <Checkbox className="add-machine-manage" checked={manage} onChange={event => setManage(event.currentTarget.checked)}
         labelElement={<span>{t("Manage it from this computer")} <span className="muted-text">{t("its devices, projects, secrets and updates")}</span></span>} />
+      <Checkbox className="add-machine-always-on" checked={alwaysOn} onChange={event => setAlwaysOn(event.currentTarget.checked)}
+        labelElement={<span>{t("Always on")} <span className="muted-text">{t("it starts with the machine, with nobody logged in (needs sudo there)")}</span></span>} />
       <Button variant="minimal" size="small" icon={<AppIcon name={advanced ? "chevronDown" : "chevronRight"} size={14} />} text={t("Advanced")} onClick={() => setAdvanced(value => !value)} />
       <Collapse isOpen={advanced}>
         <div className="add-machine-advanced">
@@ -184,7 +191,10 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
         </li>)}
       </ol>
       {failure && problem && <Callout compact intent="warning" role="alert" className="add-machine-failure">{t(problem, { host: parsed ?? target })}
-        <SetupFailureDetail code={failure.code} detail={failure.detail} /></Callout>}
+        <SetupFailureDetail code={failure.code} detail={failure.detail} />
+        {!running && asksSudoPassword(failure.code) && <label className="add-machine-field add-machine-sudo"><span>{t("Password on the machine")}</span>
+          <InputGroup type="password" autoFocus fill value={sudoPassword} autoComplete="off" aria-label={t("Password on the machine")}
+            onChange={event => setSudoPassword(event.currentTarget.value)} onKeyDown={event => { if (event.key === "Enter" && sudoPassword) void start(null); }} /></label>}</Callout>}
       {outcome?.machineId && <Callout compact intent="success" role="status">
         {t(manage ? "{name} is paired with this computer and managed from here." : "{name} is paired with this computer.", { name: outcome.name ?? parsed ?? target })}
         {outcome.words && <div className="pair-machine-words add-machine-words">{keyWords(outcome.words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</div>}
@@ -196,6 +206,7 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
       {!running && shownKey && <Button intent="primary" text={t("Trust it and start over")} title={t("Every step runs again from the first one.")}
         onClick={() => void start(shownKey)} />}
       {!running && failure && !shownKey && <Button intent="primary" icon={<AppIcon name="refresh" size={14} />} text={t("Start over")}
+        disabled={asksSudoPassword(failure.code) && !sudoPassword}
         title={t("Every step runs again from the first one.")} onClick={() => void start(null)} />}
       {outcome?.machineId && <>
         <Button text={t("Done")} onClick={() => onClose(true)} />
