@@ -68,3 +68,6 @@ export function toggledFacet(values: FacetValues, facet: string, value: string):
 export function chosenCount(values: FacetValues): number {
   return Object.values(values).reduce((sum, chosen) => sum + chosen.length, 0);
 }
+
+/** What a person made of a table: its search, its filters, its sort and its open row; kept while a page of a row is open. */
+export type TableView = Readonly<{ query: string; values: FacetValues; sort: TableSort | null; selected: string | null }>;

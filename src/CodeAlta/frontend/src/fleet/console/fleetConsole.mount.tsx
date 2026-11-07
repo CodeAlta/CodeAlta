@@ -11,6 +11,7 @@ import { ShellLanguageContext } from "../../shellLanguage";
 import type { Space } from "../../spaces/spaces";
 import { MachinesSettings } from "../../machines/MachinesSettings";
 import { FleetOverview, type FleetOverviewApi } from "./FleetOverview";
+import { createSettingsHelp, SettingsHelpContext } from "../../settingsHelp";
 
 document.documentElement.classList.add("bp6-dark");
 
@@ -56,8 +57,14 @@ const machinesApi = {
   setReceiveMoves: async () => ({ status: "ok", receiveMoves: false }),
   // What this computer lets the others do is not the subject of these pictures.
   thisComputer: async () => ({ status: "unavailable" }),
+  // Nor what the page of a machine reads of it: its page shows, with each of its sections unavailable.
+  ...Object.fromEntries(["management", "people", "sessionDefaults", "agents", "labels", "secrets"].map(name => [name, async () => ({ status: "unavailable" })])),
 } as unknown as FleetOverviewApi["machines"] & Parameters<typeof MachinesSettings>[0]["api"];
 const api: FleetOverviewApi = { machines: machinesApi, servers: { status: async () => { failing(); return { status: "ok", servers: state.servers, deviceId: "me", words: "a b c d e f" }; }, watch: never } as unknown as FleetOverviewApi["servers"] };
+
+// The guide the help buttons open, as the window would: recorded, for the test to read.
+const guides: string[] = [];
+const help = createSettingsHelp((page, anchor) => { guides.push(anchor ? `${page}#${anchor}` : page); });
 
 const pages: readonly Readonly<{ id: string; label: string; icon: IconName }>[] = [
   { id: "fleet", label: "Overview", icon: "fleet" }, { id: "machines", label: "Machines", icon: "remote" }, { id: "fleetServer", label: "Server", icon: "server" },
@@ -74,13 +81,16 @@ function Frame() {
     start: () => { state.machines = []; state.servers = []; setGeneration(value => value + 1); },
     run: () => { state.machines = fleet; state.servers = [server]; state.failing = false; setGeneration(value => value + 1); },
     fail: () => { state.failing = true; setGeneration(value => value + 1); },
+    guides,
+    // A page with edits that are not saved, as the Policies page says it has.
+    unsaved: (on: boolean) => help.mark("fixture", on),
     // A fleet of the size of a large organization, for the pages of its tables.
     many: (count: number) => {
       state.machines = Array.from({ length: count }, (_, index) => machine(`node-${String(index + 1).padStart(3, "0")}`, index % 9 === 0 ? "offline" : "online", "Ubuntu 24.04", "4.1.0", index % 5));
       setGeneration(value => value + 1);
     },
   } });
-  return <AppWindow storageKey="fixture.settings" className="settings-dialog" titleId="settings-title" title="Settings" closeLabel="Close settings" onClose={() => { }}
+  return <SettingsHelpContext.Provider value={help}><AppWindow storageKey="fixture.settings" className="settings-dialog" titleId="settings-title" title="Settings" closeLabel="Close settings" onClose={() => { }}
     preferredSize={viewport => ({ width: viewport.width * 0.8, height: viewport.height * 0.8 })} minimumSize={{ width: 560, height: 360 }}>
     <div className="settings-dialog-body">
       <nav className="settings-dialog-navigation" aria-label="Settings pages" data-fleet>
@@ -100,7 +110,7 @@ function Frame() {
           : <FleetOverview epoch={epoch} spaces={spaces} api={api} />}
       </div>
     </div>
-  </AppWindow>;
+  </AppWindow></SettingsHelpContext.Provider>;
 }
 
 createRoot(document.getElementById("root")!).render(<StrictMode>

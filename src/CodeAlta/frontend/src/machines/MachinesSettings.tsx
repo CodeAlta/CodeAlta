@@ -7,7 +7,8 @@ import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../Setting
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { pairingLinkOf, pairingProblem, pairingWords } from "./machines";
-import { MachineTable } from "./MachineTable";
+import { MachineTable, machineTableView } from "./MachineTable";
+import type { TableView } from "../fleet/console/tableRows";
 import { FleetHelp } from "../fleet/console/FleetHelp";
 import { MachinePage, type MachinePageApi } from "./MachinePage";
 import { AddMachineDialog, type AddMachineApi } from "./AddMachineDialog";
@@ -29,6 +30,9 @@ export function MachinesSettings({ epoch, api = machines, initialMachine = null 
   const [adding, setAdding] = useState(false);
   // The machine whose page is open, by its id; its row opens it, and so does its name in the Fleet canvas.
   const [opened, setOpened] = useState<string | null>(initialMachine);
+  // The table as the person left it to open a machine, and that machine: Back finds both.
+  const [tableView, setTableView] = useState<TableView>(machineTableView);
+  const [returnedFrom, setReturnedFrom] = useState<string | null>(null);
   // Whether this computer receives the sessions its machines move here: off until the person turns it on.
   const [receive, setReceive] = useState<boolean | null>(null);
   // Counts the changes the host said, so that the This computer section reads itself again with the list.
@@ -53,7 +57,7 @@ export function MachinesSettings({ epoch, api = machines, initialMachine = null 
   }, [api, epoch, reload]);
   // One list of the person's machines whatever the path: those paired with this computer and those it reaches through its server.
   const openedMachine = opened ? listing?.machines.find(machine => machine.id === opened) : undefined;
-  if (openedMachine && epoch) return <MachinePage epoch={epoch} machine={openedMachine} api={{ ...machines, ...api } as MachinePageApi} onBack={() => setOpened(null)} />;
+  if (openedMachine && epoch) return <MachinePage epoch={epoch} machine={openedMachine} api={{ ...machines, ...api } as MachinePageApi} onBack={() => { setReturnedFrom(opened); setOpened(null); }} />;
   return <SettingsPage className="machines-settings" label={t("Machines")} group="Fleet" title="Machines"
     description="The computers that run sessions for this one."
     notice={notice} loading={loading} busy={busy} onReload={reload}
@@ -65,7 +69,7 @@ export function MachinesSettings({ epoch, api = machines, initialMachine = null 
       : listing.machines.length === 0 ? <NonIdealState className="machines-empty" icon={<AppIcon name="remote" size={36} />} title={t("No machine yet.")}
         description={t("Another computer of yours can run sessions for you: another CodeAlta Desktop, a Mac mini that stays on, a build machine, a cloud server. Pair with a CodeAlta Desktop or a CodeAlta Node from its link, or let CodeAlta install CodeAlta Node over SSH.")}
         action={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch} onClick={() => setAdding(true)}>{t("Add a machine…")}</Button>} />
-      : <><MachineTable machines={listing.machines} busy={busy} onOpen={id => setOpened(id)}
+      : <><MachineTable machines={listing.machines} busy={busy} onOpen={id => { setReturnedFrom(null); setOpened(id); }} view={tableView} onView={setTableView} returnTo={returnedFrom}
         onForget={machine => void mutate(async () => api.forget({ expectedEpoch: epoch ?? "", machineId: machine.id }, { timeoutMilliseconds: 30_000 }))} />
       {receive !== null && <div className="machine-receive">
         <Switch checked={receive} disabled={busy} label={t("Receive moved sessions on this computer")}

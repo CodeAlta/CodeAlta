@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { Button, PopoverNext, Tag } from "@blueprintjs/core";
 import type { MachineView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
@@ -6,7 +6,7 @@ import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { DataTable, type DataColumn } from "../fleet/console/DataTable";
 import { FilterBar, type FilterFacet } from "../fleet/console/FilterBar";
-import { facetCounts, filterRows, type Facet, type FacetValues, type TableSort } from "../fleet/console/tableRows";
+import { facetCounts, filterRows, type Facet, type TableView } from "../fleet/console/tableRows";
 import { machineIntent, machineState, machineStateLabel, pairingWords, throughServer, type MachineState } from "./machines";
 import { managesMachine } from "./machineManagement";
 
@@ -30,18 +30,30 @@ export function machineSystem(machine: Pick<MachineView, "os">): string {
   return machine.os?.trim().split(/[\s(]/u)[0] || "";
 }
 
+/** How the table of the machines first shows: every machine, by state. */
+export const machineTableView: TableView = Object.freeze({ query: "", values: Object.freeze({}), sort: Object.freeze({ column: "state", direction: "asc" }), selected: null });
+
 /**
  * The machines of this computer as a table that scales: filtered by state, system and reach, sorted by any column, and
- * a row opens what else is known of its machine in place, with its page and Forget.
+ * a row opens what else is known of its machine in place, with its page and Forget. The page that shows it may keep its
+ * view (`view`, `onView`), so that coming back from the page of a machine finds the table as it was, at that machine.
  */
-export function MachineTable({ machines, busy, onOpen, onForget }: {
+export function MachineTable({ machines, busy, onOpen, onForget, view: kept, onView, returnTo = null }: {
   machines: readonly MachineView[]; busy: boolean; onOpen: (id: string) => void; onForget: (machine: MachineView) => void;
+  view?: TableView; onView?: Dispatch<SetStateAction<TableView>>;
+  /** The machine whose page the person comes back from: its row takes the focus. */
+  returnTo?: string | null;
 }) {
   const { t, locale } = useShellLanguage();
-  const [query, setQuery] = useState("");
-  const [values, setValues] = useState<FacetValues>({});
-  const [sort, setSort] = useState<TableSort | null>({ column: "state", direction: "asc" });
-  const [selected, setSelected] = useState<string | null>(null);
+  const [own, setOwn] = useState<TableView>(machineTableView);
+  const view = kept ?? own;
+  // From the latest view: Clear changes the search and the filters one after the other.
+  const change = (part: Partial<TableView>) => (onView ?? setOwn)(current => ({ ...current, ...part }));
+  const { query, values, sort, selected } = view;
+  const setQuery = (value: string) => change({ query: value });
+  const setValues = (value: TableView["values"]) => change({ values: value });
+  const setSort = (value: TableView["sort"]) => change({ sort: value });
+  const setSelected = (value: string | null) => change({ selected: value });
   const time = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }), [locale]);
   const facets = useMemo<Facet<MachineView>[]>(() => [
     { id: "state", values: machine => [machineState(machine)] },
@@ -80,7 +92,7 @@ export function MachineTable({ machines, busy, onOpen, onForget }: {
   ];
   return <section className="fleet-table-section" aria-label={t("Machines")}>
     <FilterBar label={t("Filter the machines")} query={query} onQuery={setQuery} facets={filters} values={values} onValues={setValues} shown={shown.length} total={machines.length} />
-    <DataTable label={t("Machines")} rows={shown} columns={columns} rowKey={machine => machine.id} sort={sort} onSort={setSort} selected={selected} onSelect={setSelected}
+    <DataTable label={t("Machines")} rows={shown} columns={columns} rowKey={machine => machine.id} sort={sort} onSort={setSort} selected={selected} onSelect={setSelected} focus={returnTo}
       rowState={machine => machineState(machine)}
       empty={<span className="muted-text">{t("No machine matches these filters.")}</span>}
       details={machine => <MachineDetails machine={machine} busy={busy} time={time} onOpen={() => onOpen(machine.id)} onForget={() => onForget(machine)} />} />

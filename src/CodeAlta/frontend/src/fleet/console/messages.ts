@@ -4,6 +4,11 @@ type Row = readonly [string, string, string, string, string];
 
 export const fleetConsoleMessages = {
   "{count} in all": ["{count} en total", "{count} au total", "{count} insgesamt", "全 {count} 件", "共 {count} 个"],
+  "Your changes on this page are not saved: opening the guide closes Settings and loses them.": ["Los cambios de esta página no se han guardado: abrir la guía cierra la configuración y se pierden.",
+    "Vos modifications de cette page ne sont pas enregistrées : ouvrir le guide ferme les paramètres et les perd.", "Ihre Änderungen auf dieser Seite sind nicht gespeichert: Das Öffnen der Anleitung schließt die Einstellungen und verwirft sie.",
+    "このページの変更は保存されていません。ガイドを開くと設定が閉じ、変更は失われます。", "此页面的更改尚未保存：打开指南会关闭设置并丢失这些更改。"],
+  "Keep editing": ["Seguir editando", "Continuer à modifier", "Weiter bearbeiten", "編集を続ける", "继续编辑"],
+  "Open the guide anyway": ["Abrir la guía de todos modos", "Ouvrir le guide quand même", "Anleitung trotzdem öffnen", "それでもガイドを開く", "仍然打开指南"],
   "Show {count} more": ["Mostrar {count} más", "Afficher {count} de plus", "{count} weitere anzeigen", "さらに {count} 件表示", "再显示 {count} 个"],
   "{shown} of {total}": ["{shown} de {total}", "{shown} sur {total}", "{shown} von {total}", "{total} 件中 {shown} 件", "{shown} / {total}"],
   "Open the guide": ["Abrir la guía", "Ouvrir le guide", "Anleitung öffnen", "ガイドを開く", "打开指南"],

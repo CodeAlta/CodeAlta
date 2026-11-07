@@ -5,6 +5,7 @@ import { AppIcon } from "../../AppIcon";
 import { ActivitySpinner } from "../../ActivitySpinner";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../../SettingsPage";
 import { FleetHelp } from "../console/FleetHelp";
+import { useUnsavedSettings } from "../../settingsHelp";
 import { useShellLanguage } from "../../shellLanguage";
 import type { MessageKey } from "../../localization";
 import { serverProblem } from "../fleetServer";
@@ -188,6 +189,8 @@ function Rules({ context }: { context: Context }) {
   const set = (change: Partial<RulesDraft>) => setDraft(value => ({ ...value, ...change }));
   const rules = rulesOf(draft);
   const changed = !sameDraft(draft, saved);
+  // Edits not signed yet: the help of the page warns before the guide closes Settings and loses them.
+  useUnsavedSettings(changed);
   const readOnly = !overview.canSign;
   const open = async () => {
     if (!rules) return;

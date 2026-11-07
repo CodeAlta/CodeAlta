@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@blueprintjs/core";
 import { AppIcon } from "../../AppIcon";
 import { useShellLanguage } from "../../shellLanguage";
@@ -28,7 +28,7 @@ export const tablePageSize = 100;
  * matters of it, and the details of the selected row opened right under it. The arrow keys move the selection, Enter and
  * Space open or close the details of a row, Escape closes them.
  */
-export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selected, onSelect, details, empty, rowState, rowProps, pageSize = tablePageSize }: {
+export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selected, onSelect, details, empty, rowState, rowProps, pageSize = tablePageSize, focus = null }: {
   label: string;
   rows: readonly T[];
   columns: readonly DataColumn<T>[];
@@ -48,6 +48,8 @@ export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selec
   rowProps?: (row: T) => Readonly<{ className?: string; data?: Readonly<Record<string, string>> }>;
   /** How many rows it shows at first, and adds at each "Show more". */
   pageSize?: number;
+  /** The row that takes the focus once the table shows, scrolled into view: the one whose page the person comes back from. */
+  focus?: string | null;
 }) {
   const { t, locale } = useShellLanguage();
   const sorted = useMemo(() => {
@@ -64,6 +66,14 @@ export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selec
   // One row is in the order of Tab, the selected one or the first: the arrows move between the others, as in a list.
   const entry = chosen >= 0 ? selected : keys[0];
   const focusRow = (body: Element | null, key: string) => body?.querySelector<HTMLElement>(`tr[data-row-key="${CSS.escape(key)}"]`)?.focus();
+  const frame = useRef<HTMLDivElement>(null);
+  // Back from the page of a row: that row has the focus, in view in the table and in the page, as it was left.
+  useEffect(() => {
+    if (focus === null) return;
+    const row = frame.current?.querySelector<HTMLElement>(`tr[data-row-key="${CSS.escape(focus)}"]`);
+    row?.focus({ preventScroll: true });
+    row?.scrollIntoView({ block: "nearest" });
+  }, [focus]);
   function move(event: KeyboardEvent<HTMLTableRowElement>, key: string) {
     const index = keys.indexOf(key);
     const next = event.key === "ArrowDown" ? keys[index + 1] : event.key === "ArrowUp" ? keys[index - 1] : undefined;
@@ -84,7 +94,7 @@ export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selec
     }
   }
 
-  return <div className="fleet-table-frame">
+  return <div className="fleet-table-frame" ref={frame}>
     <table className="fleet-table" aria-label={label}>
       <thead>
         <tr>{columns.map(column => {

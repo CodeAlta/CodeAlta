@@ -28,6 +28,9 @@
 .fleet-help { display: grid; gap: 8px; max-width: 320px; padding: 12px 14px; }
 .fleet-help p { margin: 0; line-height: 1.45; }
 .fleet-help .bp6-button { justify-self: start; }
+.fleet-help-warning { display: flex; align-items: flex-start; gap: 8px; color: var(--yellow); }
+.fleet-help-warning > svg { flex: none; margin-top: 2px; }
+.fleet-help-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .fleet-section-title { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 13px; font-weight: 650; }
 .fleet-section-title > svg { color: var(--yellow); }

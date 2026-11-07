@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ComposerStatus } from "./ComposerStatus";
 import { settingsNavigation, type SettingsTarget } from "./settingsNavigation";
-import { documentationNavigation } from "./documentationNavigation";
+import { createSettingsHelp, SettingsHelpContext } from "./settingsHelp";
 import { FleetOverview } from "./fleet/console/FleetOverview";
 import { settingsGroups, settingsPageOf, type SettingsPageId } from "./settings/settingsPages";
 import { glowSetting } from "./settings/settingsGlow";
@@ -853,8 +853,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     cancelGlow.current = setting ? glowSetting(content, setting, () => content()?.querySelector<HTMLElement>(".page-heading h1, h1") ?? null) : null;
   };
   useEffect(() => settingsNavigation.subscribe(target => openSettingsAt.current(target)), []);
-  // A help button of Settings opens its page of the guide in its tab, in the place of Settings.
-  useEffect(() => documentationNavigation.subscribe(target => { closeSettingsLatest.current(); openDocumentationLatest.current(target.page, target.anchor); }), []);
+  // A help button of Settings opens its page of the guide in its tab, in the place of Settings; the pages of Settings say
+  // here whether they hold edits that closing it would lose.
+  const [settingsHelp] = useState(() => createSettingsHelp((page, anchor) => { closeSettingsLatest.current(); openDocumentationLatest.current(page, anchor); }));
   useEffect(() => () => cancelGlow.current?.(), []);
   // A place that chooses a sandbox, from Settings > Sandbox: the editor of its provider, the page of its space, or the
   // row of its project in the Explorer, where its "Sandbox…" action is.
@@ -6293,7 +6294,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             : null}
           </div></SessionTabStrip></main></ProjectReferenceContext.Provider>} />
       </div>
-    {settingsOpen && <SettingsOverlay section={settingsSection} onSection={page => { setSettingsQuery(""); navigate(page); }} onClose={closeSettings}
+    {settingsOpen && <SettingsHelpContext.Provider value={settingsHelp}><SettingsOverlay section={settingsSection} onSection={page => { setSettingsQuery(""); navigate(page); }} onClose={closeSettings}
       spaces={spacesState.available ? spacesState.spaces : []} spacePage={spacePage} onSpacePage={setSpacePage}
       pluginPages={owned ? allPluginPages : []} pluginPage={pluginPage} onPluginPage={page => { setSettingsQuery(""); openPluginSettings(page); }}
       search={{ query: settingsQuery, onQuery: setSettingsQuery, counts: settingsSearch ? matchCounts(settingsSearch) : null, focusOnOpen: settingsFocusSearch.current,
@@ -6419,7 +6420,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           if (result === "applied" && !signal.aborted) closeSettings();
           return result;
         }} />}
-    </SettingsOverlay>}
+    </SettingsOverlay></SettingsHelpContext.Provider>}
     {dialog === "project" && <OpenProjectDialog snapshot={snapshot} getCurrentSnapshot={() => currentSnapshot.current}
       initialFolder={projectFolder ?? undefined} pickFolder={canPickFolder() ? browseForFolder : undefined}
       epoch={owned ? status?.hostEpoch : undefined}

@@ -121,6 +121,55 @@ test("a large fleet shows its machines a page at a time, and the arrows and the 
   }, options);
 });
 
+test("back from the page of a machine, the table is as it was left, at that machine", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`window.fleetConsoleFixture.show('machines')`);
+    await page.until(`${rows}.length === 22`, "the table of machines");
+    await page.evaluate(`(() => { const input = document.querySelector('.fleet-filters-search input'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      set.call(input, 'build-0'); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await page.until(`${rows}.length === 4`, "the build machines");
+    await page.clickText(".fleet-table-sort", "Machine");
+    await page.click(".fleet-table tbody tr[data-row-key]", 2);
+    await page.until(`document.querySelector('.fleet-table-details .machine-row-details')`, "the details of build-03");
+    await page.clickText(".machine-details-actions .bp6-button", "Open its page");
+    await page.until(`document.querySelector('.machine-page-back')`, "the page of the machine");
+    await page.click(".machine-page-back");
+    await page.until(`${rows}.length === 4`, "the table again");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-filters-search input').value`), "build-0", "its search");
+    assert.deepEqual(await page.evaluate(`${rows}.map(row => row.querySelector('strong').textContent)`), ["build-01", "build-02", "build-03", "build-04"], "its sort");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-table-details').previousElementSibling.querySelector('strong').textContent`), "build-03", "its open row");
+    assert.equal(await page.evaluate(`document.activeElement?.querySelector('strong')?.textContent`), "build-03", "the focus on the machine it comes back from");
+  }, options);
+});
+
+test("the help opens the guide, and says first when the page has edits that are not saved", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`window.fleetConsoleFixture.show('machines')`);
+    await page.until(`${rows}.length === 22`, "the table of machines");
+    await page.click(".fleet-help-button");
+    await page.clickText(".fleet-help .bp6-button", "Open the guide");
+    await page.until(`window.fleetConsoleFixture.guides.length === 1`, "the guide");
+    assert.deepEqual(await page.evaluate(`window.fleetConsoleFixture.guides`), ["fleet/machines.md"]);
+
+    // In the window, the guide takes the place of Settings; here the help stays open, and Escape closes it.
+    await page.key("Escape", 27);
+    await page.until(`!document.querySelector('.fleet-help')`, "the help closed");
+    await page.evaluate(`window.fleetConsoleFixture.unsaved(true)`);
+    await page.click(".fleet-help-button");
+    await page.clickText(".fleet-help .bp6-button", "Open the guide");
+    await page.until(`document.querySelector('.fleet-help-warning')`, "the warning");
+    assert.equal(await page.evaluate(`window.fleetConsoleFixture.guides.length`), 1, "nothing opens before the person says so");
+    await page.clickText(".fleet-help .bp6-button", "Keep editing");
+    await page.until(`!document.querySelector('.fleet-help')`, "the help closed, the edits kept");
+    assert.equal(await page.evaluate(`window.fleetConsoleFixture.guides.length`), 1);
+    await page.click(".fleet-help-button");
+    await page.until(`document.querySelector('.fleet-help') && !document.querySelector('.fleet-help-warning')`, "the help again, without the warning");
+    await page.clickText(".fleet-help .bp6-button", "Open the guide");
+    await page.clickText(".fleet-help .bp6-button", "Open the guide anyway");
+    await page.until(`window.fleetConsoleFixture.guides.length === 2`, "the guide, as the person chose");
+  }, options);
+});
+
 test("the machines table is taken whole, with a row open, for the guide", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.fleetConsoleFixture.show('machines')`);
