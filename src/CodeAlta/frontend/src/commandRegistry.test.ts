@@ -97,6 +97,11 @@ test("help lists bindings then typed hints", () => {
   assert.deepEqual(commandKeys(find, true), ["Cmd+F"], "A hint names the gesture of the platform.");
 });
 
+test("side questions are discoverable by /ask", () => {
+  const found = searchCommands("/ask", command => command.label, command => command.description);
+  assert.equal(found[0]?.id, "sideQuestion");
+});
+
 test("the commands a search finds come with their score: nothing typed lists them all as they are registered", () => {
   const label = (command: { label: string }) => command.label;
   const description = (command: { description: string }) => command.description;

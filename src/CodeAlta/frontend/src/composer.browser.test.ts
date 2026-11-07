@@ -26,9 +26,10 @@ const scenarios = [
   { name: "composer sets the options of the model of the session", mac: false, permission: false, outside: false, removed: false, options: true },
   { name: "composer compacts only an attached idle session, says why not otherwise, and shows a failed compaction", mac: false, permission: false, outside: false, removed: false, options: false, compaction: true },
   { name: "a prompt the shell queued in a busy session is sent after its pane left and came back", mac: false, permission: false, outside: false, removed: false, options: false, remount: true },
+  { name: "side questions bypass the running session and can be reopened", mac: false, permission: false, outside: false, removed: false, options: false, side: true },
   { name: "files and a folder that the host took from a drop are attached to the composer under the point", mac: false, permission: false, outside: false, removed: false, options: false, hostDrop: true },
 ];
-for (const { name, mac, permission, outside, removed, options, compaction = false, remount = false, hostDrop = false } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
+for (const { name, mac, permission, outside, removed, options, compaction = false, remount = false, hostDrop = false, side = false } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -48,7 +49,8 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
         });
       } }] });
     await writeFile(join(root, "style.css"), readFileSync(new URL("../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8")
-      + readFileSync(new URL("./style.css", import.meta.url), "utf8"));
+      + readFileSync(new URL("./style.css", import.meta.url), "utf8") + readFileSync(new URL("./sideQuestion/sideQuestion.css", import.meta.url), "utf8")
+      + readFileSync(new URL("./timelineEmphasis/timelineEmphasis.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, "--allow-file-access-from-files",
@@ -108,6 +110,7 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
     await command("Runtime.enable");
     await command("Page.addScriptToEvaluateOnNewDocument", { source: `Object.defineProperty(navigator,'platform',{get:()=>${JSON.stringify(mac ? "MacIntel" : "Win32")}});
       window.promptText=()=>(document.querySelector('#session-prompt .view-lines')?.textContent??'').replaceAll('\\u00a0',' ');
+      ${side ? "localStorage.setItem('codealta.desktop.timeline.emphasis.v1',JSON.stringify({enabled:true,types:{prompt:{dim:true,opacity:50,hoverOpacity:50},answer:{dim:true,opacity:60,hoverOpacity:60}}}));" : ""}
       ${permission ? "window.fixturePermission={effort:'max',mode:null,status:'ok',calls:[]};" : ""}
       ${outside ? "window.fixtureOutsideSpace=true;" : ""}
       ${removed ? "window.fixtureRemoved={replacement:'fixture-provider',switched:[]};" : ""}
@@ -116,6 +119,94 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait(`!!document.querySelector('#session-prompt') && ${idle}`), true, exceptions.join("\n"));
+
+    if (side) {
+      // The fixture has no outer workspace layout; give the timeline real room for the resize check.
+      await evaluate("document.querySelector('.session-workspace').style.height='700px'");
+      await evaluate("fixture.startRun()");
+      assert.equal(await wait(running), true);
+      await evaluate("window.dispatchEvent(new CustomEvent('codealta:composer',{detail:'sideQuestion'}))");
+      assert.equal(await wait("promptText()==='/ask '"), true);
+      await command("Input.insertText", { text: "why?" });
+      await enter();
+      assert.equal(await wait("document.querySelector('.side-question-body')?.textContent.includes('Answer to why?')"), true);
+      await evaluate("fixture.showTimelineReference()");
+      assert.equal(await wait("!!document.querySelector('#timeline-reference .message-assistant .markdown-content pre')"), true);
+      const compareTimeline = async () => { for (const role of ["user", "assistant"]) {
+        const compared = await evaluate(`(()=>{
+          const panel=document.querySelector('.side-question .message-${role}');
+          const reference=document.querySelector('#timeline-reference .message-${role}');
+          if(!panel || !reference) return null;
+          const style=(element,selector,properties)=>{const s=getComputedStyle(element.querySelector(selector));
+            return properties.map(name=>s.getPropertyValue(name));};
+          return {panelHtml:panel.querySelector('.markdown-content').innerHTML, referenceHtml:reference.querySelector('.markdown-content').innerHTML,
+            panelOpacity:getComputedStyle(panel.querySelector('.message-body')).opacity, referenceOpacity:getComputedStyle(reference.querySelector('.message-body')).opacity,
+            panelStyle:style(panel,'.markdown-content',['color','line-height']), referenceStyle:style(reference,'.markdown-content',['color','line-height']),
+            panelList:${role === "assistant"}?style(panel,'ul',['padding-left','margin-top']):null,
+            referenceList:${role === "assistant"}?style(reference,'ul',['padding-left','margin-top']):null,
+            panelHeading:${role === "assistant"}?style(panel,'h3',['font-size','margin-top']):null,
+            referenceHeading:${role === "assistant"}?style(reference,'h3',['font-size','margin-top']):null,
+            panelCode:${role === "assistant"}?style(panel,'pre',['white-space','padding','font-size','border-radius']):null,
+            referenceCode:${role === "assistant"}?style(reference,'pre',['white-space','padding','font-size','border-radius']):null}; })()`);
+        assert.ok(compared, `missing ${role} timeline card`);
+        assert.equal(compared.panelHtml, compared.referenceHtml);
+        assert.equal(compared.panelOpacity, compared.referenceOpacity);
+        assert.deepEqual(compared.panelStyle, compared.referenceStyle);
+        assert.deepEqual(compared.panelList, compared.referenceList);
+        assert.deepEqual(compared.panelHeading, compared.referenceHeading);
+        assert.deepEqual(compared.panelCode, compared.referenceCode);
+        assert.equal(compared.panelOpacity, role === "user" ? "0.5" : "0.6");
+      } };
+      await compareTimeline();
+      const geometry = () => evaluate(`(()=>{const panel=document.querySelector('.side-question').getBoundingClientRect();
+        const area=document.querySelector('.session-timeline-area').getBoundingClientRect();
+        return {height:panel.height, area:area.height, bottom:panel.bottom, areaBottom:area.bottom}})()`);
+      const initial = await geometry();
+      assert.ok(initial.area > 200 && Math.abs(initial.height / initial.area - .5) < .03, JSON.stringify(initial));
+      assert.ok(Math.abs(initial.bottom - initial.areaBottom) < 10, JSON.stringify(initial));
+      const dragGrip = async (delta: number) => {
+        const grip = await evaluate(`(()=>{const r=document.querySelector('[aria-label="Resize side question"]').getBoundingClientRect();
+          return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+        for (const [type, y, buttons] of [["mousePressed", grip.y, 1], ["mouseMoved", grip.y + delta, 1], ["mouseReleased", grip.y + delta, 0]] as const)
+          await command("Input.dispatchMouseEvent", { type, x: grip.x, y, button: "left", buttons, clickCount: 1 });
+      };
+      await dragGrip(-80);
+      const taller = await geometry();
+      assert.ok(taller.height > initial.height + 60 && Math.abs(taller.bottom - initial.bottom) < 2, JSON.stringify(taller));
+      await dragGrip(80);
+      const restored = await geometry();
+      assert.ok(Math.abs(restored.height - initial.height) < 2, JSON.stringify({ initial, taller, restored }));
+      await dragGrip(1000);
+      const minimum = await geometry();
+      assert.ok(minimum.height >= 119 && minimum.height <= 121, JSON.stringify(minimum));
+      await dragGrip(-1000);
+      const maximum = await geometry();
+      assert.ok(maximum.height <= maximum.area - 7 && maximum.height >= maximum.area - 9, JSON.stringify(maximum));
+      await key("ArrowDown", "ArrowDown", 40);
+      const shorter = await geometry();
+      assert.ok(shorter.height < maximum.height - 10, JSON.stringify(shorter));
+      await key("Home", "Home", 36);
+      assert.ok(Math.abs((await geometry()).height - initial.height) < 2);
+      assert.deepEqual(await sends(), []);
+      assert.deepEqual(await rows(), []);
+      assert.deepEqual(await steers(), []);
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait("!document.querySelector('.side-question')"), true);
+      await write("/ask");
+      await enter();
+      assert.equal(await wait("!!document.querySelector('.side-question-body li button')"), true);
+      await evaluate("document.querySelector('.side-question-body li button').click()");
+      assert.equal(await wait("document.querySelector('.side-question-body')?.textContent.includes('Answer to why?')"), true);
+      assert.equal(await evaluate("fixture.sideQuestions.view('fixture-session').entries[0].state"), "stopped");
+      await compareTimeline();
+      await key("Escape", "Escape", 27);
+      await write("/ask queued?");
+      await evaluate("document.querySelector('.composer-actions-menu').open=true; document.querySelector('[aria-label=\"Enqueue for the next turn\"]').click()");
+      assert.equal(await wait("document.querySelector('.side-question-body')?.textContent.includes('Answer to queued?')"), true);
+      assert.deepEqual(await rows(), []);
+      assert.deepEqual(await sends(), []);
+      return;
+    }
 
     if (hostDrop) {
       // Where NeoAstra takes a drop of the file manager away from the page (Linux, Windows), the host tells the page:

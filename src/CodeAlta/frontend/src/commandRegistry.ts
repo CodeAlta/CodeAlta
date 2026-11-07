@@ -9,7 +9,7 @@ export type CommandId =
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "bookmarkPrevious" | "bookmarkNext" | "bookmarkSession"
   | "attachFiles" | "attachFolder" | "attachIssues"
-  | "expandPrompt" | "insertEquation" | "dictate" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "moveTabToNewWindow" | "clearQueue" | "compact" | "fork" | "rewind" | "archiveSession"
+  | "expandPrompt" | "insertEquation" | "dictate" | "sideQuestion" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "moveTabToNewWindow" | "clearQueue" | "compact" | "fork" | "rewind" | "archiveSession"
   | "newSession" | "browseSessions" | "searchSessions" | "findInSession" | "toggleNotes" | "previousSession" | "nextSession"
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
   | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession" | "reviewChanges"
@@ -95,6 +95,7 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
     keys: ["Alt+="], macKeys: ["Ctrl+Alt+="], search: "math maths formula latex katex mathlive tex equation editor symbol" },
   { id: "dictate", name: "dictate", label: "Dictate", description: "Dictate the prompt with the microphone, or stop the dictation.", category: "Prompt", keys: ["F9"], search: "speech voice microphone speak talk transcribe stt" },
   { id: "nextPrompt", name: "next_prompt", label: "Next Prompt", description: "Switch to the next agent prompt.", category: "Prompt", keys: ["Ctrl+T"], search: "agent prompt cycle switch next_agent_prompt" },
+  { id: "sideQuestion", name: "ask", label: "Side question", description: "Ask a question about this session without adding it to the conversation.", category: "Prompt", search: "question aside ephemeral" },
   { id: "send", name: "send", label: "Send", description: "Send the current prompt.", category: "Prompt", hints: ["Enter"] },
   { id: "steer", name: "steer", label: "Steer", description: "Send the prompt to the running turn.", category: "Prompt", hints: ["Ctrl+Enter"], hidden: true },
 
