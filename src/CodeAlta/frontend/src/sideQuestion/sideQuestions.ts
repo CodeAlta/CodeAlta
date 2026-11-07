@@ -6,6 +6,8 @@ export type SideQuestionAsk = (sessionId: string, question: string, signal: Abor
 export type SideQuestionState = "running" | "done" | "stopped" | "failed";
 /** A side question and its answer, as it was shown when it was asked. */
 export type SideQuestionEntry = Readonly<{ id: number; question: string; answer: string; state: SideQuestionState;
+  /** When it was asked, as an ISO date: the list of the questions says how long ago. */
+  askedAt: string;
   /** Why it failed: the status of the host (`unsupported`, `missing_session`…), with what the host said, if anything. */
   failure: Readonly<{ status: string; message: string | null }> | null }>;
 /** What the panel of a session shows: one answer, the list of the questions, or nothing. */
@@ -77,7 +79,7 @@ export function createSideQuestions(ask: SideQuestionAsk, limit = sideQuestionLi
       const view = views.get(sessionId) ?? empty;
       stop(sessionId, view.shown);
       const id = next++;
-      const entry: SideQuestionEntry = { id, question: text, answer: "", state: "running", failure: null };
+      const entry: SideQuestionEntry = { id, question: text, answer: "", state: "running", failure: null, askedAt: new Date().toISOString() };
       const current = views.get(sessionId) ?? empty;
       const controller = new AbortController();
       running.set(id, controller);
@@ -97,6 +99,11 @@ export function createSideQuestions(ask: SideQuestionAsk, limit = sideQuestionLi
       if (!view.entries.some(entry => entry.id === id)) return;
       set(sessionId, { ...view, shown: id, listing: false });
     },
+    /** Whether the panel of a session shows something: an answer or the list. */
+    isOpen(sessionId: string): boolean {
+      const view = views.get(sessionId);
+      return !!view && (view.shown !== null || view.listing);
+    },
     /** Closes the panel of a session, and stops the answer it shows if that still comes. */
     close(sessionId: string) {
       const view = views.get(sessionId);
@@ -114,6 +121,15 @@ export function createSideQuestions(ask: SideQuestionAsk, limit = sideQuestionLi
 }
 
 export type SideQuestions = ReturnType<typeof createSideQuestions>;
+
+/** The first words of an answer, as one line of plain text, for the list of the questions: no code block, no mark of Markdown. */
+export function answerPreview(answer: string): string {
+  return answer.replace(/```[\s\S]*?```/gu, " ")
+    .replace(/`([^`\n]*)`/gu, "$1")
+    .replace(/\*\*|__/gu, "")
+    .replace(/^\s*(?:#{1,6}|[-*+>]|\d+\.)\s+/gmu, "")
+    .replace(/\s+/gu, " ").trim();
+}
 
 /** A composer command: its question, or an empty string to list questions; null for an ordinary prompt. */
 export function parseSideQuestion(text: string): string | null {

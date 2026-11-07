@@ -1,14 +1,39 @@
 .side-question { position: absolute; inset: auto calc(8px + var(--session-inset, 0px)) 4px; z-index: 5; display: flex; flex-direction: column; min-width: 0; min-height: min(120px, calc(100% - 8px)); max-height: calc(100% - 8px); border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
+/* Until its edge is dragged, the panel is as tall as what it shows, up to half the timeline. */
+.side-question[data-fit] { max-height: min(50%, calc(100% - 8px)); }
 .side-question-grip { position: absolute; inset: -5px 0 auto; height: 10px; cursor: row-resize; touch-action: none; outline: 0; }
 .side-question-grip span { display: block; width: 28px; height: 2px; margin: 4px auto; border-radius: 2px; background: var(--line-strong); }
 .side-question-grip:hover span, .side-question-grip:active span, .side-question-grip:focus-visible span { background: var(--accent); }
-.side-question > header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.side-question > header { display: flex; flex: none; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.side-question > header > .bp6-tag { flex: none; }
 .side-question-icon { flex: none; color: var(--accent); }
 .side-question > header > .side-question-hint { flex: 1; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.side-question-failure { display: flex; align-items: flex-start; gap: 8px; color: var(--red); }
-.side-question-failure > svg { flex: none; margin-top: 3px; }
-.side-question-body { overflow: auto; min-height: 0; padding: 12px 16px; line-height: 1.5; }
-.side-question-body > ul { list-style: none; padding: 0; margin: 0; }
-.side-question-body > ul > li + li { border-top: 1px solid var(--line); }
-.side-question-body > ul > li > button { width: 100%; padding: 10px 4px; text-align: left; white-space: pre-wrap; color: var(--text); background: transparent; border: 0; cursor: pointer; }
-.side-question-body > ul > li > button:hover, .side-question-body > ul > li > button:focus-visible { background: var(--accent-soft); }
+.side-question-recent .bp6-tag { margin-left: 6px; min-height: 16px; padding: 0 6px; }
+.side-question-body { flex: 1 1 auto; overflow: auto; min-height: 0; padding: 12px 16px; line-height: 1.5; }
+/* What is said under the cards (thinking, stopped, failed) starts where they start. */
+.side-question-status { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; padding-inline: var(--side-question-inset, 16px); color: var(--muted); }
+.side-question-failure { align-items: flex-start; color: var(--red); }
+.side-question-failure > svg { flex: none; margin-top: 4px; }
+
+/* The questions asked of the session, the latest first: the question, how long ago, and the start of its answer. */
+.side-question-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.side-question-list > li > button { display: grid; gap: 2px; width: 100%; padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; text-align: start; cursor: pointer; }
+.side-question-list > li > button:hover { background: var(--panel-2); }
+.side-question-list > li > button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.side-question-row-head { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.side-question-row-head > strong { flex: 1; min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.side-question-row-head > time { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.side-question-row-answer { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.side-question-list > li[data-state="failed"] .side-question-row-answer { color: var(--red); }
+.side-question-empty { display: grid; justify-items: center; gap: 4px; padding: 18px 12px; color: var(--muted); text-align: center; }
+.side-question-empty > svg { color: var(--accent); }
+.side-question-empty > strong { color: var(--text); }
+
+/* Another question, at the foot of the panel. */
+.side-question-ask { display: flex; flex: none; align-items: center; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.side-question-ask > .bp6-input-group { flex: 1; min-width: 0; }
+
+/* The button of the side questions in the composer, with how many the session has. */
+.composer-side-questions { position: relative; }
+.composer-side-count { position: absolute; top: 1px; right: 0; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: #fff;
+  font-size: 10px; font-weight: 700; line-height: 15px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }

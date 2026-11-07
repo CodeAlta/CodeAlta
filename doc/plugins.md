@@ -287,7 +287,7 @@ no native bridge, so plugin calls cannot be services of that contract. Instead:
   typed records to the plugin, read with the plugin's `JsonOptions`. The abstractions know nothing of NeoAstra, so the
   terminal and the plugin contract take no dependency on it.
 - Frames travel on the existing `canvases.watch` channel (`ICanvasRpcCarrier`), because the page has a fixed budget of
-  35 channels; frames are batched by the page and queued in order by the host, and a slow page holds back the stream
+  36 channels; frames are batched by the page and queued in order by the host, and a slow page holds back the stream
   behind it (stream credits stop the plugin's iterator, also while the tab is hidden).
 - Connections are named per instance and per page generation, so a reloaded page never talks to the session of the
   page it replaced. Handlers run on the thread pool; the page's RPC thread never waits for a plugin.

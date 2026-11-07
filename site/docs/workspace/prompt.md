@@ -31,9 +31,13 @@ Queued prompts can be edited, repeated, sent at once to steer, or deleted. When 
 
 ### Side questions
 
-In CodeAlta Desktop, choose `/ask` from the commands, type a question after it and press `Enter`. The answer appears above the prompt while the session continues. Drag the top edge of the answer to change its height; double-click it to reset. The question and answer are not added to the conversation. `Esc` closes the answer and stops it if it is still coming.
+In CodeAlta Desktop, a side question asks the model of the session about it while the session goes on. The question and its answer are not added to the conversation.
 
-Send `/ask` without a question to reopen a recent answer. These answers stay in the window only until it closes. Some providers that run their own agent cannot answer side questions.
+- Click the speech bubbles beside the microphone, or choose **Side question** (`/ask`) in the commands, then type the question after `/ask` and press `Enter`. A prompt already typed is asked as it is.
+- The answer appears above the prompt. Ask another one in the field at its foot. Drag its top edge to change its height; double-click it to fit the answer again. `Esc` closes it, and stops an answer still coming.
+- The number on the speech bubbles counts the questions of the session: click them, or send `/ask` alone, for the list of recent questions, with when each was asked and the start of its answer.
+
+These answers stay in the window until it closes. Providers that run their own agent, such as Claude Code, cannot answer side questions.
 
 ## Above the editor
 

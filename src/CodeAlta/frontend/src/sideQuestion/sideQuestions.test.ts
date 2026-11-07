@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSideQuestions, parseSideQuestion, type SideQuestionEvent } from "./sideQuestions";
+import { answerPreview, createSideQuestions, parseSideQuestion, type SideQuestionEvent } from "./sideQuestions";
 
 test("only /ask at the beginning is a side question, with or without a question", () => {
   assert.equal(parseSideQuestion("/ask"), "");
   assert.equal(parseSideQuestion("  /ASK  why? \n"), "why?");
   assert.equal(parseSideQuestion("/ask first\nsecond"), "first\nsecond");
   for (const text of ["ask", "/asking why", "text /ask why", "/ask?", "/ask-other"]) assert.equal(parseSideQuestion(text), null);
+});
+
+test("the list shows the start of an answer as plain text", () => {
+  assert.equal(answerPreview("It made 1 tool call: `read_file` for **readme.md**."), "It made 1 tool call: read_file for readme.md.");
+  assert.equal(answerPreview("### Details\n\n- one\n- two\n\n```ts\nconst n = 1;\n```\nDone"), "Details one two Done");
 });
 
 test("answers stream separately by session, can be reopened and never call the host again", async () => {
@@ -21,6 +26,7 @@ test("answers stream separately by session, can be reopened and never call the h
   });
   const done = new Promise<void>(resolve => store.subscribe(() => { if (store.view("a").entries[0]?.state === "done") resolve(); }));
   const id = store.ask("a", " why? ")!;
+  assert.ok(!Number.isNaN(Date.parse(store.view("a").entries[0].askedAt)), "when it was asked, for the list");
   await done;
   assert.equal(store.view("a").entries[0].answer, "hello world");
   assert.deepEqual(store.view("b").entries, []);

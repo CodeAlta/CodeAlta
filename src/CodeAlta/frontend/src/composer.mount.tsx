@@ -1,6 +1,6 @@
 // Test-owned mount of the production composer against a scripted backend: no host and no provider.
 // The fixture plays the host's part: it takes or refuses a Send, starts and ends the run, and takes steering.
-import { createElement, StrictMode } from "react";
+import { createElement, StrictMode, useSyncExternalStore, type ComponentProps } from "react";
 import { createSideQuestions } from "./sideQuestion/sideQuestions";
 import { SideQuestionPanel } from "./sideQuestion/SideQuestionPanel";
 import { TimelineMessage } from "./TimelineMessage";
@@ -163,9 +163,15 @@ const props = {
       pendingAgentPromptId: "default", activity: null },
     runtimeInstanceId: runtime, coordinatorTransitionInProgress: false } satisfies SessionRuntimeStateResponse)),
 };
+// The composer with the side questions of its session, as the shell gives them: their count on its button, which shows them.
+function Composer(composer: ComponentProps<typeof OwnedSessionPanel>) {
+  const view = useSyncExternalStore(sideQuestions.subscribe, () => sideQuestions.view(sessionId));
+  return createElement(OwnedSessionPanel, { ...composer, sideQuestionCount: view.entries.length,
+    onSideQuestions: () => { if (sideQuestions.isOpen(sessionId)) sideQuestions.close(sessionId); else sideQuestions.list(sessionId); } });
+}
 const shell = (hidden = false) => createElement(TimelineEmphasisProvider, null, createElement("div", { id: "workspace-shell", className: "ide-shell" },
   createElement("div", { className: "session-workspace" },
     createElement("div", { className: "session-timeline-area" }, createElement(StrictMode, null, createElement(SideQuestionPanel, { store: sideQuestions, sessionId, active: !hidden }))),
-    createElement("div", { className: "composer-region" }, createElement(OwnedSessionPanel, { ...props, observing: !hidden, active: !hidden })))));
+    createElement("div", { className: "composer-region" }, createElement(Composer, { ...props, observing: !hidden, active: !hidden } as ComponentProps<typeof OwnedSessionPanel>)))));
 const app = createRoot(document.getElementById("app")!);
 app.render(shell());

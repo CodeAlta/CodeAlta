@@ -10,12 +10,13 @@ public sealed class RpcChannelBudgetTests
 {
     /// <summary>
     /// The channels the page may hold at once. The calls of plugin canvases (<c>alta.rpc</c>) ride the single
-    /// <c>canvases.watch</c> channel instead of adding channels, so that the budget does not grow with plugins.
+    /// <c>canvases.watch</c> channel instead of adding channels, so that the budget does not grow with plugins. The answer
+    /// of a side question (<c>sideQuestion.ask</c>) is the channel of its panel: one at a time per session, for as long as it streams.
     /// </summary>
-    private const int PageBudget = 35;
+    private const int PageBudget = 36;
 
     /// <summary>The channel methods the services offer today. A new one takes room from the budget: count it here.</summary>
-    private const int Offered = 35;
+    private const int Offered = 36;
 
     [TestMethod]
     public void TheChannelsOfTheServices_AreCounted_AndStayWithinThePageBudget()

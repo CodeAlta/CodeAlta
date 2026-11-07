@@ -100,7 +100,7 @@ export function sendFailureMessage(status: string, reason?: string): string {
 
 const noWaitingSubSessions: readonly WaitingSubSession[] = [];
 
-export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, heldReviewer = null, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, archive = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, onOpenDocumentation, onSideQuestion, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null, sessionFolder = null }: {
+export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, heldReviewer = null, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, archive = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, onOpenDocumentation, onSideQuestion, sideQuestionCount = 0, onSideQuestions, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null, sessionFolder = null }: {
   /** The folder the session works in: the folder dialog of the attach menu opens there, and a folder chosen in it is a project reference. */
   sessionFolder?: string | null;
   /** Live retention claim, checked by programmatic admissions as well as the shell's inert DOM boundary. */
@@ -154,6 +154,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   onOpenCommands?: () => void;
   /** Handles /ask locally; the question never enters the session or its queue. */
   onSideQuestion?: (question: string) => void;
+  /** How many side questions the session has; its button in the composer shows them, or starts the first one. */
+  sideQuestionCount?: number;
+  /** Shows the side questions of the session, or hides them when they show. */
+  onSideQuestions?: () => void;
   onOpenCatalog?: (page: "models" | "prompts" | "providers") => void;
   /** Opens a page of the user guide at a heading. */
   onOpenDocumentation?: (page: string, anchor: string | null) => void;
@@ -734,8 +738,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     if (!capability.observe(result)) setInvalidEpoch(true);
   }
   // Intercept before queueing, steering, prompt history, or provider selection. Attachments never travel with /ask.
-  function takeSideQuestion(): boolean {
-    const question = parseSideQuestion(latestText.current);
+  function takeSideQuestion(question = parseSideQuestion(latestText.current)): boolean {
     if (question === null || !onSideQuestion) return false;
     if (images.length) { setSideQuestionNotice(t("Remove attachments before asking a side question.")); return true; }
     if (question.length > 16_384) { setSideQuestionNotice(t("A side question can have at most 16384 characters.")); return true; }
@@ -743,6 +746,14 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     onSideQuestion(question);
     inputRevision.current++; clearText();
     return true;
+  }
+  // Side question (the command, or the button of the composer): a prompt already typed is the question; an empty one
+  // starts with /ask for the question to follow it.
+  function startSideQuestion() {
+    const typed = latestText.current.trim();
+    if (typed && parseSideQuestion(typed) === null) { takeSideQuestion(typed); return; }
+    if (!typed) editText("/ask ");
+    requestAnimationFrame(() => { promptInput.current?.focus(); const end = promptInput.current?.value.length ?? 0; promptInput.current?.setSelectionRange(end, end); });
   }
   function submit(queuePrompt = enqueue) {
     if (!canAdmit()) return;
@@ -821,14 +832,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     const run = (event: Event) => {
       const command = (event as CustomEvent<string>).detail;
       if (invalidEpoch || !canAdmit()) return;
-      if (command === "sideQuestion" && onSideQuestion && !pending) {
-        if (latestText.current.trim() && parseSideQuestion(latestText.current) === null) {
-          setSideQuestionNotice(t("Clear the prompt before inserting /ask."));
-        } else {
-          if (!latestText.current.trim()) editText("/ask ");
-          requestAnimationFrame(() => { promptInput.current?.focus(); const end = promptInput.current?.value.length ?? 0; promptInput.current?.setSelectionRange(end, end); });
-        }
-      }
+      if (command === "sideQuestion" && onSideQuestion && !pending) startSideQuestion();
       if (command === "nextPrompt") {
         const prompts = activeChoices?.prompts ?? [];
         if (prompts.length > 1 && selected && !selectionDisabled)
@@ -1623,6 +1627,11 @@ ${value}` : value);
         aria-label={pendingAbortRun ? t("Retry exact cancellation request for observed run {run}", { run: pendingAbortRun.request.expectedRunId }) : t("Cancel observed run")}
         title={pendingAbortRun ? `${t("Manual retry of exact cancellation:")} ${t("epoch")} ${pendingAbortRun.request.expectedEpoch}, ${t("session")} ${pendingAbortRun.request.sessionId}, ${t("runtime")} ${pendingAbortRun.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingAbortRun.request.expectedAttachmentGeneration}, ${t("run")} ${pendingAbortRun.request.expectedRunId}, ${t("request")} ${pendingAbortRun.request.clientRequestId}`
           : t("Stop the running turn")} />}
+      {onSideQuestion && <Button variant="minimal" className="composer-side-questions" icon={<AppIcon name="chat" size={16} />} disabled={!!pending || invalidEpoch}
+        aria-label={sideQuestionCount ? t("{count} side questions: show them", { count: sideQuestionCount }) : t("Ask a side question about this session (/ask)")}
+        title={sideQuestionCount ? t("{count} side questions: show them", { count: sideQuestionCount }) : t("Ask a side question about this session (/ask)")}
+        onClick={() => { if (sideQuestionCount && onSideQuestions) onSideQuestions(); else startSideQuestion(); }}>
+        {sideQuestionCount > 0 && <span className="composer-side-count">{sideQuestionCount}</span>}</Button>}
       <MicButton owner={speechOwner} input={promptInput} disabled={!!pending || invalidEpoch || expanded} visible={observing}
         id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} onSend={() => submit(composerBusy)} />
       <SendSplitButton enqueue={enqueue} busy={composerBusy} onEnqueueChange={setEnqueue} optionsDisabled={invalidEpoch || !!pending}>

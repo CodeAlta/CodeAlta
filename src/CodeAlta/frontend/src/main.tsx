@@ -6875,6 +6875,8 @@ function SessionWorkspace({ sideQuestions, canAdmit, remoteControlRequest = null
   timelineCommand: RefObject<TimelineCommand | null>;
 }) {
   const { t, locale: languageLocale } = useShellLanguage();
+  // The side questions of this session: their count is on their button in the composer.
+  const sideQuestionView = useSyncExternalStore(sideQuestions.subscribe, () => sideQuestions.view(session.id));
   // A review of changes an agent asks for is done in the Changes tab of its checkout.
   const showReviewChanges = useContext(ShowChangesContext);
   const [persistedUsage, setPersistedUsage] = useState<string | null>(null);
@@ -7187,6 +7189,8 @@ function SessionWorkspace({ sideQuestions, canAdmit, remoteControlRequest = null
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}
               onOpenCatalog={onOpenCatalog} onOpenDocumentation={onOpenDocumentation} timelineNotices={timelineNotices} liveState={ownedSession ? live : null} inputLifetime={infoLifetime} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenCommands={onOpenCommands}
               onSideQuestion={ownedSession && !session.machineId ? question => { if (question) sideQuestions.ask(session.id, question); else sideQuestions.list(session.id); } : undefined}
+              sideQuestionCount={sideQuestionView.entries.length}
+              onSideQuestions={() => { if (sideQuestions.isOpen(session.id)) sideQuestions.close(session.id); else sideQuestions.list(session.id); }}
               activeReminderCount={activeReminderCount} autoSend={autoSend} archive={ownedSession ? archive : null} reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
           readOnly={<ReadOnlyComposer active={active} sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} infoControl={infoControl} onOpenHelp={onOpenHelp} onOpenCommands={onOpenCommands}
               reason={archivedScope ? t("Archived project; this session is read-only. Sending is unavailable.")

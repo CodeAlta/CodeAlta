@@ -164,8 +164,8 @@ images.
 Channels are the exception, and the reason for the budget. A channel the host's limit refuses is refused after its
 handler ran, so the page cannot simply send it again. Channels are therefore few and long-lived: one per kind of
 push (a `watch`), or one per open pane, multiplexing what flows through it, never one per call. The services offer
-a fixed set of channel methods, counted against a budget of 35 by `RpcChannelBudgetTests`: a new channel takes room
-from it and is counted there. What a plugin canvas calls (`alta.rpc`) rides the single `canvases.watch` channel with
+a fixed set of channel methods, counted against a budget of 36 by `RpcChannelBudgetTests`: a new channel takes room
+from it and is counted there. The answer of a side question streams on the channel of its panel, one at a time per session. What a plugin canvas calls (`alta.rpc`) rides the single `canvases.watch` channel with
 a run-time NeoAstra host per instance ([plugins](plugins.md), "The carrier of `alta.rpc`"). The open channels stay
 far under the per-session limit, and at most two items of a channel wait for the page's acknowledgement: a slow page
 holds its stream back instead of letting it pile up.

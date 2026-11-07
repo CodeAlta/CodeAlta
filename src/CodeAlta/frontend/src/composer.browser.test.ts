@@ -162,7 +162,8 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
         const area=document.querySelector('.session-timeline-area').getBoundingClientRect();
         return {height:panel.height, area:area.height, bottom:panel.bottom, areaBottom:area.bottom}})()`);
       const initial = await geometry();
-      assert.ok(initial.area > 200 && Math.abs(initial.height / initial.area - .5) < .03, JSON.stringify(initial));
+      // Until its edge is dragged, the panel is as tall as its answer, up to half the timeline.
+      assert.ok(initial.area > 200 && initial.height > 120 && initial.height <= initial.area / 2 + 2, JSON.stringify(initial));
       assert.ok(Math.abs(initial.bottom - initial.areaBottom) < 10, JSON.stringify(initial));
       const dragGrip = async (delta: number) => {
         const grip = await evaluate(`(()=>{const r=document.querySelector('[aria-label="Resize side question"]').getBoundingClientRect();
@@ -208,12 +209,30 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       assert.equal(await wait("document.querySelector('.side-question-body')?.textContent.includes('Answer to why?')"), true);
       assert.equal(await evaluate("fixture.sideQuestions.view('fixture-session').entries[0].state"), "stopped");
       await compareTimeline();
+      // The list says when each question was asked; the button of the composer counts them.
+      await key("Escape", "Escape", 27);
+      await write("/ask");
+      await enter();
+      assert.equal(await wait("!!document.querySelector('.side-question-list li time')?.textContent"), true);
+      assert.equal(await evaluate("document.querySelector('.composer-side-count')?.textContent"), "1");
       await key("Escape", "Escape", 27);
       await write("/ask queued?");
       await evaluate("document.querySelector('.composer-actions-menu').open=true; document.querySelector('[aria-label=\"Enqueue for the next turn\"]').click()");
       assert.equal(await wait("document.querySelector('.side-question-body')?.textContent.includes('Answer to queued?')"), true);
       assert.deepEqual(await rows(), []);
       assert.deepEqual(await sends(), []);
+      // Another question from the foot of the panel: its answer takes the place of the one shown, and nothing is sent.
+      await evaluate(`(() => { const input = document.querySelector('.side-question-ask input'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        set.call(input, 'follow?'); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+      await evaluate("document.querySelector('.side-question-ask button[type=submit]').click()");
+      assert.equal(await wait("document.querySelector('.side-question-body')?.textContent.includes('Answer to follow?')"), true);
+      assert.equal(await evaluate("document.querySelector('.composer-side-count')?.textContent"), "3");
+      assert.deepEqual(await sends(), []);
+      // The button of the composer hides the panel, and shows the list again.
+      await evaluate("document.querySelector('.composer-side-questions').click()");
+      assert.equal(await wait("!document.querySelector('.side-question')"), true);
+      await evaluate("document.querySelector('.composer-side-questions').click()");
+      assert.equal(await wait("document.querySelectorAll('.side-question-list li').length === 3"), true);
       // A failed answer says what failed in words, not the status of the host.
       await key("Escape", "Escape", 27);
       await write("/ask unsupported?");
