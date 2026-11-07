@@ -105,6 +105,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         var assistantContentId = $"assistant:{Guid.CreateVersion7()}";
         var reasoningContentId = $"reasoning:{Guid.CreateVersion7()}";
         ChatTokenUsage? usage = null;
+        ChatFinishReason? finishReason = null;
         string? completionId = null;
         string? modelId = null;
 
@@ -114,6 +115,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             completionId ??= update.CompletionId;
             modelId ??= update.Model;
             usage = update.Usage ?? usage;
+            finishReason = update.FinishReason ?? finishReason;
 
             // A provider that fails after the stream started (OpenRouter) sends its error as a chunk of the stream.
             if (TryCreateStreamError(update) is { } streamError)
@@ -170,6 +172,15 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                     toolState.Arguments.Append(argumentDelta);
                 }
             }
+        }
+
+        // A stream that ends after its reasoning without a finish reason was cut: a degraded provider (DeepSeek) ends
+        // the stream cleanly, without an error, before the answer or the tool call that follows.
+        if (finishReason is null && streamedAssistantContent.Length == 0 && streamedToolCalls.Count == 0 && streamedReasoning.Length > 0)
+        {
+            throw new OpenAIChatProtocolException(
+                OpenAIChatProtocolErrorCode.StreamEndedWithoutAnswer,
+                "OpenAI chat stream ended after its reasoning, without an answer or a tool call.");
         }
 
         var parts = new List<AgentMessagePart>();
@@ -238,9 +249,11 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         }
     }
 
-    // A response a transient failure stopped: the connection broke or could not be made, a gateway failed, or the
-    // provider reported in the stream an outage, a throttle, or the finish reason of a failure. A request the endpoint
-    // refused, a quota, a context overflow, a cancellation, or a wait over a minute the provider asks for end the turn.
+    // A response a transient failure stopped: the connection broke or could not be made, a gateway failed, the
+    // provider reported in the stream an outage, a throttle, or the finish reason of a failure, or the stream ended
+    // incomplete (nothing in it, a tool call cut in its arguments, reasoning without what follows it). A request the
+    // endpoint refused, a quota, a context overflow, a cancellation, or a wait over a minute the provider asks for end
+    // the turn.
     private bool ShouldAskAgain(
         Exception exception,
         StreamAttempt attempt,
@@ -253,12 +266,16 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         reason = string.Empty;
         if (cancellationToken.IsCancellationRequested ||
             retries >= RetryDelaySeconds.Length ||
-            exception is AgentTurnExecutionException or OpenAIChatProtocolException)
+            exception is AgentTurnExecutionException)
         {
             return false;
         }
 
-        if (OpenAIResponsesTurnExecutor.TryGetConnectionFailureReason(exception, out _))
+        if (exception is OpenAIChatProtocolException)
+        {
+            reason = "The response of the provider was incomplete";
+        }
+        else if (OpenAIResponsesTurnExecutor.TryGetConnectionFailureReason(exception, out _))
         {
             reason = "The connection to the provider failed";
         }
@@ -930,6 +947,8 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                 "OpenAI chat stream completed without assistant content, refusal, reasoning, or tool calls.",
             OpenAIChatProtocolErrorCode.InvalidToolCallArguments =>
                 "OpenAI chat stream returned malformed tool-call arguments.",
+            OpenAIChatProtocolErrorCode.StreamEndedWithoutAnswer =>
+                "OpenAI chat stream ended after its reasoning, without an answer or a tool call.",
             _ => "OpenAI chat stream did not match the expected protocol.",
         };
 
@@ -963,6 +982,7 @@ internal enum OpenAIChatProtocolErrorCode
 {
     StreamCompletedWithoutAssistantContent,
     InvalidToolCallArguments,
+    StreamEndedWithoutAnswer,
 }
 
 internal sealed class OpenAIChatProtocolException : InvalidOperationException

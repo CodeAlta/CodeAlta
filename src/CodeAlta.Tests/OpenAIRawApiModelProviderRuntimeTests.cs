@@ -807,6 +807,43 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual("Look\nat the file.", replayedReasoning);
     }
 
+    // A degraded DeepSeek ends a stream cleanly, without an error nor a finish reason, after the reasoning or inside the
+    // arguments of a tool call: the answer is asked again, as for a connection cut in the middle.
+    [TestMethod]
+    [DataRow("""data: {"id":"c-1","object":"chat.completion.chunk","created":1744060800,"model":"deepseek-flash","choices":[{"index":0,"delta":{"reasoning_content":"Let me look"}}]}""")]
+    [DataRow("""data: {"id":"c-1","object":"chat.completion.chunk","created":1744060800,"model":"deepseek-flash","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"read_file","arguments":"{\"pa"}}]}}]}""")]
+    [DataRow("")]
+    public async Task OpenAIChatTurnExecutor_AStreamThatEndsEarlyWithoutAnError_IsAskedAgain(string cutStream)
+    {
+        var handler = new SequenceHttpMessageHandler(
+            () => CreateSseResponse(cutStream + "\n\n"),
+            () => CreateSseResponse(
+                """
+                data: {"id":"c-2","object":"chat.completion.chunk","created":1744060800,"model":"deepseek-flash","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-2","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"a.txt\"}"}}]},"finish_reason":"tool_calls"}]}
+
+                data: [DONE]
+
+                """));
+        var updates = new List<AgentTurnSessionUpdate>();
+        var executor = new OpenAIChatTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "deepseek",
+            ApiKey = "test-key",
+            BaseUri = new Uri("https://api.deepseek.com/"),
+            HttpClient = new HttpClient(handler),
+            RetryDelayAsync = static (_, _) => Task.CompletedTask,
+        });
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateChatTurnRequest(),
+            static (_, _) => ValueTask.CompletedTask,
+            (update, _) => { updates.Add(update); return ValueTask.CompletedTask; }).ConfigureAwait(false);
+
+        Assert.AreEqual(2, handler.Requests);
+        Assert.AreEqual("call-2", response.AssistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().Single().CallId);
+        Assert.AreEqual("The response of the provider was incomplete: asking again in 1 s... 1/5", updates.Single().Message);
+    }
+
     // A message of the Responses API whose text comes in several parts keeps the parts of only whitespace between them.
     [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_KeepsTheTextPartsOfWhitespace_OfAMessage()
@@ -893,6 +930,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         {
             ProviderKey = "openai",
             ChatClientFactory = _ => chatClient,
+            RetryDelayAsync = static (_, _) => Task.CompletedTask,
         });
 
         var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
@@ -903,14 +941,15 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
 
         var protocolException = Assert.IsInstanceOfType<OpenAIChatProtocolException>(exception.InnerException);
         Assert.AreEqual(OpenAIChatProtocolErrorCode.StreamCompletedWithoutAssistantContent, protocolException.ErrorCode);
-        Assert.AreEqual(1, chatClient.Requests.Count);
+        // An empty stream is asked again, five times, before the turn fails.
+        Assert.AreEqual(6, chatClient.Requests.Count);
     }
 
     [TestMethod]
     public async Task OpenAIChatTurnExecutor_RejectsMalformedToolArgumentsAndTracesDiagnostic()
     {
         using var temp = TestTempDirectory.Create();
-        var chatClient = new RecordingOpenAIChatClient(
+        IReadOnlyList<StreamingChatCompletionUpdate> malformed =
         [
             DeserializeStreamingChatCompletionUpdate(
                 """
@@ -939,11 +978,14 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                   ]
                 }
                 """),
-        ]);
+        ];
+        // The stream is asked again, and gives the same malformed arguments each time.
+        var chatClient = RecordingOpenAIChatClient.ForBatches(Enumerable.Repeat(malformed, 6).ToArray());
         var provider = new OpenAIProviderOptions
         {
             ProviderKey = "openai",
             ChatClientFactory = _ => chatClient,
+            RetryDelayAsync = static (_, _) => Task.CompletedTask,
             ProtocolTracing = new OpenAIProtocolTraceOptions
             {
                 Enabled = true,
@@ -1145,7 +1187,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                       "index": 0,
                       "delta": {
                         "reasoning_content": "Thinking through the repository layout."
-                      }
+                      },
+                      "finish_reason": "stop"
                     }
                   ]
                 }
