@@ -850,10 +850,11 @@ public sealed class ServiceManager(ServiceEnvironment environment)
 
     // DOMAIN\alice and alice are the same user for automatic sign-in, which records the name alone.
     // Whether a Windows account (SERVICE_START_NAME) is this user, domain or computer included: .\name is an account of this
-    // computer, the one this user's own name gives (HOST\name); a bare name is compared as it is.
+    // computer (HOST\name); a bare name is compared as it is.
     private static bool SameAccount(string account, string user)
     {
-        if (account.StartsWith(".\\", StringComparison.Ordinal) && user.LastIndexOf('\\') is var slash and > 0) account = user[..slash] + account[1..];
+        // .\name is the account of this computer, never one of a domain the user belongs to.
+        if (account.StartsWith(".\\", StringComparison.Ordinal)) account = global::System.Environment.MachineName + account[1..];
         return string.Equals(account, user, StringComparison.OrdinalIgnoreCase);
     }
 
