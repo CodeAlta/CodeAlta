@@ -25,7 +25,9 @@ test("the landing page welcomes, lists what was used last, draws the cards of pl
         bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: "neoastra", namespace: "no-host" }));
         bundle.onLoad({ filter: /.*/, namespace: "no-host" }, () => ({ contents: "export const modelCatalog = {}, pluginUi = {};"
           // The Fleet card reads the machines and the servers: a window without a fleet.
-          + " export const machines = { list: async () => ({ status: 'ok', machines: [] }) }, fleetServer = { status: async () => ({ status: 'ok', servers: [] }) };", loader: "js" }));
+          + " export const machines = { list: async () => ({ status: 'ok', machines: [] }) }, fleetServer = { status: async () => ({ status: 'ok', servers: [] }) };"
+          // The card of the release notes reads the releases: a window that runs the latest version.
+          + " export const releaseNotes = { list: async () => ({ status: 'ok', currentVersion: '4.1.0', latestVersion: '4.1.0', isLatest: true, releases: [], message: null }) };", loader: "js" }));
       } }] });
     await writeFile(join(root, "style.css"), blueprintPaletteVariables(await readFile(new URL("../../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8"))
       + await readFile(new URL("../style.css", import.meta.url), "utf8") + await readFile(new URL("./landing.css", import.meta.url), "utf8"));
@@ -189,7 +191,7 @@ test("the landing page welcomes, lists what was used last, draws the cards of pl
       assert.equal(await evaluate("document.querySelector('[data-card=stats] .landing-card-status').dataset.tone"), "Success");
       assert.deepEqual(await text("[data-card=stats] .landing-card-project"), ["Alpha"]);
       // The cards sit in the grid of the page, after the two lists and before Fleet and Explore.
-      assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.landing-grid > section')).map(e => e.dataset.list || e.dataset.card || 'explore')"), ["sessions", "projects", "stats", "broken", "notes", "fleet", "explore"]);
+      assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.landing-grid > section')).map(e => e.dataset.list || e.dataset.card || 'explore')"), ["sessions", "projects", "stats", "broken", "notes", "fleet", "release-notes", "explore"]);
 
       // The card that failed says so and has nothing else; the others are drawn.
       assert.deepEqual(await text("[data-card=broken] .landing-card-failed"), ["This card could not be loaded."]);

@@ -280,6 +280,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreateSettingsCommand(context.Invocation);
         }
 
+        // The release notes of CodeAlta, which the window shows.
+        if (context.Invocation.Services.Get<IAltaReleaseNotes>() is not null)
+        {
+            yield return CreateReleaseNotesCommand(context.Invocation);
+        }
+
         // The issues and the pull requests of projects, from the trackers the plugins of the host know.
         if (context.Invocation.Services.Get<CodeAlta.Plugins.PluginRuntimeManager>() is not null)
         {
@@ -313,12 +319,14 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var search = context.Services.Get<CodeAlta.Search.SearchService>() is not null;
         var windows = context.Services.Get<IAltaWindows>() is not null;
         var settings = context.Services.Get<IAltaSettings>() is not null;
+        var releaseNotes = context.Services.Get<IAltaReleaseNotes>() is not null;
         var fleet = context.Services.Get<IAltaFleet>() is not null;
         var secrets = context.Services.Get<ProjectCatalog>() is not null;
-        if (!secrets && !changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && !windows && !settings && !fleet && workshop is null) return Policies;
+        if (!secrets && !changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && !windows && !settings && !releaseNotes && !fleet && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
         if (spaces) policies.AddRange(LabelPolicies);
+        if (releaseNotes) policies.AddRange(ReleaseNotesPolicies);
         if (spaces && context.Services.Get<IAltaSpaceView>() is not null) policies.Add(SpaceSwitchPolicy);
         if (appearance) policies.AddRange(AppearancePolicies);
         if (workItems) policies.AddRange(WorkItemPolicies);

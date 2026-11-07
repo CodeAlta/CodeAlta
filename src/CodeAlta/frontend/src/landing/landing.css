@@ -80,3 +80,11 @@
 .landing-fleet-server { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .landing-fleet-server > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .landing-fleet .landing-fleet-open { align-self: flex-start; margin-top: auto; }
+.landing-release-notes .landing-release-notes-icon { color: var(--accent); }
+.landing-release-notes-glance { display: grid; gap: 6px; font-size: 13px; }
+.landing-release-notes-glance strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.landing-release-notes-state { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); }
+.landing-release-notes-state[data-state="latest"] > svg { color: var(--green); }
+.landing-release-notes-state[data-state="behind"] { color: var(--text); }
+.landing-release-notes-state[data-state="behind"] > svg { color: var(--yellow); }
+.landing-release-notes .landing-release-notes-open { align-self: flex-start; margin-top: auto; }

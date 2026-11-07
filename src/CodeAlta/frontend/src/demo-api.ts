@@ -142,6 +142,7 @@ export const sessionOperations = Object.freeze({
 export const sessionAsks = Object.freeze({ answer: unavailable, cancel: unavailable, list: emptyPage, observe: unavailable });
 export const sessionNotes = Object.freeze({ current: unavailable });
 export const sideQuestion = Object.freeze({ ask: unavailable });
+export const releaseNotes = Object.freeze({ list: unavailable, read: unavailable, picture: unavailable });
 export const sessionPluginEvents = Object.freeze({ read: unavailable });
 // The demo has no host process: nothing to repair, nothing to keep running.
 export const startupConfig = Object.freeze({ read: unavailable, reload: unavailable, validate: unavailable, save: unavailable, leave: unavailable });

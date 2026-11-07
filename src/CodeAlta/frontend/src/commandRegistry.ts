@@ -9,7 +9,7 @@ export type CommandId =
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "bookmarkPrevious" | "bookmarkNext" | "bookmarkSession"
   | "attachFiles" | "attachFolder" | "attachIssues"
-  | "expandPrompt" | "insertEquation" | "dictate" | "sideQuestion" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "moveTabToNewWindow" | "clearQueue" | "compact" | "fork" | "rewind" | "archiveSession"
+  | "expandPrompt" | "insertEquation" | "dictate" | "sideQuestion" | "releaseNotes" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "moveTabToNewWindow" | "clearQueue" | "compact" | "fork" | "rewind" | "archiveSession"
   | "newSession" | "browseSessions" | "searchSessions" | "findInSession" | "toggleNotes" | "previousSession" | "nextSession"
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
   | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession" | "reviewChanges"
@@ -69,6 +69,7 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "bringCloudSession", name: "bring_cloud_session", label: "Bring a Cloud Session Here", description: "Continue on this computer a cloud session started on claude.ai or in the Claude app.", category: "General",
     search: "cloud teleport claude.ai claude code web link import continue phone" },
   { id: "about", name: "about", label: "About", description: "Show the version of CodeAlta.", category: "General", keys: ["Ctrl+G Ctrl+A"] },
+  { id: "releaseNotes", name: "release_notes", label: "Release Notes", description: "Show what changed in each version of CodeAlta.", category: "General", search: "changelog what's new whats new version update news" },
   { id: "exit", name: "exit", label: "Exit", description: "Close CodeAlta.", category: "General", keys: ["Ctrl+Q"], search: "quit close" },
   { id: "skills", name: "skills", label: "Skills", description: "Enable, disable and create skills.", category: "General", keys: ["Ctrl+G Ctrl+K"], search: "skill" },
   { id: "plugins", name: "plugins", label: "Plugins", description: "Enable or disable plugins.", category: "General", keys: ["Ctrl+G Ctrl+N"], search: "plugin" },

@@ -54,6 +54,7 @@ import { labelMessages } from "./labels/messages";
 import { sessionSettingsMessages } from "./sessionSettings/messages";
 import { composerCommandMessages } from "./composerCommandMessages";
 import { sideQuestionMessages } from "./sideQuestion/messages";
+import { releaseNotesMessages } from "./releaseNotes/messages";
 import { applicationLogMessages } from "./applicationLogMessages";
 import { mcpSessionMessages } from "./mcpSession/messages";
 import { cloudSessionMessages } from "./cloudSessions/messages";
@@ -3047,6 +3048,7 @@ export const messages = dictionary({
   ...sessionSettingsMessages,
   ...composerCommandMessages,
   ...sideQuestionMessages,
+  ...releaseNotesMessages,
   ...applicationLogMessages,
   ...mcpSessionMessages,
   ...cloudSessionMessages,

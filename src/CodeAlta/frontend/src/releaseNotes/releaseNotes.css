@@ -1,0 +1,34 @@
+/* The release notes: a band with the version and where the running one stands, the notes as GitHub would show them, and the
+   choice of seeing them at startup. */
+.release-notes { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.release-notes-header { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 20px; border-bottom: 1px solid var(--line);
+  background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 9%, var(--panel)), var(--panel) 65%); }
+.release-notes-version.bp6-button { min-width: 140px; justify-content: flex-start; font-weight: 650; font-variant-numeric: tabular-nums; }
+.release-notes-version .bp6-button-text { flex: 1; text-align: start; }
+.release-notes-running { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; font-size: 13px; }
+.release-notes-running > svg { flex: none; }
+.release-notes-running[data-state="latest"] > svg { color: var(--green); }
+.release-notes-running[data-state="behind"] > svg { color: var(--yellow); }
+.release-notes-running[data-state="development"] > svg { color: var(--muted); }
+.release-notes-versions .bp6-menu { max-height: min(420px, 60vh); min-width: 320px; overflow: auto; }
+.release-notes-versions .bp6-input-group { margin: 6px; }
+.release-notes-option { display: inline-flex; align-items: center; gap: 6px; }
+.release-notes-option > strong { font-variant-numeric: tabular-nums; }
+.release-notes-option .bp6-tag { min-height: 16px; padding: 0 6px; font-size: 11px; }
+
+/* The notes, as wide as a line reads well, in the middle of the window. */
+.release-notes-article { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 22px 32px 32px; }
+.release-notes-article > * { max-width: 900px; margin-inline: auto; }
+.release-notes-title { display: grid; gap: 8px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.release-notes-title > h1 { margin: 0; font-size: 26px; line-height: 1.25; }
+.release-notes-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; color: var(--muted); font-size: 13px; }
+.release-notes-meta > span { display: inline-flex; align-items: center; gap: 6px; }
+.release-notes-github.bp6-button { margin-left: auto; }
+.release-notes-article .markdown-content { font-size: 14.5px; line-height: 1.65; }
+.release-notes-article .markdown-content img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; }
+.release-notes-loading { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 80px 0; color: var(--muted); }
+
+.release-notes-footer { display: flex; flex: none; align-items: center; gap: 12px; padding: 10px 20px; border-top: 1px solid var(--line); background: var(--panel-2); }
+.release-notes-footer .bp6-checkbox { margin: 0; }
+.release-notes-footer > .bp6-button { margin-left: auto; }
+@media (max-width: 720px) { .release-notes-running { margin-left: 0; } .release-notes-article { padding: 16px 18px 24px; } }

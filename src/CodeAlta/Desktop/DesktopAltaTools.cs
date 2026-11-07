@@ -71,7 +71,7 @@ internal static class DesktopAltaTools
         IAltaCanvasView? canvases = null, CodeAlta.Catalog.Documentation.ShippedDocumentation? documentation = null, IAltaDocumentationView? documentationView = null,
         CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null,
         CodeAlta.Catalog.Reviews.ReviewService? reviews = null, IAltaReviewPolicy? reviewPolicy = null, IAltaWindows? windows = null, IAltaSettings? settings = null,
-        IAltaSessionMachineMoves? machineMoves = null, IAltaFleet? fleet = null)
+        IAltaSessionMachineMoves? machineMoves = null, IAltaFleet? fleet = null, IAltaReleaseNotes? releaseNotes = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(reminders);
@@ -80,7 +80,7 @@ internal static class DesktopAltaTools
             new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents), host.CodeModeScripts, host.CodeModeQuestions)
             .WithSpaces(async (sessionId, token) => await host.RuntimeService.GetSessionSpaceFilterAsync(sessionId, token).ConfigureAwait(false));
         var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance, spaces, commands, canvases, documentation, documentationView, bookmarks, search,
-            reviews, reviewPolicy, windows, codeMode, settings, machineMoves, fleet);
+            reviews, reviewPolicy, windows, codeMode, settings, machineMoves, fleet, releaseNotes);
         pluginAlta?.SetDispatcher(dispatcher);
         host.Commands.SessionTools = CreateSessionTools(dispatcher, search?.Service, codeMode);
         return dispatcher;
@@ -94,7 +94,8 @@ internal static class DesktopAltaTools
         CodeAlta.Catalog.Documentation.ShippedDocumentation? documentation = null, IAltaDocumentationView? documentationView = null,
         CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null,
         CodeAlta.Catalog.Reviews.ReviewService? reviews = null, IAltaReviewPolicy? reviewPolicy = null, IAltaWindows? windows = null,
-        CodeModeSessionTools? codeMode = null, IAltaSettings? settings = null, IAltaSessionMachineMoves? machineMoves = null, IAltaFleet? fleet = null)
+        CodeModeSessionTools? codeMode = null, IAltaSettings? settings = null, IAltaSessionMachineMoves? machineMoves = null, IAltaFleet? fleet = null,
+        IAltaReleaseNotes? releaseNotes = null)
     {
         var permissions = host.RuntimeService.Permissions;
         var services = new AltaServiceCollection()
@@ -150,6 +151,7 @@ internal static class DesktopAltaTools
         if (settings is not null) services.Add(settings);
         if (machineMoves is not null) services.Add(machineMoves);
         if (fleet is not null) services.Add(fleet);
+        if (releaseNotes is not null) services.Add(releaseNotes);
         if (fleet is IAltaFleetAccess access) services.Add(access);
         if (fleet is IAltaFleetAudit audit) services.Add(audit);
         if (fleet is IAltaFleetPolicy policy) services.Add(policy);

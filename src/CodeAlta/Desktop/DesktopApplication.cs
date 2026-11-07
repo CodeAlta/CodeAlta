@@ -986,6 +986,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     Log = static line => LogManager.GetLogger("CodeAlta.Settings").Info(line),
                     Plugins = pluginSettings,
                 };
+                // The release notes of CodeAlta, read from GitHub for the life of the application: the window shows them, and
+                // `alta release-notes` reads them; the dialog opens through the requests of Settings to the page.
+                var releaseNotes = new Rpc.DesktopReleaseNotes(new CodeAltaReleaseNotes(DesktopCommandLine.Version), DesktopCommandLine.Version, desktopSettings);
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
                     new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions, placement,
@@ -1007,7 +1010,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     fleet is null ? null : new Fleet.DesktopAltaFleet(fleet, fleet.Moves?.MachineName ?? Environment.MachineName, DesktopCommandLine.Version)
                     {
                         Servers = fleetServers, Moves = fleet.Moves, Automations = automations, Placement = placement, Host = host,
-                    });
+                    }, releaseNotes);
                 // A script of an automation without a model runs with these commands, as the automation allows them.
                 if (automationRunner is not null) automationRunner.Unattended = DesktopUnattendedScripts.Create(altaCommands, host);
                 search.AttachCommands(altaCommands);
@@ -1123,6 +1126,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     var applicationLogs = new ApplicationLogsService(logCapture, configStore, epoch);
                     loggingSaved = applicationLogs.Reload;
                     builder.AddSettingsService(new SettingsService(desktopSettings, epoch));
+                    builder.AddReleaseNotesService(new ReleaseNotesService(releaseNotes));
                     var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch)
                     {
                         // The file may change the levels of the log: they are taken at once.

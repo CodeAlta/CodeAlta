@@ -31,6 +31,8 @@ import { deliverHostDrop, readHostDrop } from "./hostDrops";
 import { EntryAddedDialog } from "./EntryAddedDialog";
 import { showToast } from "./appToaster";
 import { findWithPatience } from "./sessionLookup";
+import { ReleaseNotesDialog } from "./releaseNotes/ReleaseNotesDialog";
+import { readReleaseNotesPage, readReleaseNotesPreferences, startupReleaseNotes, writeReleaseNotesPreferences, type ReleaseNotesPreferences } from "./releaseNotes/releaseNotes";
 import { availableUpdate, installedNotice, runtimeNotification, updateCheckInterval, updateToAnnounce, updateNotification, UpdateToaster, type AvailableUpdate } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, labels as labelsApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
@@ -831,6 +833,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const cancelGlow = useRef<(() => void) | null>(null);
   const openSettingsAt = useRef<(target: SettingsTarget) => void>(() => {});
   openSettingsAt.current = ({ page, setting }) => {
+    // `release-notes[/<version>]` (`alta release-notes --show`, the card of the welcome page) is the dialog of the release notes.
+    const notesVersion = readReleaseNotesPage(page);
+    if (notesVersion !== undefined) { setReleaseNotesShown({ version: notesVersion }); return; }
     // The page asked for is shown, not the results of a search typed before.
     setSettingsQuery("");
     if (settingsPageOf(page)) navigate(page as SettingsSection);
@@ -2250,6 +2255,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // application stays open, or in the notification area, for days. A newer version is announced once, with the
   // command that installs it; Settings > About keeps the result.
   const [appUpdateResult, setAppUpdateResult] = useState<AppUpdateResponse | null>(null);
+  // The release notes: the version their dialog shows (null: the running one, else the latest), and whether they open at startup.
+  const [releaseNotesShown, setReleaseNotesShown] = useState<Readonly<{ version: string | null }> | null>(null);
+  const [releaseNotesPreferences, setReleaseNotesPreferences] = useState<ReleaseNotesPreferences>(() =>
+    readReleaseNotesPreferences(key => { try { return localStorage.getItem(key); } catch { return null; } }));
+  function keepReleaseNotesPreferences(next: ReleaseNotesPreferences) {
+    setReleaseNotesPreferences(next);
+    writeReleaseNotesPreferences((key, value) => localStorage.setItem(key, value), next);
+  }
   const [updateNotice, setUpdateNotice] = useState<ToastProps | null>(null);
   const announcedUpdates = useRef(new Set<string>());
   const pendingUpdate = useRef<AvailableUpdate | null>(null);
@@ -2271,7 +2284,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     updatePending.current = false;
     void appUpdate.cancelInstallation({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The helper gives up by itself after its wait. */ });
   }
-  function openReleaseNotes() { void appUpdate.openReleaseNotes({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The address is in the toast's command line. */ }); }
+  // The notes of the newer version, in their dialog: the toast of an update and the About page open them.
+  function openReleaseNotes() { setReleaseNotesShown({ version: pendingUpdate.current?.version ?? null }); }
   function announceUpdate() {
     const available = updateToAnnounce(announcedUpdates.current, pendingUpdate.current, document.visibilityState === "visible");
     if (!available) return;
@@ -2730,6 +2744,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
+  // At startup, the release notes open once after an update, unless the person chose not to see them.
+  const releaseNotesChecked = useRef(false);
+  useEffect(() => {
+    if (!owned || releaseNotesChecked.current || !status?.version) return;
+    releaseNotesChecked.current = true;
+    const { show, next } = startupReleaseNotes(releaseNotesPreferences, status.version);
+    if (next !== releaseNotesPreferences) keepReleaseNotesPreferences(next);
+    if (show) setReleaseNotesShown({ version: null });
+  }, [owned, status?.version]);
   const storageMaintenance = useStorageMaintenance(storage, owned ? status!.hostEpoch : null, language.locale, !hostLost, !secondary);
   // Speech to prompt: the microphones of the composers and the download of a model follow it by themselves.
   const speech = useSpeechInstall(speechApi, owned && !hostLost ? status!.hostEpoch : null, language.locale);
@@ -3667,6 +3690,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (settingsVisible.current) return;
     switch (command) {
       case "help": openHelp(); break;
+      case "releaseNotes": setReleaseNotesShown({ version: null }); break;
       case "palette": openSearch(); break;
       case "openProject": setDialog("project"); break;
       case "editFile": openFilePicker(); break;
@@ -6485,6 +6509,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       onSave={() => void saveAndLeaveSpace(leavingSpace)} onDiscard={() => showSpace(leavingSpace.spaceId, leavingSpace.target, true)}
       onCancel={() => { cancelSaveFollowUp(); setLeavingSpace(null); }} />}
     {dialog === "help" && <CommandHelp onClose={closeHelp} pluginCommands={pluginContributed.commands} />}
+    {releaseNotesShown && <ReleaseNotesDialog version={releaseNotesShown.version} onClose={() => setReleaseNotesShown(null)}
+      update={owned ? availableUpdate(appUpdateResult) : null}
+      onInstallUpdate={installUpdate} hideOnStartup={releaseNotesPreferences.hideOnStartup}
+      onHideOnStartup={hide => keepReleaseNotesPreferences({ ...releaseNotesPreferences, hideOnStartup: hide })} />}
     {cloudBring && owned && status?.hostEpoch && (() => {
       const project = snapshot?.projects.find(candidate => candidate.id === cloudBring.projectId && !candidate.archived);
       if (!project) return null;

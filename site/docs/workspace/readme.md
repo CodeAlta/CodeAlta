@@ -232,6 +232,21 @@ CodeAlta checks NuGet for a newer package at startup; CodeAlta Desktop checks ag
 - CodeAlta Desktop: **Update and restart** runs `dotnet tool update -g CodeAlta` and starts again.
 - CodeAlta TUI: the notice shows `dotnet tool update -g CodeAlta.Tui` to copy, and prints it again when you exit.
 
+### Release notes
+
+In CodeAlta Desktop, **Release notes** shows what changed in each version, as GitHub publishes it. Open it with `/release_notes`, from **What's new in CodeAlta** on the welcome page, or from the update notice.
+
+- The top line says which version you run, whether it is the latest, and offers **Update to** a newer one.
+- The version button finds a version by typing it, such as `4.1`.
+- After an update, the release notes open once at startup. **Don't show again on startup** stops that.
+
+Agents read them with `alta release-notes` (`--list` for the versions), and `alta release-notes --show` opens them for you.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-release-notes.webp" alt="The Release notes window of CodeAlta Desktop: the version 4.1.0 chosen, a line that says CodeAlta 4.1.0 is out while you run 4.0.0 with What's new and Update to 4.1.0, the notes with a picture, and Don't show again on startup" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The notes of the newer version, and the way to update to it.</figcaption>
+</figure>
+
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-release-toast.png" alt="CodeAlta TUI update-available toast showing a newer package version and a dotnet tool update command" loading="lazy">
   <figcaption class="small text-secondary mt-2">The update notice appears once per session when a newer CodeAlta package is available.</figcaption>

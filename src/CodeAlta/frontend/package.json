@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@blueprintjs/core": "6.21.0",
+    "@blueprintjs/select": "6.4.0",
     "@blueprintjs/table": "6.3.0",
     "@codemirror/state": "6.7.4",
     "@codemirror/view": "6.43.11",
