@@ -10,6 +10,7 @@ import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
 import type { Ask, TimelineEvent, WorkflowFacts } from "./contract";
 import { pageFiles, session, startFixtureServer } from "./fixtureServer";
+import { tapMenuItem } from "./phoneBrowser";
 
 const edge = browserExecutable;
 // Where the pictures of this test go, when a person wants to look at them.
@@ -184,7 +185,7 @@ test("the phone timeline shows what the host sent as what it is, images, and the
       await new Promise(resolve => setTimeout(resolve, 150));
       await writeFile(join(shots, name), Buffer.from(((await command("Page.captureScreenshot", { format: "png" })) as { data: string }).data, "base64"));
     };
-    const theme = async (wanted: "light" | "dark") => { if (await evaluate<string>("document.documentElement.dataset.theme") !== wanted) await click("#theme"); };
+    const theme = async (wanted: "light" | "dark") => { if (await evaluate<string>("document.documentElement.dataset.theme") !== wanted) await evaluate(tapMenuItem(`[data-theme-choice=${wanted}]`)); };
     // Nothing is wider than the phone: the page never scrolls sideways.
     const noOverflow = async (what: string) => {
       const widths = await evaluate<{ page: number; view: number; wide: string[] }>(`(() => ({ page: document.documentElement.scrollWidth, view: innerWidth,
@@ -326,7 +327,7 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     assert.equal(await evaluate("location.hash"), "#/session/t1", "Back took the entry of the viewer only");
 
     // The largest text: still nothing wider than the phone.
-    for (let step = 0; step < 6 && await evaluate<string>("document.documentElement.dataset.fontStep ?? ''") !== "5"; step++) await click("#font");
+    for (let step = 0; step < 6 && await evaluate<string>("document.documentElement.dataset.fontStep ?? ''") !== "5"; step++) await evaluate(tapMenuItem("#font-larger"));
     assert.equal(await evaluate("document.documentElement.dataset.fontStep"), "5");
     await noOverflow("t1 at the largest text");
     assert.equal(await evaluate(`(() => {
@@ -341,7 +342,7 @@ test("the phone timeline shows what the host sent as what it is, images, and the
       return false;
     })()`), false, "the headline does not overlap the facts at the largest text size");
     await shot("t1-dark-largest-text.png");
-    for (let step = 0; step < 6 && await evaluate<string>("document.documentElement.dataset.fontStep ?? ''") !== "2"; step++) await click("#font");
+    for (let step = 0; step < 6 && await evaluate<string>("document.documentElement.dataset.fontStep ?? ''") !== "2"; step++) await evaluate(tapMenuItem("#font-smaller"));
 
     // The session of the message of an agent opens on a tap.
     await click("[data-host=agent] .host-source");

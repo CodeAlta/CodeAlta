@@ -1,6 +1,7 @@
 import { hasImages, newSessionReadsImages } from "./attachments";
 import { ApiError, browserStore, createApi, failureText, signedOutMessage, SignedOutError, takeFragmentToken } from "./api";
-import { applyAppearance, fontStepKey, nextFontStep, readFontStep, readTheme, themeKey, type Theme } from "./appearance";
+import { applyAppearance, fontStepKey, fontSteps, readFontStep, readThemeChoice, steppedFont, themeKey, themeOf, type Theme, type ThemeChoice } from "./appearance";
+import { createBarMenu } from "./barMenu";
 import { coalesce, composerView } from "./composer";
 import { createApprovalPanel } from "./approvalPanel";
 import { createWaitingRuns } from "./waitingRuns";
@@ -47,26 +48,36 @@ export function startMobile(window: Window & typeof globalThis) {
   const api = createApi({ fetch: (input, init) => window.fetch(input, init), store, onSignedOut: message => showSignedOut(message) });
   const host = window.location.host;
 
-  // ---- Appearance: the theme and the text size, kept on the phone ----
-  let theme: Theme = readTheme(store, window.matchMedia("(prefers-color-scheme: light)").matches);
+  // ---- The menu of "⋯" in the top bar: the commands that do not fit the bar, and the appearance ----
+  const barMenu = createBarMenu({ window, button: $<HTMLButtonElement>("bar-more"), menu: $("bar-menu") });
+
+  // ---- Appearance: the theme (Auto follows the system) and the text size, kept on the phone ----
+  const systemLight = window.matchMedia("(prefers-color-scheme: light)");
+  let themeChoice: ThemeChoice = readThemeChoice(store);
+  let theme: Theme = themeOf(themeChoice, systemLight.matches);
   let fontStep = readFontStep(store);
-  const themeButton = $<HTMLButtonElement>("theme"), fontButton = $<HTMLButtonElement>("font");
+  const themeChoices = Array.from(document.querySelectorAll<HTMLButtonElement>("#bar-menu [data-theme-choice]"));
+  const fontSmaller = $<HTMLButtonElement>("font-smaller"), fontLarger = $<HTMLButtonElement>("font-larger");
   function showAppearance() {
     applyAppearance(document, theme, fontStep);
-    themeButton.innerHTML = iconSvg(theme === "dark" ? "sun" : "moon"); // the icon shows what a tap switches to
-    themeButton.title = theme === "dark" ? "Light mode" : "Dark mode";
-    themeButton.setAttribute("aria-label", themeButton.title);
-    fontButton.querySelector(".font-step")!.textContent = String(fontStep);
-    fontButton.title = `Text size ${fontStep} of 5`;
-    fontButton.setAttribute("aria-label", fontButton.title);
+    for (const item of themeChoices) item.setAttribute("aria-checked", String(item.dataset.themeChoice === themeChoice));
+    $("font-step").textContent = `${fontStep} of ${fontSteps}`;
+    fontSmaller.disabled = fontStep <= 1;
+    fontLarger.disabled = fontStep >= fontSteps;
   }
-  themeButton.addEventListener("click", () => {
-    theme = theme === "dark" ? "light" : "dark";
-    store.set(themeKey, theme);
+  function chooseTheme(choice: ThemeChoice) {
+    themeChoice = choice;
+    if (choice === "auto") store.remove(themeKey); else store.set(themeKey, choice);
+    const next = themeOf(choice, systemLight.matches), changed = next !== theme;
+    theme = next;
     showAppearance();
-    redrawDiagrams();
-  });
-  fontButton.addEventListener("click", () => { fontStep = nextFontStep(fontStep); store.set(fontStepKey, String(fontStep)); showAppearance(); padComposer(); });
+    if (changed) redrawDiagrams();
+  }
+  for (const item of themeChoices) item.addEventListener("click", () => chooseTheme(item.dataset.themeChoice as ThemeChoice));
+  systemLight.addEventListener?.("change", () => { if (themeChoice === "auto") chooseTheme("auto"); });
+  const stepFont = (by: -1 | 1) => { fontStep = steppedFont(fontStep, by); store.set(fontStepKey, String(fontStep)); showAppearance(); padComposer(); };
+  fontSmaller.addEventListener("click", () => stepFont(-1));
+  fontLarger.addEventListener("click", () => stepFont(1));
   showAppearance();
 
   // ---- The link to the computer: one state, in the footer (under the composer on a session's page) and on the logo ----
@@ -399,7 +410,7 @@ export function startMobile(window: Window & typeof globalThis) {
     window, timeline, hasOlder: () => detail.hasOlder, readOlder, firstHeld: () => detail.before,
     redraw: () => drawTimeline(), layout: () => padComposer(),
   });
-  $<HTMLButtonElement>("detail-find").addEventListener("click", () => sessionFind.bar.open());
+  $<HTMLButtonElement>("detail-find").addEventListener("click", () => { showWholeTitle(false); sessionFind.bar.open(); });
 
   const nearBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 40;
   const toBottom = () => window.scrollTo(0, document.documentElement.scrollHeight);
@@ -659,6 +670,7 @@ export function startMobile(window: Window & typeof globalThis) {
 
   function openDetail(id: string) {
     sessionFind.bar.dismiss();
+    showWholeTitle(false);
     detail.id = id;
     detail.generation++;
     detail.since = 0;
@@ -1087,12 +1099,25 @@ export function startMobile(window: Window & typeof globalThis) {
   window.visualViewport?.addEventListener("resize", padComposer);
   window.visualViewport?.addEventListener("scroll", padComposer);
 
-  $("detail-archive").addEventListener("click", () => {
+  // The title of a session in the top bar: one line, or on a tap the whole of it.
+  const heading = $<HTMLButtonElement>("detail-heading");
+  function showWholeTitle(whole: boolean) {
+    heading.setAttribute("aria-expanded", String(whole));
+    heading.title = whole ? "Show the title on one line" : "Show the whole title";
+  }
+  heading.addEventListener("click", () => showWholeTitle(heading.getAttribute("aria-expanded") !== "true"));
+
+  // The commands of a session that live in the menu of "⋯". What changes the page waits for the menu to close.
+  $("menu-archive").addEventListener("click", () => barMenu.close(() => {
     const id = detail.id;
     if (!id) return;
     window.location.hash = "#/";
     archive(id);
-  });
+  }));
+  $("menu-new").addEventListener("click", () => barMenu.close(startNew));
+  $("menu-refresh").addEventListener("click", () => barMenu.close(() => void refreshAll()));
+  // Notifications and Install act at once, in the tap: the browser asks for its permission or its prompt only there.
+  for (const id of ["notifications", "install"]) $(id).addEventListener("click", () => barMenu.close());
 
   // ---- New session: the project and the prompt; on the bar, the chips of the selection beside Start ----
   // As the desktop: the model chip opens the model sheet, with the tiers of the settings at its top (a tier fills provider,
@@ -1358,7 +1383,7 @@ export function startMobile(window: Window & typeof globalThis) {
   });
   // "+" on the new-session screen starts the form again from the settings: the choices are read again (models, prompts,
   // projects), what was remembered for the project of the form is forgotten (not the other projects'), the prompt is cleared.
-  $("new").addEventListener("click", () => {
+  function startNew() {
     if (window.location.hash !== "#/new") { window.location.hash = "#/new"; return; }
     const all = allPreferences();
     delete all[newProject.value];
@@ -1371,7 +1396,8 @@ export function startMobile(window: Window & typeof globalThis) {
     modelSheet.close();
     newMoreSheet.close();
     void openCreate();
-  });
+  }
+  $("new").addEventListener("click", startNew);
 
   // ---- Swipe a card for its action, Gmail-style: the drag is the action ----
   // Right: Archive, on green. Past 40% of the width a release archives and the card leaves; short of it the card springs
@@ -1467,11 +1493,13 @@ export function startMobile(window: Window & typeof globalThis) {
     const creating = hash === "#/new" && !signedOut;
     if (signedOut) id = null;
     const returning = !id && !creating && $("home").hidden;
+    // What shows changed under the menu: it closes, and the bar takes the commands of this page.
+    barMenu.dismiss();
+    showBar(id ? "session" : creating ? "new" : "home");
     $("home").hidden = !!id || creating;
     $("detail").hidden = !id;
     $("create").hidden = !creating;
     back.hidden = !id && !creating;
-    filterButton.hidden = !!id;
     const plus = $("new");
     plus.classList.toggle("on", creating);
     if (creating) plus.setAttribute("aria-current", "page"); else plus.removeAttribute("aria-current");
@@ -1489,6 +1517,18 @@ export function startMobile(window: Window & typeof globalThis) {
     padComposer();
   }
   back.addEventListener("click", () => { window.location.hash = "#/"; });
+  // The top bar of each page: on the list, the logo and its commands; on a session, Back, the state of the link, its title,
+  // Find and "⋯", whose menu holds the other commands.
+  function showBar(page: "home" | "session" | "new") {
+    const session = page === "session";
+    $("bar").dataset.page = page;
+    heading.hidden = !session;
+    $("detail-find").hidden = !session;
+    filterButton.hidden = plus.hidden = $("refresh").hidden = session;
+    for (const item of Array.from(document.querySelectorAll<HTMLElement>("#bar-menu [data-in-session]"))) item.hidden = !session;
+    if (!session) showWholeTitle(false);
+  }
+  const plus = $("new");
   window.addEventListener("hashchange", route);
 
   // ---- Live updates ----
@@ -1526,13 +1566,17 @@ export function startMobile(window: Window & typeof globalThis) {
   window.setInterval(() => { if (!$("home").hidden) renderList(); }, 60_000);
   window.setInterval(tickLive, 1000);
 
-  $<HTMLButtonElement>("refresh").addEventListener("click", async event => {
-    const button = event.currentTarget as HTMLButtonElement;
-    button.classList.add("spin");
-    if (signedOut) { button.classList.remove("spin"); return; }
-    if (!$("home").hidden) sessionList.settle();
-    try { await Promise.all([readList(), refreshDetail(), detail.id ? askPanel.read(detail.id) : null, detail.id ? approvalPanel.read(detail.id) : null, background.refresh()]); } finally { button.classList.remove("spin"); }
-  });
+  // Reads everything again. The button turns while it does: Refresh in the bar, or "⋯" on a session, whose menu holds it.
+  async function refreshAll() {
+    const turning = [$("refresh"), ...(detail.id ? [$("bar-more")] : [])];
+    for (const button of turning) button.classList.add("spin");
+    try {
+      if (signedOut) return;
+      if (!$("home").hidden) sessionList.settle();
+      await Promise.all([readList(), refreshDetail(), detail.id ? askPanel.read(detail.id) : null, detail.id ? approvalPanel.read(detail.id) : null, background.refresh()]);
+    } finally { for (const button of turning) button.classList.remove("spin"); }
+  }
+  $<HTMLButtonElement>("refresh").addEventListener("click", () => void refreshAll());
 
   // ---- Sign-in: the token of the QR link (#k=) gets the cookie; without it, the cookie or the kept token is used ----
   async function signInFromAddress(): Promise<boolean> {

@@ -8,6 +8,17 @@ import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
 import { pageFiles, startFixtureServer } from "./fixtureServer";
 
+/**
+ * A JavaScript expression that taps an item of the menu of "⋯" in the top bar, as a person does: it opens the menu, taps the
+ * item, and closes the menu again after a choice of the appearance, which leaves it open (a command closes it by itself).
+ */
+export const tapMenuItem = (selector: string) => `(() => {
+  const more = document.getElementById("bar-more"), item = document.querySelector(${JSON.stringify(selector)});
+  if (more.getAttribute("aria-expanded") !== "true") more.click();
+  item.click();
+  if (item.closest(".bar-menu-row")) more.click();
+})()`;
+
 /** The fixture server of a phone test. */
 export type PhoneFixture = Awaited<ReturnType<typeof startFixtureServer>>;
 

@@ -3,7 +3,7 @@ import test from "node:test";
 import { browserExecutable } from "../browserTarget";
 import type { ActivityFacts, Live } from "./contract";
 import { session } from "./fixtureServer";
-import { openPhone } from "./phoneBrowser";
+import { openPhone, tapMenuItem } from "./phoneBrowser";
 
 // Where the pictures of this test go, when a person wants to look at them.
 const shots = process.env.CODEALTA_SHOTS ?? "";
@@ -69,7 +69,7 @@ test("the phone lists sub-agents under their parent, folded, and keeps its order
     assert.equal(await evaluate("document.querySelector('.row[data-id=\"g1\"]').style.getPropertyValue('--depth')"), "2");
     assert.ok(await fits(), "no horizontal overflow");
     await shot("02-open-dark.png");
-    await click("#theme");
+    await evaluate(tapMenuItem("[data-theme-choice=light]"));
     await shot("03-open-light.png");
     await evaluate("document.documentElement.dataset.fontStep = '5'");
     assert.ok(await fits(), "no horizontal overflow at the largest text");
@@ -84,7 +84,7 @@ test("the phone lists sub-agents under their parent, folded, and keeps its order
     assert.equal(await evaluate("document.querySelector('.row[data-id=\"c2\"] .card').classList.contains('waiting')"), true);
     assert.match(await evaluate<string>("document.querySelector('.row[data-id=\"root\"] .subagents-states').textContent"), /1 waits for you/);
     await shot("05-waiting-light.png");
-    await click("#theme");
+    await evaluate(tapMenuItem("[data-theme-choice=dark]"));
     await shot("06-waiting-dark.png");
 
     // A session that becomes the latest changes its card at once, and takes its place only once the list has been quiet.

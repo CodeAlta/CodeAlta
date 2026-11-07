@@ -10,11 +10,22 @@ export const fontSteps = 5;
 /** The color of the browser's bar for each theme: the color of the page's top bar. */
 export const themeColors: Readonly<Record<Theme, string>> = { dark: "#252a31", light: "#ffffff" };
 
+/** The theme chosen on the phone: one of the two, or "auto", the system's. */
+export type ThemeChoice = Theme | "auto";
+
 /** The theme kept, else the system's. */
 export function readTheme(store: KeyValueStore, systemLight: boolean): Theme {
-  const kept = store.get(themeKey);
-  return kept === "light" || kept === "dark" ? kept : systemLight ? "light" : "dark";
+  return themeOf(readThemeChoice(store), systemLight);
 }
+
+/** The theme chosen: the one kept, else "auto". */
+export function readThemeChoice(store: KeyValueStore): ThemeChoice {
+  const kept = store.get(themeKey);
+  return kept === "light" || kept === "dark" ? kept : "auto";
+}
+
+/** The theme a choice shows. */
+export const themeOf = (choice: ThemeChoice, systemLight: boolean): Theme => choice === "auto" ? systemLight ? "light" : "dark" : choice;
 
 /** The text size kept, from 1 to 5; 2 is the browser's own size. */
 export function readFontStep(store: KeyValueStore): number {
@@ -22,8 +33,8 @@ export function readFontStep(store: KeyValueStore): number {
   return Number.isInteger(step) && step >= 1 && step <= fontSteps ? step : 2;
 }
 
-/** The next text size: 1 after the largest. */
-export const nextFontStep = (step: number): number => step % fontSteps + 1;
+/** The text size a step smaller (-1) or larger (+1), from 1 to 5. */
+export const steppedFont = (step: number, by: -1 | 1): number => Math.min(fontSteps, Math.max(1, step + by));
 
 /** Shows a theme and a text size on the document, with the color of the browser's bar. */
 export function applyAppearance(document: Document, theme: Theme, fontStep: number) {

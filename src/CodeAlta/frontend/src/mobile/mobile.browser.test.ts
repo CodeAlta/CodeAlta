@@ -10,6 +10,7 @@ import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } fr
 import type { Options, TimelineEvent } from "./contract";
 import { mkdir, writeFile } from "node:fs/promises";
 import { pageFiles, session, startFixtureServer } from "./fixtureServer";
+import { tapMenuItem } from "./phoneBrowser";
 
 const edge = browserExecutable;
 // Where the pictures of this test go, when a person wants to look at them.
@@ -153,9 +154,9 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     await shot("01-list-dark.png");
 
     // The theme follows a tap, with the color of the browser's bar.
-    await click("#theme");
+    await evaluate(tapMenuItem("[data-theme-choice=light]"));
     assert.deepEqual(await evaluate("[document.documentElement.dataset.theme, document.querySelector('meta[name=theme-color]').content, localStorage.getItem('alta.theme')]"), ["light", "#ffffff", "light"]);
-    await click("#theme");
+    await evaluate(tapMenuItem("[data-theme-choice=dark]"));
 
     // Open a session: its timeline, folded and rendered.
     await click('.row[data-id="s1"] .card-link');
@@ -352,7 +353,7 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     // The viewed session takes precedence over the last project; from the list, the last selection is used.
     await evaluate("location.hash = '#/session/s2'");
     await waitFor(`document.querySelector('#detail-title').textContent === "Write the docs"`, "the docs session");
-    await click("#new");
+    await evaluate(tapMenuItem("#menu-new"));
     await waitFor(`document.getElementById('new-project').value === 'p2'`, "the viewed session's project");
     await evaluate(`(() => { const select = document.getElementById('new-project'); select.value = 'p1'; select.dispatchEvent(new Event('change')); })()`);
     await click("#back");
@@ -514,7 +515,7 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     }
 
     // The light theme: the page of a session at rest, and the new-session screen.
-    await click("#theme");
+    await evaluate(tapMenuItem("[data-theme-choice=light]"));
     await evaluate("location.hash = '#/session/s1'");
     await waitFor(`document.querySelector('#detail-title').textContent === "Fix the parser" && document.getElementById('pick-model-text').textContent === "GPT-6.1 Argon · xhigh"`, "the session in light");
     await typeInto("#prompt", "");
@@ -525,7 +526,7 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     await typeInto("#new-text", "Write the release notes of the parser");
     await shot("08-new-session-light.png");
     await typeInto("#new-text", "");
-    await click("#theme");
+    await evaluate(tapMenuItem("[data-theme-choice=dark]"));
     await evaluate("location.hash = '#/'");
 
     // An expired cookie signs in again with the kept token; a reset token says the phone is no longer connected.

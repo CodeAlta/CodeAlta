@@ -64,11 +64,11 @@ test("a tap requests permission before awaiting work, subscribes, and a second t
   await click;
   assert.deepEqual(f.calls, ["permission", "key", "subscribe", "save"]);
   assert.equal(f.store.get("alta.push.enabled"), "true");
-  assert.equal(f.attributes["aria-pressed"], "true");
+  assert.equal(f.attributes["aria-checked"], "true");
   await f.click();
   assert.deepEqual(f.calls.slice(-2), ["remove", "unsubscribe"], "Remove the host subscription before the browser subscription.");
   assert.equal(f.store.get("alta.push.enabled"), null);
-  assert.equal(f.attributes["aria-pressed"], "false");
+  assert.equal(f.attributes["aria-checked"], "false");
 });
 
 test("denied permission or a failed subscription does not opt in or crash the app", async () => {

@@ -9,6 +9,7 @@ import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
 import type { TimelineEvent } from "./contract";
 import { pageFiles, session, startFixtureServer } from "./fixtureServer";
+import { tapMenuItem } from "./phoneBrowser";
 
 test("the phone opens a session on its latest messages, says when they were written, and reads older ones as it scrolls up", { skip: !browserExecutable, timeout: 90_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "codealta-mobile-history-"));
@@ -133,7 +134,7 @@ test("the phone opens a session on its latest messages, says when they were writ
 
     // A refresh, far up in the session, goes back to the latest messages at the end.
     await evaluate("window.scrollTo(0, 0)");
-    await evaluate('document.querySelector("#refresh").click()');
+    await evaluate(tapMenuItem("#menu-refresh"));
     await waitFor('document.querySelectorAll("#timeline .msg").length <= 21 && !document.querySelector("#refresh").classList.contains("spin")');
     assert.ok(await atBottom(), "what showed is gone: the page shows the end");
     assert.equal(await evaluate('document.querySelector("#older").hidden'), false, "and the older messages can be read again");

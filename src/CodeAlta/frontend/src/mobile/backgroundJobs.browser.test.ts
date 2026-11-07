@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
 import { pageFiles, session, startFixtureServer } from "./fixtureServer";
+import { tapMenuItem } from "./phoneBrowser";
 
 test("the phone shows background jobs after the turn ends, follows output and stops a job", { skip: !browserExecutable, timeout: 90_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "codealta-mobile-jobs-"));
@@ -102,7 +103,7 @@ test("the phone shows background jobs after the turn ends, follows output and st
         return response;
       };
     })()`);
-    await click("#refresh");
+    await evaluate(tapMenuItem("#menu-refresh"));
     await waitFor("window.jobReadHeld");
     await evaluate('location.hash = "#/session/s2"');
     await waitFor('document.querySelector("#detail-title").textContent === "Another session"');
