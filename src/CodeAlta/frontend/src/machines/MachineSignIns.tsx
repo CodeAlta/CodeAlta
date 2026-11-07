@@ -72,7 +72,7 @@ export function MachineSignIns({ epoch, machine, api = machines }: { epoch: stri
           {busy === id && <ActivitySpinner size={14} />}
           {!signedIn && item.ways.length > 0 && <Button size="small" intent="primary" icon={<AppIcon name="shield" size={13} />} text={t("Sign in…")} disabled={busy !== null}
             onClick={() => setSigningIn(item)} />}
-          {signedIn && <Button size="small" text={t("Sign out")} disabled={busy !== null} onClick={() => void signOut(item)} />}
+          {signedIn && item.kind !== "cli" && <Button size="small" text={t("Sign out")} disabled={busy !== null} onClick={() => void signOut(item)} />}
         </span>
       </li>;
     })}</ul>}

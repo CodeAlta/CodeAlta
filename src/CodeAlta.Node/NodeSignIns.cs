@@ -62,6 +62,7 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
                 [FleetMachineSignInWays.Browser], null));
         }
 
+        items.AddRange(await CliItemsAsync(cancellationToken).ConfigureAwait(false));
         return new FleetMachineSignInList(items);
     }
 
@@ -84,6 +85,7 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
                 {
                     FleetMachineSignInKinds.Provider => RunProvider(running, parameters),
                     FleetMachineSignInKinds.Mcp => RunMcp(running, parameters),
+                    FleetMachineSignInKinds.Cli => RunCli(running, parameters),
                     _ => throw new NotSupportedException($"A {parameters.Kind} does not sign in from another computer yet."),
                 };
                 _attempts[running.Id] = running;
@@ -112,6 +114,10 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
             if (attempt.Forwarded is not { } forwarded) throw new ArgumentException("This sign-in does not wait for the callback of a browser.", nameof(parameters));
             if (!Uri.TryCreate(callback, UriKind.Absolute, out var address) || !forwarded.TryComplete(address))
                 throw new ArgumentException("The callback is not the one this sign-in waits for.", nameof(parameters));
+        }
+        else if (attempt.AcceptCode is { } accept && parameters.Code is { Length: > 0 } code && !code.Any(char.IsControl))
+        {
+            accept(code);
         }
         else
         {
@@ -165,12 +171,14 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
                 _ = McpServer(target.Key);
                 _mcp.LogoutOAuth(target.Key);
                 break;
+            case FleetMachineSignInKinds.Cli:
+                throw new NotSupportedException("A tool keeps its own login: sign it out on the machine.");
             default:
                 throw new NotSupportedException($"A {target.Kind} is not signed out from another computer yet.");
         }
 
         return (await ListAsync(cancellationToken).ConfigureAwait(false)).Items
-            .First(item => item.Kind == target.Kind && string.Equals(item.Key, target.Key, StringComparison.OrdinalIgnoreCase));
+            .First(item => item.Kind == target.Kind && string.Equals(item.Key, target.Key, StringComparison.OrdinalIgnoreCase) && item.Space == target.Space);
     }
 
     /// <summary>The ways the desktop signs a provider type in.</summary>
@@ -314,6 +322,9 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
         public Task<FleetMachineSignInState> Completion { get; set; } = Task.FromResult(new FleetMachineSignInState("", FleetMachineSignInStates.None, null, null, null));
 
         public ForwardedBrowserCallback? Forwarded { get; set; }
+
+        // What a tool that asks for the code its page shows is given: written to its input.
+        public Action<string>? AcceptCode { get; set; }
 
         public Exception? StartFailure { get; private set; }
 
