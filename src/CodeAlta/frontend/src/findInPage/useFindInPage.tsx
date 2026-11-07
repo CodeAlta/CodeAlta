@@ -3,7 +3,7 @@ import { Button, InputGroup } from "@blueprintjs/core";
 import { AppIcon, type IconName } from "../AppIcon";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
-import { clearFound, defaultFindOptions, findPattern, findPatternInvalid, findRanges, firstBelow, isFindKey, markFound, noFoundMarks, rangeShown, revealRange, samePlace, scrollbarTicks, type FindOptions, type FindTick } from "./findInPage";
+import { clearFound, defaultFindOptions, findPattern, findPatternInvalid, findRanges, isFindKey, markFound, nearestPlace, noFoundMarks, placeKept, rangeShown, revealRange, samePlace, scrollbarTicks, type FindOptions, type FindTick } from "./findInPage";
 
 const mac = typeof navigator !== "undefined" && navigator.platform.startsWith("Mac");
 /** The key that finds in a page, as the window names it. */
@@ -151,7 +151,7 @@ export function useFindInPage({ page, available = true, className, returnTo, lab
       const view = scrollerOf(host);
       // Text typed, or a page that had nothing and now has a place (a fold that opened for it), goes to the nearest place.
       const going = next.length > 0 && (typed || !before);
-      const index = next.length === 0 ? -1 : going ? nearest(next, view, endFirst) : placeKept(next, before, shown.current);
+      const index = next.length === 0 ? -1 : going ? nearest(next, view, endFirst) : placeKept(next, before, shown.current, samePlace);
       ranges.current = next;
       shown.current = index;
       markFound(marks.current, next, index);
@@ -265,12 +265,5 @@ export function useFindInPage({ page, available = true, className, returnTo, lab
 
 // The place to go to from where the reader is: the first that ends in view or after it.
 function nearest(places: readonly Range[], view: HTMLElement, endFirst: boolean): number {
-  const at = firstBelow(places, view.getBoundingClientRect().top, range => range.getBoundingClientRect().bottom);
-  return at >= 0 ? at : endFirst ? places.length - 1 : 0;
-}
-
-// The place shown once the page is searched again: the same one wherever it is now (rows came before it), else the same rank.
-function placeKept(places: readonly Range[], before: Range | undefined, index: number): number {
-  const same = before ? places.findIndex(range => samePlace(range, before)) : -1;
-  return same >= 0 ? same : Math.max(0, Math.min(index, places.length - 1));
+  return nearestPlace(places, view.getBoundingClientRect().top, endFirst, range => range.getBoundingClientRect().bottom);
 }

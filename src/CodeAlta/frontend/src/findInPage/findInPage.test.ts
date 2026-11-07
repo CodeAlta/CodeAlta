@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findKeyKept, findMatches, findPattern, findPatternInvalid, firstBelow, isFindKey, maximumFindMatches, scrollbarTicks } from "./findInPage";
+import { findKeyKept, findMatches, findPattern, findPatternInvalid, firstBelow, isFindKey, maximumFindMatches, nearestPlace, placeKept, scrollbarTicks } from "./findInPage";
 
 test("the places of a page are marked along its scrollbar, one mark for places on the same pixel", () => {
   // A content ten times as tall as the track: ten pixels of it make one of the track.
@@ -68,4 +68,20 @@ test("Ctrl+F finds in the page, and Cmd+F on macOS; the window leaves Ctrl+F onl
   assert.equal(findKeyKept(key({ ctrlKey: true }), within(false)), false, "Elsewhere Ctrl+F searches the sessions.");
   assert.equal(findKeyKept(key({ ctrlKey: true }), null), false);
   assert.equal(findKeyKept(key({ ctrlKey: true }, "g"), within(true)), false);
+});
+
+test("the place gone to from where the reader is, and the place kept when the page is searched again", () => {
+  const bottoms = [100, 200, 300];
+  const bottom = (value: number) => value;
+  assert.equal(nearestPlace(bottoms, 150, false, bottom), 1, "The first place that ends below the top of what is seen.");
+  assert.equal(nearestPlace(bottoms, 400, false, bottom), 0, "With none after the reader, the first of the page.");
+  assert.equal(nearestPlace(bottoms, 400, true, bottom), 2, "A timeline, read from its end: the nearest one before the reader.");
+  assert.equal(nearestPlace([], 0, true, bottom), -1);
+  const same = (left: { id: string }, right: { id: string }) => left.id === right.id;
+  const places = [{ id: "new" }, { id: "a" }, { id: "b" }];
+  assert.equal(placeKept(places, { id: "b" }, 1, same), 2, "The same place, where it is now that a place came before it.");
+  assert.equal(placeKept(places, { id: "gone" }, 1, same), 1, "A place that is gone: the same rank.");
+  assert.equal(placeKept(places, { id: "gone" }, 7, same), 2, "Within the places there are.");
+  assert.equal(placeKept(places, undefined, 0, same), 0);
+  assert.equal(placeKept([], { id: "a" }, 1, same), -1);
 });

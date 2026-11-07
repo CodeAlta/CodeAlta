@@ -9,10 +9,16 @@ export const findHighlight = "find-in-page", currentFindHighlight = "find-in-pag
 /** More places than this are not looked for: the count says "1000". */
 export const maximumFindMatches = 1000;
 
-const blocks = "p, li, h1, h2, h3, h4, h5, h6, td, th, pre, blockquote, figcaption, dt, dd, summary";
-// What is not a word of the page: the links to the pages before and after, the button that copies a code block, the
-// gutter and the comment cards of a review, the time and the buttons of a message of a timeline.
-const skipped = ".documentation-pager, .review-block-gutter, .review-block-host, .message-actions, button, script, style, [aria-hidden='true']";
+/** What a place can be in, and what is not a word of the page, as CSS selectors: a place is in one of `blocks`, and the text in `skipped` is not looked at. */
+export type FindScope = Readonly<{ blocks: string; skipped: string }>;
+/**
+ * The blocks of a rendered page, and what is not a word of it: the links to the pages before and after, the button that
+ * copies a code block, the gutter and the comment cards of a review, the time and the buttons of a message of a timeline.
+ */
+export const pageFindScope: FindScope = Object.freeze({
+  blocks: "p, li, h1, h2, h3, h4, h5, h6, td, th, pre, blockquote, figcaption, dt, dd, summary",
+  skipped: ".documentation-pager, .review-block-gutter, .review-block-host, .message-actions, button, script, style, [aria-hidden='true']",
+});
 
 /** How a text is looked for: as the search of the text editor, whatever the case unless asked, and as typed. */
 export type FindOptions = Readonly<{ matchCase: boolean; wholeWord: boolean; regex: boolean }>;
@@ -66,10 +72,11 @@ export function findMatches(line: string, text: string, limit = maximumFindMatch
 
 /**
  * The places of a text in the words of an element, in the order they are read. A place is in one paragraph, item,
- * cell or heading, and can cross the parts of it that are written differently (a word in bold, a link).
+ * cell or heading (a block of `scope`), and can cross the parts of it that are written differently (a word in bold, a link).
  */
-export function findRanges(root: HTMLElement, text: string, options: FindOptions = defaultFindOptions): Range[] {
+export function findRanges(root: HTMLElement, text: string, options: FindOptions = defaultFindOptions, scope: FindScope = pageFindScope): Range[] {
   const pattern = findPattern(text, options);
+  const { blocks, skipped } = scope;
   if (!pattern) return [];
   const ranges: Range[] = [];
   const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
@@ -123,6 +130,26 @@ export function firstBelow<T>(places: readonly T[], top: number, bottomOf: (plac
 export function samePlace(left: AbstractRange, right: AbstractRange): boolean {
   return left.startContainer === right.startContainer && left.startOffset === right.startOffset
     && left.endContainer === right.endContainer && left.endOffset === right.endOffset;
+}
+
+/**
+ * The place to go to from where the reader is: the first that ends below `top` (the top of what is seen), else the last
+ * one with `endFirst` (a timeline is read from its end), else the first one; -1 when there is none.
+ */
+export function nearestPlace<T>(places: readonly T[], top: number, endFirst: boolean, bottomOf: (place: T) => number): number {
+  if (places.length === 0) return -1;
+  const at = firstBelow(places, top, bottomOf);
+  return at >= 0 ? at : endFirst ? places.length - 1 : 0;
+}
+
+/**
+ * The place shown once a page is searched again: the same one wherever it is now (rows came before it), else the same
+ * rank; -1 when there is none.
+ */
+export function placeKept<T>(places: readonly T[], before: T | undefined, index: number, same: (left: T, right: T) => boolean): number {
+  if (places.length === 0) return -1;
+  const kept = before !== undefined ? places.findIndex(place => same(place, before)) : -1;
+  return kept >= 0 ? kept : Math.max(0, Math.min(index, places.length - 1));
 }
 
 /** A mark beside the scrollbar: how far down its track a place is, in pixels, and whether it is the place shown. */
@@ -206,17 +233,26 @@ export function clearFound(marked: FoundMarks): void {
   markFound(marked, [], -1);
 }
 
+/** The part of the window where a place is seen, from its top to its bottom, in pixels of the window. */
+export type SeenBand = Readonly<{ top: number; bottom: number }>;
+
 /**
  * Scrolls a place into the page: into a wide table or block of code that scrolls by itself, then into the scroll of
  * the page, a third of the way down, out of the way of the search box. A place that is seen already stays where it is.
+ * `seen` is the part of the scroller that is seen when something covers the rest (the box of a phone, its keyboard).
  */
-export function revealRange(range: Range, scroller: HTMLElement): void {
+export function revealRange(range: Range, scroller: HTMLElement, seen?: SeenBand): void {
   const wide = range.startContainer.parentElement?.closest<HTMLElement>("pre, table");
   if (wide && wide.scrollWidth > wide.clientWidth) {
     const box = range.getBoundingClientRect(), frame = wide.getBoundingClientRect();
     if (box.left < frame.left || box.right > frame.right) wide.scrollLeft += box.left - frame.left - (frame.width - box.width) / 2;
   }
-  const box = range.getBoundingClientRect(), view = scroller.getBoundingClientRect();
+  const box = range.getBoundingClientRect();
+  if (seen) {
+    if (box.top < seen.top || box.bottom > seen.bottom) scroller.scrollTop += box.top - seen.top - (seen.bottom - seen.top) / 3;
+    return;
+  }
+  const view = scroller.getBoundingClientRect();
   if (box.top < view.top + 56 || box.bottom > view.bottom - 16) scroller.scrollTop += box.top - view.top - view.height / 3;
 }
 
