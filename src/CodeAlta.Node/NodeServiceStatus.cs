@@ -84,7 +84,8 @@ internal static class NodeServiceStatus
     }
 
     // The options of run that take a value, whose value is never read as an option (a node named --dev).
-    private static readonly HashSet<string> ValueOptions = new(["--data-root", "--port", "--bind", "--name"], StringComparer.Ordinal);
+    private static readonly System.Collections.Frozen.FrozenSet<string> ValueOptions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(["--data-root", "--port", "--bind", "--name"], StringComparer.Ordinal);
 
     // The options of run that choose the profile, as the command line reads them: --data-root and its folder, --dev.
     internal static IEnumerable<string> ProfileOptions(IReadOnlyList<string> runOptions)
