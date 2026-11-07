@@ -30,6 +30,9 @@ internal sealed class CodexAppServerFake : ICodexCliConnectionFactory
     /// <summary>Gets or sets the error <c>thread/start</c> answers with, or null to start threads.</summary>
     public string? ThreadStartError { get; set; }
 
+    /// <summary>Gets or sets whether <c>thread/start</c> ignores <c>ephemeral</c>, as a Codex that keeps every thread.</summary>
+    public bool IgnoreEphemeral { get; set; }
+
     /// <summary>Gets or sets whether <c>turn/steer</c> is refused, as for a turn that takes no more input.</summary>
     public bool RefuseSteer { get; set; }
 
@@ -305,7 +308,11 @@ internal sealed class CodexFakeConnection
         McpServer = ThreadConfig?["mcp_servers"]?["codealta"]?.DeepClone().AsObject();
         return new JsonObject
         {
-            ["thread"] = new JsonObject { ["id"] = threadId, ["cliVersion"] = CodexPinnedRelease.Version, ["preview"] = string.Empty, ["turns"] = new JsonArray() },
+            ["thread"] = new JsonObject
+            {
+                ["id"] = threadId, ["cliVersion"] = CodexPinnedRelease.Version, ["preview"] = string.Empty, ["turns"] = new JsonArray(),
+                ["ephemeral"] = !_server.IgnoreEphemeral && parameters?["ephemeral"]?.GetValue<bool>() == true,
+            },
             ["model"] = parameters?["model"]?.GetValue<string>() ?? "gpt-test",
             ["modelProvider"] = "openai",
             ["cwd"] = parameters?["cwd"]?.GetValue<string>(),

@@ -229,6 +229,10 @@ CodeAlta runtime type; `src/CodeAlta.Plugin.CodexCli` uses only the public plugi
   rewind or a fork ends (`CodexCliProviderState` keeps the last turns), or started again told the conversation. A
   message sent during a turn steers it (`turn/steer`). The approvals of Codex are answered by the permission mode or
   the user (`untrusted` asks for what is not plainly safe, `never` in `bypassPermissions`).
+- **A turn of no session** (a side question, `CodexCliStandaloneTurn`) runs in an app-server of its own that ends with
+  it: an `ephemeral` thread, never written to disk (a Codex that does not open one is refused), no MCP server, its
+  shell, `view_image`, wait, image generation, plan and web search off, and its read-only sandbox with `untrusted`,
+  whose every approval is refused: `apply_patch` has no switch.
 - **The sign-in runs in CodeAlta**: `account/login/start` (browser or device code) in a short-lived app-server of the
   home, shown to the user through the prompt of `IPluginProviderAccount.SignInAsync`.
 

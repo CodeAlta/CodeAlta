@@ -226,28 +226,8 @@ internal sealed partial class CodexCliSession
         }
     }
 
-    // A home without a sign-in makes Codex call the OpenAI API without a key: its turns fail with a 401 that does not
-    // say what to do. The sign-in is checked first, without a model call.
-    private async Task EnsureSignedInAsync(Connection connection, CancellationToken cancellationToken)
-    {
-        GetAccountResponse account;
-        try
-        {
-            account = await connection.Client.AccountReadAsync(new GetAccountParams { RefreshToken = false }, Timeout(cancellationToken)).ConfigureAwait(false);
-        }
-        catch (CodexJsonRpcException exception)
-        {
-            _logger?.Debug($"{_options.ProviderName} did not read its account: {exception.Message}. The turn goes on.");
-            return;
-        }
-
-        if (account.Account is null && account.RequiresOpenaiAuth)
-        {
-            throw new AgentProviderFailureException(
-                $"{_options.ProviderName} is not signed in (its Codex home is {_options.Home}). Sign in from Settings > Providers, then send the message again.",
-                new AgentFailureInfo(AgentFailureKind.Auth));
-        }
-    }
+    private Task EnsureSignedInAsync(Connection connection, CancellationToken cancellationToken)
+        => CodexCliAccount.EnsureSignedInAsync(connection.Client, _options, Timeout(cancellationToken));
 
     // Opens the thread of the session with what depends on it, which Codex does not keep: the MCP server of its tools, its
     // web search, the trust of its folder and the instructions of CodeAlta.

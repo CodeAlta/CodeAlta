@@ -1,3 +1,5 @@
+using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.CodexAppServer;
 using CodeAlta.CodexAppServer.Protocol;
 using CodeAlta.Plugins.Abstractions;
@@ -44,6 +46,32 @@ internal sealed class CodexCliAccount(CodexCliPlugin plugin) : IPluginProviderAc
 
         var options = plugin.CreateOptions(settings, toolEndpoints: null, logger: plugin.Logger, catalog: null);
         await SignInAsync(options, methodId == DeviceMethod, onPrompt, plugin.Logger, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Checks that the home of a running app-server is signed in, without a model call: without a sign-in, Codex calls
+    /// the OpenAI API without a key, and its turns fail with a 401 that does not say what to do.
+    /// </summary>
+    /// <exception cref="AgentProviderFailureException">The home is not signed in.</exception>
+    internal static async Task EnsureSignedInAsync(CodexAppServerClient client, CodexCliRuntimeOptions options, CancellationToken cancellationToken)
+    {
+        GetAccountResponse account;
+        try
+        {
+            account = await client.AccountReadAsync(new GetAccountParams { RefreshToken = false }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (CodexJsonRpcException exception)
+        {
+            options.Logger?.Debug($"{options.ProviderName} did not read its account: {exception.Message}. The turn goes on.");
+            return;
+        }
+
+        if (account.Account is null && account.RequiresOpenaiAuth)
+        {
+            throw new AgentProviderFailureException(
+                $"{options.ProviderName} is not signed in (its Codex home is {options.Home}). Sign in from Settings > Providers, then send the message again.",
+                new AgentFailureInfo(AgentFailureKind.Auth));
+        }
     }
 
     /// <summary>Signs a provider in: starts an app-server in its home, shows the prompt, and waits for Codex to report the end.</summary>

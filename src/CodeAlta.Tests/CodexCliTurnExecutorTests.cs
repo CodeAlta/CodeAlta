@@ -474,6 +474,148 @@ public sealed class CodexCliTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task AStandaloneTurn_RunsInAnEphemeralReadOnlyThreadWithoutTools_AndStopsItsProcess()
+    {
+        var server = new CodexAppServerFake
+        {
+            OnTurn = static async turn =>
+            {
+                await turn.SendReasoningAsync("Reading the transcript.");
+                await turn.SendTextAsync("It fixed the parser.");
+            },
+        };
+        await using var fixture = new Fixture(server);
+        var deltas = new List<AgentTurnDelta>();
+
+        var response = await fixture.Executor.ExecuteStandaloneTurnAsync(
+            fixture.CreateStandaloneRequest("What did it do?"),
+            (delta, _) =>
+            {
+                deltas.Add(delta);
+                return ValueTask.CompletedTask;
+            },
+            CancellationToken.None);
+
+        Assert.AreEqual("It fixed the parser.", Text(response.AssistantMessage));
+        Assert.AreEqual("It fixed the parser.", string.Concat(deltas.Where(static delta => delta.Kind == AgentContentKind.Assistant).Select(static delta => delta.Text)));
+        Assert.IsNull(response.ProviderState, "nothing of the turn is kept for a session");
+        Assert.IsNull(response.ProviderSessionId);
+
+        var start = server.RequestsOf("thread/start").Single()!.AsObject();
+        Assert.IsTrue(start["ephemeral"]!.GetValue<bool>(), "Codex does not write the thread to disk");
+        Assert.AreEqual("read-only", start["sandbox"]!.GetValue<string>());
+        Assert.AreEqual("untrusted", start["approvalPolicy"]!.GetValue<string>());
+        Assert.AreEqual("gpt-mini", start["model"]!.GetValue<string>());
+        StringAssert.StartsWith(start["developerInstructions"]!.GetValue<string>(), "Answer from the transcript.");
+        var config = start["config"]!.AsObject();
+        Assert.IsFalse(config.ContainsKey("mcp_servers"), "no tool of CodeAlta");
+        Assert.AreEqual("disabled", config["web_search"]!.GetValue<string>());
+        foreach (var off in new[] { "features.shell_tool", "features.view_image", "features.sleep_tool", "features.image_generation", "tools.update_plan.enabled" })
+        {
+            Assert.IsFalse(config[off]!.GetValue<bool>(), off);
+        }
+
+        Assert.AreEqual("untrusted", config["projects"]![fixture.WorkingDirectory]!["trust_level"]!.GetValue<string>());
+        var turn = server.RequestsOf("turn/start").Single()!;
+        Assert.AreEqual("What did it do?", turn["input"]![0]!["text"]!.GetValue<string>());
+        Assert.AreEqual("readOnly", turn["sandboxPolicy"]!["type"]!.GetValue<string>());
+        Assert.AreEqual("untrusted", turn["approvalPolicy"]!.GetValue<string>());
+        Assert.AreEqual("gpt-mini", turn["model"]!.GetValue<string>());
+        Assert.AreEqual("high", turn["effort"]!.GetValue<string>());
+        Assert.IsTrue(server.Connections.Single().Closed, "the process of the turn ends with it");
+    }
+
+    [TestMethod]
+    public async Task AStandaloneTurn_RefusesEveryApproval()
+    {
+        string? command = null, edit = null;
+        var server = new CodexAppServerFake
+        {
+            OnTurn = async turn =>
+            {
+                command = await turn.RunCommandAsync("rm -rf .", "removed", askApproval: true);
+                edit = await turn.ChangeFileAsync("src/a.cs");
+                await turn.SendTextAsync("I changed nothing.");
+            },
+        };
+        await using var fixture = new Fixture(server);
+
+        var response = await fixture.Executor.ExecuteStandaloneTurnAsync(fixture.CreateStandaloneRequest("Clean up?"), static (_, _) => ValueTask.CompletedTask, CancellationToken.None);
+
+        Assert.AreEqual("decline", command);
+        Assert.AreEqual("decline", edit);
+        Assert.AreEqual("I changed nothing.", Text(response.AssistantMessage));
+    }
+
+    [TestMethod]
+    public async Task AStandaloneTurn_StoppedOrFailed_StopsItsProcess()
+    {
+        var server = new CodexAppServerFake
+        {
+            OnTurn = static async turn =>
+            {
+                if (turn.Text == "fail")
+                {
+                    throw new CodexFakeTurnFailure("You've hit your usage limit.", "usageLimitExceeded");
+                }
+
+                await turn.SendTextAsync("partial");
+                while (!turn.Connection.Closed)
+                {
+                    await Task.Delay(20);
+                }
+            },
+        };
+        await using var fixture = new Fixture(server);
+        using var stop = new CancellationTokenSource();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => fixture.Executor.ExecuteStandaloneTurnAsync(
+            fixture.CreateStandaloneRequest("wait"),
+            (_, _) =>
+            {
+                stop.Cancel();
+                return ValueTask.CompletedTask;
+            },
+            stop.Token));
+        var failure = await Assert.ThrowsExactlyAsync<AgentProviderFailureException>(() => fixture.Executor.ExecuteStandaloneTurnAsync(
+            fixture.CreateStandaloneRequest("fail"), static (_, _) => ValueTask.CompletedTask, CancellationToken.None));
+
+        Assert.AreEqual(AgentFailureKind.QuotaExhausted, failure.Failure.Kind);
+        Assert.HasCount(2, server.Connections);
+        Assert.IsTrue(server.Connections.All(static connection => connection.Closed));
+    }
+
+    [TestMethod]
+    public async Task AStandaloneTurn_OfACodexThatKeepsItsThreads_IsNotSupported()
+    {
+        var server = new CodexAppServerFake { IgnoreEphemeral = true };
+        await using var fixture = new Fixture(server);
+
+        await Assert.ThrowsExactlyAsync<NotSupportedException>(() => fixture.Executor.ExecuteStandaloneTurnAsync(
+            fixture.CreateStandaloneRequest("What did it do?"), static (_, _) => ValueTask.CompletedTask, CancellationToken.None));
+
+        Assert.IsEmpty(server.RequestsOf("turn/start"));
+        Assert.IsTrue(server.Connections.Single().Closed);
+    }
+
+    [TestMethod]
+    public async Task AStandaloneTurn_LeavesTheThreadOfTheSessionAlone()
+    {
+        var server = new CodexAppServerFake();
+        await using var fixture = new Fixture(server);
+        var conversation = await fixture.RunAsync([User("one")]);
+
+        await fixture.Executor.ExecuteStandaloneTurnAsync(fixture.CreateStandaloneRequest("What did it do?"), static (_, _) => ValueTask.CompletedTask, CancellationToken.None);
+        conversation.Add(User("two"));
+        await fixture.RunAsync(conversation);
+
+        Assert.HasCount(2, server.Connections, "the question ran in a process of its own");
+        Assert.IsFalse(server.Connections.First().Closed, "the process of the session runs on");
+        CollectionAssert.AreEqual(new[] { "thread-1", "thread-2", "thread-1" }, server.RequestsOf("turn/start").Select(static turn => turn!["threadId"]!.GetValue<string>()).ToArray());
+        Assert.AreEqual("thread-1", CodexCliProviderState.Read(fixture.State)!.ThreadId);
+    }
+
+    [TestMethod]
     public async Task Probe_ReadsTheAccountAndTheModels()
     {
         var server = new CodexAppServerFake();
@@ -765,6 +907,24 @@ public sealed class CodexCliTurnExecutorTests
                 State = State,
                 ProcessHost = ProcessHost,
                 ContextSize = ContextSize,
+            };
+
+        // What a side question asks: one prompt, no tool, the model and the effort of the session.
+        public AgentTurnRequest CreateStandaloneRequest(string prompt)
+            => new()
+            {
+                Provider = Runtime.RuntimeDescriptor,
+                ProviderId = ProviderId,
+                SessionId = "side-question:1",
+                RunId = new AgentRunId("side-question:1"),
+                ModelId = "gpt-mini",
+                ReasoningEffort = AgentReasoningEffort.High,
+                WorkingDirectory = WorkingDirectory,
+                SystemMessage = "Answer from the transcript.",
+                Conversation = [User(prompt)],
+                Tools = [],
+                IsStandalone = true,
+                State = new AgentSessionState { SessionId = "side-question:1", UpdatedAt = DateTimeOffset.UtcNow },
             };
 
         public async ValueTask DisposeAsync()

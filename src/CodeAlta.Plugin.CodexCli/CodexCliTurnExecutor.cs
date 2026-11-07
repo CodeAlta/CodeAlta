@@ -6,7 +6,7 @@ namespace CodeAlta.Plugin.CodexCli;
 
 /// <summary>
 /// Executes the turns of CodeAlta sessions through the Codex app-server: one app-server process and one Codex thread
-/// per CodeAlta session.
+/// per CodeAlta session, and one of each for a turn that belongs to no session.
 /// </summary>
 internal sealed class CodexCliTurnExecutor :
     IModelProviderTurnExecutor,
@@ -15,10 +15,13 @@ internal sealed class CodexCliTurnExecutor :
     IAgentProviderSessionCleanup,
     IAgentProviderPermissionMode,
     IAgentProviderInstructionsChannel,
+    IAgentProviderStandaloneTurns,
     IAsyncDisposable
 {
     private readonly CodexCliRuntimeOptions _options;
     private readonly ConcurrentDictionary<string, CodexCliSession> _sessions = new(StringComparer.Ordinal);
+    // Stops the standalone turns that run when the executor is disposed.
+    private readonly CancellationTokenSource _lifetime = new();
     private int _disposed;
 
     public CodexCliTurnExecutor(CodexCliRuntimeOptions options)
@@ -51,6 +54,18 @@ internal sealed class CodexCliTurnExecutor :
         }
 
         return GetSession(request.SessionId).ExecuteTurnAsync(request, onUpdate, onSessionUpdate, cancellationToken);
+    }
+
+    public async Task<AgentTurnResponse> ExecuteStandaloneTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(onUpdate);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+        return await CodexCliStandaloneTurn.ExecuteAsync(_options, request, onUpdate, stop.Token).ConfigureAwait(false);
     }
 
     public void AttachRun(AgentProviderRunContext context)
@@ -102,6 +117,7 @@ internal sealed class CodexCliTurnExecutor :
             return;
         }
 
+        await _lifetime.CancelAsync().ConfigureAwait(false);
         foreach (var sessionId in _sessions.Keys)
         {
             await DisposeProviderSessionAsync(sessionId).ConfigureAwait(false);
