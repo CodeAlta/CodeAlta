@@ -219,7 +219,9 @@ internal sealed class WorktreesService
     /// worktree and one a session is at work in stay. Changes that are not committed are thrown away only for a
     /// folder the request also names in <see cref="WorktreeRemoveManyRequest.Discard"/>; the others are answered
     /// with <c>dirty</c>. A branch is deleted only when the request asks for it, and then only one whose commits
-    /// are all in another branch.
+    /// are all in another branch. With <see cref="WorktreeRemoveManyRequest.KeepUsed"/>, a worktree a session of the
+    /// catalog still works in stays too, answered with <c>used</c>: the window asks it for the worktrees of sessions it
+    /// deleted, which it knows of only from the sessions it lists.
     /// </summary>
     [NeoRpcMethod("removeMany", TimeoutMilliseconds = 600_000)]
     public async Task<WorktreeRemoveManyResponse> RemoveManyAsync(WorktreeRemoveManyRequest request, CancellationToken cancellationToken)
@@ -238,6 +240,20 @@ internal sealed class WorktreesService
         if (await _worktrees!.ListAsync(root, cancellationToken).ConfigureAwait(false) is not { } first) return new("not_repository", []);
         var gone = new HashSet<string>(first.Where(static worktree => worktree.Missing).Select(static worktree => worktree.Path), PathComparer);
         var checkout = GitWorktreeService.FindCheckoutRoot(root);
+        // The whole catalog, read after the deletion that asks: none of its sessions loses the folder it works in.
+        HashSet<string>? used = null;
+        if (request.KeepUsed)
+        {
+            if (_sessions is null) return new("sessions_unavailable", []);
+            try
+            {
+                used = UsedCheckouts(first, await _sessions(cancellationToken).ConfigureAwait(false));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or System.Data.Common.DbException)
+            {
+                return new("sessions_unavailable", []);
+            }
+        }
 
         var results = new List<WorktreeRemoval>(paths.Length);
         foreach (var path in paths)
@@ -249,14 +265,15 @@ internal sealed class WorktreesService
                 continue;
             }
 
-            results.Add(await RemoveOneAsync(root, checkout, Normalize(path), path, gone, discard, request.DeleteMergedBranches).ConfigureAwait(false));
+            results.Add(await RemoveOneAsync(root, checkout, Normalize(path), path, gone, discard, used, request.DeleteMergedBranches).ConfigureAwait(false));
         }
 
         return new("ok", [.. results]);
     }
 
     // One worktree of a request: what git lists now and the sessions at work now decide, not what the window showed.
-    private async Task<WorktreeRemoval> RemoveOneAsync(string root, string? checkout, string folder, string asked, HashSet<string> gone, HashSet<string> discard, bool deleteBranch)
+    private async Task<WorktreeRemoval> RemoveOneAsync(string root, string? checkout, string folder, string asked, HashSet<string> gone, HashSet<string> discard,
+        HashSet<string>? used, bool deleteBranch)
     {
         try
         {
@@ -268,6 +285,7 @@ internal sealed class WorktreesService
                 return new(asked, gone.Contains(folder) ? "ok" : "not_worktree");
             var busy = BusyCheckouts(_busy!()).Contains(target.Path);
             if (Protection(target, checkout, busy) is { } protection) return new(asked, protection);
+            if (used is not null && used.Contains(target.Path)) return new(asked, "used");
             var outcome = await _worktrees.RemoveAsync(root, target.Path, discard.Contains(folder), deleteBranch, CancellationToken.None).ConfigureAwait(false);
             return new(asked, outcome.Status, outcome.Message, outcome.BranchKept, outcome.BranchDeleted);
         }
@@ -473,6 +491,20 @@ internal sealed class WorktreesService
         return checkouts;
     }
 
+    // The checkouts the sessions of the catalog work in, by the folder each records: its worktree, else the folder
+    // it was created in, as the inventory counts them.
+    private static HashSet<string> UsedCheckouts(IReadOnlyList<GitWorktree> worktrees, IReadOnlyList<AgentSessionMetadata> sessions)
+    {
+        var used = new HashSet<string>(PathComparer);
+        foreach (var session in sessions)
+        {
+            var folder = string.IsNullOrWhiteSpace(session.WorktreePath) ? session.WorkspacePath : session.WorktreePath;
+            if (ValidPath(folder) && Owner(worktrees, folder!) is { } owner) used.Add(owner);
+        }
+
+        return used;
+    }
+
     // Why a checkout is not removed: it is the one of the project or the main one of the repository, a session is
     // at work in it, or git keeps it. Null for a worktree that can go.
     private static string? Protection(GitWorktree worktree, string? checkout, bool busy)
@@ -638,11 +670,14 @@ internal sealed record WorktreeSessionItem(string Id, string Title, DateTimeOffs
 /// <param name="Paths">The folders of the worktrees, each one once.</param>
 /// <param name="Discard">The folders among them that are removed with their changes that are not committed.</param>
 /// <param name="DeleteMergedBranches">Deletes the branch of a removed worktree that was created here, when all its commits are in another branch.</param>
-internal sealed record WorktreeRemoveManyRequest(string? ExpectedEpoch, string? ProjectId, string[]? Paths, string[]? Discard = null, bool DeleteMergedBranches = false);
+/// <param name="KeepUsed">Keeps a worktree that a session of the catalog still works in, as for the worktrees of deleted sessions.</param>
+internal sealed record WorktreeRemoveManyRequest(string? ExpectedEpoch, string? ProjectId, string[]? Paths, string[]? Discard = null, bool DeleteMergedBranches = false,
+    bool KeepUsed = false);
 
 /// <summary>
 /// <c>ok</c> with one result for each folder that was asked, in the order they were asked, or a refusal of the
-/// whole request with none: <c>invalid_request</c>, <c>not_repository</c>, or a refusal of the project.
+/// whole request with none: <c>invalid_request</c>, <c>not_repository</c>, <c>sessions_unavailable</c> when the
+/// sessions that work in them cannot be read, or a refusal of the project.
 /// </summary>
 /// <param name="Status">The outcome code of the request.</param>
 /// <param name="Results">What became of each worktree.</param>
@@ -651,7 +686,7 @@ internal sealed record WorktreeRemoveManyResponse(string Status, WorktreeRemoval
 /// <summary>What became of one worktree that was asked to go.</summary>
 /// <param name="Path">The folder, as it was asked.</param>
 /// <param name="Status">
-/// <c>ok</c>, or why it stays: <c>dirty</c>, <c>in_use</c>, <c>locked</c>, <c>main</c>, <c>not_worktree</c>,
+/// <c>ok</c>, or why it stays: <c>dirty</c>, <c>in_use</c>, <c>used</c> (a session still works in it), <c>locked</c>, <c>main</c>, <c>not_worktree</c>,
 /// <c>not_repository</c>, <c>git_unavailable</c>, <c>timeout</c>, <c>failed</c>, or <c>canceled</c> for one that
 /// was not started because the window went away.
 /// </param>

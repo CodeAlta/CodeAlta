@@ -151,6 +151,8 @@ const reasons: Readonly<Record<string, MessageKey>> = {
   read_failed: "The answer did not arrive: the list says whether it is still there.",
   unknown_project: "The project is no longer available.",
   project_unavailable: "The project is no longer available.",
+  used: "Another session works in it.",
+  sessions_unavailable: "The sessions that work in it could not be read.",
 };
 
 /** Why a worktree stays, in a sentence. */

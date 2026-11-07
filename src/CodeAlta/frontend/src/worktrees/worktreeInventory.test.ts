@@ -130,6 +130,8 @@ test("a batch says what went, what holds changes and what stays for another reas
 
   assert.equal(removalReason("in_use", null, t), "A session is working there. Wait for it to finish, or stop it.");
   assert.equal(removalReason("dirty", null, t), "The worktree holds changes that are not committed.");
+  assert.equal(removalReason("used", null, t), "Another session works in it.");
+  assert.equal(removalReason("sessions_unavailable", null, t), "The sessions that work in it could not be read.");
   assert.equal(removalReason("locked", null, t), "Git keeps this worktree locked: unlock it with git to remove it.");
   assert.equal(removalReason("main", null, t), "This is the folder of the project: it is not a worktree to remove.");
   assert.equal(removalReason("canceled", null, t), "Not started.");

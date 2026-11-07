@@ -35,6 +35,17 @@ export async function readSessionChildren(invoke: ReadInvoke, epoch: string | nu
   } catch { return { kind: "error", code: "read_failed" }; }
 }
 
+/**
+ * The sessions a deletion of the tree deletes, as the window knows them: those it shows, and the descendants it does
+ * not show that `sessions` lists, so that none of them is taken for a session outside the tree.
+ */
+export function treeSessions(tree: SessionChildren, sessions: readonly WorkspaceSession[]): readonly WorkspaceSession[] {
+  const shown = [tree.root, ...tree.children.map(child => child.session)];
+  const ids = new Set(shown.map(session => session.id));
+  const hidden = new Set(tree.descendantIds.filter(id => !ids.has(id)));
+  return [...shown, ...sessions.filter(session => hidden.has(session.id))];
+}
+
 /** The sessions of the tree that something goes on in: the session itself included. */
 export function sessionsAtWork(tree: SessionChildren): readonly WorkspaceSession[] {
   return [...(tree.rootAtWork ? [tree.root] : []), ...tree.children.filter(child => child.atWork).map(child => child.session)];

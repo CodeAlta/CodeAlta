@@ -11,7 +11,7 @@ import { useShellLanguage } from "../shellLanguage";
 import { SpaceIcon } from "../spaces/SpaceViews";
 import { sessionHome, type Space } from "../spaces/spaces";
 import { deletedSessionsWorktrees, type DeletedWorktree } from "../worktrees/worktrees";
-import { sessionsAtWork, sessionTreeMessage, treeDeletable, type SessionChildren, type SessionChildrenRead, type SessionTreeDeletion } from "./sessionChildren";
+import { sessionsAtWork, sessionTreeMessage, treeDeletable, treeSessions, type SessionChildren, type SessionChildrenRead, type SessionTreeDeletion } from "./sessionChildren";
 
 /**
  * The sessions below a session, wherever they are: in other projects, in the chats, in other spaces. A row opens its
@@ -78,8 +78,11 @@ export function SessionChildrenDialog({ title, deleting, read, projects, session
   const root = tree?.root;
   const atWork = tree ? sessionsAtWork(tree) : [];
   const deletable = !!tree && canDelete && treeDeletable(tree) && !busy && !loading;
-  const worktrees = tree ? deletedSessionsWorktrees(sessions, [tree.root, ...tree.children.map(child => child.session)]) : [];
+  const worktrees = tree ? deletedSessionsWorktrees(sessions, treeSessions(tree, sessions)) : [];
   const removable = worktrees.filter(worktree => !worktree.shared).length;
+  // Worktrees of several projects can have the same name: each says its project.
+  const severalProjects = new Set(worktrees.map(worktree => worktree.projectId)).size > 1;
+  const projectName = (id: string) => projects.find(project => project.id === id)?.name ?? t("Project");
   function where(session: WorkspaceSession) {
     const project = session.scopeKind === "project" ? projects.find(value => value.id === session.projectId) : undefined;
     const home = spaces.length > 1 ? sessionHome(spaces, { spaceId: session.spaceId, projectId: session.scopeKind === "project" ? session.projectId : null }) : null;
@@ -140,7 +143,7 @@ export function SessionChildrenDialog({ title, deleting, read, projects, session
                 {worktrees[0].shared && <> {t("Other sessions work in this worktree: it stays.")}</>}</p>
               : <><p>{t("These sessions work in {count} worktrees. They are kept, with their branches:", { count: worktrees.length })}</p>
                 <ul className="session-children-worktrees">{worktrees.map(worktree => <li key={worktree.path} title={worktree.path}>
-                  {worktree.name}{worktree.shared && <span className="muted-text"> · {t("Other sessions work in it: it stays.")}</span>}</li>)}</ul></>}
+                  {worktree.name}{severalProjects && <span className="muted-text"> · {projectName(worktree.projectId)}</span>}{worktree.shared && <span className="muted-text"> · {t("Other sessions work in it: it stays.")}</span>}</li>)}</ul></>}
             {removable > 0 && <Checkbox checked={removingWorktrees} disabled={busy}
               label={removable === 1 ? t("Also remove the worktree") : t("Also remove the {count} worktrees", { count: removable })}
               onChange={event => setRemovingWorktrees(event.currentTarget.checked)} />}

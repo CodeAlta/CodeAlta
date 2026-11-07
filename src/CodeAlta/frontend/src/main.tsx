@@ -5516,7 +5516,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     for (const projectId of new Set(worktrees.map(worktree => worktree.projectId))) {
       const own = worktrees.filter(worktree => worktree.projectId === projectId);
       const paths = own.map(worktree => worktree.path);
-      const reply = await worktreesApi.removeMany({ expectedEpoch: epoch, projectId, paths, discard: [], deleteMergedBranches: true },
+      // The host keeps a worktree that a session it knows of still works in: the window may not list them all.
+      const reply = await worktreesApi.removeMany({ expectedEpoch: epoch, projectId, paths, discard: [], deleteMergedBranches: true, keepUsed: true },
         { timeoutMilliseconds: 600_000 }).then(value => removalReply(value, paths), () => "unconfirmed");
       if (!creationAlive.current) return;
       own.forEach((worktree, index) => results.push(typeof reply === "string"

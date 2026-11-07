@@ -291,7 +291,7 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
     for (const chunk of removalChunks(rows)) {
       if (stop.current) { collected.push(...chunk.map(row => ({ row, path: row.path, status: "canceled", ...none }))); continue; }
       const paths = chunk.map(row => row.path);
-      const reply = await api.removeMany({ expectedEpoch: epoch, projectId: project.id, paths, discard: discard ? paths : [], deleteMergedBranches: deleteBranches },
+      const reply = await api.removeMany({ expectedEpoch: epoch, projectId: project.id, paths, discard: discard ? paths : [], deleteMergedBranches: deleteBranches, keepUsed: false },
         { timeoutMilliseconds: 600_000 }).then(value => removalReply(value, paths), () => "unconfirmed");
       if (typeof reply === "string") {
         // Nothing is known of these, and nothing more is asked of a host that did not answer.
