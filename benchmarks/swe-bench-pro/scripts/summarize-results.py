@@ -32,15 +32,19 @@ RUNS = {
     "CodeAlta / Astra": ("codealta-astra-xhigh", "codealta", "astra"),
     "Codex / Astra": ("codex-astra-xhigh", "codex", "astra"),
     "CodeAlta CC / Opus": ("codealta-cc-opus55-xhigh", "codealta", "opus"),
+    "CodeAlta / DeepSeek Flash": ("codealta-deepseek-flash-high", "codealta", "deepseek-flash"),
+    "OpenCode / DeepSeek Flash": ("opencode-deepseek-flash-high", "opencode", "deepseek-flash"),
 }
 
 # Runs that are not in the default -Runs of run-hard51.ps1: summarized when they ran, skipped in silence otherwise.
-OPTIONAL_RUNS = {"CodeAlta CC / Opus"}
+OPTIONAL_RUNS = {"CodeAlta CC / Opus", "CodeAlta / DeepSeek Flash", "OpenCode / DeepSeek Flash"}
 
 # Per token: uncached input, cache read, cache write, output (Claude Opus 5.5; GPT-6 Astra under 272k tokens).
 PRICES = {
     "opus": (4e-6, 0.2e-6, 5e-6, 20e-6),
     "astra": (10e-6, 1e-6, 12.5e-6, 50e-6),
+    # DeepSeek V4.1 Flash, as models.dev lists it: no charge for writing the cache, which DeepSeek fills by itself.
+    "deepseek-flash": (0.15e-6, 0.003e-6, 0.15e-6, 0.6e-6),
 }
 
 
@@ -109,6 +113,25 @@ def cache_write_tokens(kind: str, directory: Path) -> int:
     return extra.get("total_cache_creation_input_tokens") or extra.get("total_cache_write_input_tokens") or 0
 
 
+def reasoning_tokens(kind: str, directory: Path) -> int:
+    """Reasoning tokens a harness reports apart from its output: Harbor's OpenCode agent counts its output without them,
+    where CodeAlta, Claude Code and Codex count them in (the providers bill them as output)."""
+    if kind != "opencode":
+        return 0
+    log = directory / "agent" / "opencode.txt"
+    if not log.exists():
+        return 0
+    total = 0
+    for line in log.read_text(encoding="utf-8").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "step_finish":
+            total += ((event.get("part") or {}).get("tokens") or {}).get("reasoning") or 0
+    return total
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--bundle-root", type=Path, default=Path(__file__).resolve().parents[1])
 parser.add_argument("--run-id")
@@ -171,7 +194,7 @@ for label, (suffix, kind, model) in RUNS.items():
             "input": agent.get("n_input_tokens") or 0,
             "cache_read": agent.get("n_cache_tokens") or 0,
             "cache_write": cache_write_tokens(kind, directory),
-            "output": agent.get("n_output_tokens") or 0,
+            "output": (agent.get("n_output_tokens") or 0) + reasoning_tokens(kind, directory),
             "cost": agent.get("cost_usd"),
             "agent_seconds": (
                 timestamp(phase["finished_at"]) - timestamp(phase["started_at"])
@@ -277,6 +300,7 @@ for name, codealta, native in (
     ("Opus", "CodeAlta / Opus", "Claude Code / Opus"),
     ("Astra", "CodeAlta / Astra", "Codex / Astra"),
     ("Opus, CodeAlta on Claude Code", "CodeAlta CC / Opus", "Claude Code / Opus"),
+    ("DeepSeek Flash", "CodeAlta / DeepSeek Flash", "OpenCode / DeepSeek Flash"),
 ):
     if codealta not in outcomes or native not in outcomes:
         continue

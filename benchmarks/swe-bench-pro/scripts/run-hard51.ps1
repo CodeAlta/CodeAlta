@@ -12,7 +12,8 @@ param(
     [string]$BundleRoot = (Split-Path $PSScriptRoot -Parent),
 
     # Names among codealta-opus, claude-code-opus, codealta-astra, codex-astra, and codealta-cc-opus, codealta-sonnet,
-    # codealta-haiku, codealta-haiku-escalate and codealta-haiku-recheck-escalate (not in the default); under pwsh -File, one comma-separated argument
+    # codealta-haiku, codealta-haiku-escalate, codealta-haiku-recheck-escalate, codealta-deepseek-flash and
+    # opencode-deepseek-flash (not in the default); under pwsh -File, one comma-separated argument
     # (-Runs codealta-opus,codealta-astra).
     [string[]]$Runs = @("codealta-opus", "claude-code-opus", "codealta-astra", "codex-astra"),
 
@@ -40,6 +41,10 @@ param(
 
     [switch]$ConfirmPaidRun,
 
+    # Runs only these tasks of HARD-51 (Harbor's -i, by task name), for example a check of a new job on one task
+    # before the whole run; summarize-results.py needs all 51.
+    [string[]]$IncludeTask,
+
     [switch]$DryRun
 )
 
@@ -66,6 +71,23 @@ $runDefinitions = [ordered]@{
     "codealta-haiku" = [ordered]@{ Name = "codealta-haiku55-high"; Harness = "CodeAlta"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-haiku-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=high", "disable_tools=web") }
     "codealta-haiku-recheck-escalate" = [ordered]@{ Name = "codealta-haiku55-high-recheck-escalate-opus55-xhigh"; Harness = "CodeAlta Adaptive"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-haiku-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=high", "disable_tools=web", "recheck=true", "escalate_to=claude-opus-5-5", "escalate_effort=xhigh") }
     "codealta-haiku-escalate" = [ordered]@{ Name = "codealta-haiku55-high-escalate-opus55-xhigh"; Harness = "CodeAlta Adaptive"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-haiku-5-5"; Host = "api.anthropic.com"; Kwargs = @("reasoning_effort=high", "disable_tools=web", "escalate_to=claude-opus-5-5", "escalate_effort=xhigh") }
+    # DeepSeek V4.1 Flash on DeepSeek's API, CodeAlta against OpenCode (Harbor's own opencode agent, pinned). Both send
+    # thinking with effort high, replay the reasoning of earlier turns (reasoning_content) and cap an answer at 32,000
+    # tokens; neither starts sub-agents nor has web tools. The OpenCode provider uses the OpenAI-compatible SDK with
+    # interleaved reasoning: its @ai-sdk/deepseek package drops the reasoning between turns.
+    "codealta-deepseek-flash" = [ordered]@{ Name = "codealta-deepseek-flash-high"; Harness = "CodeAlta"; Agent = "locked_codealta:LockedCodeAlta"; Model = "deepseek/deepseek-flash"; Host = "api.deepseek.com"; Kwargs = @("reasoning_effort=high", "disable_tools=web", "provider_type=openai-chat", "api_key_env=DEEPSEEK_API_KEY", "api_url=https://api.deepseek.com", "extra_args=-c providers.deepseek.extra_body.max_tokens=32000") }
+    "opencode-deepseek-flash" = [ordered]@{ Name = "opencode-deepseek-flash-high"; Harness = "OpenCode"; Agent = "opencode"; Model = "deepseek/deepseek-flash"; Host = "api.deepseek.com"; Kwargs = @("version=1.19.5", "disable_web_search=true", ("opencode_config=" + (ConvertTo-Json -Compress -Depth 10 ([ordered]@{
+        autoupdate = $false; share = "disabled"; enabled_providers = @("deepseek"); small_model = "deepseek/deepseek-flash"
+        permission = [ordered]@{ task = "deny" }; tools = [ordered]@{ task = $false }
+        provider = [ordered]@{ deepseek = [ordered]@{
+            npm = "@ai-sdk/openai-compatible"
+            options = [ordered]@{ baseURL = "https://api.deepseek.com/v1"; apiKey = "{env:DEEPSEEK_API_KEY}" }
+            models = [ordered]@{ "deepseek-flash" = [ordered]@{
+                name = "DeepSeek V4.1 Flash"; reasoning = $true; tool_call = $true
+                limit = [ordered]@{ context = 1000000; output = 32000 }
+                interleaved = [ordered]@{ field = "reasoning_content" }
+                options = [ordered]@{ thinking = [ordered]@{ type = "enabled" }; reasoningEffort = "high" } } } } }
+    })))) }
 }
 $requestedRuns = @($Runs | ForEach-Object { $_ -split "," } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $unknownRuns = @($requestedRuns | Where-Object { -not $runDefinitions.Contains($_) })
@@ -259,6 +281,10 @@ function Invoke-HarborJob {
 
     $arguments = [Collections.Generic.List[string]]::new()
     $arguments.AddRange([string[]]@("run", "-p", $datasetRoot, "-e", "docker", "-n", $Concurrency.ToString(), "-a", $Agent, "-m", $Model))
+    foreach ($task in @($IncludeTask | ForEach-Object { $_ -split "," } | Where-Object { $_ })) {
+        $arguments.Add("-i")
+        $arguments.Add($task.Trim())
+    }
     foreach ($kwarg in $AgentKwargs) {
         $arguments.Add("--ak")
         $arguments.Add($kwarg)
@@ -303,6 +329,7 @@ $preflights = [ordered]@{
     "Codex" = [ordered]@{ Name = "codex-install-preflight"; Agent = "locked_codex:LockedCodex"; Model = "openai/gpt-6-astra"; Kwargs = @("reasoning_effort=xhigh", "web_search=disabled") }
     # altacli and the Claude Code CLI the claude-code provider runs.
     "CodeAlta on Claude Code" = [ordered]@{ Name = "codealta-cc-install-preflight"; Agent = "locked_codealta:LockedCodeAlta"; Model = "anthropic/claude-opus-5-5"; Kwargs = @("reasoning_effort=xhigh", "provider_type=claude-code") }
+    "OpenCode" = [ordered]@{ Name = "opencode-install-preflight"; Agent = "opencode"; Model = "deepseek/deepseek-flash"; Kwargs = @("version=1.19.5") }
 }
 $harnesses = @($selectedRuns | ForEach-Object { $runDefinitions[$_].Harness } | Select-Object -Unique)
 foreach ($harness in $preflights.Keys) {
@@ -327,6 +354,9 @@ if (-not $DryRun) {
     if (($models | Where-Object { $_ -like "openai/*" }) -and [string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) {
         throw "OPENAI_API_KEY is not set."
     }
+    if (($models | Where-Object { $_ -like "deepseek/*" }) -and [string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
+        throw "DEEPSEEK_API_KEY is not set."
+    }
     if (-not $ConfirmPaidRun) {
         throw "Paid execution is blocked unless -ConfirmPaidRun is provided."
     }
@@ -342,7 +372,8 @@ $manifest = [ordered]@{
     schema = 1
     run_id = $RunId
     created_at = (Get-Date).ToString("o")
-    task_count = 51
+    task_count = if ($IncludeTask) { @($IncludeTask | ForEach-Object { $_ -split "," } | Where-Object { $_ }).Count } else { 51 }
+    tasks = if ($IncludeTask) { @($IncludeTask | ForEach-Object { $_ -split "," } | Where-Object { $_ } | ForEach-Object { $_.Trim() }) } else { $null }
     concurrency = $Concurrency
     benchmark_commit = $config.benchmark_commit
     codealta_commit = $config.codealta_commit
@@ -357,7 +388,8 @@ $manifest = [ordered]@{
     dataset = $datasetRoot
     runs = @($selectedRuns | ForEach-Object {
         $run = $runDefinitions[$_]
-        [ordered]@{ name = "$RunId-$($run.Name)"; harness = $run.Harness; model = $run.Model; reasoning = "xhigh" }
+        $effort = @($run.Kwargs | Where-Object { $_ -like "reasoning_effort=*" }) | Select-Object -First 1
+        [ordered]@{ name = "$RunId-$($run.Name)"; harness = $run.Harness; model = $run.Model; reasoning = if ($effort) { $effort.Split("=", 2)[1] } elseif ($run.Name -like "*-high") { "high" } else { "xhigh" } }
     })
 }
 if ($DryRun) {
@@ -372,7 +404,10 @@ foreach ($key in $selectedRuns) {
     $jobName = "$RunId-$($run.Name)"
     $kwargs = @($run.Kwargs)
     if ($run.Agent -eq "locked_codealta:LockedCodeAlta" -and -not [string]::IsNullOrWhiteSpace($codeAltaExtraArgs)) {
-        $kwargs += "extra_args=$codeAltaExtraArgs"
+        # A run that has arguments of its own keeps them, before those of -CodeAltaArgs.
+        $own = @($kwargs | Where-Object { $_ -like "extra_args=*" }) | Select-Object -First 1
+        $kwargs = @($kwargs | Where-Object { $_ -notlike "extra_args=*" })
+        $kwargs += if ($own) { "$own $codeAltaExtraArgs" } else { "extra_args=$codeAltaExtraArgs" }
     }
     Invoke-HarborJob -JobName $jobName -Agent $run.Agent -Model $run.Model -AllowedHost $run.Host -AgentKwargs $kwargs -AllowErrored:$AllowErroredTrials
     Invoke-HarborJob -JobName "$jobName-regrade" -Agent "patch_replay:PatchReplayAgent" -Model "replay" -SourceJob (Join-Path $jobsRoot $jobName)
