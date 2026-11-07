@@ -4,6 +4,7 @@ import { fleetServer, type FleetPolicyOverview, type FleetPolicyRulesView, type 
 import { AppIcon } from "../../AppIcon";
 import { ActivitySpinner } from "../../ActivitySpinner";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../../SettingsPage";
+import { FleetHelp } from "../console/FleetHelp";
 import { useShellLanguage } from "../../shellLanguage";
 import type { MessageKey } from "../../localization";
 import { serverProblem } from "../fleetServer";
@@ -24,8 +25,9 @@ export function FleetPoliciesSettings({ epoch, api = fleetServer }: { epoch: str
   const { listing, loading, busy, notice, reload } = useSettingsEditor(options => api.status({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
   const servers = (listing?.servers ?? []).filter(server => server.controller && server.link === "approved");
   return <SettingsPage className="fleet-policies-settings" label={t("Policies")} group="Fleet" title="Policies"
-    description="The rules of your organization for the work of the fleet, and the kill switch that stops it. Each machine verifies what an owner signed before it applies it."
-    notice={notice} loading={loading} busy={busy} onReload={reload}>
+    description="The rules of your organization, and its kill switch."
+    notice={notice} loading={loading} busy={busy} onReload={reload}
+    actions={<FleetHelp text="The rules of your organization for the work of the fleet, and the kill switch that stops it. Each machine verifies what an owner signed before it applies it." page="fleet/policies-and-audit.md" />}>
     {!listing ? <SettingsUnavailable loading={loading} icon="shield" title="Servers unavailable" />
       : servers.length === 0 ? <NonIdealState className="fleet-secrets-empty" icon={<AppIcon name="server" size={36} />} title={t("Not linked to a server.")} />
       : servers.map(server => <ServerPolicy key={server.id} server={server} epoch={epoch ?? ""} api={api} titled={servers.length > 1} onChanged={reload} />)}

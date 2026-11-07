@@ -9,6 +9,7 @@ import { useShellLanguage } from "../../shellLanguage";
 import type { MessageKey } from "../../localization";
 import { serverProblem } from "../fleetServer";
 import { DataTable, type DataColumn } from "../console/DataTable";
+import { FleetHelp } from "../console/FleetHelp";
 import { FilterBar, type FilterFacet } from "../console/FilterBar";
 import { facetCounts, filterRows, type Facet, type FacetValues, type TableSort } from "../console/tableRows";
 import { onCallSummary, shiftChoices } from "./access";
@@ -37,8 +38,8 @@ export function FleetAccessSettings({ epoch, api = fleetServer }: { epoch: strin
   const { listing, loading, busy, notice, reload } = useSettingsEditor(options => api.status({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
   const servers = (listing?.servers ?? []).filter(server => server.controller && server.link === "approved");
   return <SettingsPage className="fleet-access-settings" label={t("People and access")} group="Fleet" title="People and access"
-    description="Who is in your organization, what each person may do, and who owns your machines and automations." notice={notice} loading={loading} busy={busy}
-    onReload={reload}>
+    description="Who is in your organization, and what each may do." notice={notice} loading={loading} busy={busy}
+    onReload={reload} actions={<FleetHelp text="Who is in your organization, what each person may do, and who owns your machines and automations." page="fleet/people-and-access.md" />}>
     {!listing ? <SettingsUnavailable loading={loading} icon="user" title="Servers unavailable" />
       : servers.length === 0 ? <NonIdealState className="fleet-secrets-empty" icon={<AppIcon name="server" size={36} />} title={t("Not linked to a server.")} />
       : servers.map(server => <ServerAccess key={server.id} server={server} epoch={epoch ?? ""} api={api} titled={servers.length > 1} />)}

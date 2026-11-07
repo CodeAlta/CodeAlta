@@ -4,6 +4,7 @@ import { fleetServer, type FleetAccessOverview, type FleetAuditCheck, type Fleet
 import { AppIcon } from "../../AppIcon";
 import { ActivitySpinner } from "../../ActivitySpinner";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../../SettingsPage";
+import { FleetHelp } from "../console/FleetHelp";
 import { useShellLanguage } from "../../shellLanguage";
 import type { MessageKey } from "../../localization";
 import { serverProblem } from "../fleetServer";
@@ -30,8 +31,9 @@ export function FleetAuditSettings({ epoch, api = fleetServer, now = systemNow }
   const { listing, loading, busy, notice, reload } = useSettingsEditor(options => api.status({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
   const servers = (listing?.servers ?? []).filter(server => server.controller && server.link === "approved");
   return <SettingsPage className="fleet-audit-settings" label={t("Audit")} group="Fleet" title="Audit"
-    description="Who did what in your fleet, with which device, from where, and how it ended. The log holds no content: no prompt, no answer, no file." notice={notice}
-    loading={loading} busy={busy} onReload={reload}>
+    description="Who did what in your fleet, and how it ended." notice={notice}
+    loading={loading} busy={busy} onReload={reload}
+    actions={<FleetHelp text="Who did what in your fleet, with which device, from where, and how it ended. The log holds no content: no prompt, no answer, no file." page="fleet/policies-and-audit.md" />}>
     {!listing ? <SettingsUnavailable loading={loading} icon="logs" title="Servers unavailable" />
       : servers.length === 0 ? <NonIdealState className="fleet-secrets-empty" icon={<AppIcon name="server" size={36} />} title={t("Not linked to a server.")} />
       : servers.map(server => <ServerAudit key={server.id} server={server} epoch={epoch ?? ""} api={api} titled={servers.length > 1} now={now} />)}

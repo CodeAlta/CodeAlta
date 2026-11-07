@@ -4,6 +4,7 @@ import { fleetServer, type FleetDeviceView, type FleetServerView, type FleetTele
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../SettingsPage";
+import { FleetHelp } from "./console/FleetHelp";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { CreateServerDialog } from "./CreateServerDialog";
@@ -58,13 +59,16 @@ export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: strin
   }, [api, epoch, reload]);
   const servers = listing?.servers ?? [];
   return <SettingsPage className="fleet-server-settings" label={t("Server")} group="Fleet" title="CodeAlta Server"
-    description="A server shows the machines and sessions of all your computers in one place. It never reads their content."
+    description="The server of your organization, and the computers and spaces it serves."
     notice={notice} loading={loading} busy={busy} onReload={reload}
-    actions={servers.length === 0 && listing ? <>
-      <Button icon={<AppIcon name="computer" size={15} />} disabled={!epoch} onClick={() => setJoining("organization")}>{t("Join an organization…")}</Button>
-      <Button icon={<AppIcon name="server" size={15} />} disabled={!epoch} onClick={() => setJoining("own")}>{t("Connect to my server…")}</Button>
-      <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch} onClick={() => setCreating(true)}>{t("Create my server…")}</Button>
-    </> : undefined}>
+    actions={<>
+      <FleetHelp text="A server shows the machines and sessions of all your computers in one place. It never reads their content." page="fleet/server.md" />
+      {servers.length === 0 && listing && <>
+        <Button icon={<AppIcon name="computer" size={15} />} disabled={!epoch} onClick={() => setJoining("organization")}>{t("Join an organization…")}</Button>
+        <Button icon={<AppIcon name="server" size={15} />} disabled={!epoch} onClick={() => setJoining("own")}>{t("Connect to my server…")}</Button>
+        <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch} onClick={() => setCreating(true)}>{t("Create my server…")}</Button>
+      </>}
+    </>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="server" title="Servers unavailable" />
       : servers.length === 0 ? <NonIdealState className="fleet-server-empty" icon={<AppIcon name="server" size={36} />} title={t("Not linked to a server.")}
         description={t("Create a server for your machines, or join the server of your organization.")} action={<Button variant="minimal" size="small" icon={<AppIcon name="shield" size={14} />} disabled={!epoch} onClick={() => setDialog("recover")}>
