@@ -167,8 +167,17 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       const dragGrip = async (delta: number) => {
         const grip = await evaluate(`(()=>{const r=document.querySelector('[aria-label="Resize side question"]').getBoundingClientRect();
           return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
-        for (const [type, y, buttons] of [["mousePressed", grip.y, 1], ["mouseMoved", grip.y + delta, 1], ["mouseReleased", grip.y + delta, 0]] as const)
-          await command("Input.dispatchMouseEvent", { type, x: grip.x, y, button: "left", buttons, clickCount: 1 });
+        // A drag as a hand makes it: the press, a frame for the grip to take the pointer, moves in steps that stay in the
+        // window, then the release; a single jump right after the press can reach the page before the capture.
+        const height = await evaluate("innerHeight");
+        const to = Math.max(1, Math.min(height - 1, grip.y + delta));
+        const frame = () => evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
+        await command("Input.dispatchMouseEvent", { type: "mousePressed", x: grip.x, y: grip.y, button: "left", buttons: 1, clickCount: 1 });
+        await frame();
+        for (let step = 1; step <= 4; step++)
+          await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: grip.x, y: grip.y + (to - grip.y) * step / 4, button: "left", buttons: 1 });
+        await command("Input.dispatchMouseEvent", { type: "mouseReleased", x: grip.x, y: to, button: "left", buttons: 0, clickCount: 1 });
+        await frame();
       };
       await dragGrip(-80);
       const taller = await geometry();
@@ -205,6 +214,11 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       assert.equal(await wait("document.querySelector('.side-question-body')?.textContent.includes('Answer to queued?')"), true);
       assert.deepEqual(await rows(), []);
       assert.deepEqual(await sends(), []);
+      // A failed answer says what failed in words, not the status of the host.
+      await key("Escape", "Escape", 27);
+      await write("/ask unsupported?");
+      await enter();
+      assert.equal(await wait("document.querySelector('.side-question-failure')?.textContent === 'The provider of this session runs an agent of its own and cannot answer side questions.'"), true);
       return;
     }
 

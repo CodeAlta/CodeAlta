@@ -7,6 +7,7 @@ import { TimelineGroupView } from "../TimelineEntryGroup";
 import { emphasisProperties } from "../timelineEmphasis/timelineEmphasis";
 import { useTimelineEmphasis } from "../timelineEmphasis/useTimelineEmphasis";
 import type { TimelineGroup } from "../toolGroups";
+import type { MessageKey } from "../localization";
 import type { SideQuestionEntry, SideQuestions } from "./sideQuestions";
 import "./sideQuestion.css";
 
@@ -24,6 +25,15 @@ function SideQuestionTimeline({ entry, sessionId }: { entry: SideQuestionEntry; 
     {entry.answer && <TimelineGroupView sessionId={sessionId} group={group("Assistant", entry.answer)} entryType="answer" revision={null} {...isolation} onOpenSource={isolation.noop} onOpenTool={isolation.noop} />}
   </div>;
 }
+
+// What a failed answer says, by the status of the host; what the host said goes after it only when nothing more precise does.
+const failures: Readonly<Record<string, MessageKey>> = {
+  unsupported: "The provider of this session runs an agent of its own and cannot answer side questions.",
+  missing_session: "This session can no longer be read.",
+  stale_epoch: "CodeAlta restarted since this question was asked: ask it again.",
+  closed: "CodeAlta restarted since this question was asked: ask it again.",
+  invalid_request: "This question cannot be asked.",
+};
 
 /** A transient answer over this session's timeline; the composer and running turn remain in place. */
 export function SideQuestionPanel({ store, sessionId, active }: { store: SideQuestions; sessionId: string; active: boolean }) {
@@ -86,7 +96,8 @@ export function SideQuestionPanel({ store, sessionId, active }: { store: SideQue
         if (event.key === "Home") setHeight(50);
         else resize((panel.current?.getBoundingClientRect().height ?? 0) + (event.key === "ArrowUp" ? 16 : -16));
       }}><span /></div>
-    <header><strong>{t(view.listing ? "Recent side questions" : "Side question")}</strong><span />
+    <header><AppIcon name="chat" size={15} className="side-question-icon" /><strong>{t(view.listing ? "Recent side questions" : "Side question")}</strong>
+      <span className="side-question-hint">{t("Not added to the conversation")}</span>
       {!view.listing && <Button variant="minimal" size="small" onClick={() => store.list(sessionId)}>{t("Recent side questions")}</Button>}
       <Button variant="minimal" size="small" icon={<AppIcon name="close" size={14} />} aria-label={t("Close")} onClick={() => store.close(sessionId)} />
     </header>
@@ -97,7 +108,9 @@ export function SideQuestionPanel({ store, sessionId, active }: { store: SideQue
       : entry && <><SideQuestionTimeline entry={entry} sessionId={sessionId} />
         {entry.state === "running" && <p role="status">{t("Thinking…")}</p>}
         {entry.state === "stopped" && <p role="status">{t("Question stopped.")}</p>}
-        {entry.state === "failed" && <p role="alert">{t("The side question failed ({status}).", { status: entry.failure?.status ?? "failed" })}{entry.failure?.message && <> {entry.failure.message}</>}</p>}
+        {entry.state === "failed" && <p role="alert" className="side-question-failure"><AppIcon name="warning" size={14} />
+          <span>{entry.failure && failures[entry.failure.status] ? t(failures[entry.failure.status])
+            : <>{t("The side question failed.")}{entry.failure?.message && <> {entry.failure.message}</>}</>}</span></p>}
       </>}
     </div>
   </section>;

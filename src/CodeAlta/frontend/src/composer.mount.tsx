@@ -71,6 +71,8 @@ const compaction = createCompactionSubmissions(async (request): Promise<SessionA
 });
 
 const sideQuestions = createSideQuestions(async (_session, question, signal) => (async function* () {
+  // A provider that runs an agent of its own answers no side question: the host says so by its status.
+  if (question === "unsupported?") { yield { kind: "error", status: "unsupported", value: "The provider 'fixture' runs an agent of its own." }; return; }
   yield { kind: "text", value: "Answer to " + question + "\n\n### Details\n\n- one\n- two\n\n```ts\nconst n = 1;\n```" };
   await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
 })());
