@@ -93,15 +93,16 @@ public sealed class NodeManagementCommandTests
     {
         using var root = new NodeTestRoot();
         using var machine = new FakeServiceMachine(ServicePlatform.Windows);
+        // A Windows service is installed by an administrator: from a terminal that is not elevated, nothing changes.
         var (code, _, error) = await RunAsync(machine, ["install", "--system", "--account", "codealta", "--data-root", root.DataRoot]);
 
         Assert.AreEqual(NodeExitCodes.Failure, code);
-        StringAssert.Contains(error, "not available on Windows");
+        StringAssert.Contains(error, "elevated terminal");
         Assert.IsEmpty(machine.Commands);
     }
 
     [TestMethod]
-    [DataRow("install", "--system")]
+    [DataRow("install", "--password-stdin")]
     [DataRow("install", "--user", "--system", "--account", "codealta")]
     [DataRow("install", "--account", "codealta")]
     [DataRow("install", "--no-listen", "--port", "2600")]

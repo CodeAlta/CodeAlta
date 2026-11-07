@@ -175,12 +175,16 @@ internal sealed class FakeProcess(int id, UpdateCommand command) : IUpdateProces
 
     public bool HonorsStop { get; set; } = true;
 
+    /// <summary>Gets or sets whether the system has a stop request to send it (SIGTERM); false as on Windows.</summary>
+    public bool HasStopSignal { get; set; } = true;
+
     public void Exit(int code) => _exit.TrySetResult(code);
 
     public Task<int> WaitForExitAsync(CancellationToken cancellationToken) => _exit.Task.WaitAsync(cancellationToken);
 
     public bool RequestStop()
     {
+        if (!HasStopSignal) return false;
         StopRequests++;
         if (HonorsStop) Exit(0);
         return true;

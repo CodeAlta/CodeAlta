@@ -251,6 +251,39 @@ public sealed class UpdateSwitchTests
         Assert.IsNotNull(runner.Environments[0][UpdateLauncher.SupervisorVariable]);
     }
 
+    // A Windows service's stop: no SIGTERM to send, so the version that runs is asked through its own channel (the local control of
+    // a node, the stop file of a server), and drains instead of being killed.
+    [TestMethod]
+    public async Task AStopWithoutASignal_AsksTheVersionThroughItsOwnChannel_InsteadOfKillingIt()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp, V1);
+        store.Select(V1);
+        store.Confirm(V1);
+        var started = new TaskCompletionSource<FakeProcess>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runner = new FakeRunner((process, _) => { process.HasStopSignal = false; started.TrySetResult(process); return Task.CompletedTask; });
+        using var stop = new CancellationTokenSource();
+        var asked = new List<int>();
+        var launcher = new UpdateLauncher(new UpdateLauncherOptions
+        {
+            Store = store, Product = UpdateProduct.Node, Arguments = ["run"], Installed = new UpdateCommand("installed-altanode", []), Runner = runner,
+            PollInterval = TimeSpan.FromMilliseconds(10), StopGrace = TimeSpan.FromSeconds(5), RestartDelay = TimeSpan.Zero, DotnetRoot = null, HandleSignals = false,
+            Stop = stop.Token,
+            GracefulStop = id =>
+            {
+                lock (asked) asked.Add(id);
+                runner.Started.Single(process => process.Id == id).Exit(0);
+                return true;
+            },
+        });
+        var running = launcher.RunAsync();
+        var process = await started.Task;
+        await stop.CancelAsync();
+        Assert.AreEqual(0, await running);
+        CollectionAssert.AreEqual(new[] { process.Id }, asked);
+        Assert.IsFalse(process.Killed, "it drained");
+    }
+
     [TestMethod]
     public async Task AnInstalledEntryPointUpdatedPastTheSelectedVersionRunsInsteadOfIt()
     {

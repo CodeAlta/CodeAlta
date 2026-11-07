@@ -78,6 +78,13 @@ public sealed record UpdateLauncherOptions
 
     /// <summary>Gets what stops the launcher: the version that runs is asked to stop, and the launcher ends with its exit code.</summary>
     public CancellationToken Stop { get; init; }
+
+    /// <summary>
+    /// Gets what asks the version that runs (by the id of its process) to stop gracefully through its own channel, where the
+    /// system has no request to send (Windows, where a service is stopped by the Service Control Manager): whether it was asked.
+    /// Null kills it after the grace, as before.
+    /// </summary>
+    public Func<int, bool>? GracefulStop { get; init; }
 }
 
 /// <summary>
@@ -244,7 +251,7 @@ public sealed class UpdateLauncher
             using var process = Start(command, label, trial is not null);
             if (process is null) continue;
             Volatile.Write(ref _child, process);
-            if (Volatile.Read(ref _stopping) == 1) process.RequestStop();
+            if (Volatile.Read(ref _stopping) == 1) AskToStop(process);
             int exitCode;
             try
             {
@@ -320,8 +327,9 @@ public sealed class UpdateLauncher
 
     private async Task StopAsync(IUpdateProcess process, Task<int> exited)
     {
-        // Windows has no graceful request to send: the version is killed; its sessions are resumable as after a crash.
-        var grace = process.RequestStop() ? _options.StopGrace : TimeSpan.Zero;
+        // Without a graceful request (Windows, unless the version is asked through its own channel), the version is killed; its
+        // sessions are resumable as after a crash.
+        var grace = AskToStop(process) ? _options.StopGrace : TimeSpan.Zero;
         if (grace > TimeSpan.Zero && await Task.WhenAny(exited, Task.Delay(grace)).ConfigureAwait(false) == exited) return;
         process.Kill();
         await exited.ConfigureAwait(false);
@@ -413,7 +421,22 @@ public sealed class UpdateLauncher
     private void RequestStop(bool forward)
     {
         Interlocked.Exchange(ref _stopping, 1);
-        if (forward) Volatile.Read(ref _child)?.RequestStop();
+        if (forward && Volatile.Read(ref _child) is { } child) AskToStop(child);
+    }
+
+    // SIGTERM where there is one; otherwise the channel of the version itself, when the caller gave one.
+    private bool AskToStop(IUpdateProcess process)
+    {
+        if (process.RequestStop()) return true;
+        try
+        {
+            return _options.GracefulStop?.Invoke(process.Id) ?? false;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or TimeoutException)
+        {
+            Log($"The version that runs could not be asked to stop: {exception.Message}");
+            return false;
+        }
     }
 
     // SIGTERM (a service manager's stop) is passed to the version; SIGINT (Ctrl+C in the terminal) reaches it already,

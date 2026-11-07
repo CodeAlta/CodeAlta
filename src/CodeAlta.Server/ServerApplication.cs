@@ -127,6 +127,7 @@ public sealed class ServerApplication
             { "allow-insecure-http", "Allow http:// addresses beyond the loopback, on a network you trust", v => run.AllowInsecureHttp = v is not null },
             { "trusted-proxy=", "The {ADDRESSES} of the reverse proxies in front of the server, separated by ';' (127.0.0.1;::1 for Tailscale Serve or Caddy here): their X-Forwarded-For names the caller the limits count", v => run.TrustedProxies = v },
         };
+        runCommand.Add("service", "Answer the Windows Service Control Manager (what install --system starts)", v => run.Service = v is not null);
         AddDataRoot(runCommand, run);
         runCommand.Add((_, _) => RunServerAsync(run));
 
@@ -146,7 +147,7 @@ public sealed class ServerApplication
         var install = new InstallOptions();
         var installCommand = new Command("install", "Install and start the service of this OS that runs the server")
         {
-            new CommandUsage("Usage: {NAME} [--user | --system --account <name>] [--dry-run] [run options]"),
+            new CommandUsage("Usage: {NAME} [--user | --system [--account <name> [--password-stdin]]] [--dry-run] [run options]"),
             _,
             "Installs the service that runs altaserver run with these options, so that",
             "the server starts again after a restart, and starts it: a task at the",
@@ -154,8 +155,11 @@ public sealed class ServerApplication
             "stops), a LaunchAgent on macOS, a systemd --user unit on Linux, with",
             "lingering turned on so that it starts at boot without a login. One",
             "service per data root; running install again replaces it with the new",
-            "options. --system installs a LaunchDaemon or a system unit that runs as",
-            "--account, started at boot (run it with sudo). A .NET tool runs from its",
+            "options. --system installs a service started at boot without a login: a",
+            "LaunchDaemon or a system unit that runs as --account (with sudo), or a",
+            "Windows service (from an elevated terminal) that runs as its own account",
+            "NT SERVICE\\altaserver with its data root under %ProgramData%, or as",
+            "--account with its password on standard input. A .NET tool runs from its",
             "shim, so the service follows dotnet tool update, and altaserver update",
             "switches versions without the service.",
             _,
@@ -170,6 +174,7 @@ public sealed class ServerApplication
             { "user", "A service of the current user (the default)", v => install.User = v is not null },
             { "system", "A service of the system, started at boot, that runs as --account", v => install.System = v is not null },
             { "account=", "The {ACCOUNT} a --system service runs as", v => install.Account = v },
+            { "password-stdin", "Read the password of --account from standard input (Windows)", v => install.PasswordStdin = v is not null },
             { "dry-run", "Print what would be installed, change nothing", v => install.DryRun = v is not null },
         };
         AddDataRoot(installCommand, install);
@@ -283,8 +288,28 @@ public sealed class ServerApplication
         command.Add(new HelpOption());
     }
 
+    // The stop of the Windows service this process runs as (run --service): the Service Control Manager's stop or shutdown.
+    private CancellationToken _serviceStop;
+
     private async ValueTask<int> RunServerAsync(RunOptions options)
     {
+        if (options.Service)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                await _error.WriteLineAsync("altaserver: --service is for the Windows service that altaserver install --system registers.").ConfigureAwait(false);
+                return ServerExitCodes.InvalidUsage;
+            }
+
+            options.Service = false;
+            // The process answers the Service Control Manager; its stop becomes the graceful stop of the server, as SIGTERM does elsewhere.
+            return WindowsServiceHost.Run(ServiceDefinition.Noun(UpdateProduct.Server), token =>
+            {
+                _serviceStop = token;
+                return RunServerAsync(options).AsTask();
+            });
+        }
+
         if (!options.TryResolve(_error, out var paths)) return ServerExitCodes.InvalidUsage;
         var urls = new List<string>();
         if (options.Urls is not null) urls.AddRange(options.Urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
@@ -436,6 +461,8 @@ public sealed class ServerApplication
             // confirmed within seconds of serving: one stopped before is rolled back by its launcher, as one that exited.
             TryDelete(paths.StopRequestPath);
             using var stopRequested = new CancellationTokenSource();
+            // The Windows service's stop is a graceful stop, as altaserver uninstall asks it.
+            using var serviceStop = _serviceStop.Register(stopRequested.Cancel);
             await using var stopWatch = new Timer(_ => { if (File.Exists(paths.StopRequestPath)) stopRequested.Cancel(); }, null, StopRequestInterval, StopRequestInterval);
             using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(restart.Token, stopRequested.Token);
             Started?.Invoke(server, restart.Cancel);
@@ -462,9 +489,13 @@ public sealed class ServerApplication
     {
         var options = new UpdateLauncherOptions
         {
-            Store = store, Product = UpdateProduct.Server, Arguments = _args, Installed = InstalledCommand(), InstalledVersion = InstalledVersion(),
-            Lease = lease, HeldExitCode = ServerExitCodes.DataRootInUse,
+            // The version runs without --service: the Service Control Manager talks to this process only.
+            Store = store, Product = UpdateProduct.Server, Arguments = [.. _args.Where(static argument => argument != ServiceDefinition.WindowsServiceOption)],
+            Installed = InstalledCommand(), InstalledVersion = InstalledVersion(), Lease = lease, HeldExitCode = ServerExitCodes.DataRootInUse,
             Log = message => _error.WriteLine("altaserver: " + message),
+            Stop = _serviceStop,
+            // Windows has no SIGTERM: the version is asked to stop through its data root, as altaserver uninstall asks it.
+            GracefulStop = OperatingSystem.IsWindows() ? _ => RequestStopThroughDataRoot(paths) : null,
             Backup = target => ServerUpdates.BackupStopped(paths, target),
             RolledBack = (trial, _) =>
             {
@@ -698,7 +729,9 @@ public sealed class ServerApplication
 
         options.TryResolve(_error, out var paths);
         var running = CoordinatorServer.IsRunning(paths!) ? CoordinatorServer.ReadState(paths!) : null;
-        var code = manager.Install(plan, _output, _error);
+        // The password goes to Windows only: read here, never printed, never written.
+        var password = options.PasswordStdin ? await Console.In.ReadLineAsync().ConfigureAwait(false) : null;
+        var code = manager.Install(plan, _output, _error, password);
         if (code != ServiceManager.Success) return ServerExitCodes.Failure;
         await _output.WriteLineAsync(ServiceExecutableLocator.Describe(UpdateProduct.Server, (ServiceExecutable ?? LocateExecutable)()!)).ConfigureAwait(false);
         // The server of the service it replaced stopped with it (launchd, systemd): only a server that still holds the data
@@ -727,6 +760,20 @@ public sealed class ServerApplication
         if (manager.Uninstall(plan, _output, _error) != ServiceManager.Success) return ServerExitCodes.Failure;
         options.TryResolve(_error, out var paths);
         return installed && plan.LeavesProcessRunning ? await StopServerAsync(paths!).ConfigureAwait(false) : ServerExitCodes.Success;
+    }
+
+    // Asks the server of a data root to stop, without waiting: the file it watches.
+    private static bool RequestStopThroughDataRoot(ServerPaths paths)
+    {
+        try
+        {
+            File.WriteAllText(paths.StopRequestPath, DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     // Stops the server of a data root the service manager leaves running (the task at logon of Windows): it is asked through
@@ -770,7 +817,9 @@ public sealed class ServerApplication
         if (!options.TryResolve(_error, out var paths)) return (null, null, ServerExitCodes.InvalidUsage);
         string? usage = null;
         if (options.User && options.System) usage = "--user and --system cannot go together.";
-        else if (options.System && options.Account is null) usage = "--system needs --account <name>, the account the server runs as.";
+        // A Windows service runs as its own virtual account without one; launchd and systemd need the account.
+        else if (options.System && options.Account is null && !OperatingSystem.IsWindows()) usage = "--system needs --account <name>, the account the server runs as.";
+        else if (options.PasswordStdin && options.Account is null) usage = "--password-stdin goes with --account.";
         else if (!options.System && options.Account is not null) usage = "--account goes with --system only.";
         else if (options.Port is not null && (!int.TryParse(options.Port, NumberStyles.None, CultureInfo.InvariantCulture, out var port) || port is < 1 or > 65535))
             usage = $"--port needs a port from 1 to 65535: '{options.Port}'.";
@@ -918,6 +967,8 @@ public sealed class ServerApplication
         public bool OwnCertificate { get; set; }
 
         public string? TrustedProxies { get; set; }
+
+        public bool Service { get; set; }
     }
 
     private static string[] Proxies(string? text) => text is null ? [] : text.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -948,6 +999,8 @@ public sealed class ServerApplication
         public string? Account { get; set; }
 
         public bool DryRun { get; set; }
+
+        public bool PasswordStdin { get; set; }
     }
 
     private sealed class BackupsOptions : DataRootOptions

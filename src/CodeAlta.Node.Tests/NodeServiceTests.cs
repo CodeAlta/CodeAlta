@@ -304,8 +304,8 @@ public sealed class NodeServiceTests
         Assert.AreEqual("io.codealta.altanode", Dict(File.ReadAllText(plistPath))["Label"].Value);
         CollectionAssert.AreEqual(new[]
         {
-            "launchctl bootout gui/501/io.codealta.altanode", "launchctl print gui/501/io.codealta.altanode", "launchctl enable gui/501/io.codealta.altanode",
-            $"launchctl bootstrap gui/501 {plistPath}",
+            "launchctl print gui/501", "launchctl bootout gui/501/io.codealta.altanode", "launchctl print gui/501/io.codealta.altanode",
+            "launchctl enable gui/501/io.codealta.altanode", $"launchctl bootstrap gui/501 {plistPath}",
         }, machine.Commands);
         var answer = string.Join('\n', ServiceManager.Describe(manager.Query(plan)));
         StringAssert.Contains(answer, "a LaunchAgent of alice");
@@ -314,6 +314,22 @@ public sealed class NodeServiceTests
 
         Assert.AreEqual(NodeExitCodes.Success, manager.Uninstall(plan, new StringWriter(), new StringWriter()));
         Assert.IsFalse(File.Exists(plistPath));
+    }
+
+    // Over SSH with nobody logged in at the screen of the Mac, its gui domain does not exist and a bootstrap would fail: the agent
+    // is written, and starts at the next login; a system service is the way to run without one.
+    [TestMethod]
+    public void MacOS_WithNobodyLoggedInAtTheScreen_WritesTheAgentForTheNextLogin()
+    {
+        using var machine = new FakeServiceMachine(ServicePlatform.MacOS) { GuiSession = false };
+        var manager = new ServiceManager(machine.Environment);
+        var plan = manager.Plan(Request(machine));
+        var output = new StringWriter();
+        Assert.AreEqual(NodeExitCodes.Success, manager.Install(plan, output, new StringWriter()));
+        Assert.IsTrue(File.Exists(plan.DefinitionPath));
+        CollectionAssert.AreEqual(new[] { "launchctl print gui/501" }, machine.Commands, "no bootstrap that would fail");
+        StringAssert.Contains(output.ToString(), "it starts at the next login of alice");
+        StringAssert.Contains(output.ToString(), "install --system --account alice");
     }
 
     [TestMethod]
@@ -333,7 +349,7 @@ public sealed class NodeServiceTests
         Assert.IsTrue(machine.IsRegistered("io.codealta.altanode"), "the new job is loaded");
         CollectionAssert.AreEqual(new[]
         {
-            "launchctl bootout gui/501/io.codealta.altanode", "launchctl print gui/501/io.codealta.altanode", "launchctl print gui/501/io.codealta.altanode",
+            "launchctl print gui/501", "launchctl bootout gui/501/io.codealta.altanode", "launchctl print gui/501/io.codealta.altanode", "launchctl print gui/501/io.codealta.altanode",
             "launchctl print gui/501/io.codealta.altanode", "launchctl print gui/501/io.codealta.altanode", "launchctl enable gui/501/io.codealta.altanode",
             $"launchctl bootstrap gui/501 {plan.DefinitionPath}",
         }, machine.Commands);
@@ -368,8 +384,57 @@ public sealed class NodeServiceTests
 
         Assert.AreEqual(NodeExitCodes.Success, manager.Uninstall(plan, new StringWriter(), new StringWriter()));
         Assert.IsFalse(machine.IsRegistered(@"\CodeAlta\altanode"));
-        var refused = Assert.ThrowsExactly<ServiceException>(() => manager.Plan(Request(machine) with { Scope = ServiceScope.System, Account = "codealta" }));
-        StringAssert.Contains(refused.Message, "not available on Windows");
+        var refused = Assert.ThrowsExactly<ServiceException>(() => manager.Plan(Request(machine) with { Scope = ServiceScope.System, Account = null, StateRoot = null }));
+        StringAssert.Contains(refused.Message, "elevated terminal", "a Windows service is installed by an administrator");
+    }
+
+    // A node that starts at boot on Windows with nobody signed in (doc/fleet/node.md, running as a service): a Windows service,
+    // as its own virtual account with its profile under %ProgramData%, or as a named account whose password goes to Windows only.
+    [TestMethod]
+    public void Windows_SystemService_IsAServiceOfTheSCM_AsItsVirtualAccount_OrANamedOneWithItsPasswordGivenToWindowsOnly()
+    {
+        using var machine = new FakeServiceMachine(ServicePlatform.Windows) { IsRoot = true };
+        var shim = Path.Combine(machine.Root, "tools", "altanode.cmd");
+        var exe = Path.Combine(machine.Root, "tools", ".store", "codealta.node", "4.1.0", "altanode.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(exe)!);
+        File.WriteAllText(exe, "");
+        File.WriteAllText(shim, "@echo off\r\n\"%~dp0.store\\codealta.node\\4.1.0\\altanode.exe\" %*\r\n");
+        var manager = new ServiceManager(machine.Environment);
+        var request = Request(machine) with { Scope = ServiceScope.System, Account = null, StateRoot = null, Executable = new ServiceExecutable(ServiceExecutableKind.ToolShim, shim, []) };
+
+        var plan = manager.Plan(request);
+        var root = Path.Combine(machine.ProgramData, "CodeAlta", "Node", "altanode");
+        Assert.AreEqual(@"a Windows service run as NT SERVICE\altanode", plan.Kind);
+        Assert.AreEqual(exe, plan.Spec.Executable, "the program the batch file of the tool starts, never cmd.exe");
+        CollectionAssert.AreEqual(new[] { "run", "--port", "2600", "--data-root", root }, plan.Spec.Arguments.ToArray());
+        StringAssert.Contains(plan.Definition, "--service");
+        Assert.IsTrue(plan.Notes.Any(static note => note.Contains("dotnet tool update", StringComparison.Ordinal)));
+        Assert.AreEqual(ServiceManager.Success, manager.Install(plan, new StringWriter(), new StringWriter()));
+        Assert.IsTrue(Directory.Exists(root), "its profile is made before the service is given it");
+        Assert.IsTrue(machine.IsRegistered("altanode"));
+        CollectionAssert.AreEqual(new[] { "create", "config", "description", "failure", "icacls.exe", "start" },
+            machine.Commands.Select(static command => command.StartsWith("icacls.exe", StringComparison.Ordinal) ? "icacls.exe" : command.Split(' ')[1]).ToArray());
+        StringAssert.Contains(machine.Commands[0], @"obj= NT SERVICE\altanode");
+        StringAssert.Contains(machine.Commands[0], "start= delayed-auto");
+        StringAssert.Contains(machine.Commands[4], @"NT SERVICE\altanode:(OI)(CI)M");
+        Assert.AreEqual(0, machine.Logons.Count, "a virtual account has no password");
+        var answer = string.Join('\n', ServiceManager.Describe(manager.Query(plan)));
+        StringAssert.Contains(answer, @"it starts at boot as NT SERVICE\altanode, without a login");
+
+        // As a named account ("at boot as me"): its password is needed, and goes to Windows through the API only.
+        machine.Commands.Clear();
+        var named = manager.Plan(request with { Account = @".\codealta" });
+        Assert.AreEqual(@".\codealta", named.LogonAccount);
+        var error = new StringWriter();
+        Assert.AreEqual(ServiceManager.Failure, manager.Install(named, new StringWriter(), error));
+        StringAssert.Contains(error.ToString(), "--password-stdin");
+        Assert.AreEqual(ServiceManager.Success, manager.Install(named, new StringWriter(), new StringWriter(), "s3cret-pass"));
+        Assert.AreEqual((@"altanode", @".\codealta", "s3cret-pass"), machine.Logons.Single());
+        Assert.IsFalse(machine.Commands.Any(static command => command.Contains("s3cret-pass", StringComparison.Ordinal)), "never on a command line");
+        Assert.IsFalse(machine.Commands.Any(static command => command.StartsWith("icacls", StringComparison.Ordinal)), "its own profile is the account's");
+
+        Assert.AreEqual(ServiceManager.Success, manager.Uninstall(plan, new StringWriter(), new StringWriter()));
+        Assert.IsFalse(machine.IsRegistered("altanode"));
     }
 
     [TestMethod]

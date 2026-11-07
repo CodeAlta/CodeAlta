@@ -72,6 +72,22 @@ public sealed class ServiceEnvironment
     /// <summary>Gets what reads the user the machine signs in automatically at startup, or null.</summary>
     public Func<string?> AutoLoginUser { get; init; } = static () => null;
 
+    /// <summary>
+    /// Gets what makes a Windows service log on as an account with its password (the service, the account, the password), through
+    /// the API of the Service Control Manager: never a command line. Null where there is none.
+    /// </summary>
+    public Action<string, string, string>? SetServiceLogon { get; init; }
+
+    /// <summary>Gets what reads the lines of a small text file (the batch file of a .NET tool); no lines when it cannot be read.</summary>
+    public Func<string, IReadOnlyList<string>> ReadLines { get; init; } = static path =>
+    {
+        try { return File.ReadAllLines(path); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return []; }
+    };
+
+    /// <summary>Gets the folder of the data of the system services on Windows (<c>%ProgramData%</c>).</summary>
+    public string? ProgramData { get; init; }
+
     /// <summary>Gets what reads the home folder of an account, or null when there is no such account.</summary>
     public Func<string, string?> HomeOfAccount { get; init; } = static _ => null;
 
@@ -93,8 +109,11 @@ public sealed class ServiceEnvironment
             {
                 Platform = ServicePlatform.Windows, Home = home, UserName = Environment.UserName, UserDisplayName = identity.Name,
                 UserId = identity.User?.Value, WindowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                // A service is registered by an elevated administrator.
+                IsRoot = new System.Security.Principal.WindowsPrincipal(identity).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator),
+                ProgramData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
                 // The task gets the environment of the user's logon: nothing to copy.
-                Run = RunProcess, AutoLoginUser = ReadWindowsAutoLogin,
+                Run = RunProcess, AutoLoginUser = ReadWindowsAutoLogin, HomeOfAccount = ReadWindowsHome, SetServiceLogon = WindowsServiceLogon.Set,
             };
         }
 
@@ -156,6 +175,17 @@ public sealed class ServiceEnvironment
         {
             return null;
         }
+    }
+
+    // The profile of an account of this machine: a folder of that name beside the profile of the current user.
+    private static string? ReadWindowsHome(string account)
+    {
+        // DOMAIN\name, .\name or name@domain: the name alone names the folder.
+        var name = account[(account.LastIndexOf('\\') + 1)..];
+        if (name.IndexOf('@', StringComparison.Ordinal) is var at and > 0) name = name[..at];
+        var profiles = Path.GetDirectoryName(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        var home = profiles is null ? null : Path.Combine(profiles, name);
+        return home is not null && Directory.Exists(home) ? home : null;
     }
 
     private static string? ReadMacAutoLogin()

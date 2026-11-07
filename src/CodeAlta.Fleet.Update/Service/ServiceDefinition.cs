@@ -138,6 +138,19 @@ public static partial class ServiceDefinition
     /// <returns>Whether it is 1 to 32 letters, digits, <c>_</c>, <c>.</c> or <c>-</c>, not starting with <c>-</c> or <c>.</c>.</returns>
     public static bool IsValidAccount(string? account) => account is not null && AccountPattern().IsMatch(account);
 
+    /// <summary>The option of <c>run</c> that tells it runs as a Windows service, which answers the Service Control Manager.</summary>
+    public const string WindowsServiceOption = "--service";
+
+    /// <summary>Gets the virtual account of a Windows service: <c>NT SERVICE\&lt;name&gt;</c>, which needs no password.</summary>
+    /// <param name="name">The name of the service.</param>
+    /// <returns>The account.</returns>
+    public static string WindowsVirtualAccount(string name) => $@"NT SERVICE\{name}";
+
+    /// <summary>Gets whether a text is a Windows account a service can log on as: <c>name</c>, <c>.\name</c>, <c>DOMAIN\name</c> or <c>name@domain</c>.</summary>
+    /// <param name="account">The text.</param>
+    /// <returns>Whether it is one.</returns>
+    public static bool IsValidWindowsAccount(string? account) => account is not null && WindowsAccountPattern().IsMatch(account);
+
     /// <summary>Names the service of a profile for a system account: one per account.</summary>
     /// <param name="name">The name of the service of the profile.</param>
     /// <param name="account">The account.</param>
@@ -408,4 +421,8 @@ public static partial class ServiceDefinition
 
     [GeneratedRegex(@"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}$")]
     private static partial Regex AccountPattern();
+
+    // name, .\name, DOMAIN\name or name@domain.
+    [GeneratedRegex(@"^(?:(?:\.|[A-Za-z0-9][A-Za-z0-9_.-]{0,62})\\)?[A-Za-z0-9_][A-Za-z0-9_. $-]{0,63}(?:@[A-Za-z0-9.-]{1,253})?$")]
+    private static partial Regex WindowsAccountPattern();
 }

@@ -207,8 +207,23 @@ internal sealed class NodeApplication
         return NodeExitCodes.InvalidUsage;
     }
 
+    // The stop of the Windows service this process runs as (run --service): the Service Control Manager's stop or shutdown.
+    private CancellationToken _serviceStop;
+
     private async ValueTask<int> RunNodeAsync(NodeRunOptions options)
     {
+        if (options.Service)
+        {
+            if (!OperatingSystem.IsWindows()) return await UsageAsync("--service is for the Windows service that altanode install --system registers.").ConfigureAwait(false);
+            options.Service = false;
+            // The process answers the Service Control Manager; its stop becomes the graceful stop of the node, as SIGTERM does elsewhere.
+            return WindowsServiceHost.Run(ServiceDefinition.Noun(UpdateProduct.Node), token =>
+            {
+                _serviceStop = token;
+                return RunNodeAsync(options).AsTask();
+            });
+        }
+
         if (options.Profile.Resolve(out var invalid) is not { } profile) return await UsageAsync(invalid!).ConfigureAwait(false);
         if (ResolveListen(options, out var listenError) is not { } listen) return await UsageAsync(listenError!).ConfigureAwait(false);
         var name = options.Name ?? Environment.MachineName;
@@ -263,27 +278,56 @@ internal sealed class NodeApplication
                 await _error.WriteLineAsync($"altanode: the versions of {store.Root} could not be read: {exception.Message}").ConfigureAwait(false);
             }
 
-            if (store.Read() is { } selected && (selected.Current is not null || selected.RollingBack is not null)) return await RunLauncherAsync(store, lease).ConfigureAwait(false);
+            if (store.Read() is { } selected && (selected.Current is not null || selected.RollingBack is not null)) return await RunLauncherAsync(store, lease, profile).ConfigureAwait(false);
         }
 
         var (exitCode, restart) = await RunInProcessAsync(options, profile, listen, name, store).ConfigureAwait(false);
         if (!restart) return exitCode;
         // A launcher waits for this process and starts the newly selected version; without one, this process becomes it.
         if (UpdateLauncher.IsSupervised) return UpdateLauncher.RestartExitCode;
-        return await RunLauncherAsync(store, lease).ConfigureAwait(false);
+        return await RunLauncherAsync(store, lease, profile).ConfigureAwait(false);
     }
 
     // The launcher hop: the selected version runs as a child process of this one, which ends with its exit code.
-    private async Task<int> RunLauncherAsync(UpdateVersionStore store, UpdateLauncherLease? lease)
+    private async Task<int> RunLauncherAsync(UpdateVersionStore store, UpdateLauncherLease? lease, CodeAltaInstanceProfile profile)
     {
         var options = new UpdateLauncherOptions
         {
-            Store = store, Product = UpdateProduct.Node, Arguments = _args, Installed = InstalledCommand(), InstalledVersion = InstalledVersion(),
-            Lease = lease, HeldExitCode = NodeExitCodes.ProfileInUse,
+            // The version runs without --service: the Service Control Manager talks to this process only.
+            Store = store, Product = UpdateProduct.Node, Arguments = [.. _args.Where(static argument => argument != ServiceDefinition.WindowsServiceOption)],
+            Installed = InstalledCommand(), InstalledVersion = InstalledVersion(), Lease = lease, HeldExitCode = NodeExitCodes.ProfileInUse,
             Log = message => _error.WriteLine("altanode: " + message),
+            Stop = _serviceStop,
+            // Windows has no SIGTERM: the version is asked to stop through its local control, as altanode uninstall asks it.
+            GracefulStop = OperatingSystem.IsWindows() ? _ => RequestGracefulStop(profile) : null,
         };
         if (ConfigureLauncher is not null) options = ConfigureLauncher(options);
         return await new UpdateLauncher(options).RunAsync().ConfigureAwait(false);
+    }
+
+    // Asks the node of a profile to stop gracefully through its local control (its turns get their bound), without waiting.
+    private static bool RequestGracefulStop(CodeAltaInstanceProfile profile)
+    {
+        var control = NodeLocalControl.Read(profile);
+        if (!control.NodeListens) return false;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                var (client, identity) = await control.ConnectAsync(timeout.Token).ConfigureAwait(false);
+                using (identity)
+                await using (client.ConfigureAwait(false))
+                {
+                    await client.StopNodeAsync(timeout.Token).ConfigureAwait(false);
+                }
+            }
+            catch (Exception exception) when (exception is OperationCanceledException or IOException or Fleet.Protocol.FleetException or System.Net.Sockets.SocketException)
+            {
+                NodeLog($"The node did not take the request to stop: {exception.Message}");
+            }
+        });
+        return true;
     }
 
     // How this process was started, to start the installed entry point again when the pointer returns to it.
@@ -335,6 +379,8 @@ internal sealed class NodeApplication
             if (ConfigureHost is not null) hostOptions = ConfigureHost(hostOptions);
             using var stopRequested = new CancellationTokenSource();
             using var hurry = new CancellationTokenSource();
+            // The Windows service's stop is a graceful stop, as SIGTERM.
+            using var serviceStop = _serviceStop.Register(stopRequested.Cancel);
             NodeHost node;
             using (var startSignals = new NodeSignals(stopRequested.Cancel, stopRequested.Cancel, static () => Environment.Exit(NodeExitCodes.Failure)))
             {

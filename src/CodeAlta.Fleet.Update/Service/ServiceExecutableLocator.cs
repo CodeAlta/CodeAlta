@@ -71,6 +71,33 @@ public static class ServiceExecutableLocator
         return new ServiceExecutable(ServiceExecutableKind.Executable, processPath, []);
     }
 
+    /// <summary>
+    /// Finds the program a batch file of a .NET tool starts (<c>"%~dp0.store\...\altanode.exe" %*</c>), for a Windows service, which
+    /// must start a program and never <c>cmd.exe</c>.
+    /// </summary>
+    /// <param name="batchFile">The batch file.</param>
+    /// <param name="readLines">Reads the lines of a file.</param>
+    /// <returns>The program, or null when the batch file names none in its folder.</returns>
+    public static string? ResolveBatchTarget(string batchFile, Func<string, IReadOnlyList<string>> readLines)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(batchFile);
+        ArgumentNullException.ThrowIfNull(readLines);
+        var folder = System.IO.Path.GetDirectoryName(batchFile);
+        if (folder is null) return null;
+        foreach (var line in readLines(batchFile))
+        {
+            var start = line.IndexOf("\"%~dp0", StringComparison.OrdinalIgnoreCase);
+            if (start < 0) continue;
+            var end = line.IndexOf('"', start + 1);
+            if (end < 0) continue;
+            var relative = line[(start + "\"%~dp0".Length)..end].TrimStart('\\', '/');
+            var target = System.IO.Path.GetFullPath(System.IO.Path.Combine(folder, relative));
+            if (target.StartsWith(System.IO.Path.GetFullPath(folder), StringComparison.OrdinalIgnoreCase) && target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return target;
+        }
+
+        return null;
+    }
+
     /// <summary>Describes how the service starts the product, in one line.</summary>
     /// <param name="product">The product.</param>
     /// <param name="executable">The executable.</param>

@@ -46,6 +46,11 @@ internal sealed class FakeServiceMachine : IDisposable
     public string? AutoLoginUser { get; set; }
 
     /// <summary>
+    /// Gets or sets whether the user is logged in at the screen of the Mac: its <c>gui</c> domain exists; true by default.
+    /// </summary>
+    public bool GuiSession { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets how many <c>launchctl print</c> a job still answers after its <c>bootout</c>: launchd keeps a job while its
     /// process stops, and refuses to bootstrap it again meanwhile (<c>Bootstrap failed: 5: Input/output error</c>).
     /// </summary>
@@ -59,6 +64,12 @@ internal sealed class FakeServiceMachine : IDisposable
 
     /// <summary>Gets the commands run, as typed.</summary>
     public List<string> Commands { get; } = [];
+
+    /// <summary>Gets the logons given to Windows services (service, account, password), through the API, never a command.</summary>
+    public List<(string Service, string Account, string Password)> Logons { get; } = [];
+
+    /// <summary>Gets the folder of the data of the system services (<c>%ProgramData%</c>).</summary>
+    public string ProgramData => Path.Combine(Root, "ProgramData");
 
     /// <summary>Gets the task XML files <c>schtasks /Create</c> was given, with the encoding they were written in.</summary>
     public List<(string Text, Encoding Encoding)> TaskFiles { get; } = [];
@@ -87,7 +98,13 @@ internal sealed class FakeServiceMachine : IDisposable
             lock (_gate) Slept += delay;
         },
         AutoLoginUser = () => AutoLoginUser,
-        HomeOfAccount = account => account == "codealta" ? Path.Combine(Root, "home", "codealta") : null,
+        HomeOfAccount = account => account is "codealta" or @".\codealta" ? Path.Combine(Root, "home", "codealta") : null,
+        ProgramData = ProgramData,
+        SetServiceLogon = (service, account, password) =>
+        {
+            lock (_gate) Logons.Add((service, account, password));
+        },
+        ReadLines = static path => File.Exists(path) ? File.ReadAllLines(path) : [],
     };
 
     public bool IsRegistered(string name)
@@ -132,6 +149,9 @@ internal sealed class FakeServiceMachine : IDisposable
                     if (LaunchdPrintsWhileStopping > 0) _leaving[label] = LaunchdPrintsWhileStopping;
                     return new(0, "");
                 }
+                case ("launchctl", "print") when arguments[1].Count(static character => character == '/') == 1:
+                    // A domain alone (gui/<uid>): the login session of the user, there while someone is logged in at the screen.
+                    return GuiSession ? new(0, "type = gui") : new(113, "Could not find domain for port identifier");
                 case ("launchctl", "print"):
                 {
                     var label = arguments[1][(arguments[1].LastIndexOf('/') + 1)..];
@@ -141,6 +161,14 @@ internal sealed class FakeServiceMachine : IDisposable
                     else _leaving[label] = left - 1;
                     return new(0, "state = stopping");
                 }
+                case ("sc.exe", "create"):
+                    return _registered.Add(arguments[1]) ? new(0, "[SC] CreateService SUCCESS") : new(1073, "[SC] CreateService FAILED 1073: The specified service already exists.");
+                case ("sc.exe", "qc"):
+                    return _registered.Contains(arguments[1])
+                        ? new(0, $"SERVICE_NAME: {arguments[1]}\n        START_TYPE         : 2   AUTO_START  (DELAYED)\n")
+                        : new(1060, "[SC] OpenService FAILED 1060: The specified service does not exist as an installed service.");
+                case ("sc.exe", "delete"):
+                    return _registered.Remove(arguments[1]) ? new(0, "[SC] DeleteService SUCCESS") : new(1060, "[SC] OpenService FAILED 1060");
                 case ("systemctl", "enable"):
                     _registered.Add(arguments[^1]);
                     return new(0, "");

@@ -22,6 +22,9 @@ internal sealed class NodeInstallOptions
 
     /// <summary>Gets or sets whether the plan is printed and nothing changes.</summary>
     public bool DryRun { get; set; }
+
+    /// <summary>Gets or sets whether the password of the account of a Windows service is read from standard input.</summary>
+    public bool PasswordStdin { get; set; }
 }
 
 /// <summary>
@@ -33,6 +36,9 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
 {
     /// <summary>Gets or sets what stops a call to the node, for tests; none by default.</summary>
     public CancellationToken Stop { get; init; }
+
+    /// <summary>Gets or sets what reads the password of <c>--password-stdin</c>: the first line of standard input by default.</summary>
+    public Func<Task<string?>> ReadPassword { get; init; } = static async () => await Console.In.ReadLineAsync().ConfigureAwait(false);
 
     /// <summary>Gets or sets the version of the installed entry point (this executable); null when this process runs a staged version.</summary>
     public string? InstalledVersion { get; init; }
@@ -49,7 +55,9 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
 
         var profile = options.Run.Profile.Resolve(out _)!;
         var held = NodeProfileStatus.Read(profile);
-        var code = manager.Install(plan, output, error);
+        // The password goes to Windows only: read here, never printed, never written.
+        var password = options.PasswordStdin ? await ReadPassword().ConfigureAwait(false) : null;
+        var code = manager.Install(plan, output, error, password);
         if (code == NodeExitCodes.Success)
         {
             await output.WriteLineAsync(ServiceExecutableLocator.Describe(UpdateProduct.Node, executable()!)).ConfigureAwait(false);
@@ -251,7 +259,10 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
         var run = options.Run;
         if (run.Profile.Resolve(out var invalid) is not { } profile) return (null, null, await UsageAsync(invalid!).ConfigureAwait(false));
         if (options.User && options.System) return (null, null, await UsageAsync("--user and --system cannot go together.").ConfigureAwait(false));
-        if (options.System && options.Account is null) return (null, null, await UsageAsync("--system needs --account <name>, the account the node runs as.").ConfigureAwait(false));
+        // A Windows service runs as its own virtual account without one; launchd and systemd need the account.
+        if (options.System && options.Account is null && !OperatingSystem.IsWindows())
+            return (null, null, await UsageAsync("--system needs --account <name>, the account the node runs as.").ConfigureAwait(false));
+        if (options.PasswordStdin && options.Account is null) return (null, null, await UsageAsync("--password-stdin goes with --account.").ConfigureAwait(false));
         if (!options.System && options.Account is not null) return (null, null, await UsageAsync("--account goes with --system only.").ConfigureAwait(false));
         if (NodeApplication.ResolveListen(run, out var listenError) is null) return (null, null, await UsageAsync(listenError!).ConfigureAwait(false));
         if (run.Name is { } name)

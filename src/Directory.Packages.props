@@ -16,6 +16,8 @@
     <PackageVersion Include="MSTest" Version="4.5.2" />
     <PackageVersion Include="Markdig" Version="1.6.0" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
+    <!-- The Windows service of altanode and altaserver (WindowsServiceHost): ServiceBase, AOT-compatible. -->
+    <PackageVersion Include="System.ServiceProcess.ServiceController" Version="10.0.14" />
     <PackageVersion Include="ModelContextProtocol" Version="2.3.1" />
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.3.1" />
     <PackageVersion Include="ModelContextProtocol.Core" Version="2.3.1" />

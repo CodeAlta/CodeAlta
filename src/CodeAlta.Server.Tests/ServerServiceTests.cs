@@ -220,9 +220,9 @@ public sealed class ServerServiceTests
 
         using var windows = new FakeServiceMachine(ServicePlatform.Windows);
         var onWindows = Application(windows, @"C:\Users\alice\.dotnet\tools\altaserver.cmd", out _, out var windowsError);
+        // A Windows service is installed by an administrator, from an elevated terminal.
         Assert.AreEqual(ServerExitCodes.Failure, await onWindows.RunAsync(["install", "--system", "--account", "codealta", "--data-root", root]));
-        StringAssert.Contains(windowsError.ToString(), "altaserver install --system is not available on Windows yet");
-        StringAssert.Contains(windowsError.ToString(), "CodeAlta Server does not run as a Windows service yet");
+        StringAssert.Contains(windowsError.ToString(), "altaserver install: A Windows service is installed by an administrator");
     }
 
     [TestMethod]

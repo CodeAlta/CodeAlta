@@ -55,6 +55,9 @@ internal sealed class NodeRunOptions
 
     /// <summary>Gets or sets the name of the node shown to the devices that pair with it; null for the name of the machine.</summary>
     public string? Name { get; set; }
+
+    /// <summary>Gets or sets whether the node runs as the Windows service <c>install --system</c> registered, answering the Service Control Manager.</summary>
+    public bool Service { get; set; }
 }
 
 /// <summary>What the commands of <c>altanode</c> do once parsed.</summary>
@@ -144,6 +147,7 @@ internal static class NodeCommandLine
             "Options:",
         };
         AddRunOptions(runCommand, run);
+        runCommand.Add("service", "Answer the Windows Service Control Manager (what install --system starts)", v => run.Service = v is not null);
         AddProfile(runCommand, run.Profile);
         runCommand.Add((_, _) => handlers.Run(run));
 
@@ -167,7 +171,7 @@ internal static class NodeCommandLine
         var installCommand = new Command("install", "Install and start the service of this OS")
         {
             new CommandUsage("Usage: {NAME} [--user] [run options] [options]"),
-            new CommandUsage("       {NAME} --system --account <name> [run options] [options]"),
+            new CommandUsage("       {NAME} --system [--account <name> [--password-stdin]] [run options] [options]"),
             _,
             "Registers a service that runs altanode run with the options given here,",
             "and starts it. --user (the default) runs it as you, with your logins:",
@@ -175,8 +179,11 @@ internal static class NodeCommandLine
             "  macOS    a LaunchAgent in ~/Library/LaunchAgents",
             "  Linux    a systemd --user unit, with lingering so that it runs",
             "           without a login (loginctl enable-linger)",
-            "--system runs it at boot as a dedicated account, for machines that use",
-            "deploy keys and tokens only (a LaunchDaemon, a system unit; with sudo).",
+            "--system runs it at boot, without a login, as --account: a LaunchDaemon",
+            "or a system unit (with sudo), or a Windows service (from an elevated",
+            "terminal), as its own account NT SERVICE\\altanode with its profile",
+            "under %ProgramData%, or as --account with its password on standard input",
+            "(--password-stdin; Windows keeps it, CodeAlta does not).",
             "A .NET tool is started from its shim (~/.dotnet/tools/altanode), so",
             "dotnet tool update changes the version the service runs. Run install",
             "again to change the options; altanode uninstall removes the service.",
@@ -185,6 +192,7 @@ internal static class NodeCommandLine
             { "user", "A service of the current user (the default)", v => install.User = v is not null },
             { "system", "A system service, started at boot without a login", v => install.System = v is not null },
             { "account=", "The {ACCOUNT} a system service runs as", v => install.Account = v },
+            { "password-stdin", "Read the password of --account from standard input (Windows)", v => install.PasswordStdin = v is not null },
             { "dry-run", "Print the service and the commands; change nothing", v => install.DryRun = v is not null },
         };
         AddRunOptions(installCommand, install.Run);

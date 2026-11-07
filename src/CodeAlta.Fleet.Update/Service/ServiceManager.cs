@@ -102,6 +102,21 @@ public sealed record ServicePlan
 
     /// <summary>Gets what a person should know before relying on the service (warnings).</summary>
     public IReadOnlyList<string> Notes { get; init; } = [];
+
+    /// <summary>Gets the commands that start the service, once it is registered and its logon set (a Windows service); empty when <see cref="Install"/> starts it.</summary>
+    public IReadOnlyList<ServiceCommand> Start { get; init; } = [];
+
+    /// <summary>Gets the named account a Windows service logs on as, whose password <c>install</c> needs (<c>--password-stdin</c>); null for none.</summary>
+    public string? LogonAccount { get; init; }
+
+    /// <summary>Gets the folder of the data of a service of its own account, made by <c>install</c> before the service is given it; null for none.</summary>
+    public string? DataRoot { get; init; }
+
+    /// <summary>
+    /// Gets the command that tells whether the login session the service is loaded into exists (the <c>gui</c> domain of launchd):
+    /// without one, the definition is written and the service starts at the next login; null for none.
+    /// </summary>
+    public ServiceCommand? SessionProbe { get; init; }
 }
 
 /// <summary>What the service of a node or a server is on this machine, as <c>status</c> reads it.</summary>
@@ -146,22 +161,30 @@ public sealed class ServiceManager(ServiceEnvironment environment)
         var system = request.Scope == ServiceScope.System;
         var notes = new List<string>();
         string workingDirectory = env.Home, stateRoot = request.StateRoot ?? "";
-        if (system)
+        List<string> extraArguments = [];
+        string? dataRoot = null;
+        if (system && env.Platform == ServicePlatform.Windows && request.Account is null)
         {
-            if (env.Platform == ServicePlatform.Windows)
-            {
-                throw new ServiceException($"{command} install --system is not available on Windows yet: a Windows service runs in Session 0, apart from "
-                    + $"the logins of a user, and {ServiceDefinition.DisplayName(request.Product)} does not run as a Windows service yet. On a machine that uses "
-                    + $"deploy keys only, sign in as the account that should run the {noun} and use {command} install --user there.");
-            }
-
-            if (!ServiceDefinition.IsValidAccount(request.Account))
+            // A Windows service of its own virtual account (NT SERVICE\<name>): no password, its data under %ProgramData%.
+            if (!env.IsRoot) throw new ServiceException("A Windows service is installed by an administrator: run it again from an elevated terminal (Run as administrator).");
+            stateRoot = request.StateRoot ?? Path.Combine(env.ProgramData ?? throw new ServiceException("The folder of the data of the system (%ProgramData%) cannot be read."),
+                "CodeAlta", ServiceDefinition.Noun(request.Product) == "server" ? "Server" : "Node", request.Name);
+            if (request.StateRoot is null) extraArguments.AddRange(["--data-root", stateRoot]);
+            workingDirectory = stateRoot;
+            dataRoot = stateRoot;
+        }
+        else if (system)
+        {
+            if (env.Platform == ServicePlatform.Windows ? !ServiceDefinition.IsValidWindowsAccount(request.Account) : !ServiceDefinition.IsValidAccount(request.Account))
                 throw new ServiceException($"--system needs --account <name>, the account the {noun} runs as: '{request.Account}' is not an account name.");
             if (!env.IsRoot)
             {
-                throw new ServiceException(env.Platform == ServicePlatform.MacOS
-                    ? "A LaunchDaemon is installed by root: run it again with sudo."
-                    : "A system unit is installed by root: run it again with sudo.");
+                throw new ServiceException(env.Platform switch
+                {
+                    ServicePlatform.Windows => "A Windows service is installed by an administrator: run it again from an elevated terminal (Run as administrator).",
+                    ServicePlatform.MacOS => "A LaunchDaemon is installed by root: run it again with sudo.",
+                    _ => "A system unit is installed by root: run it again with sudo.",
+                });
             }
 
             var home = env.HomeOfAccount(request.Account!) ?? throw new ServiceException($"No account named '{request.Account}' exists on this machine: create it first.");
@@ -183,7 +206,7 @@ public sealed class ServiceManager(ServiceEnvironment environment)
             Product = request.Product,
             Name = request.Name,
             Executable = request.Executable.Path,
-            Arguments = [.. request.Executable.PrefixArguments, .. request.RunArguments],
+            Arguments = [.. request.Executable.PrefixArguments, .. request.RunArguments, .. extraArguments],
             WorkingDirectory = workingDirectory,
             Environment = env.ServiceVariables,
             Scope = request.Scope,
@@ -192,6 +215,7 @@ public sealed class ServiceManager(ServiceEnvironment environment)
         };
         return env.Platform switch
         {
+            ServicePlatform.Windows when system => PlanWindowsService(spec, notes, dataRoot),
             ServicePlatform.Windows => PlanWindows(spec, notes),
             ServicePlatform.MacOS => PlanMac(spec, notes),
             _ => PlanLinux(spec, notes),
@@ -232,6 +256,50 @@ public sealed class ServiceManager(ServiceEnvironment environment)
         };
     }
 
+    // A Windows service (sc.exe): started at boot, delayed so that the network is up, started again when it fails. Its process is the
+    // executable itself, never the batch file of a .NET tool, which cmd.exe would run apart from the Service Control Manager.
+    private ServicePlan PlanWindowsService(ServiceSpec spec, List<string> notes, string? dataRoot)
+    {
+        var executable = spec.Executable;
+        if (ServiceDefinition.IsWindowsBatchFile(executable))
+        {
+            executable = ServiceExecutableLocator.ResolveBatchTarget(executable, Environment.ReadLines)
+                ?? throw new ServiceException($"The service cannot start {executable}, the batch file of a .NET tool: install the self-contained archive of {ServiceDefinition.DisplayName(spec.Product)}, or run {spec.Product.AssemblyName} install from it.");
+            notes.Add($"The service starts {executable}, in the folder of the .NET tool: stop the service before dotnet tool update, and run {spec.Product.AssemblyName} install --system again after it. "
+                + $"{spec.Product.AssemblyName} update keeps working under the service.");
+        }
+
+        var name = spec.Name;
+        var virtualAccount = spec.Account is null ? ServiceDefinition.WindowsVirtualAccount(name) : null;
+        var binPath = ServiceDefinition.WindowsCommandLine([executable, .. spec.Arguments, ServiceDefinition.WindowsServiceOption]);
+        var display = $"{ServiceDefinition.DisplayName(spec.Product)} ({name})";
+        string[] settings = ["binPath=", binPath, "start=", "delayed-auto", "DisplayName=", display, .. virtualAccount is null ? Array.Empty<string>() : ["obj=", virtualAccount]];
+        var install = new List<ServiceCommand>
+        {
+            // Created when it is not there yet; configured in every case, so that install again changes one that exists.
+            new("sc.exe", ["create", name, .. settings], MayFail: true),
+            new("sc.exe", ["config", name, .. settings]),
+            new("sc.exe", ["description", name, $"{ServiceDefinition.DisplayName(spec.Product)} ({spec.Product.AssemblyName} run). Written by {spec.Product.AssemblyName} install --system; {spec.Product.AssemblyName} uninstall --system removes it."]),
+            new("sc.exe", ["failure", name, "reset=", "86400", "actions=", "restart/60000/restart/60000/restart/60000"]),
+        };
+        // The virtual account of the service owns the data it writes; it exists once the service does.
+        if (virtualAccount is not null && dataRoot is not null) install.Add(new("icacls.exe", [dataRoot, "/grant", $"{virtualAccount}:(OI)(CI)M", "/T", "/Q"]));
+        return new ServicePlan
+        {
+            Platform = ServicePlatform.Windows, Spec = spec with { Executable = executable }, Kind = $"a Windows service run as {virtualAccount ?? spec.Account}",
+            Location = $"Services {name}", DefinitionPath = binPath, DefinitionIsTemporary = true, Definition = $"sc.exe config {name} binPath= {binPath} start= delayed-auto"
+                + (virtualAccount is null ? "" : $" obj= \"{virtualAccount}\""),
+            Install = install,
+            Start = [new("sc.exe", ["start", name])],
+            LogonAccount = spec.Account,
+            DataRoot = dataRoot,
+            // Stopped (the launcher drains the version that runs), then deleted: Windows removes it once it stopped.
+            Uninstall = [new("sc.exe", ["stop", name], MayFail: true), new("sc.exe", ["delete", name])],
+            Query = new("sc.exe", ["qc", name]),
+            Notes = notes,
+        };
+    }
+
     private ServicePlan PlanMac(ServiceSpec spec, List<string> notes)
     {
         var env = Environment;
@@ -256,6 +324,8 @@ public sealed class ServiceManager(ServiceEnvironment environment)
             Uninstall = [bootout],
             Query = print,
             Notes = notes,
+            // Over SSH, with nobody logged in at the screen, the gui domain does not exist and a bootstrap fails.
+            SessionProbe = system ? null : new ServiceCommand("launchctl", ["print", domain]),
         };
     }
 
@@ -289,31 +359,89 @@ public sealed class ServiceManager(ServiceEnvironment environment)
     /// <param name="error">Where failures go.</param>
     /// <returns>The exit code: <see cref="Success"/> or <see cref="Failure"/>.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    public int Install(ServicePlan plan, TextWriter output, TextWriter error)
+    public int Install(ServicePlan plan, TextWriter output, TextWriter error) => Install(plan, output, error, password: null);
+
+    /// <summary>Writes the definition, registers the service, sets its logon, and starts it.</summary>
+    /// <param name="plan">The plan.</param>
+    /// <param name="output">Where progress goes.</param>
+    /// <param name="error">Where failures go.</param>
+    /// <param name="password">The password of <see cref="ServicePlan.LogonAccount"/>, given to Windows only; null when the plan names none.</param>
+    /// <returns>The exit code: <see cref="Success"/> or <see cref="Failure"/>.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public int Install(ServicePlan plan, TextWriter output, TextWriter error, string? password)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
         var command = plan.Spec.Product.AssemblyName;
-        try
+        if (plan.LogonAccount is { } logon && string.IsNullOrEmpty(password))
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(plan.DefinitionPath)!);
-            if (plan.Spec.StandardErrorPath is { } errorLog && plan.Spec.Scope == ServiceScope.User) Directory.CreateDirectory(Path.GetDirectoryName(errorLog)!);
-            File.WriteAllText(plan.DefinitionPath, plan.Definition, plan.DefinitionEncoding);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            error.WriteLine($"{command} install: cannot write {plan.DefinitionPath}: {exception.Message}");
+            error.WriteLine($"{command} install: the service runs as {logon}, whose password Windows needs: give it with --password-stdin (it goes to Windows only).");
             return Failure;
+        }
+
+        if (plan.Platform != ServicePlatform.Windows)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(plan.DefinitionPath)!);
+                if (plan.Spec.StandardErrorPath is { } errorLog && plan.Spec.Scope == ServiceScope.User) Directory.CreateDirectory(Path.GetDirectoryName(errorLog)!);
+                File.WriteAllText(plan.DefinitionPath, plan.Definition, plan.DefinitionEncoding);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                error.WriteLine($"{command} install: cannot write {plan.DefinitionPath}: {exception.Message}");
+                return Failure;
+            }
+        }
+        else if (plan.Spec.Scope == ServiceScope.User)
+        {
+            try
+            {
+                File.WriteAllText(plan.DefinitionPath, plan.Definition, plan.DefinitionEncoding);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                error.WriteLine($"{command} install: cannot write {plan.DefinitionPath}: {exception.Message}");
+                return Failure;
+            }
+        }
+
+        if (plan.SessionProbe is { } probe && !Environment.Run(probe.FileName, probe.Arguments).Succeeded)
+        {
+            output.WriteLine($"Installed {plan.Kind}: {plan.Location}.");
+            output.WriteLine($"Nobody is logged in to the screen of this computer: it starts at the next login of {Environment.UserName}. A {ServiceDefinition.Noun(plan.Spec.Product)} "
+                + $"that runs without a login is a system service ({command} install --system --account {Environment.UserName}, with sudo).");
+            return Success;
         }
 
         try
         {
+            if (plan.DataRoot is { } dataRoot) Directory.CreateDirectory(dataRoot);
             if (!RunAll(command, plan.Install, "install", error)) return Failure;
+            if (plan.LogonAccount is { } account)
+            {
+                try
+                {
+                    (Environment.SetServiceLogon ?? throw new InvalidOperationException("This machine cannot set the logon of a service."))(plan.Spec.Name, account, password!);
+                }
+                catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
+                {
+                    error.WriteLine($"{command} install: Windows refused {account} with its password for the service: {exception.Message}");
+                    return Failure;
+                }
+            }
+
+            if (!RunAll(command, plan.Start, "install", error)) return Failure;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            error.WriteLine($"{command} install: cannot make {plan.DataRoot}: {exception.Message}");
+            return Failure;
         }
         finally
         {
-            if (plan.DefinitionIsTemporary) TryDelete(plan.DefinitionPath);
+            if (plan.DefinitionIsTemporary && plan.Platform == ServicePlatform.Windows && plan.Spec.Scope == ServiceScope.User) TryDelete(plan.DefinitionPath);
         }
 
         output.WriteLine($"Installed {plan.Kind}: {plan.Location}.");
@@ -393,7 +521,8 @@ public sealed class ServiceManager(ServiceEnvironment environment)
             {
                 var query = env.Run(plan.Query!.FileName, plan.Query.Arguments);
                 installed = query.Succeeded;
-                enabled = installed && IsTaskEnabled(query.Output);
+                // A service starts at boot when its start type is automatic (delayed or not); a task when it is enabled.
+                enabled = installed && (plan.Spec.Scope == ServiceScope.System ? query.Output.Contains("AUTO_START", StringComparison.Ordinal) : IsTaskEnabled(query.Output));
                 break;
             }
             case ServicePlatform.MacOS:
@@ -407,7 +536,7 @@ public sealed class ServiceManager(ServiceEnvironment environment)
                 break;
         }
 
-        var user = plan.Spec.Scope == ServiceScope.System ? plan.Spec.Account! : env.UserDisplayName ?? env.UserName;
+        var user = plan.Spec.Scope == ServiceScope.System ? plan.Spec.Account ?? ServiceDefinition.WindowsVirtualAccount(plan.Spec.Name) : env.UserDisplayName ?? env.UserName;
         return new ServiceFacts(plan.Spec.Product, plan.Platform, plan.Spec.Scope, plan.Kind, plan.Location, user, installed, enabled,
             plan.Platform == ServicePlatform.Linux && plan.Spec.Scope == ServiceScope.User ? IsLingering(env.UserName) : null,
             plan.Platform == ServicePlatform.Linux ? null : env.AutoLoginUser());
