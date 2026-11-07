@@ -79,7 +79,7 @@ test("the phone timeline shows what the host sent as what it is, images, and the
   server.state.events.set("t1", [
     event("user.message", "Why does the login page look broken?", 0, { attachments: [{ title: "login.png", mediaType: "image/png", id: "20261027-01-login.png" }, { title: "notes.txt", mediaType: "text/plain", id: "20261027-02-notes.txt" }] }),
     event("activity.turn.started", "turn", 1),
-    event("assistant.reasoning", "**Looking at the screenshot**", 2),
+    event("assistant.reasoning", "**Looking at a login screen to see why it does not fit on a small phone and how to fix it properly**", 2),
     event("activity.toolcall.started", "view_image", 3, { activityId: "view-1" }),
     event("activity.toolcall.completed", "view_image", 4, { activityId: "view-1" }),
     event("tool.output", "", 4, { parentId: "view-1", images: [{ title: "Rendered page", mediaType: "image/png", id: "20261027-tool-render.png" }] }),
@@ -114,6 +114,7 @@ test("the phone timeline shows what the host sent as what it is, images, and the
   server.state.events.set("t2", [
     event("user.message", "Pick the cache with a script, and ask me before you decide.", 0),
     event("activity.turn.started", "turn", 1),
+    event("assistant.reasoning", "**Comparing the cache options before choosing the right one for this service**", 1),
     event("activity.toolcall.started", "exec", 2, { activityId: "exec-2" }),
     live("runStarted", 2, { title: "Pick a cache" }),
     live("stepsDeclared", 2, declared),
@@ -204,6 +205,28 @@ test("the phone timeline shows what the host sent as what it is, images, and the
       ["msg msg-user", "activity", "msg msg-assistant", "host:job", "host:agent", "host:host", "host:workflow"]);
     assert.equal(await evaluate("document.querySelectorAll('.msg-user').length"), 1, "only the prompt the user typed is theirs");
     assert.ok(!(await evaluate<string>("[...document.querySelectorAll('.msg-user')].map(e => e.textContent).join()")).includes("[CodeAlta"), "no envelope as a prompt of the user");
+
+    // The first line can use the space over the facts; only the second shares it with them.
+    for (const width of [320, 390]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 844, deviceScaleFactor: 2, mobile: true });
+      const layout = await evaluate<{ lines: number; firstRight: number; secondRight: number; factsLeft: number; factsTop: number; firstTop: number; secondTop: number }>(`(() => {
+        const headline = document.querySelector('.activity .act-headline'), facts = document.querySelector('.activity .act-facts');
+        const node = headline.firstChild, line = headline.closest('.act-line').getBoundingClientRect(), rows = new Map();
+        for (let i = 0; i < node.length; i++) {
+          const range = document.createRange(); range.setStart(node, i); range.setEnd(node, i + 1);
+          const r = range.getBoundingClientRect();
+          if (r.top < line.bottom && r.bottom > line.top) rows.set(r.top, Math.max(rows.get(r.top) ?? 0, r.right));
+        }
+        const entries = [...rows.entries()], f = facts.getBoundingClientRect();
+        return { lines: entries.length, firstTop: entries[0]?.[0], firstRight: entries[0]?.[1], secondTop: entries[1]?.[0], secondRight: entries[1]?.[1], factsLeft: f.left, factsTop: facts.firstElementChild.getBoundingClientRect().top };
+      })()`);
+      assert.equal(layout.lines, 2, `${width}px: headline has two visible lines`);
+      assert.ok(layout.firstRight > layout.factsLeft, `${width}px: first line uses the space above the facts: ${JSON.stringify(layout)}`);
+      assert.ok(layout.secondRight <= layout.factsLeft + 1, `${width}px: second line does not overlap the facts`);
+      assert.ok(layout.factsTop > layout.firstTop && Math.abs(layout.factsTop - layout.secondTop) < 6, `${width}px: facts are on the second line: ${JSON.stringify(layout)}`);
+      await noOverflow(`activity at ${width}px`);
+    }
+    await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: shots ? 3 : 2, mobile: true });
 
     // The background job: one line, its title, a chip of how it ended; its command and output open on a tap.
     assert.equal(await evaluate("document.querySelector('[data-host=job] .host-name').textContent"), "Run the parser tests");
@@ -306,6 +329,17 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     for (let step = 0; step < 6 && await evaluate<string>("document.documentElement.dataset.fontStep ?? ''") !== "5"; step++) await click("#font");
     assert.equal(await evaluate("document.documentElement.dataset.fontStep"), "5");
     await noOverflow("t1 at the largest text");
+    assert.equal(await evaluate(`(() => {
+      const line = document.querySelector('.activity .act-line').getBoundingClientRect();
+      const node = document.querySelector('.activity .act-headline').firstChild;
+      const facts = document.querySelector('.activity .act-facts').firstElementChild.getBoundingClientRect();
+      for (let i = 0; i < node.length; i++) {
+        const range = document.createRange(); range.setStart(node, i); range.setEnd(node, i + 1);
+        const r = range.getBoundingClientRect();
+        if (r.top < line.bottom && r.bottom > facts.top && r.right > facts.left && r.left < facts.right) return true;
+      }
+      return false;
+    })()`), false, "the headline does not overlap the facts at the largest text size");
     await shot("t1-dark-largest-text.png");
     for (let step = 0; step < 6 && await evaluate<string>("document.documentElement.dataset.fontStep ?? ''") !== "2"; step++) await click("#font");
 
@@ -316,6 +350,13 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     // ---- A run that waits for the user: its card says so, and the ask of its script is the ask card ----
     await evaluate(`location.hash = "#/session/t2"`);
     await waitFor(`document.querySelector('.wf-card')`, "the card of the running script");
+    assert.equal(await evaluate(`(() => {
+      const line = document.querySelector('.activity .act-line'), headline = line.querySelector('.act-headline');
+      const rects = [...headline.getClientRects()], facts = line.querySelector('.act-facts');
+      const firstFact = facts.firstElementChild.getBoundingClientRect(), lastFact = facts.lastElementChild.getBoundingClientRect();
+      return rects.length >= 2 && rects[0].right > facts.getBoundingClientRect().left
+        && rects[1].right <= firstFact.left && firstFact.top > rects[0].top && lastFact.right <= line.getBoundingClientRect().right;
+    })()`), true, "a running activity leaves the first line free and keeps its facts beside the second");
     assert.equal(await evaluate("document.querySelector('.wf-card').dataset.state"), "waiting");
     assert.equal(await evaluate("document.querySelector('.wf-card .wf-progress').textContent"), "1/3");
     assert.equal(await evaluate("document.querySelector('.wf-card .wf-sub').textContent"), "Waits for your answer");
@@ -332,7 +373,7 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     await waitFor(`document.querySelector(".activity > .act-body .wf-card[data-run=run-c4]")`, "the ended script in the place of its call");
     // Open, such a script is in the place of its call; a run with steps keeps its card under the line, and its call is a row.
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.activity > .act-body > *')].map(e => e.dataset.run ?? e.querySelector('strong')?.textContent)"),
-      ["exec", "run-c3", "run-c4"]);
+      ["Comparing the cache options before choosing the right one for this service", "exec", "run-c3", "run-c4"]);
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.activity > .act-extras .wf-card')].map(card => card.dataset.run)"), ["run-b2"]);
     assert.match(await evaluate<string>("document.querySelector('.wf-card[data-run=run-c4] .wf-sub').textContent"), /^Done · 2s · 1 call$/);
     await click(".wf-card[data-run=run-c3] .wf-head");
