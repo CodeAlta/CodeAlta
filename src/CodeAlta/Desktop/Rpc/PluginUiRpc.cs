@@ -274,7 +274,14 @@ internal sealed partial class PluginUiService
     /// arrives on <see cref="Watch"/>, because a command can wait for the user in a dialog.
     /// </summary>
     [NeoRpcMethod("invokeCommand")]
-    public async Task<PluginUiStatusResponse> InvokeCommandAsync(PluginUiInvokeRequest request, CancellationToken cancellationToken)
+    public Task<PluginUiStatusResponse> InvokeCommandAsync(PluginUiInvokeRequest request, NeoRpcContext context, CancellationToken cancellationToken)
+        => InvokeCommandAsync(request, context.ViewLabel, cancellationToken);
+
+    internal Task<PluginUiStatusResponse> InvokeCommandAsync(PluginUiInvokeRequest request, CancellationToken cancellationToken)
+        => InvokeCommandAsync(request, (string?)null, cancellationToken);
+
+    // What the command asks of the window (a dialog, a notification) goes to the window it was started in.
+    internal async Task<PluginUiStatusResponse> InvokeCommandAsync(PluginUiInvokeRequest request, string? windowLabel, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         var scope = await ResolveAsync(request.ExpectedEpoch, request.ProjectId, request.SessionId, request.SpaceId, cancellationToken).ConfigureAwait(false);
@@ -295,6 +302,7 @@ internal sealed partial class PluginUiService
         {
             ProjectId = request.ProjectId, ProjectPath = scope.Options!.ProjectPath, SessionId = request.SessionId,
             SessionBusy = request.SessionBusy, DraftText = request.DraftText, SpaceId = request.SpaceId,
+            WindowLabel = string.IsNullOrWhiteSpace(windowLabel) ? null : windowLabel,
         };
         lock (_gate)
         {
@@ -340,18 +348,21 @@ internal sealed partial class PluginUiService
 
     /// <summary>What plugins ask of the page, until the page goes away.</summary>
     [NeoRpcMethod("watch")]
-    public NeoRpcChannel<PluginUiEvent> Watch(PluginUiWatchRequest request, CancellationToken cancellationToken)
+    public NeoRpcChannel<PluginUiEvent> Watch(PluginUiWatchRequest request, NeoRpcContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return new(WatchAsync(request, cancellationToken), DesktopJsonContext.Default.PluginUiEvent);
+        return new(WatchAsync(request, context.ViewLabel, cancellationToken), DesktopJsonContext.Default.PluginUiEvent);
     }
 
-    internal async IAsyncEnumerable<PluginUiEvent> WatchAsync(PluginUiWatchRequest request, [EnumeratorCancellation] CancellationToken cancellationToken)
+    internal IAsyncEnumerable<PluginUiEvent> WatchAsync(PluginUiWatchRequest request, CancellationToken cancellationToken) => WatchAsync(request, null, cancellationToken);
+
+    // The page of a window gets what plugins ask of that window (see DesktopPluginUi).
+    internal async IAsyncEnumerable<PluginUiEvent> WatchAsync(PluginUiWatchRequest request, string? label, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (_ui is null || !string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) yield break;
         // Dialogs wait for their answer, so nothing is dropped; a page that stops reading stops the plugins that ask.
         var events = Channel.CreateUnbounded<PluginUiEvent>(new UnboundedChannelOptions { SingleReader = true });
-        using var registration = _ui.Watch(value => events.Writer.TryWrite(value));
+        using var registration = _ui.Watch(label, value => events.Writer.TryWrite(value));
         await foreach (var value in events.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
     }
 

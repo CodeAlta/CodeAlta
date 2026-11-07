@@ -183,6 +183,147 @@ public sealed class DesktopPluginUiTests
     }
 
     [TestMethod]
+    public async Task WithSeveralWindows_APromptGoesToTheWindowOfItsSession_AndADialogToTheWindowOfItsCommand()
+    {
+        using var ui = new DesktopPluginUi();
+        var focused = "main";
+        ui.SessionWindow = session => session switch { "s1" => "main", "s2" => "window-a1", _ => null };
+        ui.FocusedWindow = () => focused;
+        var main = new List<PluginUiEvent>();
+        var second = new List<PluginUiEvent>();
+        using var mainPage = ui.Watch("main", main.Add);
+        // The second window watches last: before, every request went to its page.
+        using var secondPage = ui.Watch("window-a1", second.Add);
+
+        var toMain = ui.SendPromptToSessionAsync("s1", "for the main window").AsTask();
+        Assert.AreEqual(("prompt", "s1"), (main.Single().Kind, main.Single().SessionId));
+        Assert.AreEqual(0, second.Count);
+        Assert.IsTrue(ui.Respond(Answer(main[^1], button: "ok")));
+        Assert.IsTrue(await toMain);
+
+        var toSecond = ui.SendPromptToSessionAsync("s2", "for the second window").AsTask();
+        Assert.AreEqual(("prompt", "s2"), (second.Single().Kind, second.Single().SessionId));
+        Assert.AreEqual(1, main.Count);
+        Assert.IsTrue(ui.Respond(Answer(second[^1], button: "ok")));
+        Assert.IsTrue(await toSecond);
+
+        await Task.Run(async () =>
+        {
+            // A command started in the second window, on the session of the main one: its dialog and its notification go
+            // where the user acted, its prompt to the composer of its session.
+            ui.Enter(new DesktopPluginScope { SessionId = "s1", WindowLabel = "window-a1" });
+            var confirm = ui.ConfirmAsync("Title", "Continue?").AsTask();
+            Assert.AreEqual("ask", second[^1].Kind);
+            ui.Respond(Answer(second[^1], button: "yes"));
+            Assert.IsTrue(await confirm);
+            await ui.NotifyAsync("done");
+            Assert.AreEqual("done", second[^1].Message);
+            var send = ui.SendPromptAsync("go").AsTask();
+            Assert.AreEqual(("prompt", "s1"), (main[^1].Kind, main[^1].SessionId));
+            ui.Respond(Answer(main[^1], button: "ok"));
+            await send;
+        });
+        Assert.AreEqual(2, main.Count);
+        Assert.AreEqual(3, second.Count);
+
+        // Without a command or a session, the window used last.
+        focused = "window-a1";
+        await ui.NotifyAsync("background");
+        Assert.AreEqual("background", second[^1].Message);
+        Assert.AreEqual(2, main.Count);
+
+        // What changes for every page goes to each.
+        ui.InvalidateButtons();
+        ui.Refresh();
+        Assert.AreEqual("refresh", main[^1].Kind);
+        Assert.AreEqual("refresh", second[^1].Kind);
+        Assert.AreEqual("buttons", main[^2].Kind);
+        Assert.AreEqual("buttons", second[^2].Kind);
+    }
+
+    [TestMethod]
+    public async Task ADialogOfAWindowThatCloses_IsShownByTheMainWindow()
+    {
+        using var ui = new DesktopPluginUi();
+        var open = true;
+        ui.FocusedWindow = () => "window-a1";
+        ui.WindowOpen = _ => open;
+        var main = new List<PluginUiEvent>();
+        var second = new List<PluginUiEvent>();
+        using var mainPage = ui.Watch("main", main.Add);
+        var secondPage = ui.Watch("window-a1", second.Add);
+
+        var confirm = ui.ConfirmAsync("Title", "Continue?").AsTask();
+        Assert.AreEqual("ask", second.Single().Kind);
+        Assert.AreEqual(0, main.Count);
+        open = false;
+        secondPage.Dispose();
+        Assert.AreEqual(second[0].RequestId, main.Single().RequestId);
+        Assert.IsTrue(ui.Respond(Answer(main[0], button: "yes")));
+        Assert.IsTrue(await confirm);
+
+        // The window used last is closed: its request goes to the main window rather than nowhere.
+        await ui.NotifyAsync("to a window that closed");
+        Assert.AreEqual("to a window that closed", main[^1].Message);
+        Assert.AreEqual(1, second.Count);
+    }
+
+    [TestMethod]
+    public async Task APageThatReloads_KeepsTheRequestsOfItsWindow_UntilItsWindowCloses()
+    {
+        using var ui = new DesktopPluginUi();
+        var open = true;
+        ui.SessionWindow = session => session == "s2" ? "window-a1" : null;
+        ui.FocusedWindow = () => "window-a1";
+        ui.WindowOpen = _ => open;
+        var main = new List<PluginUiEvent>();
+        using var mainPage = ui.Watch("main", main.Add);
+
+        // The page of the second window reloads: its dialog and the prompt for its session wait for it, not in the main window.
+        var first = new List<PluginUiEvent>();
+        var firstPage = ui.Watch("window-a1", first.Add);
+        var confirm = ui.ConfirmAsync("Title", "Continue?").AsTask();
+        firstPage.Dispose();
+        var prompt = ui.SendPromptToSessionAsync("s2", "for the second window").AsTask();
+        var reloaded = new List<PluginUiEvent>();
+        var reloadedPage = ui.Watch("window-a1", reloaded.Add);
+        Assert.AreEqual(0, main.Count);
+        Assert.AreEqual(first.Single().RequestId, reloaded[0].RequestId);
+        Assert.AreEqual(("prompt", "s2"), (reloaded[1].Kind, reloaded[1].SessionId));
+        Assert.IsTrue(ui.Respond(Answer(reloaded[1], button: "ok")));
+        Assert.IsTrue(await prompt);
+
+        // Its page goes and then the window closes: the dialog goes to the main window.
+        reloadedPage.Dispose();
+        Assert.AreEqual(0, main.Count);
+        open = false;
+        ui.WindowsChanged();
+        Assert.AreEqual(reloaded[0].RequestId, main.Single().RequestId);
+        Assert.IsTrue(ui.Respond(Answer(main[0], button: "yes")));
+        Assert.IsTrue(await confirm);
+    }
+
+    [TestMethod]
+    public async Task WhatIsAskedBeforeThePagesWatch_GoesToThePageOfItsWindow()
+    {
+        using var ui = new DesktopPluginUi();
+        ui.SessionWindow = session => session == "s2" ? "window-a1" : null;
+        await Task.Run(async () =>
+        {
+            ui.Enter(new DesktopPluginScope { SessionId = "s2" });
+            await ui.SetDraftTextAsync("for the second window");
+        });
+        await ui.NotifyAsync("for the main window");
+
+        var second = new List<PluginUiEvent>();
+        using var secondPage = ui.Watch("window-a1", second.Add);
+        var main = new List<PluginUiEvent>();
+        using var mainPage = ui.Watch("main", main.Add);
+        Assert.AreEqual(("draft", "for the second window"), (second.Single().Kind, second.Single().Text));
+        Assert.AreEqual("for the main window", main.Single().Message);
+    }
+
+    [TestMethod]
     public void Cut_NeverSplitsASurrogatePair()
     {
         Assert.AreEqual("ab", DesktopPluginUi.Cut("abc", 2));
