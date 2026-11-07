@@ -5,7 +5,8 @@ using CodeAlta.Agent.Runtime;
 namespace CodeAlta.Plugin.Acp;
 
 /// <summary>
-/// Executes the turns of CodeAlta sessions through an ACP agent: one agent process and session per CodeAlta session.
+/// Executes the turns of CodeAlta sessions through an ACP agent: one agent process and session per CodeAlta session. A
+/// turn that belongs to no session (a side question) has a process and a session of its own, ended with it.
 /// </summary>
 internal sealed class AcpTurnExecutor :
     IModelProviderTurnExecutor,
@@ -14,6 +15,7 @@ internal sealed class AcpTurnExecutor :
     IAgentProviderSessionCleanup,
     IAgentProviderPermissionMode,
     IAgentProviderInstructionsChannel,
+    IAgentProviderStandaloneTurns,
     IAsyncDisposable
 {
     private readonly AcpRuntimeOptions _options;
@@ -50,6 +52,35 @@ internal sealed class AcpTurnExecutor :
         }
 
         return GetSession(request.SessionId).ExecuteTurnAsync(request, onUpdate, onSessionUpdate, cancellationToken);
+    }
+
+    public async Task<AgentTurnResponse> ExecuteStandaloneTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(onUpdate);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.SessionId);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+
+        // A process and a session of the agent of its own, never those of a CodeAlta session; kept here only while it
+        // runs, so that the end of the executor ends it.
+        var session = new AcpAgentSession(request.SessionId, _options) { Standalone = true };
+        if (!_sessions.TryAdd(request.SessionId, session))
+        {
+            await session.DisposeAsync().ConfigureAwait(false);
+            throw new InvalidOperationException($"The session {request.SessionId} already runs with {_options.AgentName}.");
+        }
+
+        try
+        {
+            return await session.ExecuteStandaloneTurnAsync(request, onUpdate, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            await DisposeProviderSessionAsync(request.SessionId).ConfigureAwait(false);
+        }
     }
 
     public void AttachRun(AgentProviderRunContext context)

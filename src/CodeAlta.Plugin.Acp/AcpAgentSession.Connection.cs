@@ -135,15 +135,8 @@ internal sealed partial class AcpAgentSession
         Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken)
     {
-        var workingDirectory = string.IsNullOrWhiteSpace(request.WorkingDirectory) ? Environment.CurrentDirectory : request.WorkingDirectory;
-        var environment = new Dictionary<string, string>(_options.Agent.Environment, StringComparer.Ordinal);
-        if (request.Environment is { IsEmpty: false } sessionEnvironment)
-        {
-            foreach (var (name, value) in sessionEnvironment.Variables)
-            {
-                environment[name] = value;
-            }
-        }
+        var workingDirectory = WorkingDirectoryOf(request);
+        var environment = CreateEnvironment(request);
 
         // A process in another sandbox, or out of one, is another process.
         var launchKey = string.Join('\u001f', [workingDirectory, request.ProcessHost?.Key ?? "-",
@@ -155,19 +148,12 @@ internal sealed partial class AcpAgentSession
         }
 
         await CloseConnectionAsync().ConfigureAwait(false);
-        var executable = _options.Agent.ResolveExecutable()
-            ?? throw new AgentProviderFailureException(
-                $"{_options.Agent.Command} was not found: {_options.AgentName} cannot start. " +
-                (_options.Agent.UsesPackageRunner ? $"Install the tool that provides `{_options.Agent.CommandName}` (Node.js for npx, uv for uvx), then send the message again." : "Install the agent, or set its command in Settings > Providers."),
-                new AgentFailureInfo(AgentFailureKind.Unavailable));
-
+        var executable = ResolveExecutable();
         if (_options.Agent.UsesPackageRunner)
         {
             await onSessionUpdate(new AgentTurnSessionUpdate { Kind = AgentSessionUpdateKind.Info, Message = $"Starting {_options.AgentName}…" }, cancellationToken).ConfigureAwait(false);
         }
 
-        Connection? connection = null;
-        AcpClient client;
         // In the sandbox of the session, when it has one, the agent runs its tools in its own process, and reaches the
         // tools of CodeAlta through its proxy: their endpoint is opened first, for its port.
         HarnessToolEndpoint? endpoint = null;
@@ -178,22 +164,18 @@ internal sealed partial class AcpAgentSession
             needs = _options.Quirks.SandboxNeeds(_options.Agent, executable, _options.ProviderKey) with { LocalPorts = [endpoint.Url.Port] };
         }
 
+        Connection connection;
         try
         {
-            client = await _options.ConnectionFactory.StartAsync(
+            connection = await StartAgentAsync(
                     new AcpConnectionRequest(executable, _options.Agent.Arguments, environment, workingDirectory, _options.InitializeTimeout)
                     {
                         Host = request.ProcessHost,
                         Needs = needs,
                     },
-                    message => OnMessage(connection, message),
+                    launchKey,
                     cancellationToken)
                 .ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is AcpConnectionClosedException or TimeoutException or IOException or System.ComponentModel.Win32Exception or InvalidOperationException && !cancellationToken.IsCancellationRequested)
-        {
-            if (endpoint is not null) await endpoint.DisposeAsync().ConfigureAwait(false);
-            throw new AgentProviderFailureException($"{_options.AgentName} could not be started. {ex.Message}", new AgentFailureInfo(AgentFailureKind.Unavailable), ex);
         }
         catch
         {
@@ -201,21 +183,7 @@ internal sealed partial class AcpAgentSession
             throw;
         }
 
-        var capabilities = AcpAgentCapabilities.Read(JsonSerializer.SerializeToElement(client.InitializeResponse, AcpClient.CreateJsonSerializerOptions()));
-        _options.Profile.Capabilities = capabilities;
-        connection = new Connection(client, capabilities, workingDirectory, launchKey) { InSandbox = request.ProcessHost is not null };
-        _ = client.Completion.ContinueWith(
-            static (_, state) =>
-            {
-                var connection = (Connection)state!;
-                connection.Post(new ClosedEvent(connection.DescribeExit()));
-            },
-            connection,
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-        _connection = connection;
-
+        var capabilities = connection.Capabilities;
         try
         {
             if (!capabilities.McpHttp)
@@ -236,14 +204,72 @@ internal sealed partial class AcpAgentSession
         }
     }
 
+    private static string WorkingDirectoryOf(AgentTurnRequest request)
+        => string.IsNullOrWhiteSpace(request.WorkingDirectory) ? Environment.CurrentDirectory : request.WorkingDirectory;
+
+    // The variables of the provider, then those of the session over them.
+    private Dictionary<string, string> CreateEnvironment(AgentTurnRequest request)
+    {
+        var environment = new Dictionary<string, string>(_options.Agent.Environment, StringComparer.Ordinal);
+        if (request.Environment is { IsEmpty: false } sessionEnvironment)
+        {
+            foreach (var (name, value) in sessionEnvironment.Variables)
+            {
+                environment[name] = value;
+            }
+        }
+
+        return environment;
+    }
+
+    private string ResolveExecutable()
+        => _options.Agent.ResolveExecutable()
+            ?? throw new AgentProviderFailureException(
+                $"{_options.Agent.Command} was not found: {_options.AgentName} cannot start. " +
+                (_options.Agent.UsesPackageRunner ? $"Install the tool that provides `{_options.Agent.CommandName}` (Node.js for npx, uv for uvx), then send the message again." : "Install the agent, or set its command in Settings > Providers."),
+                new AgentFailureInfo(AgentFailureKind.Unavailable));
+
+    // Starts the process of the agent and makes it the connection of the session.
+    private async Task<Connection> StartAgentAsync(AcpConnectionRequest start, string launchKey, CancellationToken cancellationToken)
+    {
+        Connection? connection = null;
+        AcpClient client;
+        try
+        {
+            client = await _options.ConnectionFactory.StartAsync(start, message => OnMessage(connection, message), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is AcpConnectionClosedException or TimeoutException or IOException or System.ComponentModel.Win32Exception or InvalidOperationException && !cancellationToken.IsCancellationRequested)
+        {
+            throw new AgentProviderFailureException($"{_options.AgentName} could not be started. {ex.Message}", new AgentFailureInfo(AgentFailureKind.Unavailable), ex);
+        }
+
+        var capabilities = AcpAgentCapabilities.Read(JsonSerializer.SerializeToElement(client.InitializeResponse, AcpClient.CreateJsonSerializerOptions()));
+        _options.Profile.Capabilities = capabilities;
+        connection = new Connection(client, capabilities, start.WorkingDirectory ?? Environment.CurrentDirectory, launchKey) { InSandbox = start.Host is not null };
+        _ = client.Completion.ContinueWith(
+            static (_, state) =>
+            {
+                var connection = (Connection)state!;
+                connection.Post(new ClosedEvent(connection.DescribeExit()));
+            },
+            connection,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+        _connection = connection;
+        return connection;
+    }
+
+    // Appended to the system prompt of the agent, for an agent that takes one from its client.
+    private static SystemPrompt CreateSystemPrompt(string text)
+        => new() { Mode = new SystemPromptMode { Value = JsonSerializer.SerializeToElement("append", AcpPluginJsonContext.Default.String) }, Content = [AcpPrompts.Text(text)] };
+
     private async Task OpenSessionAsync(AgentTurnRequest request, Connection connection, CancellationToken cancellationToken)
     {
         var capabilities = connection.Capabilities;
         var mcpServers = CreateMcpServers(connection);
         var instructions = CreateInstructions(request, connection);
-        var systemPrompt = capabilities.SystemPrompt
-            ? new SystemPrompt { Mode = new SystemPromptMode { Value = JsonSerializer.SerializeToElement("append", AcpPluginJsonContext.Default.String) }, Content = [AcpPrompts.Text(instructions)] }
-            : null;
+        var systemPrompt = capabilities.SystemPrompt ? CreateSystemPrompt(instructions) : null;
 
         if (_agentSessionId is { } recorded && (capabilities.ResumeSession || capabilities.LoadSession))
         {

@@ -105,6 +105,7 @@ internal sealed class AcpAgentProfile
 /// <param name="LoadSession">Whether it loads a session (<c>session/load</c>).</param>
 /// <param name="ResumeSession">Whether it resumes a session without replaying it (<c>session/resume</c>).</param>
 /// <param name="CloseSession">Whether it closes a session (<c>session/close</c>).</param>
+/// <param name="DeleteSession">Whether it deletes a session from the ones it lists (<c>session/delete</c>).</param>
 /// <param name="SystemPrompt">Whether it takes a system prompt from its client (<c>systemPrompt</c>).</param>
 /// <param name="McpHttp">Whether it connects to an MCP server over HTTP.</param>
 /// <param name="Images">Whether a prompt can hold images.</param>
@@ -115,6 +116,7 @@ internal sealed record AcpAgentCapabilities(
     bool LoadSession,
     bool ResumeSession,
     bool CloseSession,
+    bool DeleteSession,
     bool SystemPrompt,
     bool McpHttp,
     bool Images,
@@ -137,6 +139,7 @@ internal sealed record AcpAgentCapabilities(
             AcpJson.GetBoolean(agent, "loadSession"),
             AcpJson.HasCapability(session, "resume"),
             AcpJson.HasCapability(session, "close"),
+            AcpJson.HasCapability(session, "delete"),
             AcpJson.HasCapability(session, "systemPrompt"),
             AcpJson.GetBoolean(mcp, "http"),
             AcpJson.GetBoolean(prompt, "image"),

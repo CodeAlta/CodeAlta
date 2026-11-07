@@ -1004,6 +1004,160 @@ public sealed class AcpTurnExecutorTests
         Assert.IsNull(methods[2].TerminalCommand);
     }
 
+    private const string SideSystemMessage = "Answer the side question from the transcript.";
+
+    [TestMethod]
+    public async Task StandaloneTurn_RunsInAnAgentSessionOfItsOwnWithoutTools_ThenClosesAndDeletesIt()
+    {
+        var agent = new AcpFakeAgent
+        {
+            DeleteSession = true,
+            OnPrompt = static async prompt =>
+            {
+                await prompt.SendThoughtAsync("Thinking.");
+                await prompt.SendTextAsync("The answer.");
+                return "end_turn";
+            },
+        };
+        var deltas = new List<AgentTurnDelta>();
+        await using var fixture = new Fixture(agent) { Tools = [Tool("alta", static _ => new AgentToolResult(true, []))] };
+        await fixture.RunAsync([User("hello")]);
+
+        var response = await fixture.RunStandaloneAsync("What did the session do?", deltas.Add);
+
+        Assert.AreEqual("The answer.", Text(response.AssistantMessage));
+        Assert.AreEqual("The answer.", string.Concat(deltas.Where(static delta => delta.Kind == AgentContentKind.Assistant).Select(static delta => delta.Text)));
+        Assert.IsNull(response.ProviderState, "nothing of the turn is resumed");
+        Assert.IsNull(response.ProviderSessionId);
+        Assert.HasCount(2, agent.Connections, "a process of its own, beside the one of the CodeAlta session");
+        var newSession = agent.RequestsOf("session/new").Last()!;
+        Assert.IsEmpty(newSession["mcpServers"]!.AsArray(), "no tool of CodeAlta");
+        Assert.IsNull(newSession["systemPrompt"]);
+        Assert.AreEqual(SideSystemMessage + "\nWhat did the session do?", PromptText(agent.RequestsOf("session/prompt").Last()), "no instructions of a session, no tools");
+        var capabilities = agent.ClientCapabilities!;
+        Assert.IsFalse(capabilities["fs"]!["readTextFile"]!.GetValue<bool>());
+        Assert.IsFalse(capabilities["fs"]!["writeTextFile"]!.GetValue<bool>());
+        Assert.IsFalse(capabilities["terminal"]!.GetValue<bool>());
+        Assert.AreEqual("agent-session-2", agent.RequestsOf("session/close").Single()!["sessionId"]!.GetValue<string>());
+        Assert.AreEqual("agent-session-2", agent.RequestsOf("session/delete").Single()!["sessionId"]!.GetValue<string>());
+        var methods = agent.Requests.Select(static request => request.Method).ToList();
+        Assert.IsLessThan(methods.IndexOf("session/delete"), methods.IndexOf("session/close"), "closed, then deleted");
+        await agent.Clients.Last().Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.IsFalse(agent.Clients.First().Completion.IsCompleted, "the process of the CodeAlta session goes on");
+    }
+
+    [TestMethod]
+    public async Task StandaloneTurn_RefusesEveryPermission_InTheReadOnlyModeOfTheAgent_AndLeavesItsToolCallsOut()
+    {
+        JsonNode? outcome = null;
+        var agent = new AcpFakeAgent
+        {
+            Modes = ["default", "acceptEdits", "plan"],
+            OnPrompt = async prompt =>
+            {
+                await prompt.SendTextAsync("Looking.");
+                await prompt.StartToolAsync("call-1", "Search", "search");
+                await prompt.EndToolAsync("call-1", "found");
+                outcome = await prompt.RequestPermissionAsync("call-2", "Read a file", "read");
+                await prompt.SendTextAsync(" Done.");
+                return "end_turn";
+            },
+        };
+        await using var fixture = new Fixture(agent);
+
+        var response = await fixture.RunStandaloneAsync("Look.");
+
+        Assert.AreEqual("no", outcome!["outcome"]!["optionId"]!.GetValue<string>(), "even a read the permission modes allow is refused");
+        var setMode = agent.RequestsOf("session/set_mode").Single()!;
+        Assert.AreEqual("plan", setMode["modeId"]!.GetValue<string>());
+        Assert.AreEqual("agent-session-1", setMode["sessionId"]!.GetValue<string>());
+        Assert.AreEqual("Looking. Done.", Text(response.AssistantMessage));
+        Assert.IsFalse(response.AssistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().Any());
+        Assert.IsEmpty(agent.RequestsOf("session/delete"), "an agent that cannot delete a session is not asked to");
+        Assert.HasCount(1, agent.RequestsOf("session/close"));
+    }
+
+    [TestMethod]
+    public async Task StandaloneTurn_TakesTheModelAndTheEffortOfTheRequest()
+    {
+        var agent = new AcpFakeAgent();
+        await using var fixture = new Fixture(agent) { ModelId = "smart", Effort = AgentReasoningEffort.Low };
+
+        await fixture.RunStandaloneAsync("Which model?");
+
+        CollectionAssert.AreEqual(new[] { "model=smart", "reasoning=low" }, agent.ConfigChanges.ToArray());
+    }
+
+    [TestMethod]
+    public async Task StandaloneTurn_ToAnAgentThatTakesASystemPrompt_AppendsTheSystemMessageThere()
+    {
+        var agent = new AcpFakeAgent { SystemPrompt = true };
+        await using var fixture = new Fixture(agent);
+
+        await fixture.RunStandaloneAsync("Why?");
+
+        var systemPrompt = agent.RequestsOf("session/new").Single()!["systemPrompt"]!;
+        Assert.AreEqual("append", systemPrompt["mode"]!.GetValue<string>());
+        Assert.AreEqual(SideSystemMessage, systemPrompt["content"]![0]!["text"]!.GetValue<string>());
+        Assert.AreEqual("Why?", PromptText(agent.RequestsOf("session/prompt").Single()));
+    }
+
+    [TestMethod]
+    public async Task StandaloneTurn_Cancelled_StopsThePrompt_ClosesTheSession_AndEndsTheProcess()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var agent = new AcpFakeAgent
+        {
+            DeleteSession = true,
+            OnPrompt = async prompt =>
+            {
+                started.TrySetResult();
+                await Task.Delay(Timeout.Infinite, prompt.CancellationToken);
+                return "end_turn";
+            },
+        };
+        await using var fixture = new Fixture(agent);
+        using var cancellation = new CancellationTokenSource();
+
+        var turn = fixture.RunStandaloneAsync("Wait.", cancellationToken: cancellation.Token);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => turn);
+        Assert.HasCount(1, agent.RequestsOf("session/cancel"));
+        Assert.HasCount(1, agent.RequestsOf("session/close"));
+        Assert.HasCount(1, agent.RequestsOf("session/delete"));
+        await agent.Clients.Single().Completion.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [TestMethod]
+    public async Task StandaloneTurn_ThatFails_StillClosesAndDeletesTheSession()
+    {
+        var agent = new AcpFakeAgent
+        {
+            DeleteSession = true,
+            OnPrompt = static _ => Task.FromException<string>(new AcpFakeConnection.FakeRpcException(-32603, "The model failed.")),
+        };
+        await using var fixture = new Fixture(agent);
+
+        var error = await Assert.ThrowsExactlyAsync<AgentProviderFailureException>(() => fixture.RunStandaloneAsync("Why?"));
+
+        StringAssert.Contains(error.Message, "The model failed.");
+        Assert.HasCount(1, agent.RequestsOf("session/close"));
+        Assert.HasCount(1, agent.RequestsOf("session/delete"));
+        await agent.Clients.Single().Completion.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [TestMethod]
+    public void ReadOnlyMode_IsTheModeThatChangesTheLeast()
+    {
+        Assert.AreEqual("read-only", AcpAgentSession.ChooseReadOnlyMode([("auto", "Default"), ("read-only", "Read Only"), ("full-access", "Full Access")]));
+        Assert.AreEqual("ask", AcpAgentSession.ChooseReadOnlyMode([("agent", "Agent"), ("plan", "Plan"), ("ask", "Ask")]));
+        Assert.AreEqual("plan", AcpAgentSession.ChooseReadOnlyMode([("default", "Default"), ("acceptEdits", "Accept Edits"), ("plan", "Plan Mode")]));
+        Assert.AreEqual("m2", AcpAgentSession.ChooseReadOnlyMode([("m1", "Write"), ("m2", "Readonly")]), "by its name");
+        Assert.IsNull(AcpAgentSession.ChooseReadOnlyMode([("code", "Code"), ("yolo", "Yolo")]));
+    }
+
     private static AgentConversationMessage User(string text) => new(AgentConversationRole.User, [new AgentMessagePart.Text(text)]);
 
     private static string Text(AgentConversationMessage message) => string.Concat(message.Parts.OfType<AgentMessagePart.Text>().Select(static part => part.Value));
@@ -1137,6 +1291,30 @@ public sealed class AcpTurnExecutorTests
                 }
             }
         }
+
+        public Task<AgentTurnResponse> RunStandaloneAsync(string question, Action<AgentTurnDelta>? onDelta = null, CancellationToken cancellationToken = default)
+            => Executor.ExecuteStandaloneTurnAsync(
+                new AgentTurnRequest
+                {
+                    Provider = Runtime.RuntimeDescriptor,
+                    ProviderId = ProviderId,
+                    SessionId = "side-question:1",
+                    RunId = new AgentRunId("side-question:1"),
+                    WorkingDirectory = WorkingDirectory,
+                    SystemMessage = SideSystemMessage,
+                    ModelId = ModelId,
+                    ReasoningEffort = Effort,
+                    Conversation = [User(question)],
+                    Tools = [],
+                    IsStandalone = true,
+                    State = new AgentSessionState { SessionId = "side-question:1", UpdatedAt = DateTimeOffset.UtcNow },
+                },
+                (delta, _) =>
+                {
+                    onDelta?.Invoke(delta);
+                    return ValueTask.CompletedTask;
+                },
+                cancellationToken);
 
         private AgentTurnRequest CreateRequest(IReadOnlyList<AgentConversationMessage> conversation)
             => new()

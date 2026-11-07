@@ -26,6 +26,11 @@ internal sealed class AcpFakeAgent
 
     public bool CloseSession { get; set; } = true;
 
+    public bool DeleteSession { get; set; }
+
+    /// <summary>Gets or sets the modes a new session offers, the first one current; none when null.</summary>
+    public List<string>? Modes { get; set; }
+
     public bool SystemPrompt { get; set; }
 
     public bool McpHttp { get; set; } = true;
@@ -80,6 +85,9 @@ internal sealed class AcpFakeAgent
     /// <summary>Gets the connections opened, one per agent process.</summary>
     public ConcurrentQueue<AcpFakeConnection> Connections { get; } = new();
 
+    /// <summary>Gets the clients connected to the agent, one per process: a client the executor disposed ends its process.</summary>
+    public ConcurrentQueue<AcpClient> Clients { get; } = new();
+
     /// <summary>Gets every request a client sent, in order, with its parameters.</summary>
     public ConcurrentQueue<(string Method, JsonNode? Params)> Requests { get; } = new();
 
@@ -100,7 +108,9 @@ internal sealed class AcpFakeAgent
             var connection = new AcpFakeConnection(agent, toAgent.Reader.AsStream(), fromAgent.Writer.AsStream(), request);
             agent.Connections.Enqueue(connection);
             connection.Start();
-            return await AcpClient.ConnectAsync(fromAgent.Reader.AsStream(), toAgent.Writer.AsStream(), AcpClientInfo.CreateInitializeRequest(), messageHandler, cancellationToken);
+            var client = await AcpClient.ConnectAsync(fromAgent.Reader.AsStream(), toAgent.Writer.AsStream(), AcpClientInfo.CreateInitializeRequest(), messageHandler, cancellationToken);
+            agent.Clients.Enqueue(client);
+            return client;
         }
     }
 }
@@ -213,6 +223,8 @@ internal sealed class AcpFakeConnection
                 "session/load" => await LoadSessionAsync(parameters),
                 "session/resume" => ResumeSession(parameters),
                 "session/close" => new JsonObject(),
+                "session/delete" => new JsonObject(),
+                "session/set_mode" => new JsonObject(),
                 "session/set_config_option" => SetConfigOption(parameters),
                 "session/prompt" => await PromptAsync(parameters),
                 "authenticate" => new JsonObject(),
@@ -236,6 +248,7 @@ internal sealed class AcpFakeConnection
         _agent.ClientCapabilities = parameters["clientCapabilities"]?.DeepClone().AsObject();
         var session = new JsonObject();
         if (_agent.CloseSession) session["close"] = new JsonObject();
+        if (_agent.DeleteSession) session["delete"] = new JsonObject();
         if (_agent.ResumeSession) session["resume"] = new JsonObject();
         if (_agent.SystemPrompt) session["systemPrompt"] = new JsonObject();
         return new JsonObject
@@ -266,7 +279,17 @@ internal sealed class AcpFakeConnection
         var efforts = _agent.EffortsOf(model);
         var options = CreateOptions(model, efforts.Count > 0 ? efforts[^1] : null);
         _sessions[sessionId] = options;
-        return new JsonObject { ["sessionId"] = sessionId, ["configOptions"] = options["list"]!.DeepClone() };
+        var created = new JsonObject { ["sessionId"] = sessionId, ["configOptions"] = options["list"]!.DeepClone() };
+        if (_agent.Modes is { Count: > 0 } modes)
+        {
+            created["modes"] = new JsonObject
+            {
+                ["currentModeId"] = modes[0],
+                ["availableModes"] = new JsonArray([.. modes.Select(static mode => (JsonNode)new JsonObject { ["id"] = mode, ["name"] = mode })]),
+            };
+        }
+
+        return created;
     }
 
     private async Task<JsonObject> LoadSessionAsync(JsonObject parameters)
@@ -424,7 +447,8 @@ internal sealed class AcpFakeConnection
 
     internal static JsonObject Text(string text) => new() { ["type"] = "text", ["text"] = text };
 
-    private sealed class FakeRpcException(int code, string message) : Exception(message)
+    /// <summary>An error the agent answers a request with; a prompt script throws it to fail its prompt.</summary>
+    internal sealed class FakeRpcException(int code, string message) : Exception(message)
     {
         public int Code { get; } = code;
     }

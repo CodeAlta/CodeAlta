@@ -200,6 +200,10 @@ schema types, JSON-RPC transport, client, process, registry and installer) and n
   from, for the update. Adding from the registry downloads a binary distribution or writes an `npx`/`uvx` command.
 - `AcpAgentSession` owns one agent process and one agent session per CodeAlta session. It resumes the agent session
   when the journal holds the same conversation (`AcpProviderState`), else creates one with the previous conversation.
+- A side question (`IAgentProviderStandaloneTurns`) runs in an agent process and session of its own: no MCP server,
+  a read-only (`read-only`, `ask`, `plan`) mode when the agent offers one, every permission request refused, then
+  `session/close` and `session/delete` when the agent supports them and the process ended, also on failure or
+  cancellation. The agent may still run the tools it runs without asking, and keeps a session it cannot delete.
 - Models and efforts are the agent's config options; the probe selects each model once to learn its efforts, then
   restores the selection, since some agents remember the last choice. What an agent does beyond the protocol is a
   subclass of `AcpAgentQuirks`, chosen from the registry id or the command.

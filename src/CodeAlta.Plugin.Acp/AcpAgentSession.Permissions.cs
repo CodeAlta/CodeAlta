@@ -67,6 +67,13 @@ internal sealed partial class AcpAgentSession
     private async Task<string?> DecideAsync(Connection connection, JsonElement parameters, CancellationToken cancellationToken)
     {
         AcpJson.TryGetObject(parameters, "toolCall", out var toolCall);
+        if (Standalone)
+        {
+            // A turn that belongs to no session runs no tool: even a read the permission modes allow is refused.
+            _logger?.Info($"A tool call of {_options.AgentName} in a turn without tools was refused: {Limit(AcpJson.GetString(toolCall, "title") ?? "a tool")}");
+            return AcpPermissionOptions.Select(parameters, "reject_once", "reject_always");
+        }
+
         var callId = AcpJson.GetString(toolCall, "toolCallId");
         var kind = AcpJson.GetString(toolCall, "kind");
         if (callId is not null && _bridge.Find(callId) is { IsCodeAltaTool: true })

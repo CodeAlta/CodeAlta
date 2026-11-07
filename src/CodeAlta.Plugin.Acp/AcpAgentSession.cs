@@ -519,7 +519,12 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
             _pendingPreamble = null;
         }
 
-        var prompt = AcpPrompts.CreatePrompt(preambles, messages, connection.Capabilities.Images);
+        SendPrompt(connection, AcpPrompts.CreatePrompt(preambles, messages, connection.Capabilities.Images));
+    }
+
+    // Sends a prompt: its end is read as an event of the turn.
+    private void SendPrompt(Connection connection, List<ContentBlock> prompt)
+    {
         connection.BeginPrompt();
         var task = connection.Client.SessionPromptAsync(
             new PromptRequest { SessionId = new SessionId { Value = connection.AgentSessionId }, Prompt = prompt },
