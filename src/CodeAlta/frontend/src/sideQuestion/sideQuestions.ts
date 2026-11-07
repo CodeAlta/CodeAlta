@@ -125,6 +125,9 @@ export type SideQuestions = ReturnType<typeof createSideQuestions>;
 /** The first words of an answer, as one line of plain text, for the list of the questions: no code block, no mark of Markdown. */
 export function answerPreview(answer: string): string {
   return answer.replace(/```[\s\S]*?```/gu, " ")
+    // A table reads as its cells: no row of dashes, and its cells apart by a dot.
+    .replace(/^[ \t]*\|?(?:[ \t]*:?-{3,}:?[ \t]*\|)+[ \t]*:?-*:?[ \t]*\|?[ \t]*$/gmu, "")
+    .replace(/^[ \t]*\|(.*)\|[ \t]*$/gmu, (_, cells: string) => cells.split("|").map(cell => cell.trim()).join(" · "))
     .replace(/`([^`\n]*)`/gu, "$1")
     .replace(/\*\*|__/gu, "")
     .replace(/^\s*(?:#{1,6}|[-*+>]|\d+\.)\s+/gmu, "")

@@ -11,6 +11,7 @@ test("only /ask at the beginning is a side question, with or without a question"
 
 test("the list shows the start of an answer as plain text", () => {
   assert.equal(answerPreview("It made 1 tool call: `read_file` for **readme.md**."), "It made 1 tool call: read_file for readme.md.");
+  assert.equal(answerPreview("| Point | Area |\n|---|---|\n| One | Workspace |"), "Point · Area One · Workspace");
   assert.equal(answerPreview("### Details\n\n- one\n- two\n\n```ts\nconst n = 1;\n```\nDone"), "Details one two Done");
 });
 
