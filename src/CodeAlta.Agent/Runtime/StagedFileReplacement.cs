@@ -13,16 +13,71 @@ namespace CodeAlta.Agent.Runtime;
 /// opened), and where the file system cannot, the plain move is tried again for a while.
 /// </summary>
 /// <remarks>
+/// <para>
+/// On Windows even that rename can leave no file for a moment, rarely (about one replacement in ten thousand, for tens of
+/// milliseconds): the previous file is gone, the staged one not yet in its place. A reader for which a missing file
+/// means something (a credential read as a sign-out) opens it with <see cref="OpenReplacedFileAsync"/>, which waits for
+/// the new one while a staged file shows a write in progress.
+/// </para>
+/// <para>
 /// A file system filter (an antivirus scanning what a process wrote) can hold the file open without taking part in
 /// its sharing: nothing then shows a reader, the file opens exclusively, it can be deleted, but no rename replaces it,
 /// for as long as the filter keeps it, which can be longer than any retry. Such a file is replaced the way
 /// <see cref="File.Replace(string, string, string?)"/> does it, which first moves it out of the way: a reader may then
 /// find no file for a moment. A read-only file is never replaced that way.
+/// </para>
 /// </remarks>
 internal static class StagedFileReplacement
 {
     // How long the plain move is tried again: far beyond the time a reader holds the file.
     private static readonly TimeSpan RetryLimit = TimeSpan.FromSeconds(2);
+
+    // How recent a staged file is for a write in progress: older, it was left by a write that never ended.
+    private static readonly TimeSpan StagedFileLifetime = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Opens for reading a file that a write replaces with <see cref="MoveOverAsync"/>, from a staged file named
+    /// <c>&lt;file name&gt;.&lt;anything&gt;.tmp</c> in its folder, or returns <see langword="null"/> when there is no file.
+    /// </summary>
+    /// <param name="path">The file to read.</param>
+    /// <param name="cancellationToken">Cancels the wait for a file being replaced.</param>
+    /// <returns>The file, opened to be read while a writer replaces it (the reader keeps what it opened), or <see langword="null"/>.</returns>
+    /// <exception cref="IOException">The file cannot be opened.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled while the file was being replaced.</exception>
+    /// <remarks>
+    /// On Windows the open is tried again for up to two seconds: for a missing file while a recent staged file shows a
+    /// replacement in progress (or once it is back), and for an access denied or a sharing violation, which a replacement
+    /// causes for a moment, as the writer tries its move again. A file missing without a write in progress is none at once.
+    /// </remarks>
+    internal static async ValueTask<FileStream?> OpenReplacedFileAsync(string path, CancellationToken cancellationToken)
+    {
+        var started = Stopwatch.GetTimestamp();
+        for (var delay = 1; ; delay = Math.Min(delay * 2, 50))
+        {
+            try
+            {
+                return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 4096, useAsync: true);
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                // A file back already, or a staged file still there: the open came in the moment of a replacement.
+                if (!CanWaitForReplacement(started) || !(IsBeingReplaced(path) || File.Exists(path)))
+                {
+                    return null;
+                }
+            }
+            catch (Exception ex) when ((ex is UnauthorizedAccessException || ex is IOException && (ex.HResult & 0xffff) == 32)
+                && CanWaitForReplacement(started) && !Directory.Exists(path))
+            {
+            }
+
+            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static bool CanWaitForReplacement(long started)
+        => OperatingSystem.IsWindows() && Stopwatch.GetElapsedTime(started) < RetryLimit;
 
     /// <summary>Moves <paramref name="stagedPath"/> onto <paramref name="path"/>, replacing it.</summary>
     /// <param name="stagedPath">The file written aside, in the folder of <paramref name="path"/>.</param>
@@ -72,8 +127,8 @@ internal static class StagedFileReplacement
 
     /// <summary>
     /// Moves <paramref name="stagedPath"/> onto <paramref name="path"/> as <see cref="MoveOver(string, string)"/> does, but never
-    /// moves the file out of the way: a reader finds the previous file or the new one at every moment. A file a filter holds
-    /// beyond the retries is left as it is, and the write fails.
+    /// moves the file out of the way: beyond the moment a rename takes on Windows, a reader finds the previous file or the new
+    /// one. A file a filter holds beyond the retries is left as it is, and the write fails.
     /// </summary>
     /// <param name="stagedPath">The file written aside, in the folder of <paramref name="path"/>.</param>
     /// <param name="path">The file to replace, or to create when it does not exist.</param>
@@ -108,6 +163,25 @@ internal static class StagedFileReplacement
 
                 Thread.Sleep(delay);
             }
+        }
+    }
+
+    private static bool IsBeingReplaced(string path)
+    {
+        try
+        {
+            var folder = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(path))!);
+            var now = DateTime.UtcNow;
+            foreach (var staged in folder.EnumerateFiles(Path.GetFileName(path) + ".*.tmp"))
+            {
+                if (now - staged.LastWriteTimeUtc < StagedFileLifetime) return true;
+            }
+
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 

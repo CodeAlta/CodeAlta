@@ -153,16 +153,14 @@ internal sealed class XaiDirectCredentialStore
 
     public async ValueTask<XaiDirectCredentialCache?> ReadAsync(CancellationToken cancellationToken)
     {
-        if (!File.Exists(_path))
-        {
-            return null;
-        }
-
         try
         {
-            // A writer may replace the file while it is read: the reader keeps the content it opened.
-            await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 4096, useAsync: true);
-            return await JsonSerializer.DeserializeAsync(stream, XaiDirectJsonContext.Default.XaiDirectCredentialCache, cancellationToken).ConfigureAwait(false);
+            // A refresh may replace the file while it is read: the read finds the previous credential or the new one,
+            // never none, and keeps the content it opened.
+            await using var stream = await StagedFileReplacement.OpenReplacedFileAsync(_path, cancellationToken).ConfigureAwait(false);
+            return stream is null
+                ? null
+                : await JsonSerializer.DeserializeAsync(stream, XaiDirectJsonContext.Default.XaiDirectCredentialCache, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {

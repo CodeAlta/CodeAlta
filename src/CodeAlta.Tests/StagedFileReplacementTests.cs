@@ -110,6 +110,58 @@ public sealed class StagedFileReplacementTests
     }
 
     [TestMethod]
+    public async Task AReadInTheMomentAReplacementLeavesNoFile_GetsTheNewOne_AndAMissingFileIsNoneAtOnce()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Elsewhere a rename replaces a file in one step for every reader.");
+        var root = Path.Combine(Path.GetTempPath(), "codealta-staged-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var path = Path.Combine(root, "credential.json");
+            var staged = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            File.WriteAllText(staged, "after");
+
+            // On Windows a rename that replaces a file can leave no file for tens of milliseconds (rarely, but a refresh
+            // read as a sign-out): the previous file is gone, the staged one not yet in its place.
+            var read = Task.Run(async () =>
+            {
+                await using var stream = await StagedFileReplacement.OpenReplacedFileAsync(path, CancellationToken.None);
+                return stream is null ? null : await new StreamReader(stream).ReadToEndAsync();
+            });
+            await Task.Delay(100);
+            File.Move(staged, path);
+            Assert.AreEqual("after", await read.WaitAsync(TimeSpan.FromSeconds(10)));
+
+            // A file a replacement holds for a moment (a sharing violation, or an access denied) is read once it lets go.
+            var holder = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            read = Task.Run(async () =>
+            {
+                await using var stream = await StagedFileReplacement.OpenReplacedFileAsync(path, CancellationToken.None);
+                return stream is null ? null : await new StreamReader(stream).ReadToEndAsync();
+            });
+            await Task.Delay(100);
+            await holder.DisposeAsync();
+            Assert.AreEqual("after", await read.WaitAsync(TimeSpan.FromSeconds(10)));
+
+            // No write in progress: a missing file is none, without waiting.
+            File.Delete(path);
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            Assert.IsNull(await StagedFileReplacement.OpenReplacedFileAsync(path, CancellationToken.None));
+
+            // Nor for a staged file a write left behind long ago (a process that ended in the middle of it).
+            File.WriteAllText(staged, "left");
+            File.SetLastWriteTimeUtc(staged, DateTime.UtcNow.AddHours(-1));
+            Assert.IsNull(await StagedFileReplacement.OpenReplacedFileAsync(path, CancellationToken.None));
+            Assert.IsNull(await StagedFileReplacement.OpenReplacedFileAsync(Path.Combine(root, "missing", "credential.json"), CancellationToken.None));
+            Assert.IsLessThan(TimeSpan.FromSeconds(1), started.Elapsed);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task AFolderInThePlaceOfTheFile_IsRefusedAtOnce()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-staged-" + Guid.NewGuid().ToString("N"));
