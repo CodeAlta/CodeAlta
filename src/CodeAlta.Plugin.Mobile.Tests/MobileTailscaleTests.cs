@@ -45,6 +45,45 @@ public sealed class MobileTailscaleTests
     }
 
     [TestMethod]
+    public async Task Publish_AfterARenameOfTheComputer_ServesThePageUnderItsNewName()
+    {
+        // The computer was "old-desk" when the page was published: that rule answers no one, Tailscale has no certificate for it.
+        var cli = new FakeTailscaleCli().Answer("status --json", FakeTailscaleCli.Running)
+            .Answer("serve status --json", """{"TCP":{"2584":{"HTTPS":true}},"Web":{"old-desk.tail1234.ts.net:2584":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:2584"}}}}}""")
+            .Answer("serve reset", "")
+            .Answer(Serve, "Available within your tailnet");
+
+        var status = await new TailscaleServe(cli).PublishAsync(2584, 2584, default);
+
+        Assert.AreEqual(("serving", "https://desk.tail1234.ts.net:2584"), (status.State, status.Url));
+        CollectionAssert.AreEqual(new[] { "status --json", "serve status --json", "serve reset", Serve }, cli.Calls, "The old rule is the only one: a reset takes it off.");
+    }
+
+    [TestMethod]
+    public async Task Publish_AfterARenameOfTheComputer_KeepsWhatTheUserServes()
+    {
+        // The command line cannot take off the rule of another name alone: with the user's own rules beside it, it is left.
+        var cli = new FakeTailscaleCli().Answer("status --json", FakeTailscaleCli.Running)
+            .Answer("serve status --json", """{"TCP":{"443":{"HTTPS":true},"2584":{"HTTPS":true}},"Web":{"desk.tail1234.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}},"old-desk.tail1234.ts.net:2584":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:2584"}}}}}""")
+            .Answer(Serve, "Available within your tailnet");
+
+        var status = await new TailscaleServe(cli).PublishAsync(2584, 2584, default);
+
+        Assert.AreEqual("serving", status.State);
+        CollectionAssert.AreEqual(new[] { "status --json", "serve status --json", Serve }, cli.Calls);
+    }
+
+    [TestMethod]
+    public async Task Publish_LeavesAPortThatServesSomethingElseUnderAnotherName()
+    {
+        var cli = new FakeTailscaleCli().Answer("status --json", FakeTailscaleCli.Running)
+            .Answer("serve status --json", """{"TCP":{"2584":{"HTTPS":true}},"Web":{"old-desk.tail1234.ts.net:2584":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}}}}""");
+
+        Assert.AreEqual("port-taken", (await new TailscaleServe(cli).PublishAsync(2584, 2584, default)).State);
+        Assert.IsFalse(cli.Calls.Contains("serve reset"));
+    }
+
+    [TestMethod]
     public async Task Publish_SaysWhatIsMissing()
     {
         Assert.AreEqual(("not-installed", TailscaleServe.DownloadUrl), Of(await new TailscaleServe(new FakeTailscaleCli(installed: false)).PublishAsync(2584, 2584, default)));
@@ -67,21 +106,38 @@ public sealed class MobileTailscaleTests
     [TestMethod]
     public async Task Unpublish_TakesOffOnlyTheHandlerOfThePlugin()
     {
-        var ours = new FakeTailscaleCli()
+        var ours = new FakeTailscaleCli().Answer("status --json", FakeTailscaleCli.Running)
             .Answer("serve status --json", """{"TCP":{"2584":{"HTTPS":true}},"Web":{"desk.tail1234.ts.net:2584":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:2584"}}}}}""")
             .Answer("serve --https=2584 off", "");
         await new TailscaleServe(ours).UnpublishAsync(2584, 2584, default);
         CollectionAssert.Contains(ours.Calls, "serve --https=2584 off");
 
-        var theirs = new FakeTailscaleCli()
+        var theirs = new FakeTailscaleCli().Answer("status --json", FakeTailscaleCli.Running)
             .Answer("serve status --json", """{"TCP":{"2584":{"HTTPS":true}},"Web":{"desk.tail1234.ts.net:2584":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}}}}""");
         await new TailscaleServe(theirs).UnpublishAsync(2584, 2584, default);
         Assert.IsFalse(theirs.Calls.Contains("serve --https=2584 off"), "Another program now serves that port.");
 
-        var more = new FakeTailscaleCli()
+        var more = new FakeTailscaleCli().Answer("status --json", FakeTailscaleCli.Running)
             .Answer("serve status --json", """{"Web":{"desk.tail1234.ts.net:2584":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:2584"},"/docs":{"Path":"C:\\docs"}}}}}""");
         await new TailscaleServe(more).UnpublishAsync(2584, 2584, default);
         Assert.IsFalse(more.Calls.Contains("serve --https=2584 off"), "The user added a handler to the port: it is theirs too.");
+    }
+
+    [TestMethod]
+    public async Task Unpublish_AfterARenameOfTheComputer_TakesOffThePageOfTheOldName()
+    {
+        var alone = new FakeTailscaleCli().Answer("status --json", FakeTailscaleCli.Running)
+            .Answer("serve status --json", """{"TCP":{"2584":{"HTTPS":true}},"Web":{"old-desk.tail1234.ts.net:2584":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:2584"}}}}}""")
+            .Answer("serve reset", "");
+        Assert.AreEqual("Tailscale no longer serves the page.", await new TailscaleServe(alone).UnpublishAsync(2584, 2584, default));
+        CollectionAssert.Contains(alone.Calls, "serve reset");
+        Assert.IsFalse(alone.Calls.Contains("serve --https=2584 off"), "The current name has no rule to take off.");
+
+        // Beside the user's own rules, a reset would take them off too: the old rule is left, and the log says how to remove it.
+        var beside = new FakeTailscaleCli().Answer("status --json", FakeTailscaleCli.Running)
+            .Answer("serve status --json", """{"TCP":{"443":{"HTTPS":true},"2584":{"HTTPS":true}},"Web":{"desk.tail1234.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}},"old-desk.tail1234.ts.net:2584":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:2584"}}}}}""");
+        StringAssert.Contains(await new TailscaleServe(beside).UnpublishAsync(2584, 2584, default), "older name");
+        Assert.IsFalse(beside.Calls.Contains("serve reset"));
     }
 
     private static (string State, string? FixUrl) Of(PrivateNetworkStatus status) => (status.State, status.FixUrl);

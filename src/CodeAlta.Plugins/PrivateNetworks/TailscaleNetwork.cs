@@ -47,10 +47,20 @@ internal sealed class TailscaleServe(ITailscaleCli cli)
         if (notRunning is not null) return notRunning;
 
         var target = Target(localPort);
-        var (proxy, used, unread) = await ServedAsync(httpsPort, cancellationToken).ConfigureAwait(false);
+        var (served, unread) = await ServedAsync(dnsName!, httpsPort, target, cancellationToken).ConfigureAwait(false);
         if (unread is not null) return unread;
-        if (string.Equals(proxy, target, StringComparison.OrdinalIgnoreCase)) return Serving(dnsName!, httpsPort);
-        if (used) return new("port-taken", null, $"Port {httpsPort} of this computer on the tailnet already serves something else.");
+        if (served.Ours) return Serving(dnsName!, httpsPort);
+        if (served.Taken) return new("port-taken", null, $"Port {httpsPort} of this computer on the tailnet already serves something else.");
+
+        // Published under an older name of this computer (it was renamed): that rule answers no one, since Tailscale only has a
+        // certificate for the current name. The command line takes off only the rules of the current name, so the old one is
+        // removed with a reset when the page is all Tailscale serves, and is otherwise left beside the new one.
+        if (served.Stale && served.OnlyThePage)
+        {
+            var reset = await cli.RunAsync(["serve", "reset"], cancellationToken).ConfigureAwait(false);
+            if (reset.TimedOut) return new("failed", null, "tailscale serve reset did not answer.");
+            if (reset.ExitCode != 0) return new("failed", null, $"tailscale serve reset failed: {FirstLine(reset.Output)}");
+        }
 
         var result = await cli.RunAsync(["serve", "--bg", HttpsOption(httpsPort), target], cancellationToken).ConfigureAwait(false);
         // Without Serve on the tailnet, the command prints the page that enables it and waits for it.
@@ -61,7 +71,10 @@ internal sealed class TailscaleServe(ITailscaleCli cli)
         return Serving(dnsName!, httpsPort);
     }
 
-    /// <summary>Takes the page off the tailnet: the handler of its HTTPS port, when it points at the page's server.</summary>
+    /// <summary>
+    /// Takes the page off the tailnet: the handler of its HTTPS port, when it points at the page's server; also the one left under
+    /// an older name of this computer, when the page is all Tailscale serves.
+    /// </summary>
     /// <param name="localPort">The port of the page's server on the loopback address.</param>
     /// <param name="httpsPort">The HTTPS port of this computer on the tailnet.</param>
     /// <param name="cancellationToken">Stops the work.</param>
@@ -69,11 +82,18 @@ internal sealed class TailscaleServe(ITailscaleCli cli)
     internal async Task<string> UnpublishAsync(int localPort, int httpsPort, CancellationToken cancellationToken)
     {
         if (!cli.IsInstalled) return "Tailscale is not installed.";
-        var (proxy, _, unread) = await ServedAsync(httpsPort, cancellationToken).ConfigureAwait(false);
+        var (dnsName, notRunning) = await NodeAsync(cancellationToken).ConfigureAwait(false);
+        if (notRunning is not null) return notRunning.Detail;
+        var (served, unread) = await ServedAsync(dnsName!, httpsPort, Target(localPort), cancellationToken).ConfigureAwait(false);
         if (unread is not null) return unread.Detail;
-        if (!string.Equals(proxy, Target(localPort), StringComparison.OrdinalIgnoreCase)) return $"Port {httpsPort} does not serve the page: nothing to take off.";
-        var result = await cli.RunAsync(["serve", HttpsOption(httpsPort), "off"], cancellationToken).ConfigureAwait(false);
-        return result.ExitCode == 0 && !result.TimedOut ? "Tailscale no longer serves the page." : $"tailscale serve off failed: {FirstLine(result.Output)}";
+        if (!served.Ours && !served.Stale) return $"Port {httpsPort} does not serve the page: nothing to take off.";
+
+        CommandLineResult result;
+        if (served.Stale && served.OnlyThePage) result = await cli.RunAsync(["serve", "reset"], cancellationToken).ConfigureAwait(false);
+        else if (served.Ours) result = await cli.RunAsync(["serve", HttpsOption(httpsPort), "off"], cancellationToken).ConfigureAwait(false);
+        else return $"Port {httpsPort} serves the page under an older name of this computer, beside other things Tailscale serves: `tailscale serve reset` takes it off with them.";
+
+        return result.ExitCode == 0 && !result.TimedOut ? "Tailscale no longer serves the page." : $"tailscale serve failed: {FirstLine(result.Output)}";
     }
 
     private static string Target(int localPort) => string.Create(CultureInfo.InvariantCulture, $"http://127.0.0.1:{localPort}");
@@ -108,37 +128,72 @@ internal sealed class TailscaleServe(ITailscaleCli cli)
         }
     }
 
-    // What the HTTPS port serves now: the proxy of its root when it serves nothing else, and whether anything is configured on it.
-    private async Task<(string? Proxy, bool Used, PrivateNetworkStatus? Unread)> ServedAsync(int httpsPort, CancellationToken cancellationToken)
+    // What the HTTPS port serves now. A site of Tailscale Serve is keyed by "{name}:{port}", the name of this computer when it
+    // was added: after a rename, a site of the old name still holds the port but answers no one.
+    private async Task<(ServedPort Served, PrivateNetworkStatus? Unread)> ServedAsync(string dnsName, int httpsPort, string target, CancellationToken cancellationToken)
     {
         var result = await cli.RunAsync(["serve", "status", "--json"], cancellationToken).ConfigureAwait(false);
-        if (result.ExitCode != 0 || result.TimedOut) return (null, false, new("failed", null, $"tailscale serve status failed: {FirstLine(result.Output)}"));
+        if (result.ExitCode != 0 || result.TimedOut) return (ServedPort.Nothing, new("failed", null, $"tailscale serve status failed: {FirstLine(result.Output)}"));
         try
         {
             using var json = JsonDocument.Parse(string.IsNullOrWhiteSpace(result.Output) ? "{}" : result.Output);
             var root = json.RootElement;
-            if (root.ValueKind != JsonValueKind.Object) return (null, false, null);
+            if (root.ValueKind != JsonValueKind.Object) return (ServedPort.Nothing, null);
             var port = httpsPort.ToString(CultureInfo.InvariantCulture);
-            var used = root.TryGetProperty("TCP", out var tcp) && tcp.ValueKind == JsonValueKind.Object && tcp.TryGetProperty(port, out _);
-            string? proxy = null;
-            if (root.TryGetProperty("Web", out var web) && web.ValueKind == JsonValueKind.Object)
+            bool ours = false, stale = false, taken = false, elsewhere = false;
+            foreach (var property in root.EnumerateObject())
             {
-                foreach (var site in web.EnumerateObject())
+                if (property.NameEquals("TCP") && property.Value.ValueKind == JsonValueKind.Object)
                 {
-                    if (!site.Name.EndsWith(":" + port, StringComparison.Ordinal)) continue;
-                    used = true;
-                    if (site.Value.ValueKind == JsonValueKind.Object && site.Value.TryGetProperty("Handlers", out var handlers) && handlers.ValueKind == JsonValueKind.Object
-                        && handlers.EnumerateObject().Count() == 1 && handlers.TryGetProperty("/", out var handler) && handler.ValueKind == JsonValueKind.Object)
-                        proxy = Text(handler, "Proxy");
+                    foreach (var entry in property.Value.EnumerateObject())
+                    {
+                        if (!entry.NameEquals(port)) elsewhere = true;
+                        // The page's port is an HTTPS port and nothing more: a forwarder of raw TCP there is another program's.
+                        else if (entry.Value.ValueKind != JsonValueKind.Object || entry.Value.EnumerateObject().Any(static field => !field.NameEquals("HTTPS"))) taken = true;
+                    }
                 }
+                else if (property.NameEquals("Web") && property.Value.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var site in property.Value.EnumerateObject())
+                    {
+                        var colon = site.Name.LastIndexOf(':');
+                        if (colon < 0 || !site.Name.AsSpan(colon + 1).Equals(port, StringComparison.Ordinal))
+                        {
+                            elsewhere = true;
+                            continue;
+                        }
+
+                        var current = site.Name.AsSpan(0, colon).Equals(dnsName, StringComparison.OrdinalIgnoreCase);
+                        if (!IsThePage(site.Value, target)) taken = true;
+                        else if (current) ours = true;
+                        else stale = true;
+                    }
+                }
+                else if (property.Value.ValueKind is not (JsonValueKind.Null or JsonValueKind.False)) elsewhere = true;
             }
 
-            return (proxy, used, null);
+            return (new ServedPort(ours, stale, taken, !taken && !elsewhere), null);
         }
         catch (JsonException)
         {
-            return (null, false, new("failed", null, "tailscale serve status did not answer in JSON."));
+            return (ServedPort.Nothing, new("failed", null, "tailscale serve status did not answer in JSON."));
         }
+    }
+
+    // A site that serves the page: one handler, at its root, a proxy to the page's server.
+    private static bool IsThePage(JsonElement site, string target)
+        => site.ValueKind == JsonValueKind.Object && site.TryGetProperty("Handlers", out var handlers) && handlers.ValueKind == JsonValueKind.Object
+            && handlers.EnumerateObject().Count() == 1 && handlers.TryGetProperty("/", out var handler)
+            && string.Equals(Text(handler, "Proxy"), target, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>What Tailscale Serve does with the HTTPS port of the page.</summary>
+    /// <param name="Ours">It serves the page under the current name of this computer.</param>
+    /// <param name="Stale">It serves the page under another name, an older name of this computer.</param>
+    /// <param name="Taken">It serves something else on that port.</param>
+    /// <param name="OnlyThePage">The page is all Tailscale Serve serves, on any port: a reset takes off nothing else.</param>
+    private sealed record ServedPort(bool Ours, bool Stale, bool Taken, bool OnlyThePage)
+    {
+        internal static ServedPort Nothing { get; } = new(false, false, false, false);
     }
 
     private static string? Text(JsonElement element, string name)
