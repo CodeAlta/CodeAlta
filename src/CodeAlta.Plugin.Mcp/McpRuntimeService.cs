@@ -1636,6 +1636,13 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
             return false;
         }
 
+        // A relative folder that a variable gives is taken from the project folder too, as one written relative is.
+        if (projectDirectory is not null && definition is { Transport: McpTransportKind.Stdio, SourceScope: McpConfigScope.Project }
+            && definition.SourcePath != McpConfigDiscovery.SessionServersPath && !string.IsNullOrWhiteSpace(cwd) && !Path.IsPathRooted(cwd))
+        {
+            cwd = Path.GetFullPath(Path.Combine(projectDirectory, cwd));
+        }
+
         expanded = definition with { Command = command, Args = args, Cwd = cwd, Url = url };
         diagnostic = null;
         return true;

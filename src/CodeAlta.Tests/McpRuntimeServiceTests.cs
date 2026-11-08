@@ -719,6 +719,7 @@ public sealed partial class McpRuntimeServiceTests
         // server creates MCP_TEST_START_DIR where it is told, relative to the folder it was started in.
         using var project = TempDirectory.Create();
         Directory.CreateDirectory(Path.Combine(project.Path, "sub"));
+        var subVariable = "CODEALTA_TEST_MCP_SUB_" + Guid.NewGuid().ToString("N");
         var path = McpConfigDiscovery.GetProjectConfigPath(project.Path);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         object Server(string? cwd, string startDirectory) => cwd is null
@@ -731,17 +732,28 @@ public sealed partial class McpRuntimeServiceTests
                 ["in-project"] = Server(null, "in-project-starts"),
                 ["relative-cwd"] = Server("sub", "relative-cwd-starts"),
                 ["variable"] = Server(null, "${workspaceFolder}${/}sub${/}variable-starts"),
+                ["variable-cwd"] = Server("${" + subVariable + "}", "variable-cwd-starts"),
             },
         });
         File.WriteAllText(path, written);
         await using var service = new McpRuntimeService(_home.Path);
 
-        var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: null, query: null, CancellationToken.None);
+        McpRuntimeToolSearchResult search;
+        try
+        {
+            Environment.SetEnvironmentVariable(subVariable, "sub");
+            search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: null, query: null, CancellationToken.None);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(subVariable, null);
+        }
 
         Assert.AreEqual(0, search.Diagnostics.Count, string.Join(Environment.NewLine, search.Diagnostics.Select(static diagnostic => diagnostic.Message)));
         Assert.IsTrue(Directory.Exists(Path.Combine(project.Path, "in-project-starts")), "A server without a cwd starts in the project folder.");
         Assert.IsTrue(Directory.Exists(Path.Combine(project.Path, "sub", "relative-cwd-starts")), "A relative cwd is taken from the project folder.");
         Assert.IsTrue(Directory.Exists(Path.Combine(project.Path, "sub", "variable-starts")), "${workspaceFolder} is the project folder.");
+        Assert.IsTrue(Directory.Exists(Path.Combine(project.Path, "sub", "variable-cwd-starts")), "A relative cwd a variable gives is taken from the project folder.");
         Assert.AreEqual(written, File.ReadAllText(path), "The file keeps what it says.");
     }
 
