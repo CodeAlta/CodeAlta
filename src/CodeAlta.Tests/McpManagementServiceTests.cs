@@ -1070,9 +1070,20 @@ public sealed class McpManagementServiceTests
 
         public void Dispose()
         {
-            if (Directory.Exists(Path))
+            // A cancelled test server is killed, and the test may end before Windows has ended the process, which still
+            // holds this folder as its working directory: tens of milliseconds on a loaded machine. A server that never
+            // ends still fails the test once the deadline passes.
+            var deadline = Environment.TickCount64 + 10_000;
+            while (Directory.Exists(Path))
             {
-                Directory.Delete(Path, recursive: true);
+                try
+                {
+                    Directory.Delete(Path, recursive: true);
+                }
+                catch (IOException) when (Environment.TickCount64 < deadline)
+                {
+                    Thread.Sleep(50);
+                }
             }
         }
     }
