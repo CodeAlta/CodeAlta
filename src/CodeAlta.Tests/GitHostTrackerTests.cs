@@ -977,6 +977,59 @@ public sealed class GitHostTrackerTests
         Assert.AreEqual(1, handler.Requests.Count(static request => request.Contains("/pulls?", StringComparison.Ordinal)), "The recent pull requests are listed once while typing.");
     }
 
+    [TestMethod]
+    public async Task AListLongerThanAPage_IsReadPageByPage_OnEachService()
+    {
+        static string Numbers(int from, int count, Func<int, string> item) => string.Join(',', Enumerable.Range(from, count).Select(item));
+        static string GitHubIssue(int number) => $$"""{"number":{{number}},"title":"Issue {{number}}","html_url":"https://github.com/o/r/issues/{{number}}","state":"open"}""";
+        static int Page(HttpRequestMessage request) => System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["page"] is { } page ? int.Parse(page, System.Globalization.CultureInfo.InvariantCulture) : 1;
+
+        // GitHub: the search is read page by page, the first one asked as before.
+        var github = new Handler(request => request.RequestUri!.AbsolutePath == "/search/issues"
+            ? $$"""{"items":[{{Numbers((Page(request) - 1) * 100 + 1, 100, GitHubIssue)}}]}""" : null);
+        var searched = await Tracker(github, GitRepositoryReference.GitHub("o", "r")).ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, "slow", 150), default);
+        Assert.AreEqual((150, true, "150"), (searched.Items.Count, searched.More, searched.Items[^1].Id));
+        Assert.IsFalse(github.Requests[0].Contains("&page=", StringComparison.Ordinal), "The first page is asked as before.");
+        StringAssert.Contains(github.Requests[1], "&page=2");
+        Assert.HasCount(2, github.Requests, "No more pages than the list needs.");
+
+        // GitLab: pages of the same size, until one is not full.
+        var gitlab = new Handler(request => request.RequestUri!.AbsolutePath == "/api/v4/projects/group%2Fapp/issues"
+            ? "[" + Numbers((Page(request) - 1) * 100 + 1, Page(request) == 1 ? 100 : 30, number => $$"""{"iid":{{number}},"title":"Issue {{number}}","web_url":"https://gitlab.com/group/app/-/issues/{{number}}","state":"opened"}""") + "]" : null);
+        var listed = await Tracker(gitlab, GitRepositoryReference.GitLab("gitlab.com", "group", "app")).ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 200), default);
+        Assert.AreEqual((130, false), (listed.Items.Count, listed.More), "A page that is not full is the last.");
+        CollectionAssert.AreEqual(new[] { 1, 2 }, gitlab.Requests.Select(static request => int.Parse(System.Web.HttpUtility.ParseQueryString(new Uri("https://x" + request).Query)["page"]!, System.Globalization.CultureInfo.InvariantCulture)).ToArray());
+
+        // Bitbucket: the next page the service names, only on the address of the repository.
+        const string Root = "https://api.bitbucket.org/2.0/repositories/team/app/issues";
+        var bitbucket = new Handler(request =>
+        {
+            var page = Page(request);
+            var next = page == 1 ? $"{Root}?page=2&pagelen=50" : "https://elsewhere.example/2.0/repositories/team/app/issues?page=3";
+            return request.RequestUri!.AbsolutePath == "/2.0/repositories/team/app/issues"
+                ? $$"""{"values":[{{Numbers((page - 1) * 50 + 1, 50, number => "{\"id\":" + number + ",\"title\":\"Issue " + number + "\",\"state\":\"open\",\"links\":{\"html\":{\"href\":\"https://bitbucket.org/team/app/issues/" + number + "\"}}}")}}],"next":"{{next}}"}"""
+                : null;
+        });
+        var followed = await Tracker(bitbucket, GitRepositoryReference.Bitbucket("team", "app")).ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, null, 300), default);
+        Assert.AreEqual(100, followed.Items.Count, "The page another address names is not read.");
+        Assert.HasCount(2, bitbucket.Requests);
+
+        // Azure DevOps: the query gives every id, whose fields are read 200 at a time, in the order asked.
+        var azure = new Handler(request => request.RequestUri!.AbsolutePath switch
+        {
+            // The query gives what it is asked, of the 260 it finds.
+            "/org/proj/_apis/wit/wiql" => $$"""{"workItems":[{{Numbers(1, Math.Min(260, int.Parse(System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["$top"]!, System.Globalization.CultureInfo.InvariantCulture)), number => "{\"id\":" + number + "}")}}]}""",
+            "/org/proj/_apis/wit/workitems" => $$"""{"value":[{{string.Join(',', System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["ids"]!.Split(',')
+                .Select(id => "{\"id\":" + id + ",\"fields\":{\"System.Title\":\"Item " + id + "\",\"System.State\":\"Active\",\"System.WorkItemType\":\"Bug\",\"System.TeamProject\":\"proj\"}}"))}}]}""",
+            _ => null,
+        });
+        var work = await Tracker(azure, GitRepositoryReference.AzureDevOps("org", "proj", "app")).ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 250), default);
+        Assert.AreEqual((250, true, "1", "250"), (work.Items.Count, work.More, work.Items[0].Id, work.Items[^1].Id));
+        StringAssert.Contains(azure.Requests[0], "$top=251");
+        CollectionAssert.AreEqual(new[] { 200, 51 }, azure.Requests.Where(static request => request.StartsWith("/org/proj/_apis/wit/workitems?", StringComparison.Ordinal))
+            .Select(static request => System.Web.HttpUtility.ParseQueryString(new Uri("https://x" + request).Query)["ids"]!.Split(',').Length).ToArray());
+    }
+
     private static IIssueTracker Tracker(HttpMessageHandler handler, GitRepositoryReference repository, GitRemoteCredential? credential = null)
     {
         var lookup = new GitIssueLookup(GitIssueLookup.CreateHttpClient(handler), new GitIssueLookupOptions

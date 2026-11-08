@@ -637,3 +637,36 @@ test("the images of a description and of its comments are read through the host 
     assert.deepEqual(page.problems, []);
   }, { ...options, styles: [...options.styles, "../style.css"] });
 });
+test("a list longer than a page shows more on demand, a page at a time, up to what the tracker gives", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`${rows}.join() === '#128'`, "the list");
+    assert.equal(await page.evaluate(`document.querySelector('.issues-more')`), null, "a whole list says nothing more");
+    await page.evaluate(`(() => { issuesFixture.state.many = 130; issuesFixture.rerender(); return true; })()`);
+    await page.click('[aria-label="Reload"]');
+    await page.until(`document.querySelectorAll('.issue-row-item').length === 50`, "the first page");
+    assert.equal(await page.evaluate(`issuesFixture.state.lists.at(-1).limit`), 50);
+    assert.equal(await page.evaluate(`document.querySelector('.issues-more-bar .muted-text').textContent`), "50 shown, more match");
+
+    await page.clickText(".issues-more-bar .bp6-button", "Show 50 more");
+    await page.until(`document.querySelectorAll('.issue-row-item').length === 100`, "a page more");
+    assert.equal(await page.evaluate(`issuesFixture.state.lists.at(-1).limit`), 100);
+    assert.equal(await page.evaluate(`document.querySelector('.issue-row-item[data-selected] .issue-ref').textContent`), "#1000", "the item read stays");
+    await page.shot("issues-show-more");
+    await page.clickText(".issues-more-bar .bp6-button", "Show 50 more");
+    await page.until(`document.querySelectorAll('.issue-row-item').length === 130 && !document.querySelector('.issues-more')`, "the whole list");
+
+    // Another list starts at a page again.
+    await page.clickText(".issues-stages .bp6-tab", "Closed");
+    await page.until(`issuesFixture.state.lists.at(-1).filter === 'closed'`, "the closed ones");
+    assert.equal(await page.evaluate(`issuesFixture.state.lists.at(-1).limit`), 50);
+
+    // A tracker that gives fewer than asked has no more to give here: the tab says to narrow the list instead.
+    await page.evaluate(`(() => { issuesFixture.state.most = 70; return true; })()`);
+    await page.clickText(".issues-stages .bp6-tab", "Open");
+    await page.until(`document.querySelectorAll('.issue-row-item').length === 50`, "the first page");
+    await page.clickText(".issues-more-bar .bp6-button", "Show 50 more");
+    await page.until(`document.querySelectorAll('.issue-row-item').length === 70 && !document.querySelector('.issues-more-bar')`, "what the tracker gives");
+    assert.equal(await page.evaluate(`document.querySelector('.issues-more').textContent`), "More match. Type words to narrow the list.");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});

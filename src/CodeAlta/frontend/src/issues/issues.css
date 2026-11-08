@@ -72,6 +72,8 @@
 .issue-views-field-list { max-height: 320px; overflow: auto; padding: 0; }
 .issue-views-field-list .bp6-menu-item-label { color: var(--muted); font-family: var(--bp-typography-family-mono); font-size: 11px; }
 .issues-more { margin: 8px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
+/* Under a list that has more: how many are shown, and the way to the next ones. */
+.issues-more-bar { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 6px 0 4px; }
 
 .issue-row-item[data-tone="open"] .issue-glyph, .issue-state[data-tone="open"] { color: var(--issue-open); }
 .issue-row-item[data-tone="done"] .issue-glyph, .issue-state[data-tone="done"] { color: var(--issue-done); }

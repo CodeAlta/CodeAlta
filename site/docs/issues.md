@@ -30,6 +30,7 @@ Open it with **Issues** in the title bar (in its **…** menu when the window is
 
 - Choose the project, then **Issues** or **Pull requests**. The list has the projects of the window's [space](spaces.md).
 - **Open**, **Closed**, **Merged** and **All** are separate lists, most recently updated first.
+- A list shows 50 items at first. When more match, **Show 50 more** at its end shows the next ones, up to 500 (100 for Jira); past that, type words to narrow it.
 - Type words or a number to filter.
 - The icon of an item tells its type when the service gives one (a bug, a user story, a task, a feature, an epic), and its color tells whether it is open or done; a bug is always red. The tag of its state has the color Azure DevOps gives that state.
 - The people an issue is assigned to are named at the right of its row, below its state; their tooltip says that they are its assignees.

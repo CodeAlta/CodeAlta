@@ -28,6 +28,10 @@ import { IssueViewsWindow, type IssueViewsApi } from "./IssueViewsWindow";
 import { MultiChoice } from "./MultiChoice";
 
 const noProviders: readonly RunProvider[] = [];
+/** How many items a list shows at first, and how many more each Show more asks for. */
+export const issuePageSize = 50;
+/** The most items a list shows: the host asks no tracker for more. */
+export const issueListMaximum = 500;
 
 /** The part of the host the tab uses; a test gives its own. */
 export type IssuesApi = Pick<typeof issuesService, "sources" | "list" | "read" | "start" | "openLink"> & Partial<Pick<typeof issuesService, "filters" | "fields" | "views" | "saveView" | "renameView" | "removeView" | "selectView" | "image" | "branchScheme" | "saveBranchScheme">>;
@@ -88,6 +92,8 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const [typed, setTyped] = useState("");
   const [query, setQuery] = useState("");
   const [listing, setListing] = useState<Listing | null>(null);
+  // How many items of the list shown are asked for: a page, and a page more at each Show more, for that list only.
+  const [extent, setExtent] = useState<Readonly<{ key: IssueListKey; limit: number }> | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -266,23 +272,30 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
     ? { projectId: project.id, service: source.service, kind: shownKind, filter: shownFilter, query, part: listedPart, filters: listed.text } : null,
     [project?.id, source?.service, shownKind, shownFilter, query, listedPart, filtersReady, listed.text]);
 
+  const limit = wanted && extent && sameList(extent.key, wanted) ? extent.limit : issuePageSize;
+  // Another list starts at a page, also when the tab comes back to one it showed more of.
+  useEffect(() => { setExtent(current => current && wanted && sameList(current.key, wanted) ? current : null); }, [wanted]);
   useEffect(() => {
     if (!available || !visible || !wanted) return;
     const controller = new AbortController();
+    // Showing more of the same list keeps what it shows while the rest comes.
     setListing(current => sameList(current?.key ?? null, wanted) ? { ...current!, loading: true } : { key: wanted, loading: true, items: [], more: false, problem: null, needsSignIn: false, readAt: null });
     const fresh = freshList.current;
     freshList.current = false;
-    void api.list({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: wanted.kind, filter: wanted.filter, query: wanted.query || null, limit: 50, part: wanted.part,
+    void api.list({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: wanted.kind, filter: wanted.filter, query: wanted.query || null, limit, part: wanted.part,
       filters: listed.text ? listed.values : null, fresh: fresh || null },
       { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
       reply => { if (!controller.signal.aborted) setListing({ key: wanted, loading: false, items: reply.status === "ok" ? reply.items : [], more: reply.more,
         problem: reply.status === "ok" ? reply.problem : t("The list could not be read."), needsSignIn: reply.needsSignIn, readAt: reply.status === "ok" ? reply.readAt : null }); },
       () => { if (!controller.signal.aborted) setListing({ key: wanted, loading: false, items: [], more: false, problem: t("The list could not be read."), needsSignIn: false, readAt: null }); });
     return () => controller.abort();
-  }, [api, epoch, available, visible, wanted, revision, listRevision]);
+  }, [api, epoch, available, visible, wanted, limit, revision, listRevision]);
 
   const shown = sameList(listing?.key ?? null, wanted) ? listing : null;
   const items = shown?.items ?? [];
+  // More can be shown while the tracker filled what was asked: one that gives fewer (Jira gives 100 at most) has no more to give here.
+  const canShowMore = !!shown?.more && items.length >= limit && limit < issueListMaximum;
+  const showMore = () => { if (wanted) setExtent({ key: wanted, limit: Math.min(limit + issuePageSize, issueListMaximum) }); };
   const current = items.find(item => issueKey(item) === selected) ?? items[0] ?? null;
   const currentKey = current && wanted ? `${wanted.projectId}\n${wanted.service}\n${issueKey(current)}` : null;
   useEffect(() => {
@@ -493,7 +506,14 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
                 </span>
               </button>;
             })}
-            {shown?.more && <p className="issues-more">{t("More match. Type words to narrow the list.")}</p>}
+            {shown?.more && (canShowMore || shown.loading && items.length < limit
+              ? <div className="issues-more issues-more-bar">
+                <span className="muted-text">{t("{count} shown, more match", { count: items.length })}</span>
+                <Button size="small" variant="outlined" loading={shown.loading} icon={<AppIcon name="chevronDown" size={14} />} onClick={showMore}>
+                  {t("Show {count} more", { count: issuePageSize })}</Button>
+              </div>
+              : <p className="issues-more">{t(limit >= issueListMaximum ? "The first {count} are shown. Type words to narrow the list." : "More match. Type words to narrow the list.",
+                { count: items.length })}</p>)}
           </div>
           <aside className="work-detail">
             {current ? <section className="work-detail-card issue-detail" aria-label={current.title}>

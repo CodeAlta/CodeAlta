@@ -14,8 +14,8 @@ namespace CodeAlta.Plugin.Git;
 /// </summary>
 internal sealed class GitHostTracker : IIssueTracker
 {
-    /// <summary>The most items one listing returns.</summary>
-    public const int MaximumItems = 100;
+    /// <summary>The most items one listing returns: a list longer than a page of the service is read page by page.</summary>
+    public const int MaximumItems = 500;
 
     /// <summary>The most comments read for one item.</summary>
     public const int MaximumComments = 100;
@@ -303,14 +303,30 @@ internal sealed class GitHubApi : GitHostApi
                 _ => string.Empty,
             };
             var search = $"repo:{query.Repository.FullName} {(pulls ? "is:pr" : "is:issue")}{state}{(text is null ? string.Empty : " " + text)}";
-            using var found = await GetJsonAsync(query, FormattableString.Invariant($"https://api.github.com/search/issues?q={Escape(search)}&sort=updated&order=desc&per_page={Math.Min(limit, 100)}"), Accept, cancellationToken).ConfigureAwait(false);
-            if (found is not null) results.AddRange(Items(found.RootElement, "items").Select(Read).OfType<TrackedItem>().Where(item => item.Kind == kind));
+            // A list longer than a page is read page by page; the search gives a thousand results at most.
+            var size = Math.Min(limit, 100);
+            for (var page = 1; page <= 10 && results.Count < limit; page++)
+            {
+                var url = FormattableString.Invariant($"https://api.github.com/search/issues?q={Escape(search)}&sort=updated&order=desc&per_page={size}") + (page > 1 ? FormattableString.Invariant($"&page={page}") : string.Empty);
+                using var found = await GetJsonAsync(query, url, Accept, cancellationToken).ConfigureAwait(false);
+                if (found is null) break;
+                var count = 0;
+                foreach (var element in Items(found.RootElement, "items"))
+                {
+                    count++;
+                    if (Read(element) is { } item && item.Kind == kind && results.Count < limit) results.Add(item);
+                }
+
+                if (count < size) break;
+            }
+
             return results;
         }
 
         var listed = filter switch { TrackedItemFilter.Open => "open", TrackedItemFilter.Closed => "closed", _ => "all" };
         // The listing of issues holds the pull requests too: more pages are read until enough issues are found.
-        for (var page = 1; page <= (pulls ? 1 : 3) && results.Count < limit; page++)
+        var pages = (limit + 99) / 100 + (pulls ? 0 : 2);
+        for (var page = 1; page <= pages && results.Count < limit; page++)
         {
             var url = FormattableString.Invariant($"{Root(query.Repository)}/{(pulls ? "pulls" : "issues")}?state={listed}&sort=updated&direction=desc&per_page=100&page={page}");
             using var document = await GetJsonAsync(query, url, Accept, cancellationToken).ConfigureAwait(false);
@@ -380,10 +396,26 @@ internal sealed class GitLabApi : GitHostApi
     public override async Task<IReadOnlyList<TrackedItem>> ListAsync(GitIssueQuery query, TrackedItemKind kind, TrackedItemFilter filter, string? text, int limit, CancellationToken cancellationToken)
     {
         var state = filter switch { TrackedItemFilter.Open => "&state=opened", TrackedItemFilter.Closed => "&state=closed", TrackedItemFilter.Merged => "&state=merged", _ => string.Empty };
-        var url = FormattableString.Invariant($"{Root(query.Repository)}/{Path(kind)}?scope=all{state}&order_by=updated_at&sort=desc&per_page={Math.Min(limit, 100)}&page=1")
-            + (text is null ? string.Empty : "&search=" + Escape(text));
-        using var document = await GetJsonAsync(query, url, Accept, cancellationToken).ConfigureAwait(false);
-        return document is null ? [] : [.. Items(document.RootElement).Select(element => Read(element, kind)).OfType<TrackedItem>()];
+        // A list longer than a page is read page by page, each of the same size.
+        var size = Math.Min(limit, 100);
+        var results = new List<TrackedItem>(limit);
+        for (var page = 1; results.Count < limit; page++)
+        {
+            var url = FormattableString.Invariant($"{Root(query.Repository)}/{Path(kind)}?scope=all{state}&order_by=updated_at&sort=desc&per_page={size}&page={page}")
+                + (text is null ? string.Empty : "&search=" + Escape(text));
+            using var document = await GetJsonAsync(query, url, Accept, cancellationToken).ConfigureAwait(false);
+            if (document is null) break;
+            var count = 0;
+            foreach (var element in Items(document.RootElement))
+            {
+                count++;
+                if (Read(element, kind) is { } item && results.Count < limit) results.Add(item);
+            }
+
+            if (count < size) break;
+        }
+
+        return results;
     }
 
     public override async Task<TrackedItemDetail?> ReadAsync(GitIssueQuery query, TrackedItemKind kind, int number, CancellationToken cancellationToken)
@@ -429,6 +461,9 @@ internal sealed class GitLabApi : GitHostApi
 /// <summary>Azure DevOps Services: the work items of the project and the pull requests of the repository.</summary>
 internal sealed partial class AzureDevOpsApi : GitHostApi
 {
+    // The most work items whose fields one request reads.
+    private const int WorkItemsAtOnce = 200;
+
     private const string Accept = "application/json";
     private const string ApiVersion = "7.1";
     private const string Closed = "'Closed', 'Done', 'Removed', 'Completed'";
@@ -465,7 +500,7 @@ internal sealed partial class AzureDevOpsApi : GitHostApi
                 + (int.TryParse(text.TrimStart('#'), NumberStyles.None, CultureInfo.InvariantCulture, out var number) ? FormattableString.Invariant($" OR [System.Id] = {number}") : string.Empty) + ")")
             + await OrderByAsync(query, cancellationToken).ConfigureAwait(false);
         var ids = new List<int>(limit);
-        using (var response = await query.PostJsonAsync(FormattableString.Invariant($"{Project(repository)}/_apis/wit/wiql?$top={Math.Min(limit, 200)}&api-version={ApiVersion}"),
+        using (var response = await query.PostJsonAsync(FormattableString.Invariant($"{Project(repository)}/_apis/wit/wiql?$top={limit}&api-version={ApiVersion}"),
             "{\"query\":\"" + JsonEncodedText.Encode(wiql) + "\"}", cancellationToken).ConfigureAwait(false))
         {
             if (!IsAnswer(response))
@@ -480,9 +515,17 @@ internal sealed partial class AzureDevOpsApi : GitHostApi
         }
 
         if (ids.Count == 0) return [];
-        using var items = await GetAnswerAsync(query, FormattableString.Invariant($"{Project(repository)}/_apis/wit/workitems?ids={string.Join(',', ids)}&fields={Fields}&errorPolicy=omit&api-version={ApiVersion}"), cancellationToken).ConfigureAwait(false);
-        if (items is null) return [];
-        var read = Items(items.RootElement, "value").Select(element => ReadWorkItem(element, repository)).OfType<TrackedItem>().ToDictionary(static item => item.Id);
+        // The service reads the fields of 200 work items at most at once.
+        var read = new Dictionary<string, TrackedItem>(StringComparer.Ordinal);
+        foreach (var batch in ids.Chunk(WorkItemsAtOnce))
+        {
+            using var items = await GetAnswerAsync(query, FormattableString.Invariant($"{Project(repository)}/_apis/wit/workitems?ids={string.Join(',', batch)}&fields={Fields}&errorPolicy=omit&api-version={ApiVersion}"), cancellationToken).ConfigureAwait(false);
+            // What could not be read ends the list: the work items read before it stay, in their order.
+            if (items is null) break;
+            foreach (var item in Items(items.RootElement, "value").Select(element => ReadWorkItem(element, repository)).OfType<TrackedItem>()) read.TryAdd(item.Id, item);
+        }
+
+        if (read.Count == 0) return [];
         // The fields come in the order of the service; the query gave the order that was asked.
         return await WithStateColorsAsync(query, [.. ids.Select(id => read.GetValueOrDefault(id.ToString(CultureInfo.InvariantCulture))).OfType<TrackedItem>()], cancellationToken).ConfigureAwait(false);
     }
@@ -622,9 +665,22 @@ internal sealed class BitbucketApi : GitHostApi
             };
         var words = text is null ? null : "title ~ \"" + text.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
         var where = state is not null && words is not null ? state + " AND " + words : state ?? words;
-        var url = FormattableString.Invariant($"{Root(query.Repository)}/{(pulls ? "pullrequests" : "issues")}?sort=-updated_on&pagelen={Math.Min(limit, 50)}") + (where is null ? string.Empty : "&q=" + Escape(where));
-        using var document = await GetJsonAsync(query, url, Accept, cancellationToken).ConfigureAwait(false);
-        return document is null ? [] : [.. Items(document.RootElement, "values").Select(element => Read(element, kind)).OfType<TrackedItem>()];
+        var first = FormattableString.Invariant($"{Root(query.Repository)}/{(pulls ? "pullrequests" : "issues")}?sort=-updated_on&pagelen={Math.Min(limit, 50)}") + (where is null ? string.Empty : "&q=" + Escape(where));
+        var results = new List<TrackedItem>(limit);
+        // A list longer than a page follows the next page the service names, only on the address of the repository.
+        for (string? url = first; url is not null && results.Count < limit;)
+        {
+            using var document = await GetJsonAsync(query, url, Accept, cancellationToken).ConfigureAwait(false);
+            if (document is null) break;
+            foreach (var element in Items(document.RootElement, "values"))
+            {
+                if (Read(element, kind) is { } item && results.Count < limit) results.Add(item);
+            }
+
+            url = Text(document.RootElement, "next") is { } next && next.StartsWith(Root(query.Repository) + "/", StringComparison.Ordinal) ? next : null;
+        }
+
+        return results;
     }
 
     public override async Task<TrackedItemDetail?> ReadAsync(GitIssueQuery query, TrackedItemKind kind, int number, CancellationToken cancellationToken)

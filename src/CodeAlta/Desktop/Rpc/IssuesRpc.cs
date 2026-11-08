@@ -27,8 +27,8 @@ internal sealed partial class IssuesService
     /// <summary>The items of one listing when the page does not say.</summary>
     internal const int DefaultLimit = 50;
 
-    /// <summary>The most items of one listing.</summary>
-    internal const int MaximumLimit = 100;
+    /// <summary>The most items of one listing: the tab shows more of a list by asking it again for more.</summary>
+    internal const int MaximumLimit = 500;
 
     /// <summary>The most text of a description or of all the comments of an item, in UTF-16 units.</summary>
     internal const int MaximumBody = 200 * 1024;
@@ -510,7 +510,7 @@ internal sealed record IssueSource(string Service, string Name, string Location,
 /// <param name="Kind"><c>issue</c> or <c>pull_request</c>.</param>
 /// <param name="Filter"><c>open</c>, <c>closed</c>, <c>merged</c> or <c>all</c>.</param>
 /// <param name="Query">Words the items must match; null or empty for the most recently updated ones.</param>
-/// <param name="Limit">The most items; 50 when null, 100 at most.</param>
+/// <param name="Limit">The most items; 50 when null, 500 at most: the tab asks for more to show more of a list.</param>
 /// <param name="Part">One of the <see cref="IssueSource.Parts"/> of the tracker, to list it alone; null for all of them.</param>
 /// <param name="Filters">The values of the filters of the tracker for the kind listed (<see cref="IssuesService.FiltersAsync"/>), by filter id.</param>
 /// <param name="Fresh">Whether the tracker is asked again even when the list was read less than five minutes ago.</param>

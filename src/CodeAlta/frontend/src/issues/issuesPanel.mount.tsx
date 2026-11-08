@@ -99,11 +99,18 @@ const state = { images: [] as { address: string; projectId: string; service: str
   // wait while paused; the views read, and the problem of a file of views.
   failPicks: false, failFilters: false, throwFilters: false, paused: false, waiting: [] as (() => void)[], viewReads: 0, viewsProblem: null as string | null,
   // The starts the test ends itself, by the id of their item, and the sessions opened or offered when they end.
-  starts: [] as string[], finish: {} as Record<string, (sessionId: string) => void>, opened: [] as string[], offered: [] as string[] };
+  starts: [] as string[], finish: {} as Record<string, (sessionId: string) => void>, opened: [] as string[], offered: [] as string[],
+  // How many issues the tracker of GitHub has, more than a page; and the most it gives, as a tracker that gives fewer than asked.
+  many: 0, most: 0 };
 const api = {
   sources: async (request: { projectId: string }) => ({ status: "ok", sources: sources[request.projectId] ?? [] }),
   list: async (request: IssueListRequest) => {
     state.lists.push(request);
+    if (state.many && request.service === "github") {
+      const given = Math.min(request.limit ?? 50, state.most || Infinity, state.many);
+      return { status: "ok", items: Array.from({ length: given }, (_, index) => item(String(1000 - index), `Issue ${1000 - index}`, { url: `https://github.com/o/r/issues/${1000 - index}`, stateText: null, type: null })),
+        more: given < state.many, problem: null, needsSignIn: false, readAt: new Date().toISOString() };
+    }
     const all = request.service === "github" ? github : request.service === "azure_devops" ? request.kind === "pull_request" ? pulls : work.filter(row => (request.filters?.team === "t2") === row.title.startsWith("Mobile"))
       : request.projectId === "single" ? [item("DOCS-1", "Explain the Jira projects")] : jira;
     return { status: "ok", items: all.filter(row => !request.part || row.id.startsWith(request.part + "-")), more: false, problem: state.problem, needsSignIn: false,
