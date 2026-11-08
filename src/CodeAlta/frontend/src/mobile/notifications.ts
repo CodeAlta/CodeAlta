@@ -33,7 +33,8 @@ export function setUpNotifications(window: Window & typeof globalThis, store: Ke
     button.hidden = !supported();
     button.disabled = busy;
     const active = enabled() && window.Notification?.permission === "granted";
-    button.setAttribute("aria-pressed", String(active));
+    // An item of the menu of the top bar, checked while notifications are on.
+    button.setAttribute("aria-checked", String(active));
     button.setAttribute("aria-label", active ? "Turn off notifications" : "Enable notifications");
     button.title = button.getAttribute("aria-label")!;
   }

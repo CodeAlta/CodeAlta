@@ -27,6 +27,9 @@ const icons = {
   bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/>',
   left: '<path d="M15 18l-6-6 6-6"/>',
   right: '<path d="M9 18l6-6-6-6"/>',
+  up: '<path d="M18 15l-6-6-6 6"/>',
+  down: '<path d="M6 9l6 6 6-6"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
 } as const;
 
 /** An icon of the cards of the timeline. */

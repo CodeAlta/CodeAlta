@@ -16,30 +16,58 @@
   <script type="module" src="/src/mobile/main.ts"></script>
 </head>
 <body>
-  <header class="bar">
+  <header id="bar" class="bar">
     <button id="back" class="icon-btn" type="button" aria-label="Back to the sessions" title="Sessions" hidden>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
     </button>
     <span class="brand" id="brand"><img src="/mobile/icon-192.png" alt="CodeAlta" width="30" height="30"><span id="link-dot" class="link-dot connecting" role="img" aria-label="Connecting…"></span></span>
+    <button id="detail-heading" class="bar-title" type="button" aria-expanded="false" title="Show the whole title" hidden><span id="detail-title" class="bar-title-text"></span></button>
     <nav class="actions" aria-label="Commands">
-      <button id="notifications" class="icon-btn" type="button" aria-label="Enable notifications" title="Enable notifications" aria-pressed="false" hidden>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
-      </button>
-      <button id="install" class="icon-btn" type="button" aria-label="Install the app" title="Install CodeAlta" hidden>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
-      </button>
       <button id="new" class="icon-btn" type="button" aria-label="New session" title="New session">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
       </button>
       <button id="filter" class="icon-btn" type="button" aria-label="Filter by project" title="Filter by project" aria-haspopup="dialog">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg><span class="badge" hidden></span>
       </button>
-      <button id="font" class="icon-btn" type="button" aria-label="Text size"><span class="font-a" aria-hidden="true">A</span><span class="font-step" aria-hidden="true"></span></button>
-      <button id="theme" class="icon-btn" type="button" aria-label="Theme"></button>
       <button id="refresh" class="icon-btn" type="button" aria-label="Refresh" title="Refresh">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/></svg>
       </button>
+      <button id="detail-find" class="icon-btn" type="button" aria-label="Find in this session" title="Find" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      </button>
+      <button id="bar-more" class="icon-btn" type="button" aria-label="More" title="More" aria-haspopup="menu" aria-expanded="false" aria-controls="bar-menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+      </button>
     </nav>
+    <div id="bar-menu" class="bar-menu" role="menu" aria-label="More" hidden>
+      <button id="menu-new" class="bar-menu-item" type="button" role="menuitem" data-in-session>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>New session</span>
+      </button>
+      <button id="menu-refresh" class="bar-menu-item" type="button" role="menuitem" data-in-session>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/></svg><span>Refresh</span>
+      </button>
+      <button id="menu-archive" class="bar-menu-item" type="button" role="menuitem" data-in-session>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/></svg><span>Archive the session</span>
+      </button>
+      <div class="bar-menu-row" role="group" aria-labelledby="font-label">
+        <span id="font-label" class="bar-menu-label">Text size</span>
+        <span id="font-step" class="bar-menu-value"></span>
+        <button id="font-smaller" class="bar-menu-choice" type="button" role="menuitem" aria-label="Smaller text" title="Smaller text"><span aria-hidden="true">A−</span></button>
+        <button id="font-larger" class="bar-menu-choice" type="button" role="menuitem" aria-label="Larger text" title="Larger text"><span aria-hidden="true">A+</span></button>
+      </div>
+      <div class="bar-menu-row" role="group" aria-labelledby="theme-label">
+        <span id="theme-label" class="bar-menu-label">Theme</span>
+        <button class="bar-menu-choice" type="button" role="menuitemradio" aria-checked="false" data-theme-choice="auto">Auto</button>
+        <button class="bar-menu-choice" type="button" role="menuitemradio" aria-checked="false" data-theme-choice="light">Light</button>
+        <button class="bar-menu-choice" type="button" role="menuitemradio" aria-checked="false" data-theme-choice="dark">Dark</button>
+      </div>
+      <button id="notifications" class="bar-menu-item" type="button" role="menuitemcheckbox" aria-label="Enable notifications" aria-checked="false" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span>Notifications</span>
+      </button>
+      <button id="install" class="bar-menu-item" type="button" role="menuitem" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span>Install the app</span>
+      </button>
+    </div>
   </header>
   <div id="install-bar" class="install-bar" role="region" aria-label="Install the app" hidden>
     <img src="/mobile/icon-192.png" alt="" width="32" height="32">
@@ -74,12 +102,6 @@
     </form>
   </main>
   <main id="detail" hidden>
-    <div class="detail-head">
-      <h1 id="detail-title" class="detail-title"></h1>
-      <button id="detail-archive" class="icon-btn" type="button" aria-label="Archive the session" title="Archive">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/></svg>
-      </button>
-    </div>
     <div id="detail-meta" class="meta-facts detail-meta"></div>
     <p id="detail-note" class="muted" role="status" aria-live="polite"></p>
     <button id="older" class="older" type="button" hidden>Load older messages</button>

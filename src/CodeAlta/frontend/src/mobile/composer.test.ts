@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { memoryStore } from "./api";
-import { nextFontStep, readFontStep, readTheme } from "./appearance";
+import { readFontStep, readTheme, readThemeChoice, steppedFont, themeOf } from "./appearance";
 import { coalesce, composerView } from "./composer";
 
 test("idle, the composer sends", () => {
@@ -55,5 +55,10 @@ test("the theme and the text size kept on the phone, else the system's theme and
   assert.equal(readFontStep(memoryStore()), 2);
   assert.equal(readFontStep(memoryStore({ "alta.fontStep": "5" })), 5);
   assert.equal(readFontStep(memoryStore({ "alta.fontStep": "9" })), 2);
-  assert.deepEqual([1, 2, 3, 4, 5].map(nextFontStep), [2, 3, 4, 5, 1]);
+  assert.deepEqual([1, 2, 3, 4, 5].map(step => steppedFont(step, 1)), [2, 3, 4, 5, 5], "A+ stops at the largest size.");
+  assert.deepEqual([1, 2, 3, 4, 5].map(step => steppedFont(step, -1)), [1, 1, 2, 3, 4], "A- stops at the smallest size.");
+  assert.equal(readThemeChoice(memoryStore()), "auto", "No theme kept: the system's.");
+  assert.equal(readThemeChoice(memoryStore({ "alta.theme": "light" })), "light");
+  assert.equal(readThemeChoice(memoryStore({ "alta.theme": "pink" })), "auto");
+  assert.deepEqual([themeOf("auto", true), themeOf("auto", false), themeOf("dark", true), themeOf("light", false)], ["light", "dark", "dark", "light"]);
 });

@@ -29,7 +29,8 @@
 html, body { margin: 0; max-width: 100%; overflow-x: clip; background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.45; }
 body { font-size: .9375rem; }
 
-/* The top bar: the brand, then a row of icon buttons. A new command is one more .icon-btn in .actions. Fixed px: the bar does not scale. */
+/* The top bar: the brand, then a row of icon buttons; "⋯" opens the menu of the rest. On a session: Back, the dot of the link,
+   the title, Find and "⋯". A new command is one more .icon-btn in .actions, or an item of the menu. Fixed px: the bar does not scale. */
 .bar { position: sticky; top: 0; z-index: 3; isolation: isolate; display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: calc(6px + env(safe-area-inset-top)) calc(8px + var(--safe-right)) 6px calc(16px + var(--safe-left)); background: var(--panel); border-bottom: 1px solid var(--line); }
 .brand { position: relative; flex: none; } .brand img { display: block; width: 30px; height: 30px; }
@@ -40,17 +41,40 @@ body { font-size: .9375rem; }
 .icon-btn:hover { background: var(--hover); }
 .icon-btn:active { background: var(--panel-2); }
 .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-#notifications[aria-pressed="true"] { color: var(--accent); }
 .icon-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-/* The A grows with the step, and a small number says which step it is. */
-.font-a { font-family: Georgia, "Times New Roman", serif; }
-:root[data-font-step="1"] .font-a { font-size: 14px; } :root[data-font-step="2"] .font-a { font-size: 17px; }
-:root[data-font-step="3"] .font-a { font-size: 20px; } :root[data-font-step="4"] .font-a { font-size: 23px; }
-:root[data-font-step="5"] .font-a { font-size: 26px; }
-.font-step { position: absolute; right: 5px; bottom: 5px; font-size: 10px; font-weight: 600; color: var(--muted); }
 .spin svg { animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
 #back { margin-left: -6px; }
 .bar:has(#back:not([hidden])) .brand { margin-right: auto; }
+/* On a session the logo makes room for the title: its dot stays, before it. */
+.bar[data-page="session"] { gap: 4px; }
+.bar[data-page="session"] .brand { display: flex; align-items: center; margin-right: 0; padding: 0 2px; }
+.bar[data-page="session"] .brand img { display: none; }
+.bar[data-page="session"] .brand .link-dot { position: static; box-shadow: none; }
+.bar[data-page="session"] .actions { flex: none; flex-wrap: nowrap; }
+.bar-title { flex: 1 1 auto; min-width: 0; min-height: 44px; margin: 0; padding: 4px; border: 0; border-radius: 8px; background: transparent; color: var(--text);
+  font: 600 16px/1.3 var(--font); text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.bar-title:active { background: var(--panel-2); }
+.bar-title:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.bar-title-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A tap shows the whole title, on up to three lines. */
+.bar-title[aria-expanded="true"] .bar-title-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; white-space: normal; overflow-wrap: anywhere; }
+/* The menu of "⋯", under its button: commands, then rows of choices. */
+.bar-menu { position: absolute; top: calc(100% - 2px); right: calc(8px + var(--safe-right)); z-index: 5; display: flex; flex-direction: column; width: 272px; max-width: calc(100vw - 16px);
+  padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+.bar-menu-item { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--text);
+  font: 15px/1.2 var(--font); text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.bar-menu-item:active, .bar-menu-choice:active { background: var(--panel-2); }
+.bar-menu-item:focus-visible, .bar-menu-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.bar-menu-item svg { flex: none; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; color: var(--muted); }
+#notifications[aria-checked="true"] svg { color: var(--accent); }
+.bar-menu-row { display: flex; align-items: center; gap: 4px; min-height: 52px; padding: 0 4px 0 12px; border-top: 1px solid var(--line); }
+.bar-menu-item + .bar-menu-row, .bar-menu-row + .bar-menu-item { margin-top: 2px; }
+.bar-menu-label { flex: 1; min-width: 0; color: var(--text); font: 15px/1.2 var(--font); }
+.bar-menu-value { color: var(--muted); font: 13px/1 var(--font); font-variant-numeric: tabular-nums; white-space: nowrap; margin-right: 4px; }
+.bar-menu-choice { min-width: 44px; height: 44px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--text);
+  font: 600 14px/1 var(--font); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.bar-menu-choice[aria-checked="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.bar-menu-choice:disabled { opacity: .4; cursor: default; }
 #new.on { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); border-radius: 8px; }
 /* The filter shows a dot while a project is chosen. */
 .badge { position: absolute; top: 9px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--panel); }
@@ -146,11 +170,8 @@ footer { display: flex; align-items: center; justify-content: center; gap: .4rem
 .act-facts > span { display: inline-flex; align-items: center; gap: 3px; } .act-facts .ok { color: var(--green); } .act-facts .bad { color: var(--red); }
 @media (max-width: 360px) { .act-facts .dur { display: none; } }
 
-/* The page of a session. */
-.detail-head { display: flex; align-items: flex-start; gap: .25rem; min-width: 0; }
-.detail-title { flex: 1; min-width: 0; font-size: 1.0625rem; line-height: 1.3; margin: .625rem .25rem .25rem; overflow-wrap: anywhere; }
-/* What a prompt goes to, under the title: every fact, broken between facts. */
-.detail-meta { display: block; overflow: visible; margin: 0 .25rem .625rem; color: var(--muted); font-size: .75rem; line-height: 1.5; }
+/* The page of a session: its title is in the top bar. What a prompt goes to, at the top of the timeline: every fact, broken between facts. */
+.detail-meta { display: block; overflow: visible; margin: .25rem .25rem .625rem; color: var(--muted); font-size: .75rem; line-height: 1.5; }
 .detail-meta:empty { display: none; }
 .msg.pending { border-style: dashed; }
 .msg.pending .msg-label { font-style: italic; display: flex; align-items: center; gap: .25rem; }
@@ -159,7 +180,6 @@ footer { display: flex; align-items: center; justify-content: center; gap: .4rem
 .pending-edit, .pending-delete { display: grid; place-items: center; width: 40px; height: 40px; margin: -6px 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: inherit; font-size: 1.0625rem; cursor: pointer; }
 .pending-delete:hover, .pending-delete:focus-visible { color: var(--red); }
 .pending-edit:focus-visible, .pending-delete:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.detail-head .icon-btn { flex: none; color: var(--muted); }
 .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
 /* As .timeline-message on the desktop: 1px border, radius 4px, padding 6px 12px and an 8% tint of the card color. */
 .msg { --card-color: var(--muted); min-width: 0; padding: 6px 12px; border: 1px solid var(--card-color); border-radius: 4px;
@@ -777,3 +797,41 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .output-viewer-note:empty { display: none; }
 /* A table scrolls sideways in its message: its cells keep their words whole, as the rest of the message does not. */
 .markdown-content :is(th, td) { min-width: 4ch; overflow-wrap: normal; word-break: normal; }
+
+/* The search in a session or in a file (findBar.ts): its box, the count, "Aa" and its menu, the arrows and the close button,
+   and under them the button that reads more to search. The session's bar covers the top bar, in place of the composer; the
+   viewer's takes the place of its title. Fixed px, as the top bar. */
+.find-bar { display: flex; flex-direction: column; gap: 4px; padding: calc(6px + env(safe-area-inset-top)) calc(8px + var(--safe-right)) 6px calc(12px + var(--safe-left));
+  background: var(--panel); border-bottom: 1px solid var(--line); }
+.find-bar.session-find { position: fixed; top: 0; left: 0; right: 0; z-index: 4; }
+.find-bar-row { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; }
+.find-bar-query { flex: 1 1 auto; width: 0; min-width: 0; height: 40px; margin-right: 4px; padding: 0 .625rem; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--text); font: inherit; font-size: 16px; }
+.find-bar-query:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.find-bar-query[aria-invalid="true"] { border-color: var(--red); outline-color: var(--red); }
+.find-bar-count { flex: none; min-width: 3.25rem; padding: 0 2px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
+.find-bar-count:empty { min-width: 0; }
+.find-bar-count[data-empty] { color: var(--red); }
+.find-bar .icon-btn { flex: none; min-width: 44px; padding: 0; }
+.find-bar .icon-btn:disabled { opacity: .4; cursor: default; }
+.find-bar .icon-btn .ico svg { width: 22px; height: 22px; }
+.find-bar-options { color: var(--muted); font-size: 15px; }
+.find-bar-options[data-on] { color: var(--accent); }
+.find-bar-menu { position: absolute; top: calc(100% + 6px); right: 88px; z-index: 1; display: flex; flex-direction: column; min-width: 14rem; padding: 4px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+.find-bar-toggle { display: flex; align-items: center; gap: .625rem; min-height: 44px; padding: 0 .75rem; border: 0; border-radius: 8px; background: transparent;
+  color: var(--text); font: inherit; font-size: 15px; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.find-bar-toggle:active { background: var(--panel-2); }
+.find-bar-toggle .ico { visibility: hidden; color: var(--accent); }
+.find-bar-toggle[aria-checked="true"] .ico { visibility: visible; }
+.find-bar-more { align-self: center; min-height: 36px; padding: 0 .75rem; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2);
+  color: var(--text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.find-bar-more:disabled { color: var(--muted); cursor: default; }
+/* While a session is searched, its composer, its approvals and its ask make room for what is found. */
+body.session-finding :is(#composer, #ask) { display: none !important; }
+.output-viewer[data-finding] .output-viewer-bar { display: none; }
+/* The places found, as the desktop marks them; the place shown brighter. */
+::highlight(find-in-page) { background-color: #5c4a14; }
+::highlight(find-in-page-current) { background-color: #b07d0e; color: #fff; }
+:root[data-theme="light"] ::highlight(find-in-page) { background-color: #f5df9a; }
+:root[data-theme="light"] ::highlight(find-in-page-current) { background-color: #f0b726; color: #111; }
