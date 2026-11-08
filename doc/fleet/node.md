@@ -119,10 +119,10 @@ Each node signs in by itself; the desktop drives the sign-ins so that nobody has
 
 | Need | How the node gets it |
 | --- | --- |
-| Providers CodeAlta signs in (Codex subscription, Copilot, xAI) | Signed in from the desktop ([below](#signing-in-from-the-desktop)); tokens stay in the node's `~/.alta/auth/`. Mistral Vibe signs in on the machine |
+| Providers CodeAlta signs in (Codex subscription, Copilot, xAI, Mistral Vibe) | Signed in from the desktop ([below](#signing-in-from-the-desktop)); tokens stay in the node's `~/.alta/auth/` |
 | Providers with an API key, and any other token a run needs | A secret of the node's store ([secrets](secrets.md)): typed by the person from the desktop and sent over the end-to-end channel, or a secret of a space, a team or the organization sealed to the node; kept in its protected store (DPAPI, Keychain, libsecret), or named as an environment variable of the service |
-| Claude Code | `claude setup-token` run by the node; the token it prints is a secret of the node's store, named by the provider's `CLAUDE_CODE_OAUTH_TOKEN` (`${secret:NAME}`) |
-| Codex CLI, ACP agents | The sign-in method of their plugin; Codex CLI's device code is shown by the desktop, ACP agents sign in with a command on the machine |
+| Claude Code | `claude setup-token` run by the node in a pseudo-terminal (`script` on macOS and Linux, ConPTY on Windows); the token it prints is a secret of the node's store, named by the provider's `CLAUDE_CODE_OAUTH_TOKEN` (`${secret:NAME}`) |
+| Codex CLI, ACP agents | The sign-in method of their plugin: Codex CLI's device code is shown by the desktop; an ACP agent's API key (`env_var`) is typed on the desktop and kept as a secret of the node, which its `env` names (`${secret:NAME}`, resolved when its runtime starts); an agent that signs in in a terminal or with a browser on its own loopback signs in on the machine |
 | MCP servers with OAuth | Signed in from the desktop; tokens stay in `~/.alta/auth/mcp/` ([MCP](../mcp.md#runtime)) |
 | Git over SSH | A key made on the node; its public key added to the Git host (`gh ssh-key add`, or copied by the person); the space identity names it. Organizations can sign short-lived SSH certificates instead (milestone 5) |
 | GitHub | `gh auth login` with a device code, per space profile, run by the node on behalf of the desktop; with a server, the CodeAlta GitHub App's device flow gives the node expiring user tokens (8 hours, refreshed for up to 6 months) |
@@ -151,7 +151,9 @@ sequenceDiagram
 
 - **The node names the redirect address**, a loopback address of the desktop, and keeps it per target; the desktop
   listens there and forwards the whole callback address. The code is useless without the verifier the node holds.
-  A device code or a code the person pastes takes the same path, started and completed by the node.
+  A device code or a code the person pastes takes the same path, started and completed by the node. A sign-in that
+  needs no redirect (Mistral Vibe) only has its page opened by the desktop, while the node asks the service until it is
+  done; a value the person types (an API key) goes once to the node, which keeps it as a secret and never gives it back.
 - **Tools sign in through an allowlist of login commands, never a shell**, run with the identity environment of the
   space. The node reads the page and the code from their output and writes the pasted code to their input; when it
   cannot read a tool, the answer is the command to run on the machine. A tool keeps its own login.

@@ -217,7 +217,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | **Labels** | Its [labels](#label-your-machines), which it publishes to its servers: add them, or remove one with its cross |
 | **Projects** | Clone a repository there, add a folder, remove a project; how many [worktrees](sessions.md#start-a-session-on-it) its sessions work in, and what they take on its disk |
 | **Providers** | Each provider of the machine and whether it is ready; when it is not, why: no key, the secret of the machine it waits for, not signed in. **Add a provider…** and **Add its key…** take its key here: it goes to the machine encrypted from end to end and is kept in its secrets (`PROVIDER_<KEY>_API_KEY`), never in its configuration. **Sign in…** signs in a provider such as GitHub Copilot or xAI on the machine: its code shows here with **Copy**; enter it on the provider's page in your browser |
-| **Sign-ins** | What the machine signs in to by itself, and as whom: Codex and the other providers that sign in through a browser, MCP servers with OAuth, and the tools of its spaces. **Sign in…** does it from here ([Sign in on a machine](#sign-in-on-a-machine)) |
+| **Sign-ins** | What the machine signs in to by itself, and as whom: Codex and the other providers that sign in with an account, ACP agents, MCP servers with OAuth, and the tools of its spaces. **Sign in…** does it from here ([Sign in on a machine](#sign-in-on-a-machine)) |
 | **Secrets** | Its [secrets and variables](../secrets.md), as **Settings** > **Secrets** shows those of this computer: **Add a secret…**, **Rotate** and **Delete** a secret, edit or delete a variable. A value goes to the machine and is never shown back |
 | **Start at boot** | Whether the node starts when the machine does, with nobody logged in, in the words of `altanode status`; when it does not, the command to run on the machine that makes it so |
 | **Updates** | The version it runs. **Check for updates**, then **Update to** the version found: it switches once no session works |
@@ -252,10 +252,12 @@ A machine signs in to its providers, MCP servers and tools itself; nothing is co
 | Codex and MCP servers with OAuth | The page opens in the browser of this computer. When you have signed in, the browser sends its answer back to the machine, which finishes the sign-in |
 | GitHub Copilot, xAI, Codex CLI | A code shows here with **Copy**: enter it on the page it names |
 | `gh` of each space, and the tools whose login a space names in its CLI profiles (`gh`, `glab`, `az`, `aws`, `gcloud`) | The machine runs the login with the identity of the space and shows its page and code here, or asks for the code its page gives |
-| Claude Code | The machine runs `claude setup-token`: its page opens here, and you paste the code it shows. The machine keeps the token it gets as a secret and Claude Code uses it. On a Windows machine, sign in there |
-| Mistral Vibe, ACP agents | They sign in on the machine itself, or over SSH |
+| Mistral Vibe | Its page opens in the browser of this computer. Sign in there and choose the workspace: the machine waits for the console of Mistral and keeps the key it gives |
+| Claude Code | The machine runs `claude setup-token` (on Windows too): its page opens here, and you paste the code it shows. The machine keeps the token it gets as a secret and Claude Code uses it |
+| ACP agents that take an API key | You type the key here. The machine keeps it as a secret, names it in the agent's environment, and it never comes back to this computer |
+| Other ACP agents | They sign in on the machine itself: the list says how, such as the command to run in a terminal there. An agent that signs in with a browser it opens on its own machine cannot finish from another computer |
 
-**Sign out** removes the sign-in of a provider or an MCP server. A tool keeps its own login on the machine, and Claude Code's token goes with its **Sign out**.
+**Sign out** removes the sign-in of a provider or an MCP server. A tool keeps its own login on the machine. Claude Code's token and an ACP agent's key go with their **Sign out**.
 
 The machine exchanges the code and keeps the token: this computer only opens the page and relays the code or the address the browser returns, which is useless without what the machine holds. If another program holds the port the browser comes back to, the sign-in says it cannot start and the machine keeps nothing half done. A sign-in waits 15 minutes at most for you, and closing its window cancels it.
 
