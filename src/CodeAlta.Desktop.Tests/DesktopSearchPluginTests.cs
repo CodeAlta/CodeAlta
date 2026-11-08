@@ -43,7 +43,7 @@ public sealed class DesktopSearchPluginTests
     [TestMethod]
     public void TheCard_FollowsTheFirstIndexingByMeaning_NotThePassagesEachTurnAddsAfterIt()
     {
-        static MeaningStatus Status(string state, bool caughtUp) => new(state, "model", 10, 20, 1, state == "failed" ? "broken" : null) { CaughtUp = caughtUp };
+        static MeaningStatus Status(string state, bool caughtUp, int left = 500) => new(state, "model", 1000 - left, 1000, 1, state == "failed" ? "broken" : null) { CaughtUp = caughtUp };
         // The download, the loading and the first indexing are worth a card, and so is a failure, before or after.
         foreach (var state in new[] { "downloading", "loading", "indexing", "paused", "failed" }) Assert.IsTrue(DesktopSearchPlugin.ShowsOnCard(Status(state, false)), state);
         Assert.IsTrue(DesktopSearchPlugin.ShowsOnCard(Status("failed", true)));
@@ -52,6 +52,9 @@ public sealed class DesktopSearchPluginTests
         Assert.IsFalse(DesktopSearchPlugin.ShowsOnCard(Status("paused", true)));
         Assert.IsFalse(DesktopSearchPlugin.ShowsOnCard(Status("ready", true)));
         Assert.IsFalse(DesktopSearchPlugin.ShowsOnCard(Status("off", false)));
+        // The few passages the last sessions left at a start are no backlog to show either.
+        Assert.IsFalse(DesktopSearchPlugin.ShowsOnCard(Status("indexing", false, left: 3)));
+        Assert.IsTrue(DesktopSearchPlugin.ShowsOnCard(Status("indexing", false, left: DesktopSearchPlugin.BacklogShown)));
     }
 
     [TestMethod]

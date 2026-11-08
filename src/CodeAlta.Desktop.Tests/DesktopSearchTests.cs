@@ -176,7 +176,12 @@ public sealed class DesktopSearchTests
             while ((await search.Store.CountAsync(timeout.Token)).Days.Count == 0) await Task.Delay(20, timeout.Token);
         }
 
-        Assert.IsNull(await DesktopSearchPlugin.LandingCardAsync(search, today, default), "never at the first start");
+        // The card is always there; search by meaning is never offered at the first start: the card says what the index holds.
+        var first = await DesktopSearchPlugin.LandingCardAsync(search, today, default);
+        Assert.IsNotNull(first, "the card is always there");
+        StringAssert.Contains(first.Html, "Find past conversations");
+        Assert.IsFalse(first.Html.Contains("Search your work by meaning", StringComparison.Ordinal), "never offered at the first start");
+        Assert.AreEqual(("Open Search", true), (first.Actions.Single().Label, first.Actions.Single().Primary));
         Assert.AreEqual("offer", DesktopSearchPlugin.CardKey(search, today), "the card is asked again as the days pass");
         var later = today.AddDays(3);
         var card = await DesktopSearchPlugin.LandingCardAsync(search, later, default);
@@ -197,12 +202,20 @@ public sealed class DesktopSearchTests
         Assert.AreEqual("meaning", events.Current.Open);
         Assert.IsFalse((await rpc.StatusAsync(new("epoch"), default)).Semantic!.Offer, "the window offers it no sooner than the card");
 
-        // "Not now" puts it off for 30 days: no card, and no offer in the status, until then.
+        // "Not now" puts it off for 30 days: the card says what the index holds, and the status offers nothing, until then.
         search.AnswerMeaningOffer("later", later);
-        Assert.IsNull(await DesktopSearchPlugin.LandingCardAsync(search, later.AddDays(29), default));
-        Assert.AreEqual(string.Empty, DesktopSearchPlugin.CardKey(search, later.AddDays(29)));
-        Assert.IsNotNull(await DesktopSearchPlugin.LandingCardAsync(search, later.AddDays(30), default));
+        var put = await DesktopSearchPlugin.LandingCardAsync(search, later.AddDays(29), default);
+        Assert.IsNotNull(put, "the card stays");
+        Assert.IsFalse(put.Html.Contains("Search your work by meaning", StringComparison.Ordinal));
+        StringAssert.StartsWith(DesktopSearchPlugin.CardKey(search, later.AddDays(29)), "ready:");
+        StringContains(await DesktopSearchPlugin.LandingCardAsync(search, later.AddDays(30), default), "Search your work by meaning");
         Assert.ThrowsExactly<ArgumentException>(() => search.AnswerMeaningOffer("maybe", later));
+    }
+
+    private static void StringContains(CodeAlta.Plugins.Abstractions.PluginLandingCard? card, string text)
+    {
+        Assert.IsNotNull(card);
+        StringAssert.Contains(card.Html, text);
     }
 
     [TestMethod]

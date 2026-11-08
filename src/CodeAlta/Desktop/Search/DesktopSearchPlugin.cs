@@ -156,15 +156,18 @@ internal sealed class DesktopSearchPlugin : PluginBase
     }
 
     /// <summary>
-    /// The card of the landing page: only while there is something to say. The download and the first indexing of search by
-    /// meaning, or its failure; the first build of the index, or a failure of the indexer; and the offer of search by meaning
-    /// once there is enough to search (never at the first start, never as a dialog). Otherwise there is no card.
+    /// The card of the landing page, always there while the window has its search, so that the page does not change under the
+    /// person: it says what is in progress when something is (the download and the first indexing of search by meaning, or
+    /// its failure; the first build of the index, or a failure of the indexer), the offer of search by meaning once there is
+    /// enough to search (never at the first start, never as a dialog), and otherwise what the index holds.
     /// </summary>
     internal static async ValueTask<PluginLandingCard?> LandingCardAsync(DesktopSearch? search, DateOnly today, CancellationToken cancellationToken)
     {
-        if (search is null || !search.Host.GetSettings().Enabled) return null;
+        if (search is null) return null;
         var open = PluginLandingCardAction.OpenCanvas("Open Search", CanvasId, icon: "search") with { Primary = true };
         PluginLandingCard Note(string text) => PluginLandingCard.Of($"<p class=\"{PluginHtml.MutedClass}\">{PluginHtml.Encode(text)}</p>", open);
+        var settings = search.Host.GetSettings();
+        if (!settings.Enabled) return Note("Search is turned off in Settings › Search.") with { Status = "Off", Tone = PluginStatusTone.Muted };
         if (MeaningCard(search) is { } meaning)
         {
             return meaning.State switch
@@ -192,7 +195,18 @@ internal sealed class DesktopSearchPlugin : PluginBase
                 return Note("The search index could not read everything: " + status.LastError) with { Status = "Failed", Tone = PluginStatusTone.Error };
         }
 
-        if (!await search.IsMeaningOfferedAsync(today, cancellationToken).ConfigureAwait(false)) return null;
+        if (!await search.IsMeaningOfferedAsync(today, cancellationToken).ConfigureAwait(false))
+        {
+            // Nothing in progress: what can be found, and how.
+            var meaningOn = search.Meaning is not null && settings.Semantic;
+            var how = meaningOn ? "by their words and by meaning" : "by their words";
+            if (!status.Ready) return Note($"Find past conversations, plans, skills and tools {how}. The index starts shortly.");
+            var counts = await search.Store.CountAsync(cancellationToken).ConfigureAwait(false);
+            return PluginLandingCard.Of($"<p>Find past conversations, plans, skills and tools {how}.</p><p class=\"{PluginHtml.MutedClass}\">"
+                + PluginHtml.Encode(string.Create(CultureInfo.CurrentCulture, $"{counts.Sessions:N0} {(counts.Sessions == 1 ? "session" : "sessions")} and {counts.Items.Values.Sum():N0} items indexed."))
+                + "</p>", open) with { Status = "Ready", Tone = PluginStatusTone.Success };
+        }
+
         return PluginLandingCard.Of($"<p><strong>Search your work by meaning</strong></p><p class=\"{PluginHtml.MutedClass}\">"
                 + "Find past conversations, skills and tools from what they are about, not only from the words they contain. The model runs on this computer.</p>",
             PluginLandingCardAction.RunCommand("Learn more", MeaningCommandName, icon: "search") with { Primary = true },
@@ -223,10 +237,14 @@ internal sealed class DesktopSearchPlugin : PluginBase
         return (status.State, status, percent);
     }
 
+    /// <summary>The passages left to index from which the card says it indexes, before search by meaning first caught up.</summary>
+    internal const int BacklogShown = 100;
+
     /// <summary>
-    /// Whether the card says where search by meaning is: while its model downloads or loads, while it indexes what was there
-    /// before it caught up, and when it failed. Once it caught up, the passages each session writes are embedded without a
-    /// card: it would come and go with every turn.
+    /// Whether the card says where search by meaning is: while its model downloads or loads, while it indexes a backlog of
+    /// <see cref="BacklogShown"/> passages or more before it caught up, and when it failed. The few passages left by the
+    /// last sessions, and those each session writes once it caught up, are embedded without saying so: the card would
+    /// change for a moment with every turn.
     /// </summary>
     /// <param name="status">Where search by meaning is.</param>
     /// <returns>Whether the card shows it.</returns>
@@ -234,7 +252,7 @@ internal sealed class DesktopSearchPlugin : PluginBase
         => status.State switch
         {
             "downloading" or "loading" or "failed" => true,
-            "indexing" or "paused" => !status.CaughtUp,
+            "indexing" or "paused" => !status.CaughtUp && status.Total - status.Embedded >= BacklogShown,
             _ => false,
         };
 
@@ -243,16 +261,21 @@ internal sealed class DesktopSearchPlugin : PluginBase
         => status.LastError is not null ? 2 : status.Busy && !status.Ready ? 1 : 0;
 
     /// <summary>
-    /// What the card says, in a key that changes when it should be read again: a state, a whole percent of a progress, or that
-    /// search by meaning may be offered. The numbers of a progress between two percents do not ask for it.
+    /// What the card says, in a key that changes when it should be read again: a state, a whole percent of a progress, that
+    /// search by meaning may be offered, or the summary of the index. The numbers of a progress between two percents, and the
+    /// counts of the summary as each turn adds to them, do not ask for it.
     /// </summary>
     internal static string CardKey(DesktopSearch? search, DateOnly today)
     {
-        if (search is null || !search.Host.GetSettings().Enabled) return string.Empty;
+        if (search is null) return string.Empty;
+        var settings = search.Host.GetSettings();
+        if (!settings.Enabled) return "off";
         if (MeaningCard(search) is { } meaning) return string.Create(CultureInfo.InvariantCulture, $"meaning:{meaning.State}:{meaning.Percent}");
-        var kind = CardKindOf(search.Indexer.Status);
+        var status = search.Indexer.Status;
+        var kind = CardKindOf(status);
         if (kind != 0) return "index:" + kind.ToString(CultureInfo.InvariantCulture);
-        return search.Meaning is not null && search.Host.GetSettings().MayOfferMeaning(today) ? "offer" : string.Empty;
+        if (search.Meaning is not null && settings.MayOfferMeaning(today)) return "offer";
+        return string.Create(CultureInfo.InvariantCulture, $"ready:{status.Ready}:{search.Meaning is not null && settings.Semantic}");
     }
 
     internal static string Describe(DesktopSearch? search)
