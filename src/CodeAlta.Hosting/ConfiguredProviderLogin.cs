@@ -140,6 +140,15 @@ public static class ConfiguredProviderLogin
     /// <returns>True for <c>codex</c>.</returns>
     public static bool SupportsForwardedBrowser(string? providerType) => providerType is "codex";
 
+    /// <summary>
+    /// Tells whether the browser sign-in of a provider type completes on a page that any computer opens, with nothing coming back
+    /// to the computer that runs it: that computer asks the service until the person signed in, then takes the credential with
+    /// the verifier it kept. Another computer only opens the page of its <see cref="ProviderLoginPrompt"/>.
+    /// </summary>
+    /// <param name="providerType">The canonical provider type.</param>
+    /// <returns>True for <c>mistral-vibe</c>.</returns>
+    public static bool SupportsPolledBrowser(string? providerType) => providerType is MistralVibe;
+
     /// <summary>Gets the address a forwarded browser sign-in of a provider type comes back to, on a port of the other computer.</summary>
     /// <param name="providerType">A type of <see cref="SupportsForwardedBrowser"/>.</param>
     /// <param name="port">The port, 1024 and up.</param>

@@ -35,6 +35,10 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
 
     private CodeAltaConfigStore Store => new(host.CatalogOptions);
 
+    /// <summary>Gets the sign-in of a provider by a device code or on a page (<see cref="ConfiguredProviderLogin.LoginAsync"/>); replaced by tests.</summary>
+    internal Func<CodeAltaProviderDocument, string, string, Func<ProviderLoginPrompt, CancellationToken, ValueTask>, CancellationToken, Task<ProviderLoginStatus>> ProviderLogin
+    { get; init; } = ConfiguredProviderLogin.LoginAsync;
+
     /// <inheritdoc />
     public async Task<FleetMachineSignInList> ListAsync(CancellationToken cancellationToken)
     {
@@ -210,16 +214,18 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
 
     /// <summary>The ways the desktop signs a provider type in.</summary>
     /// <param name="type">The type.</param>
-    /// <returns>Browser first when it has it, then device.</returns>
+    /// <returns>Browser first when it has it, else page, then device.</returns>
     internal static IReadOnlyList<string> ProviderWays(string? type)
     {
         var ways = new List<string>(2);
         if (ConfiguredProviderLogin.SupportsForwardedBrowser(type)) ways.Add(FleetMachineSignInWays.Browser);
+        else if (ConfiguredProviderLogin.SupportsPolledBrowser(type)) ways.Add(FleetMachineSignInWays.Page);
         if (ConfiguredProviderLogin.GetLoginModes(type).Contains("device", StringComparer.Ordinal)) ways.Add(FleetMachineSignInWays.Device);
         return ways;
     }
 
-    // A provider: a device code the desktop shows, or a browser of the desktop whose callback it forwards. Never throws.
+    // A provider: a device code the desktop shows, a page the desktop opens while the node asks the service until it is done, or a
+    // browser of the desktop whose callback it forwards. Never throws.
     private Task<FleetMachineSignInState> RunProvider(Attempt attempt, FleetMachineSignInStartParams parameters) => Task.Run(async () =>
     {
         try
@@ -232,12 +238,13 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
                 ?? throw new NotSupportedException($"{definition.DisplayName ?? definition.ProviderKey} signs in with a browser on the machine itself: sign in there, or over SSH.");
             if (!ways.Contains(way, StringComparer.Ordinal)) throw new NotSupportedException($"{definition.DisplayName ?? definition.ProviderKey} does not sign in with a {way} from another computer.");
             ProviderLoginStatus status;
-            if (way == FleetMachineSignInWays.Device)
+            if (way is FleetMachineSignInWays.Device or FleetMachineSignInWays.Page)
             {
-                status = await ConfiguredProviderLogin.LoginAsync(definition, Root, "device", (prompt, _) =>
+                // A page signs in with the browser sign-in of the provider: its verifier stays here, and nothing comes back but the end of the wait.
+                status = await ProviderLogin(definition, Root, way == FleetMachineSignInWays.Device ? "device" : "browser", (prompt, _) =>
                 {
                     attempt.Prompt.TrySetResult(new FleetMachineSignInPrompt(attempt.Id, way, prompt.Uri.AbsoluteUri, null, prompt.UserCode, null,
-                        prompt.ExpiresAt ?? attempt.ExpiresAt));
+                        prompt.ExpiresAt is { } expires && expires < attempt.ExpiresAt ? expires : attempt.ExpiresAt));
                     return ValueTask.CompletedTask;
                 }, attempt.Lifetime.Token).ConfigureAwait(false);
             }

@@ -106,8 +106,8 @@ test("the computer that manages a machine sees why each provider is not ready, g
 test("the computer that manages a machine signs it in from here: the page opens in this browser, and the machine keeps the sign-in", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     const section = ".machine-signins-section";
-    await page.until(`document.querySelectorAll('${section} li').length === 2`, "the sign-ins of the machine");
-    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('${section} li')].map(row => row.dataset.state)`), ["signed_out", "signed_in"]);
+    await page.until(`document.querySelectorAll('${section} li').length === 3`, "the sign-ins of the machine");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('${section} li')].map(row => row.dataset.state)`), ["signed_out", "signed_out", "signed_in"]);
     await page.evaluate(`document.querySelector('${section}').scrollIntoView({ block: "nearest" })`);
     await page.shot("machine-signins");
 
@@ -118,12 +118,20 @@ test("the computer that manages a machine signs it in from here: the page opens 
     await page.clickText(".machine-provider-signin-dialog .bp6-button", "Done");
     await page.until(`document.querySelector('${section} li')?.dataset.state === 'signed_in'`, "Codex signed in");
 
+    // Mistral Vibe signs in on its page, opened in the browser of this computer: nothing comes back here, the machine waits for its console.
+    await page.clickText(`${section} li:nth-child(2) .bp6-button`, "Sign in…");
+    await page.until(`document.querySelector('.machine-provider-signin-dialog [role=status]')?.textContent.includes('browser that opened on this computer')`, "its page opened");
+    assert.equal(await page.evaluate(`document.querySelector('.machine-provider-signin-dialog [role=status] a')?.getAttribute('href')`), "https://console.mistral.ai/vibe/sign-in/p1");
+    await page.until(`document.querySelector('.machine-provider-signin-dialog [role=status]')?.textContent.includes('Mistral Vibe is signed in on build-box.')`, "Vibe signed in");
+    await page.clickText(".machine-provider-signin-dialog .bp6-button", "Done");
+    await page.until(`document.querySelector('${section} li:nth-child(2)')?.dataset.state === 'signed_in'`, "Vibe signed in on the page");
+
     // Sign out: the machine deletes the tokens of the MCP server.
-    await page.clickText(`${section} li:nth-child(2) .bp6-button`, "Sign out");
+    await page.clickText(`${section} li:nth-child(3) .bp6-button`, "Sign out");
     await page.until(`window.machineFixture.calls.some(call => call.includes('signOut'))`, "the sign-out asked");
     const asked = (await calls(page)).filter(call => call.signInStart || call.signOut);
     assert.deepEqual(asked.filter((call, index, all) => all.findIndex(other => JSON.stringify(other) === JSON.stringify(call)) === index),
-      [{ signInStart: ["provider", "codex"] }, { signOut: ["mcp", "linear"] }]);
+      [{ signInStart: ["provider", "codex"] }, { signInStart: ["provider", "vibe"] }, { signOut: ["mcp", "linear"] }]);
     assert.deepEqual(page.problems, []);
   }, options);
 });

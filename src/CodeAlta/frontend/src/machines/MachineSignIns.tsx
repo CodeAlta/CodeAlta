@@ -145,7 +145,7 @@ function SignInDialog({ epoch, machine, api, item, onClose }: {
   return <Dialog isOpen className="machine-provider-signin-dialog" title={t("Sign {name} in on {machine}", { name, machine: machine.name })} onClose={onClose}>
     <DialogBody>
       {state === "starting" && <p className="muted-text"><ActivitySpinner size={14} /> {t("{machine} starts the sign-in…", { machine: machine.name })}</p>}
-      {state === "waiting" && prompt?.way === "browser" && <Callout compact intent="primary" role="status" icon={<ActivitySpinner size={16} />}>
+      {state === "waiting" && (prompt?.way === "browser" || prompt?.way === "page") && <Callout compact intent="primary" role="status" icon={<ActivitySpinner size={16} />}>
         <p>{t("Finish the sign-in in the browser that opened on this computer.")}</p>
         {prompt.page && <div className="machine-provider-code-row"><a href={prompt.page} target="_blank" rel="noreferrer">{prompt.page}</a></div>}
       </Callout>}

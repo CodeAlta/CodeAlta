@@ -19,6 +19,9 @@ internal sealed partial class MachinesService
     // The browser sign-ins whose callback this computer waits for, by attempt: the listener goes with the attempt.
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _forwardedSignIns = new(StringComparer.Ordinal);
 
+    /// <summary>Gets what opens the page of a sign-in of a machine in the browser of this computer; replaced by tests.</summary>
+    internal Func<Uri, bool> OpenSignInPage { get; init; } = ProviderLoginService.OpenBrowser;
+
     /// <summary>Lists what a machine signs in, and how each stands.</summary>
     [NeoRpcMethod("signIns")]
     public async Task<MachineSignInsView> SignInsAsync(MachineRequest request, CancellationToken cancellationToken)
@@ -59,6 +62,23 @@ internal sealed partial class MachinesService
         catch (Exception exception) when (exception is IOException or TimeoutException) { return MachineSignInPromptView.Refused(RemoteSessionHost.MachineOfflineCode) with { Message = exception.Message }; }
 
         var page = SafePage(prompt.Page);
+        if (prompt.Way == FleetMachineSignInWays.Page)
+        {
+            // A page that signs in by itself: it opens here, nothing comes back here, and the machine waits for the service to say it is done.
+            if (page is null || page.Scheme != Uri.UriSchemeHttps || !OpenSignInPage(page))
+            {
+                await CancelOnMachineAsync(host, prompt.AttemptId).ConfigureAwait(false);
+                return MachineSignInPromptView.Refused(page is null || page.Scheme != Uri.UriSchemeHttps ? "signin.failed" : "signin.browser") with
+                {
+                    Message = page is null || page.Scheme != Uri.UriSchemeHttps
+                        ? "The machine gave no page this computer can sign it in with."
+                        : "The browser of this computer did not open the sign-in.",
+                };
+            }
+
+            return new MachineSignInPromptView("ok", null, prompt.AttemptId, prompt.Way, page.AbsoluteUri, null, null, prompt.ExpiresAt);
+        }
+
         if (prompt.Way != FleetMachineSignInWays.Browser)
             return new MachineSignInPromptView("ok", null, prompt.AttemptId, prompt.Way, page?.AbsoluteUri, prompt.UserCode is { Length: <= 64 } code ? code : null,
                 prompt.Ask is { Length: <= 256 } ask ? ask : null, prompt.ExpiresAt);
@@ -89,7 +109,7 @@ internal sealed partial class MachinesService
         var lifetime = new CancellationTokenSource(prompt.ExpiresAt - DateTimeOffset.UtcNow is { Ticks: > 0 } left ? left : TimeSpan.FromMinutes(1));
         _forwardedSignIns[prompt.AttemptId] = lifetime;
         _ = ForwardAsync(host, prompt.AttemptId, listener, state, lifetime);
-        if (!ProviderLoginService.OpenBrowser(page))
+        if (!OpenSignInPage(page))
         {
             await lifetime.CancelAsync().ConfigureAwait(false);
             await CancelOnMachineAsync(host, prompt.AttemptId).ConfigureAwait(false);
@@ -236,7 +256,7 @@ internal sealed partial class MachinesService
 /// <param name="State"><c>signed_in</c>, <c>signed_out</c> or <c>unknown</c>.</param>
 /// <param name="Account">The account it is signed in as, when known.</param>
 /// <param name="ExpiresAt">When its sign-in expires, when known.</param>
-/// <param name="Ways">How this computer signs it in: <c>browser</c>, <c>device</c>, <c>code</c>; empty when only on the machine.</param>
+/// <param name="Ways">How this computer signs it in: <c>browser</c>, <c>device</c>, <c>code</c>, <c>page</c>; empty when only on the machine.</param>
 /// <param name="Detail">What the machine says more of it.</param>
 internal sealed record MachineSignInItemView(string Kind, string Key, string? Space, string Title, string State, string? Account, DateTimeOffset? ExpiresAt, string[] Ways,
     string? Detail);
@@ -256,15 +276,15 @@ internal sealed record MachineSignInsView(string Status, string? Message, Machin
 /// <param name="Kind"><c>provider</c>, <c>mcp</c> or <c>cli</c>.</param>
 /// <param name="Key">What to sign in.</param>
 /// <param name="Space">The space of its profile; null for the machine's own.</param>
-/// <param name="Way"><c>browser</c>, <c>device</c> or <c>code</c>; null for the first it offers.</param>
+/// <param name="Way"><c>browser</c>, <c>device</c>, <c>code</c> or <c>page</c>; null for the first it offers.</param>
 internal sealed record MachineSignInStartRequest(string ExpectedEpoch, string MachineId, string Kind, string Key, string? Space, string? Way);
 
 /// <summary>What the page shows for a sign-in that started on a machine.</summary>
 /// <param name="Status"><c>ok</c>, <c>port_busy</c>, <c>signin.browser</c>, <c>signin.unsupported</c>, <c>not_manager</c>, <c>offline</c>...</param>
 /// <param name="Message">Why it could not start.</param>
 /// <param name="AttemptId">The attempt, for the calls that follow.</param>
-/// <param name="Way"><c>browser</c> (the browser was opened here), <c>device</c> or <c>code</c>.</param>
-/// <param name="Page">The page: opened already for <c>browser</c>; to open for <c>device</c> and <c>code</c>.</param>
+/// <param name="Way"><c>browser</c> or <c>page</c> (the browser was opened here), <c>device</c> or <c>code</c>.</param>
+/// <param name="Page">The page: opened already for <c>browser</c> and <c>page</c>; to open for <c>device</c> and <c>code</c>.</param>
 /// <param name="UserCode">For <c>device</c>: the code to enter on the page.</param>
 /// <param name="Ask">For <c>code</c>: what the person pastes.</param>
 /// <param name="ExpiresAt">When the attempt ends if nothing comes.</param>

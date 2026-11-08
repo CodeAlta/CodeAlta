@@ -24,6 +24,12 @@ public static class FleetMachineSignInWays
 
     /// <summary>The desktop opens a page that shows a code, and sends back the code the person pastes.</summary>
     public const string Code = "code";
+
+    /// <summary>
+    /// The desktop opens a page in its browser and nothing comes back to it: the machine asks the service until it says the person
+    /// signed in there (Mistral Vibe).
+    /// </summary>
+    public const string Page = "page";
 }
 
 /// <summary>Where a sign-in of a machine stands, or what it is.</summary>
@@ -84,7 +90,7 @@ public sealed record FleetMachineSignInStartParams(string Kind, string Key, stri
 /// <summary>What the desktop does for a sign-in that started on a machine.</summary>
 /// <param name="AttemptId">The attempt, for the calls that follow.</param>
 /// <param name="Way">A way of <see cref="FleetMachineSignInWays"/>.</param>
-/// <param name="Page">The page to open in the browser of the desktop.</param>
+/// <param name="Page">The page to open in the browser of the desktop (for <see cref="FleetMachineSignInWays.Page"/>, the whole sign-in).</param>
 /// <param name="Redirect">For <see cref="FleetMachineSignInWays.Browser"/>: the loopback address of the desktop the browser comes back to.</param>
 /// <param name="UserCode">For <see cref="FleetMachineSignInWays.Device"/>: the code to enter on the page.</param>
 /// <param name="Ask">For <see cref="FleetMachineSignInWays.Code"/>: what the person pastes, in words.</param>
