@@ -330,6 +330,9 @@ public sealed class CodeAltaHostOptions
     /// </summary>
     public Action<ModelProviderRegistry>? ConfigureModelProviders { get; init; }
 
+    /// <summary>Gets what gives the transport of a provider that names a model server; null for a host without model servers.</summary>
+    public Func<string, HttpMessageHandler?>? ModelServerTransports { get; init; }
+
     /// <summary>
     /// Gets an optional callback, called after <see cref="ConfigureModelProviders"/> once the plugins started, that
     /// registers the providers whose type a plugin contributes: it is given the plugin runtime.

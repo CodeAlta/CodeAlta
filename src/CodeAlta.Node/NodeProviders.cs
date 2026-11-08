@@ -29,7 +29,7 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
     private static readonly TimeSpan PromptWait = TimeSpan.FromSeconds(60);
 
     /// <summary>The types a provider added from the desktop can have: those that take a key, and those that sign in with a device code.</summary>
-    internal static readonly ImmutableArray<string> OfferedTypes = ["openai-responses", "anthropic", "google-genai", "mistral", "openai-chat", "copilot", "xai"];
+    internal static readonly ImmutableArray<string> OfferedTypes = ["openai-responses", "anthropic", "google-genai", "mistral", "openai-chat", "copilot", "xai", "llama-cpp"];
 
     // The provider types that run a CLI with its own login on the machine, and those that need no credential.
     private static readonly ImmutableArray<string> CliTypes = ["claude-code", "mistral-vibe", "codex-cli"];
@@ -112,6 +112,14 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
                 if (url is not null && (!Uri.TryCreate(url, UriKind.Absolute, out var parsed) || parsed.Scheme is not ("https" or "http")))
                     throw new ArgumentException("An endpoint is an http or https address.", nameof(parameters));
                 definition.ApiUrl = url;
+            }
+
+            if (parameters.Server is not null)
+            {
+                var server = Optional(parameters.Server);
+                if (server is not null && !CodeAltaConfigStore.IsModelServerReference(server)) throw new ArgumentException("A model server is <machine>/<server>, such as local/coding.", nameof(parameters));
+                definition.Server = server;
+                if (server is not null) definition.ApiUrl = null;
             }
 
             definition.Enabled = parameters.Enabled;

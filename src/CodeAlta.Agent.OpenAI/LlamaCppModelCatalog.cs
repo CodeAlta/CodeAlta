@@ -56,10 +56,21 @@ internal static class LlamaCppModelCatalog
                 capabilities["contextWindow"] = contextTokens;
                 capabilities["contextWindowTokens"] = contextTokens;
             }
+            else if (entry.TryGetProperty("context_length", out var length) && length.TryGetInt64(out var lengthTokens) && lengthTokens > 0)
+            {
+                // A router lists each model, loaded or not, with the context it gets.
+                capabilities["contextWindow"] = lengthTokens;
+                capabilities["contextWindowTokens"] = lengthTokens;
+            }
 
             if (readsImages.TryGetValue(modelId, out var images))
             {
                 capabilities["supportsImageInput"] = images;
+            }
+            else if (entry.TryGetProperty("architecture", out var architecture) && architecture.ValueKind == JsonValueKind.Object &&
+                     architecture.TryGetProperty("input_modalities", out var inputs) && inputs.ValueKind == JsonValueKind.Array)
+            {
+                capabilities["supportsImageInput"] = inputs.EnumerateArray().Any(static input => input.ValueKind == JsonValueKind.String && input.ValueEquals("image"));
             }
 
             models.Add(new AgentModelInfo(modelId, DisplayName: modelId, Provider: providerKey, Capabilities: capabilities));

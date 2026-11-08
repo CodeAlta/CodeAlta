@@ -38,6 +38,9 @@ public sealed record NodeHostOptions
     /// </summary>
     public Action<ModelProviderRegistry>? ConfigureModelProviders { get; init; }
 
+    /// <summary>Gets what gives the transport of a provider that names a model server; null for none.</summary>
+    public Func<string, HttpMessageHandler?>? ModelServerTransports { get; init; }
+
     /// <summary>Gets the limits of the discovery of instructions and skills, for tests; null for the user's home.</summary>
     public SessionDiscoveryScope? DiscoveryScope { get; init; }
 

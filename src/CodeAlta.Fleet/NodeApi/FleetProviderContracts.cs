@@ -52,7 +52,11 @@ public sealed record FleetProviderList(IReadOnlyList<FleetProviderStatus> Provid
 /// <param name="Enabled">Whether it is enabled.</param>
 /// <param name="MakeDefault">Whether sessions that name no provider run on it.</param>
 public sealed record FleetProviderSetParams(string Key, string? Type, string? DisplayName, string? Model, string? ApiUrl, string? ApiKey, bool Enabled = true,
-    bool MakeDefault = false);
+    bool MakeDefault = false)
+{
+    /// <summary>Gets the model server a <c>llama-cpp</c> provider uses (<c>local/&lt;server&gt;</c> for one of the machine); null keeps it, empty clears it.</summary>
+    public string? Server { get; init; }
+}
 
 /// <summary>A provider of a node, by its key.</summary>
 /// <param name="Key">Its key.</param>

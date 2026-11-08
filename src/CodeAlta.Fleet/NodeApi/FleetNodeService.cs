@@ -48,6 +48,9 @@ public sealed class FleetNodeServiceOptions
     /// </summary>
     public Func<CodeAlta.Agent.ModelProviderDescriptor, bool>? IsPersonalProvider { get; init; }
 
+    /// <summary>Gets the model host of the machine (its llama.cpp builds, models and model servers); null for a host that has none.</summary>
+    public CodeAlta.ModelServers.ModelHost? ModelServers { get; init; }
+
     /// <summary>Gets what reads the service that runs the node and whether it starts at boot (<c>control.status</c>); null for a host that has none.</summary>
     public Func<FleetNodeServiceStatus?>? ServiceStatus { get; init; }
 
@@ -434,6 +437,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             RegisterSessionDefaults(caller, Access.Owner);
             RegisterLabels(caller, Access.Owner);
             RegisterPeople(caller, Access.Owner);
+            RegisterModelServers(caller, owner: true);
             // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
             RegisterMoves(caller, Access.Owner);
             On(caller, FleetNodeMethods.MovesList, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList,
@@ -514,6 +518,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         RegisterLabels(caller, Access.Manage);
         // Who the machine lets in is its owner's: a device paired to manage it, never one trusted through the organization alone.
         RegisterPeople(caller, Access.ManagePaired);
+        RegisterModelServers(caller, owner: false);
     }
 
     private void RegisterManagementExtras(FleetNodeCaller caller, Access access)
@@ -541,6 +546,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         public static Access Automate => new(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, false, false);
         public static Access Manage => new(DevicePermissions.Manage, false, false);
         public static Access ManagePaired => new(DevicePermissions.Manage, false, false, PairedOnly: true);
+        public static Access Paired => new(DevicePermissions.None, false, false);
     }
 
     private delegate Task<TResult> Handler<TParams, TResult>(FleetNodeCall call, TParams parameters, CancellationToken cancellationToken);

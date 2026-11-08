@@ -586,6 +586,13 @@ public sealed class CodeAltaProviderDocument
     public string? SingleModelId { get; set; }
 
     /// <summary>
+    /// Gets or sets the model server a <c>llama-cpp</c> provider uses, as <c>&lt;machine&gt;/&lt;server&gt;</c> (the machine by its id or
+    /// <c>local</c> for this computer): CodeAlta finds its address and its key, and reaches another machine through the fleet.
+    /// </summary>
+    [JsonPropertyName("server")]
+    public string? Server { get; set; }
+
+    /// <summary>
     /// Gets or sets the optional regular expression used to include discovered model ids.
     /// </summary>
     [JsonPropertyName("models_include_regex")]

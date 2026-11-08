@@ -9,7 +9,7 @@ namespace CodeAlta.Fleet.NodeApi;
 public sealed class FleetPairingCoordinator
 {
     /// <summary>What a device paired by redeeming an offer may do: view, drive and start sessions; never move them here.</summary>
-    public const DevicePermissions DefaultPermissions = DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Start;
+    public const DevicePermissions DefaultPermissions = DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Start | DevicePermissions.Models;
 
     private readonly Lock _gate = new();
     private readonly PairingOfferService _offers;

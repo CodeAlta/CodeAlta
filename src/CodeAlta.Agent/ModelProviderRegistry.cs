@@ -35,6 +35,12 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     public Action<string>? SecretIssued { get; set; }
 
     /// <summary>
+    /// Gets or sets what gives the transport of a provider that names a model server (<c>server = "&lt;machine&gt;/&lt;server&gt;"</c>):
+    /// the host knows where its servers and the servers of its machines are. Null knows none.
+    /// </summary>
+    public Func<string, HttpMessageHandler?>? ModelServerTransports { get; set; }
+
+    /// <summary>
     /// Gets the processes the runtimes of the providers registered here started and still run. It outlives the
     /// registrations: a provider registered again knows the processes of the sessions that still run on its former runtime.
     /// </summary>

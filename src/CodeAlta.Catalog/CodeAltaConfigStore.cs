@@ -2723,10 +2723,24 @@ public sealed partial class CodeAltaConfigStore
         }
 
         definition.DisplayName ??= LlamaCppDefaultDisplayName;
-        definition.ApiUrl ??= LlamaCppDefaultApiUrl;
+        definition.Server = NormalizeText(definition.Server);
+        if (definition.Server is { } server && !IsModelServerReference(server))
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} server must be <machine>/<server>, such as local/coding.");
+        // A provider of a model server gets its address from CodeAlta: this one is a placeholder the transport replaces.
+        definition.ApiUrl ??= definition.Server is null ? LlamaCppDefaultApiUrl : ModelServerApiUrl;
         // Chat Completions, the most mature API of llama-server, is the absence of the setting.
         NormalizeApi(definition);
     }
+
+    /// <summary>The address a provider of a model server names: its transport sends each request to the server itself.</summary>
+    public const string ModelServerApiUrl = "http://model-server.invalid/v1";
+
+    /// <summary>Whether a text names a model server: <c>&lt;machine&gt;/&lt;server&gt;</c>, each of letters, digits, '-', '_' and '.'.</summary>
+    /// <param name="server">The text.</param>
+    /// <returns>Whether it does.</returns>
+    public static bool IsModelServerReference(string? server)
+        => server?.Split('/') is [{ Length: > 0 and <= 64 } machine, { Length: > 0 and <= 40 } id]
+           && machine.All(static c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.') && id.All(static c => char.IsAsciiLetterOrDigit(c) || c == '-');
 
     private static void ApplyMistralDefaults(CodeAltaProviderDocument definition)
     {
@@ -2842,6 +2856,8 @@ public sealed partial class CodeAltaConfigStore
 
     private static void ValidateProviderFields(CodeAltaProviderDocument definition)
     {
+        if (definition.Server is not null && !string.Equals(definition.ProviderType, LlamaCppProviderType, StringComparison.Ordinal))
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} server is only for type 'llama-cpp'.");
         if (!string.Equals(definition.ProviderType, ClaudeCodeProviderType, StringComparison.Ordinal))
         {
             RejectUnsupportedField(definition, "command", definition.Command);
@@ -3713,6 +3729,7 @@ public sealed partial class CodeAltaConfigStore
             Location = definition.Location,
             ModelsDevProviderId = definition.ModelsDevProviderId,
             SingleModelId = definition.SingleModelId,
+            Server = definition.Server,
             ModelsIncludeRegex = definition.ModelsIncludeRegex,
             SortModels = definition.SortModels,
             ModelsOrder = definition.ModelsOrder,

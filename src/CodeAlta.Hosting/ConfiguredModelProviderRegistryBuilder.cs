@@ -99,7 +99,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         {
             if (TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
                     modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, modelProviderRegistry.Application,
-                    out var descriptor, out var createRuntime, modelProviderRegistry.SecretIssued))
+                    out var descriptor, out var createRuntime, modelProviderRegistry.SecretIssued, modelProviderRegistry.ModelServerTransports))
             {
                 modelProviderRegistry.RegisterOrReplace(descriptor, createRuntime);
                 descriptors.Add(descriptor);
@@ -176,7 +176,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         {
             if (!TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
                     modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, modelProviderRegistry.Application,
-                    out var descriptor, out var createRuntime, modelProviderRegistry.SecretIssued))
+                    out var descriptor, out var createRuntime, modelProviderRegistry.SecretIssued, modelProviderRegistry.ModelServerTransports))
             {
                 continue;
             }
@@ -251,7 +251,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null)
+        Action<string>? issued = null,
+        Func<string, HttpMessageHandler?>? modelServerTransports = null)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(codexSubscriptionConcurrencyLimiter);
@@ -283,7 +284,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             case ClaudeCodeModelProviderRuntime.ProviderType:
                 return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, externalConversationHeaders, providerProcesses, out descriptor, out createRuntime, issued);
             case LlamaCppProviderType:
-                return TryCreateLlamaCppProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime, issued);
+                return TryCreateLlamaCppProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime, issued, modelServerTransports);
             default:
                 descriptor = null!;
                 createRuntime = null!;
@@ -454,7 +455,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime,
-        Action<string>? issued = null)
+        Action<string>? issued = null,
+        Func<string, HttpMessageHandler?>? modelServerTransports = null)
     {
         var responses = string.Equals(definition.Api, "responses", StringComparison.Ordinal);
         var transportKind = responses ? AgentTransportKind.OpenAIResponses : AgentTransportKind.OpenAIChatCompletions;
@@ -486,6 +488,16 @@ public static class ConfiguredModelProviderRegistryBuilder
             ModelCatalog = modelsDevProviderId is null ? null : modelCatalog,
             ProtocolTracing = CreateOpenAIProtocolTraceOptions(definition, stateRootPath),
         };
+        // A model server of the fleet: its transport sends each request to the server, here on loopback with its key or
+        // through the fleet channel to its machine, so that no address nor key is written in the file.
+        if (definition.Server is { } server)
+        {
+            var handler = modelServerTransports?.Invoke(server);
+            provider.HttpClient = handler is null
+                ? new HttpClient(new UnavailableModelServerHandler(server), disposeHandler: true) { Timeout = Timeout.InfiniteTimeSpan }
+                : new HttpClient(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
+        }
+
         provider.ModelListAsync = cancellationToken => LlamaCppModelCatalog.ListModelsAsync(provider, cancellationToken);
 
         descriptor = CreateProviderDescriptor(definition, displayName, baseUri);

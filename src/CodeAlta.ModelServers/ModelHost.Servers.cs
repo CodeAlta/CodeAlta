@@ -136,6 +136,47 @@ public sealed partial class ModelHost
     /// <returns>Its address and key, or null when it is not found.</returns>
     public (string Address, string Key)? Endpoint(string id) => Find(id) is { } supervisor ? ($"http://127.0.0.1:{supervisor.Definition.Port}", supervisor.Key) : null;
 
+    /// <summary>Stops every server (a node that stops for good, not one that switches its version).</summary>
+    /// <param name="cancellationToken">Ends the stops.</param>
+    /// <returns>A task that ends once they stopped.</returns>
+    public async Task StopAllServersAsync(CancellationToken cancellationToken)
+    {
+        foreach (var supervisor in Supervisors().Where(static s => s.Status.State != "stopped"))
+        {
+            try { await supervisor.StopAsync(cancellationToken).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is IOException or InvalidOperationException or OperationCanceledException) { }
+        }
+    }
+
+    /// <summary>
+    /// Gives the list of models of a server (`/v1/models`) with the context each model had when it last loaded: a router
+    /// lists the context a model was trained for, which `--fit` may have lowered, and a provider sizes its compaction by it.
+    /// </summary>
+    /// <param name="id">The server.</param>
+    /// <param name="json">The list the server gave.</param>
+    /// <returns>The list with those contexts, or the list as it was.</returns>
+    public byte[] AdjustModelList(string id, byte[] json)
+    {
+        if (Find(id) is not { } supervisor) return json;
+        var contexts = supervisor.Status.Models.Where(static m => m.Context is > 0).ToDictionary(static m => m.Model, static m => m.Context!.Value, StringComparer.Ordinal);
+        if (contexts.Count == 0) return json;
+        try
+        {
+            var root = System.Text.Json.Nodes.JsonNode.Parse(json);
+            if (root?["data"] is not System.Text.Json.Nodes.JsonArray data) return json;
+            foreach (var entry in data.OfType<System.Text.Json.Nodes.JsonObject>())
+            {
+                if (entry["id"]?.GetValue<string>() is { } model && contexts.TryGetValue(model, out var context) && entry["meta"] is null) entry["context_length"] = context;
+            }
+
+            return System.Text.Encoding.UTF8.GetBytes(root.ToJsonString());
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
+        {
+            return json;
+        }
+    }
+
     /// <summary>The servers.</summary>
     /// <returns>Each server and where it stands.</returns>
     public IReadOnlyList<ServerView> ListServers() => Supervisors().Select(static s => new ServerView(s.Definition, s.Status)).ToList();

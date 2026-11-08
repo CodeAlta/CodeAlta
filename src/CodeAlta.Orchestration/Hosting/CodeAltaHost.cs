@@ -576,6 +576,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             // A secret given to a provider (its key, a variable of its CLI) is masked from then on, before the provider gets it; so is
             // one a plugin gives out (an MCP server's variables and headers), told to the runtime of the plugins.
             modelProviderRegistry.SecretIssued = secretMasker.Retain;
+            modelProviderRegistry.ModelServerTransports = options.ModelServerTransports;
             pluginRuntime.Secrets.Attach(secretMasker.Retain);
             options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
             options.ConfigurePluginModelProviders?.Invoke(modelProviderRegistry, pluginRuntime);

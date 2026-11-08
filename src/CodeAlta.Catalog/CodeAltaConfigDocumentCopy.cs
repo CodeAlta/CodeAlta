@@ -184,6 +184,7 @@ internal static class CodeAltaConfigDocumentCopy
         Location = provider.Location,
         ModelsDevProviderId = provider.ModelsDevProviderId,
         SingleModelId = provider.SingleModelId,
+        Server = provider.Server,
         ModelsIncludeRegex = provider.ModelsIncludeRegex,
         SortModels = provider.SortModels,
         ModelsOrder = provider.ModelsOrder,

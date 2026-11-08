@@ -124,6 +124,23 @@ internal sealed class NodeFleet : IAsyncDisposable
     /// <exception cref="SocketException">The address cannot be bound.</exception>
     public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version, Action? requestStop,
         Func<Fleet.Protocol.FleetUpdateStatus?>? updateStatus, Fleet.Telemetry.FleetMetrics? metrics, IFleetNodeManagement? management)
+        => Start(node, listen, name, version, requestStop, updateStatus, metrics, management, null);
+
+    /// <summary>Starts the node API with the model host of the machine too.</summary>
+    /// <param name="node">The running node.</param>
+    /// <param name="listen">Where to listen.</param>
+    /// <param name="name">The name of the node.</param>
+    /// <param name="version">The version of CodeAlta it runs.</param>
+    /// <param name="requestStop">What stops the node gracefully; null for none.</param>
+    /// <param name="updateStatus">What reads the versions of the node and its self-update; null for none.</param>
+    /// <param name="metrics">The instruments of the node API; null for none.</param>
+    /// <param name="management">The log and the self-update of <c>control.log</c> and <c>control.update</c>; null for none.</param>
+    /// <param name="modelServers">The model host of the machine (llama.cpp); null for none.</param>
+    /// <returns>The fleet part of the node.</returns>
+    /// <exception cref="SocketException">The address cannot be bound.</exception>
+    public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version, Action? requestStop,
+        Func<Fleet.Protocol.FleetUpdateStatus?>? updateStatus, Fleet.Telemetry.FleetMetrics? metrics, IFleetNodeManagement? management,
+        CodeAlta.ModelServers.ModelHost? modelServers)
     {
         ArgumentNullException.ThrowIfNull(node);
         ArgumentNullException.ThrowIfNull(listen);
@@ -142,6 +159,7 @@ internal sealed class NodeFleet : IAsyncDisposable
                 AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses, RequestStop = requestStop, CloneRoot = node.Options.CloneRoot,
                 Updating = () => node.AdmissionPaused, UpdateStatus = updateStatus, Metrics = metrics, Automations = node.Automations,
                 Management = management,
+                ModelServers = modelServers,
                 // A personal plan serves the owner's own work only: the sessions other people start here keep to account credentials.
                 IsPersonalProvider = provider => ServesOwnerOnly(node.Automations?.CredentialKindOf(provider) ?? NodeAutomations.Classify(catalog, provider)),
                 // Its providers, their readiness, a key typed on the desktop kept in the secrets of the machine, and their device-code sign-in.

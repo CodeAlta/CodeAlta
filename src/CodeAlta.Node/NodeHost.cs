@@ -208,6 +208,7 @@ public sealed class NodeHost : IAsyncDisposable
             StartPlugins = options.StartPlugins,
             PluginFrontend = PluginFrontends.Cli,
             PluginBuiltIns = NodeBuiltInPlugins.For(catalog),
+            ModelServerTransports = options.ModelServerTransports,
             RawArguments = [],
             ConfigureModelProviders = options.ConfigureModelProviders ?? (registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                 registry, new CodeAltaConfigStore(catalog), profile.GlobalRoot, modelsDev, pluginProviderTypes)),

@@ -364,9 +364,12 @@ internal sealed class NodeApplication
         NodeServers? linked = null;
         try
         {
+            // The providers of the node reach its model servers through this, once its model host runs.
+            var modelServerTransports = new CodeAlta.Fleet.Client.FleetModelServerTransports();
             var hostOptions = new NodeHostOptions
             {
                 Profile = profile, Offline = options.Offline, StartPlugins = !options.NoPlugins,
+                ModelServerTransports = modelServerTransports.Resolve,
                 // The log and the telemetry of the state root start once its lock is held: a refused start leaves them to its instance.
                 Admitted = () =>
                 {
@@ -407,11 +410,20 @@ internal sealed class NodeApplication
             {
                 NodeFleet fleet;
                 NodeUpdates? updates = null;
+                CodeAlta.ModelServers.ModelHost? modelServers = null;
                 try
                 {
                     // The node API runs with or without a listener (--no-listen): the servers the node joined relay channels to it.
+                    // The model servers of the machine (llama.cpp): they go on while the node switches versions.
+                    if (!hostOptions.Offline)
+                    {
+                        modelServers = CodeAlta.Fleet.FleetModelHosts.Create(node.Host.CatalogOptions, serversOutliveHost: true);
+                        await modelServers.StartAsync(stopRequested.Token).ConfigureAwait(false);
+                        modelServerTransports.Local = modelServers;
+                    }
+
                     fleet = NodeFleet.Start(node, listen, name, Version, stopRequested.Cancel, () => updates?.Describe(), telemetry?.Metrics,
-                        new NodeManagement(profile, Version, () => updates));
+                        new NodeManagement(profile, Version, () => updates), modelServers);
                     listening = fleet;
                 }
                 catch (SocketException exception)
@@ -481,6 +493,13 @@ internal sealed class NodeApplication
                 // The channels close first: no remote call reaches a runtime that stops.
                 await fleetLifetime.StopAsync().ConfigureAwait(false);
                 await serversLifetime.DisposeAsync().ConfigureAwait(false);
+                if (modelServers is not null)
+                {
+                    // A switch of version keeps the models loaded; a stop for good stops the servers.
+                    if (!restart) await modelServers.StopAllServersAsync(hurry.Token).ConfigureAwait(false);
+                    await modelServers.DisposeAsync().ConfigureAwait(false);
+                }
+
                 await node.StopAsync(hurry.Token).ConfigureAwait(false);
                 return (NodeExitCodes.Success, restart);
             }

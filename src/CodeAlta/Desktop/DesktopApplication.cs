@@ -315,6 +315,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         DesktopSessionRetention? retention = null;
         DesktopBookmarks? bookmarkLife = null;
         Fleet.DesktopFleet? fleet = null;
+        // Where the providers reach the model servers (llama.cpp) of this computer and of the paired machines, filled once they run.
+        var modelServerTransports = new CodeAlta.Fleet.Client.FleetModelServerTransports();
+        ModelServers.DesktopModelServers? modelServers = null;
         Fleet.DesktopFleetServers? fleetServers = null;
         Fleet.DesktopNode? desktopNode = null;
         Fleet.DesktopRemoteChildren? remoteChildren = null;
@@ -535,6 +538,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     ? null
                     : new SessionDiscoveryScope(roots.Home, roots.Instructions),
                 BuiltInSkillRoot = roots.Builtin,
+                ModelServerTransports = modelServerTransports.Resolve,
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions,
                 AutoApproveOwnedPermissions = !options.ReviewOwnedCommandPermissions,
@@ -593,6 +597,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await CloseStepAsync(closing, "bookmarks", () => { bookmarkLife?.Dispose(); return ValueTask.CompletedTask; });
                 await CloseStepAsync(closing, "placed automations", async () => { if (placement is not null) await placement.DisposeAsync(); }); // What was copied runs on its machines.
                 await CloseStepAsync(closing, "remote children", async () => { if (remoteChildren is not null) await remoteChildren.DisposeAsync(); }); // Their answers wait on their machines.
+                await CloseStepAsync(closing, "model servers", async () => { if (modelServers is not null) await modelServers.DisposeAsync(); }); // Those kept running are taken back at the next start.
                 await CloseStepAsync(closing, "paired machines", async () => { if (fleet is not null) await fleet.DisposeAsync(); }); // Their channels close; their sessions go on where they run.
                 await CloseStepAsync(closing, "paired computers", async () => { if (desktopNode is not null) await desktopNode.DisposeAsync(); }); // The computers paired with this one see it offline.
                 await CloseStepAsync(closing, "servers", async () => { if (fleetServers is not null) await fleetServers.DisposeAsync(); }); // Their control connections close; the servers see this computer offline.
@@ -811,6 +816,31 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 remoteChildren = fleetStartup.RemoteChildren;
                 fleetServers = fleetStartup.Servers;
                 desktopNode = fleetStartup.Node;
+                // The model servers of this computer, and those of the paired machines. An instance on explicit roots
+                // (automation, tests) runs none and downloads nothing.
+                modelServers = new ModelServers.DesktopModelServers(roots.Home is null ? CodeAlta.Fleet.FleetModelHosts.Create(host.CatalogOptions, serversOutliveHost: false) : null,
+                    fleet, modelServerTransports);
+                modelServers.SaveLocalProvider = async (key, name, server, token) =>
+                {
+                    var store = new CodeAltaConfigStore(host.CatalogOptions);
+                    var definitions = store.LoadGlobalProviderDefinitions(includeDisabled: true).ToList();
+                    var definition = definitions.FirstOrDefault(existing => string.Equals(existing.ProviderKey, key, StringComparison.OrdinalIgnoreCase));
+                    if (definition is null) definitions.Add(definition = new CodeAltaProviderDocument { ProviderKey = key, ProviderType = "llama-cpp" });
+                    definition.ProviderType = "llama-cpp";
+                    definition.DisplayName = name;
+                    definition.Server = server;
+                    definition.ApiUrl = null;
+                    definition.Enabled = true;
+                    store.SaveGlobalProviderDefinitions(definitions);
+                    GlobalConfigService.ApplyProviders(store, host.ModelProviderRegistry, options.CatalogRoot!, pluginProviderTypes, modelsDev);
+                    await host.ModelProviderInitializationService.RefreshProviderAfterChangeAsync(new CodeAlta.Agent.ModelProviderId(key), token).ConfigureAwait(false);
+                };
+                var startingModelServers = modelServers;
+                _ = Task.Run(async () =>
+                {
+                    try { await startingModelServers.StartAsync(CancellationToken.None).ConfigureAwait(false); }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException) { }
+                });
                 // The bookmarks of the sessions of this instance, in its database. A bookmarked session is kept by the
                 // retention of sessions, which deletes nothing before the bookmarks were read.
                 var bookmarks = new CodeAlta.Catalog.Bookmarks.BookmarkService(host.ApplicationDatabase,
@@ -1109,6 +1139,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     }
 
                     builder.AddMachinesService(machinesService);
+                    builder.AddModelServersService(modelServers is null ? new ModelServersService() : new ModelServersService(modelServers, epoch));
                     // A secret set here is masked at once in the sessions of the host.
                     builder.AddSecretsService(new SecretsService(new CodeAlta.Catalog.Secrets.LocalSecretStore(host.CatalogOptions.GlobalRoot), epoch,
                         () => host.AgentHub.SecretMasker?.Refresh()));
@@ -1614,6 +1645,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddProviderUsageService(new ProviderUsageService());
             builder.AddSandboxSettingsService(new SandboxSettingsService());
             builder.AddSpeechService(new SpeechService());
+            builder.AddModelServersService(new ModelServersService());
             builder.AddClaudeCliService(new ClaudeCliService());
             builder.AddMcpServersService(new McpServersService());
             builder.AddAgentPromptsService(new AgentPromptsService());

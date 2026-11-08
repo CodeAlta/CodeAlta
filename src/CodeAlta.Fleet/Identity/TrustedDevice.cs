@@ -28,13 +28,19 @@ public enum DevicePermissions
     /// had one, to the device a pairing link made for a manager (<c>altanode pair --manage</c>) adds, or by the owner.
     /// </summary>
     Manage = 32,
+
+    /// <summary>
+    /// Use the model servers of this instance (llama.cpp): send inference requests to them, never change them (that is
+    /// <see cref="Manage"/>). Given at pairing.
+    /// </summary>
+    Models = 64,
 }
 
-/// <summary>The names of <see cref="DevicePermissions"/> as people and the node API write them: <c>view</c>, <c>drive</c>, <c>start</c>, <c>move</c>, <c>automate</c>, <c>manage</c>.</summary>
+/// <summary>The names of <see cref="DevicePermissions"/> as people and the node API write them: <c>view</c>, <c>drive</c>, <c>start</c>, <c>move</c>, <c>automate</c>, <c>manage</c>, <c>models</c>.</summary>
 public static class DevicePermissionNames
 {
     /// <summary>Gets the names of the permissions, in their order.</summary>
-    public static IReadOnlyList<string> All { get; } = ["view", "drive", "start", "move", "automate", "manage"];
+    public static IReadOnlyList<string> All { get; } = ["view", "drive", "start", "move", "automate", "manage", "models"];
 
     /// <summary>Names the permissions of a set, in their order.</summary>
     /// <param name="permissions">The set.</param>
@@ -48,6 +54,7 @@ public static class DevicePermissionNames
         if (permissions.HasFlag(DevicePermissions.Move)) names.Add("move");
         if (permissions.HasFlag(DevicePermissions.Automate)) names.Add("automate");
         if (permissions.HasFlag(DevicePermissions.Manage)) names.Add("manage");
+        if (permissions.HasFlag(DevicePermissions.Models)) names.Add("models");
         return names;
     }
 
@@ -72,6 +79,7 @@ public static class DevicePermissionNames
                 case "move": permissions |= DevicePermissions.Move; break;
                 case "automate": permissions |= DevicePermissions.Automate; break;
                 case "manage": permissions |= DevicePermissions.Manage; break;
+                case "models": permissions |= DevicePermissions.Models; break;
                 default:
                     unknown = part;
                     permissions = DevicePermissions.None;
