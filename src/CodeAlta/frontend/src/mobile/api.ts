@@ -195,7 +195,8 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
       return call<LinkedFilePage>("GET", `${session(id)}/file?${query}`);
     },
     abort: (id: string) => command<ActionResult>(`${session(id)}/abort`),
-    archive: (id: string) => command<ActionResult>(`${session(id)}/archive`),
+    archiveChildren: (id: string) => call<{ hasChildren?: boolean; error?: string | null }>("GET", `${session(id)}/archive-children`),
+    archive: (id: string, withChildren = false) => command<ActionResult & { changed?: readonly string[] | null }>(`${session(id)}/archive${withChildren ? "?withChildren=true" : ""}`),
     restore: (id: string) => command<ActionResult>(`${session(id)}/restore`),
     /** The ask the session waits on; an answer that did not reach it says why in its result, not as an error. */
     ask: (id: string) => call<AskPage>("GET", `${session(id)}/ask`),

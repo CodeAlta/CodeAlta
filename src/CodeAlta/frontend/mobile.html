@@ -163,6 +163,17 @@
       <label class="check"><input id="new-worktree" type="checkbox"> Work in a new git worktree</label>
     </div>
   </div>
+  <div id="archive-sheet" class="sheet" hidden>
+    <div class="sheet-panel confirm-panel" role="dialog" aria-modal="true" aria-labelledby="archive-title">
+      <h2 id="archive-title">Archive child sessions too?</h2>
+      <p>Archive the sessions below this one as well?</p>
+      <div class="confirm-actions">
+        <button id="archive-cancel" class="ghost" type="button">Cancel</button>
+        <button id="archive-no" class="ghost" type="button">No</button>
+        <button id="archive-yes" class="primary" type="button">Yes</button>
+      </div>
+    </div>
+  </div>
   <div id="ask-cancel-sheet" class="sheet" hidden>
     <div class="sheet-panel confirm-panel" role="alertdialog" aria-modal="true" aria-labelledby="ask-cancel-title" aria-describedby="ask-cancel-detail">
       <h2 id="ask-cancel-title">Cancel Ask</h2>
