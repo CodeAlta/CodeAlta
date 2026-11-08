@@ -1,6 +1,6 @@
 ---
 title: llama.cpp model servers on the machines of the fleet
-status: draft
+status: approved
 created: 2026-11-08
 summary: CodeAlta installs and updates the right llama.cpp build on any machine of the fleet, downloads Hugging Face models with real progress and shows what they take on disk, runs one or several model servers per machine, and makes each one a provider that sessions use at once. Agents do all of it through `alta llama`.
 ---
@@ -112,12 +112,17 @@ A machine can have several builds. This computer gets the CUDA build for the RTX
 
 The ROCm builds of `lemonade-sdk/llamacpp-rocm` are an option the person turns on per machine. They bundle ROCm, which suits Strix Halo (gfx1151) and Linux without glibc 2.38.
 
-**Schedule**, per machine:
+**Three ways to update**, for one machine, the machines selected in the llama.cpp tab, or all of them:
 
-- **When I click Update** (the default): the table says an update is there.
-- **Every day**, or **Every week on** a chosen day, at a time of the machine's time zone.
+| Way | What it does |
+| --- | --- |
+| **Update now** | The desktop updates the machines one after the other. The first machine's test gates the others: a build that fails there goes no further |
+| **Update at…** | Once, at a time chosen, such as tonight at 03:00 in each machine's time zone. Each machine keeps the instruction and does it by itself, across its restarts, so the desktop need not be on |
+| **Policy…** | What each machine does from then on: **When I click Update** (the default: the tables say an update is there), **Every day**, or **Every week on** a chosen day, at a time |
 
-An update waits until no server is working, for an hour at most, then tries again at the next time.
+Each way takes the newest build of each machine's channel, or one build chosen for all of them. Choosing an older build is how a fleet goes back to it.
+
+An update waits until no server is working, for an hour at most. **Update now** then says which machines still wait; the other two ways try again at their next time.
 
 ```mermaid
 sequenceDiagram
@@ -155,7 +160,7 @@ ROCm can also give wrong output at normal speed:
 
 A short test cannot see these. For them, the page of a server has **Reload this model**, and **Back to the previous build** is one click away.
 
-**Several machines.** Selecting machines in the llama.cpp tab gives **Update now** and **Policy…**. The update runs on one machine first, and goes to the others only once its test passed there.
+**When a test fails on a machine**, the build is marked bad there, for that backend. The desktop then drops that build from the instructions it has given other machines and not yet run, and says so.
 
 ### Models on disk
 
@@ -182,7 +187,11 @@ On pc-ai today, that is 8 repositories and 184 GB. The running server uses only 
 - Files are removed under the cache's locks (`.locks/`), which llama.cpp and `huggingface_hub` take too.
 - On Windows without the right to create symbolic links, the cache holds copies instead of links, as llama.cpp does. CodeAlta reads both.
 
-**Models get updates too.** Publishers fix their files: unsloth uploads quantizations again when a chat template is fixed. A model whose file changed in the repository shows **Update available**. **Update** downloads the new revision, and the servers take it when they next load the model; the older revision is then offered in **Clean up…**.
+**Models get updates too.** Publishers fix their files: unsloth uploads quantizations again when a chat template is fixed. A model whose file changed in the repository shows **Update available**.
+
+- **Update** downloads the new revision. The servers take it when they next load the model, and the older revision is then offered in **Clean up…**.
+- The Models tab offers **Update now** and **Update at…** for the models selected, on any machines.
+- **Policy…** can also let a machine update its models by itself. This is off by default, since each update downloads gigabytes.
 
 ### Downloads with real progress
 
@@ -401,7 +410,7 @@ server = "pc-ai/coding"   # the machine and the server: CodeAlta finds the addre
 | --- | --- |
 | `alta llama machine list`, `machine show <machine>` | GPUs, builds, servers, models and free disk; the detail with the candidate builds and why each one fits or not |
 | `alta llama build list`, `install`, `use`, `remove` | The builds of a machine |
-| `alta llama update status`, `set`, `run` | The channel, the schedule and the last updates |
+| `alta llama update status`, `run`, `set` | Where each machine stands and its last updates. `run` updates now, or once with `--at 03:00`; it takes several `--machine`, or `--all`, and `--build` for one build. `set` changes the policy |
 | `alta llama hub search <words>`, `hub show <repo> [--fit <machine>]` | Hugging Face models; the quantizations with their size and their fit |
 | `alta llama model list`, `download`, `update`, `remove` | The models on disk |
 | `alta llama download list`, `pause`, `resume`, `cancel` | The downloads in progress |
@@ -471,7 +480,7 @@ The tables are the fleet console's own: `DataTable` and `FilterBar` of `frontend
 | GPUs | 2× R9700 (gfx1201) |
 | Build | b12110 · ROCm, tested 2 hours ago |
 | Latest | b12110 (v0.9.0), or the newer one the channel offers |
-| Updates | When I click Update, Every day at 04:00… |
+| Updates | When I click Update, Every day at 04:00…, and an update planned once, such as **Tonight at 03:00** |
 | Last change | Updated, Rolled back, Failed |
 
 **The details of a row** show:
@@ -480,7 +489,7 @@ The tables are the fleet console's own: `DataTable` and `FilterBar` of `frontend
 - the devices each build sees;
 - the candidates with their verdicts (ROCm: in use; Vulkan: works, kept as a fallback; CUDA: no NVIDIA GPU);
 - the libraries found (ROCm 7.2.1 in `/opt/rocm-7.2.1`, glibc 2.39);
-- **Update now** and **Policy…**. Rows can be selected for several machines at once.
+- **Update now**, **Update at…** and **Policy…**, for that machine. With several rows selected, or **Select all**, the same three buttons act on those machines.
 
 **Discover models** is a tab of the window, not part of Settings: it is browsed beside the work, and a dialog would close on a click outside it.
 
@@ -531,6 +540,7 @@ It is not a plugin: it needs methods of the node API and a transport for provide
 | `~/.alta/llama/builds/<build>/<backend>/`, `builds/state.json` | Installed builds, whole folders side by side; the current, previous and bad build of each backend |
 | The machine's Hugging Face cache, or the folder of **Keep models in…** | Models, in the hub layout |
 | `~/.alta/llama/downloads.json` | Download jobs, resumed after a restart |
+| `~/.alta/llama/update.json` | An update planned once, kept until it runs or is cancelled |
 | `<state root>/llama/servers/<id>/` | `server.toml`, the generated `preset.ini`, `keys` (owner only), `run.json` (process, port, build), `logs/` |
 | `[llama]` in `config.toml` | The models folder, the channel, the schedule, the downloads at once |
 
@@ -540,7 +550,7 @@ Server definitions are in the state root, so a developer instance (`--dev`) has 
 | --- | --- | --- |
 | `control.llama.status` | View | GPUs, builds, policy, servers, models and downloads, in one record |
 | `control.llama.watch`, event `llama.changed` | View | What changed, coalesced; download progress at most twice a second |
-| `control.llama.builds.install`, `use`, `remove`; `control.llama.updates.run`; `control.llama.settings.set` | Manage | Builds, updates, the folder and the policy |
+| `control.llama.builds.install`, `use`, `remove`; `control.llama.updates.run` (now, or once at a time), `cancel`; `control.llama.settings.set` | Manage | Builds, updates, the folder and the policy |
 | `control.llama.downloads.start`, `pause`, `resume`, `cancel`; `control.llama.models.remove`, `update` | Manage | Models |
 | `control.llama.servers.set`, `remove`, `start`, `stop`, `restart`, `load`, `unload`, `test`, `logs`, `import` | Manage | Servers |
 | `llama.servers.list` | Models | The servers and models this device may use |
@@ -656,14 +666,22 @@ Every machine:
 Updates:
 
 - [ ] 20. The updates themselves:
-  - `[llama]` in `config.toml`: channel, schedule, the age a build must have, models folder, downloads at once;
+  - `[llama]` in `config.toml`: channel, policy, the age a build must have, models folder, downloads at once;
   - the scheduler on desktop and node, in the machine's time zone;
-  - waiting for idle servers, the switch, the test, the rollback, the bad builds;
+  - an update planned once (`control.llama.updates.run` with a time and a build), kept by the machine across its restarts in `~/.alta/llama/update.json`, and `control.llama.updates.cancel`;
+  - waiting for idle servers, the switch, the test, the rollback, the bad builds, and dropping a bad build from the instructions not yet run;
   - Lemonade's ROCm builds as an option;
-  - model updates.
+  - model updates: now, at a time, or by policy.
 
   Tests use a fake clock and fake builds.
-- [ ] 21. Their screens: **Policy…**, **Update now** for several machines (the first one gates the others), the history of a machine's updates, **Back to the previous build**. Docs.
+- [ ] 21. Their screens and commands:
+  - **Update now**, **Update at…** and **Policy…**, for one machine, the selected ones or all, with one build for all as a choice;
+  - **Update now** one machine after the other, the first one gating the others;
+  - a planned update shown on its rows, with **Cancel**;
+  - the history of a machine's updates, and **Back to the previous build**;
+  - `alta llama update run` with `--at`, `--build` and `--all`.
+
+  Docs.
 
 Discover:
 
@@ -697,6 +715,11 @@ Discover:
   - `ss -ltnp` on pc-ai shows that nothing beyond the node listens on its network;
   - an update to the current stable build passes its test;
   - a build made to fail its test is rolled back.
+- [ ] Updates across this computer and pc-ai:
+  - **Update now** of both stops at the first machine whose test fails;
+  - **Update at…** a few minutes ahead runs on pc-ai with CodeAlta Desktop closed;
+  - one older build chosen for both takes them back to it;
+  - **Cancel** drops a planned update.
 - [ ] Agents:
   - with `alta llama` only, a session puts a model on pc-ai, serves it, and adds its provider here;
   - its download comes back to it as a prompt;
@@ -714,6 +737,7 @@ Discover:
 | Engine | CodeAlta drives `llama-server` itself, in router mode by default, with one-model servers beside it. No llama-swap: an external endpoint (llama-swap, Lemonade, Ollama) stays a plain provider | The router now does what llama-swap did for llama.cpp. A second binary to ship and update on every platform would add none of the actual plan: builds, downloads, disk |
 | Where builds come from | The official GitHub releases, checked against GitHub's SHA-256. Not pinned in CodeAlta's source, unlike Codex CLI | The person chooses versions and wants them updated. A pin in the source would need a CodeAlta release for each llama.cpp build |
 | Default channel | Stable: the build named by llama.cpp's versioned releases | 6 to 20 builds a day, any of which can break one backend. A versioned release comes every one or two weeks |
+| Updating a fleet | Three ways for one machine, a selection or all: **Update now** (one after the other, the first gating the rest), **Update at…** (kept and done by each machine), **Policy…** (recurring). **When I click Update** by default | The person chooses when updates happen. A planned update must not need the desktop to be on |
 | How a build is chosen | By probe on the machine (`--list-devices`, then the test), not by name | ROCm on Windows can list a GPU and still run on the CPU; names of GPUs are not reliable |
 | Where models live | The machine's Hugging Face cache, with another folder possible | The existing 184 GB show up at once, and llama.cpp and `hf` share the files. Nothing is downloaded twice |
 | Who downloads models | CodeAlta, on the machine that serves them | Real progress, SHA-256 checks, a disk check first, gated repositories, and never a repository's `preset.ini` |
@@ -725,15 +749,15 @@ Discover:
 | Agent commands | A root of their own, `alta llama`, with `--machine` | They work on this computer without a fleet too, and on a node for its own sessions |
 | Fit before download | An estimate for the architectures CodeAlta knows, marked approximate; the measure on the machine after the download | The plain formula is several times too large for sliding-window and hybrid models |
 
-> **Open:** Should models be kept in each machine's Hugging Face cache (proposed), or in a folder of CodeAlta's own such as `~/.alta/models`, at the cost of downloading again what is already there?
+The owner approved the plan in its review of 2026-11-08 and confirmed what it proposed:
 
-> **Open:** Should llama.cpp update by itself by default, for example every day at 04:00 on the stable channel? The plan proposes **When I click Update**, with the automatic schedule one setting away.
+- the Hugging Face cache of each machine as the store of its models;
+- **When I click Update** as the default policy;
+- **Models** on at pairing for the person's own computers;
+- the screens, and the order of the steps;
+- the network address for other programs, later.
 
-> **Open:** Should **Models** be on at pairing for your own computers (proposed)?
-
-> **Open:** Is the order right: this computer, then every machine, then updates, then Discover? Discover could come before updates.
-
-> **Open:** Do other programs (Open WebUI, editors, scripts) need to reach the servers soon? The plan leaves the network address with a key per program for later.
+The review also asked for the choice of how a fleet is updated: manually or on a schedule. That is the **Updating a fleet** row above, and the three ways to update in [The right llama.cpp build, kept up to date](#the-right-llamacpp-build-kept-up-to-date).
 
 ## Risks
 
@@ -756,6 +780,8 @@ Discover:
 - vLLM, SGLang and every Python stack.
 - Quantizing or fine-tuning models.
 - Model servers shared with the people of an organization through grants. Later; the person's own fleet comes first.
+- A network address for other programs (Open WebUI, editors, scripts), with a key per program. Later, as the review confirmed.
+- Fleet updates through a CodeAlta Server, as campaigns of the server. The desktop and each machine do them for now.
 - CodeAlta's own features on embedding, rerank and fill-in-the-middle servers: search by meaning, completion in the code editor.
 - The TUI.
 
