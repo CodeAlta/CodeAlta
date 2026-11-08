@@ -111,7 +111,9 @@ export function createSessionRetention(publish: (request: RetentionPublication) 
   // Capture before any presentation restore/reconciliation can overwrite ambiguous persisted state.
   collect();
   const invalidate = () => { suspended = true; restored = false; generation++; epoch = null; acknowledged.clear(); changed(); };
-  function enqueue(expectedEpoch: string, wanted: readonly string[], current: () => boolean, expose: () => void, restoration = false): Promise<boolean> {
+  // `refused` hears why the host refused, or null when the publication failed, while the navigation is still wanted.
+  function enqueue(expectedEpoch: string, wanted: readonly string[], current: () => boolean, expose: () => void, restoration = false,
+    refused?: (reason: string | null) => void): Promise<boolean> {
     if (suspended || !identifier(expectedEpoch) || wanted.some(id => !identifier(id))) return Promise.resolve(false);
     if (epoch !== expectedEpoch) { generation++; restored = false; epoch = expectedEpoch; acknowledged.clear(); changed(); }
     const captured = generation;
@@ -126,9 +128,11 @@ export function createSessionRetention(publish: (request: RetentionPublication) 
       } catch {
         // A failed publication adds nothing, and takes nothing back: the host's claims only grow, so what it
         // acknowledged before still holds. Clearing them would hold every pane after one failed call.
+        if (captured === generation && current()) refused?.(null);
         return false;
       }
-      if (reply?.accepted !== true || captured !== generation || !current()) return false;
+      if (captured !== generation || !current()) return false;
+      if (reply?.accepted !== true) { refused?.(typeof reply?.reason === "string" ? reply.reason : null); return false; }
       if (restoration) restored = true;
       const claimed = acknowledged.size;
       for (const id of sessionIds) acknowledged.add(id);
@@ -154,9 +158,35 @@ export function createSessionRetention(publish: (request: RetentionPublication) 
     publish: (expectedEpoch: string) => enqueue(expectedEpoch, [], () => true, () => {}),
     /** Initial restoration (or reconnect) supplies its selection before certifying a complete inventory. */
     restore: (expectedEpoch: string, wanted: readonly string[], current: () => boolean, expose: () => void) => enqueue(expectedEpoch, wanted, current, expose, true),
-    /** No tab, draft handoff or work is exposed if retirement won or the lifetime changed while waiting. */
-    admit: enqueue,
+    /**
+     * No tab, draft handoff or work is exposed if retirement won or the lifetime changed while waiting. `refused`
+     * hears a refusal of the host (its reason) or a failed publication (null) for a navigation `current` still wants.
+     */
+    admit: (expectedEpoch: string, wanted: readonly string[], current: () => boolean, expose: () => void, refused?: (reason: string | null) => void) =>
+      enqueue(expectedEpoch, wanted, current, expose, false, refused),
   };
 }
 
 export type SessionRetention = ReturnType<typeof createSessionRetention>;
+
+/** What the window was at when a navigation asked for its admission, or is at when the host answers. */
+export type NavigationMoment = Readonly<{
+  navigation: number; epoch: string | null; view: number; alive: boolean;
+  catalog: Readonly<{ sessions: readonly Readonly<{ id: string }>[] }> | undefined;
+}>;
+
+/**
+ * Whether a navigation that waited for its admission is still the one to show. A newer navigation, another host,
+ * another view or the end of the page supersedes it. A new catalog does not, as long as it still lists each session
+ * asked for that the catalog of the click listed: a running session has the catalog read again all the time, and a
+ * click that waits for the host would otherwise be lost. A session the click's catalog did not list (a tab of a space
+ * entered) is judged by the transition itself, against the catalog it then shows.
+ */
+export function navigationStillWanted(ids: readonly string[], asked: NavigationMoment, now: NavigationMoment): boolean {
+  if (!now.alive || now.navigation !== asked.navigation || now.epoch !== asked.epoch || now.view !== asked.view) return false;
+  if (now.catalog === asked.catalog) return true;
+  const before = asked.catalog, after = now.catalog;
+  if (!before || !after) return false;
+  const listed = (catalog: NonNullable<NavigationMoment["catalog"]>, id: string) => catalog.sessions.some(session => session.id === id);
+  return ids.every(id => !listed(before, id) || listed(after, id));
+}
