@@ -122,7 +122,9 @@
 .fleet-filters-count.bp6-tag { margin-left: 6px; min-height: 16px; padding: 0 6px; }
 .fleet-filters-total { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; }
 .fleet-filters-actions { display: flex; gap: 6px; }
-.fleet-filters-menu { min-width: 200px; }
+.fleet-filters-menu { min-width: 200px; max-height: min(60vh, 420px); overflow: auto; }
+/* A facet of one value says it: "Result: Succeeded". */
+.fleet-filters-facet-label { opacity: 0.75; }
 
 /* The table scrolls in its frame, so that its header stays in view; sideways too, before a column has no room. */
 .fleet-table-frame { min-width: 0; max-height: min(68vh, 720px); overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
@@ -152,7 +154,13 @@
 .fleet-table tbody tr[data-row-key] > td:first-child { box-shadow: inset 3px 0 0 transparent; }
 .fleet-table tbody tr[data-state="online"] > td:first-child { box-shadow: inset 3px 0 0 var(--green); }
 .fleet-table tbody tr[data-state="connecting"] > td:first-child { box-shadow: inset 3px 0 0 var(--yellow); }
-.fleet-table tbody tr[data-state="unauthorized"] > td:first-child { box-shadow: inset 3px 0 0 var(--red); }
+.fleet-table tbody tr[data-state="unauthorized"] > td:first-child, .fleet-table tbody tr[data-state="refused"] > td:first-child { box-shadow: inset 3px 0 0 var(--red); }
+/* What is over (a revoked device) stays listed, quieted. */
+.fleet-table tbody tr[data-state="ended"] > td { color: var(--muted); }
+.fleet-table tbody tr[data-state="ended"] > td:first-child { box-shadow: inset 3px 0 0 var(--line); }
+/* The line that names a group of rows (a day...), above its first one. */
+.fleet-table .fleet-table-group > th { padding: 10px 10px 5px; border-bottom: 1px solid var(--line); background: var(--panel); color: var(--text);
+  font-size: 12px; font-weight: 650; text-align: start; }
 .fleet-table tbody tr:last-child > td { border-bottom: 0; }
 .fleet-table-details > td { padding: 0 !important; background: var(--panel-2); white-space: normal !important; }
 .fleet-table-details-body { padding: 12px 16px 14px 16px; border-left: 3px solid var(--accent); }

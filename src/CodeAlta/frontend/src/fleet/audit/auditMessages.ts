@@ -154,4 +154,7 @@ export const fleetAuditMessages = {
   "Withdrew a session from the server": ["Retiró una sesión del servidor", "A retiré une session du serveur", "Hat eine Sitzung vom Server zurückgezogen", "セッションをサーバーから撤回",
     "从服务器撤回了会话"],
   "Exported the audit log": ["Exportó el registro de auditoría", "A exporté le journal d’audit", "Hat das Audit-Protokoll exportiert", "監査ログをエクスポート", "导出了审计日志"],
+  "{count} records": ["{count} registros", "{count} enregistrements", "{count} Einträge", "{count} 件の記録", "{count} 条记录"],
+  "The newest {count} records": ["Los {count} registros más recientes", "Les {count} enregistrements les plus récents", "Die neuesten {count} Einträge", "最新の {count} 件の記録",
+    "最新的 {count} 条记录"],
 } satisfies Record<string, Row>;

@@ -14,13 +14,22 @@
 .fleet-server-confirm p { margin: 0; }
 .fleet-server-empty { margin-top: 32px; }
 .fleet-server-key { max-width: 820px; margin-top: 12px; font-size: 12px; }
-.fleet-server-devices { display: grid; gap: 6px; padding-left: 28px; }
-.fleet-device-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.fleet-device-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 0; color: var(--muted); }
-.fleet-device-row[data-status="pending"] { color: inherit; }
-.fleet-device-main { min-width: 0; display: grid; gap: 4px; }
-.fleet-device-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.fleet-device-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+/* The devices of the organization: a table under the card of the server, those that wait first. */
+.fleet-server-devices { display: grid; gap: 8px; min-width: 0; padding-left: 28px; }
+.fleet-server-devices-head { display: flex; align-items: center; gap: 8px; }
+.fleet-server-devices-head > svg { color: var(--fleet-blue); }
+/* A line of the card like Recovery key and Sign-in, not a heading of Settings in capitals. */
+.app-window-body .fleet-server-card .fleet-server-devices-head h3, .fleet-server-devices-head h3 { margin: 0; color: var(--text); font-size: inherit; font-weight: 600; letter-spacing: normal; text-transform: none; }
+.fleet-device-table .fleet-table-frame { max-height: min(48vh, 520px); }
+.fleet-device-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.fleet-device-title > svg { flex: none; color: var(--fleet-blue); }
+.fleet-device-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.fleet-device-row[data-state="ended"] .fleet-device-title > svg { color: var(--muted); }
+.fleet-device-details dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px 18px; margin: 0; }
+.fleet-device-details dt { color: var(--muted); font-size: 11.5px; }
+.fleet-device-details dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.fleet-device-details code { font-size: 11px; }
+.fleet-device-details-words { grid-column: 1 / -1; }
 .fleet-device-words { display: flex; flex-wrap: wrap; gap: 4px; }
 .fleet-device-actions { display: inline-flex; gap: 6px; }
 .fleet-device-confirm .fleet-device-words { margin: 2px 0 4px; }

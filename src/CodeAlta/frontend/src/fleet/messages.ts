@@ -180,5 +180,11 @@ export const fleetMessages = {
   "Automatic: the latest stable version": ["Automática: la última versión estable", "Automatique : la dernière version stable", "Automatisch: die neueste stabile Version", "自動: 最新の安定版", "自动：最新稳定版本"],
   "Maintenance window ({zone})": ["Ventana de mantenimiento ({zone})", "Fenêtre de maintenance ({zone})", "Wartungsfenster ({zone})", "メンテナンス時間帯 ({zone})", "维护窗口（{zone}）"],
   "The server reads the feed each day and updates the fleet at this time. Machines check the feed's hash of what they install.": ["El servidor lee el feed cada día y actualiza la flota a esta hora. Las máquinas comprueban el hash del feed de lo que instalan.", "Le serveur lit le flux chaque jour et met la flotte à jour à cette heure. Les machines vérifient le hachage du flux de ce qu’elles installent.", "Der Server liest den Feed täglich und aktualisiert die Flotte zu dieser Zeit. Die Maschinen prüfen den Hash des Feeds für das, was sie installieren.", "サーバーは毎日フィードを読み、この時刻にフリートを更新します。マシンはインストールするもののフィードのハッシュを確認します。", "服务器每天读取该源，并在此时间更新机群。机器会校验所安装内容在源中的哈希。"],
+  "1 waits for you": ["1 te espera", "1 vous attend", "1 wartet auf Sie", "1 件があなたを待っています", "1 个在等你"],
+  "{count} wait for you": ["{count} te esperan", "{count} vous attendent", "{count} warten auf Sie", "{count} 件があなたを待っています", "{count} 个在等你"],
+  "The words of its key": ["Las palabras de su clave", "Les mots de sa clé", "Die Wörter seines Schlüssels", "そのキーの単語", "其密钥的单词"],
+  "Filter the devices": ["Filtrar los dispositivos", "Filtrer les appareils", "Geräte filtern", "デバイスを絞り込む", "筛选设备"],
+  "No device matches these filters.": ["Ningún dispositivo coincide con estos filtros.", "Aucun appareil ne correspond à ces filtres.", "Kein Gerät entspricht diesen Filtern.",
+    "これらの条件に一致するデバイスはありません。", "没有符合这些筛选条件的设备。"],
   "Pair with this machine to open its sessions.": ["Empareja con esta máquina para abrir sus sesiones.", "Associez cette machine pour ouvrir ses sessions.", "Koppeln Sie diese Maschine, um ihre Sitzungen zu öffnen.", "このマシンとペアリングすると、そのセッションを開けます。", "与此机器配对后才能打开其会话。"],
 } as const satisfies Record<string, Row>;

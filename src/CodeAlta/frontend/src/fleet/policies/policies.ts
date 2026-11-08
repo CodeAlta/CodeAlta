@@ -46,6 +46,12 @@ export function rulesOf(draft: RulesDraft): FleetPolicyRulesView | null {
   };
 }
 
+/** Whether a field of the form sets a rule: a text or a limit, or a choice narrower than what a machine allows. */
+export function ruleIsSet(draft: RulesDraft, rule: keyof RulesDraft): boolean {
+  const value = draft[rule];
+  return typeof value === "boolean" ? value : rule === "remoteStarts" || rule === "agentStarts" ? value === "no" : value.trim() !== "";
+}
+
 /** Whether two forms say the same. */
 export function sameDraft(left: RulesDraft, right: RulesDraft): boolean {
   return JSON.stringify(rulesOf(left)) === JSON.stringify(rulesOf(right));

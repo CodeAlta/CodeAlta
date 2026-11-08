@@ -30,7 +30,7 @@ Owners and the admins who sign the [access document](people-and-access.md#sign-w
 The rules apply to the work of the fleet in the spaces linked to the server. A rule only narrows what a machine allows; an empty one says nothing.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-fleet-policies.webp" alt="Settings > Fleet > Policies: the kill switch, then the rules of the organization (providers, models, sandbox at least, network, tools turned off, permission mode, sessions elsewhere, longest session)" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-policies.webp" alt="Settings > Fleet > Policies: the kill switch, then the rules of the organization in groups, Providers and models, then Sandbox and tools, a dot before each field that sets a rule" loading="lazy">
   <figcaption class="small text-secondary mt-2">The rules of your organization narrow what machines allow.</figcaption>
 </figure>
 
@@ -46,7 +46,9 @@ The rules apply to the work of the fleet in the spaces linked to the server. A r
 | **Team machines publish the facts…** | A team machine publishes the facts (never the content) of every session of your spaces, Private ones included |
 | **Every automation runs with account credentials** | Refuses an automation that would use a personal plan |
 
-Change the fields, click **Review and sign…**, read the changes and click **Sign**. **Versions** lists every signed version and what it changed.
+The fields come in four groups: providers and models, sandbox and tools, work on other machines, sessions and automations. A dot before a field says it sets a rule, and **Changed** marks a field you edited since the version in force. Change the fields, click **Review and sign…**, read the changes and click **Sign**, or **Undo the changes**.
+
+**Versions** is a table of every signed version, newest first, the one **In force** marked: what it changed, who signed it and when. Click a row to see all it changed; with many versions, filter them by who signed them or by the kill switch.
 
 ## Why machines can trust it
 
@@ -54,14 +56,14 @@ Each version is signed with the key of the computer of an owner or an admin who 
 
 ## Read the audit log
 
-**Settings** > **Fleet** > **Audit** shows who did what, newest first, by day: the action, the person and their device, and how it ended. A refused attempt is marked **Refused** with its code. Click a record to see its target, the address it came from, its request and its hashes.
+**Settings** > **Fleet** > **Audit** shows who did what in a table, newest first under each day: the time, the action, the person and their device, how it ended and what it reached. A refused attempt is marked **Refused** with its code. Click a header to sort by it, and a record to see when it happened, the address it came from, its request, its hashes and its details.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-fleet-audit.webp" alt="Settings > Fleet > Audit: the audit log with its filters and the records of today (signed the access document, accepted a transfer, created a team, invited a person, set a budget, approved a device)" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-audit.webp" alt="Settings > Fleet > Audit: the audit log as a table under Today, with the search, What, Who, Result and Period, and records such as channels to machines, a device enrolled and approved, people invited and the work of the fleet let go on" loading="lazy">
   <figcaption class="small text-secondary mt-2">The audit log: who did what, with which device, and how it ended.</figcaption>
 </figure>
 
-Narrow it with the search box and **What**, **Who**, **Result** and **Period** (**Between two days…** takes two days). **Show older records** reads the next page.
+Narrow it with the search box and **What** (one or several kinds of actions), **Who**, **Result** and **Period** (**Between two days…** takes two days); **Clear** shows the whole log again. **Show older records** reads the next page.
 
 The log holds no content: no prompt, no answer, no file. Owners, admins and auditors read it.
 

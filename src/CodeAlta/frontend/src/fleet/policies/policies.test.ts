@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { FleetServerView } from "#neoastra";
-import { bannerOf, draftOf, minutesOf, ruleCount, rulesOf, sameDraft, splitList, stopReady, stopSentence } from "./policies";
+import { bannerOf, draftOf, minutesOf, ruleCount, ruleIsSet, rulesOf, sameDraft, splitList, stopReady, stopSentence } from "./policies";
 
 test("a form of rules says what it holds, and nothing for what it leaves empty", () => {
   const empty = draftOf(null);
@@ -18,6 +18,13 @@ test("a form of rules says what it holds, and nothing for what it leaves empty",
   assert.deepEqual(draftOf(rules), { ...empty, providers: "anthropic, openai", models: "claude-*, gpt-6.1", agentStarts: "no", maxSessionMinutes: "90", publishFacts: true });
   assert.ok(sameDraft(draftOf(rules), { ...draftOf(rules), providers: "anthropic,openai" }), "the same rules, written otherwise");
   assert.equal(ruleCount(rules), 5);
+});
+
+test("a field sets a rule when it narrows what a machine allows", () => {
+  const empty = draftOf(null);
+  assert.deepEqual((Object.keys(empty) as (keyof typeof empty)[]).filter(rule => ruleIsSet(empty, rule)), [], "an empty form sets nothing");
+  const draft = { ...empty, models: " claude-* ", agentStarts: "no" as const, remoteStarts: "any" as const, accountCredentials: true, sandbox: "  " };
+  assert.deepEqual((Object.keys(draft) as (keyof typeof draft)[]).filter(rule => ruleIsSet(draft, rule)), ["models", "agentStarts", "accountCredentials"]);
 });
 
 test("lists, minutes and stops", () => {

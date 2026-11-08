@@ -11,23 +11,41 @@
 .fleet-policy-stop-form p, .fleet-policy-lift-form p { margin: 0; font-size: 12px; }
 .fleet-policy-confirm-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .fleet-policy-rules { container-type: inline-size; }
-.fleet-policy-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 8px 0 0; padding: 0; border: 0; min-width: 0; }
+/* The rules in four groups, each a band with its icon and its fields side by side. */
+.fleet-policy-form { display: grid; gap: 10px; margin: 8px 0 0; padding: 0; border: 0; min-width: 0; }
+.fleet-policy-group { display: grid; gap: 10px; min-width: 0; padding: 12px 14px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.fleet-policy-group-title { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; font-weight: 650; }
+.fleet-policy-group-title > svg { color: var(--fleet-violet); }
+.fleet-policy-group-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; min-width: 0; }
 .fleet-policy-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.fleet-policy-label { font-weight: 600; font-size: 12px; }
+.fleet-policy-label { display: flex; align-items: center; gap: 6px; min-height: 18px; font-weight: 600; font-size: 12px; }
+/* A field that sets a rule has a mark before its name; one changed since the version in force says so. */
+.fleet-policy-mark { flex: none; width: 7px; height: 7px; border: 1.5px solid var(--line); border-radius: 50%; }
+:is(.fleet-policy-field, .fleet-policy-toggle)[data-set] .fleet-policy-mark { border-color: var(--fleet-violet); background: var(--fleet-violet); }
+.fleet-policy-changed.bp6-tag { min-height: 16px; padding: 0 6px; font-size: 11px; font-weight: 500; }
+.fleet-policy-toggle { display: flex; align-items: center; gap: 8px; }
 .fleet-policy-hint { font-size: 11px; }
 .fleet-policy-field .bp6-html-select { width: 100%; }
-.fleet-policy-switches { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; }
+.fleet-policy-switches { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; }
 .fleet-policy-switches .bp6-control { margin: 0; }
 .fleet-policy-actions { display: flex; gap: 8px; margin-top: 12px; }
 .fleet-policy-review { max-width: 440px; }
-.fleet-policy-versions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.fleet-policy-version { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
-.fleet-policy-version-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; }
+/* The versions: a table, the newest first; a row opens all it changed. */
+.fleet-policy-versions-card { display: grid; gap: 10px; }
+.fleet-policy-versions-card .fleet-table th:first-child, .fleet-policy-versions-card .fleet-table td:first-child { min-width: 8.5rem; }
+.fleet-policy-version-number { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.fleet-policy-version-changes { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fleet-policy-version-changes > .bp6-tag { flex: none; }
+.fleet-policy-version-change { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-policy-version-more { flex: none; font-size: 12px; }
+.fleet-policy-version-details { display: grid; gap: 6px; }
+.fleet-policy-version-details .fleet-access-changes { margin: 0; }
+.fleet-policy-version-details p { margin: 0; font-size: 12px; }
 .fleet-stop-indicator { white-space: nowrap; font-weight: 600; }
 /* In the title bar, where buttons are bare icons: a red label that reads at a glance, never over its neighbours. */
 .window-actions > .bp6-button.fleet-stop-indicator { flex: 0 0 auto; padding: 0 8px; margin-right: 4px; color: #fff; background: var(--red, #cd4246); }
 .window-actions > .bp6-button.fleet-stop-indicator:hover { color: #fff; background: color-mix(in srgb, var(--red, #cd4246) 85%, #000); }
 .window-actions > .bp6-button.fleet-stop-indicator .bp6-icon, .window-actions > .bp6-button.fleet-stop-indicator svg { color: #fff; }
 @container (max-width: 560px) {
-  .fleet-policy-form { grid-template-columns: minmax(0, 1fr); }
+  .fleet-policy-group-fields { grid-template-columns: minmax(0, 1fr); }
 }

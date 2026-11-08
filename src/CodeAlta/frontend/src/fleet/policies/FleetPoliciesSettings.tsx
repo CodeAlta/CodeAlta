@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button, Callout, Card, Checkbox, HTMLSelect, InputGroup, NonIdealState, PopoverNext, Radio, RadioGroup, Switch, Tag } from "@blueprintjs/core";
-import { fleetServer, type FleetPolicyOverview, type FleetPolicyRulesView, type FleetPolicyStopView, type FleetServerView } from "#neoastra";
-import { AppIcon } from "../../AppIcon";
+import { fleetServer, type FleetPolicyOverview, type FleetPolicyRulesView, type FleetPolicyStopView, type FleetPolicyVersionView, type FleetServerView } from "#neoastra";
+import { AppIcon, type IconName } from "../../AppIcon";
 import { ActivitySpinner } from "../../ActivitySpinner";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../../SettingsPage";
+import { DataTable, type DataColumn } from "../console/DataTable";
+import { FilterBar, type FilterFacet } from "../console/FilterBar";
 import { FleetHelp } from "../console/FleetHelp";
+import { facetCounts, filterRows, type Facet, type FacetValues, type TableSort } from "../console/tableRows";
 import { useUnsavedSettings } from "../../settingsHelp";
 import { useShellLanguage } from "../../shellLanguage";
 import type { MessageKey } from "../../localization";
 import { serverProblem } from "../fleetServer";
-import { draftOf, minutesOf, ruleCount, rulesOf, sameDraft, stopReady, stopScopes, stopSentence, type RulesDraft } from "./policies";
+import { draftOf, minutesOf, ruleCount, ruleIsSet, rulesOf, sameDraft, stopReady, stopScopes, stopSentence, type RulesDraft } from "./policies";
 
 export type FleetPoliciesApi = Pick<typeof fleetServer, "status" | "policy" | "preparePolicy" | "signPolicy">;
 type Problem = { key: MessageKey; detail?: string | null };
@@ -202,9 +205,22 @@ function Rules({ context }: { context: Context }) {
       setReading(false);
     }
   };
-  const field = (label: MessageKey, hint: MessageKey, control: ReactNode) => <label className="fleet-policy-field">
-    <span className="fleet-policy-label">{t(label)}</span>{control}<span className="fleet-policy-hint muted-text">{t(hint)}</span>
+  // A field says whether it sets a rule (a mark before its name) and whether it changed since the version in force.
+  const field = (rule: keyof RulesDraft, label: MessageKey, hint: MessageKey, control: ReactNode) => <label className="fleet-policy-field" data-rule={rule}
+    data-set={ruleIsSet(draft, rule) || undefined} data-changed={draft[rule] !== saved[rule] || undefined}>
+    <span className="fleet-policy-label"><span className="fleet-policy-mark" aria-hidden="true" />{t(label)}
+      {draft[rule] !== saved[rule] && <Tag minimal round intent="warning" className="fleet-policy-changed">{t("Changed")}</Tag>}</span>
+    {control}<span className="fleet-policy-hint muted-text">{t(hint)}</span>
   </label>;
+  const group = (icon: IconName, title: MessageKey, children: ReactNode) => <section className="fleet-policy-group" aria-label={t(title)}>
+    <h3 className="fleet-policy-group-title"><AppIcon name={icon} size={14} />{t(title)}</h3>
+    <div className="fleet-policy-group-fields">{children}</div>
+  </section>;
+  const toggle = (rule: "publishFacts" | "accountCredentials", label: MessageKey) => <div className="fleet-policy-toggle" data-rule={rule} data-set={draft[rule] || undefined}
+    data-changed={draft[rule] !== saved[rule] || undefined}>
+    <Switch checked={draft[rule]} label={t(label)} onChange={event => set({ [rule]: event.currentTarget.checked })} />
+    {draft[rule] !== saved[rule] && <Tag minimal round intent="warning" className="fleet-policy-changed">{t("Changed")}</Tag>}
+  </div>;
   return <Card className="appearance-settings fleet-policy-rules" aria-labelledby={`rules-${linkId}`}>
     <div className="fleet-secrets-head">
       <h2 id={`rules-${linkId}`}>{t("Rules")}</h2>
@@ -212,36 +228,42 @@ function Rules({ context }: { context: Context }) {
     </div>
     <p className="muted-text">{t("They apply to the work of the fleet in the spaces linked to this server: sessions started from another device, agents of other machines, automations. A rule only narrows what a machine allows.")}</p>
     <fieldset className="fleet-policy-form" disabled={readOnly || busy}>
-      {field("Providers", "Kinds of providers, such as anthropic, openai. Empty: any.",
-        <InputGroup size="small" value={draft.providers} placeholder={t("Any")} onValueChange={value => set({ providers: value })} />)}
-      {field("Models", "Model ids; a trailing * names a prefix, such as claude-*. Empty: any.",
-        <InputGroup size="small" value={draft.models} placeholder={t("Any")} onValueChange={value => set({ models: value })} />)}
-      {field("Sandbox at least", "The profile the work runs in at least, such as workspace. Empty: no floor.",
-        <InputGroup size="small" value={draft.sandbox} placeholder={t("No floor")} onValueChange={value => set({ sandbox: value })} />)}
-      {field("Network at most", "The widest network of its sandbox.",
-        <HTMLSelect value={draft.network} onChange={event => set({ network: event.currentTarget.value })}
-          options={[{ value: "", label: t("No limit") }, { value: "off", label: t("None") }, { value: "hosts", label: t("Hosts of the profile") }, { value: "on", label: t("The internet") }]} />)}
-      {field("Tools turned off", "Names of tools, or patterns such as web_*.",
-        <InputGroup size="small" value={draft.toolsOff} placeholder={t("None")} onValueChange={value => set({ toolsOff: value })} />)}
-      {field("Permission mode at most", "The widest mode the work runs in.",
-        <HTMLSelect value={draft.permissionMode} onChange={event => set({ permissionMode: event.currentTarget.value })}
-          options={[{ value: "", label: t("No limit") }, { value: "default", label: t("Ask") }, { value: "acceptEdits", label: t("Accept edits") },
-            { value: "bypassPermissions", label: t("Bypass permissions") }]} />)}
-      {field("People start sessions elsewhere", "Whether a person starts a session on another machine from their device.",
-        <HTMLSelect value={draft.remoteStarts} onChange={event => set({ remoteStarts: event.currentTarget.value as RulesDraft["remoteStarts"] })}
-          options={[{ value: "any", label: t("Allowed") }, { value: "no", label: t("Not allowed") }]} />)}
-      {field("Agents start work elsewhere", "Whether agents start sessions or send prompts on other machines, where a machine allows it.",
-        <HTMLSelect value={draft.agentStarts} onChange={event => set({ agentStarts: event.currentTarget.value as RulesDraft["agentStarts"] })}
-          options={[{ value: "any", label: t("As each machine allows") }, { value: "no", label: t("Not allowed") }]} />)}
-      {field("Longest session", "In minutes; a machine stops a session of the fleet after it. Empty: no limit.",
-        <InputGroup size="small" value={draft.maxSessionMinutes} placeholder={t("No limit")} intent={minutesOf(draft.maxSessionMinutes) === undefined ? "danger" : "none"}
-          onValueChange={value => set({ maxSessionMinutes: value })} />)}
-      <div className="fleet-policy-switches">
-        <Switch checked={draft.publishFacts} label={t("Team machines publish the facts of every session of the organization's spaces")}
-          onChange={event => set({ publishFacts: event.currentTarget.checked })} />
-        <Switch checked={draft.accountCredentials} label={t("Every automation runs with account credentials, never a personal plan")}
-          onChange={event => set({ accountCredentials: event.currentTarget.checked })} />
-      </div>
+      {group("model", "Providers and models", <>
+        {field("providers", "Providers", "Kinds of providers, such as anthropic, openai. Empty: any.",
+          <InputGroup size="small" value={draft.providers} placeholder={t("Any")} onValueChange={value => set({ providers: value })} />)}
+        {field("models", "Models", "Model ids; a trailing * names a prefix, such as claude-*. Empty: any.",
+          <InputGroup size="small" value={draft.models} placeholder={t("Any")} onValueChange={value => set({ models: value })} />)}
+      </>)}
+      {group("sandbox", "Sandbox and tools", <>
+        {field("sandbox", "Sandbox at least", "The profile the work runs in at least, such as workspace. Empty: no floor.",
+          <InputGroup size="small" value={draft.sandbox} placeholder={t("No floor")} onValueChange={value => set({ sandbox: value })} />)}
+        {field("network", "Network at most", "The widest network of its sandbox.",
+          <HTMLSelect value={draft.network} onChange={event => set({ network: event.currentTarget.value })}
+            options={[{ value: "", label: t("No limit") }, { value: "off", label: t("None") }, { value: "hosts", label: t("Hosts of the profile") }, { value: "on", label: t("The internet") }]} />)}
+        {field("toolsOff", "Tools turned off", "Names of tools, or patterns such as web_*.",
+          <InputGroup size="small" value={draft.toolsOff} placeholder={t("None")} onValueChange={value => set({ toolsOff: value })} />)}
+        {field("permissionMode", "Permission mode at most", "The widest mode the work runs in.",
+          <HTMLSelect value={draft.permissionMode} onChange={event => set({ permissionMode: event.currentTarget.value })}
+            options={[{ value: "", label: t("No limit") }, { value: "default", label: t("Ask") }, { value: "acceptEdits", label: t("Accept edits") },
+              { value: "bypassPermissions", label: t("Bypass permissions") }]} />)}
+      </>)}
+      {group("remote", "Work on other machines", <>
+        {field("remoteStarts", "People start sessions elsewhere", "Whether a person starts a session on another machine from their device.",
+          <HTMLSelect value={draft.remoteStarts} onChange={event => set({ remoteStarts: event.currentTarget.value as RulesDraft["remoteStarts"] })}
+            options={[{ value: "any", label: t("Allowed") }, { value: "no", label: t("Not allowed") }]} />)}
+        {field("agentStarts", "Agents start work elsewhere", "Whether agents start sessions or send prompts on other machines, where a machine allows it.",
+          <HTMLSelect value={draft.agentStarts} onChange={event => set({ agentStarts: event.currentTarget.value as RulesDraft["agentStarts"] })}
+            options={[{ value: "any", label: t("As each machine allows") }, { value: "no", label: t("Not allowed") }]} />)}
+      </>)}
+      {group("timer", "Sessions and automations", <>
+        {field("maxSessionMinutes", "Longest session", "In minutes; a machine stops a session of the fleet after it. Empty: no limit.",
+          <InputGroup size="small" value={draft.maxSessionMinutes} placeholder={t("No limit")} intent={minutesOf(draft.maxSessionMinutes) === undefined ? "danger" : "none"}
+            onValueChange={value => set({ maxSessionMinutes: value })} />)}
+        <div className="fleet-policy-switches">
+          {toggle("publishFacts", "Team machines publish the facts of every session of the organization's spaces")}
+          {toggle("accountCredentials", "Every automation runs with account credentials, never a personal plan")}
+        </div>
+      </>)}
     </fieldset>
     {!readOnly && <div className="fleet-policy-actions">
       <PopoverNext isOpen={review !== null} placement="top-start" onInteraction={next => { if (!next && !busy) setReview(null); }}
@@ -260,26 +282,63 @@ function Rules({ context }: { context: Context }) {
   </Card>;
 }
 
-/** The versions of the policy, the newest first, each with what it changed. */
+/**
+ * The versions of the policy as a table, the newest first: what each changed, whether it stops the work, who signed it and
+ * when; filtered by signer and by the kill switch, and by the words of its changes. A row opens all its changes.
+ */
 function Versions({ context }: { context: Context }) {
   const { t, locale } = useShellLanguage();
   const { overview, linkId } = context;
-  if (overview.versions.length === 0) return <Card className="appearance-settings" aria-labelledby={`versions-${linkId}`}>
+  const [query, setQuery] = useState("");
+  const [values, setValues] = useState<FacetValues>({});
+  const [sort, setSort] = useState<TableSort | null>({ column: "number", direction: "desc" });
+  const [selected, setSelected] = useState<string | null>(null);
+  const signer = (version: FleetPolicyVersionView) => version.signedBy ?? t("an owner");
+  const facets = useMemo<Facet<FleetPolicyVersionView>[]>(() => [
+    { id: "signer", values: version => [version.signedBy ?? ""] },
+    { id: "stop", values: version => [version.stops ? "stops" : "goes-on"] },
+  ], []);
+  const versions = overview.versions;
+  const shown = useMemo(() => filterRows(versions, facets, values, query, version => [`#${version.number}`, version.signedBy ?? "", ...version.changes].join(" ")),
+    [versions, facets, values, query]);
+  if (versions.length === 0) return <Card className="appearance-settings" aria-labelledby={`versions-${linkId}`}>
     <h2 id={`versions-${linkId}`}>{t("Versions")}</h2>
     <p className="muted-text">{t("No version is signed yet: machines follow their own policy only.")}</p>
   </Card>;
+  const options = (id: string, label: (value: string) => string): FilterFacet["options"] =>
+    [...facetCounts(versions, facets.find(facet => facet.id === id)!)].map(([value, count]) => ({ value, label: label(value), count }));
+  const filters: FilterFacet[] = [
+    { id: "signer", label: "Signed by", icon: "user", options: options("signer", value => value || t("an owner")) },
+    { id: "stop", label: "Kill switch", icon: "hand", options: options("stop", value => t(value === "stops" ? "Stops the work" : "The work goes on")) },
+  ];
   const format = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" });
-  return <Card className="appearance-settings" aria-labelledby={`versions-${linkId}`}>
-    <h2 id={`versions-${linkId}`}>{t("Versions")}</h2>
-    <ol className="fleet-policy-versions">
-      {overview.versions.map(version => <li key={version.number} className="fleet-policy-version" data-version={version.number}>
-        <div className="fleet-policy-version-head">
-          <strong>#{version.number}</strong>
-          <span className="muted-text">{version.signedBy ?? t("an owner")} · {format.format(new Date(version.signedAt))}</span>
-          {version.stops && <Tag minimal intent="danger">{t("Stop")}</Tag>}
-        </div>
-        <ul className="fleet-access-changes">{version.changes.map(line => <li key={line}>{line}</li>)}</ul>
-      </li>)}
-    </ol>
+  const columns: DataColumn<FleetPolicyVersionView>[] = [
+    { id: "number", label: "Version", width: "8.5rem", sort: version => version.number, cell: version => <span className="fleet-policy-version-number">
+      <strong>#{version.number}</strong>{version.number === overview.number && <Tag minimal round intent="primary">{t("In force")}</Tag>}</span> },
+    { id: "changes", label: "Changes", sort: version => version.changes.length, cell: version => <span className="fleet-policy-version-changes">
+      <span className="fleet-policy-version-change" title={version.changes.join("\n")}>{version.changes[0] ?? t("Nothing changed.")}</span>
+      {version.changes.length > 1 && <span className="muted-text fleet-policy-version-more">{t("+{count} more", { count: version.changes.length - 1 })}</span>}
+    </span> },
+    { id: "signer", label: "Signed by", width: "10rem", secondary: true, sort: version => signer(version), cell: version => <span className="fleet-person-name">
+      <AppIcon name="user" size={13} /><span>{signer(version)}</span></span> },
+    { id: "signed", label: "Signed", width: "11rem", sort: version => version.signedAt, cell: version => <span className="muted-text">{format.format(new Date(version.signedAt))}</span> },
+  ];
+  return <Card className="appearance-settings fleet-policy-versions-card" aria-labelledby={`versions-${linkId}`}>
+    <div className="fleet-secrets-head">
+      <h2 id={`versions-${linkId}`}>{t("Versions")}</h2>
+      <Tag minimal>{versions.length}</Tag>
+    </div>
+    <section className="fleet-table-section" aria-label={t("Versions")}>
+      {versions.length > 4 && <FilterBar label={t("Filter the versions")} query={query} onQuery={setQuery} facets={filters} values={values} onValues={setValues}
+        shown={shown.length} total={versions.length} />}
+      <DataTable label={t("Versions")} rows={shown} columns={columns} rowKey={version => String(version.number)} sort={sort} onSort={setSort} selected={selected} onSelect={setSelected}
+        rowState={version => version.stops ? "refused" : version.number === overview.number ? "online" : undefined}
+        rowProps={version => ({ className: "fleet-policy-version", data: { version: String(version.number) } })}
+        empty={<span className="muted-text">{t("No version matches these filters.")}</span>}
+        details={version => <div className="fleet-policy-version-details">
+          <ul className="fleet-access-changes">{version.changes.map(line => <li key={line}>{line}</li>)}</ul>
+          <p className="muted-text">{t("Signed by {name}, {time}.", { name: signer(version), time: format.format(new Date(version.signedAt)) })}</p>
+        </div>} />
+    </section>
   </Card>;
 }

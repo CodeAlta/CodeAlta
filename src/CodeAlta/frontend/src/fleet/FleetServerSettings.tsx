@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button, Callout, Checkbox, Dialog, DialogBody, DialogFooter, HTMLSelect, InputGroup, NonIdealState, PopoverNext, Switch, Tag, TextArea } from "@blueprintjs/core";
 import { fleetServer, type FleetDeviceView, type FleetServerView, type FleetTelemetryView, type FleetUpdateCampaignView, type FleetUpdatesView } from "#neoastra";
-import { AppIcon } from "../AppIcon";
+import { AppIcon, type IconName } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
+import { DataTable, type DataColumn } from "./console/DataTable";
+import { FilterBar, type FilterFacet } from "./console/FilterBar";
+import { facetCounts, filterRows, type Facet, type FacetValues, type TableSort } from "./console/tableRows";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../SettingsPage";
 import { FleetHelp } from "./console/FleetHelp";
 import { useShellLanguage } from "../shellLanguage";
@@ -178,41 +181,113 @@ function ServerDevices({ server, epoch, api, revision }: { server: FleetServerVi
   }
   if (!devices && !problem) return <div className="fleet-server-devices"><ActivitySpinner size={14} /></div>;
   const ordered = orderedDevices(devices ?? []);
-  return <div className="fleet-server-devices">
+  const waiting = ordered.filter(device => device.status === "pending").length;
+  return <section className="fleet-server-devices" aria-labelledby={`devices-${server.id}`}>
+    <div className="fleet-server-devices-head">
+      <AppIcon name="computer" size={14} />
+      <h3 id={`devices-${server.id}`}>{t("Devices")}</h3>
+      {waiting > 0 && <Tag minimal round intent="warning">{t(waiting === 1 ? "1 waits for you" : "{count} wait for you", { count: waiting })}</Tag>}
+    </div>
     {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
     {confirming && <SignInAgain key={confirming.id} server={server} epoch={epoch} api={api} message="Approving {name} needs you to sign in again with a way you have."
       values={{ name: confirming.name }} run={(method, handle) => act(confirming, "approve", method, handle)} />}
     {skipped > 0 && <Callout compact intent="warning" className="fleet-device-list-skipped">
       {skipped === 1 ? t("An entry of the device list comes from a newer version of CodeAlta and was skipped: update CodeAlta.")
         : t("{count} entries of the device list come from a newer version of CodeAlta and were skipped: update CodeAlta.", { count: skipped })}</Callout>}
-    {ordered.length > 0 && <ul className="fleet-device-list" aria-label={t("Devices")}>
-      {ordered.map(device => <li key={device.id} className="fleet-device-row" data-status={device.status}>
-        <AppIcon name={device.kind === "controller" ? "computer" : "remote"} size={15} />
-        <div className="fleet-device-main">
-          <div className="fleet-device-title"><strong>{device.name}</strong>
-            {device.status === "pending" ? <Tag minimal round intent="warning">{t("New device")}</Tag>
-              : device.status === "revoked" ? <Tag minimal round>{t("Revoked")}</Tag>
-              : <Tag minimal round intent={device.online ? "success" : "none"}>{t(device.online ? "Online" : "Offline")}</Tag>}</div>
-        </div>
-        {device.status === "pending" ? <span className="fleet-device-actions">
-          <Button size="small" variant="minimal" disabled={!!acting} onClick={() => void act(device, "revoke")}>{t("Refuse")}</Button>
-          {/* It gets a key only once the person saw the same words on both screens. */}
-          <PopoverNext placement="left" content={<div className="fleet-server-confirm fleet-device-confirm">
-            <p>{t("Does {name} show these words?", { name: device.name })}</p>
-            <div className="fleet-device-words">{keyWords(device.words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</div>
-            <Button className="bp6-popover-dismiss" intent="primary" disabled={!!acting || keyWords(device.words).length === 0}
-              onClick={() => void act(device, "approve")}>{t("It shows the same words")}</Button></div>}>
-            <Button size="small" intent="primary" disabled={!!acting} icon={acting === device.id ? <ActivitySpinner size={12} /> : undefined}
-              title={t("Approve when the machine shows the same words.")}>{t("Approve…")}</Button>
-          </PopoverNext>
-        </span> : device.status === "approved" && device.kind !== "controller" ? <PopoverNext placement="left" content={<div className="fleet-server-confirm">
-          <p>{t("Revoke {name}?", { name: device.name })}</p>
-          <Button className="bp6-popover-dismiss" intent="danger" disabled={!!acting} onClick={() => void act(device, "revoke")}>{t("Revoke")}</Button></div>}>
-          <Button variant="minimal" size="small" intent="danger" icon={<AppIcon name="trash" size={14} />} disabled={!!acting} aria-label={`${t("Revoke")} ${device.name}`} title={t("Revoke")} />
-        </PopoverNext> : <span />}
-      </li>)}
-    </ul>}
+    {ordered.length > 0 && <DeviceTable devices={ordered} acting={acting} act={act} />}
+  </section>;
+}
+
+const deviceKindLabels: Readonly<Record<string, MessageKey>> = Object.freeze({ controller: "Computer", node: "Machine", recovery: "Recovery key" });
+const deviceKindIcons: Readonly<Record<string, IconName>> = Object.freeze({ controller: "computer", node: "remote", recovery: "shield" });
+
+/** What a device is now, as its row says it: waiting for an approval, connected or not, or revoked. */
+function deviceState(device: FleetDeviceView): "pending" | "online" | "offline" | "revoked" {
+  return device.status === "pending" ? "pending" : device.status === "revoked" ? "revoked" : device.online ? "online" : "offline";
+}
+
+const deviceStateLabels: Readonly<Record<ReturnType<typeof deviceState>, MessageKey>> = Object.freeze({ pending: "New device", online: "Online", offline: "Offline", revoked: "Revoked" });
+const deviceStateRanks: Readonly<Record<ReturnType<typeof deviceState>, number>> = Object.freeze({ pending: 0, online: 1, offline: 2, revoked: 3 });
+
+/**
+ * The devices of the organization as a table: filtered by state and kind and by their name, those that wait first; Approve…
+ * and Refuse on the row of a new one, Revoke on a machine's. A row opens what it is, since when, and the words of its key.
+ */
+function DeviceTable({ devices, acting, act }: {
+  devices: readonly FleetDeviceView[]; acting: string | null; act: (device: FleetDeviceView, call: "approve" | "revoke") => Promise<void>;
+}) {
+  const { t, locale } = useShellLanguage();
+  const [query, setQuery] = useState("");
+  const [values, setValues] = useState<FacetValues>({});
+  const [sort, setSort] = useState<TableSort | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const kindLabel = (kind: string) => t(deviceKindLabels[kind] ?? "Device");
+  const facets = useMemo<Facet<FleetDeviceView>[]>(() => [
+    { id: "state", values: device => [deviceState(device)] },
+    { id: "kind", values: device => [device.kind] },
+  ], []);
+  const shown = useMemo(() => filterRows(devices, facets, values, query, device => [device.name, kindLabel(device.kind), t(deviceStateLabels[deviceState(device)])].join(" ")),
+    [devices, facets, values, query, t]);
+  const options = (id: string, label: (value: string) => string): FilterFacet["options"] =>
+    [...facetCounts(devices, facets.find(facet => facet.id === id)!)].map(([value, count]) => ({ value, label: label(value), count }));
+  const filters: FilterFacet[] = [
+    { id: "state", label: "Status", icon: "issueOpen", options: options("state", value => t(deviceStateLabels[value as ReturnType<typeof deviceState>])) },
+    { id: "kind", label: "Kind", icon: "computer", options: options("kind", kindLabel) },
+  ];
+  const date = new Intl.DateTimeFormat(locale, { dateStyle: "medium" });
+  const columns: DataColumn<FleetDeviceView>[] = [
+    { id: "name", label: "Device", sort: device => device.name, cell: device => <span className="fleet-device-title">
+      <AppIcon name={deviceKindIcons[device.kind] ?? "computer"} size={14} /><strong title={device.name}>{device.name}</strong></span> },
+    { id: "kind", label: "Kind", width: "8rem", secondary: true, sort: device => kindLabel(device.kind), cell: device => kindLabel(device.kind) },
+    { id: "state", label: "Status", width: "8.5rem", sort: device => deviceStateRanks[deviceState(device)], cell: device => {
+      const state = deviceState(device);
+      return <Tag minimal round intent={state === "pending" ? "warning" : state === "online" ? "success" : "none"} className="fleet-device-state">{t(deviceStateLabels[state])}</Tag>;
+    } },
+    { id: "added", label: "Added", width: "8.5rem", secondary: true, sort: device => device.createdAt, cell: device => <span className="muted-text">{date.format(new Date(device.createdAt))}</span> },
+    { id: "actions", label: "Actions", width: "12rem", align: "end", hiddenLabel: true, cell: device => <DeviceActions device={device} acting={acting} act={act} /> },
+  ];
+  return <div className="fleet-table-section fleet-device-table">
+    {devices.length > 4 && <FilterBar label={t("Filter the devices")} query={query} onQuery={setQuery} facets={filters} values={values} onValues={setValues}
+      shown={shown.length} total={devices.length} />}
+    <DataTable label={t("Devices")} rows={shown} columns={columns} rowKey={device => device.id} sort={sort} onSort={setSort} selected={selected} onSelect={setSelected}
+      rowState={device => ({ pending: "connecting", online: "online", offline: undefined, revoked: "ended" })[deviceState(device)]}
+      rowProps={device => ({ className: "fleet-device-row", data: { status: device.status, device: device.name } })}
+      empty={<span className="muted-text">{t("No device matches these filters.")}</span>}
+      details={device => <div className="fleet-device-details">
+        <dl>
+          <div><dt>{t("Kind")}</dt><dd>{kindLabel(device.kind)}</dd></div>
+          <div><dt>{t("Status")}</dt><dd>{t(deviceStateLabels[deviceState(device)])}</dd></div>
+          <div><dt>{t("Added")}</dt><dd>{new Date(device.createdAt).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" })}</dd></div>
+          <div><dt>{t("ID")}</dt><dd><code>{device.id}</code></dd></div>
+          {/* The words of a new device are compared in its approval only, beside the button that trusts them. */}
+          {device.status !== "pending" && keyWords(device.words).length > 0 && <div className="fleet-device-details-words"><dt>{t("The words of its key")}</dt>
+            <dd className="fleet-device-words">{keyWords(device.words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</dd></div>}
+        </dl>
+      </div>} />
   </div>;
+}
+
+/** Approve… and Refuse for a new device, Revoke for a machine of the organization; nothing for a computer of a person or what is revoked. */
+function DeviceActions({ device, acting, act }: { device: FleetDeviceView; acting: string | null; act: (device: FleetDeviceView, call: "approve" | "revoke") => Promise<void> }) {
+  const { t } = useShellLanguage();
+  if (device.status === "pending") return <span className="fleet-device-actions">
+    <Button size="small" variant="minimal" disabled={!!acting} onClick={() => void act(device, "revoke")}>{t("Refuse")}</Button>
+    {/* It gets a key only once the person saw the same words on both screens. */}
+    <PopoverNext placement="left" content={<div className="fleet-server-confirm fleet-device-confirm">
+      <p>{t("Does {name} show these words?", { name: device.name })}</p>
+      <div className="fleet-device-words">{keyWords(device.words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</div>
+      <Button className="bp6-popover-dismiss" intent="primary" disabled={!!acting || keyWords(device.words).length === 0}
+        onClick={() => void act(device, "approve")}>{t("It shows the same words")}</Button></div>}>
+      <Button size="small" intent="primary" disabled={!!acting} icon={acting === device.id ? <ActivitySpinner size={12} /> : undefined}
+        title={t("Approve when the machine shows the same words.")}>{t("Approve…")}</Button>
+    </PopoverNext>
+  </span>;
+  if (device.status === "approved" && device.kind !== "controller") return <PopoverNext placement="left" content={<div className="fleet-server-confirm">
+    <p>{t("Revoke {name}?", { name: device.name })}</p>
+    <Button className="bp6-popover-dismiss" intent="danger" disabled={!!acting} onClick={() => void act(device, "revoke")}>{t("Revoke")}</Button></div>}>
+    <Button variant="minimal" size="small" intent="danger" icon={<AppIcon name="trash" size={14} />} disabled={!!acting} aria-label={`${t("Revoke")} ${device.name}`} title={t("Revoke")} />
+  </PopoverNext>;
+  return null;
 }
 
 /**

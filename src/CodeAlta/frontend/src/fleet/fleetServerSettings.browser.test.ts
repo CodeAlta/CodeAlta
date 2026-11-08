@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
 
-const options = { entry: "../fleet/fleetServerSettings.mount.tsx", fixture: "fleetFixture", rpcFixture: "../demo-api.ts", styles: ["../fleet/fleet.css"], width: 1100,
+const options = { entry: "../fleet/fleetServerSettings.mount.tsx", fixture: "fleetFixture", rpcFixture: "../demo-api.ts", styles: ["../fleet/fleet.css", "../fleet/console/fleetConsole.css"], width: 1100,
   height: 800, reducedMotion: true } as const;
 // Chooses an option of a native select as the user does: React reads the change event.
 const choose = (selector: string, value: string) => `(() => { const select = document.querySelector(${JSON.stringify(selector)});
@@ -122,7 +122,8 @@ test("the owner's computer updates the fleet at a time it chooses, follows the c
 test("a new device of the person is approved in a popover beside its row, once its words are the ones the device shows", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-device-row[data-status=pending]')`, "the new device");
-    assert.equal(await page.evaluate(`document.querySelector('.fleet-device-row[data-status=pending] .fleet-device-title').textContent`), "LaptopNew device");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-device-row[data-status=pending] .fleet-device-title').textContent`), "Laptop");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-device-row[data-status=pending] .fleet-device-state').textContent`), "New device");
     assert.equal(await page.evaluate(`document.querySelectorAll('.fleet-device-row[data-status=pending] .fleet-device-words').length`), 0,
       "the words show in the confirmation, where they are compared");
 
@@ -470,7 +471,6 @@ test("the owner's computer sees the telemetry of the fleet and changes it withou
     assert.deepEqual(page.problems, []);
   }, options);
 });
-
 test("a change the host announces is read again without the page blinking; Reload still shows that it reads", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     // A computer without a server whose paired machines try to connect: the host says something changed every second or so.

@@ -6,9 +6,8 @@ import type { MessageKey } from "../../localization";
 /** A kind of action the page filters by: the prefixes of the actions it holds. */
 export type AuditCategory = Readonly<{ id: string; label: MessageKey; actions: readonly string[] }>;
 
-/** The kinds of actions, in the order of the filter; the first one holds everything. */
+/** The kinds of actions, in the order of the filter: none chosen is the whole log, several add up. */
 export const auditCategories: readonly AuditCategory[] = Object.freeze([
-  { id: "all", label: "Everything", actions: [] },
   { id: "sign-in", label: "Sign-in", actions: ["sign_in.", "passkey.", "server.setup"] },
   { id: "devices", label: "Devices and machines", actions: ["device.", "enrollment_token.", "recovery_key.", "metadata_key.", "relay.", "relay"] },
   { id: "access", label: "People and access", actions: ["person.", "team.", "grant.", "service_identity.", "owner.", "transfer.", "access.", "access_document."] },
@@ -28,14 +27,14 @@ export type AuditPeriod = "any" | "day" | "week" | "month" | "custom";
 export type AuditOutcome = "any" | "success" | "failure";
 
 /** What the page filters by, as the person sets it. */
-export type AuditFilterState = Readonly<{ category: string; person: string; outcome: AuditOutcome; period: AuditPeriod; from: string; to: string; text: string }>;
+export type AuditFilterState = Readonly<{ categories: readonly string[]; person: string; outcome: AuditOutcome; period: AuditPeriod; from: string; to: string; text: string }>;
 
 /** No filter: the whole log. */
-export const noFilter: AuditFilterState = Object.freeze({ category: "all", person: "", outcome: "any", period: "any", from: "", to: "", text: "" });
+export const noFilter: AuditFilterState = Object.freeze({ categories: Object.freeze([]) as readonly string[], person: "", outcome: "any", period: "any", from: "", to: "", text: "" });
 
 /** Whether a filter narrows the log. */
 export function isFiltered(state: AuditFilterState): boolean {
-  return state.category !== "all" || state.person !== "" || state.outcome !== "any" || state.period !== "any" || state.text.trim() !== "";
+  return state.categories.length > 0 || state.person !== "" || state.outcome !== "any" || state.period !== "any" || state.text.trim() !== "";
 }
 
 const day = 24 * 60 * 60 * 1000;
@@ -45,7 +44,7 @@ const day = 24 * 60 * 60 * 1000;
  * the start of its first day to the end of its last, in the time zone of this computer. Null when a custom day does not read.
  */
 export function toFilters(state: AuditFilterState, now: Date): FleetAuditFilters | null {
-  const category = auditCategories.find(item => item.id === state.category);
+  const actions = auditCategories.filter(item => state.categories.includes(item.id)).flatMap(item => item.actions);
   let from: string | null = null;
   let to: string | null = null;
   if (state.period === "day" || state.period === "week" || state.period === "month") {
@@ -62,7 +61,7 @@ export function toFilters(state: AuditFilterState, now: Date): FleetAuditFilters
 
   const text = state.text.trim();
   return {
-    actions: category && category.actions.length > 0 ? [...category.actions] : null,
+    actions: actions.length > 0 ? actions : null,
     personId: state.person || null, deviceId: null, result: state.outcome === "any" ? null : state.outcome, target: null, address: null, from, to,
     text: text.length > 0 ? text.slice(0, 256) : null,
   };
@@ -79,15 +78,20 @@ function localDay(text: string): Date | null {
 /** A day of the timeline and its records, newest first. */
 export type AuditDay = Readonly<{ key: string; date: Date; items: readonly FleetAuditItem[] }>;
 
+/** The day a record was recorded here: a key that is the same for the records of a day, and its midnight. */
+export function dayOf(recordedAt: string): Readonly<{ key: string; date: Date }> {
+  const time = new Date(recordedAt);
+  return { key: `${time.getFullYear()}-${time.getMonth() + 1}-${time.getDate()}`, date: new Date(time.getFullYear(), time.getMonth(), time.getDate()) };
+}
+
 /** Groups records, newest first, by the day they were recorded here. */
 export function groupByDay(items: readonly FleetAuditItem[]): AuditDay[] {
   const days: { key: string; date: Date; items: FleetAuditItem[] }[] = [];
   for (const item of items) {
-    const time = new Date(item.recordedAt);
-    const key = `${time.getFullYear()}-${time.getMonth() + 1}-${time.getDate()}`;
+    const { key, date } = dayOf(item.recordedAt);
     const last = days[days.length - 1];
     if (last && last.key === key) last.items.push(item);
-    else days.push({ key, date: new Date(time.getFullYear(), time.getMonth(), time.getDate()), items: [item] });
+    else days.push({ key, date, items: [item] });
   }
 
   return days;
@@ -98,6 +102,24 @@ export function dayName(date: Date, now: Date): "today" | "yesterday" | "date" {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const time = date.getTime();
   return time === today ? "today" : time === today - day ? "yesterday" : "date";
+}
+
+/** The names of what records reach, by id: the people and teams of the organization and its devices. */
+export function targetNames(...lists: readonly (readonly Readonly<{ id: string; name: string }>[])[]): ReadonlyMap<string, string> {
+  const names = new Map<string, string>();
+  for (const list of lists) for (const item of list) if (!names.has(item.id)) names.set(item.id, item.name);
+  return names;
+}
+
+/**
+ * What a record reached, as a person reads it: the name of a person, a team or a device, or the number of a version of the
+ * policy; null when the page knows no name for it, which then shows the target as the server wrote it.
+ */
+export function targetOf(item: Pick<FleetAuditItem, "action" | "target">, names: ReadonlyMap<string, string>): { name: string } | { version: string } | null {
+  if (!item.target) return null;
+  const name = names.get(item.target);
+  if (name) return { name };
+  return item.action.startsWith("policy.") && /^\d+$/.test(item.target) ? { version: item.target } : null;
 }
 
 /** Whether a record tells of an action that succeeded. */

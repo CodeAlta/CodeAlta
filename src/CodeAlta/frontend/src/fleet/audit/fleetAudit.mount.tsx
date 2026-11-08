@@ -48,6 +48,8 @@ const api: FleetAuditApi = {
   status: async () => ({ status: "ok", servers: [{ id: "home", url: "https://fleet.example", organization: "Example", link: "approved", connection: "online", problem: null,
     controller: true, spaces: [], recoveryKey: true, stop: null }], deviceId: "desktop", words: "apple river stone", personName: null }) as never,
   access: async () => access,
+  devices: async () => ({ status: "ok", devices: [{ id: "build-box", name: "Build box", kind: "node", status: "approved", online: true, words: "", createdAt: "2026-11-01T08:00:00Z" }],
+    skippedEntries: 0, message: null }),
   audit: async request => {
     calls.push(JSON.stringify({ audit: { filters: request.filters, before: request.before } }));
     if (request.before !== null && olderHeld) await olderHeld;

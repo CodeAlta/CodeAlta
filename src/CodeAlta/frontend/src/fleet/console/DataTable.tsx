@@ -28,7 +28,7 @@ export const tablePageSize = 100;
  * matters of it, and the details of the selected row opened right under it. The arrow keys move the selection, Enter and
  * Space open or close the details of a row, Escape closes them.
  */
-export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selected, onSelect, details, empty, rowState, rowProps, pageSize = tablePageSize, focus = null }: {
+export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selected, onSelect, details, empty, rowState, rowProps, group, pageSize = tablePageSize, focus = null }: {
   label: string;
   rows: readonly T[];
   columns: readonly DataColumn<T>[];
@@ -46,6 +46,11 @@ export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selec
   rowState?: (row: T) => string | undefined;
   /** A class and data attributes of the row of an item (`data-person`...), for what finds it. */
   rowProps?: (row: T) => Readonly<{ className?: string; data?: Readonly<Record<string, string>> }>;
+  /**
+   * The group of a row in the order shown (its day...): a line names the group above the first row of each; none for no
+   * groups. A table gives it for the sort that keeps a group together.
+   */
+  group?: ((row: T) => Readonly<{ key: string; label: ReactNode }>) | null;
   /** How many rows it shows at first, and adds at each "Show more". */
   pageSize?: number;
   /** The row that takes the focus once the table shows, scrolled into view: the one whose page the person comes back from. */
@@ -99,7 +104,7 @@ export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selec
       <thead>
         <tr>{columns.map(column => {
           const sorting = sort?.column === column.id ? sort.direction : null;
-          return <th key={column.id} scope="col" data-align={column.align} data-secondary={column.secondary || undefined} style={column.width ? { width: column.width } : undefined}
+          return <th key={column.id} scope="col" data-column={column.id} data-align={column.align} data-secondary={column.secondary || undefined} style={column.width ? { width: column.width } : undefined}
             aria-sort={sorting === "asc" ? "ascending" : sorting === "desc" ? "descending" : undefined}>
             {column.sort ? <button type="button" className="fleet-table-sort settings-own-button" onClick={() => onSort(toggledSort(sort, column.id))}>
               <span>{t(column.label)}</span>
@@ -110,16 +115,19 @@ export function DataTable<T>({ label, rows, columns, rowKey, sort, onSort, selec
       </thead>
       <tbody>
         {sorted.length === 0 ? <tr className="fleet-table-empty"><td colSpan={columns.length}>{empty}</td></tr>
-          : shown.map(row => {
+          : shown.map((row, index) => {
             const key = rowKey(row);
             const open = selected === key && !!details;
             const extra = rowProps?.(row);
             const data = Object.fromEntries(Object.entries(extra?.data ?? {}).map(([name, value]) => [`data-${name}`, value]));
+            const heading = group?.(row);
+            const starts = !!heading && (index === 0 || group!(shown[index - 1]).key !== heading.key);
             return <Fragment key={key}>
+              {starts && <tr className="fleet-table-group" data-group={heading.key}><th scope="rowgroup" colSpan={columns.length}>{heading.label}</th></tr>}
               <tr {...data} className={extra?.className} data-row-key={key} tabIndex={key === entry ? 0 : -1} aria-selected={selected === key} aria-expanded={details ? open : undefined} data-state={rowState?.(row)}
                 onClick={event => { if (!(event.target as HTMLElement).closest("button, a, input, label, select, [role=switch]")) onSelect(open ? null : key); }}
                 onKeyDown={event => { if (event.target === event.currentTarget) move(event, key); }}>
-                {columns.map(column => <td key={column.id} data-align={column.align} data-secondary={column.secondary || undefined}>{column.cell(row)}</td>)}
+                {columns.map(column => <td key={column.id} data-column={column.id} data-align={column.align} data-secondary={column.secondary || undefined}>{column.cell(row)}</td>)}
               </tr>
               {open && <tr className="fleet-table-details"><td colSpan={columns.length}><div className="fleet-table-details-body">{details!(row)}</div></td></tr>}
             </Fragment>;
