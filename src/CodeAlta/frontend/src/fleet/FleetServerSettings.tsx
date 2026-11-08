@@ -36,7 +36,7 @@ const devicesPollMilliseconds = 5000;
  */
 export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: string | null; api?: FleetServerApi }) {
   const { t } = useShellLanguage();
-  const { listing, loading, busy, notice, reload, mutate } = useSettingsEditor(options => api.status({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
+  const { listing, loading, busy, notice, reload, refresh, mutate } = useSettingsEditor(options => api.status({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
   const [dialog, setDialog] = useState<ServerDialogKind | null>(null);
   // Create my server…: on this computer in one go, or a server that runs already.
   const [creating, setCreating] = useState(false);
@@ -47,16 +47,17 @@ export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: strin
   // The words of a recovery key just made: shown once, until the person showed they kept them.
   const [recoveryWords, setRecoveryWords] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
-  // The host says when a link or its connection changes: the page reads them again, and the devices of a server with them.
+  // The host says when a link or its connection changes: the page reads them again, and the devices of a server with them,
+  // quietly: a paired machine that tries to connect says so every few seconds, and the page must not blink each time.
   useEffect(() => {
     if (!epoch) return;
     const abort = new AbortController();
     void (async () => {
-      try { for await (const _ of await api.watch({ expectedEpoch: epoch }, { signal: abort.signal })) if (!abort.signal.aborted) { reload(); setRevision(value => value + 1); } }
+      try { for await (const _ of await api.watch({ expectedEpoch: epoch }, { signal: abort.signal })) if (!abort.signal.aborted) { refresh(); setRevision(value => value + 1); } }
       catch { /* The bridge is gone: Reload still reads the page. */ }
     })();
     return () => abort.abort();
-  }, [api, epoch, reload]);
+  }, [api, epoch, refresh]);
   const servers = listing?.servers ?? [];
   return <SettingsPage className="fleet-server-settings" label={t("Server")} group="Fleet" title="CodeAlta Server"
     description="The server of your organization, and the computers and spaces it serves."

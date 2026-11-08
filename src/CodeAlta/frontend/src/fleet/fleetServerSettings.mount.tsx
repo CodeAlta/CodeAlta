@@ -47,8 +47,16 @@ let logins: FleetSignInLoginView[] = [];
 const unavailable = async () => { throw new Error("not in this fixture"); };
 // Left, the page is empty; the recovery key of the person links it again.
 let linked = true;
+// How long a read of the servers takes, and the changes the host announces, which a test sends.
+let statusDelay = 0;
+let reads = 0;
+let announce: (() => void) | null = null;
 const api: FleetServerApi = {
-  status: async () => ({ status: "ok", servers: linked ? [server()] : [], deviceId: "device-1", words: "apple river stone", personName: "Alex Example" }),
+  status: async () => {
+    reads++;
+    if (statusDelay) await new Promise(resolve => setTimeout(resolve, statusDelay));
+    return { status: "ok", servers: linked ? [server()] : [], deviceId: "device-1", words: "apple river stone", personName: "Alex Example" };
+  },
   leave: async () => { calls.push(JSON.stringify({ leave: "home" })); linked = false; return { status: "ok", message: null }; },
   recover: async (request: FleetServerRecoverRequest) => {
     calls.push(JSON.stringify({ recover: request.url, words: request.words }));
@@ -146,11 +154,17 @@ const api: FleetServerApi = {
     return { status: "ok", message: null };
   },
   openSignInPage: async (request: { handle: string }) => { calls.push(JSON.stringify({ openPage: request.handle })); return { status: "ok", message: null }; },
-  watch: async () => (async function* () { })(),
+  watch: async (_: unknown, options?: { signal?: AbortSignal }) => (async function* () {
+    while (!options?.signal?.aborted) {
+      await new Promise<void>(resolve => { announce = resolve; options?.signal?.addEventListener("abort", () => resolve(), { once: true }); });
+      if (!options?.signal?.aborted) yield { kind: "changed" };
+    }
+  })(),
   createToken: async () => { calls.push(JSON.stringify({ token: "home" })); return { status: "ok", token: "JOIN-5678", expiresAt: null, message: null }; },
   create: unavailable, join: unavailable, revoke: unavailable, signInMethods: unavailable, joinWithSignIn: unavailable,
 };
 Object.assign(window, { fleetFixture: { calls, skip: (count: number) => { skippedEntries = count; },
+  unlink: () => { linked = false; }, slow: (milliseconds: number) => { statusDelay = milliseconds; }, announce: () => announce?.(), reads: () => reads,
   // A person who signs in with the company's account and a Microsoft account (a passkey is linked by the test).
   logins: () => { logins = [
     { method: "company", name: "alex@contoso.example", createdAt: "2026-11-01T08:00:00Z", lastUsedAt: null, id: "a_company" },

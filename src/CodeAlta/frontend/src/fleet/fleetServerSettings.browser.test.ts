@@ -470,3 +470,32 @@ test("the owner's computer sees the telemetry of the fleet and changes it withou
     assert.deepEqual(page.problems, []);
   }, options);
 });
+
+test("a change the host announces is read again without the page blinking; Reload still shows that it reads", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    // A computer without a server whose paired machines try to connect: the host says something changed every second or so.
+    await page.evaluate(`window.fleetFixture.unlink()`);
+    await page.clickText(".settings-page-head .bp6-button, .bp6-button", "Reload");
+    await page.until(`document.querySelector('.fleet-server-empty')`, "the page without a server");
+    await page.evaluate(`window.fleetFixture.slow(300)`);
+    const reads = `window.fleetFixture.reads()`;
+    const before = await page.evaluate(reads) as number;
+    // Each moment the Reload button is disabled or a spinner shows is recorded while the host announces three changes.
+    await page.evaluate(`(() => { window.blinks = 0; const reload = () => [...document.querySelectorAll('.bp6-button')].find(button => button.textContent === 'Reload');
+      window.watcher = new MutationObserver(() => { if (reload()?.disabled || document.querySelector('.settings-page .activity-spinner, .settings-page [class*=spinner]')) window.blinks++; });
+      window.watcher.observe(document.body, { subtree: true, childList: true, attributes: true }); return true; })()`);
+    for (let index = 0; index < 3; index++) {
+      await page.evaluate(`window.fleetFixture.announce()`);
+      await page.until(`${reads} >= ${before + index + 1}`, "the page reads the servers again");
+      await new Promise(resolve => setTimeout(resolve, 400));
+    }
+    assert.equal(await page.evaluate(`window.blinks`), 0, "nothing appears and disappears");
+    assert.ok(await page.evaluate(`!!document.querySelector('.fleet-server-empty')`), "the page stays as it was");
+
+    // A read the person asks shows that it reads.
+    await page.clickText(".bp6-button", "Reload");
+    await page.until(`window.blinks > 0`, "Reload shows that it reads");
+    await page.evaluate(`window.watcher.disconnect()`);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});

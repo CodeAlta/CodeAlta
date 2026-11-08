@@ -22,19 +22,29 @@ export function useSettingsEditor<T extends { status: string }>(read: (options: 
   const [generation, setGeneration] = useState(0);
   const latest = useRef(read); latest.current = read;
   const alive = useRef(true);
+  // The next read is one the page asks by itself (the host said something changed): it shows no loading, and a read that
+  // fails keeps what the page shows instead of emptying it.
+  const quiet = useRef(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
+    const silent = quiet.current;
+    quiet.current = false;
+    if (!silent) setLoading(true);
     latest.current({ signal: controller.signal, timeoutMilliseconds: 20000 }).then(value => {
       if (controller.signal.aborted) return;
       const failure = settingsFailure(value.status);
-      if (failure) { setListing(null); setNotice(failure); } else setListing(value);
-    }).catch(() => { if (!controller.signal.aborted) { setListing(null); setNotice(settingsFailure("read_failed")); } })
+      if (!failure) setListing(value);
+      else if (!silent) { setListing(null); setNotice(failure); }
+    }).catch(() => { if (!controller.signal.aborted && !silent) { setListing(null); setNotice(settingsFailure("read_failed")); } })
+      // A quiet read that replaced a visible one ends its loading too.
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [key, generation]);
-  const reload = useCallback(() => setGeneration(value => value + 1), []);
+  // A read the person asked shows that it loads, also when the host announced a change at the same moment.
+  const reload = useCallback(() => { quiet.current = false; setGeneration(value => value + 1); }, []);
+  /** Reads the listing again without showing it loads: for a change the host announced, which may come every second. */
+  const refresh = useCallback(() => { quiet.current = true; setGeneration(value => value + 1); }, []);
   /**
    * Runs one write; returns whether it succeeded. `policy_failed` saved the item, so it also reloads. `describe` says
    * what a status of the page's own means, before the statuses every page shares.
@@ -54,7 +64,7 @@ export function useSettingsEditor<T extends { status: string }>(read: (options: 
       return false;
     } finally { if (alive.current) setBusy(false); }
   }, []);
-  return { listing, loading, busy, notice, setNotice, reload, mutate };
+  return { listing, loading, busy, notice, setNotice, reload, refresh, mutate };
 }
 
 /** A text that is shown as it is, not translated: what a plugin writes. */

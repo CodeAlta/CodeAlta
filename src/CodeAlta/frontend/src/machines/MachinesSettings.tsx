@@ -24,7 +24,7 @@ type MachinesApi = Pick<typeof machines, "list" | "previewPairing" | "pair" | "f
  */
 export function MachinesSettings({ epoch, api = machines, initialMachine = null }: { epoch: string | null; api?: MachinesApi; initialMachine?: string | null }) {
   const { t } = useShellLanguage();
-  const { listing, loading, busy, notice, reload, mutate } = useSettingsEditor(options => api.list({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
+  const { listing, loading, busy, notice, reload, refresh, mutate } = useSettingsEditor(options => api.list({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
   const [pairing, setPairing] = useState(false);
   // Add a machine…: how it is reached, then its setup.
   const [adding, setAdding] = useState(false);
@@ -50,11 +50,11 @@ export function MachinesSettings({ epoch, api = machines, initialMachine = null 
     if (!epoch) return;
     const abort = new AbortController();
     void (async () => {
-      try { for await (const _ of await api.watch({ expectedEpoch: epoch }, { signal: abort.signal })) if (!abort.signal.aborted) { reload(); setChanges(value => value + 1); } }
+      try { for await (const _ of await api.watch({ expectedEpoch: epoch }, { signal: abort.signal })) if (!abort.signal.aborted) { refresh(); setChanges(value => value + 1); } }
       catch { /* The bridge is gone: Reload still reads the list. */ }
     })();
     return () => abort.abort();
-  }, [api, epoch, reload]);
+  }, [api, epoch, refresh]);
   // One list of the person's machines whatever the path: those paired with this computer and those it reaches through its server.
   const openedMachine = opened ? listing?.machines.find(machine => machine.id === opened) : undefined;
   if (openedMachine && epoch) return <MachinePage epoch={epoch} machine={openedMachine} api={{ ...machines, ...api } as MachinePageApi} onBack={() => { setReturnedFrom(opened); setOpened(null); }} />;
