@@ -33,8 +33,9 @@ public sealed class SkillCatalogTests
                 })
             .ConfigureAwait(false);
 
-        Assert.AreEqual(8, descriptors.Count);
+        Assert.AreEqual(9, descriptors.Count);
         Assert.AreEqual(SkillSourceKind.Builtin, descriptors.Single(x => x.Name == "codealta-plugin-runtime").SourceKind);
+        Assert.AreEqual(SkillSourceKind.Builtin, descriptors.Single(x => x.Name == "codealta-model-servers").SourceKind);
         Assert.AreEqual(SkillSourceKind.Builtin, descriptors.Single(x => x.Name == "codealta-fleet").SourceKind);
         Assert.AreEqual(SkillSourceKind.Builtin, descriptors.Single(x => x.Name == "document-conversion").SourceKind);
         Assert.AreEqual(SkillSourceKind.Builtin, descriptors.Single(x => x.Name == "ultra-profiler").SourceKind);
@@ -198,7 +199,7 @@ public sealed class SkillCatalogTests
             .ConfigureAwait(false);
 
         CollectionAssert.AreEquivalent(
-            new[] { "codealta-fleet", "codealta-plugin-runtime", "document-conversion", "parent-skill", "ultra-profiler", "visible-skill" },
+            new[] { "codealta-fleet", "codealta-model-servers", "codealta-plugin-runtime", "document-conversion", "parent-skill", "ultra-profiler", "visible-skill" },
             descriptors.Select(static descriptor => descriptor.Name).ToArray());
     }
 
@@ -229,7 +230,7 @@ public sealed class SkillCatalogTests
                 })
             .ConfigureAwait(false);
 
-        Assert.AreEqual(8, allDescriptors.Count);
+        Assert.AreEqual(9, allDescriptors.Count);
         var winner = allDescriptors.Single(x => x.SourceKind == SkillSourceKind.ProjectAlta);
         Assert.IsTrue(winner.IsModelVisible);
         Assert.IsFalse(winner.IsShadowed);

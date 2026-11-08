@@ -58,10 +58,10 @@ internal sealed class DesktopModelServers : IAsyncDisposable
     /// <summary>Raised with the id of a machine whose model servers changed.</summary>
     public event Action<string>? Changed;
 
-    /// <summary>Raised when a download of this computer ended.</summary>
+    /// <summary>Raised when a download of this computer or of a machine it watches ended.</summary>
     public event Action<string, DownloadInfo>? DownloadEnded;
 
-    /// <summary>Raised when an install or an update of this computer ended.</summary>
+    /// <summary>Raised when an install or an update of this computer or of a machine it watches ended.</summary>
     public event Action<string, HostTask>? TaskEnded;
 
     /// <summary>Gets or sets what adds or changes a provider of this computer that uses a model server.</summary>
@@ -134,7 +134,11 @@ internal sealed class DesktopModelServers : IAsyncDisposable
             if (_watches.TryGetValue(id, out var existing) && ReferenceEquals(existing.Client, client)) continue;
             try
             {
-                var watch = await client.WatchModelServersAsync(_ => Changed?.Invoke(id), cancellationToken).ConfigureAwait(false);
+                var watch = await client.WatchModelServersAsync(_ => Changed?.Invoke(id), ended =>
+                {
+                    if (ended.Download is { } download) DownloadEnded?.Invoke(id, download);
+                    if (ended.Task is { } task) TaskEnded?.Invoke(id, task);
+                }, cancellationToken).ConfigureAwait(false);
                 if (_watches.TryRemove(id, out var replaced)) replaced.Watch.Dispose();
                 _watches[id] = (client, watch);
             }
@@ -143,6 +147,34 @@ internal sealed class DesktopModelServers : IAsyncDisposable
                 // A machine of an older version, or one that does not run model servers: it is shown without live changes.
             }
         }
+    }
+
+    /// <summary>Reads a model of Hugging Face, with its quantizations and whether each fits the machines named and is on their disk.</summary>
+    /// <param name="repo">The repository.</param>
+    /// <param name="machines">The machines; those that cannot be read are left out.</param>
+    /// <param name="cancellationToken">Ends the reading.</param>
+    /// <returns>The model.</returns>
+    /// <exception cref="ModelHostException">This instance runs no model host, or the repository cannot be read.</exception>
+    public async Task<CodeAlta.LiveTool.AltaHubModel> ReadHubModelAsync(string repo, IReadOnlyList<string> machines, CancellationToken cancellationToken)
+    {
+        var local = Local ?? throw new ModelHostException("unavailable", "This instance runs no model host: Hugging Face is read through it.");
+        var (details, quants) = await local.InspectRepoAsync(repo, cancellationToken).ConfigureAwait(false);
+        var read = await Task.WhenAll(machines.Distinct(StringComparer.Ordinal).Select(async machine =>
+        {
+            try
+            {
+                var status = await StatusAsync(machine, cancellationToken).ConfigureAwait(false);
+                return (Machine: machine, Status: status);
+            }
+            catch (ModelHostException)
+            {
+                return (Machine: machine, Status: (ModelHostStatus?)null);
+            }
+        })).ConfigureAwait(false);
+        var known = read.Where(static item => item.Status is not null).ToList();
+        return new CodeAlta.LiveTool.AltaHubModel(details, [.. quants.Select(quant => new CodeAlta.LiveTool.AltaHubQuantization(quant.Tag, quant.Bits, quant.ModelBytes, quant.MmprojBytes, quant.Files.Count,
+            [.. known.Select(item => new CodeAlta.LiveTool.AltaHubFit(item.Machine, CodeAlta.ModelServers.Store.FitEstimate.For(quant, item.Status!.Hardware),
+                item.Status.Models.Any(model => string.Equals(model.Id, $"{details.Model.Id}:{quant.Tag}", StringComparison.OrdinalIgnoreCase))))]))]);
     }
 
     /// <summary>Adds a provider for a server on each machine named, so that the sessions there use it.</summary>

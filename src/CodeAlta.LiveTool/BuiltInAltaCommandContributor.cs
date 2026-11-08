@@ -237,6 +237,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreateAutomationCommand(context.Invocation);
         }
 
+        // The llama.cpp servers of this computer and of the machines it manages.
+        if (context.Invocation.Services.Get<IAltaModelServers>() is not null)
+        {
+            yield return CreateLlamaCommand(context.Invocation);
+        }
+
         // The fleet: the machines this computer reaches, their sessions, the moves, where the automations run.
         if (context.Invocation.Services.Get<IAltaFleet>() is not null)
         {
@@ -322,7 +328,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var releaseNotes = context.Services.Get<IAltaReleaseNotes>() is not null;
         var fleet = context.Services.Get<IAltaFleet>() is not null;
         var secrets = context.Services.Get<ProjectCatalog>() is not null;
-        if (!secrets && !changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && !windows && !settings && !releaseNotes && !fleet && workshop is null) return Policies;
+        var llama = context.Services.Get<IAltaModelServers>() is not null;
+        if (!llama && !secrets && !changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && !windows && !settings && !releaseNotes && !fleet && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
         if (spaces) policies.AddRange(LabelPolicies);
@@ -351,6 +358,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (fleet) policies.AddRange(FleetAuditPolicies);
         if (fleet) policies.AddRange(FleetPolicyPolicies);
         if (secrets) policies.AddRange(SecretPolicies);
+        if (llama) policies.AddRange(LlamaPolicies);
         return policies;
     }
 

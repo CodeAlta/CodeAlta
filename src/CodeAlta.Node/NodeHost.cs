@@ -131,7 +131,15 @@ public sealed class NodeHost : IAsyncDisposable
             if (!options.Offline && options.ConfigureModelProviders is null) modelsDev.StartBackgroundRefresh();
             var pluginProviderTypes = new PluginModelProviderTypes(toolEndpoints) { ModelCatalog = modelsDev };
             host = await CodeAltaHost.CreateAsync(CreateHostOptions(options, guard, modelsDev, pluginProviderTypes), cancellationToken).ConfigureAwait(false);
-            var alta = HeadlessAltaTools.Attach(host, CreateAltaOptions(profile));
+            var running = host;
+            var alta = HeadlessAltaTools.Attach(host, CreateAltaOptions(profile) with
+            {
+                // `alta llama`: the model servers of the machine; what a session starts tells it its end as a background job does.
+                ModelServers = options.ModelHost is { } modelHost
+                    ? new LocalAltaModelServers(modelHost, Environment.MachineName,
+                        (session, prompt) => running.RuntimeService.DeliverHostPromptAsync(session, prompt, CodeAlta.Orchestration.Runtime.SessionRuntimeService.JobPromptKind))
+                    : null,
+            });
             // The schedules fire on the node: those of its profile, and those its devices assigned to it, which it keeps.
             NodeAutomations? automations = null;
             if (options.RunAutomations)

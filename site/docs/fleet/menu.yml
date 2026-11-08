@@ -2,6 +2,7 @@ doc:
   - {path: readme.md, title: "<i class='bi bi-pc-display-horizontal' aria-hidden='true'></i> Overview"}
   - {path: machines.md, title: "Your Machines"}
   - {path: sessions.md, title: "Work on Your Machines"}
+  - {path: model-servers.md, title: "Model Servers"}
   - {path: server.md, title: "CodeAlta Server"}
   - {path: operations.md, title: "Run Your Fleet"}
   - {path: people-and-access.md, title: "People and Access"}

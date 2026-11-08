@@ -63,8 +63,8 @@ internal sealed class ModelServersService
     }
 
     /// <summary>Asks a machine for an action on its model servers; the action and its result are the JSON of the node API.</summary>
-    [NeoRpcMethod("do")]
-    public async Task<ModelServersJsonResponse> DoAsync(ModelServersDoRequest request, CancellationToken cancellationToken)
+    [NeoRpcMethod("act")]
+    public async Task<ModelServersJsonResponse> ActAsync(ModelServersDoRequest request, CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
         if (request!.Machine is not { Length: > 0 and <= 64 } machine || request.Action is not { Length: > 0 and <= MaximumText } json) return new("invalid_request", null, null);
@@ -131,24 +131,12 @@ internal sealed class ModelServersService
         if (_servers!.Local is not { } local) return new("unavailable", null, null);
         try
         {
-            var (details, quants) = await local.InspectRepoAsync(request!.Repo ?? "", cancellationToken).ConfigureAwait(false);
+            var model = await _servers.ReadHubModelAsync(request!.Repo ?? "", [.. (request.Machines ?? []).Where(static machine => machine is { Length: > 0 and <= 64 }).Take(32)],
+                cancellationToken).ConfigureAwait(false);
+            var details = model.Details;
             var card = await local.Hub.GetCardAsync(details.Model.Id, details.Revision, cancellationToken).ConfigureAwait(false);
-            var machines = new List<(string Machine, HardwareInventory Hardware, IReadOnlyList<StoredModel> Models)>();
-            foreach (var machine in request.Machines ?? [])
-            {
-                try
-                {
-                    var status = await _servers.StatusAsync(machine, cancellationToken).ConfigureAwait(false);
-                    machines.Add((machine, status.Hardware, status.Models));
-                }
-                catch (ModelHostException)
-                {
-                }
-            }
-
-            var views = quants.Select(quant => new HubQuantView(quant.Tag, quant.Bits, quant.ModelBytes, quant.MmprojBytes, quant.Files.Count,
-                [.. machines.Select(item => new HubFitView(item.Machine, FitEstimate.For(quant, item.Hardware),
-                    item.Models.Any(model => string.Equals(model.Id, $"{details.Model.Id}:{quant.Tag}", StringComparison.OrdinalIgnoreCase))))])).ToList();
+            var views = model.Quantizations.Select(static quant => new HubQuantView(quant.Tag, quant.Bits, quant.ModelBytes, quant.MmprojBytes, quant.Files,
+                [.. quant.Fits.Select(static fit => new HubFitView(fit.Machine, fit.Fit, fit.OnDisk))])).ToList();
             var view = new HubModelView(details.Model, details.Revision, details.License, [.. details.BaseModels], details.Parameters, details.Architecture, details.ContextLength, views, card);
             return new("ok", JsonSerializer.Serialize(view, ModelServersPageJson.Default.HubModelView), null);
         }

@@ -23,6 +23,7 @@ work with, without changing anything for someone who stays on one computer.
 | [The console](console.md) | CodeAlta Desktop as the gateway of the fleet: why and at what cost, the API-complete server, canvases, plugins, agents |
 | [Protocol](protocol.md) | Three planes; connections, handshake, envelopes, durability, versions, the services, the REST API, and why WebSocket |
 | [Identity](identity.md) | People, devices, nodes, service identities; pairing, sign-in, enrollment, confirmations, agents acting for people |
+| [Model servers](model-servers.md) | llama.cpp on the machines: builds, models in the Hugging Face cache, servers, updates, how sessions reach them, permissions |
 | [Secrets](secrets.md) | Secrets, variables and environments as in GitHub Actions: scopes, references from the configuration, sealed end to end to the machines that use them, write-only, masking, approvals |
 | [Security and privacy](security-and-privacy.md) | What the server sees, keys, the device list, credentials, remote execution, policies, threats, audit, SOC 2 |
 | [Collaboration](collaboration.md) | Presence, project channels, sharing, handoffs, notifications, questions across people |

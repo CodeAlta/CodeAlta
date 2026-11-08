@@ -52,11 +52,11 @@ public sealed record AltaCommandRegistryOptions
     /// <summary>
     /// Gets the built-in roots of CodeAlta Node (<c>altanode</c>), a long-lived host without a window: those of
     /// <see cref="CliBuiltInRoots"/>, and the reminders and automations a host that outlives the turns of its sessions
-    /// keeps. Without <c>ask</c> and <c>review</c>, until they reach people.
+    /// keeps, and the model servers of its machine. Without <c>ask</c> and <c>review</c>, until they reach people.
     /// </summary>
     public static FrozenSet<string> NodeBuiltInRoots { get; } = FrozenSet.Create(
         StringComparer.Ordinal,
-        [.. CliBuiltInRoots, "reminder", "automation"]);
+        [.. CliBuiltInRoots, "reminder", "automation", "llama"]);
 
     /// <summary>Gets the options of CodeAlta Node (<c>altanode</c>): the built-in roots of <see cref="NodeBuiltInRoots"/> only.</summary>
     public static AltaCommandRegistryOptions Node { get; } = new() { AllowedBuiltInRoots = NodeBuiltInRoots };

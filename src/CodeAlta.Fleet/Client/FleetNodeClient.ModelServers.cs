@@ -13,6 +13,7 @@ public sealed partial class FleetNodeClient
 {
     private readonly ConcurrentDictionary<string, Channel<FleetLlamaHttpChunk?>> _llamaAnswers = new(StringComparer.Ordinal);
     private event Action<long>? LlamaChanged;
+    private event Action<FleetLlamaEnded>? LlamaEnded;
     private int _llamaWatching;
 
     /// <summary>Reads the model host of the machine.</summary>
@@ -43,10 +44,20 @@ public sealed partial class FleetNodeClient
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>Something that stops calling <paramref name="changed"/>.</returns>
     /// <exception cref="FleetException">The node refused the call.</exception>
-    public async Task<IDisposable> WatchModelServersAsync(Action<long> changed, CancellationToken cancellationToken = default)
+    public Task<IDisposable> WatchModelServersAsync(Action<long> changed, CancellationToken cancellationToken = default)
+        => WatchModelServersAsync(changed, null, cancellationToken);
+
+    /// <summary>Follows the changes of the model host of the machine, and the ends of its downloads and installs, while this channel lasts.</summary>
+    /// <param name="changed">Called with the revision of each change, at most twice a second.</param>
+    /// <param name="ended">Called when a download or an install or update ended there; null for none.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Something that stops calling them.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public async Task<IDisposable> WatchModelServersAsync(Action<long> changed, Action<FleetLlamaEnded>? ended, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(changed);
         LlamaChanged += changed;
+        if (ended is not null) LlamaEnded += ended;
         if (Interlocked.Exchange(ref _llamaWatching, 1) == 0)
         {
             try
@@ -58,11 +69,16 @@ public sealed partial class FleetNodeClient
             {
                 Interlocked.Exchange(ref _llamaWatching, 0);
                 LlamaChanged -= changed;
+                if (ended is not null) LlamaEnded -= ended;
                 throw;
             }
         }
 
-        return new Unsubscribe(() => LlamaChanged -= changed);
+        return new Unsubscribe(() =>
+        {
+            LlamaChanged -= changed;
+            if (ended is not null) LlamaEnded -= ended;
+        });
     }
 
     /// <summary>Sends an inference request to a server of the machine; the body of its answer streams as it comes.</summary>
@@ -118,6 +134,9 @@ public sealed partial class FleetNodeClient
                 break;
             case FleetModelServerMethods.ChangedEvent when fleetEvent.Payload?.Deserialize(FleetModelServersJsonContext.Default.FleetLlamaChanged) is { } changed:
                 LlamaChanged?.Invoke(changed.Revision);
+                break;
+            case FleetModelServerMethods.EndedEvent when fleetEvent.Payload?.Deserialize(FleetModelServersJsonContext.Default.FleetLlamaEnded) is { } finished:
+                LlamaEnded?.Invoke(finished);
                 break;
         }
     }

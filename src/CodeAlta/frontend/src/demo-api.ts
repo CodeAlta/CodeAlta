@@ -175,6 +175,10 @@ export const secrets = Object.freeze({ list: async () => ({ status: "unavailable
 export const machines = Object.freeze({ list: async () => ({ status: "unavailable", hostEpoch: null, machines: [] }), refresh: async () => ({ status: "unavailable", hostEpoch: null, machines: [] }),
   previewPairing: unavailable, pair: unavailable, forget: unavailable, newSession: unavailable, newSessionChoices: unavailable, watch: async () => (async function* () { })(),
   moveSettings: unavailable, setReceiveMoves: unavailable, movePreview: unavailable, moveSession: unavailable });
+export const modelServers = Object.freeze({ machines: async () => ({ status: "unavailable", machines: [] }), status: async () => ({ status: "unavailable", json: null, message: null }),
+  act: async () => ({ status: "unavailable", json: null, message: null }), useInSessions: async () => ({ status: "unavailable", results: [] }),
+  hubSearch: async () => ({ status: "unavailable", json: null, message: null }), hubModel: async () => ({ status: "unavailable", json: null, message: null }),
+  watch: async () => (async function* () { })() });
 export const fleetServer = Object.freeze({ status: async () => ({ status: "unavailable", servers: [], deviceId: null, words: null }),
   create: unavailable, join: unavailable, leave: unavailable, createToken: unavailable, devices: unavailable, approve: unavailable, revoke: unavailable,
   linkSpace: unavailable, directory: async () => ({ status: "unavailable", linkId: null, url: null, organization: null, connection: null, machines: [], sessions: [] }),

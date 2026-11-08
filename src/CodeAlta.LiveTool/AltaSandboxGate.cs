@@ -42,6 +42,9 @@ internal static class AltaSandboxGate
         "fleet audit list", "fleet audit verify",
         // The policy is read, as access is.
         "fleet policy show",
+        // The model servers are read; what downloads, starts or changes them is refused.
+        "llama machine list", "llama status", "llama build list", "llama hub search", "llama hub show", "llama model list", "llama download list",
+        "llama server list", "llama server show", "llama server log",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Gets the sandbox of a session, or null when it is not sandboxed.</summary>

@@ -23,6 +23,9 @@ public static class FleetModelServerMethods
     /// <summary>The model host changed: read its status again.</summary>
     public const string ChangedEvent = "llama.changed";
 
+    /// <summary>A download or an install or update of the model host ended (<see cref="FleetLlamaEnded"/>), sent to the channels that watch.</summary>
+    public const string EndedEvent = "llama.ended";
+
     /// <summary>The servers this device may use, with their models. Models or Manage.</summary>
     public const string Servers = "llama.servers.list";
 
@@ -88,6 +91,11 @@ public sealed record FleetLlamaHttpCancel(string RequestId);
 /// <param name="Revision">Its revision now.</param>
 public sealed record FleetLlamaChanged(long Revision);
 
+/// <summary>A download, or an install or update of llama.cpp, ended on the machine.</summary>
+/// <param name="Download">The download that ended, or null.</param>
+/// <param name="Task">The install or update that ended, or null.</param>
+public sealed record FleetLlamaEnded(DownloadInfo? Download, HostTask? Task);
+
 /// <summary>The JSON of the model servers on the node API.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(FleetLlamaServerList))]
@@ -97,6 +105,7 @@ public sealed record FleetLlamaChanged(long Revision);
 [JsonSerializable(typeof(FleetLlamaHttpEnd))]
 [JsonSerializable(typeof(FleetLlamaHttpCancel))]
 [JsonSerializable(typeof(FleetLlamaChanged))]
+[JsonSerializable(typeof(FleetLlamaEnded))]
 [JsonSerializable(typeof(FleetEmpty))]
 public sealed partial class FleetModelServersJsonContext : JsonSerializerContext;
 
@@ -169,7 +178,13 @@ public sealed partial class FleetNodeService
         var connection = call.Caller.Connection;
         if (_llamaWatches.ContainsKey(connection)) return Task.FromResult(new FleetEmpty());
         var watch = new LlamaWatch(this, connection);
-        if (_llamaWatches.TryAdd(connection, watch)) ModelServersHost.Changed += watch.OnChanged;
+        if (_llamaWatches.TryAdd(connection, watch))
+        {
+            ModelServersHost.Changed += watch.OnChanged;
+            ModelServersHost.DownloadEnded += watch.OnDownloadEnded;
+            ModelServersHost.TaskEnded += watch.OnTaskEnded;
+        }
+
         return Task.FromResult(new FleetEmpty());
     }
 
@@ -337,9 +352,39 @@ public sealed partial class FleetNodeService
             });
         }
 
+        // The end of a download or of an install is sent at once: the computer that asked tells its person and its session.
+        public void OnDownloadEnded(DownloadInfo download) => SendEnded(new FleetLlamaEnded(download, null));
+
+        public void OnTaskEnded(HostTask task) => SendEnded(new FleetLlamaEnded(null, task));
+
+        private void SendEnded(FleetLlamaEnded ended)
+        {
+            if (connection.State != FleetConnectionState.Open)
+            {
+                Stop();
+                return;
+            }
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await connection.SendEventAsync(new FleetEvent(FleetModelServerMethods.EndedEvent,
+                        JsonSerializer.SerializeToElement(ended, FleetModelServersJsonContext.Default.FleetLlamaEnded))).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is FleetConnectionClosedException or ObjectDisposedException or IOException or OperationCanceledException)
+                {
+                    Stop();
+                }
+            });
+        }
+
         private void Stop()
         {
-            if (service._llamaWatches.TryRemove(connection, out _) && service._options.ModelServers is { } host) host.Changed -= OnChanged;
+            if (!service._llamaWatches.TryRemove(connection, out _) || service._options.ModelServers is not { } host) return;
+            host.Changed -= OnChanged;
+            host.DownloadEnded -= OnDownloadEnded;
+            host.TaskEnded -= OnTaskEnded;
         }
     }
 }

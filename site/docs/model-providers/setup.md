@@ -369,6 +369,7 @@ api_url = "http://localhost:9931/v1"  # optional: the address of llama-server 0.
 - **The API** is Chat Completions. Set `api = "responses"` for the Responses API of llama-server 0.8.0 or later; with an older server, the answer of a reasoning model shows twice there.
 - **Reasoning** follows the options of the server, such as `--reasoning-effort`: the server lists no efforts for its model, so CodeAlta offers none.
 - A slow model on a small machine may need a longer `network_timeout_seconds`.
+- **A server CodeAlta runs** (Settings > Fleet > [Model servers](../fleet/model-servers.md)) is named with `server` instead of `api_url`: `server = "local/coder"` for the server `coder` of this computer, `"<machine>/<server>"` for one of a paired machine, reached through the connection to that machine. CodeAlta adds such providers when you tick **Use in the sessions of**.
 
 The server runs the model: what one model does wrong (a tool call left in its thinking, a template that ignores the effort) is fixed in llama.cpp or with its options, not in CodeAlta.
 

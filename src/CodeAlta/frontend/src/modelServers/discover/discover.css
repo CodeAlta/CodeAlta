@@ -1,0 +1,35 @@
+/* The Discover models canvas: a bar of search and filters, the models as cards, and the page of the one chosen beside them. */
+.discover-models { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; background: var(--bg); color: var(--text); }
+.discover-models-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.discover-models-search { flex: 1 1 260px; max-width: 520px; }
+.discover-models-publishers { display: flex; flex-wrap: wrap; gap: 4px; }
+.discover-models-body { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
+.discover-models-body.has-details { grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr); }
+.discover-models-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); align-content: start; gap: 10px; padding: 14px 16px; overflow: auto; }
+.discover-models-list > .bp6-non-ideal-state { grid-column: 1 / -1; padding: 40px 0; }
+.discover-model-card { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: inherit; font: inherit;
+  text-align: start; cursor: pointer; }
+.discover-model-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.discover-model-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.discover-model-card.is-chosen { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.discover-model-title { display: grid; min-width: 0; }
+.discover-model-title > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.discover-model-title > span { font-size: 11.5px; }
+.discover-model-facts { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; }
+.discover-model-facts > span { display: inline-flex; align-items: center; gap: 3px; }
+.discover-model-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.discover-model-page { display: grid; align-content: start; gap: 12px; padding: 14px 18px; overflow: auto; border-left: 1px solid var(--line); background: var(--panel); }
+.discover-model-page > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.discover-model-page h2 { margin: 0; font-size: 17px; }
+.discover-model-page header a { font-size: 12px; }
+.discover-model-facts-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px 16px; margin: 0; }
+.discover-model-facts-list dt { color: var(--muted); font-size: 11.5px; }
+.discover-model-facts-list dd { margin: 0; overflow-wrap: anywhere; }
+.discover-model-machine { display: flex; align-items: center; gap: 8px; }
+.discover-model-card-text { padding-top: 10px; border-top: 1px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
+.discover-model-card-text img { max-width: 100%; }
+@media (max-width: 900px) {
+  .discover-models-body.has-details { grid-template-columns: minmax(0, 1fr); }
+  .discover-models-body.has-details .discover-models-list { display: none; }
+  .discover-model-page { border-left: 0; }
+}

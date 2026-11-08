@@ -62,6 +62,8 @@ internal static class DesktopAltaTools
     /// <param name="settings">The settings the <c>alta settings</c> commands list, read, change and open; without them the commands do not exist.</param>
     /// <param name="machineMoves">The moves of sessions to the paired machines, for <c>alta session move</c>; without them the command does not exist.</param>
     /// <param name="fleet">The fleet the <c>alta fleet</c> commands read; without it the commands do not exist.</param>
+    /// <param name="releaseNotes">The release notes the <c>alta release-notes</c> commands read.</param>
+    /// <param name="modelServers">The model servers the <c>alta llama</c> commands manage; without them the commands do not exist.</param>
     /// <returns>The dispatcher of the commands, for the other callers of the host (its MCP server).</returns>
     /// <exception cref="ArgumentNullException">The host or the reminders are null.</exception>
     internal static AltaCommandDispatcher Attach(CodeAltaHost host, AltaReminderService reminders, PluginAltaServiceBridge? pluginAlta = null, IAltaChangesView? changes = null,
@@ -71,7 +73,7 @@ internal static class DesktopAltaTools
         IAltaCanvasView? canvases = null, CodeAlta.Catalog.Documentation.ShippedDocumentation? documentation = null, IAltaDocumentationView? documentationView = null,
         CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null,
         CodeAlta.Catalog.Reviews.ReviewService? reviews = null, IAltaReviewPolicy? reviewPolicy = null, IAltaWindows? windows = null, IAltaSettings? settings = null,
-        IAltaSessionMachineMoves? machineMoves = null, IAltaFleet? fleet = null, IAltaReleaseNotes? releaseNotes = null)
+        IAltaSessionMachineMoves? machineMoves = null, IAltaFleet? fleet = null, IAltaReleaseNotes? releaseNotes = null, IAltaModelServers? modelServers = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(reminders);
@@ -80,7 +82,7 @@ internal static class DesktopAltaTools
             new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents), host.CodeModeScripts, host.CodeModeQuestions)
             .WithSpaces(async (sessionId, token) => await host.RuntimeService.GetSessionSpaceFilterAsync(sessionId, token).ConfigureAwait(false));
         var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance, spaces, commands, canvases, documentation, documentationView, bookmarks, search,
-            reviews, reviewPolicy, windows, codeMode, settings, machineMoves, fleet, releaseNotes);
+            reviews, reviewPolicy, windows, codeMode, settings, machineMoves, fleet, releaseNotes, modelServers);
         pluginAlta?.SetDispatcher(dispatcher);
         host.Commands.SessionTools = CreateSessionTools(dispatcher, search?.Service, codeMode);
         return dispatcher;
@@ -95,7 +97,7 @@ internal static class DesktopAltaTools
         CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null,
         CodeAlta.Catalog.Reviews.ReviewService? reviews = null, IAltaReviewPolicy? reviewPolicy = null, IAltaWindows? windows = null,
         CodeModeSessionTools? codeMode = null, IAltaSettings? settings = null, IAltaSessionMachineMoves? machineMoves = null, IAltaFleet? fleet = null,
-        IAltaReleaseNotes? releaseNotes = null)
+        IAltaReleaseNotes? releaseNotes = null, IAltaModelServers? modelServers = null)
     {
         var permissions = host.RuntimeService.Permissions;
         var services = new AltaServiceCollection()
@@ -152,6 +154,7 @@ internal static class DesktopAltaTools
         if (machineMoves is not null) services.Add(machineMoves);
         if (fleet is not null) services.Add(fleet);
         if (releaseNotes is not null) services.Add(releaseNotes);
+        if (modelServers is not null) services.Add(modelServers);
         if (fleet is IAltaFleetAccess access) services.Add(access);
         if (fleet is IAltaFleetAudit audit) services.Add(audit);
         if (fleet is IAltaFleetPolicy policy) services.Add(policy);

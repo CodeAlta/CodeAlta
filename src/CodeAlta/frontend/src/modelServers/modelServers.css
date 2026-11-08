@@ -1,0 +1,91 @@
+/* Settings > Fleet > Model servers: the tables of servers, models and builds, their details, and the dialogs. */
+.model-servers-settings .bp6-tabs { display: grid; gap: 10px; }
+.model-servers-settings .bp6-tab-list { align-items: center; gap: 4px 18px; flex-wrap: wrap; }
+.model-servers-settings .bp6-tab-panel { margin-top: 0; display: grid; gap: 10px; }
+.model-servers-unreachable { display: grid; gap: 2px; }
+.model-servers-state { white-space: nowrap; }
+.model-servers-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.model-servers-name > svg { flex: none; color: var(--fleet-blue); }
+.model-servers-name > strong, .model-servers-name > span > strong { overflow: hidden; text-overflow: ellipsis; }
+.model-servers-name > span { display: grid; min-width: 0; }
+.model-servers-repo { overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; }
+.model-servers-models { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.model-servers-gpus { overflow: hidden; text-overflow: ellipsis; }
+.model-servers-update, .model-servers-vision, .model-servers-more { margin-left: 6px; }
+.model-servers-progress { display: grid; gap: 3px; min-width: 0; font-size: 11.5px; }
+.model-servers-progress .bp6-progress-bar { height: 5px; }
+.model-servers-failed { display: inline-flex; gap: 6px; align-items: center; overflow: hidden; text-overflow: ellipsis; color: var(--red); }
+
+/* The details of a row. */
+.model-servers-details { display: grid; gap: 10px; }
+.model-servers-details dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px 18px; margin: 0; }
+.model-servers-details dt { color: var(--muted); font-size: 11.5px; }
+.model-servers-details dd { margin: 0; overflow-wrap: anywhere; }
+.model-servers-details h4 { margin: 4px 0 0; font-size: 12px; font-weight: 650; }
+.model-servers-details .machine-details-actions { flex-wrap: wrap; }
+.model-servers-reason { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: var(--muted); }
+.model-servers-reason > svg { flex: none; margin-top: 2px; }
+.model-servers-reason.is-failed { color: var(--red); }
+.model-servers-test { display: flex; align-items: center; gap: 8px; margin: 0; }
+.model-servers-models-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.model-servers-models-table th { padding: 4px 8px; color: var(--muted); font-weight: 500; text-align: start; border-bottom: 1px solid var(--line); }
+.model-servers-models-table td { padding: 4px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); vertical-align: middle; }
+.model-servers-models-table tr:last-child td { border-bottom: 0; }
+.model-servers-models-table td.numeric { text-align: end; white-space: nowrap; }
+.model-servers-model-actions { text-align: end; white-space: nowrap; }
+.model-servers-log { max-height: 220px; margin: 0; padding: 8px 10px; overflow: auto; border: 1px solid var(--line); border-radius: 4px; background: var(--panel);
+  font: 11px/1.45 var(--mono-font, ui-monospace, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }
+.model-servers-path { overflow-wrap: anywhere; }
+.model-servers-history { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.model-servers-history .bp6-tag { margin-left: 6px; }
+
+/* The disks of the machines, above the models. */
+.model-servers-disks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.model-servers-disk { display: grid; gap: 5px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.model-servers-disk:empty { display: none; }
+.model-servers-disk-title { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.model-servers-disk .bp6-progress-bar { height: 6px; }
+.model-servers-disk-foot { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.model-servers-disk > .bp6-popover-target, .model-servers-disk > span > .bp6-button { justify-self: start; }
+.model-servers-cleanup ul { max-height: 180px; margin: 0; padding-left: 18px; overflow: auto; }
+
+/* The dialogs. */
+.model-server-dialog { width: min(720px, calc(100vw - 40px)); }
+.model-download-dialog, .model-import-dialog { width: min(600px, calc(100vw - 40px)); }
+.model-policy-dialog, .model-update-at-dialog { width: min(520px, calc(100vw - 40px)); }
+.model-server-dialog .bp6-dialog-body, .model-download-dialog .bp6-dialog-body { display: grid; gap: 10px; }
+.model-server-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.model-server-row > label { display: grid; gap: 4px; }
+.model-server-kind { display: grid; gap: 6px; }
+.model-server-kind > .muted-text { font-size: 12px; }
+.model-server-models, .model-server-use, .model-server-devices, .model-download-quants { display: grid; gap: 6px; }
+.model-server-use, .model-server-devices { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.model-server-use > span:first-child, .model-server-devices > span:first-child { flex-basis: 100%; }
+.model-server-use .bp6-control, .model-server-devices .bp6-control { margin: 0; }
+.model-server-model { display: grid; grid-template-columns: minmax(0, 1fr) 9.5rem auto auto auto; gap: 8px; align-items: center; padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: 4px; background: var(--panel); }
+.model-server-model-name { display: grid; min-width: 0; }
+.model-server-model-name > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-server-model-name > .muted-text { font-size: 11.5px; }
+.model-server-preload.bp6-control { margin: 0; white-space: nowrap; }
+.model-server-add { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 8px; }
+.model-server-more { justify-self: start; }
+.model-server-advanced { display: grid; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; }
+.model-server-advanced > label { display: grid; gap: 4px; }
+.model-server-advanced .bp6-switch { margin: 0; }
+.model-download-quants { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.model-download-quants > span:first-child { grid-column: 1 / -1; }
+.model-download-quant { display: grid; gap: 3px; justify-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.model-download-quant:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.model-download-quant:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.model-download-quant.is-chosen { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.model-import-text { min-height: 90px; font-family: var(--mono-font, ui-monospace, monospace); font-size: 12px; }
+
+@container (max-width: 560px) {
+  .model-servers-disks { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+  .model-server-model { grid-template-columns: minmax(0, 1fr) auto; }
+  .model-server-add { grid-template-columns: 1fr; }
+}

@@ -4,7 +4,7 @@ import catalog from "./builtInSettings.json";
 
 /** A page of Settings with a fixed place in its navigation; spaces and plugins add pages of their own. */
 export type SettingsPageId = "appearance" | "general" | "windows" | "speech" | "search" | "spaces" | "labels" | "providers" | "secrets" | "models" | "prompts" | "skills"
-  | "permissions" | "sandbox" | "codeMode" | "sessions" | "worktrees" | "workItems" | "pullRequests" | "plugins" | "mcp" | "fleet" | "machines" | "fleetServer" | "fleetSecrets" | "fleetBudgets" | "fleetAccess" | "fleetAudit" | "fleetPolicies" | "config" | "storage" | "mcpHost"
+  | "permissions" | "sandbox" | "codeMode" | "sessions" | "worktrees" | "workItems" | "pullRequests" | "plugins" | "mcp" | "fleet" | "machines" | "modelServers" | "fleetServer" | "fleetSecrets" | "fleetBudgets" | "fleetAccess" | "fleetAudit" | "fleetPolicies" | "config" | "storage" | "mcpHost"
   | "logs" | "about";
 
 /**

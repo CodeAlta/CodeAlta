@@ -25,6 +25,9 @@ internal sealed class DesktopFleetPlugin : PluginBase
     /// <summary>The name of the module of the application's build that draws the canvas.</summary>
     internal const string AppModule = "fleet";
 
+    /// <summary>The id of the canvas of the models of Hugging Face: <c>alta canvas open models</c>.</summary>
+    internal const string ModelsCanvasId = "models";
+
     private const string Summary = "The console of the fleet in CodeAlta Desktop: the machines of the organization of a CodeAlta Server, or the machines paired with this computer, and their sessions.";
 
     /// <summary>The definition a window lists among its built-in plugins.</summary>
@@ -51,6 +54,19 @@ internal sealed class DesktopFleetPlugin : PluginBase
                 + "and the sessions they publish: their state, machine, provider and model, and times. Titles and content are never published. "
                 + "A session of this computer or of a paired machine opens in a tab; the others are shown only."),
         };
+        yield return new PluginCanvasContribution
+        {
+            Id = ModelsCanvasId,
+            Title = "Discover models",
+            Description = "The GGUF models of Hugging Face: search them, read their card, see which quantization fits the GPUs of your machines, and download or serve one.",
+            Icon = "model",
+            Scope = PluginCanvasScope.Application,
+            Open = static (_, _) => new ValueTask<PluginCanvasView>(new PluginCanvasView { Script = PluginScript.App(ModelsCanvasId) }),
+            Describe = static (_, _) => new ValueTask<string?>(
+                "# Discover models\n\nThe GGUF models of Hugging Face, searched and sorted as the hub does (trending, downloads, likes, recent), by kind and publisher. "
+                + "A model shows its facts, its card, and its quantizations with whether each fits the GPUs of this computer and of the machines it manages; "
+                + "a quantization downloads to a machine, or is served there at once. `alta llama hub search` and `alta llama hub show` read the same."),
+        };
     }
 
     /// <inheritdoc />
@@ -61,6 +77,17 @@ internal sealed class DesktopFleetPlugin : PluginBase
             Label = "Fleet",
             SearchText = "fleet server machines nodes console sessions organization",
         };
+        yield return Command.Shell(ModelsCanvasId, "Opens the Discover models canvas: the GGUF models of Hugging Face, to download or serve on your machines.", OpenModelsAsync) with
+        {
+            Label = "Discover models",
+            SearchText = "models hugging face gguf llama llama.cpp download quantization discover local",
+        };
+    }
+
+    private async ValueTask<PluginCommandResult> OpenModelsAsync(PluginCommandContext context, CancellationToken cancellationToken)
+    {
+        var result = await Services.Canvases.OpenAsync(ModelsCanvasId, cancellationToken: cancellationToken).ConfigureAwait(false);
+        return result.Requested ? PluginCommandResult.Handled : PluginCommandResult.Message("The Discover models canvas cannot be shown here.");
     }
 
     private async ValueTask<PluginCommandResult> OpenAsync(PluginCommandContext context, CancellationToken cancellationToken)

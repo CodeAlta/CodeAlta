@@ -370,6 +370,7 @@ internal sealed class NodeApplication
             {
                 Profile = profile, Offline = options.Offline, StartPlugins = !options.NoPlugins,
                 ModelServerTransports = modelServerTransports.Resolve,
+                ModelHost = () => modelServerTransports.Local,
                 // The log and the telemetry of the state root start once its lock is held: a refused start leaves them to its instance.
                 Admitted = () =>
                 {

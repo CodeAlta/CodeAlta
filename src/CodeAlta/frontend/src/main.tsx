@@ -297,6 +297,8 @@ import { SecretsSettings } from "./secrets/SecretsSettings";
 import { isMachineProject, machineRowState, readMachinePageLink } from "./machines/machines";
 import { FleetServerSettings } from "./fleet/FleetServerSettings";
 import { FleetSecretsSettings } from "./fleet/FleetSecretsSettings";
+import { ModelServersSettings } from "./modelServers/ModelServersSettings";
+import { useModelServerToasts } from "./modelServers/useModelServerToasts";
 import { FleetBudgetsSettings } from "./fleet/FleetBudgetsSettings";
 import { FleetAccessSettings } from "./fleet/access/FleetAccessSettings";
 import { FleetAuditSettings } from "./fleet/audit/FleetAuditSettings";
@@ -397,6 +399,7 @@ import "./fleet/fleet.css";
 import "./fleet/fleetSecrets.css";
 import "./fleet/fleetBudgets.css";
 import "./fleet/console/fleetConsole.css";
+import "./modelServers/modelServers.css";
 import "./fleet/access/fleetAccess.css";
 import "./fleet/audit/fleetAudit.css";
 import "./fleet/policies/fleetPolicies.css";
@@ -1996,6 +1999,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const canvasCatalog = useMemo(() => tabCanvases(declaredCanvases), [declaredCanvases]);
   const pluginPages = useMemo(() => pluginSettingsPages(declaredCanvases), [declaredCanvases]);
   const fleetCanvas = useMemo(() => fleetCanvasOf(canvasCatalog), [canvasCatalog]);
+  const modelsCanvas = useMemo(() => canvasCatalog.find(item => item.pluginKey === fleetCanvas?.pluginKey && item.id === "models") ?? null, [canvasCatalog, fleetCanvas]);
   // Opens the tab of a canvas in the space that is shown: one tab for each canvas, project, session and key. A settings page opens in Settings.
   function openCanvas(item: CanvasItem, target: CanvasTarget) {
     if (!owned) return;
@@ -2956,6 +2960,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The reviews of the page: one watch of the host, the threads of each review a surface shows.
   const [reviewsHub] = useState(() => createReviewsHub(reviewsApi));
   useEffect(() => terminalEpoch && owned ? reviewsHub.connect(terminalEpoch) : undefined, [reviewsHub, terminalEpoch, owned]);
+  // The end of a download of a model or of an install of llama.cpp, on this computer or a machine: a toast, in the main window.
+  useModelServerToasts(owned && !secondary ? terminalEpoch : null, t);
   const workState = useSyncExternalStore(workHub.subscribe, workHub.getSnapshot);
   refreshWorkItems.current = () => void workHub.refresh();
   // The Explorer does not wait for them: they are read a few projects at a time, the ones used last first.
@@ -6435,6 +6441,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       : settingsSection === "fleet" ? <FleetOverview epoch={owned ? status!.hostEpoch : null} spaces={spacesState.spaces} />
       : settingsSection === "machines" ? <MachinesSettings key={machineFocus ? `${machineFocus.id}:${machineFocus.ticket}` : ""} epoch={owned ? status!.hostEpoch : null}
         initialMachine={machineFocus?.id ?? null} />
+      : settingsSection === "modelServers" ? <ModelServersSettings epoch={owned ? status!.hostEpoch : null}
+        onDiscover={owned && modelsCanvas ? () => { closeSettings(); openCanvasHere(modelsCanvas); } : undefined} />
       : settingsSection === "fleetServer" ? <FleetServerSettings epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "fleetSecrets" ? <FleetSecretsSettings epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "fleetBudgets" ? <FleetBudgetsSettings epoch={owned ? status!.hostEpoch : null} />

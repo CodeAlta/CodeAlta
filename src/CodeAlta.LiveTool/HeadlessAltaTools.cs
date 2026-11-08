@@ -47,6 +47,9 @@ public sealed record HeadlessAltaToolsOptions
     /// sessions. False, the default; a registry that offers <c>reminder</c> needs them.
     /// </summary>
     public bool OwnsReminders { get; init; }
+
+    /// <summary>Gets the model servers the <c>alta llama</c> commands manage; null, the default, for none (the commands do not exist).</summary>
+    public IAltaModelServers? ModelServers { get; init; }
 }
 
 /// <summary>
@@ -101,6 +104,7 @@ public sealed class HeadlessAltaTools : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(options);
         var services = CreateServices(host);
+        if (options.ModelServers is not null) services.Add(options.ModelServers);
         var registry = new AltaCommandRegistry(options.Registry);
         var dispatcher = new AltaCommandDispatcher(registry, services);
         // The registry is a service too: alta tool list and alta tool capability list read it.

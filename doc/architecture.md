@@ -51,6 +51,7 @@ flowchart LR
 | `CodeAlta.Plugin.*` | Built-in plugins. |
 | `CodeAlta.Browser` | Drives web browsers for the browser plugin: CDP for Chromium, WebDriver BiDi for Firefox, the tools of Chrome DevTools MCP. See [browser](browser.md). |
 | `CodeAlta.Search` | Local search index (words and meaning). |
+| `CodeAlta.ModelServers` | The model host of a machine: builds of llama.cpp, GGUF models in the Hugging Face cache and their downloads, `llama-server` processes, updates. See [model servers](fleet/model-servers.md). |
 | `CodeAlta.NativeEngines` | Pinned native downloads and worker processes (speech, embeddings). |
 | `CodeAlta.Sandbox` | The optional OS sandbox of sessions: profiles, the policy of a session, the mxc backend. See [sandbox](sandbox.md). |
 | `CodeAlta.CodeMode` | The engine of Code Mode: runs the JavaScript of agents (Jint, one engine per run), with the functions its host binds; prepares sources, reads descriptors, renders declarations and results. See [code mode](codemode.md). |
