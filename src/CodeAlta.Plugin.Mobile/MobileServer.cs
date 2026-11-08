@@ -184,7 +184,8 @@ internal sealed partial class MobileServer : IAsyncDisposable
         api.MapGet("/sessions/{id}/tools/{activityId}/output", async (string id, string activityId, long? since, int? offset, int? before, CancellationToken ct) =>
             Json(await _options.Api.ToolOutputAsync(id, activityId, since, offset, before, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/abort", async (string id, CancellationToken ct) => Json(await _options.Api.AbortAsync(id, ct).ConfigureAwait(false)));
-        api.MapPost("/sessions/{id}/archive", async (string id, CancellationToken ct) => Json(await _options.Api.ArchiveAsync(id, ct).ConfigureAwait(false)));
+        api.MapGet("/sessions/{id}/archive-children", async (string id, CancellationToken ct) => Json(await _options.Api.ArchiveChildrenAsync(id, ct).ConfigureAwait(false)));
+        api.MapPost("/sessions/{id}/archive", async (string id, bool? withChildren, CancellationToken ct) => Json(await _options.Api.ArchiveAsync(id, withChildren == true, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/restore", async (string id, CancellationToken ct) => Json(await _options.Api.RestoreAsync(id, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}/ask", async (string id, CancellationToken ct) => Json(await _options.Asks.GetAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/ask/answer", async (string id, HttpRequest request, CancellationToken ct) =>

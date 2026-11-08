@@ -230,7 +230,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       }
       return send(response, 200, { job, text: state.jobOutput.get(jobId) ?? "", truncated: false, error: null });
     }
-    const found = /^\/api\/sessions\/([^/]+)(?:\/(events\/latest|events|prompt|abort|archive|restore|choices|ask|ask\/answer|ask\/cancel|permissions|permissions\/resolve|takeover))?$/.exec(path);
+    const found = /^\/api\/sessions\/([^/]+)(?:\/(events\/latest|events|prompt|abort|archive-children|archive|restore|choices|ask|ask\/answer|ask\/cancel|permissions|permissions\/resolve|takeover))?$/.exec(path);
     if (found) {
       const id = decodeURIComponent(found[1]), action = found[2];
       // An archived session is out of the list, and can still be restored.
@@ -242,6 +242,9 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
         return send(response, 200, { ok: true });
       }
       const target = sessionOf(id);
+      if (action === "archive-children" && target) {
+        return send(response, 200, { hasChildren: state.sessions.some(s => s.parentId === id) });
+      }
       if (!target) return send(response, 404, { error: "No such session." });
       if (!action) return send(response, 200, target);
       if (action === "events") {
@@ -323,7 +326,16 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
         }
         return send(response, 200, { ok: true, mode });
       }
-      if (action === "archive") { state.sessions = state.sessions.filter(s => s.id !== id); archived.set(id, target); return send(response, 200, { ok: true }); }
+      if (action === "archive") {
+        const changed = [id];
+        if (url.searchParams.get("withChildren") === "true") {
+          for (let i = 0; i < changed.length; i++)
+            for (const child of state.sessions) if (child.parentId === changed[i] && !changed.includes(child.id)) changed.push(child.id);
+        }
+        for (const session of state.sessions) if (changed.includes(session.id)) archived.set(session.id, session);
+        state.sessions = state.sessions.filter(s => !changed.includes(s.id));
+        return send(response, 200, { ok: true, changed });
+      }
       return send(response, 200, { ok: true });
     }
     return send(response, 404, { error: "No such route." });

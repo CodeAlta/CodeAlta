@@ -347,8 +347,41 @@ internal sealed partial class MobileApi(IPluginAltaService alta, MobileSessions 
         return new JsonObject { ["ok"] = result.Error is null, ["error"] = result.Error };
     }
 
-    /// <summary>Archives a session as the desktop's Archive does.</summary>
-    internal Task<JsonObject?> ArchiveAsync(string id, CancellationToken cancellationToken) => SessionCommandAsync("archive", id, cancellationToken);
+    /// <summary>Whether the session has unarchived descendants, including those outside the phone's current page.</summary>
+    internal async Task<JsonObject?> ArchiveChildrenAsync(string id, CancellationToken cancellationToken)
+    {
+        if (await sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is null) return null;
+        var result = await MobileAlta.RunAsync(alta, ["session", "children", id, "--recursive"], null, cancellationToken).ConfigureAwait(false);
+        if (result.Error is not null || result.Truncated || !result.OfType("alta.session.children.summary").Any())
+            return new JsonObject { ["error"] = result.Error ?? "The child sessions could not be read completely." };
+        return new JsonObject { ["hasChildren"] = result.OfType("alta.session.item").Any(item => !IsArchivedChild(item)) };
+    }
+
+    private static bool IsArchivedChild(JsonObject item) => string.Equals(MobileAlta.Text(item, "state"), "archived", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(MobileAlta.Text(item, "status"), "archived", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Archives a session, optionally with its descendants.</summary>
+    internal Task<JsonObject?> ArchiveAsync(string id, CancellationToken cancellationToken) => ArchiveAsync(id, false, cancellationToken);
+
+    /// <summary>Archives descendants only when they are within the spaces assigned to the phone.</summary>
+    internal async Task<JsonObject?> ArchiveAsync(string id, bool withChildren, CancellationToken cancellationToken)
+    {
+        if (await sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is null) return null;
+        if (withChildren && sessions.Spaces.Count > 0)
+        {
+            var children = await MobileAlta.RunAsync(alta, ["session", "children", id, "--recursive"], null, cancellationToken).ConfigureAwait(false);
+            if (children.Error is not null || children.Truncated || !children.OfType("alta.session.children.summary").Any())
+                return new JsonObject { ["ok"] = false, ["error"] = children.Error ?? "The child sessions could not be read completely." };
+            // A child archived before is left as it is: only those the archive changes must be the phone's.
+            if (children.OfType("alta.session.item").Any(item => !IsArchivedChild(item) && MobileAlta.Text(item, "spaceId") is { } space && !sessions.Spaces.Contains(space, StringComparer.OrdinalIgnoreCase)))
+                return new JsonObject { ["ok"] = false, ["error"] = "A child session is outside the spaces available to this phone." };
+        }
+        List<string> args = ["session", "archive", id];
+        if (withChildren) args.Add("--with-children");
+        var result = await MobileAlta.RunAsync(alta, args, null, CancellationToken.None).ConfigureAwait(false);
+        var changed = result.OfType("alta.session.archived").FirstOrDefault()?["changed"]?.DeepClone();
+        return new JsonObject { ["ok"] = result.Error is null, ["error"] = result.Error, ["changed"] = changed };
+    }
 
     /// <summary>Restores an archived session, which the list shows again.</summary>
     internal Task<JsonObject?> RestoreAsync(string id, CancellationToken cancellationToken) => SessionCommandAsync("restore", id, cancellationToken);
