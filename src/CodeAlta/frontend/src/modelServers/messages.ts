@@ -279,6 +279,10 @@ export const modelServersMessages = {
   "Choose a time.": ["Elige una hora.", "Choisissez une heure.", "Wählen Sie eine Uhrzeit.", "時刻を選んでください。", "选择一个时间。"],
   "Choose a time to come.": ["Elige una hora futura.", "Choisissez une heure à venir.", "Wählen Sie eine künftige Uhrzeit.", "これからの時刻を選んでください。", "选择一个未来的时间。"],
   "The update is planned.": ["La actualización está prevista.", "La mise à jour est prévue.", "Das Update ist geplant.", "更新を予定しました。", "更新已计划。"],
+  // The permission of a paired device.
+  "Use its model servers in sessions.": ["Usar sus servidores de modelos en las sesiones.", "Utiliser ses serveurs de modèles dans les sessions.", "Seine Modellserver in Sitzungen verwenden.",
+    "セッションでそのモデルサーバーを使います。", "在会话中使用其模型服务器。"],
+
   // Words of their own.
   "Build": ["Versión", "Version", "Build", "ビルド", "版本"],
   "llama.cpp": ["llama.cpp", "llama.cpp", "llama.cpp", "llama.cpp", "llama.cpp"],

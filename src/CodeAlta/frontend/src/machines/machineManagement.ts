@@ -2,10 +2,10 @@ import type { MachineAgentsView, MachineDeviceView, MachineManagement, MachinePr
 import type { MessageKey } from "../localization";
 
 /** A permission a device has on a machine, in the order the page shows them. */
-export type DevicePermission = "view" | "drive" | "start" | "move" | "automate" | "manage";
+export type DevicePermission = "view" | "drive" | "start" | "move" | "automate" | "models" | "manage";
 
 /** The permissions, in their order. */
-export const devicePermissions: readonly DevicePermission[] = ["view", "drive", "start", "move", "automate", "manage"];
+export const devicePermissions: readonly DevicePermission[] = ["view", "drive", "start", "move", "automate", "models", "manage"];
 
 /** The words of a permission: its short name, and what it lets a device do. */
 export function permissionLabel(permission: DevicePermission): { name: MessageKey; description: MessageKey } {
@@ -15,6 +15,7 @@ export function permissionLabel(permission: DevicePermission): { name: MessageKe
     case "start": return { name: "Start", description: "Start sessions there." };
     case "move": return { name: "Move", description: "Move sessions there, and take them back." };
     case "automate": return { name: "Automate", description: "Run its automations there." };
+    case "models": return { name: "Models", description: "Use its model servers in sessions." };
     case "manage": return { name: "Manage", description: "Change what each device may do, its projects, its secrets and its updates." };
   }
 }

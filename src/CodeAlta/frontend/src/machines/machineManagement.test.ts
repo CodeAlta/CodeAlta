@@ -34,7 +34,7 @@ const device = (change: Partial<MachineDeviceView> = {}): MachineDeviceView => (
   pairedAt: "2026-11-01T00:00:00Z", revokedAt: null, channels: 0, isThisComputer: false, ...change });
 
 test("The six permissions have their order, a name and what they let a device do", () => {
-  assert.deepEqual([...devicePermissions], ["view", "drive", "start", "move", "automate", "manage"]);
+  assert.deepEqual([...devicePermissions], ["view", "drive", "start", "move", "automate", "models", "manage"]);
   assert.equal(permissionLabel("manage").name, "Manage");
   assert.equal(permissionLabel("automate").description, "Run its automations there.");
   assert.ok(hasPermission(device(), "drive"));

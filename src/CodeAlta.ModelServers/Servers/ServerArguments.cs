@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -25,8 +26,8 @@ public static partial class ServerArguments
     /// <summary>The first build whose router has the options CodeAlta gives it.</summary>
     public const int MinimumRouterBuild = 10000;
 
-    private static readonly HashSet<string> Refused = new(StringComparer.Ordinal)
-    {
+    private static readonly FrozenSet<string> Refused = FrozenSet.Create(StringComparer.Ordinal,
+    [
         // Run commands, act as an agent, open tunnels or the network.
         "tools", "tools-runtime", "agent", "ag", "mcp-servers-config", "mcp-servers-json", "ui-mcp-proxy", "connect", "rpc",
         // Read or write files of the machine.
@@ -37,7 +38,7 @@ public static partial class ServerArguments
         "host", "port", "api-key", "api-key-file", "ssl-key-file", "ssl-cert-file", "cors-origins", "cors-methods", "cors-headers", "cors-credentials",
         "model", "m", "mmproj", "mm", "alias", "a", "offline", "models-max", "models-memory-margin", "models-autoload", "no-models-autoload", "webui", "no-webui",
         "ui", "no-ui", "api-prefix",
-    };
+    ]);
 
     /// <summary>Whether an option may not be given by a person or an agent: one that runs commands, opens the network, touches files, downloads, or that CodeAlta sets.</summary>
     /// <param name="option">The option, with or without its dashes.</param>

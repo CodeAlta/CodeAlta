@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Globalization;
 
 namespace CodeAlta.ModelServers.LlamaCpp;
@@ -10,17 +11,17 @@ namespace CodeAlta.ModelServers.LlamaCpp;
 public static class BuildSelector
 {
     // The gfx targets the official ROCm archives are built for (release.yml of llama.cpp).
-    private static readonly HashSet<string> WindowsRocmTargets = new(StringComparer.Ordinal)
-    {
+    private static readonly FrozenSet<string> WindowsRocmTargets = FrozenSet.Create(StringComparer.Ordinal,
+    [
         "gfx1010", "gfx1011", "gfx1012", "gfx1030", "gfx1031", "gfx1032", "gfx1033", "gfx1034", "gfx1035", "gfx1036",
         "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1200", "gfx1201",
-    };
+    ]);
 
-    private static readonly HashSet<string> LinuxRocmTargets = new(StringComparer.Ordinal)
-    {
+    private static readonly FrozenSet<string> LinuxRocmTargets = FrozenSet.Create(StringComparer.Ordinal,
+    [
         "gfx908", "gfx90a", "gfx942", "gfx950", "gfx1010", "gfx1011", "gfx1012", "gfx1030", "gfx1031", "gfx1032", "gfx1033", "gfx1034",
         "gfx1035", "gfx1036", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1200", "gfx1201",
-    };
+    ]);
 
     /// <summary>Says what each backend of a release would do on a machine, the best first.</summary>
     /// <param name="hardware">The machine.</param>

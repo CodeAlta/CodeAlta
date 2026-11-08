@@ -83,7 +83,7 @@ public sealed class DesktopRelayTests
             Assert.AreEqual(FleetChannelPath.Relayed, host.ChannelPath);
             var view = MachinesService.View(host);
             Assert.AreEqual((false, "relayed"), (view.Paired, view.Channel));
-            CollectionAssert.AreEquivalent(new[] { "view", "drive", "start" }, view.Permissions, "The owner's own node gives this controller device the paired defaults.");
+            CollectionAssert.AreEquivalent(new[] { "view", "drive", "start", "models" }, view.Permissions, "The owner's own node gives this controller device the paired defaults.");
 
             var created = await host.CurrentClient!.CreateSessionAsync(new FleetCreateSessionParams(Title: "Through the server"), "create-desktop-relay", token);
             Assert.IsTrue(await host.WaitListedAsync(created.SessionId, Patience, token));

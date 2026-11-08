@@ -79,7 +79,7 @@ public sealed class DesktopReachableThroughServerTests
                 Assert.AreEqual(FleetChannelPath.Relayed, client.Path);
                 var info = await client.GetInfoAsync(token);
                 Assert.AreEqual("desk", info.Name);
-                CollectionAssert.AreEquivalent(new[] { "view", "drive", "start" }, info.Permissions.ToArray(), "the person's own device gets what a pairing gives");
+                CollectionAssert.AreEquivalent(new[] { "view", "drive", "start", "models" }, info.Permissions.ToArray(), "the person's own device gets what a pairing gives");
                 Assert.IsNotNull(await client.ListSessionsAsync(cancellationToken: token), "it lists the sessions of the desk");
                 Assert.AreEqual(0, node.Devices().Count, "reached through the server, nothing is paired");
 

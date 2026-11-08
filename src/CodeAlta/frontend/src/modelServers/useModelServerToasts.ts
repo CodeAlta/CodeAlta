@@ -39,6 +39,11 @@ export function useModelServerToasts(epoch: string | null, t: Translate, given?:
     if (!api) return;
     const controller = new AbortController();
     let machines: readonly ModelServersMachine[] = [];
+    // Listing the machines makes the host follow those online: the end of a download there comes as an event too.
+    const list = () => void api.machines(controller.signal).then(value => { machines = value; }, () => { /* Read again at the next turn. */ });
+    list();
+    const timer = window.setInterval(list, 60_000);
+    controller.signal.addEventListener("abort", () => window.clearInterval(timer));
     const nameOf = async (id: string) => {
       if (!machines.some(machine => machine.id === id)) machines = await api.machines(controller.signal).catch(() => machines);
       return machines.find(machine => machine.id === id)?.name ?? id;

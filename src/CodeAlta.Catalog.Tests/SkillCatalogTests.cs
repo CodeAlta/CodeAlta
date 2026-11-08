@@ -250,7 +250,7 @@ public sealed class SkillCatalogTests
                 })
             .ConfigureAwait(false);
 
-        Assert.AreEqual(5, visible.Count);
+        Assert.AreEqual(6, visible.Count);
         Assert.IsTrue(visible.Any(static descriptor => descriptor.SourceKind == SkillSourceKind.ProjectAlta));
         Assert.IsTrue(visible.Any(static descriptor => descriptor.SourceKind == SkillSourceKind.Builtin));
     }

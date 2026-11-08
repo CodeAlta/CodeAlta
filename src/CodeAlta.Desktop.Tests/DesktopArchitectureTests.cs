@@ -36,6 +36,8 @@ public sealed class DesktopArchitectureTests
                     or "CodeAlta.Fleet" or "CodeAlta.Fleet.Protocol"
                     // The update of the fleet: the hashes of the feed an owner's computer signs, and why a feed was refused.
                     or "CodeAlta.Fleet.Update"
+                    // The model host of this computer: llama.cpp, its models and servers.
+                    or "CodeAlta.ModelServers"
                     // The safe file operations every project shares.
                     or "CodeAlta.Core", reference.Name);
             Assert.AreNotEqual("altatui", reference.Name);

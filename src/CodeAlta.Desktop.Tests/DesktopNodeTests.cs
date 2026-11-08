@@ -79,12 +79,13 @@ public sealed class DesktopNodeTests
 
             var device = node.Devices().Single();
             Assert.AreEqual("laptop", device.Name);
-            Assert.AreEqual(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Start, device.Permissions, "a pairing never lets it move sessions here, nor manage this computer");
+            Assert.AreEqual(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Start | DevicePermissions.Models, device.Permissions,
+                "a pairing lets it use the model servers here, never move sessions here nor manage this computer");
             await using (var client = await FleetNodeClient.ConnectAsync(machine, laptop, token))
             {
                 var info = await client.GetInfoAsync(token);
                 Assert.AreEqual("desk", info.Name);
-                CollectionAssert.AreEquivalent(new[] { "view", "drive", "start" }, info.Permissions.ToArray());
+                CollectionAssert.AreEquivalent(new[] { "view", "drive", "start", "models" }, info.Permissions.ToArray());
                 Assert.IsNotNull(await client.ListSessionsAsync(cancellationToken: token), "it lists the sessions of this computer");
             }
 
@@ -211,7 +212,7 @@ public sealed class DesktopNodeTests
             var laptopOnDesk = desk.Fleet.Hosts.Single();
             Assert.AreEqual(("laptop", laptop.Fleet.DeviceId), (laptopOnDesk.Machine.Name, laptopOnDesk.MachineId));
             CollectionAssert.AreEqual(laptop.Node.Addresses.ToArray(), laptopOnDesk.Machine.Addresses.ToArray(), "the desk reaches the laptop where it listens");
-            CollectionAssert.AreEquivalent(new[] { "view", "drive", "start" }, laptopOnDesk.Machine.Permissions.ToArray());
+            CollectionAssert.AreEquivalent(new[] { "view", "drive", "start", "models" }, laptopOnDesk.Machine.Permissions.ToArray());
             Assert.AreEqual("desk", laptop.Fleet.Hosts.Single().Machine.Name);
             // The first connection of the desk is accepted: the laptop trusted it before.
             await WaitAsync(() => laptopOnDesk.State == RemoteMachineState.Online, token);
