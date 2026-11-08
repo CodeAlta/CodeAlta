@@ -611,11 +611,15 @@ export function startMobile(window: Window & typeof globalThis) {
   // Watching it again says at once whether it is near: a short page reads the next one by itself. A read that failed does
   // not come here, so that it is not made again and again: a tap makes it again.
   function watchOlder() { olderWatch.unobserve(older); if (detail.id && detail.hasOlder) olderWatch.observe(older); }
-  // A read of older messages asked for while one runs waits for that one.
-  let olderRead: Promise<void> | null = null;
+  // A read of older messages asked for while one runs for the same session waits for that one; a read of the session shown
+  // before (another one, or the same one read again) does not hold it back.
+  let olderRead: { id: string | null; generation: number; read: Promise<void> } | null = null;
   function readOlder(): Promise<void> {
-    olderRead ??= readOlderPage().finally(() => { olderRead = null; });
-    return olderRead;
+    if (olderRead && olderRead.id === detail.id && olderRead.generation === detail.generation) return olderRead.read;
+    const entry: { id: string | null; generation: number; read: Promise<void> } = { id: detail.id, generation: detail.generation, read: Promise.resolve() };
+    olderRead = entry;
+    entry.read = readOlderPage().finally(() => { if (olderRead === entry) olderRead = null; });
+    return entry.read;
   }
   async function readOlderPage() {
     const id = detail.id, generation = detail.generation, before = detail.before;

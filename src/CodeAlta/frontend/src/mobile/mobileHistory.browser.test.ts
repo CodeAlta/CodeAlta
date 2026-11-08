@@ -32,8 +32,9 @@ test("the phone opens a session on its latest messages, says when they were writ
     event("activity.toolcall.completed", "read_file", when, `call-${turn}`);
     event("assistant.message", `Answer ${turn}. ${long}`, when);
   }
-  server.state.sessions = [session("s1", "A long session", "p1", 0)];
+  server.state.sessions = [session("s1", "A long session", "p1", 0), session("s2", "Another long session", "p1", 1)];
   server.state.events.set("s1", events);
+  server.state.events.set("s2", events.map(item => ({ ...item })));
   server.state.messagesPerPage = 20;
   const failures: string[] = [];
   try {
@@ -138,6 +139,19 @@ test("the phone opens a session on its latest messages, says when they were writ
     await waitFor('document.querySelectorAll("#timeline .msg").length <= 21 && !document.querySelector("#refresh").classList.contains("spin")');
     assert.ok(await atBottom(), "what showed is gone: the page shows the end");
     assert.equal(await evaluate('document.querySelector("#older").hidden'), false, "and the older messages can be read again");
+
+    // A read of older messages that the host has not answered yet does not hold back those of the next session opened.
+    let release!: () => void;
+    server.state.olderHeld.set("s1", new Promise<void>(resolve => { release = resolve; }));
+    await evaluate('document.querySelector("#older").click()');
+    await waitFor('document.querySelector("#older").disabled');
+    await evaluate('document.querySelector("#back").click()');
+    await waitFor('document.querySelector(".row[data-id=s2] .card-link")');
+    await evaluate('document.querySelector(".row[data-id=s2] .card-link").click()');
+    await waitFor('document.querySelectorAll("#timeline .msg").length === 20 && !document.querySelector("#older").hidden && !document.querySelector("#older").disabled');
+    await evaluate('document.querySelector("#older").click()');
+    await waitFor('document.querySelectorAll("#timeline .msg").length === 40');
+    release();
 
     assert.deepEqual(failures, []);
   } finally {

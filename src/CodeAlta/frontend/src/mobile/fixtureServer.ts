@@ -56,6 +56,8 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     messagesPerPage: null as number | null,
     /** The reads of older events fail. */
     olderFails: false,
+    /** The reads of older events of these sessions wait until their promise ends. */
+    olderHeld: new Map<string, Promise<void>>(),
     /** The prompts that wait in the queues of the sessions. */
     queues: new Map<string, QueuedPrompt[]>(),
     /** What the next removal from a queue answers; null: the prompt is removed. */
@@ -250,6 +252,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       if (action === "events/latest") {
         const before = url.searchParams.get("before");
         if (before !== null && state.olderFails) return send(response, 500, { error: "The journal cannot be read." });
+        if (before !== null) await state.olderHeld.get(id);
         const events = (state.events.get(id) ?? []).filter(e => before === null || e.seq < Number(before));
         // As the plugin: back to the messages of a page, then forward to the first prompt.
         let start = 0;
