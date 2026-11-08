@@ -809,6 +809,16 @@ public sealed class DesktopWorktreeTests
         Assert.AreEqual("ok", removed.Results.Single().Status);
         Assert.IsFalse(Directory.Exists(recorded.Root));
 
+        // A session that comes to a worktree while an earlier one of the request is removed keeps it: the catalog is read
+        // again for each worktree.
+        var first = await repository.Worktrees.CreateAsync(project);
+        var second = await repository.Worktrees.CreateAsync(project);
+        var reads = 0;
+        var arriving = repository.Manager(static () => [], () => ++reads < 2 ? [] : [Recorded("late", DateTimeOffset.UnixEpoch, repository.Root, second.Root)]);
+        var late = await arriving.RemoveManyAsync(new(Epoch, project.Id, [first.Root!, second.Root!], KeepUsed: true), default);
+        CollectionAssert.AreEqual(new[] { "ok", "used" }, late.Results.Select(static result => result.Status).ToArray());
+        Assert.IsTrue(!Directory.Exists(first.Root) && Directory.Exists(second.Root));
+
         // Sessions that cannot be read keep every worktree.
         var unknown = await repository.Service(static () => []).RemoveManyAsync(new(Epoch, project.Id, [created.Root!], KeepUsed: true), default);
         Assert.AreEqual(("sessions_unavailable", 0), (unknown.Status, unknown.Results.Length));

@@ -240,20 +240,9 @@ internal sealed class WorktreesService
         if (await _worktrees!.ListAsync(root, cancellationToken).ConfigureAwait(false) is not { } first) return new("not_repository", []);
         var gone = new HashSet<string>(first.Where(static worktree => worktree.Missing).Select(static worktree => worktree.Path), PathComparer);
         var checkout = GitWorktreeService.FindCheckoutRoot(root);
-        // The whole catalog, read after the deletion that asks: none of its sessions loses the folder it works in.
-        HashSet<string>? used = null;
-        if (request.KeepUsed)
-        {
-            if (_sessions is null) return new("sessions_unavailable", []);
-            try
-            {
-                used = UsedCheckouts(first, await _sessions(cancellationToken).ConfigureAwait(false));
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or System.Data.Common.DbException)
-            {
-                return new("sessions_unavailable", []);
-            }
-        }
+        // The whole catalog keeps the folders its sessions work in: read for each worktree right before it goes, so that a
+        // session that came to one while others were removed keeps it too.
+        if (request.KeepUsed && _sessions is null) return new("sessions_unavailable", []);
 
         var results = new List<WorktreeRemoval>(paths.Length);
         foreach (var path in paths)
@@ -265,7 +254,7 @@ internal sealed class WorktreesService
                 continue;
             }
 
-            results.Add(await RemoveOneAsync(root, checkout, Normalize(path), path, gone, discard, used, request.DeleteMergedBranches).ConfigureAwait(false));
+            results.Add(await RemoveOneAsync(root, checkout, Normalize(path), path, gone, discard, request.KeepUsed, request.DeleteMergedBranches).ConfigureAwait(false));
         }
 
         return new("ok", [.. results]);
@@ -273,7 +262,7 @@ internal sealed class WorktreesService
 
     // One worktree of a request: what git lists now and the sessions at work now decide, not what the window showed.
     private async Task<WorktreeRemoval> RemoveOneAsync(string root, string? checkout, string folder, string asked, HashSet<string> gone, HashSet<string> discard,
-        HashSet<string>? used, bool deleteBranch)
+        bool keepUsed, bool deleteBranch)
     {
         try
         {
@@ -285,7 +274,12 @@ internal sealed class WorktreesService
                 return new(asked, gone.Contains(folder) ? "ok" : "not_worktree");
             var busy = BusyCheckouts(_busy!()).Contains(target.Path);
             if (Protection(target, checkout, busy) is { } protection) return new(asked, protection);
-            if (used is not null && used.Contains(target.Path)) return new(asked, "used");
+            if (keepUsed)
+            {
+                if (await UsedNowAsync(worktrees).ConfigureAwait(false) is not { } used) return new(asked, "sessions_unavailable");
+                if (used.Contains(target.Path)) return new(asked, "used");
+            }
+
             var outcome = await _worktrees.RemoveAsync(root, target.Path, discard.Contains(folder), deleteBranch, CancellationToken.None).ConfigureAwait(false);
             return new(asked, outcome.Status, outcome.Message, outcome.BranchKept, outcome.BranchDeleted);
         }
@@ -489,6 +483,19 @@ internal sealed class WorktreesService
         }
 
         return checkouts;
+    }
+
+    // The checkouts the sessions of the catalog work in now; null when the catalog cannot be read.
+    private async Task<HashSet<string>?> UsedNowAsync(IReadOnlyList<GitWorktree> worktrees)
+    {
+        try
+        {
+            return UsedCheckouts(worktrees, await _sessions!(CancellationToken.None).ConfigureAwait(false));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or System.Data.Common.DbException)
+        {
+            return null;
+        }
     }
 
     // The checkouts the sessions of the catalog work in, by the folder each records: its worktree, else the folder
