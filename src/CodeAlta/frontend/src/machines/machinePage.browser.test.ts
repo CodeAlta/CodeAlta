@@ -136,6 +136,7 @@ test("the computer that manages a machine signs it in from here: the page opens 
     assert.equal(await page.evaluate(`document.querySelector('.machine-signin-secret input').getAttribute('aria-label')`), "API key (OPENAI_API_KEY)");
     assert.equal(await page.evaluate(`document.querySelector('.machine-signin-secret a').getAttribute('href')`), "https://platform.example.com/api-keys");
     await page.evaluate(type(".machine-signin-secret input", "sk-agent-typed"));
+    await page.shot("machine-signin-key");
     await page.clickText(".machine-signin-secret .bp6-button", "Send");
     await page.until(`document.querySelector('.machine-provider-signin-dialog [role=status]')?.textContent.includes('Agent is signed in on build-box.')`, "the agent signed in");
     await page.clickText(".machine-provider-signin-dialog .bp6-button", "Done");
