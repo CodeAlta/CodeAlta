@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Secrets;
+using CodeAlta.Core.Terminals;
 using CodeAlta.Fleet.NodeApi;
 
 namespace CodeAlta.Node;
@@ -46,11 +47,24 @@ internal sealed partial class NodeSignIns
     /// <returns>Whether it is.</returns>
     internal static bool IsVariableName([NotNullWhen(true)] string? name) => name is { Length: <= 64 } && LocalSecretStore.IsName(name);
 
-    /// <summary>Reads what <c>claude setup-token</c> printed in its terminal: the page to open, once it asks for the code; null before.</summary>
+    /// <summary>
+    /// Reads what <c>claude setup-token</c> printed in its terminal: the page to open, once it asks for the code; null before. The page
+    /// is the link of the terminal it prints, or else, as a console of Windows may render it, its address in the text, on a site of
+    /// Claude only.
+    /// </summary>
     /// <param name="output">What it printed, escapes of the terminal included.</param>
     /// <returns>The page.</returns>
     internal static string? ReadClaudePage(string output)
-        => ClaudeLinkPattern().Match(output) is { Success: true } link && AskCodePattern().IsMatch(Plain(output)) ? link.Groups["page"].Value : null;
+    {
+        var plain = Plain(output);
+        if (!AskCodePattern().IsMatch(plain)) return null;
+        if (ClaudeLinkPattern().Match(output) is { Success: true } link) return link.Groups["page"].Value;
+        return ClaudePagePattern().Match(plain) is { Success: true } page ? page.Value : null;
+    }
+
+    // The address of the page of the sign-in in the text, ended by what follows it.
+    [GeneratedRegex(@"https://(claude\.ai|claude\.com|console\.anthropic\.com)/[^\s""'<>]+(?=\s)", RegexOptions.CultureInvariant)]
+    private static partial Regex ClaudePagePattern();
 
     /// <summary>Reads the token <c>claude setup-token</c> printed once the code was given; null before.</summary>
     /// <param name="output">What it printed.</param>
@@ -73,8 +87,13 @@ internal sealed partial class NodeSignIns
     [GeneratedRegex(@"\u001b\[\d*[CG]", RegexOptions.CultureInvariant)]
     private static partial Regex CursorMovePattern();
 
+    // A console of Windows draws its screen again by placing the cursor on a line (ESC[row;colH) or moving it up and down: those
+    // moves end a line.
+    [GeneratedRegex(@"\u001b\[\d*(;\d*)?[Hf]|\u001b\[\d*[ABEF]", RegexOptions.CultureInvariant)]
+    private static partial Regex LineMovePattern();
+
     private static string Plain(string output)
-        => TerminalEscapePattern().Replace(CursorMovePattern().Replace(output, " "), "").Replace("\r", "", StringComparison.Ordinal);
+        => TerminalEscapePattern().Replace(CursorMovePattern().Replace(LineMovePattern().Replace(output, "\n"), " "), "").Replace("\r", "", StringComparison.Ordinal);
 
     // The Claude Code providers of the node: signed in when their token is a secret of the machine, else unknown (the CLI may
     // keep its own login here).
@@ -97,34 +116,36 @@ internal sealed partial class NodeSignIns
         }
     }
 
+    /// <summary>Gets the executable of Claude Code; null to find <c>claude</c> on the PATH of the node. Set by tests.</summary>
+    internal string? ClaudeExecutable { get; init; }
+
+    private string? FindClaude() => ClaudeExecutable is { } path ? (File.Exists(path) ? path : null) : FindExecutable("claude");
+
     // Why claude setup-token cannot run here from another computer; null when it can.
-    private static string? ClaudeCanSignIn()
+    private string? ClaudeCanSignIn()
     {
-        if (OperatingSystem.IsWindows()) return "Claude Code signs in from another computer on a macOS or Linux machine: on Windows, run claude setup-token there.";
-        if (FindExecutable("claude") is null) return "Claude Code is not installed on the machine, or not on the PATH of the node.";
+        if (FindClaude() is not { } claude) return "Claude Code is not installed on the machine, or not on the PATH of the node.";
+        if (OperatingSystem.IsWindows())
+            return !IsBatch(claude) || IsPlainForCmd(claude) ? null : "The folder of Claude Code holds a character cmd.exe reads: run claude setup-token on the machine.";
         return File.Exists("/usr/bin/script") ? null : "The machine has no script command, which runs claude setup-token in a terminal.";
     }
 
-    // claude setup-token in a pseudo-terminal: its page goes to the desktop, the code the person pastes to its input, and the token
-    // it prints to a secret of the machine, which the provider names. Never throws.
+    // claude setup-token in a pseudo-terminal (script on macOS and Linux, a pseudoconsole on Windows): its page goes to the desktop,
+    // the code the person pastes to its input, and the token it prints to a secret of the machine, which the provider names. Never throws.
     private async Task<FleetMachineSignInState> RunClaudeAsync(Attempt attempt, FleetMachineSignInStartParams parameters, CodeAltaProviderDocument definition)
     {
         if (parameters.Way is { } way && way != FleetMachineSignInWays.Code) throw new NotSupportedException("Claude Code signs in with the code its page shows.");
         if (ClaudeCanSignIn() is { } why) throw new NotSupportedException(why);
-        using var process = StartClaudeSetupToken(FindExecutable("claude")!);
-        attempt.AcceptCode = code =>
-        {
-            // The terminal takes the code as typed, then Enter.
-            process.StandardInput.Write(code + "\r");
-            process.StandardInput.Flush();
-        };
-        using var kill = attempt.Lifetime.Token.Register(() => { try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } });
+        using var terminal = ClaudeTerminal.Start(FindClaude()!);
+        // The terminal takes the code as typed, then Enter.
+        attempt.AcceptCode = code => terminal.Write(code + "\r");
+        using var kill = attempt.Lifetime.Token.Register(terminal.Kill);
         var output = new StringBuilder();
         var buffer = new char[4096];
         string? token = null;
-        while (await process.StandardOutput.ReadAsync(buffer, attempt.Lifetime.Token).ConfigureAwait(false) is var read and > 0)
+        while (await terminal.ReadAsync(buffer, attempt.Lifetime.Token).ConfigureAwait(false) is var read and > 0)
         {
-            if (output.Length < MaxOutput) output.Append(buffer, 0, read);
+            if (output.Length < MaxOutput) output.Append(buffer, 0, Math.Min(read, MaxOutput - output.Length));
             var text = output.ToString();
             if (!attempt.Prompt.Task.IsCompleted && ReadClaudePage(text) is { } page)
             {
@@ -135,7 +156,8 @@ internal sealed partial class NodeSignIns
             if ((token = ReadClaudeToken(text)) is not null) break;
         }
 
-        try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+        terminal.Kill();
+        attempt.Lifetime.Token.ThrowIfCancellationRequested();
         if (token is null)
         {
             attempt.Prompt.TrySetException(new InvalidOperationException("claude setup-token ended before it gave a page to open."));
@@ -159,20 +181,102 @@ internal sealed partial class NodeSignIns
         new LocalSecretStore(Root).DeleteSecret(ClaudeSecretName(definition.ProviderKey));
     }
 
-    // The pseudo-terminal of script, wide enough that the token is printed on one line; no browser opens here.
-    private static Process StartClaudeSetupToken(string claude)
+    private static bool IsBatch(string path)
+        => path.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".bat", StringComparison.OrdinalIgnoreCase);
+
+    // The terminal claude setup-token runs in, wide enough that the page and the token are printed on one line; no browser opens here.
+    private abstract class ClaudeTerminal : IDisposable
     {
-        var quoted = "'" + claude.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
-        var command = $"stty cols 1000 rows 50 2>/dev/null; exec {quoted} setup-token";
-        var start = new ProcessStartInfo("/usr/bin/script")
+        public static ClaudeTerminal Start(string claude) => OperatingSystem.IsWindows() ? new ConsoleTerminal(claude) : new ScriptTerminal(claude);
+
+        public abstract ValueTask<int> ReadAsync(char[] buffer, CancellationToken cancellationToken);
+
+        public abstract void Write(string text);
+
+        public abstract void Kill();
+
+        public abstract void Dispose();
+    }
+
+    // macOS and Linux: the pseudo-terminal of script.
+    private sealed class ScriptTerminal : ClaudeTerminal
+    {
+        private readonly Process _process;
+
+        public ScriptTerminal(string claude)
         {
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
-        };
-        // BSD script (macOS) takes the command and its words; util-linux script (Linux) a command line with -c.
-        string[] arguments = OperatingSystem.IsMacOS() ? ["-q", "/dev/null", "/bin/sh", "-c", command] : ["-q", "-e", "-c", command, "/dev/null"];
-        foreach (var argument in arguments) start.ArgumentList.Add(argument);
-        start.Environment["BROWSER"] = "true";
-        start.Environment["TERM"] = "xterm-256color";
-        return Process.Start(start) ?? throw new InvalidOperationException("script could not start on this machine.");
+            var quoted = "'" + claude.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+            var command = $"stty cols 1000 rows 50 2>/dev/null; exec {quoted} setup-token";
+            var start = new ProcessStartInfo("/usr/bin/script")
+            {
+                RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
+            };
+            // BSD script (macOS) takes the command and its words; util-linux script (Linux) a command line with -c.
+            string[] arguments = OperatingSystem.IsMacOS() ? ["-q", "/dev/null", "/bin/sh", "-c", command] : ["-q", "-e", "-c", command, "/dev/null"];
+            foreach (var argument in arguments) start.ArgumentList.Add(argument);
+            start.Environment["BROWSER"] = "true";
+            start.Environment["TERM"] = "xterm-256color";
+            _process = Process.Start(start) ?? throw new InvalidOperationException("script could not start on this machine.");
+        }
+
+        public override ValueTask<int> ReadAsync(char[] buffer, CancellationToken cancellationToken) => _process.StandardOutput.ReadAsync(buffer, cancellationToken);
+
+        public override void Write(string text)
+        {
+            _process.StandardInput.Write(text);
+            _process.StandardInput.Flush();
+        }
+
+        public override void Kill()
+        {
+            try { _process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+        }
+
+        public override void Dispose() => _process.Dispose();
+    }
+
+    // Windows: a pseudoconsole, which claude asks its questions in as in any console; a .cmd of npm runs through cmd.exe.
+    private sealed class ConsoleTerminal : ClaudeTerminal
+    {
+        private readonly PseudoTerminal _terminal;
+        private readonly Decoder _decoder = Encoding.UTF8.GetDecoder();
+        private readonly byte[] _bytes = new byte[4096];
+
+        public ConsoleTerminal(string claude)
+        {
+            var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (System.Collections.DictionaryEntry pair in Environment.GetEnvironmentVariables())
+            {
+                if (pair.Key is string name && pair.Value is string value) environment[name] = value;
+            }
+
+            environment["BROWSER"] = "true";
+            environment["TERM"] = "xterm-256color";
+            var (fileName, arguments) = IsBatch(claude)
+                ? (Path.Combine(Environment.SystemDirectory, "cmd.exe"), new[] { "/d", "/c", claude, "setup-token" })
+                : (claude, new[] { "setup-token" });
+            var folder = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            _terminal = PseudoTerminal.Start(new PseudoTerminalStart(fileName, arguments, Directory.Exists(folder) ? folder : Environment.CurrentDirectory, environment,
+                PseudoTerminal.MaximumSize, 50));
+        }
+
+        // A read waits in the console: it ends with what the program printed, or with 0 once the console is closed.
+        public override async ValueTask<int> ReadAsync(char[] buffer, CancellationToken cancellationToken)
+        {
+            while (true)
+            {
+                var read = await Task.Run(() => _terminal.Read(_bytes), cancellationToken).ConfigureAwait(false);
+                if (read == 0) return 0;
+                var chars = _decoder.GetChars(_bytes, 0, read, buffer, 0, flush: false);
+                if (chars > 0) return chars;
+            }
+        }
+
+        public override void Write(string text) => _terminal.Write(Encoding.UTF8.GetBytes(text));
+
+        public override void Kill() => _terminal.Kill();
+
+        public override void Dispose() => _terminal.Dispose();
     }
 }

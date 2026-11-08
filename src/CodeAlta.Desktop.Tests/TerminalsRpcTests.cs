@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CodeAlta.Catalog;
+using CodeAlta.Core.Terminals;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Desktop.Terminals;
 

@@ -2,18 +2,23 @@
 
   <!-- The lowest layer: the safe operations on files that every project shares (a file replaced while others read it, a
        read that never takes a replacement for a missing file, the lock files of the processes of one profile, the lock of a
-       path within a process). It references nothing of CodeAlta, so that the self-update and the server use it as the
+       path within a process), and the pseudo-terminals (ConPTY, pty) that the terminals of the desktop and the sign-ins of a
+       node run programs in. It references nothing of CodeAlta, so that the self-update and the server use it as the
        agent runtime does. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsAotCompatible>true</IsAotCompatible>
+    <!-- The code LibraryImport generates for the pseudo-terminals. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="CodeAlta.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Node.Tests" />
   </ItemGroup>
 </Project>

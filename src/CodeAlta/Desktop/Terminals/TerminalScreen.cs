@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using CodeAlta.Core.Terminals;
 
 namespace CodeAlta.Desktop.Terminals;
 

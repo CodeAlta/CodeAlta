@@ -1,3 +1,4 @@
+using CodeAlta.Core.Terminals;
 using CodeAlta.Desktop.Terminals;
 
 namespace CodeAlta.Desktop.Tests;

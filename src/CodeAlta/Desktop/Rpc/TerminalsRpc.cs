@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using CodeAlta.Catalog;
+using CodeAlta.Core.Terminals;
 using CodeAlta.Desktop.Terminals;
 using NeoAstra.Rpc;
 

@@ -4,14 +4,14 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 
-namespace CodeAlta.Desktop.Terminals;
+namespace CodeAlta.Core.Terminals;
 
 /// <summary>
 /// A program behind a pty on Linux and macOS. The program is the leader of a session of its own, with the
 /// pty as its controlling terminal: its job control and the signals of its keyboard work as in any terminal.
 /// </summary>
 [UnsupportedOSPlatform("windows")]
-internal sealed class UnixPseudoTerminal : PseudoTerminal
+internal sealed partial class UnixPseudoTerminal : PseudoTerminal
 {
     // The program is started by a shell that makes the pty the terminal of the session (the first terminal a
     // session leader opens becomes its controlling terminal), enters the folder and becomes the program.
@@ -63,7 +63,7 @@ internal sealed class UnixPseudoTerminal : PseudoTerminal
             if (grantpt(master) != 0 || unlockpt(master) != 0) throw Failure("The pty could not be opened.");
             _ = ioctl(master, CloseOnExecute);
             var name = new byte[256];
-            if (ptsname_r(master, name, (nuint)name.Length) != 0) throw Failure("The pty has no name.");
+            if (ptsname_r(master, ref name[0], (nuint)name.Length) != 0) throw Failure("The pty has no name.");
             var device = Encoding.UTF8.GetString(name, 0, Math.Max(0, Array.IndexOf(name, (byte)0)));
             // macOS refuses settings through the master until the pty is opened, and gives the pty its defaults at
             // that first open: they are set through the pty itself, kept open until the program has it open too.
@@ -276,10 +276,10 @@ internal sealed class UnixPseudoTerminal : PseudoTerminal
     private static void AcceptUtf8(int descriptor)
     {
         var settings = new byte[256];
-        if (tcgetattr(descriptor, settings) != 0) return;
+        if (tcgetattr(descriptor, ref settings[0]) != 0) return;
         // The input flags come first, 4 bytes on Linux and 8 on macOS: the flag is in the low ones on both.
         BinaryPrimitives.WriteUInt32LittleEndian(settings, BinaryPrimitives.ReadUInt32LittleEndian(settings) | InputIsUtf8);
-        _ = tcsetattr(descriptor, 0, settings);
+        _ = tcsetattr(descriptor, 0, ref settings[0]);
     }
 
     /// <summary>Waits until the descriptor has something to read. Returns 1 then, 0 when the time is over, -1 on an error.</summary>
@@ -292,7 +292,7 @@ internal sealed class UnixPseudoTerminal : PseudoTerminal
         // Seconds then microseconds: two 8-byte integers on Linux, 8 then 4 bytes on macOS.
         var time = new byte[16];
         BinaryPrimitives.WriteInt32LittleEndian(time.AsSpan(8), milliseconds * 1000);
-        return select(descriptor + 1, set, 0, 0, time);
+        return select(descriptor + 1, ref set[0], 0, 0, ref time[0]);
     }
 
     // On Linux a program inherits what this process has open and did not mark otherwise: a C library that can
@@ -353,93 +353,93 @@ internal sealed class UnixPseudoTerminal : PseudoTerminal
         public ushort Rows, Columns, Width, Height;
     }
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int posix_openpt(int flags);
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int posix_openpt(int flags);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+    [LibraryImport("libc", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int open(string path, int flags);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int grantpt(int descriptor);
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int grantpt(int descriptor);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int unlockpt(int descriptor);
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int unlockpt(int descriptor);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int ptsname_r(int descriptor, byte[] name, nuint length);
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int ptsname_r(int descriptor, ref byte name, nuint length);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int ioctl(int descriptor, nuint request);
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int ioctl(int descriptor, nuint request);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int ioctl(int descriptor, nuint request, ref WindowSize size);
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int ioctl(int descriptor, nuint request, ref WindowSize size);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int ioctl(int descriptor, nuint request, nint unused2, nint unused3, nint unused4, nint unused5, nint unused6, nint unused7, ref WindowSize size);
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int ioctl(int descriptor, nuint request, nint unused2, nint unused3, nint unused4, nint unused5, nint unused6, nint unused7, ref WindowSize size);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int tcgetattr(int descriptor, byte[] settings);
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int tcgetattr(int descriptor, ref byte settings);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int tcsetattr(int descriptor, int when, byte[] settings);
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int tcsetattr(int descriptor, int when, ref byte settings);
 
-    [DllImport("libc")]
-    private static extern int posix_spawn_file_actions_init(nint actions);
+    [LibraryImport("libc")]
+    private static partial int posix_spawn_file_actions_init(nint actions);
 
-    [DllImport("libc")]
-    private static extern int posix_spawn_file_actions_destroy(nint actions);
+    [LibraryImport("libc")]
+    private static partial int posix_spawn_file_actions_destroy(nint actions);
 
-    [DllImport("libc")]
-    private static extern int posix_spawn_file_actions_addopen(nint actions, int descriptor, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags, uint mode);
+    [LibraryImport("libc", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int posix_spawn_file_actions_addopen(nint actions, int descriptor, string path, int flags, uint mode);
 
-    [DllImport("libc")]
-    private static extern int posix_spawn_file_actions_adddup2(nint actions, int descriptor, int copy);
+    [LibraryImport("libc")]
+    private static partial int posix_spawn_file_actions_adddup2(nint actions, int descriptor, int copy);
 
-    [DllImport("libc")]
-    private static extern int posix_spawn_file_actions_addclosefrom_np(nint actions, int from);
+    [LibraryImport("libc")]
+    private static partial int posix_spawn_file_actions_addclosefrom_np(nint actions, int from);
 
-    [DllImport("libc")]
-    private static extern int posix_spawnattr_init(nint attributes);
+    [LibraryImport("libc")]
+    private static partial int posix_spawnattr_init(nint attributes);
 
-    [DllImport("libc")]
-    private static extern int posix_spawnattr_destroy(nint attributes);
+    [LibraryImport("libc")]
+    private static partial int posix_spawnattr_destroy(nint attributes);
 
-    [DllImport("libc")]
-    private static extern int posix_spawnattr_setflags(nint attributes, short flags);
+    [LibraryImport("libc")]
+    private static partial int posix_spawnattr_setflags(nint attributes, short flags);
 
-    [DllImport("libc")]
-    private static extern int posix_spawnattr_setsigdefault(nint attributes, nint signals);
+    [LibraryImport("libc")]
+    private static partial int posix_spawnattr_setsigdefault(nint attributes, nint signals);
 
-    [DllImport("libc")]
-    private static extern int posix_spawnattr_setsigmask(nint attributes, nint signals);
+    [LibraryImport("libc")]
+    private static partial int posix_spawnattr_setsigmask(nint attributes, nint signals);
 
-    [DllImport("libc")]
-    private static extern int sigfillset(nint signals);
+    [LibraryImport("libc")]
+    private static partial int sigfillset(nint signals);
 
-    [DllImport("libc")]
-    private static extern int sigemptyset(nint signals);
+    [LibraryImport("libc")]
+    private static partial int sigemptyset(nint signals);
 
-    [DllImport("libc")]
-    private static extern int posix_spawn(out int processId, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, nint actions, nint attributes, nint arguments, nint environment);
+    [LibraryImport("libc", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int posix_spawn(out int processId, string path, nint actions, nint attributes, nint arguments, nint environment);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int waitpid(int processId, out int status, int options);
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int waitpid(int processId, out int status, int options);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int kill(int processId, int signal);
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int kill(int processId, int signal);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int select(int count, byte[] read, nint write, nint error, byte[] time);
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int select(int count, ref byte read, nint write, nint error, ref byte time);
 
-    [DllImport("libc", SetLastError = true)]
-    private static extern int close(int descriptor);
+    [LibraryImport("libc", SetLastError = true)]
+    private static partial int close(int descriptor);
 
-    private static class LibC
+    private static partial class LibC
     {
-        [DllImport("libc", SetLastError = true)]
-        internal static extern nint read(int descriptor, ref byte buffer, nuint count);
+        [LibraryImport("libc", SetLastError = true)]
+        internal static partial nint read(int descriptor, ref byte buffer, nuint count);
 
-        [DllImport("libc", SetLastError = true)]
-        internal static extern nint write(int descriptor, in byte buffer, nuint count);
+        [LibraryImport("libc", SetLastError = true)]
+        internal static partial nint write(int descriptor, in byte buffer, nuint count);
     }
 }

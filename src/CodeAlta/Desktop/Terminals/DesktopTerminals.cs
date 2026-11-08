@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using CodeAlta.Core.Terminals;
 
 namespace CodeAlta.Desktop.Terminals;
 

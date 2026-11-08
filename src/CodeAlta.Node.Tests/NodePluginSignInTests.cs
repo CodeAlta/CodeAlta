@@ -115,15 +115,12 @@ public sealed class NodePluginSignInTests
         await using var node = await NodeHost.StartAsync(root.Options(), token);
         File.WriteAllText(node.Host.CatalogOptions.ConfigPath, "[providers.claude]\ntype = \"claude-code\"\n");
         var providers = new NodeProviders(node.Host, null);
-        var signIns = new NodeSignIns(node.Host, providers);
+        var signIns = new NodeSignIns(node.Host, providers) { ClaudeExecutable = Path.Combine(root.Root, "missing", "claude.exe") };
 
         var item = (await signIns.ListAsync(token)).Items.Single(static value => value.Key == "claude");
         Assert.AreEqual(FleetMachineSignInStates.Unknown, item.State, "the CLI may keep its own login on the machine");
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.AreEqual(0, item.Ways.Count);
-            StringAssert.Contains(item.Detail, "macOS or Linux");
-        }
+        Assert.AreEqual(0, item.Ways.Count);
+        StringAssert.Contains(item.Detail, "not installed");
 
         var name = NodeSignIns.ClaudeSecretName("claude");
         new CodeAlta.Catalog.Secrets.LocalSecretStore(node.Host.CatalogOptions.GlobalRoot).SetSecret(name, "sk-ant-oat01-test-token-value-0123456789", "test");
@@ -136,6 +133,49 @@ public sealed class NodePluginSignInTests
         Assert.AreEqual(FleetMachineSignInStates.Unknown, signedOut.State);
         Assert.IsFalse(new CodeAlta.Catalog.Secrets.LocalSecretStore(node.Host.CatalogOptions.GlobalRoot).ListSecrets().Any(secret => secret.Name == name));
         Assert.IsFalse(File.ReadAllText(node.Host.CatalogOptions.ConfigPath).Contains(NodeSignIns.ClaudeTokenVariable, StringComparison.Ordinal));
+    }
+
+    // On Windows, claude setup-token runs in a pseudoconsole of the node: what it prints there gives the page, the code the person
+    // pastes on the desktop is typed into it, and the token it prints becomes a secret of the machine. A script of cmd.exe plays it.
+    [TestMethod]
+    public async Task ClaudeCode_SignsInOnAWindowsMachine_InAPseudoconsoleOfTheNode()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("The pseudoconsole of Windows; macOS and Linux run it under script.");
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options(), token);
+        File.WriteAllText(node.Host.CatalogOptions.ConfigPath, "[providers.claude]\ntype = \"claude-code\"\n");
+        var claude = Path.Combine(root.Root, "fake-claude", "claude.cmd");
+        Directory.CreateDirectory(Path.GetDirectoryName(claude)!);
+        File.WriteAllText(claude, string.Join("\r\n",
+            "@echo off",
+            "if not \"%1\"==\"setup-token\" exit /b 2",
+            "echo Browser didn't open? Use the url below to sign in:",
+            "echo.",
+            "echo https://claude.ai/oauth/authorize?code=true^&client_id=x^&state=s",
+            "echo.",
+            "set /p CODE=Paste code here if prompted ^> ",
+            "echo.",
+            "echo sk-ant-oat01-ABCDEFGHIJKLMNOPQRSTUVWXYZ_%CODE%",
+            "echo.",
+            "echo Store this token securely.",
+            "pause >nul",
+            ""));
+        var signIns = new NodeSignIns(node.Host, new NodeProviders(node.Host, null)) { ClaudeExecutable = claude };
+
+        var item = (await signIns.ListAsync(token)).Items.Single(static value => value.Key == "claude");
+        CollectionAssert.AreEqual(new[] { FleetMachineSignInWays.Code }, item.Ways.ToArray(), "a Windows machine signs Claude Code in from the desktop too");
+        var prompt = await signIns.StartAsync(new FleetMachineSignInStartParams(FleetMachineSignInKinds.Provider, "claude"), token);
+        Assert.AreEqual((FleetMachineSignInWays.Code, "https://claude.ai/oauth/authorize?code=true&client_id=x&state=s"), (prompt.Way, prompt.Page));
+        var ended = await signIns.CompleteAsync(new FleetMachineSignInCompleteParams(prompt.AttemptId, null, "pasted42"), token);
+        if (ended.Status == FleetMachineSignInStates.Waiting) ended = await signIns.WaitAsync(prompt.AttemptId, TimeSpan.FromSeconds(20), token);
+        Assert.AreEqual(FleetMachineSignInStates.Completed, ended.Status, ended.Message);
+
+        var name = NodeSignIns.ClaudeSecretName("claude");
+        Assert.IsTrue(CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForMachine(node.Host.CatalogOptions.GlobalRoot)
+            .TryGet(new CodeAlta.Catalog.Secrets.SecretReference(CodeAlta.Catalog.Secrets.SecretReferenceKind.Secret, name), out var kept));
+        Assert.AreEqual("sk-ant-oat01-ABCDEFGHIJKLMNOPQRSTUVWXYZ_pasted42", kept, "the code pasted on the desktop was typed into the console");
+        StringAssert.Contains(File.ReadAllText(node.Host.CatalogOptions.ConfigPath), $"${{secret:{name}}}");
     }
 
     private static PluginModelProviderContribution Contribution(string type, IPluginProviderAccount account) => new()

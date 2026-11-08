@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using CodeAlta.Core.Terminals;
 using CodeAlta.Desktop.Terminals;
 
 namespace CodeAlta.Desktop.Tests;

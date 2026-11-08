@@ -52,6 +52,23 @@ public sealed class NodeCliSignInTests
         Assert.IsTrue(NodeSignIns.IsPlainForCmd("--tenant=contoso.onmicrosoft.com"));
     }
 
+    // What a pseudoconsole of Windows renders of claude setup-token: the screen drawn again with moves of the cursor, and the page as
+    // text when the console does not pass the link of the terminal on. Only a page of Claude is taken from the text.
+    [TestMethod]
+    public void WhatAConsoleOfWindowsRenders_GivesThePageAsText()
+    {
+        const string Page = "https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=s";
+        var screen = "\u001b[?25l\u001b[2J\u001b[m\u001b[HBrowser didn't open? Use the url below to sign in:\u001b[K\r\n\u001b[K\r\n"
+            + $"{Page}\u001b[K\r\n\u001b[K\r\n";
+        Assert.IsNull(NodeSignIns.ReadClaudePage(screen), "not before it asks for the code");
+        var asked = screen + "\u001b[5;1HPaste code here if prompted >\u001b[K\u001b[?25h";
+        Assert.AreEqual(Page, NodeSignIns.ReadClaudePage(asked));
+        Assert.IsNull(NodeSignIns.ReadClaudePage(asked.Replace("https://claude.com/", "https://claude.example.com/", StringComparison.Ordinal)), "a page elsewhere is not one");
+        const string Token = "sk-ant-oat01-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA_BBBBBBBBBBBBBBBB-CCCCCCCC";
+        Assert.AreEqual(Token, NodeSignIns.ReadClaudeToken(asked + $"\u001b[7;1H{Token}\u001b[K\r\n"));
+        Assert.AreEqual(Token, NodeSignIns.ReadClaudeToken(asked + $"\u001b[7;1H{Token}\u001b[K\u001b[8;1HStore"), "a move of the cursor ends the token too");
+    }
+
     [TestMethod]
     public void ALoginCommand_IsSplitIntoItsWords_AndAzureSignsInWithItsDeviceCode()
     {

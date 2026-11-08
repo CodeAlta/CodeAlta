@@ -4,14 +4,14 @@ using System.Runtime.Versioning;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
-namespace CodeAlta.Desktop.Terminals;
+namespace CodeAlta.Core.Terminals;
 
 /// <summary>
 /// A program behind a Windows pseudoconsole (ConPTY, Windows 10 1809 and later). The console host renders
 /// what the program does to its console as the bytes a terminal receives, in UTF-8.
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed class WindowsPseudoTerminal : PseudoTerminal
+internal sealed partial class WindowsPseudoTerminal : PseudoTerminal
 {
     // How long a program has to end once its console is closed before it is terminated.
     private static readonly TimeSpan KillPatience = TimeSpan.FromSeconds(5);
@@ -72,9 +72,11 @@ internal sealed class WindowsPseudoTerminal : PseudoTerminal
             // With this flag and no handle, the program has the handles of its console: without it, a program
             // started by a process whose own output is redirected would write there.
             startup.Information.Flags = UseStandardHandles;
-            var commandLine = new StringBuilder(CommandLine(start.FileName, start.Arguments));
+            // The command line is written in place by CreateProcess: a buffer of its own, ended by a null.
+            var commandLine = (CommandLine(start.FileName, start.Arguments) + "\0").ToCharArray();
             var environment = EnvironmentBlock(start.Environment);
-            if (!CreateProcessW(null, commandLine, 0, 0, false, ExtendedStartupInformation | UnicodeEnvironment, environment, start.WorkingDirectory, ref startup, out var created))
+            if (!CreateProcess(null, ref commandLine[0], 0, 0, false, ExtendedStartupInformation | UnicodeEnvironment, ref environment[0], start.WorkingDirectory, ref startup,
+                    out var created))
             {
                 throw Failure($"'{start.FileName}' could not be started.");
             }
@@ -290,7 +292,7 @@ internal sealed class WindowsPseudoTerminal : PseudoTerminal
         public readonly short X = x, Y = y;
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    [StructLayout(LayoutKind.Sequential)]
     private struct StartupInformation
     {
         public int Size;
@@ -314,52 +316,52 @@ internal sealed class WindowsPseudoTerminal : PseudoTerminal
         public int ProcessId, ThreadId;
     }
 
-    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CreatePipe(out SafeFileHandle read, out SafeFileHandle write, nint attributes, int size);
+    private static partial bool CreatePipe(out SafeFileHandle read, out SafeFileHandle write, nint attributes, int size);
 
-    [DllImport("kernel32.dll", ExactSpelling = true)]
-    private static extern int CreatePseudoConsole(Coordinates size, SafeFileHandle input, SafeFileHandle output, uint flags, out nint console);
+    [LibraryImport("kernel32.dll")]
+    private static partial int CreatePseudoConsole(Coordinates size, SafeFileHandle input, SafeFileHandle output, uint flags, out nint console);
 
-    [DllImport("kernel32.dll", ExactSpelling = true)]
-    private static extern int ResizePseudoConsole(nint console, Coordinates size);
+    [LibraryImport("kernel32.dll")]
+    private static partial int ResizePseudoConsole(nint console, Coordinates size);
 
-    [DllImport("kernel32.dll", ExactSpelling = true)]
-    private static extern void ClosePseudoConsole(nint console);
+    [LibraryImport("kernel32.dll")]
+    private static partial void ClosePseudoConsole(nint console);
 
-    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool InitializeProcThreadAttributeList(nint list, int count, int flags, ref nuint size);
+    private static partial bool InitializeProcThreadAttributeList(nint list, int count, int flags, ref nuint size);
 
-    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool UpdateProcThreadAttribute(nint list, uint flags, nuint attribute, nint value, nuint size, nint previous, nint returned);
+    private static partial bool UpdateProcThreadAttribute(nint list, uint flags, nuint attribute, nint value, nuint size, nint previous, nint returned);
 
-    [DllImport("kernel32.dll", ExactSpelling = true)]
-    private static extern void DeleteProcThreadAttributeList(nint list);
+    [LibraryImport("kernel32.dll")]
+    private static partial void DeleteProcThreadAttributeList(nint list);
 
-    [DllImport("kernel32.dll", ExactSpelling = true, CharSet = CharSet.Unicode, SetLastError = true)]
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateProcessW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CreateProcessW(string? application, StringBuilder commandLine, nint processAttributes, nint threadAttributes,
-        [MarshalAs(UnmanagedType.Bool)] bool inheritHandles, uint flags, char[] environment, string? directory, ref StartupInformationEx startup, out ProcessInformation created);
+    private static partial bool CreateProcess(string? application, ref char commandLine, nint processAttributes, nint threadAttributes,
+        [MarshalAs(UnmanagedType.Bool)] bool inheritHandles, uint flags, ref char environment, string? directory, ref StartupInformationEx startup, out ProcessInformation created);
 
-    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool ReadFile(SafeFileHandle file, ref byte buffer, int count, out int read, nint overlapped);
+    private static partial bool ReadFile(SafeFileHandle file, ref byte buffer, int count, out int read, nint overlapped);
 
-    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool WriteFile(SafeFileHandle file, in byte buffer, int count, out int written, nint overlapped);
+    private static partial bool WriteFile(SafeFileHandle file, in byte buffer, int count, out int written, nint overlapped);
 
-    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetExitCodeProcess(SafeProcessHandle process, out uint code);
+    private static partial bool GetExitCodeProcess(SafeProcessHandle process, out uint code);
 
-    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool TerminateProcess(SafeProcessHandle process, uint code);
+    private static partial bool TerminateProcess(SafeProcessHandle process, uint code);
 
-    [DllImport("kernel32.dll", ExactSpelling = true)]
+    [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseHandle(nint handle);
+    private static partial bool CloseHandle(nint handle);
 }
