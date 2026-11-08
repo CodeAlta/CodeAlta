@@ -42,6 +42,66 @@ internal static class McpExternalVariables
         return true;
     }
 
+    /// <summary>
+    /// Gives a server of CodeAlta's own file of a project what a server of a project file of another tool gets (#368): the
+    /// folder variables <c>${workspaceFolder}</c>, <c>${workspaceFolderBasename}</c>, <c>${userHome}</c>, <c>${pathSeparator}</c>
+    /// and <c>${/}</c> are resolved, and it starts in the project folder, a relative <c>cwd</c> taken from it. Every other
+    /// <c>${...}</c> stays, resolved as an environment variable, a secret or a variable when the server starts. Done when it
+    /// starts, so that the file keeps what it writes.
+    /// </summary>
+    internal static McpServerDefinition ResolveProjectFolders(McpServerDefinition definition, string? projectDirectory, string userHome)
+    {
+        if (definition.SourceScope != McpConfigScope.Project || definition.SourceOrigin != McpConfigOrigin.CodeAlta || projectDirectory is null)
+        {
+            return definition;
+        }
+
+        string? Folders(string? value) => ReplaceFolders(value, projectDirectory, userHome);
+        var cwd = Folders(definition.Cwd);
+        return definition with
+        {
+            Command = Folders(definition.Command),
+            Args = definition.Args.Count == 0 ? definition.Args : definition.Args.Select(arg => Folders(arg)!).ToArray(),
+            Cwd = ResolveWorkingDirectory(definition, cwd, new McpExternalContext(projectDirectory, userHome)),
+            Url = Folders(definition.Url),
+            Env = definition.Env.Count == 0 ? definition.Env : definition.Env.ToDictionary(static pair => pair.Key, pair => Folders(pair.Value)!, StringComparer.Ordinal),
+            Headers = definition.Headers.Count == 0 ? definition.Headers : definition.Headers.ToDictionary(static pair => pair.Key, pair => Folders(pair.Value)!, StringComparer.Ordinal),
+        };
+    }
+
+    // The folder variables of a value, resolved; anything else between ${ and } is kept as it is written.
+    private static string? ReplaceFolders(string? value, string projectDirectory, string userHome)
+    {
+        if (value is null || !value.Contains("${", StringComparison.Ordinal))
+        {
+            return value;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        var offset = 0;
+        for (var start = value.IndexOf("${", StringComparison.Ordinal); start >= 0; start = value.IndexOf("${", offset, StringComparison.Ordinal))
+        {
+            var end = value.IndexOf('}', start + 2);
+            if (end < 0)
+            {
+                break;
+            }
+
+            string? folder = value.AsSpan(start + 2, end - start - 2) switch
+            {
+                "workspaceFolder" => projectDirectory,
+                "workspaceFolderBasename" => Path.GetFileName(Path.TrimEndingDirectorySeparator(projectDirectory)),
+                "userHome" => userHome,
+                "pathSeparator" or "/" => Path.DirectorySeparatorChar.ToString(),
+                _ => null,
+            };
+            builder.Append(value, offset, start - offset).Append(folder ?? value.Substring(start, end - start + 1));
+            offset = end + 1;
+        }
+
+        return builder.Append(value, offset, value.Length - offset).ToString();
+    }
+
     // A server of a project starts in the folder of the project, as it does in the tool the file is written for.
     private static string? ResolveWorkingDirectory(McpServerDefinition definition, string? cwd, McpExternalContext context)
     {

@@ -818,7 +818,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         var key = effective.Definition.Key;
         if (!context.Policy.IsServerInSpace(key, context.Request.SpaceId) || !IsServerEnabled(context.Policy, key, out var serverPolicy)) return null;
         // The list answers only for a start with the same values: the same variables and headers, the same session variables.
-        if (!TryExpandConnectionFields(effective.Definition, ReaderOf(context.Request.Home), out var definition, out _)) return null;
+        if (!TryExpandConnectionFields(effective.Definition, ProjectOf(context), ReaderOf(context.Request.Home), out var definition, out _)) return null;
         var serverAliasPart = context.ServerAliasParts.TryGetValue(key, out var aliasPart) ? aliasPart : SanitizeAliasPart(key);
         var variant = VariantOf(definition, serverAliasPart, context.Request.Environment);
         var list = new McpToolListCache(McpToolListCache.FolderOf(context.Request.Home)).Read(key, McpToolListCache.Fingerprint(effective.Definition));
@@ -970,7 +970,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         // The tokens of a server are kept under its address as the file writes it, also when a variable is part of it.
         var tokenUrl = effective.Definition.Url;
         var read = ReaderOf(context.Request.Home);
-        if (!TryExpandConnectionFields(effective.Definition, read, out var definition, out var missing))
+        if (!TryExpandConnectionFields(effective.Definition, ProjectOf(context), read, out var definition, out var missing))
         {
             return Cache(cacheKey, ServerRuntimeState.Failed(missing));
         }
@@ -1585,14 +1585,21 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
     /// <summary>Gets or sets what is told each value of a secret given to a server before it gets it (the masking of the host); null tells nothing.</summary>
     internal Action<string>? SecretIssued { get; set; }
 
-    // Resolves ${NAME} in the command, its arguments, its folder and the address. The values of environment variables
-    // and headers are resolved where they are used, so that a diagnostic can name the one that fails.
+    // The folder of the project of a request, as its files were discovered from it; null without one.
+    private static string? ProjectOf(RuntimeContext context)
+        => string.IsNullOrWhiteSpace(context.Request.ProjectDirectory) ? null : Path.GetFullPath(context.Request.ProjectDirectory);
+
+    // Resolves ${NAME} in the command, its arguments, its folder and the address, after the folder variables of a server of
+    // CodeAlta's file of the project, which also starts in the project folder. The values of environment variables and
+    // headers are resolved where they are used, so that a diagnostic can name the one that fails.
     private static bool TryExpandConnectionFields(
         McpServerDefinition definition,
+        string? projectDirectory,
         Func<string, string?> read,
         out McpServerDefinition expanded,
         [NotNullWhen(false)] out McpRuntimeDiagnostic? diagnostic)
     {
+        definition = McpExternalVariables.ResolveProjectFolders(definition, projectDirectory, McpConfigDiscovery.GetUserHome(null));
         string? missing = null;
         string? field = null;
         string? Expand(string? value, string fieldName)

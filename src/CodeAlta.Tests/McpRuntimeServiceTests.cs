@@ -713,6 +713,39 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task AServerOfTheProjectFileOfCodeAlta_StartsInTheProjectFolder_AndResolvesItsFolderVariables()
+    {
+        // #368: a server of .alta/mcp.json refers to the files of the project as a server of .mcp.json does. The tiny
+        // server creates MCP_TEST_START_DIR where it is told, relative to the folder it was started in.
+        using var project = TempDirectory.Create();
+        Directory.CreateDirectory(Path.Combine(project.Path, "sub"));
+        var path = McpConfigDiscovery.GetProjectConfigPath(project.Path);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        object Server(string? cwd, string startDirectory) => cwd is null
+            ? new { command = "dotnet", args = new[] { TinyServerAssemblyPath }, env = new Dictionary<string, string> { ["MCP_TEST_START_DIR"] = startDirectory } }
+            : new { command = "dotnet", args = new[] { TinyServerAssemblyPath }, cwd, env = new Dictionary<string, string> { ["MCP_TEST_START_DIR"] = startDirectory } };
+        var written = JsonSerializer.Serialize(new
+        {
+            mcpServers = new Dictionary<string, object>
+            {
+                ["in-project"] = Server(null, "in-project-starts"),
+                ["relative-cwd"] = Server("sub", "relative-cwd-starts"),
+                ["variable"] = Server(null, "${workspaceFolder}${/}sub${/}variable-starts"),
+            },
+        });
+        File.WriteAllText(path, written);
+        await using var service = new McpRuntimeService(_home.Path);
+
+        var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: null, query: null, CancellationToken.None);
+
+        Assert.AreEqual(0, search.Diagnostics.Count, string.Join(Environment.NewLine, search.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        Assert.IsTrue(Directory.Exists(Path.Combine(project.Path, "in-project-starts")), "A server without a cwd starts in the project folder.");
+        Assert.IsTrue(Directory.Exists(Path.Combine(project.Path, "sub", "relative-cwd-starts")), "A relative cwd is taken from the project folder.");
+        Assert.IsTrue(Directory.Exists(Path.Combine(project.Path, "sub", "variable-starts")), "${workspaceFolder} is the project folder.");
+        Assert.AreEqual(written, File.ReadAllText(path), "The file keeps what it says.");
+    }
+
+    [TestMethod]
     public async Task Search_ReturnsDiagnosticWhenEnvironmentVariableReferenceIsMissing()
     {
         using var project = TempDirectory.Create();

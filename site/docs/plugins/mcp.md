@@ -107,7 +107,7 @@ A file with both `mcpServers` and `servers` is invalid. A server defines exactly
 |---|---|---|
 | `command` | stdio | The program to start. |
 | `args` | stdio | Array of strings, passed as separate arguments. |
-| `cwd` | stdio | Working directory. |
+| `cwd` | stdio | Working directory. A server of a project starts in the project folder, and a relative `cwd` is taken from it. |
 | `env` | stdio | Object of string values: environment of the server. |
 | `url` | remote | Absolute `http` or `https` endpoint. |
 | `headers` | remote | Object of string values: static HTTP headers. |
@@ -115,7 +115,7 @@ A file with both `mcpServers` and `servers` is invalid. A server defines exactly
 | `type` | both | `stdio`, `local` (Copilot's name for stdio), `http` or `sse`. |
 | `tools` | Copilot files | Kept as is; not used by CodeAlta. |
 
-`${NAME}` and `${NAME:-default}` are expanded in `command`, `args`, `cwd`, `url`, and the values of `env` and `headers`. A missing variable without a default is reported (`environment_variable_not_found`), and the placeholder is never sent.
+`${NAME}` and `${NAME:-default}` are expanded in `command`, `args`, `cwd`, `url`, and the values of `env` and `headers`. A missing variable without a default is reported (`environment_variable_not_found`), and the placeholder is never sent. In the file of a project, `${workspaceFolder}`, `${workspaceFolderBasename}` and `${userHome}` are also the project folder, its name and your home folder, so a server can run a script of the project, such as `"args": ["${workspaceFolder}/.alta/mcp/server.mjs"]`, or simply `"args": [".alta/mcp/server.mjs"]`.
 
 ```json
 {
