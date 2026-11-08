@@ -1,13 +1,13 @@
 ---
 name: codealta-release
-description: Release a new version of CodeAlta - review the changes since the last public release, refresh the site pictures, banner, documentation and front page, write the release tour, push main, tag, edit the GitHub release notes, deploy the website and wait for the NuGet packages. Only for the owner of the repository (xoofx, Alexandre Mutel); use it only when he asks for a release.
+description: Release a new version of CodeAlta - review the changes since the last public release, refresh the site pictures, banner, documentation and front page, write the release tour, push main, tag, edit the GitHub release notes, deploy the website, wait for the NuGet packages and announce the release on X. Only for the owner of the repository (xoofx, Alexandre Mutel); use it only when he asks for a release.
 ---
 
 # Releasing CodeAlta
 
 This skill is for the owner of CodeAlta, **xoofx (Alexandre Mutel)**, and nobody else. It pushes to `main`, pushes a
-tag that publishes packages to nuget.org, edits a GitHub release and deploys the public website: every step is
-outward-facing and hard to undo.
+tag that publishes packages to nuget.org, edits a GitHub release, deploys the public website and posts on X as
+@codealta: every step is outward-facing and hard to undo.
 
 Run it only when the owner asks for a release in the current conversation, and stop at once if the checks of
 step 0 fail. A request for a release is permission for the steps of this skill for that version only.
@@ -54,6 +54,7 @@ CodeAlta clears the scratchpad of its instance when it starts, which can happen 
   - **Banner** (step 3) and **front page** (step 5): unchanged.
   - **Tour** (step 6): none. The release keeps the notes the release run generates, the list of commits and pull
     requests (step 11).
+  - **Announcement on X** (step 13): none.
   - Still done: the review of the changes (step 1), the docs of any behavior the release changes (step 4), the
     local checks (step 7), the push and a green CI (step 8), the issues of its milestone (step 9), the tag, the
     website when a doc changed (step 11), and the NuGet packages (step 12).
@@ -268,8 +269,87 @@ They appear one after the other over about twenty minutes (up to an hour), the t
 `release.py nuget X.Y.Z`, started as a background job, waits until each lists `X.Y.Z` on nuget.org; it reads the
 runtimes from the `<RuntimeIdentifiers>` of the five projects, so a runtime added there is checked too.
 
-## 13. Report
+## 13. Announce on X (feature releases)
+
+Once every package lists the version (step 12), a release with a tour is announced on X from the **@codealta**
+account, as a thread: a first post and at least one reply. A small release is not announced, unless the owner
+asks.
+
+### The thread
+
+- **First post:** announces the release (`CodeAlta X.Y is out`, with what kind of release it is) and gives a very
+  concise extract of its headline features, one line each, with an emoji. Its media are pictures only (up to
+  four), and it has no link.
+- **More replies with pictures** when the release has more features than one post holds: a few lines each, on
+  features that go together, with their pictures. A table of numbers (a benchmark) is a picture too.
+- **Last reply:** the link to the release notes (`https://github.com/CodeAlta/CodeAlta/releases/tag/X.Y.Z`, which
+  shows the card of the release, so no picture), and thanks for the feedback and to the contributors.
+- Number the posts `1/N` at the end of each. A post holds 280 characters at most, the numbering included; a link
+  counts for 23.
+- Pictures are the ones of the tour (`site/img/alta-desktop-*.webp`): the ones that show a feature best. X takes
+  WebP, PNG, JPEG and GIF up to 5 MB, four per post, or one video.
+- The tone of the owner, as in the thread of 3.0.0:
+
+  ```text
+  CodeAlta 3.0 is out, a major release! 🎉
+  - Workflows & Code Mode: your agent writes a small script that plans, runs sub-agents in parallel and comes back with a nice markdown with pictures 🧩
+  - Watch the graph run live, save it as a workflow 🔁
+  1/4
+  ```
+
+  ```text
+  - New Codex CLI provider (like we do with Claude Code CLI), so ChatGPT Business subscriptions work with CodeAlta 🤖
+  - Plugin hooks on every tool call 🪝
+  - Sessions resume by themselves when your limit resets ⏰
+  - Attach files and answer your agents from your phone 📱
+  3/4
+  ```
+
+  ```text
+  Full release notes https://github.com/CodeAlta/CodeAlta/releases/tag/3.0.0
+
+  Thanks again to all the contributors for your feedback and PRs. Keep it up! 🤗
+  4/4
+  ```
+
+### No approval to wait for
+
+The owner's request for the release covers the announcement: do not stop for his approval of the thread. Write
+it in `tmp/release-X.Y.Z/x-thread.md` (the text of each post, exactly as it will be sent, and the paths of its
+pictures) while the packages are published, check each post against the 280 characters, then post it. A post
+that went wrong is deleted by the owner.
+
+### Posting
+
+1. `alta mcp activate xapi`: its tools are there in the next step. `get_users_me` must answer `codealta`.
+2. Upload each picture with the `xurl` bridge, from the shell (the `chat_media_*` tools of `xapi` are for XChat,
+   not for posts):
+
+   ```sh
+   npx -y @xdevplatform/xurl media upload --app codealta site/img/<picture>.webp
+   ```
+
+   It waits for the processing and prints the media id.
+3. Post the first one with `create_posts`:
+   `{ "text": "...", "media": { "media_ids": ["<id>", "<id>"] } }`.
+4. Post each reply in answer to the **previous** post, so the thread reads in order:
+   `{ "text": "...", "media": { "media_ids": [...] }, "reply": { "in_reply_to_tweet_id": "<id of the previous post>" } }`.
+5. The result of each has `data.id`: the post is at `https://x.com/codealta/status/<id>`. `get_posts_by_id` reads it
+   back. Open the thread and check its text and pictures.
+
+When a post fails in the middle of the thread, fix the cause and go on from the last post that went out: never
+post the thread again from the start. A post that went out wrong: say which one in the report, with its link, for
+the owner to delete; do not post a correction.
+
+**Errors**
+
+- `402 credits depleted`: the X developer account is out of API credits. Ask the owner to add some.
+- `401`: the sign-in has expired. Ask the owner to run `npx -y @xdevplatform/xurl auth oauth2 --app codealta`.
+- `403`: the X app lacks "Read and write" permission.
+- `xurl binary not found`: npx installed a fresh copy without its `xurl.exe`. Ask the owner to reinstall xurl.
+
+## 14. Report
 
 Tell the owner, with links: the release, the CI runs, the website run, the packages and their versions, the
-issues closed, what was skipped and why, and what he has to do himself (the Social preview of the repository
-when the banner changed).
+issues closed, the posts on X, what was skipped and why, and what he has to do himself (the Social preview of the
+repository when the banner changed).
