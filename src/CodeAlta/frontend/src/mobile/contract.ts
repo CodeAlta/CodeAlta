@@ -51,6 +51,8 @@ export type Live = Readonly<{
   asking?: AskMark | null;
   /** The permission requests the session waits on, which the page reads again when they change; null when it waits for none (an older CodeAlta does not say). */
   approving?: ApprovalMark | null;
+  /** What the model suggested as the next prompt once the last turn ended; null once another one started (an older CodeAlta does not say). */
+  suggestion?: string | null;
 }>;
 
 /** The ask of a session, as the live stream says it: what changes when an answer goes, or did not reach the session. */
