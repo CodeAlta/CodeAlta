@@ -2746,12 +2746,13 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
-  // At startup, the release notes open once after an update, unless the person chose not to see them.
+  // At startup, the release notes open once after an update, unless the person chose not to see them; never in the
+  // developer instance, nor for a build of the repository.
   const releaseNotesChecked = useRef(false);
   useEffect(() => {
     if (!owned || releaseNotesChecked.current || !status?.version) return;
     releaseNotesChecked.current = true;
-    const { show, next } = startupReleaseNotes(releaseNotesPreferences, status.version);
+    const { show, next } = startupReleaseNotes(releaseNotesPreferences, status.version, status.developerMode);
     if (next !== releaseNotesPreferences) keepReleaseNotesPreferences(next);
     if (show) setReleaseNotesShown({ version: null });
   }, [owned, status?.version]);

@@ -34,12 +34,23 @@ export function isReleaseVersion(version: string | null | undefined): version is
 }
 
 /**
+ * Whether a version is a build of a commit after the last tag of the repository: MinVer names it `X.Y.Z-alpha.0.<commits>`,
+ * which changes at each commit. Nobody installs it as a version of CodeAlta.
+ */
+export function isRepositoryBuild(version: string): boolean {
+  return /-alpha\.0\.\d+(?:\+|$)/u.test(version.trim());
+}
+
+/**
  * At startup: the release notes open when the running version is another one than the version they last opened for
  * (CodeAlta was updated), unless the person chose not to see them. The first run records its version and opens nothing:
- * nothing changed for that person yet. A development build opens nothing.
+ * nothing changed for that person yet. A development build, a build of the repository and the developer instance
+ * (`developer`, started with --dev to work on CodeAlta) open nothing, and leave the last version as it was.
  */
-export function startupReleaseNotes(preferences: ReleaseNotesPreferences, currentVersion: string | null | undefined): { show: boolean; next: ReleaseNotesPreferences } {
-  if (!isReleaseVersion(currentVersion) || sameVersion(preferences.lastVersion, currentVersion)) return { show: false, next: preferences };
+export function startupReleaseNotes(preferences: ReleaseNotesPreferences, currentVersion: string | null | undefined, developer = false): { show: boolean; next: ReleaseNotesPreferences } {
+  if (developer || !isReleaseVersion(currentVersion) || isRepositoryBuild(currentVersion) || sameVersion(preferences.lastVersion, currentVersion)) {
+    return { show: false, next: preferences };
+  }
   return { show: preferences.lastVersion !== null && !preferences.hideOnStartup, next: { ...preferences, lastVersion: currentVersion } };
 }
 

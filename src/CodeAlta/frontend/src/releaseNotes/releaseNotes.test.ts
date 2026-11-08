@@ -20,6 +20,18 @@ test("the release notes open at startup once after an update, never at the first
   assert.equal(startupReleaseNotes({ hideOnStartup: false, lastVersion: "4.1.0" }, "development").show, false);
 });
 
+test("a build of the repository and the developer instance open nothing at startup, and leave the last release as it was", () => {
+  const released = { hideOnStartup: false, lastVersion: "4.0.0" };
+  // A build of a commit after a tag (MinVer): its version changes at each commit, which is no update of CodeAlta.
+  assert.deepEqual(startupReleaseNotes(released, "4.0.1-alpha.0.85+596d79282a1377abbb6c6c55e4a8daa86921f8c0"), { show: false, next: released });
+  assert.deepEqual(startupReleaseNotes(released, "4.0.1-alpha.0.85"), { show: false, next: released });
+  // The developer instance (--dev) is started to work on CodeAlta, whatever its build.
+  assert.deepEqual(startupReleaseNotes(released, "4.1.0", true), { show: false, next: released });
+  // A pre-release that was tagged is a version people install: it opens them.
+  assert.equal(startupReleaseNotes(released, "4.1.0-beta.1+abc").show, true);
+  assert.equal(startupReleaseNotes(released, "4.1.0", false).show, true);
+});
+
 test("the preferences read anything malformed as the default", () => {
   const read = (value: string | null) => readReleaseNotesPreferences(key => key === releaseNotesStorageKey ? value : null);
   assert.deepEqual(read(null), { hideOnStartup: false, lastVersion: null });
