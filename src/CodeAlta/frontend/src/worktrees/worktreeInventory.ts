@@ -15,7 +15,9 @@ export type Inventory = Readonly<{ rows: readonly InventoryRow[]; sessionsKnown:
   /** Git lists more checkouts than the host answered with. */
   truncated?: boolean }>;
 /** What became of one worktree that was asked to go. */
-export type Removal = Readonly<{ path: string; status: string; message: string | null; branchKept: string | null; branchDeleted: string | null }>;
+export type Removal = Readonly<{ path: string; status: string; message: string | null; branchKept: string | null; branchDeleted: string | null;
+  /** The bytes its folder held when it was removed; 0 for one that stays, or that the host did not measure. */
+  bytes?: number }>;
 export type RemovalOutcome = Removal & Readonly<{ row: InventoryRow }>;
 
 /** The worktrees one request names: the window says how far it is between two of them, and can stop there. */
@@ -89,9 +91,19 @@ export function removalReply(reply: unknown, asked: readonly string[]): readonly
     if (result.path !== asked[index] || !text(result.status, 64) || !optional(result.message ?? null, 2048) || !optional(result.branchKept ?? null, 256)
       || !optional(result.branchDeleted ?? null, 256)) return "read_failed";
     results.push({ path: result.path as string, status: result.status, message: (result.message ?? null) as string | null,
-      branchKept: (result.branchKept ?? null) as string | null, branchDeleted: (result.branchDeleted ?? null) as string | null });
+      branchKept: (result.branchKept ?? null) as string | null, branchDeleted: (result.branchDeleted ?? null) as string | null, bytes: removedBytes(result.bytes) });
   }
   return results;
+}
+
+// The size the host says a removed folder held, as the text of a number of bytes; anything else is nothing known.
+function removedBytes(value: unknown): number {
+  return typeof value === "string" && /^\d{1,19}$/u.test(value) ? Number(value) : 0;
+}
+
+/** The bytes the removals freed: what the folders held of the worktrees that were removed. */
+export function freedBytes(removals: readonly Removal[]): number {
+  return removals.reduce((total, removal) => total + (removal.status === "ok" ? removal.bytes ?? 0 : 0), 0);
 }
 
 /**

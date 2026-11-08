@@ -24,6 +24,42 @@ public sealed class DesktopWorktreeTests
     private const string Epoch = "11111111-1111-4111-8111-111111111111";
 
     [TestMethod]
+    public void TheSizeOfAWorktree_CountsItsFiles_WithoutFollowingALinkToAnotherFolder()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-worktree-size-");
+        try
+        {
+            var tree = Directory.CreateDirectory(Path.Combine(root.FullName, "tree"));
+            File.WriteAllBytes(Path.Combine(tree.FullName, "a.txt"), new byte[10]);
+            File.WriteAllBytes(Path.Combine(Directory.CreateDirectory(Path.Combine(tree.FullName, "src", "deep")).FullName, "b.bin"), new byte[2048]);
+            var elsewhere = Directory.CreateDirectory(Path.Combine(root.FullName, "elsewhere"));
+            File.WriteAllBytes(Path.Combine(elsewhere.FullName, "big.bin"), new byte[100_000]);
+            if (OperatingSystem.IsWindows())
+            {
+                // A junction, as a package manager makes one, to a folder the removal does not delete.
+                using var link = Process.Start(new ProcessStartInfo("cmd.exe", ["/d", "/c", "mklink", "/J", Path.Combine(tree.FullName, "node_modules"), elsewhere.FullName])
+                    { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!;
+                link.WaitForExit();
+                Assert.AreEqual(0, link.ExitCode, "the junction is made");
+            }
+            else
+            {
+                Directory.CreateSymbolicLink(Path.Combine(tree.FullName, "node_modules"), elsewhere.FullName);
+            }
+
+            Assert.AreEqual(2058L, WorktreesService.FolderBytes(tree.FullName));
+            Assert.AreEqual(0L, WorktreesService.FolderBytes(Path.Combine(root.FullName, "gone")), "a folder that is not there holds nothing");
+        }
+        finally
+        {
+            // The link goes first, without what it points to.
+            var link = Path.Combine(root.FullName, "tree", "node_modules");
+            if (Directory.Exists(link)) Directory.Delete(link);
+            root.Delete(recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task WorkStartedOnANamedBranch_InTheProjectFolder_MovesTheFolderToANewBranch()
     {
         using var repository = await Repository.CreateAsync();
@@ -900,7 +936,11 @@ public sealed class DesktopWorktreeTests
         Assert.IsTrue(File.Exists(Path.Combine(dirty.Root!, "draft.txt")));
         // A branch that was asked to go goes when all its commits are elsewhere, and stays when it holds commits of its own.
         var discarded = await service.RemoveManyAsync(new(Epoch, project.Id, [dirty.Root!, ahead.Root!], [dirty.Root!], DeleteMergedBranches: true), default);
-        CollectionAssert.AreEqual(new[] { new WorktreeRemoval(dirty.Root!, "ok", null, null, dirty.Branch), new WorktreeRemoval(ahead.Root!, "ok", null, ahead.Branch, null) }, discarded.Results);
+        CollectionAssert.AreEqual(new[] { new WorktreeRemoval(dirty.Root!, "ok", null, null, dirty.Branch), new WorktreeRemoval(ahead.Root!, "ok", null, ahead.Branch, null) },
+            discarded.Results.Select(static result => result with { Bytes = 0 }).ToArray());
+        // Each says what its folder held: its files, the one not committed among them; a worktree that stays freed nothing.
+        Assert.IsTrue(discarded.Results.All(static result => result.Bytes > 0), "a removed worktree says its size");
+        Assert.AreEqual(0L, kept.Results.Single().Bytes);
         Assert.IsFalse(Directory.Exists(dirty.Root) || Directory.Exists(ahead.Root));
         Assert.AreEqual(string.Empty, repository.Git("branch", "--list", dirty.Branch!).Trim());
         StringAssert.Contains(repository.Git("branch", "--list", ahead.Branch!), ahead.Name!);
@@ -966,7 +1006,7 @@ public sealed class DesktopWorktreeTests
         var removed = await service.RemoveManyAsync(new(Epoch, project.Id, [first.Root!, second.Root!]), gone.Token);
 
         // What started is finished, and what did not start is left as it is.
-        CollectionAssert.AreEqual(new[] { new WorktreeRemoval(first.Root!, "ok"), new WorktreeRemoval(second.Root!, "canceled") }, removed.Results);
+        CollectionAssert.AreEqual(new[] { new WorktreeRemoval(first.Root!, "ok"), new WorktreeRemoval(second.Root!, "canceled") }, removed.Results.Select(static result => result with { Bytes = 0 }).ToArray());
         Assert.IsTrue(!Directory.Exists(first.Root) && Directory.Exists(second.Root));
     }
 

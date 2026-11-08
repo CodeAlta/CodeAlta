@@ -63,6 +63,8 @@ export const worktreeMessages = {
   "{count} worktrees": ["{count} worktrees", "{count} worktrees", "{count} Worktrees", "{count} 個のワークツリー", "{count} 个工作树"],
   "No worktrees to show": ["No hay worktrees que mostrar", "Aucun worktree à afficher", "Keine Worktrees anzuzeigen", "表示するワークツリーはありません", "没有可显示的工作树"],
   "This repository has no worktree. A session started in a new worktree makes one.": ["Este repositorio no tiene worktrees. Una sesión iniciada en un nuevo worktree crea uno.", "Ce dépôt n’a aucun worktree. Une session démarrée dans un nouveau worktree en crée un.", "Dieses Repository hat keinen Worktree. Eine in einem neuen Worktree gestartete Sitzung legt einen an.", "このリポジトリにワークツリーはありません。新しいワークツリーで開始したセッションが作成します。", "此仓库没有工作树。在新工作树中开始的会话会创建一个。"],
+  "{size} freed so far": ["{size} liberados hasta ahora", "{size} libérés jusqu’ici", "{size} bisher freigegeben", "これまでに {size} を解放", "已释放 {size}"],
+  "{size} freed.": ["{size} liberados.", "{size} libérés.", "{size} freigegeben.", "{size} を解放しました。", "已释放 {size}。"],
   "Removing… {done} of {count} done": ["Eliminando… {done} de {count} hechos", "Suppression… {done} sur {count} terminés", "Wird entfernt… {done} von {count} erledigt", "削除中… {count} 個中 {done} 個完了", "正在移除… 已完成 {done}/{count}"],
   "What is being removed is finished first.": ["Primero se termina lo que se está eliminando.", "Ce qui est en cours de suppression est d’abord terminé.", "Was gerade entfernt wird, wird zuerst abgeschlossen.", "削除中のものは先に完了します。", "正在移除的项会先完成。"],
   "Not started.": ["No iniciado.", "Non démarré.", "Nicht begonnen.", "未開始。", "未开始。"],

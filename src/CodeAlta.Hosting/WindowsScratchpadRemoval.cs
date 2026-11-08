@@ -215,8 +215,11 @@ internal static class WindowsScratchpadRemoval
                     {
                         beforeDelete?.Invoke(discovered.Path);
                         cancellationToken.ThrowIfCancellationRequested();
+                        // Read on the handle that deletes it: the size of the file that goes, whatever its name became.
+                        var size = Length(handle);
                         MarkForDeletion(handle);
                         result.RemovedFiles++;
+                        result.RemovedBytes += size;
                     }
                 }
                 catch (Exception ex) when (IsFilesystemFailure(ex)) { result.Skip("entry-locked-denied-or-changed"); }
@@ -224,6 +227,13 @@ internal static class WindowsScratchpadRemoval
             }
         }
         finally { while (frames.TryPop(out var frame)) frame.Dispose(); }
+    }
+
+    // The length of an open file; 0 when it does not read, which only makes the size shown smaller.
+    private static long Length(SafeFileHandle handle)
+    {
+        try { return RandomAccess.GetLength(handle); }
+        catch (Exception ex) when (IsFilesystemFailure(ex)) { return 0; }
     }
 
     private sealed class DirectoryFrame(string path, SafeFileHandle? handle) : IDisposable

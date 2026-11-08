@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using CodeAlta.Catalog.Storage;
 using CodeAlta.Plugins;
@@ -40,9 +41,20 @@ internal sealed class DesktopStartupStatus
     internal void SetScratchpadCleanup(ScratchpadCleanupSnapshot snapshot)
     {
         var text = snapshot.State == ScratchpadCleanupState.Running
-            ? $"Clearing scratchpad… {snapshot.ProcessedFiles:N0} files and {snapshot.ProcessedDirectories:N0} folders processed."
+            ? $"Clearing scratchpad… {snapshot.ProcessedFiles:N0} files and {snapshot.ProcessedDirectories:N0} folders processed, {Size(snapshot.RemovedBytes)} removed."
             : string.Empty;
         lock (_gate) _cleanup = text;
+    }
+
+    // A size as the Storage page writes it: bytes, then KiB, MiB, GiB and TiB.
+    internal static string Size(long bytes)
+    {
+        string[] units = ["KiB", "MiB", "GiB", "TiB"];
+        if (bytes < 1024) return string.Create(CultureInfo.CurrentCulture, $"{bytes:N0} B");
+        var value = bytes / 1024.0;
+        var unit = 0;
+        while (value >= 1024 && unit < units.Length - 1) { value /= 1024; unit++; }
+        return string.Create(CultureInfo.CurrentCulture, $"{value:0.#} {units[unit]}");
     }
 
     /// <summary>The status as the JSON document the start-up screen reads.</summary>

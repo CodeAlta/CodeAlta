@@ -82,7 +82,7 @@ Run `/worktree`, or right-click a project in the Explorer and choose **Worktrees
 | **Folder gone** | Git still lists the worktree, but its folder was deleted. Removing it makes git forget it. |
 | **Last used** | When the last session of the worktree was active, or **Unknown** when none is left. |
 
-- To remove worktrees, tick them (the header box ticks all), then click **Remove**. CodeAlta shows the list again before it removes anything.
+- To remove worktrees, tick them (the header box ticks all), then click **Remove**. CodeAlta shows the list again before it removes anything, and says how much space the removal freed.
 - A worktree with uncommitted changes, also in a submodule, is kept, and CodeAlta asks about it separately. Files that git ignores are deleted with the folder.
 - Branches are kept, unless you tick the box of the confirmation that also deletes the `alta/` branches with no commit of their own.
 - **Outcome unknown** means CodeAlta could not confirm what happened: check the refreshed list before trying again. **Stop** lets the current removal finish without starting the next.

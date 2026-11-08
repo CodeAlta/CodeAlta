@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { translate, type MessageKey } from "../localization";
 import { checkedWorktrees, editorFailure, inventoryFailure, inventoryGroups, inventoryReply, keepSelection, lastUse, mergeOutcomes, removable, removalChunks, removalCounts, removalReason,
-  removalReply, selectedRows, showsChanges, toggleAll, toggleOne, type InventoryRow, type RemovalOutcome } from "./worktreeInventory";
+  freedBytes, removalReply, selectedRows, showsChanges, toggleAll, toggleOne, type InventoryRow, type RemovalOutcome } from "./worktreeInventory";
 
 const t = (key: MessageKey) => translate("en", key);
 const row = (change: Partial<InventoryRow> = {}): InventoryRow => ({ path: "C:\\trees\\alpha\\quiet-heron", name: "quiet-heron", branch: "alta/quiet-heron", head: "1234567",
@@ -99,13 +99,20 @@ test("five older running sessions do not lend a title to a newer completed sessi
   assert.deepEqual(lastUse({ ...used, lastUsedAt: at, sessions: [older] }), { at, session: null });
 });
 
+test("what removals freed is the size of the folders of the worktrees that went", () => {
+  const removal = (status: string, bytes: number) => ({ path: "C:\\trees\\" + status, status, message: null, branchKept: null, branchDeleted: null, bytes });
+  assert.equal(freedBytes([removal("ok", 2048), removal("ok", 1024), removal("dirty", 4096), removal("unconfirmed", 8192)]), 3072, "only what went counts");
+  assert.equal(freedBytes([{ path: "a", status: "ok", message: null, branchKept: null, branchDeleted: null }]), 0, "a size not known counts for nothing");
+});
+
 test("an answer to a removal is read only as the answer for the folders that were asked", () => {
   const asked = ["C:\\trees\\a", "C:\\trees\\b"];
-  const results = [{ path: asked[0], status: "ok", message: null, branchKept: null, branchDeleted: "alta/a" }, { path: asked[1], status: "dirty", message: null, branchKept: null, branchDeleted: null }];
-  assert.deepEqual(removalReply({ status: "ok", results }, asked), results);
-  // Fields the host left out read as none.
-  assert.deepEqual(removalReply({ status: "ok", results: [{ path: asked[0], status: "locked" }] }, [asked[0]]),
-    [{ path: asked[0], status: "locked", message: null, branchKept: null, branchDeleted: null }]);
+  const results = [{ path: asked[0], status: "ok", message: null, branchKept: null, branchDeleted: "alta/a", bytes: "3221225472" },
+    { path: asked[1], status: "dirty", message: null, branchKept: null, branchDeleted: null, bytes: "0" }];
+  assert.deepEqual(removalReply({ status: "ok", results }, asked), [{ ...results[0], bytes: 3221225472 }, { ...results[1], bytes: 0 }]);
+  // Fields the host left out read as none, and a size that is not the text of a number as nothing known.
+  assert.deepEqual(removalReply({ status: "ok", results: [{ path: asked[0], status: "locked", bytes: -5 }] }, [asked[0]]),
+    [{ path: asked[0], status: "locked", message: null, branchKept: null, branchDeleted: null, bytes: 0 }]);
   assert.equal(removalReply({ status: "stale_epoch", results: [] }, asked), "stale_epoch");
   // Fewer results, results in another order, or for other folders: nothing is concluded.
   assert.equal(removalReply({ status: "ok", results: [results[0]] }, asked), "read_failed");

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Worktrees;
@@ -260,6 +261,31 @@ internal sealed class WorktreesService
         return new("ok", [.. results]);
     }
 
+    /// <summary>
+    /// The bytes of the files of a folder and of its folders, without following a link (a junction to another folder, a
+    /// link to a file): what removing the folder frees. What cannot be read counts for nothing.
+    /// </summary>
+    /// <param name="folder">The folder.</param>
+    /// <returns>The bytes; 0 for a folder that cannot be read.</returns>
+    internal static long FolderBytes(string folder)
+    {
+        try
+        {
+            var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
+            var files = new System.IO.Enumeration.FileSystemEnumerable<long>(folder, static (ref System.IO.Enumeration.FileSystemEntry entry) => entry.Length, options)
+            {
+                ShouldIncludePredicate = static (ref System.IO.Enumeration.FileSystemEntry entry) => !entry.IsDirectory,
+            };
+            long total = 0;
+            foreach (var length in files) total += length;
+            return total;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
+    }
+
     // One worktree of a request: what git lists now and the sessions at work now decide, not what the window showed.
     private async Task<WorktreeRemoval> RemoveOneAsync(string root, string? checkout, string folder, string asked, HashSet<string> gone, HashSet<string> discard,
         bool keepUsed, bool deleteBranch)
@@ -280,8 +306,10 @@ internal sealed class WorktreesService
                 if (used.Contains(target.Path)) return new(asked, "used");
             }
 
+            // What it holds, read right before git removes it: the window says how much the removal freed.
+            var size = target.Missing ? 0 : FolderBytes(target.Path);
             var outcome = await _worktrees.RemoveAsync(root, target.Path, discard.Contains(folder), deleteBranch, CancellationToken.None).ConfigureAwait(false);
-            return new(asked, outcome.Status, outcome.Message, outcome.BranchKept, outcome.BranchDeleted);
+            return new(asked, outcome.Status, outcome.Message, outcome.BranchKept, outcome.BranchDeleted) { Bytes = outcome.Status == "ok" ? size : 0 };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or InvalidOperationException)
         {
@@ -700,7 +728,12 @@ internal sealed record WorktreeRemoveManyResponse(string Status, WorktreeRemoval
 /// <param name="Message">What git said, when it refused.</param>
 /// <param name="BranchKept">The branch that was asked to go with it and was kept because it holds commits of its own.</param>
 /// <param name="BranchDeleted">The branch that was deleted with it.</param>
-internal sealed record WorktreeRemoval(string Path, string Status, string? Message = null, string? BranchKept = null, string? BranchDeleted = null);
+internal sealed record WorktreeRemoval(string Path, string Status, string? Message = null, string? BranchKept = null, string? BranchDeleted = null)
+{
+    /// <summary>Gets the bytes its folder held when it was removed; 0 for one that stays, or whose folder was gone.</summary>
+    [NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))]
+    public long Bytes { get; init; }
+}
 
 /// <summary>Asks for the code editor on a checkout.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>

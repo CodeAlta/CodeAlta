@@ -35,6 +35,7 @@ public sealed class ScratchpadStartupCleanupTests
             Assert.AreEqual(ScratchpadCleanupState.Running, cleanup.Snapshot.State);
             Assert.AreEqual(1L, cleanup.Snapshot.RemovedFiles, "A long cleanup must publish progress before its final result.");
             Assert.AreEqual(1L, cleanup.Snapshot.ProcessedFiles);
+            Assert.AreEqual(6L, cleanup.Snapshot.RemovedBytes, "The progress says the size removed so far.");
             ScratchpadCleanupSnapshot? replay = null;
             using var subscription = cleanup.Subscribe(snapshot => replay = snapshot);
             Assert.AreEqual(cleanup.Snapshot, replay);
@@ -42,6 +43,7 @@ public sealed class ScratchpadStartupCleanupTests
         finally { release.Set(); await worker; }
         Assert.AreEqual(2L, cleanup.Snapshot.RemovedFiles);
         Assert.AreEqual(2L, cleanup.Snapshot.ProcessedFiles);
+        Assert.AreEqual(12L, cleanup.Snapshot.RemovedBytes, "The size of the files removed, \"remove\" twice.");
     }
 
     [TestMethod]
@@ -66,6 +68,7 @@ public sealed class ScratchpadStartupCleanupTests
 
         Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State, string.Join(",", cleanup.Snapshot.Reasons));
         Assert.AreEqual(2L, cleanup.Snapshot.RemovedFiles);
+        Assert.AreEqual(12L, cleanup.Snapshot.RemovedBytes, "Only the files removed count: the protected ones stay.");
         Assert.AreEqual(40L, cleanup.Snapshot.RemovedDirectories);
         Assert.AreEqual(2L, cleanup.Snapshot.ProcessedFiles);
         Assert.AreEqual(40L, cleanup.Snapshot.ProcessedDirectories);

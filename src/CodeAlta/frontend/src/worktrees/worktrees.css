@@ -169,6 +169,8 @@ dialog.worktree-manager-dialog:has(> .app-window) .app-window-body .worktree-rev
 .worktree-result-text { display: grid; flex: 1 1 50%; min-width: 0; font-size: 12px; }
 .worktree-result-text strong { font-size: 13px; }
 .worktree-result-text span { color: var(--muted); overflow-wrap: anywhere; }
+/* What the removal freed, under what was removed. */
+.worktree-results-freed { margin-top: -4px !important; color: var(--muted); font-size: 13px; }
 .worktree-results-dirty { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; font-size: 13px; }
 /* In a narrow window the state goes under the name, and the path gives way before the actions do. */
 @container (max-width: 700px) {

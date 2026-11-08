@@ -191,8 +191,10 @@ test("Storage edits valid durations only and measures independently without clea
         }
     }
     await act(`${f}.setLocale('en'); ${f}.setSize({ width: 518, height: 484 })`);
-    await act(`${f}.setMaintenance({ state: 'running', reasons: [], processedFiles: '12345', processedDirectories: '678' })`);
-    assert.ok(await evaluate("document.querySelector('.storage-maintenance').textContent.includes('12,345 files and 678 folders processed.')"));
+    await act(`${f}.setMaintenance({ state: 'running', reasons: [], processedFiles: '12345', processedDirectories: '678', removedBytes: '3145728' })`);
+    assert.ok(await evaluate("document.querySelector('.storage-maintenance').textContent.includes('12,345 files and 678 folders processed, 3 MiB removed.')"), "the size removed so far");
+    await act(`${f}.setMaintenance({ state: 'completed', reasons: [], processedFiles: '12345', processedDirectories: '678', removedBytes: '3145728' })`);
+    assert.ok(await evaluate("document.querySelector('.storage-maintenance').textContent.includes('3 MiB removed.')"), "a finished pass says what it removed");
     await act(`${button("Refresh")}.click(); ${state}.scans.at(-1).finish()`);
     assert.ok(await evaluate("document.body.textContent.includes('Storage could not be measured.')"), "an interrupted stream never stays measuring forever");
     await act(`${button("Refresh")}.click(); ${state}.scans.at(-1).resolve({ status: 'read_failed', snapshot: null })`);

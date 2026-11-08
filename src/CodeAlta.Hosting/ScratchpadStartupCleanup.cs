@@ -78,7 +78,7 @@ public sealed class ScratchpadStartupCleanup : IStartupScratchpadCleanup
         {
             Progress = current => Publish(new(ScratchpadCleanupState.Running, current.RemovedFiles, current.RemovedDirectories,
                 current.SkippedEntries, current.Reasons.ToImmutableArray(), started, null)
-            { ProcessedFiles = current.ProcessedFiles, ProcessedDirectories = current.ProcessedDirectories }),
+            { ProcessedFiles = current.ProcessedFiles, ProcessedDirectories = current.ProcessedDirectories, RemovedBytes = current.RemovedBytes }),
         };
         var state = ScratchpadCleanupState.Skipped;
         try
@@ -120,7 +120,7 @@ public sealed class ScratchpadStartupCleanup : IStartupScratchpadCleanup
         {
             Publish(new(state, result.RemovedFiles, result.RemovedDirectories, result.SkippedEntries,
                 result.Reasons.ToImmutableArray(), started, DateTimeOffset.UtcNow)
-            { ProcessedFiles = result.ProcessedFiles, ProcessedDirectories = result.ProcessedDirectories });
+            { ProcessedFiles = result.ProcessedFiles, ProcessedDirectories = result.ProcessedDirectories, RemovedBytes = result.RemovedBytes });
         }
     }
 
@@ -154,6 +154,7 @@ internal sealed class ScratchpadRemovalResult
     internal long ProcessedDirectories;
     internal long RemovedFiles;
     internal long RemovedDirectories;
+    internal long RemovedBytes;
     internal long SkippedEntries;
     internal List<string> Reasons { get; } = [];
     internal void Reason(string reason)

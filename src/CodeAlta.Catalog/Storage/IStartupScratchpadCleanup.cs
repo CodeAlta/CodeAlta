@@ -36,6 +36,9 @@ public sealed record ScratchpadCleanupSnapshot(ScratchpadCleanupState State, lon
 
     /// <summary>Gets the child directory entries examined, excluding the preserved scratchpad root.</summary>
     public long ProcessedDirectories { get; init; }
+
+    /// <summary>Gets the bytes of the files removed so far.</summary>
+    public long RemovedBytes { get; init; }
 }
 
 /// <summary>The host admission and presentation contract for instance-owned scratchpad maintenance.</summary>

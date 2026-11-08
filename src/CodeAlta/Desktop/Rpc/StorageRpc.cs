@@ -154,7 +154,7 @@ internal sealed class StorageService
         await foreach (var snapshot in snapshots.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             yield return new(snapshot.State.ToString().ToLowerInvariant(), snapshot.RemovedFiles,
                 snapshot.RemovedDirectories, snapshot.SkippedEntries, snapshot.Reasons, snapshot.StartedAt, snapshot.CompletedAt)
-            { ProcessedFiles = snapshot.ProcessedFiles, ProcessedDirectories = snapshot.ProcessedDirectories };
+            { ProcessedFiles = snapshot.ProcessedFiles, ProcessedDirectories = snapshot.ProcessedDirectories, RemovedBytes = snapshot.RemovedBytes };
     }
 
     /// <summary>Replays and follows retention outcomes without starting, retrying or canceling the host pass.</summary>
@@ -231,6 +231,9 @@ internal sealed record StorageMaintenance(string State,
     public long ProcessedFiles { get; init; }
     [NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))]
     public long ProcessedDirectories { get; init; }
+    /// <summary>Gets the bytes of the files removed so far.</summary>
+    [NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))]
+    public long RemovedBytes { get; init; }
 }
 internal sealed record StorageRetentionMaintenance(string State, int Examined, int Deleted, int Skipped, string? Reason)
 {

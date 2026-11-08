@@ -16,12 +16,17 @@ public sealed class DesktopPluginStartupTests
         var status = new DesktopStartupStatus();
         foreach (var state in Enum.GetValues<ScratchpadCleanupState>())
         {
-            status.SetScratchpadCleanup(new(state, 3, 2, 0, [], null, null) { ProcessedFiles = 4, ProcessedDirectories = 2 });
-            var expected = state == ScratchpadCleanupState.Running ? "Clearing scratchpad… 4 files and 2 folders processed." : string.Empty;
+            status.SetScratchpadCleanup(new(state, 3, 2, 0, [], null, null) { ProcessedFiles = 4, ProcessedDirectories = 2, RemovedBytes = 3L * 1024 * 1024 });
+            var expected = state == ScratchpadCleanupState.Running ? "Clearing scratchpad… 4 files and 2 folders processed, 3 MiB removed." : string.Empty;
             Assert.AreEqual(expected, status.Shown);
             using var json = System.Text.Json.JsonDocument.Parse(status.ToJson());
             Assert.AreEqual(expected, json.RootElement.GetProperty("text").GetString());
         }
+
+        Assert.AreEqual("0 B", DesktopStartupStatus.Size(0));
+        Assert.AreEqual("512 B", DesktopStartupStatus.Size(512));
+        Assert.AreEqual("2 KiB", DesktopStartupStatus.Size(2048));
+        Assert.AreEqual("5 GiB", DesktopStartupStatus.Size(5L * 1024 * 1024 * 1024));
 
         // A notification of the worker that comes after the next step does not erase it.
         status.Text = "Opening the database…";

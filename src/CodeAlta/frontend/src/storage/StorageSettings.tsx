@@ -19,6 +19,8 @@ export interface StorageMaintenanceSummary {
   reasons: readonly string[];
   processedFiles?: string;
   processedDirectories?: string;
+  /** The bytes of the files removed so far, as the text of a number. */
+  removedBytes?: string;
 }
 
 /** Host-owned session retention feedback. An unknown state reads as unavailable and unknown reasons are never shown raw. */
@@ -189,9 +191,13 @@ function MaintenanceStatus({ maintenance }: { maintenance: StorageMaintenanceSum
     : <AppIcon name={state === "partial" ? "warning" : state === "completed" ? "check" : "info"} size={14} />;
   return <div className="storage-maintenance" data-state={state}>
     <span className="storage-maintenance-title" role="status">{icon}<span>{t(maintenanceTitles[state])}</span></span>
-    {state === "running" && <span className="storage-hint" role="status">{t("{files} files and {folders} folders processed.", {
+    {state === "running" && <span className="storage-hint" role="status">{t("{files} files and {folders} folders processed, {size} removed.", {
       files: new Intl.NumberFormat(locale).format(storageBytes(maintenance.processedFiles ?? "0")),
       folders: new Intl.NumberFormat(locale).format(storageBytes(maintenance.processedDirectories ?? "0")),
+      size: storageSize(storageBytes(maintenance.removedBytes ?? "0"), locale),
+    })}</span>}
+    {state !== "running" && storageBytes(maintenance.removedBytes ?? "0") > 0 && <span className="storage-hint">{t("{size} removed.", {
+      size: storageSize(storageBytes(maintenance.removedBytes ?? "0"), locale),
     })}</span>}
     {reasons.length > 0 && <details>
       <summary>{t("Details")}</summary>
