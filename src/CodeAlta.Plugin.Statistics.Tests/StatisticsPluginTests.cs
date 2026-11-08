@@ -744,9 +744,13 @@ public sealed class StatisticsPluginTests
         await using var application = new ApplicationDatabase(new ApplicationDatabaseOptions { DatabasePath = Path.Combine(temp.Path, "data", "alta.sqlite3") });
         var journals = new FakeJournalCatalog();
         var now = DateTimeOffset.UtcNow;
-        // A session of today and one of last month: a node counts from its first start, as "from today" does.
-        var today = EngineHarness.Session("today", now.AddMinutes(-30), 2);
-        journals.Set(today, EngineHarness.EndOf(today, now.AddMinutes(-30)));
+        // A session of today and one of last month: a node counts from its first start, as "from today" does. Today is the
+        // local day: half an hour ago is yesterday just after midnight, the start of the day is taken then.
+        var day = TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).Date;
+        var midnight = new DateTimeOffset(day, TimeZoneInfo.Local.GetUtcOffset(day));
+        var startedAt = now.AddMinutes(-30) < midnight ? midnight : now.AddMinutes(-30);
+        var today = EngineHarness.Session("today", startedAt, 2);
+        journals.Set(today, EngineHarness.EndOf(today, startedAt));
         var old = EngineHarness.Session("old", now.AddDays(-40), 2);
         journals.Set(old, EngineHarness.EndOf(old, now.AddDays(-40)));
         StatisticsPlugin? created = null;
