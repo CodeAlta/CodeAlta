@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { translate, type MessageKey } from "../localization";
-import { editorFailure, inventoryFailure, inventoryGroups, inventoryReply, keepSelection, lastUse, mergeOutcomes, removable, removalChunks, removalCounts, removalReason,
+import { checkedWorktrees, editorFailure, inventoryFailure, inventoryGroups, inventoryReply, keepSelection, lastUse, mergeOutcomes, removable, removalChunks, removalCounts, removalReason,
   removalReply, selectedRows, showsChanges, toggleAll, toggleOne, type InventoryRow, type RemovalOutcome } from "./worktreeInventory";
 
 const t = (key: MessageKey) => translate("en", key);
@@ -130,6 +130,8 @@ test("a batch says what went, what holds changes and what stays for another reas
 
   assert.equal(removalReason("in_use", null, t), "A session is working there. Wait for it to finish, or stop it.");
   assert.equal(removalReason("dirty", null, t), "The worktree holds changes that are not committed.");
+  assert.equal(removalReason("used", null, t), "Another session works in it.");
+  assert.equal(removalReason("sessions_unavailable", null, t), "The sessions that work in it could not be read.");
   assert.equal(removalReason("locked", null, t), "Git keeps this worktree locked: unlock it with git to remove it.");
   assert.equal(removalReason("main", null, t), "This is the folder of the project: it is not a worktree to remove.");
   assert.equal(removalReason("canceled", null, t), "Not started.");
@@ -164,4 +166,24 @@ test("every word of the window is in the five languages", async () => {
       assert.deepEqual((value.match(/\{[a-z]+\}/gu) ?? []).sort(), (key.match(/\{[a-z]+\}/gu) ?? []).sort(), `${key} [${index}]`);
     }
   }
+});
+
+test("the host says which worktrees of deleted sessions another session still works in, also one the window does not list", () => {
+  const deleted = (name: string, sessionIds: string[], projectId = "p1") => ({ projectId, name, path: `C:\\trees\\alpha\\${name}`, shared: false, sessionIds });
+  const worktrees = [deleted("alone", ["a"]), deleted("listed", ["b"]), deleted("counted", ["c"]), deleted("busy", ["d"]), deleted("unread", ["e"], "p2"), deleted("unknown", ["f"])];
+  const inventory = { sessionsKnown: true, rows: [
+    named("alone", { sessions: [session("A", "2026-11-07T10:00:00Z")], sessionCount: 1 }),
+    // Another session the window does not list: the host names it.
+    named("listed", { sessions: [session("b", "2026-11-07T10:00:00Z"), session("outside", "2026-11-07T09:00:00Z")], sessionCount: 2 }),
+    // More sessions than the ones deleted, beyond those the host names.
+    named("counted", { sessions: [session("c", "2026-11-07T10:00:00Z")], sessionCount: 6 }),
+    named("busy", { sessions: [session("d", "2026-11-07T10:00:00Z")], sessionCount: 1, busy: true }),
+  ] };
+  const checked = checkedWorktrees(worktrees, new Map([["p1", inventory]]), ["a", "B", "c", "d", "e", "f"]);
+  assert.deepEqual(checked.map(worktree => `${worktree.name}:${worktree.shared}`),
+    ["alone:false", "listed:true", "counted:true", "busy:true", "unread:false", "unknown:false"], "a project not read, or a worktree the host does not list, keeps what the window found");
+  // Sessions the host could not read say nothing: what the window found stays.
+  assert.deepEqual(checkedWorktrees(worktrees, new Map([["p1", { ...inventory, sessionsKnown: false }]]), ["a"]).map(worktree => worktree.shared), worktrees.map(() => false));
+  // What the window already found shared stays shared.
+  assert.equal(checkedWorktrees([{ ...worktrees[0], shared: true }], new Map([["p1", inventory]]), ["a"])[0].shared, true);
 });

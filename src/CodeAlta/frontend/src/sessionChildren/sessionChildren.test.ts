@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceDeleteSessionTreeRequest, WorkspaceDeleteSessionTreeResponse, WorkspaceSession, WorkspaceSessionChildrenResponse } from "#neoastra";
 import { translate } from "../localization";
-import { deleteSessionTree, readSessionChildren, sessionsAtWork, sessionTreeMessage, treeDeletable, type SessionChildren } from "./sessionChildren";
+import { deleteSessionTree, readSessionChildren, sessionsAtWork, sessionTreeMessage, treeDeletable, treeSessions, type SessionChildren } from "./sessionChildren";
 
 const epoch = "12345678-1234-1234-1234-123456789abc";
 const fixtureSession = (id: string, changes: Partial<WorkspaceSession> = {}): WorkspaceSession => ({
@@ -91,4 +91,13 @@ test("every refusal is told in the words of the window, in every language", () =
     assert.notEqual(translate("fr", key), key, code);
   }
   assert.match(sessionTreeMessage("descendants_changed"), /changed/);
+});
+
+test("the sessions a tree deletion deletes include the descendants the window does not show, as far as it knows them", () => {
+  const shown = fixtureSession("child");
+  const tree: SessionChildren = { root: fixtureSession("parent"), rootAtWork: false, children: [{ session: shown, parentSessionId: "parent", depth: 1, atWork: false }],
+    descendantIds: ["child", "hidden", "unknown"], direct: 1, total: 3, truncated: true };
+  const listed = [fixtureSession("parent"), fixtureSession("hidden"), fixtureSession("outside")];
+  // "unknown" is in no list the window has: it cannot be named, and "outside" is not part of the tree.
+  assert.deepEqual(treeSessions(tree, listed).map(session => session.id), ["parent", "child", "hidden"]);
 });

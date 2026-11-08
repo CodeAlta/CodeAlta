@@ -70,22 +70,52 @@ test("the child sessions of a session show their tree across projects, chats and
     await evaluate(`${deleteButton}.click()`);
     assert.equal(await wait(confirm), true);
     assert.match(await evaluate<string>(`${confirm}.textContent`), /Delete 4 sessions\?.*Plan the release.*the 3 sessions below it are deleted with their history\. Projects and their files are kept\./s);
-    assert.equal(await evaluate(`${confirm}.querySelector('input[type=checkbox]')`), null, "There is no Do not ask again: it is asked every time.");
+    // The worktree the sessions work in is kept, unless the question is told to remove it; there is no Do not ask again.
+    assert.match(await evaluate<string>(`${confirm}.textContent`), /These sessions work in the worktree quiet-heron, in \/trees\/parser\/quiet-heron\. It is kept, with its branch\./);
+    assert.deepEqual(await evaluate(`[...${confirm}.querySelectorAll('label')].filter(label=>label.querySelector('input[type=checkbox]')).map(label=>label.textContent.trim())`), ["Also remove the worktree"]);
     assert.equal(await wait(`document.activeElement?.textContent==='Cancel'`), true);
     await evaluate("childrenFixture.answer('descendants_changed')");
     const reads = await state<number>("reads");
     await evaluate(`[...${confirm}.querySelectorAll('button')].find(button=>button.textContent==='Delete all').click()`);
     assert.equal(await wait(`${dialog}.querySelector('.session-children-status').textContent.includes('The child sessions changed')`), true);
     assert.deepEqual(await state("deletes"), [["child", "grandchild", "second"]]);
+    assert.deepEqual(await state("worktrees"), [[]], "Not asked to: no worktree is removed.");
     assert.equal(await wait(`childrenFixture.state.reads>${reads}`), true, "The tree is read again.");
     assert.equal(await evaluate(`!!${confirm}`), false);
 
     await evaluate("childrenFixture.answer(null)");
     await evaluate(`${deleteButton}.click()`);
     assert.equal(await wait(confirm), true);
+    assert.equal(await evaluate(`${confirm}.querySelector('input[type=checkbox]').checked`), false, "The question starts without removing the worktrees.");
+    await evaluate(`${confirm}.querySelector('input[type=checkbox]').click()`);
+    assert.equal(await wait(`${confirm}.textContent.includes('A worktree that holds changes that are not committed is kept')`), true);
     await evaluate(`[...${confirm}.querySelectorAll('button')].find(button=>button.textContent==='Delete all').click()`);
     assert.equal(await wait(`!${dialog}`), true, "The window closes once everything is deleted.");
     assert.equal(await state("closed"), 1);
+    assert.deepEqual(await state("worktrees"), [[], ["/trees/parser/quiet-heron"]]);
+    // Each question asks the host who works in the worktrees, naming every session the deletion deletes.
+    assert.deepEqual(await state("checked"), [["parent", "child", "grandchild", "second"], ["parent", "child", "grandchild", "second"]]);
+
+    // A session outside the tree works in the same worktree: it stays, and its removal is not offered.
+    await evaluate("childrenFixture.show(true, false, true)");
+    assert.equal(await wait(`${dialog} && ${rows}.length===4`), true);
+    await evaluate(`${deleteButton}.click()`);
+    assert.equal(await wait(confirm), true);
+    assert.match(await evaluate<string>(`${confirm}.textContent`), /It is kept, with its branch\. Other sessions work in this worktree: it stays\./);
+    assert.equal(await evaluate(`${confirm}.querySelector('input[type=checkbox]')`), null);
+    await evaluate(`[...${confirm}.querySelectorAll('button')].find(button=>button.textContent==='Cancel').click()`);
+    assert.equal(await wait(`!${confirm}`), true);
+
+    // A session only the host knows of works in it: the question says so before anything is deleted, and stops offering it.
+    await evaluate("childrenFixture.show(true, false, false, true)");
+    assert.equal(await wait(`${dialog} && ${rows}.length===4`), true);
+    await evaluate(`${deleteButton}.click()`);
+    assert.equal(await wait(`${confirm}?.textContent.includes('Checking which sessions still work in them')`), true);
+    assert.equal(await evaluate(`${confirm}.querySelector('input[type=checkbox]').disabled`), true, "Nothing is offered while the host checks.");
+    assert.equal(await wait(`${confirm}.textContent.includes('Other sessions work in this worktree: it stays.')`), true);
+    assert.equal(await evaluate(`${confirm}.querySelector('input[type=checkbox]')`), null);
+    await evaluate(`[...${confirm}.querySelectorAll('button')].find(button=>button.textContent==='Cancel').click()`);
+    assert.equal(await wait(`!${confirm}`), true);
 
     // A session at work keeps the tree: the window says which, and does not offer the deletion.
     await evaluate("childrenFixture.show(false, true)");

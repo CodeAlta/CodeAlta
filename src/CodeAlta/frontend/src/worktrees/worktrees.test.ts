@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { translate } from "../localization";
 import { branchesReply, checkoutFolder, checkoutShown, filterBranches, folderName, newBranchName, persistWorkPlaces, projectFolder, referenceName, restoreWorkPlaces, sameFolder,
-  deletedSessionWorktree, sessionWorktree, shownCheckout, withWorkPlace, worktreeFailure, worktreeSessions, worktreesReply, type Branch, type Worktree } from "./worktrees";
+  deletedSessionWorktree, deletedSessionsWorktrees, sessionWorktree, worktreesLeft, shownCheckout, withWorkPlace, worktreeFailure, worktreeSessions, worktreesReply, type Branch, type Worktree } from "./worktrees";
 
 const t = (key: Parameters<typeof translate>[1]) => translate("en", key);
 const worktree = (change: Partial<Worktree> = {}): Worktree => ({ path: "C:\\trees\\app\\quiet-heron", name: "quiet-heron", branch: "alta/quiet-heron", head: "1234567",
@@ -141,4 +141,32 @@ test("a deleted session names the worktree it leaves, and offers it for removal 
   assert.equal(deletedSessionWorktree([own, row("b", "c:/trees/app/quiet-heron/")], own)?.shared, true);
   assert.equal(deletedSessionWorktree([row("c", null)], row("c", null)), null);
   assert.equal(deletedSessionWorktree([], row("d", "C:\\trees\\app\\gone", "C:\\trees\\app\\gone", true)), null, "a folder that is gone is not named");
+});
+
+test("sessions deleted together name each worktree they leave once, and offer only those no other session works in", () => {
+  const row = (id: string, path: string | null, changes: { projectId?: string | null; machineId?: string | null; missing?: boolean } = {}) =>
+    ({ id, scopeKind: changes.projectId === null ? "global" : "project", projectId: changes.projectId === undefined ? "p1" : changes.projectId,
+      machineId: changes.machineId ?? null, ...session(path, path, changes.missing ?? false) });
+  const parent = row("parent", "C:\\trees\\app\\quiet-heron");
+  // A sub-agent works in the worktree of its parent: the worktree is named once, for both.
+  const child = row("child", "c:/trees/app/quiet-heron/");
+  const other = row("other", "C:\\trees\\lib\\bold-otter", { projectId: "p2" });
+  const sharedOne = row("shared", "C:\\trees\\app\\calm-lynx");
+  const outside = row("outside", "C:\\trees\\app\\calm-lynx");
+  const chat = row("chat", null, { projectId: null });
+  const remote = row("remote", "/home/me/trees/app/far-crane", { machineId: "m1" });
+  const gone = row("gone", "C:\\trees\\app\\gone", { missing: true });
+  const deleted = [parent, child, other, sharedOne, chat, remote, gone];
+  const worktrees = deletedSessionsWorktrees([...deleted, outside], deleted);
+  assert.deepEqual(worktrees.map(worktree => [worktree.projectId, worktree.name, worktree.path, worktree.shared, worktree.sessionIds.join()]), [
+    ["p1", "quiet-heron", "C:\\trees\\app\\quiet-heron", false, "parent,child"],
+    ["p2", "bold-otter", "C:\\trees\\lib\\bold-otter", false, "other"],
+    // A session that is not deleted works in it: it stays.
+    ["p1", "calm-lynx", "C:\\trees\\app\\calm-lynx", true, "shared"],
+  ], "a chat has none, a machine of the fleet removes its own, and a folder that is gone is not named");
+
+  // What goes: the worktrees not shared, once every session of the tree that works in them was deleted.
+  assert.deepEqual(worktreesLeft(worktrees, ["PARENT", "child", "other", "shared"]).map(worktree => worktree.name), ["quiet-heron", "bold-otter"]);
+  assert.deepEqual(worktreesLeft(worktrees, ["parent", "other"]).map(worktree => worktree.name), ["bold-otter"], "the child that is left still works in quiet-heron");
+  assert.deepEqual(worktreesLeft(worktrees, []), []);
 });

@@ -1,4 +1,4 @@
-import { Button, Callout, Tag } from "@blueprintjs/core";
+import { Button, Callout, Checkbox, Tag } from "@blueprintjs/core";
 import { useEffect, useRef, useState } from "react";
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -10,25 +10,35 @@ import { plainTitle } from "../sessionTitle";
 import { useShellLanguage } from "../shellLanguage";
 import { SpaceIcon } from "../spaces/SpaceViews";
 import { sessionHome, type Space } from "../spaces/spaces";
-import { sessionsAtWork, sessionTreeMessage, treeDeletable, type SessionChildren, type SessionChildrenRead, type SessionTreeDeletion } from "./sessionChildren";
+import { deletedSessionsWorktrees, type DeletedWorktree } from "../worktrees/worktrees";
+import { sessionsAtWork, sessionTreeMessage, treeDeletable, treeSessions, type SessionChildren, type SessionChildrenRead, type SessionTreeDeletion } from "./sessionChildren";
 
 /**
  * The sessions below a session, wherever they are: in other projects, in the chats, in other spaces. A row opens its
  * session. Delete removes one session and never a session that others come from: the window says so, and offers to
- * delete the session with all of them, asked about on its own.
+ * delete the session with all of them, asked about on its own. The worktrees they work in are kept, unless the question
+ * is told to remove them too.
  */
-export function SessionChildrenDialog({ title, deleting, read, projects, spaces, canDelete, onOpen, onDelete, onClose }: {
+export function SessionChildrenDialog({ title, deleting, read, projects, sessions, spaces, canDelete, checkWorktrees, onOpen, onDelete, onClose }: {
   /** The title of the session, shown until the host has read it. */
   title: string;
   /** The window comes from Delete: the session was not deleted because of its children. */
   deleting: boolean;
   read: () => Promise<SessionChildrenRead>;
   projects: readonly WorkspaceProject[];
+  /** The sessions the window knows: a worktree one of them works in, outside the tree, is not removed with it. */
+  sessions: readonly WorkspaceSession[];
   spaces: readonly Space[];
   /** The host can delete sessions now. */
   canDelete: boolean;
+  /**
+   * Asks the host who works in the worktrees of the tree, `deleted` the sessions the deletion deletes: it knows of
+   * sessions the window does not list. Without it, or when it fails, the question says what the window found.
+   */
+  checkWorktrees?: (worktrees: readonly DeletedWorktree[], deleted: readonly string[]) => Promise<readonly DeletedWorktree[]>;
   onOpen: (session: WorkspaceSession) => void;
-  onDelete: (tree: SessionChildren) => Promise<SessionTreeDeletion>;
+  /** Deletes the tree, then removes the worktrees given, those the sessions that were deleted leave. */
+  onDelete: (tree: SessionChildren, worktrees: readonly DeletedWorktree[]) => Promise<SessionTreeDeletion>;
   onClose: () => void;
 }) {
   const { t } = useShellLanguage();
@@ -37,6 +47,11 @@ export function SessionChildrenDialog({ title, deleting, read, projects, spaces,
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [removingWorktrees, setRemovingWorktrees] = useState(false);
+  // The worktrees as the host checked them for the question that is open; null while it checks, or without a check.
+  const [checked, setChecked] = useState<readonly DeletedWorktree[] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const checks = useRef(0);
   const [message, setMessage] = useState<string | null>(null);
   const reads = useRef(0);
   const alive = useRef(true);
@@ -56,11 +71,25 @@ export function SessionChildrenDialog({ title, deleting, read, projects, spaces,
     return () => { alive.current = false; };
   }, []);
 
+  async function ask() {
+    if (!tree) return;
+    setRemovingWorktrees(false);
+    setChecked(null);
+    setConfirming(true);
+    if (!checkWorktrees || found.length === 0) return;
+    const sequence = ++checks.current;
+    setChecking(true);
+    const result = await checkWorktrees(found, [tree.root.id, ...tree.descendantIds]).catch(() => null);
+    if (!alive.current || sequence !== checks.current) return;
+    setChecking(false);
+    if (result) setChecked(result);
+  }
+
   async function remove() {
     if (!tree || busy) return;
     setBusy(true);
     setMessage(null);
-    const result = await onDelete(tree);
+    const result = await onDelete(tree, removingWorktrees ? worktrees.filter(worktree => !worktree.shared) : []);
     if (!alive.current) return;
     setBusy(false);
     setConfirming(false);
@@ -72,6 +101,12 @@ export function SessionChildrenDialog({ title, deleting, read, projects, spaces,
   const root = tree?.root;
   const atWork = tree ? sessionsAtWork(tree) : [];
   const deletable = !!tree && canDelete && treeDeletable(tree) && !busy && !loading;
+  const found = tree ? deletedSessionsWorktrees(sessions, treeSessions(tree, sessions)) : [];
+  const worktrees = checked ?? found;
+  const removable = worktrees.filter(worktree => !worktree.shared).length;
+  // Worktrees of several projects can have the same name: each says its project.
+  const severalProjects = new Set(worktrees.map(worktree => worktree.projectId)).size > 1;
+  const projectName = (id: string) => projects.find(project => project.id === id)?.name ?? t("Project");
   function where(session: WorkspaceSession) {
     const project = session.scopeKind === "project" ? projects.find(value => value.id === session.projectId) : undefined;
     const home = spaces.length > 1 ? sessionHome(spaces, { spaceId: session.spaceId, projectId: session.scopeKind === "project" ? session.projectId : null }) : null;
@@ -120,12 +155,27 @@ export function SessionChildrenDialog({ title, deleting, read, projects, spaces,
       </span>
       {tree && tree.total > 0 && <span className="session-children-delete">
         <Button intent="danger" variant="outlined" size="small" icon={<AppIcon name="trash" size={14} />} text={t("Delete with all child sessions…")}
-          disabled={!deletable} onClick={() => setConfirming(true)} />
+          disabled={!deletable} onClick={() => void ask()} />
         {confirming && <ConfirmPopover always intent="danger" busy={busy} title={t("Delete {count} sessions?", { count: tree.total + 1 })}
           subject={plainTitle(tree.root.title)} confirmLabel={t("Delete all")}
           detail={tree.total === 1 ? t("This session and the session below it are deleted with their history. Projects and their files are kept.")
             : t("This session and the {count} sessions below it are deleted with their history. Projects and their files are kept.", { count: tree.total })}
-          onConfirm={() => void remove()} onCancel={() => setConfirming(false)} />}
+          onConfirm={() => void remove()} onCancel={() => { checks.current++; setChecking(false); setConfirming(false); }}>
+          {worktrees.length > 0 && <div className="confirm-worktree">
+            {worktrees.length === 1
+              ? <p>{t("These sessions work in the worktree {name}, in {path}. It is kept, with its branch.", { name: worktrees[0].name, path: worktrees[0].path })}
+                {worktrees[0].shared && <> {t("Other sessions work in this worktree: it stays.")}</>}</p>
+              : <><p>{t("These sessions work in {count} worktrees. They are kept, with their branches:", { count: worktrees.length })}</p>
+                <ul className="session-children-worktrees">{worktrees.map(worktree => <li key={worktree.path} title={worktree.path}>
+                  {worktree.name}{severalProjects && <span className="muted-text"> · {projectName(worktree.projectId)}</span>}{worktree.shared && <span className="muted-text"> · {t("Other sessions work in it: it stays.")}</span>}</li>)}</ul></>}
+            {checking && <p className="muted-text" role="status">{t("Checking which sessions still work in them…")}</p>}
+            {removable > 0 && <Checkbox checked={removingWorktrees} disabled={busy || checking}
+              label={removable === 1 ? t("Also remove the worktree") : t("Also remove the {count} worktrees", { count: removable })}
+              onChange={event => setRemovingWorktrees(event.currentTarget.checked)} />}
+            {removingWorktrees && removable > 0 && !checking && <p className="muted-text">
+              {t("A worktree that holds changes that are not committed is kept, and its branch is deleted only when its commits are all in another branch.")}</p>}
+          </div>}
+        </ConfirmPopover>}
       </span>}
     </footer>
   </AppWindow>;

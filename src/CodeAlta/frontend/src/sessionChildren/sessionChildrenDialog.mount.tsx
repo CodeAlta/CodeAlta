@@ -16,9 +16,10 @@ const session = (id: string, title: string, changes: Partial<WorkspaceSession> =
   forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, archived: false, archivedAt: null, spaceId: null, ...changes,
 });
 // A chat of the Work space started a session in the Parser project, in the Personal space, which started a chat of its
-// own there; the chat also started a second chat.
+// own there; the chat also started a second chat. The session of the Parser project works in a worktree.
+const worktree = { worktreePath: "/trees/parser/quiet-heron", worktreeRoot: "/trees/parser/quiet-heron", worktreeName: "quiet-heron" };
 const children: WorkspaceSessionChild[] = [
-  { session: session("child", "Review the parser", { scopeKind: "project", projectId: "p1", workspacePath: "/parser", spaceId: "personal" }), parentSessionId: "parent", depth: 1, atWork: false },
+  { session: session("child", "Review the parser", { scopeKind: "project", projectId: "p1", workspacePath: "/parser", spaceId: "personal", ...worktree }), parentSessionId: "parent", depth: 1, atWork: false },
   { session: session("grandchild", "Write the tests", { spaceId: "personal" }), parentSessionId: "child", depth: 2, atWork: false },
   { session: session("second", "Summarize", { spaceId: "work" }), parentSessionId: "parent", depth: 1, atWork: false },
 ];
@@ -32,8 +33,11 @@ const spaces = readSpaces([
   { id: "work", name: "Work", description: null, icon: null, color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] },
   { id: "personal", name: "Personal", description: null, icon: null, color: null, isDefault: false, projectIds: ["p1"], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] },
 ]);
-const state = { reads: 0, deletes: [] as string[][], opened: [] as string[], closed: 0 };
+const state = { reads: 0, deletes: [] as string[][], worktrees: [] as string[][], checked: [] as string[][], opened: [] as string[], closed: 0 };
 let working = false;
+// Another session, outside the tree, works in the same worktree: one the window lists, or one only the host knows of.
+let shared = false;
+let hostShares = false;
 // What the next deletion answers: an error code, or nothing for a deletion that is made.
 let answer: string | null = null;
 
@@ -46,9 +50,17 @@ function Fixture() {
     {shown && <SessionChildrenDialog key={shown.revision} title="Plan the release" deleting={shown.deleting} canDelete
       read={async () => { state.reads++; return { kind: "read", value: tree(working) }; }}
       projects={[{ id: "p1", name: "Parser", path: "/parser", archived: false }]} spaces={spaces}
+      sessions={shared ? [session("outside", "Fix the lexer", { scopeKind: "project", projectId: "p1", workspacePath: "/parser", ...worktree })] : []}
+      checkWorktrees={async (worktrees, deleted) => {
+        state.checked.push([...deleted]);
+        if (!hostShares) return worktrees;
+        await new Promise(resolve => setTimeout(resolve, 150));
+        return worktrees.map(item => ({ ...item, shared: true }));
+      }}
       onOpen={value => { state.opened.push(value.id); setShown(null); }}
-      onDelete={async value => {
+      onDelete={async (value, worktrees) => {
         state.deletes.push([...value.descendantIds]);
+        state.worktrees.push(worktrees.map(item => item.path));
         return (answer ? { kind: "error", code: answer, deleted: [], blocking: null } : { kind: "deleted", deleted: [...value.descendantIds, value.root.id] }) satisfies SessionTreeDeletion;
       }}
       onClose={() => { state.closed++; setShown(null); }} />}
@@ -58,7 +70,7 @@ function Fixture() {
 // As the application does: a press outside a window dismisses it.
 dismissDialogsOnOutsidePress(document);
 Object.assign(window, { childrenFixture: { state,
-  show(deleting: boolean, atWork = false) { working = atWork; flushSync(() => show!({ deleting, revision: ++revision })); },
+  show(deleting: boolean, atWork = false, sharedWorktree = false, sharedByHost = false) { working = atWork; shared = sharedWorktree; hostShares = sharedByHost; flushSync(() => show!({ deleting, revision: ++revision })); },
   /** What the next deletion answers. */
   answer(code: string | null) { answer = code; },
 } });

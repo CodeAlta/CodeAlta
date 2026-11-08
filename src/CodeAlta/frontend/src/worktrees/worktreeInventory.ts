@@ -1,5 +1,5 @@
 import type { MessageKey } from "../localization";
-import { worktreeFailure } from "./worktrees";
+import { sameFolder, worktreeFailure, type DeletedWorktree } from "./worktrees";
 
 /** A session of the catalog that records a checkout. */
 export type InventorySession = Readonly<{ id: string; title: string; updatedAt: string; running: boolean }>;
@@ -55,6 +55,22 @@ export function inventoryReply(reply: unknown, projectId: string): Inventory | s
       folder: row.folder, busy: row.busy, protection: row.protection as Protection | null, sessions, sessionCount: row.sessionCount, lastUsedAt: row.lastUsedAt });
   }
   return value.truncated ? { rows, sessionsKnown: value.sessionsKnown, truncated: true } : { rows, sessionsKnown: value.sessionsKnown };
+}
+
+/**
+ * The worktrees of sessions about to be deleted, as the host knows who works in them: `shared` also when a session the
+ * window does not list works in one, or when the host counts more sessions there than the deleted ones it knows
+ * of. A worktree of a project whose sessions the host could not read keeps what the window found.
+ */
+export function checkedWorktrees(worktrees: readonly DeletedWorktree[], inventories: ReadonlyMap<string, Inventory>, deleted: readonly string[]): readonly DeletedWorktree[] {
+  const ids = new Set(deleted.map(id => id.toLowerCase()));
+  return worktrees.map(worktree => {
+    const inventory = inventories.get(worktree.projectId);
+    const row = inventory?.sessionsKnown ? inventory.rows.find(item => sameFolder(item.path, worktree.path)) : undefined;
+    if (!row || worktree.shared) return worktree;
+    const shared = row.busy || row.sessions.some(session => !ids.has(session.id.toLowerCase())) || row.sessionCount > worktree.sessionIds.length;
+    return shared ? { ...worktree, shared } : worktree;
+  });
 }
 
 /**
@@ -151,6 +167,8 @@ const reasons: Readonly<Record<string, MessageKey>> = {
   read_failed: "The answer did not arrive: the list says whether it is still there.",
   unknown_project: "The project is no longer available.",
   project_unavailable: "The project is no longer available.",
+  used: "Another session works in it.",
+  sessions_unavailable: "The sessions that work in it could not be read.",
 };
 
 /** Why a worktree stays, in a sentence. */

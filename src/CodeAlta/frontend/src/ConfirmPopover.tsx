@@ -8,7 +8,8 @@ import { useShellLanguage } from "./shellLanguage";
  * be positioned so the popover's anchor covers it.
  * The button that does it has the focus, so Enter answers yes; Escape, Cancel or a click elsewhere leaves
  * everything as it is and gives the focus back to the row. A check box asks not to be asked the next time.
- * A question that is always asked has no check box, and Cancel has the focus: Enter leaves everything as it is.
+ * A question that is always asked has no check box, and Cancel has the focus: Enter leaves everything as it is. It
+ * keeps it for a danger even with choices, as the removal of the worktrees of the sessions it deletes.
  */
 export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = "primary", always = false, onConfirm, onCancel, busy, error = null, children, placement = "right-start" }: {
   /** The question. */
@@ -29,7 +30,8 @@ export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = 
   /** Why it could not be done. */
   error?: string | null;
   /** What the answer chooses besides yes, as an archive with or without the child sessions; the button that confirms
-   * takes the focus, as for a question that can be told not to be asked again. */
+   * takes the focus, as for a question that can be told not to be asked again, unless the question is always asked
+   * about a danger. */
   children?: ReactNode;
   /** Where the question opens: beside a row of the Explorer by default, above a button at the foot of a window. */
   placement?: PopoverNextProps["placement"];
@@ -44,7 +46,7 @@ export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = 
   // The menu the question comes from closes after it is asked, and gives the focus back to its own button: the
   // question takes it again.
   useEffect(() => {
-    const focus = () => { if (!form.current?.contains(document.activeElement)) (always && !children ? dismiss : confirm).current?.focus(); };
+    const focus = () => { if (!form.current?.contains(document.activeElement)) (always && (!children || intent === "danger") ? dismiss : confirm).current?.focus(); };
     const timers = [0, 150, 400].map(delay => setTimeout(focus, delay));
     return () => timers.forEach(clearTimeout);
   }, []);

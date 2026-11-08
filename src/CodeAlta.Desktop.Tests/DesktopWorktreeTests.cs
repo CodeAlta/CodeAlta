@@ -783,6 +783,39 @@ public sealed class DesktopWorktreeTests
     }
 
     [TestMethod]
+    public async Task RemoveMany_KeepUsed_KeepsAWorktreeASessionOfTheCatalogStillWorksIn()
+    {
+        using var repository = await Repository.CreateAsync();
+        var project = await repository.Projects.UpsertFromPathAsync(repository.Root);
+        var recorded = await repository.Worktrees.CreateAsync(project);
+        var created = await repository.Worktrees.CreateAsync(project);
+        var free = await repository.Worktrees.CreateAsync(project);
+        // One session records the worktree it works in; another was created in the folder of a worktree (a project
+        // registered there) and records none: both keep theirs. No session is at work.
+        var sessions = new List<AgentSessionMetadata>
+        {
+            Recorded("idle", DateTimeOffset.UnixEpoch, repository.Root, recorded.Root),
+            Recorded("there", DateTimeOffset.UnixEpoch, created.Root!),
+        };
+        var service = repository.Manager(static () => [], () => sessions);
+
+        var kept = await service.RemoveManyAsync(new(Epoch, project.Id, [recorded.Root!, created.Root!, free.Root!], KeepUsed: true), default);
+        Assert.AreEqual("ok", kept.Status);
+        CollectionAssert.AreEqual(new[] { "used", "used", "ok" }, kept.Results.Select(static result => result.Status).ToArray());
+        Assert.IsTrue(Directory.Exists(recorded.Root) && Directory.Exists(created.Root) && !Directory.Exists(free.Root));
+
+        // Without it, the window of the worktrees removes one an idle session works in, as it always did.
+        var removed = await service.RemoveManyAsync(new(Epoch, project.Id, [recorded.Root!]), default);
+        Assert.AreEqual("ok", removed.Results.Single().Status);
+        Assert.IsFalse(Directory.Exists(recorded.Root));
+
+        // Sessions that cannot be read keep every worktree.
+        var unknown = await repository.Service(static () => []).RemoveManyAsync(new(Epoch, project.Id, [created.Root!], KeepUsed: true), default);
+        Assert.AreEqual(("sessions_unavailable", 0), (unknown.Status, unknown.Results.Length));
+        Assert.IsTrue(Directory.Exists(created.Root));
+    }
+
+    [TestMethod]
     public async Task RemoveMany_RemovesWhatCanGo_AndSaysWhyEachOtherStays()
     {
         using var repository = await Repository.CreateAsync();

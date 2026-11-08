@@ -14,3 +14,5 @@ dialog:has(> .app-window) > .app-window > .app-window-body > footer.session-chil
 .session-children-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--line); }
 .session-children-status { min-width: 0; color: var(--muted); font-size: 12px; }
 .session-children-delete { position: relative; display: inline-flex; flex: none; }
+/* The worktrees the sessions of the tree work in, in the question of its deletion. */
+.session-children-worktrees { margin: 0; padding-inline-start: 18px; max-height: 120px; overflow-y: auto; overflow-wrap: anywhere; }
