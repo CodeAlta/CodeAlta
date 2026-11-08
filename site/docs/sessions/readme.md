@@ -241,7 +241,7 @@ A session takes the change with its next prompt. Commits you make yourself do no
 
 ### What agents write elsewhere
 
-When an agent writes for you in another system, such as a pull request comment or review, an issue, a chat message or an email, it ends the text with a short italic line saying that it comes from CodeAlta, so that readers do not take it for your own words:
+When an agent writes for you in another system, such as a pull request comment or review, an issue, a chat message or an email, it ends the text with a short italic line saying that it comes from CodeAlta, with a link to its website, so that readers do not take it for your own words:
 
 ```markdown
 _This review was written by [CodeAlta](https://codealta.io)._

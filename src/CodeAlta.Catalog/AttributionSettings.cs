@@ -15,7 +15,7 @@ public sealed record AttributionSettings(bool CoAuthor, string CoAuthorTrailer, 
     public const string DefaultCoAuthorTrailer = "Co-authored-by: CodeAlta <noreply@codealta.io>";
 
     /// <summary>What agents are told about the texts they write in an external system, unless the user writes another instruction.</summary>
-    public const string DefaultExternalWritingInstruction = "When you write in an external system on the user's behalf (a pull request comment or review, an issue, a reply in an issue tracker, chat or email), end the text with a short italic line saying that it comes from CodeAlta, so readers do not take it for the user's own words, for example `_This review was written by [CodeAlta](https://codealta.io)._` or `_This issue was created by [CodeAlta](https://codealta.io)._`; this does not apply to commit messages.";
+    public const string DefaultExternalWritingInstruction = "When you write in an external system on the user's behalf (a pull request comment or review, an issue, a reply in an issue tracker, chat or email), end the text with a short italic line saying that it comes from CodeAlta, with a link to its website https://codealta.io, so readers do not take it for the user's own words, for example `_This review was written by [CodeAlta](https://codealta.io)._` or `_This issue was created by [CodeAlta](https://codealta.io)._`; this does not apply to commit messages.";
 
     /// <summary>The longest trailer, in characters.</summary>
     public const int MaximumCoAuthorTrailerLength = 200;
