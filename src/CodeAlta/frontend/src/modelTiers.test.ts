@@ -5,7 +5,7 @@ import { adaptiveChoice, adaptiveLevelOf, adaptiveLevelSummary, adaptiveTierOf, 
   removeTierTarget, replaceTierTarget, setTierReasoning, startingEfforts, tierLists, type TierState } from "./modelTiers";
 
 const reply = (changes: Partial<GlobalConfigModelTiersResponse> = {}): GlobalConfigModelTiersResponse => ({
-  status: "ok", message: null, source: "global", spaceId: null, adaptive: null, adaptiveReady: false, adaptiveProposal: null,
+  status: "ok", message: null, source: "global", spaceId: null, adaptive: null, adaptiveReady: false, adaptiveProposal: null, pending: false,
   fallback: { enabled: true, onQuota: true, onUnavailable: false, resume: false, maxResumes: 5 },
   tiers: [
     { tier: "complex", targets: [{ providerKey: "claude-code", modelId: "opus", reasoning: ["High", "XHigh"] }, { providerKey: "codex", modelId: "gpt-6.1", reasoning: ["XHigh"] }],
@@ -158,6 +158,38 @@ test("the store reads the tiers of a host once at a time and tells its listeners
   stop();
   store.set("e1", state());
   assert.equal(told, 2);
+});
+
+test("a reading made while a provider of the tiers is prepared is made again until the tiers give their models (#367)", async () => {
+  let starting = true;
+  const asked: string[] = [];
+  const planned: (() => void)[] = [];
+  const store = createTierStore(async request => {
+    asked.push(request.spaceId ?? "");
+    return starting ? reply({ pending: true, tiers: [{ tier: "standard", targets: [{ providerKey: "custom", modelId: "glm", reasoning: [] }], choice: null }] })
+      : reply({ pending: false, tiers: [{ tier: "standard", targets: [{ providerKey: "custom", modelId: "glm", reasoning: [] }],
+        choice: { providerKey: "custom", modelId: "glm", reasoning: null, providerName: "Custom", modelName: "GLM" } }] });
+  }, { delay: 10, reads: 3, schedule: run => { planned.push(run); } });
+
+  await store.refresh("e1", { spaceId: "work" });
+  assert.equal(store.of("e1", { spaceId: "work" })?.choices.standard, null);
+  assert.equal(planned.length, 1, "The reading is planned again.");
+  await store.refresh("e1", { spaceId: "work" });
+  assert.equal(planned.length, 1, "Once at a time.");
+
+  starting = false;
+  planned.shift()!();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(store.of("e1", { spaceId: "work" })?.choices.standard?.modelName, "GLM");
+  assert.equal(planned.length, 0, "A reading that is not pending is not made again.");
+
+  // A provider that never gets ready is read again a bounded number of times.
+  assert.deepEqual(asked, ["work", "work", "work"]);
+  let bounded = 0;
+  const never = createTierStore(async () => { bounded++; return reply({ pending: true }); }, { delay: 10, reads: 2, schedule: run => { planned.push(run); } });
+  await never.refresh("e1");
+  while (planned.length > 0) { planned.shift()!(); await new Promise(resolve => setImmediate(resolve)); }
+  assert.equal(bounded, 3, "The first reading and two more.");
 });
 
 test("a change of the providers reads again every scope of the host the window knows", async () => {

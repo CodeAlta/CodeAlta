@@ -59,7 +59,21 @@ internal sealed partial class GlobalConfigService
             Source = scope.FromSpace ? "space" : "global", SpaceId = space?.Id,
             Adaptive = ToItem(scope.Adaptive), AdaptiveReady = scope.IsAdaptiveReady,
             AdaptiveProposal = Propose(scope),
+            Pending = Pending(scope),
         };
+    }
+
+    // Whether a model of the tiers or of Adaptive is of a provider that is still being prepared: what they give can
+    // change once it is, and the window reads them again (#367). The providers are prepared once the window shows.
+    private bool Pending(ModelTierScope scope)
+    {
+        var states = ProviderStates?.Invoke() ?? [];
+        var keys = CodeAlta.Catalog.ModelTiers.ModelTiers.All.SelectMany(tier => scope.Tiers.Get(tier))
+            .Where(target => scope.IsProviderAvailable(target.ProviderKey)).Select(static target => target.ProviderKey)
+            .Concat(scope.Adaptive?.Levels.Select(static level => level.Model.ProviderKey) ?? [])
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return states.Any(state => keys.Contains(state.ProviderId.Value) && state.Descriptor.IsEnabled
+            && state.Availability is ModelProviderAvailability.Unknown or ModelProviderAvailability.Probing);
     }
 
     // The levels Adaptive proposes for the providers that are ready (in the space, with a space), a subscription first.
@@ -418,6 +432,12 @@ internal sealed record GlobalConfigModelTiersResponse(string Status, IReadOnlyLi
     /// the models a proposal knows is there, and the user then chooses the models.
     /// </summary>
     public IReadOnlyList<AdaptiveLevelSetting>? AdaptiveProposal { get; init; }
+
+    /// <summary>
+    /// Gets whether a model of the tiers or of Adaptive is of a provider that is still being prepared: the models they
+    /// give can change once it is ready, and the reading is to be made again.
+    /// </summary>
+    public bool Pending { get; init; }
 }
 
 /// <summary>A tier of models: its targets in order of preference, and the model it gives now.</summary>

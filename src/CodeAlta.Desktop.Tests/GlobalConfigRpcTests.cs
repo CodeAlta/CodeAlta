@@ -543,6 +543,49 @@ type = "fake-agent"
     }
 
     [TestMethod]
+    public async Task ModelTiers_ArePending_WhileAProviderOfTheirModelsIsStillPrepared()
+    {
+        // The providers are prepared once the window shows: its first reading finds them not ready yet (#367).
+        await using var fixture = new Fixture("""
+            [models.tiers]
+            standard = ["custom:glm-5.3@high"]
+
+            [models.adaptive]
+            level = "medium"
+
+            [models.adaptive.medium]
+            model = "other:mimo@high"
+            """);
+        var states = new Dictionary<string, ModelProviderAvailability> { ["custom"] = ModelProviderAvailability.Probing, ["other"] = ModelProviderAvailability.Ready };
+        ModelProviderStateSnapshot State(string key) => new()
+        {
+            Descriptor = new ModelProviderDescriptor(new ModelProviderId(key), key),
+            Availability = states[key],
+            Models = states[key] == ModelProviderAvailability.Ready ? [new AgentModelInfo("glm-5.3"), new AgentModelInfo("mimo")] : [],
+        };
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch)
+        {
+            ProviderStates = () => [State("custom"), State("other")],
+        };
+
+        var starting = ReadTiers(service, new(Epoch));
+        Assert.AreEqual("ok", starting.Status, starting.Message);
+        Assert.IsNull(starting.Tiers[1].Choice);
+        Assert.IsTrue(starting.Pending, "The standard tier can give a model once its provider is ready.");
+
+        states["custom"] = ModelProviderAvailability.Ready;
+        var ready = ReadTiers(service, new(Epoch));
+        Assert.AreEqual("glm-5.3", ready.Tiers[1].Choice?.ModelId);
+        Assert.IsFalse(ready.Pending);
+
+        // The model of a level of Adaptive counts too; a provider that failed is not waited for.
+        states["other"] = ModelProviderAvailability.Unknown;
+        Assert.IsTrue(ReadTiers(service, new(Epoch)).Pending);
+        states["other"] = ModelProviderAvailability.Failed;
+        Assert.IsFalse(ReadTiers(service, new(Epoch)).Pending);
+    }
+
+    [TestMethod]
     public async Task Adaptive_IsSetUpWithItsLevelsAndTakenOut_ReadWithTheTiers_AndKeptWhenTheTiersAreSaved()
     {
         await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");

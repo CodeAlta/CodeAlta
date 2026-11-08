@@ -293,14 +293,25 @@ type Read = (request: { expectedEpoch: string; spaceId: string | null; sessionId
 
 const scopeKey = (epoch: string, scope?: TierScope | null) => `${epoch}|${scope?.spaceId ?? ""}|${scope?.sessionId ?? ""}`;
 
+/** How a store reads again the tiers of a scope whose providers are still prepared: after `delay`, `reads` times at most in a row. */
+export type PendingRereads = Readonly<{ delay: number; reads: number; schedule: (run: () => void, delay: number) => void }>;
+
+// Every 2 seconds for 3 minutes at most: a provider that takes longer is read again once the user changes a provider.
+const pendingRereads: PendingRereads = { delay: 2000, reads: 90, schedule: (run, delay) => { setTimeout(run, delay); } };
+
 /**
  * The tiers of the window, read from the host for each scope: Settings, the page of a space and the composers show
- * the same readings, and a save tells every one of them, after reading again the scopes it may change.
+ * the same readings, and a save tells every one of them, after reading again the scopes it may change. A reading the
+ * host says is pending (a provider of its models is still prepared, as when the window starts) is made again until it
+ * is not, so that a tier does not stay without a model (#367).
  */
-export function createTierStore(read: Read) {
+export function createTierStore(read: Read, rereads: PendingRereads = pendingRereads) {
   let readings: ReadonlyMap<string, TierState> = new Map();
   const scopes = new Map<string, Readonly<{ epoch: string; scope: TierScope | null }>>();
   const loading = new Set<string>();
+  // The pending readings made in a row for each scope, and the scopes whose next reading is planned.
+  const pending = new Map<string, number>();
+  const planned = new Set<string>();
   const listeners = new Set<() => void>();
   const tell = () => { for (const listener of [...listeners]) listener(); };
   const put = (key: string, state: TierState) => { readings = new Map(readings).set(key, state); tell(); };
@@ -314,6 +325,17 @@ export function createTierStore(read: Read) {
         { timeoutMilliseconds: 15_000 });
       const state = reply.status === "ok" || reply.status === "invalid" ? readTierState(reply) : null;
       if (state) put(key, state);
+      if (reply.status !== "ok" || reply.pending !== true) pending.delete(key);
+      else {
+        const count = (pending.get(key) ?? 0) + 1;
+        // Past the last one, the count starts again with the next reading asked from outside (a change of the providers).
+        if (count > rereads.reads) pending.delete(key);
+        else pending.set(key, count);
+        if (count <= rereads.reads && !planned.has(key)) {
+          planned.add(key);
+          rereads.schedule(() => { planned.delete(key); void refresh(epoch, scope); }, rereads.delay);
+        }
+      }
     } catch { /* The reading the window has stays. */ }
     finally { loading.delete(key); }
   }
