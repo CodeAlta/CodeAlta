@@ -465,7 +465,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
               <DefaultedInput id="provider-url" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>}
             {formPlugin
               ? original && original.type === form.type
-                ? <PluginProviderPanel key={original.key} epoch={epoch} providerKey={original.key} api={plugins}
+                ? <PluginProviderPanel key={`${original.key}:plugin`} epoch={epoch} providerKey={original.key} api={plugins}
                     capabilities={availability.get(original.key.toLowerCase())?.capabilities ?? null} signedOut={!!signedOut}
                     blocked={dirty ? t("Save before signing in.") : null} runInTerminal={runInTerminal}
                     onChanged={() => { selectAfterLoad.current = original.key; setGeneration(value => value + 1); onApplied?.(); }}
@@ -497,7 +497,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
             <Checkbox className="provider-settings-wide" checked={form.makeDefault} disabled={busy || !form.enabled} label={t("Use as the default provider for new sessions")}
               onChange={event => edit({ makeDefault: event.currentTarget.checked })} />
             {/* Few people need it: folded, last, under a line that says what it hides. */}
-            <ProviderModelVisibility key={original?.key ?? newProvider} epoch={epoch} revision={listing.revision}
+            {/* The keys of the children of this card are distinct: React leaves behind a copy of a child whose key another one has. */}
+            <ProviderModelVisibility key={`${original?.key ?? newProvider}:visibility`} epoch={epoch} revision={listing.revision}
               providerId={modelProvider && availability.get(modelProvider.toLowerCase())?.availability === "Ready" ? modelProvider : null}
               hide={form.modelsHide} show={form.modelsShow} disabled={busy} readModels={readModels} onChange={change => edit(change)} />
           </SectionCard>
