@@ -213,7 +213,7 @@ internal sealed class DesktopSearchPlugin : PluginBase
     {
         if (search.Meaning is not { } meaning || !search.Host.GetSettings().Semantic) return null;
         var status = meaning.Status;
-        if (status.State is not ("downloading" or "loading" or "indexing" or "paused" or "failed")) return null;
+        if (!ShowsOnCard(status)) return null;
         int? percent = status.State switch
         {
             "downloading" => meaning.Installer.Current is { TotalBytes: > 0 } download ? (int)(download.ReceivedBytes * 100 / download.TotalBytes) : null,
@@ -222,6 +222,21 @@ internal sealed class DesktopSearchPlugin : PluginBase
         };
         return (status.State, status, percent);
     }
+
+    /// <summary>
+    /// Whether the card says where search by meaning is: while its model downloads or loads, while it indexes what was there
+    /// before it caught up, and when it failed. Once it caught up, the passages each session writes are embedded without a
+    /// card: it would come and go with every turn.
+    /// </summary>
+    /// <param name="status">Where search by meaning is.</param>
+    /// <returns>Whether the card shows it.</returns>
+    internal static bool ShowsOnCard(MeaningStatus status)
+        => status.State switch
+        {
+            "downloading" or "loading" or "failed" => true,
+            "indexing" or "paused" => !status.CaughtUp,
+            _ => false,
+        };
 
     // 0 no card, 1 the first build, 2 a failure.
     private static int CardKindOf(SearchIndexerStatus status)

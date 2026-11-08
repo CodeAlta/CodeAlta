@@ -48,6 +48,7 @@ public sealed class DesktopSearchMeaningTests
             meaning.Start();
             await UntilAsync(() => meaning.Status is { State: "ready", Total: 3 });
             Assert.AreEqual((3, 3), (meaning.Status.Embedded, meaning.Status.Total));
+            Assert.IsTrue(meaning.Status.CaughtUp, "everything was embedded once");
             Assert.AreEqual(model.Id, loads.Single().ModelId);
             Assert.AreEqual(installer.RuntimeLibrary(), loads.Single().OnnxRuntime);
             Assert.AreEqual(SearchMeaningState.Ready, meaning.State);
@@ -89,6 +90,8 @@ public sealed class DesktopSearchMeaningTests
             documents.Add(new("doc:e.md", SearchKind.Doc, "Plugins", "A plugin adds commands and canvases.", DateTimeOffset.UtcNow));
             indexer.Signal("docs");
             await UntilAsync(() => meaning.Status.State == "paused");
+            Assert.IsTrue(meaning.Status.CaughtUp, "what a session writes after it caught up is no indexing to wait for");
+            Assert.IsFalse(DesktopSearchPlugin.ShowsOnCard(meaning.Status), "the welcome page shows no card for it");
             Assert.AreEqual("doc:b.md", (await service.SearchAsync(new SearchRequest("microphone dictates", new SearchScope()) { Mode = SearchMode.Meaning })).Hits[0].Ref);
             meaning.Paused = false;
             await UntilAsync(() => meaning.Status is { State: "ready", Embedded: 45 });
@@ -96,6 +99,7 @@ public sealed class DesktopSearchMeaningTests
             // Turned off, it says so and is not offered again.
             meaning.TurnOff();
             await UntilAsync(() => meaning.Status.State == "off");
+            Assert.IsFalse(meaning.Status.CaughtUp, "turned on again, it indexes from the start");
             Assert.AreEqual(SearchSettings.MeaningOfferTurnedOff, settings.GetSettings().MeaningOffer);
             Assert.IsEmpty(await meaning.SearchAsync("microphone", new SearchScope(), false, 5, default));
             // The model in use cannot be deleted while it is on; once off it can.

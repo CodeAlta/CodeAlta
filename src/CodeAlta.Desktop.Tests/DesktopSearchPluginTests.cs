@@ -41,6 +41,20 @@ public sealed class DesktopSearchPluginTests
     }
 
     [TestMethod]
+    public void TheCard_FollowsTheFirstIndexingByMeaning_NotThePassagesEachTurnAddsAfterIt()
+    {
+        static MeaningStatus Status(string state, bool caughtUp) => new(state, "model", 10, 20, 1, state == "failed" ? "broken" : null) { CaughtUp = caughtUp };
+        // The download, the loading and the first indexing are worth a card, and so is a failure, before or after.
+        foreach (var state in new[] { "downloading", "loading", "indexing", "paused", "failed" }) Assert.IsTrue(DesktopSearchPlugin.ShowsOnCard(Status(state, false)), state);
+        Assert.IsTrue(DesktopSearchPlugin.ShowsOnCard(Status("failed", true)));
+        // Once caught up, what each turn adds is embedded without a card that would come and go with it.
+        Assert.IsFalse(DesktopSearchPlugin.ShowsOnCard(Status("indexing", true)));
+        Assert.IsFalse(DesktopSearchPlugin.ShowsOnCard(Status("paused", true)));
+        Assert.IsFalse(DesktopSearchPlugin.ShowsOnCard(Status("ready", true)));
+        Assert.IsFalse(DesktopSearchPlugin.ShowsOnCard(Status("off", false)));
+    }
+
+    [TestMethod]
     public async Task TheCanvas_IsDrawnByTheModuleOfTheApplication_OnePerSpace_AndDescribesItself()
     {
         await using var fixture = await Fixture.CreateAsync();

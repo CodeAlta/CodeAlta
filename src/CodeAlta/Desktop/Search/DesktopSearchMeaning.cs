@@ -60,6 +60,12 @@ internal interface IMeaningVectors : IAsyncDisposable
 /// <param name="Error">For <c>failed</c>: what went wrong.</param>
 internal sealed record MeaningStatus(string State, string ModelId, int Embedded, int Total, double ChunksPerSecond, string? Error)
 {
+    /// <summary>
+    /// Gets whether everything was embedded once since the model was loaded: an indexing after that is the few passages a
+    /// session just wrote, not one the person waits for.
+    /// </summary>
+    public bool CaughtUp { get; init; }
+
     /// <summary>Gets an estimate of the seconds left to index, or null when unknown.</summary>
     public int? SecondsLeft => ChunksPerSecond > 0 && Total > Embedded ? (int)Math.Ceiling((Total - Embedded) / ChunksPerSecond) : null;
 }
@@ -101,6 +107,8 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
     private string _state = "off";
     private string? _error;
     private bool _paused;
+    // Everything was embedded once since the model was loaded (see MeaningStatus.CaughtUp).
+    private bool _caughtUp;
     private bool _dictating;
     private double _rate;
     private int _failures;
@@ -140,7 +148,8 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
         {
             var (embedded, total) = _open is null ? (0, 0) : _vectors.Coverage;
             // Before its first step, the page is told nothing that would show: no card, no "loading" at every start.
-            lock (_gate) return new(_paused && _state is "indexing" ? "paused" : _state is "starting" ? "ready" : _state, _host.GetSettings().Model, embedded, total, _rate, _error);
+            lock (_gate) return new(_paused && _state is "indexing" ? "paused" : _state is "starting" ? "ready" : _state, _host.GetSettings().Model, embedded, total, _rate, _error)
+                { CaughtUp = _caughtUp };
         }
     }
 
@@ -349,6 +358,9 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
         {
             if (_state == state && _error == error) return;
             (_state, _error) = (state, error);
+            // Caught up once everything is embedded; a model downloaded or loaded again, or turned off, starts over.
+            if (state == "ready") _caughtUp = true;
+            else if (state is "off" or "downloading" or "loading") _caughtUp = false;
         }
 
         Notify();
