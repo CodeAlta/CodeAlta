@@ -22,6 +22,10 @@ public sealed class MobileSessionsTests
         var refused = await api.ArchiveAsync("parent", true, default);
         Assert.IsFalse((bool)refused!["ok"]!);
         Assert.AreEqual(1, alta.CallsOf("session archive").Length);
+        alta.Answer("session children parent", FakeAlta.Session("child", "p1", "personal", "2026-10-24T10:00:00Z"),
+            FakeAlta.Session("gone", "p1", "work", "2026-10-24T10:00:00Z", state: "archived"), new JsonObject { ["type"] = "alta.session.children.summary" });
+        Assert.IsTrue((bool)(await api.ArchiveAsync("parent", true, default))!["ok"]!, "a child of another space archived before does not stop it");
+        Assert.AreEqual(2, alta.CallsOf("session archive").Length);
         alta.Cut = args => args[1] == "children";
         Assert.IsNotNull((await api.ArchiveChildrenAsync("parent", default))!["error"]);
         alta.Cut = null;

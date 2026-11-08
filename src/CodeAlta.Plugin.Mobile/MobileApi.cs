@@ -372,7 +372,8 @@ internal sealed partial class MobileApi(IPluginAltaService alta, MobileSessions 
             var children = await MobileAlta.RunAsync(alta, ["session", "children", id, "--recursive"], null, cancellationToken).ConfigureAwait(false);
             if (children.Error is not null || children.Truncated || !children.OfType("alta.session.children.summary").Any())
                 return new JsonObject { ["ok"] = false, ["error"] = children.Error ?? "The child sessions could not be read completely." };
-            if (children.OfType("alta.session.item").Any(item => MobileAlta.Text(item, "spaceId") is { } space && !sessions.Spaces.Contains(space, StringComparer.OrdinalIgnoreCase)))
+            // A child archived before is left as it is: only those the archive changes must be the phone's.
+            if (children.OfType("alta.session.item").Any(item => !IsArchivedChild(item) && MobileAlta.Text(item, "spaceId") is { } space && !sessions.Spaces.Contains(space, StringComparer.OrdinalIgnoreCase)))
                 return new JsonObject { ["ok"] = false, ["error"] = "A child session is outside the spaces available to this phone." };
         }
         List<string> args = ["session", "archive", id];

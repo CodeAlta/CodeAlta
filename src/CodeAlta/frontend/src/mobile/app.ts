@@ -1437,8 +1437,9 @@ export function startMobile(window: Window & typeof globalThis) {
   $("new").addEventListener("click", startNew);
 
   // ---- Swipe a card for its action, Gmail-style: the drag is the action ----
-  // Right: Archive, on green. Past 40% of the width a release asks about child sessions before archiving; short of it the
-  // card springs back. A drag that starts vertical is the page's scroll. A toast offers Restore for 5 s.
+  // Right: Archive, on green. Past 40% of the width a release archives and the card leaves, or comes back while the phone
+  // asks about the session's child sessions; short of it the card springs back. A drag that starts vertical is the page's
+  // scroll (touch-action: pan-y). A toast offers Restore for 5 s.
   let swipe: { row: HTMLElement; card: HTMLElement; x: number; y: number; dx: number; dragging: boolean; pointer: number } | null = null;
   function place(item: HTMLElement, x: number, how?: "spring" | "out") {
     const element = item.querySelector<HTMLElement>(".card")!;
@@ -1473,8 +1474,8 @@ export function startMobile(window: Window & typeof globalThis) {
     done.row.dataset.dragged = "1";
     window.setTimeout(() => delete done.row.dataset.dragged, 0);
     if (event.type === "pointerup" && done.dx >= done.row.offsetWidth * 0.4) {
-      place(done.row, 0, "spring");
-      archive(done.row.dataset.id!);
+      place(done.row, done.row.offsetWidth + 24, "out");
+      void archive(done.row.dataset.id!);
     } else place(done.row, 0, "spring");
   }
   list.addEventListener("pointerup", endSwipe);
@@ -1507,15 +1508,18 @@ export function startMobile(window: Window & typeof globalThis) {
       if (id) doArchive(id, withChildren);
     });
   }
+  // A swiped card left its row: it comes back when the session is not archived at once.
+  function springBack(id: string) { const item = rowOf(id); if (item) place(item, 0, "spring"); }
   async function archive(id: string) {
-    if (checkingArchive || archiveSheet.shown) return;
+    if (checkingArchive || archiveSheet.shown) { springBack(id); return; }
     checkingArchive = true;
     try {
       const result = await api.archiveChildren(id);
       if (result.error || typeof result.hasChildren !== "boolean") throw new Error(result.error || "The child sessions could not be checked.");
-      if (result.hasChildren) { archiveQuestion = id; archiveSheet.open($("archive-yes")); }
+      if (result.hasChildren) { springBack(id); archiveQuestion = id; archiveSheet.open($("archive-yes")); }
       else doArchive(id, false);
     } catch (error) {
+      springBack(id);
       if (!(error instanceof SignedOutError)) showToast(`Not archived: ${failureText(error, host)}`);
     } finally { checkingArchive = false; }
   }
@@ -1541,8 +1545,10 @@ export function startMobile(window: Window & typeof globalThis) {
         for (const changed of result.changed ?? [id]) await api.restore(changed);
       }
       catch (error) { scheduleListRead(0); if (!(error instanceof SignedOutError)) showToast(`Not restored: ${failureText(error, host)}`); return; }
+      // A read of the list started before the restore would take the session out again: the row comes back with a read
+      // made after it.
+      await readList();
       bringBack(id);
-      scheduleListRead(0);
     };
     showToast(`Archived “${title.length > 40 ? `${title.slice(0, 39)}…` : title}”`, { label: "Restore", run: () => void restore() });
     toast!.id = id;

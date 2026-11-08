@@ -4,6 +4,14 @@ import { browserExecutable } from "../browserTarget";
 import { session } from "./fixtureServer";
 import { openPhone, tapMenuItem } from "./phoneBrowser";
 
+// Drags the card of a session to the right past the threshold and releases it; gives the card's transform after the release.
+const swipeAway = (id: string) => `(() => {
+  const card = document.querySelector('.row[data-id="${id}"] .card'), box = card.getBoundingClientRect(), y = box.top + box.height / 2;
+  const fire = (type, x) => card.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 7, button: 0, clientX: x, clientY: y }));
+  fire("pointerdown", box.left + 10); fire("pointermove", box.left + 30); fire("pointermove", box.left + 10 + box.width * 0.6); fire("pointerup", box.left + 10 + box.width * 0.6);
+  return card.style.transform;
+})()`;
+
 test("archiving asks about descendants even outside the loaded page and restores only what changed", { skip: !browserExecutable, timeout: 120_000 }, async () => {
   const phone = await openPhone(server => {
     server.state.sessions = [session("parent", "Parent", "p1", 1), ...Array.from({ length: 7 }, (_, i) => session(`other${i}`, "Other", "p1", 2 + i)),
@@ -33,6 +41,8 @@ test("archiving asks about descendants even outside the loaded page and restores
     await click("#archive-no");
     await waitFor('document.querySelector("#toast .toast-text").textContent.startsWith("Archived")', "archived parent");
     assert.equal(server.requests.find(r => r.path === "/api/sessions/parent/archive")?.query, "");
+    // The toast comes before the row leaves: the row that comes back is the restored one.
+    await waitFor(`!document.querySelector('.row[data-id="parent"]')`, "parent out of the list");
     await click("#toast button");
     await waitFor(`document.querySelector('.row[data-id="parent"]')`, "restored parent");
     await click('.row[data-id="parent"] .card-archive');
@@ -40,6 +50,7 @@ test("archiving asks about descendants even outside the loaded page and restores
     await click("#archive-yes");
     await waitFor('document.querySelector("#toast .toast-text").textContent.startsWith("Archived")', "archived family");
     assert.equal(server.requests.filter(r => r.path === "/api/sessions/parent/archive").at(-1)?.query, "?withChildren=true");
+    await waitFor(`!document.querySelector('.row[data-id="parent"]') && !document.querySelector('.row[data-id="child"]')`, "family out of the list");
     await click("#toast button");
     await waitFor(`document.querySelector('.row[data-id="parent"]')`, "restored family");
     await evaluate(`(async () => { for (let i = 0; i < 80; i++) { if ((await fetch('/api/sessions/child')).ok) return; await new Promise(r => setTimeout(r, 50)); } throw new Error('child not restored'); })()`);
@@ -47,6 +58,14 @@ test("archiving asks about descendants even outside the loaded page and restores
     assert.ok(server.state.sessions.some(s => s.id === "child"));
     assert.ok(!server.state.sessions.some(s => s.id === "old"), "a child archived before this action stays archived");
     assert.ok(!server.requests.some(r => r.path === "/api/sessions/old/restore"));
+    // A swipe: the card leaves at once, and comes back while the phone asks about the child sessions.
+    assert.match(String(await evaluate(swipeAway("parent"))), /translateX/);
+    await waitFor('!document.getElementById("archive-sheet").hidden', "question after a swipe");
+    assert.equal(await evaluate(`document.querySelector('.row[data-id="parent"] .card').style.transform`), "");
+    await click("#archive-cancel");
+    assert.match(String(await evaluate(swipeAway("other0"))), /translateX/);
+    await waitFor('document.querySelector("#toast .toast-text").textContent.startsWith("Archived “Other")', "swiped session archived");
+    assert.equal(server.requests.filter(r => r.path === "/api/sessions/other0/archive").at(-1)?.query, "");
     assert.deepEqual(phone.failures, []);
   } finally { await phone.close(); }
 });
