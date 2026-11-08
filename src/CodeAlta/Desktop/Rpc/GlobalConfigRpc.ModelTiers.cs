@@ -43,7 +43,7 @@ internal sealed partial class GlobalConfigService
         catch (InvalidDataException exception)
         {
             // Tiers the file writes wrong are shown as none, with what is wrong: saving here writes them again.
-            return new("invalid", ToItems(ModelTierScope.None), ToItem(ModelFallbackSettings.Default), Bound(exception.Message));
+            return new("invalid", ToItems(ModelTierScope.None, ProviderStates?.Invoke() ?? []), ToItem(ModelFallbackSettings.Default), Bound(exception.Message));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -54,20 +54,22 @@ internal sealed partial class GlobalConfigService
         if (status is not null) return new(status, [], null, null);
         // The global reading is for no space: every provider counts there.
         var scope = ModelTierScope.Of(settings, space, space is null ? SpaceAssignments.Empty : assignments);
-        return new("ok", ToItems(scope), ToItem(scope.Fallback), null)
+        // One reading of the providers for the whole reply: a provider that gets ready meanwhile cannot leave a tier
+        // without a model in a reply that is not pending.
+        var states = ProviderStates?.Invoke() ?? [];
+        return new("ok", ToItems(scope, states), ToItem(scope.Fallback), null)
         {
             Source = scope.FromSpace ? "space" : "global", SpaceId = space?.Id,
-            Adaptive = ToItem(scope.Adaptive), AdaptiveReady = scope.IsAdaptiveReady,
-            AdaptiveProposal = Propose(scope),
-            Pending = Pending(scope),
+            Adaptive = ToItem(scope.Adaptive, states), AdaptiveReady = scope.IsAdaptiveReady,
+            AdaptiveProposal = Propose(scope, states),
+            Pending = Pending(scope, states),
         };
     }
 
     // Whether a model of the tiers or of Adaptive is of a provider that is still being prepared: what they give can
     // change once it is, and the window reads them again (#367). The providers are prepared once the window shows.
-    private bool Pending(ModelTierScope scope)
+    private static bool Pending(ModelTierScope scope, IReadOnlyList<ModelProviderStateSnapshot> states)
     {
-        var states = ProviderStates?.Invoke() ?? [];
         var keys = CodeAlta.Catalog.ModelTiers.ModelTiers.All.SelectMany(tier => scope.Tiers.Get(tier))
             .Where(target => scope.IsProviderAvailable(target.ProviderKey)).Select(static target => target.ProviderKey)
             .Concat(scope.Adaptive?.Levels.Select(static level => level.Model.ProviderKey) ?? [])
@@ -77,10 +79,10 @@ internal sealed partial class GlobalConfigService
     }
 
     // The levels Adaptive proposes for the providers that are ready (in the space, with a space), a subscription first.
-    private IReadOnlyList<AdaptiveLevelSetting>? Propose(ModelTierScope scope)
+    private static IReadOnlyList<AdaptiveLevelSetting>? Propose(ModelTierScope scope, IReadOnlyList<ModelProviderStateSnapshot> states)
     {
         var candidates = new List<AdaptiveProposals.Candidate>();
-        foreach (var state in ProviderStates?.Invoke() ?? [])
+        foreach (var state in states)
         {
             if (state.Availability != ModelProviderAvailability.Ready || !state.Descriptor.IsEnabled) continue;
             var key = state.ProviderId.Value;
@@ -90,7 +92,7 @@ internal sealed partial class GlobalConfigService
         }
 
         var proposal = AdaptiveProposals.Propose(candidates);
-        return proposal.Count == 0 ? null : [.. proposal.Select(ToItem)];
+        return proposal.Count == 0 ? null : [.. proposal.Select(level => ToItem(level, states))];
     }
 
     /// <summary>
@@ -302,9 +304,8 @@ internal sealed partial class GlobalConfigService
         }
     }
 
-    private IReadOnlyList<ModelTierList> ToItems(ModelTierScope scope)
+    private static IReadOnlyList<ModelTierList> ToItems(ModelTierScope scope, IReadOnlyList<ModelProviderStateSnapshot> states)
     {
-        var states = ProviderStates?.Invoke() ?? [];
         return [.. CodeAlta.Catalog.ModelTiers.ModelTiers.All.Select(tier => new ModelTierList(
             CodeAlta.Catalog.ModelTiers.ModelTiers.NameOf(tier),
             [.. scope.Tiers.Get(tier).Select(static target => new ModelTierTargetItem(target.ProviderKey, target.ModelId, [.. target.Reasoning.Select(static effort => effort.ToString())]))])
@@ -318,14 +319,13 @@ internal sealed partial class GlobalConfigService
     private static ModelFallbackSetting ToItem(ModelFallbackSettings fallback)
         => new(fallback.Enabled, fallback.OnQuota, fallback.OnUnavailable, fallback.Resume, fallback.MaxResumes);
 
-    private AdaptiveSetting? ToItem(AdaptiveModelSettings? adaptive)
-        => adaptive is null ? null : new(AdaptiveLevels.NameOf(adaptive.DefaultLevel), [.. adaptive.Levels.Select(ToItem)]);
+    private static AdaptiveSetting? ToItem(AdaptiveModelSettings? adaptive, IReadOnlyList<ModelProviderStateSnapshot> states)
+        => adaptive is null ? null : new(AdaptiveLevels.NameOf(adaptive.DefaultLevel), [.. adaptive.Levels.Select(level => ToItem(level, states))]);
 
     // A level with the names of its model when its provider is ready, as a tier gives the model it gives now, and the
     // names of its critics.
-    private AdaptiveLevelSetting ToItem(AdaptiveLevelSettings level)
+    private static AdaptiveLevelSetting ToItem(AdaptiveLevelSettings level, IReadOnlyList<ModelProviderStateSnapshot> states)
     {
-        var states = ProviderStates?.Invoke() ?? [];
         var state = StateOf(states, level.Model);
         var model = ModelOf(state, level.Model);
         return new(AdaptiveLevels.NameOf(level.Level), ToItem(level.Model), [.. level.Critics.Select(ToItem)])

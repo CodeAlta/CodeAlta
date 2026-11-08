@@ -190,6 +190,14 @@ test("a reading made while a provider of the tiers is prepared is made again unt
   await never.refresh("e1");
   while (planned.length > 0) { planned.shift()!(); await new Promise(resolve => setImmediate(resolve)); }
   assert.equal(bounded, 3, "The first reading and two more.");
+
+  // A reading again that fails (the host is busy) is tried again while the providers are prepared.
+  let attempt = 0;
+  const flaky = createTierStore(async () => { attempt++; if (attempt === 2) throw new Error("timeout"); return reply({ pending: attempt < 3 }); },
+    { delay: 10, reads: 5, schedule: run => { planned.push(run); } });
+  await flaky.refresh("e1");
+  while (planned.length > 0) { planned.shift()!(); await new Promise(resolve => setImmediate(resolve)); }
+  assert.equal(attempt, 3, "Pending, failed, then read.");
 });
 
 test("a change of the providers reads again every scope of the host the window knows", async () => {

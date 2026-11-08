@@ -326,18 +326,22 @@ export function createTierStore(read: Read, rereads: PendingRereads = pendingRer
       const state = reply.status === "ok" || reply.status === "invalid" ? readTierState(reply) : null;
       if (state) put(key, state);
       if (reply.status !== "ok" || reply.pending !== true) pending.delete(key);
-      else {
-        const count = (pending.get(key) ?? 0) + 1;
-        // Past the last one, the count starts again with the next reading asked from outside (a change of the providers).
-        if (count > rereads.reads) pending.delete(key);
-        else pending.set(key, count);
-        if (count <= rereads.reads && !planned.has(key)) {
-          planned.add(key);
-          rereads.schedule(() => { planned.delete(key); void refresh(epoch, scope); }, rereads.delay);
-        }
-      }
-    } catch { /* The reading the window has stays. */ }
+      else planAgain(key, epoch, scope);
+    } catch {
+      // The reading the window has stays; one made while the providers are prepared is tried again.
+      if (pending.has(key)) planAgain(key, epoch, scope);
+    }
     finally { loading.delete(key); }
+  }
+  // Plans the next reading of a scope whose providers are prepared, `reads` in a row at most. Past the last one, the count
+  // starts again with the next reading asked from outside (a change of the providers).
+  function planAgain(key: string, epoch: string, scope: TierScope | null) {
+    const count = (pending.get(key) ?? 0) + 1;
+    if (count > rereads.reads) { pending.delete(key); return; }
+    pending.set(key, count);
+    if (planned.has(key)) return;
+    planned.add(key);
+    rereads.schedule(() => { planned.delete(key); void refresh(epoch, scope); }, rereads.delay);
   }
   return Object.freeze({
     /** The readings, by scope; a new map each time one changes. */

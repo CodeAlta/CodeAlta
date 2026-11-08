@@ -583,6 +583,21 @@ type = "fake-agent"
         Assert.IsTrue(ReadTiers(service, new(Epoch)).Pending);
         states["other"] = ModelProviderAvailability.Failed;
         Assert.IsFalse(ReadTiers(service, new(Epoch)).Pending);
+
+        // A provider that gets ready while a reply is made: the reply is read from one state of the providers, so a
+        // tier without a model is always pending.
+        states["custom"] = ModelProviderAvailability.Probing;
+        var calls = 0;
+        var racing = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch)
+        {
+            ProviderStates = () =>
+            {
+                if (calls++ == 1) states["custom"] = ModelProviderAvailability.Ready;
+                return [State("custom"), State("other")];
+            },
+        };
+        var raced = ReadTiers(racing, new(Epoch));
+        Assert.IsTrue(raced.Tiers[1].Choice is not null || raced.Pending, "A tier without a model in a reply that is not pending is never read again.");
     }
 
     [TestMethod]
