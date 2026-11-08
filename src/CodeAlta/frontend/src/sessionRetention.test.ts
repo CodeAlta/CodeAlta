@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collectSessionRetention, createSessionRetention, type RetentionPublication, type RetentionStorage } from "./sessionRetention";
+import { collectSessionRetention, createSessionRetention, navigationStillWanted, type NavigationMoment, type RetentionPublication, type RetentionStorage } from "./sessionRetention";
 import { sessionTabsKey } from "./sessionTabs";
 import { draftStorageKey } from "./promptDraft";
 import { createImageDrafts } from "./promptImages";
@@ -92,6 +92,47 @@ test("retirement rejection, transport failure, stale navigation and disconnect r
   assert.equal(requests.at(-1)?.revision, 2);
   assert.ok(requests.at(-1)?.sessionIds.includes("saved"), "invalidation never silently drops IDs");
   assert.equal(await owner.admit("new-epoch", ["saved"], () => false, () => assert.fail("stale navigation")), false);
+});
+
+test("a navigation opens its session when the catalog changes while the host answers", async () => {
+  const ack = deferred<{ accepted: boolean; reason: string | null }>();
+  const owner = createSessionRetention(() => ack.promise, empty, "page");
+  const listing = (...ids: string[]) => ({ sessions: ids.map(id => ({ id })) });
+  let now: NavigationMoment = { navigation: 1, epoch: "epoch", view: 4, alive: true, catalog: listing("parent", "running") };
+  const asked = now;
+  let opened = false;
+  const admission = owner.admit("epoch", ["running"], () => navigationStillWanted(["running"], asked, now), () => { opened = true; });
+  await Promise.resolve(); await Promise.resolve();
+  // A session that runs nonstop has the catalog read again and published while the publication is on its way.
+  now = { ...now, catalog: listing("parent", "running", "another") };
+  ack.resolve({ accepted: true, reason: null });
+  assert.equal(await admission, true);
+  assert.equal(opened, true);
+});
+
+test("a navigation that waited is dropped for a newer one, another host, another view or a session gone", () => {
+  const listing = (...ids: string[]) => ({ sessions: ids.map(id => ({ id })) });
+  const asked: NavigationMoment = { navigation: 1, epoch: "epoch", view: 4, alive: true, catalog: listing("parent", "running") };
+  assert.equal(navigationStillWanted(["running"], asked, asked), true);
+  assert.equal(navigationStillWanted(["running"], asked, { ...asked, catalog: listing("running") }), true);
+  for (const now of [{ ...asked, navigation: 2 }, { ...asked, epoch: "other" }, { ...asked, view: 5 }, { ...asked, alive: false },
+    { ...asked, catalog: listing("parent") }, { ...asked, catalog: undefined }])
+    assert.equal(navigationStillWanted(["running"], asked, now), false, JSON.stringify(now));
+  // A session the catalog of the click did not list (another space's tab) is the expose's to judge.
+  assert.equal(navigationStillWanted(["elsewhere"], asked, { ...asked, catalog: listing("parent") }), true);
+  assert.equal(navigationStillWanted(["running"], { ...asked, catalog: undefined }, { ...asked, catalog: listing("running") }), false);
+});
+
+test("a refusal of the host is reported for a navigation still wanted, not for one superseded", async () => {
+  const reasons: (string | null)[] = [];
+  const refusing = createSessionRetention(async () => ({ accepted: false, reason: "session_retiring" }), empty, "page");
+  assert.equal(await refusing.admit("epoch", ["saved"], () => true, () => assert.fail("refused"), reason => reasons.push(reason)), false);
+  const failing = createSessionRetention(async () => { throw Error("closed"); }, empty, "page");
+  assert.equal(await failing.admit("epoch", ["saved"], () => true, () => assert.fail("failed"), reason => reasons.push(reason)), false);
+  assert.deepEqual(reasons, ["session_retiring", null]);
+  let wanted = true;
+  const superseded = createSessionRetention(async () => { wanted = false; return { accepted: false, reason: "session_retiring" }; }, empty, "page");
+  assert.equal(await superseded.admit("epoch", ["saved"], () => wanted, () => assert.fail("superseded"), () => assert.fail("nothing to report")), false);
 });
 
 test("ambiguous restoration stays latched and IDs survive later empty reads", async () => {

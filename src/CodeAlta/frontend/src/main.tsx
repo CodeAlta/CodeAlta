@@ -274,7 +274,7 @@ import { createHostLiveness, hostCheckInterval, hostPingInterval } from "./hostL
 import { createSlowCallWatch, installLocalCallPolicy } from "./localCalls";
 import { closingPingInterval, readHostClosing, type HostClosing } from "./hostClosing";
 import { reportToHost } from "./hostReport";
-import { collectSessionRetention, createSessionRetention } from "./sessionRetention";
+import { collectSessionRetention, createSessionRetention, navigationStillWanted, type NavigationMoment } from "./sessionRetention";
 import { publishSessionRetention, watchSessionRetention } from "./sessionRetentionRpc";
 import { SessionRetentionGate } from "./SessionRetentionGate";
 import { reloadsAfterClose, rpcSessionClosed, sessionRecoveryKey } from "./sessionRecovery";
@@ -575,7 +575,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [, renderInfoRevision] = useState(0);
   // Same-value/ABA state updates may otherwise skip a render and leave a canceled
   // Info read looking loading. Keep the existing synchronous capture revision visible.
-  function advanceBrowserRevision() { batchDeletion.invalidate(); renderInfoRevision(++browserRevision.current); }
+  // The same transitions but a new catalog: a navigation that waits for its admission is superseded by what the user
+  // does meanwhile (another view, a tab closed), not by the catalog a running session has read again.
+  const viewRevision = useRef(0);
+  function advanceBrowserRevision(catalog = false) { batchDeletion.invalidate(); if (!catalog) viewRevision.current++; renderInfoRevision(++browserRevision.current); }
   const [browserCapture, setBrowserCapture] = useState<{ snapshot: WorkspaceSnapshot; projectId: string | null; revision: number; hostReady: boolean } | null>(null);
   const invalidateCreation = (paletteTransition = false) => { creationGeneration.current++; if (!paletteTransition) commandGeneration.current++; runtimeObservations.invalidate(); };
   const [logClearActions] = useState(() => createApplicationLogClearActions(applicationLogs.clear));
@@ -616,7 +619,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       // In the same update as the list: published alone, the list drops the tab of a moved session.
       retargetMovedTabs(shown);
     }
-    advanceBrowserRevision();
+    advanceBrowserRevision(true);
     invalidateCreation();
     currentSnapshot.current = value.kind === "ready" ? value.snapshot : undefined;
     markProjectInspection(value.kind === "ready");
@@ -681,16 +684,20 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const openingMode = (id: string | null): SessionTabMode => id !== null && keptSession.current === id ? "permanent" : "preview";
   const retentionNavigation = useRef(0);
   // All shell routes, including recovery callbacks, use these admission boundaries. A newer navigation
-  // invalidates an older held acknowledgement; a catalog/host/lifetime change cannot revive it either.
+  // invalidates an older held acknowledgement; a host/lifetime/view change, or a catalog that no longer lists a session
+  // asked for, cannot revive it either. A refusal of the host is said, never a click dropped in silence.
   function protectNavigation(ids: readonly string[], expose: () => void): boolean {
     const generation = ++retentionNavigation.current;
     const epoch = currentHostEpoch.current;
     if (!currentHostAvailable.current) { if (status && !status.hostAvailable) { expose(); return true; } return false; }
     if (!epoch || hostLost || !creationAlive.current) return false;
     if (ids.every(id => retention.hasClaim(epoch, id))) { expose(); return true; }
-    const revision = browserRevision.current, catalog = currentSnapshot.current;
-    void retention.admit(epoch, ids, () => generation === retentionNavigation.current && creationAlive.current
-      && currentHostEpoch.current === epoch && browserRevision.current === revision && currentSnapshot.current === catalog, expose);
+    const moment = (): NavigationMoment => ({ navigation: retentionNavigation.current, epoch: currentHostEpoch.current ?? null, view: viewRevision.current,
+      alive: creationAlive.current, catalog: currentSnapshot.current });
+    const asked = { ...moment(), navigation: generation, epoch };
+    void retention.admit(epoch, ids, () => navigationStillWanted(ids, asked, moment()), expose, reason => showToast({ intent: "danger", icon: "error", timeout: 8000,
+      message: translate(shownLocale.current, reason === "session_retiring" ? "The session could not be opened while CodeAlta deletes old sessions. Try again in a moment."
+        : "The session could not be opened: CodeAlta did not confirm that this window keeps it. Try again, or reload the window if it goes on.") }));
     return false;
   }
   function setTabs(next: SessionTabsState) { protectNavigation(next.open.map(tab => tab.sessionId), () => writeTabs(next)); }
@@ -3001,9 +3008,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     setWorkBusy(value => new Set(value).add(key));
     try {
       if (session) {
-        const epoch = currentHostEpoch.current, revision = browserRevision.current;
+        // A new catalog does not stop it: a running session has it read again all the time.
+        const epoch = currentHostEpoch.current, revision = viewRevision.current;
         if (!epoch || !await retention.admit(epoch, [session.id], () => currentHostEpoch.current === epoch
-          && currentHostAvailable.current && revision === browserRevision.current, () => {})) return false;
+          && currentHostAvailable.current && revision === viewRevision.current, () => {},
+          () => showToast({ message: t("The work did not start."), intent: "danger", icon: "error", timeout: 8000 }))) return false;
       }
       return await startWorkItem({ hub: workHub, composer: (kind, id, text, agent) => askPluginComposer(kind, id, text ?? null, agent ?? null),
         openSession: id => { if (!shown || shown()) void openAutomationSession(id); else offerStartedSession(id, item.title); },

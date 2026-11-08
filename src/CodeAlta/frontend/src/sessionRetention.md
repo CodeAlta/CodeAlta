@@ -33,7 +33,9 @@ acknowledgement; missing/failed real RPC calls refuse admission. No timeout rele
 
 `main.tsx` starts with an empty session tab strip. `protectNavigation` executes synchronously only when
 every candidate already has an acknowledged claim. Otherwise it defers the **whole transition**, with
-latest-navigation, catalog, browser revision, host epoch and component-lifetime fences.
+latest-navigation, view revision, host epoch and component-lifetime fences (`navigationStillWanted`). A new
+catalog does not supersede it while it still lists the sessions asked for: a running session has the catalog
+read again all the time. A refusal of the host, or a failed publication, is shown in a toast.
 
 | Route | Boundary |
 | --- | --- |
