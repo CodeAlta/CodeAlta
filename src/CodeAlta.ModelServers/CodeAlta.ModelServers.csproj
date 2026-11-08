@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The model host of a machine: its GPUs, the llama.cpp builds it installs, the models it keeps in its Hugging Face
+       cache, their downloads, and the llama-server processes it runs. It knows neither a host of CodeAlta nor a window
+       (doc/model-servers.md), so that CodeAlta Desktop and CodeAlta Node compose the same code. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../CodeAlta.Core/CodeAlta.Core.csproj" />
+  </ItemGroup>
+</Project>

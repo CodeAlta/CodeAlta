@@ -1,0 +1,287 @@
+using System.Text.Json;
+using CodeAlta.ModelServers;
+using CodeAlta.ModelServers.Hardware;
+using CodeAlta.ModelServers.HuggingFace;
+using CodeAlta.ModelServers.LlamaCpp;
+using CodeAlta.ModelServers.Servers;
+using CodeAlta.ModelServers.Store;
+
+namespace CodeAlta.Tests.ModelServers;
+
+[TestClass]
+public sealed class ModelServersParsingTests
+{
+    [TestMethod]
+    public void ParseAsset_ReadsBackendVersionAndRuntime()
+    {
+        var cuda = LlamaReleases.ParseAsset("llama-b12110-bin-win-cuda-13.4-x64.zip", "u", 1, "aa")!;
+        Assert.AreEqual(("windows", "cuda", "13.4", "x64", false), (cuda.Os, cuda.Backend, cuda.BackendVersion, cuda.Arch, cuda.IsCudaRuntime));
+        var runtime = LlamaReleases.ParseAsset("cudart-llama-bin-win-cuda-13.4-x64.zip", "u", 1, "aa")!;
+        Assert.IsTrue(runtime.IsCudaRuntime);
+        Assert.AreEqual("13.4", runtime.BackendVersion);
+        var linuxRuntime = LlamaReleases.ParseAsset("cudart-llama-b12110-bin-ubuntu-cuda-12.8-x64.tar.gz", "u", 1, null)!;
+        Assert.AreEqual(("linux", "12.8"), (linuxRuntime.Os, linuxRuntime.BackendVersion));
+        Assert.AreEqual("rocm", LlamaReleases.ParseAsset("llama-b12110-bin-ubuntu-rocm-10.0-x64.tar.gz", "u", 1, null)!.Backend);
+        Assert.AreEqual("cpu", LlamaReleases.ParseAsset("llama-b12110-bin-ubuntu-x64.tar.gz", "u", 1, null)!.Backend);
+        Assert.AreEqual("metal", LlamaReleases.ParseAsset("llama-b12110-bin-macos-arm64.tar.gz", "u", 1, null)!.Backend);
+        Assert.AreEqual("cpu", LlamaReleases.ParseAsset("llama-b12110-bin-macos-x64.tar.gz", "u", 1, null)!.Backend);
+        Assert.AreEqual("vulkan", LlamaReleases.ParseAsset("llama-b12110-bin-win-vulkan-x64.zip", "u", 1, null)!.Backend);
+        Assert.AreEqual("opencl-adreno", LlamaReleases.ParseAsset("llama-b12110-bin-win-opencl-adreno-arm64.zip", "u", 1, null)!.Backend);
+        Assert.IsNull(LlamaReleases.ParseAsset("llama-b12110-bin-ubuntu-26.04-s390x.tar.gz", "u", 1, null));
+        Assert.IsNull(LlamaReleases.ParseAsset("llama-b12110-bin-android-arm64.tar.gz", "u", 1, null));
+        Assert.IsNull(LlamaReleases.ParseAsset("llama-b12110-ui.tar.gz", "u", 1, null));
+    }
+
+    [TestMethod]
+    public void ReadRelease_SkipsABuildWhoseArchivesAreStillUploading()
+    {
+        var complete = JsonDocument.Parse("""{"tag_name":"b12110","published_at":"2026-11-04T10:00:00Z","assets":[{"name":"llama-b12110-bin-win-vulkan-x64.zip","browser_download_url":"https://x/v.zip","size":10,"state":"uploaded","digest":"sha256:abc"}]}""");
+        var release = LlamaReleases.ReadRelease(complete.RootElement)!;
+        Assert.AreEqual(12110, release.Build);
+        Assert.AreEqual("abc", release.Assets[0].Sha256);
+        var uploading = JsonDocument.Parse("""{"tag_name":"b12111","assets":[{"name":"llama-b12111-bin-win-vulkan-x64.zip","browser_download_url":"u","size":10,"state":"starting"}]}""");
+        Assert.IsNull(LlamaReleases.ReadRelease(uploading.RootElement));
+        var pointer = JsonDocument.Parse("""{"tag_name":"v0.9.0","assets":[{"name":"nightly-tag.txt","browser_download_url":"u","size":7,"state":"uploaded"}]}""");
+        Assert.IsNull(LlamaReleases.ReadRelease(pointer.RootElement));
+    }
+
+    [TestMethod]
+    public void ParseDevices_ReadsListDevices()
+    {
+        var devices = LlamaBuilds.ParseDevices("Available devices:\n  Vulkan0: NVIDIA GeForce RTX 4070 (12010 MiB, 11242 MiB free)\r\n  Vulkan2: AMD Radeon RX 7600 XT (16368 MiB, 15554 MiB free)\n");
+        Assert.HasCount(2, devices);
+        Assert.AreEqual(("Vulkan2", "AMD Radeon RX 7600 XT", 16368L, 15554L), (devices[1].Name, devices[1].Description, devices[1].TotalMiB, devices[1].FreeMiB));
+        Assert.IsEmpty(LlamaBuilds.ParseDevices("Available devices:\n  (none)\n"));
+        Assert.AreEqual("rocm", LlamaBuilds.DeviceBackend("ROCm1"));
+        Assert.AreEqual("cuda", LlamaBuilds.DeviceBackend("CUDA0"));
+        Assert.AreEqual("metal", LlamaBuilds.DeviceBackend("MTL0"));
+    }
+
+    [TestMethod]
+    public void GgufNames_FindsTagsShardsAndProjector()
+    {
+        HubFile[] files =
+        [
+            new("Qwen3.8-27B-UD-Q4_K_XL.gguf", 17_548_181_504, "a"),
+            new("Qwen3.8-27B-Q8_0.gguf", 29_000_000_000, "b"),
+            new("mmproj-BF16.gguf", 931_000_000, "c"),
+            new("mmproj-F16.gguf", 931_000_000, "d"),
+            new("BF16/Qwen3.8-27B-BF16-00001-of-00002.gguf", 30_000_000_000, "e"),
+            new("BF16/Qwen3.8-27B-BF16-00002-of-00002.gguf", 25_000_000_000, "f"),
+            new("Q2_K/Qwen3.8-27B-Q2_K-00001-of-00002.gguf", 5_000_000_000, "g"),
+            new("imatrix_unsloth.gguf", 10, "h"),
+        ];
+        var quants = GgufNames.Quantizations(files);
+        CollectionAssert.AreEqual(new[] { "UD-Q4_K_XL", "Q8_0", "BF16" }, quants.Select(static q => q.Tag).ToArray(), "a split file with a shard missing is no quantization");
+        var ud = GgufNames.Find(files, "UD-Q4_K_XL")!;
+        Assert.AreEqual(17_548_181_504, ud.ModelBytes);
+        Assert.IsTrue(ud.Vision);
+        Assert.AreEqual(4, ud.Bits);
+        var bf16 = GgufNames.Find(files, "bf16")!;
+        Assert.HasCount(3, bf16.Files, "two shards and the projector");
+        Assert.AreEqual(55_000_000_000, bf16.ModelBytes);
+        Assert.AreEqual("Q8_0", GgufNames.Find(files, null)!.Tag, "llama.cpp takes Q4_K_M, then Q8_0");
+        Assert.IsTrue(GgufNames.IsSidecar("mtp-Qwen3.6-27B-Q8_0.gguf"));
+    }
+
+    [TestMethod]
+    public void BuildSelector_ChoosesPerFamilyAndSaysWhy()
+    {
+        var release = new LlamaRelease("b12110", 12110, DateTimeOffset.UtcNow, "v0.9.0",
+        [
+            Asset("llama-b12110-bin-win-cuda-12.4-x64.zip"), Asset("llama-b12110-bin-win-cuda-13.4-x64.zip"), Asset("cudart-llama-bin-win-cuda-13.4-x64.zip"),
+            Asset("llama-b12110-bin-win-rocm-10.0-x64.zip"), Asset("llama-b12110-bin-win-vulkan-x64.zip"), Asset("llama-b12110-bin-win-cpu-x64.zip"),
+        ]);
+        var windows = new HardwareInventory("windows", "x64", "Ryzen 9 9950X", 64L << 30,
+        [
+            new GpuInfo("gpu0", "amd", "AMD Radeon RX 7600 XT", 16L << 30, false, "gfx1102", "1002:7480"),
+            new GpuInfo("gpu1", "nvidia", "NVIDIA GeForce RTX 4070", 12L << 30, false, "sm_89", "10de:2786"),
+            new GpuInfo("gpu2", "amd", "AMD Radeon(TM) Graphics", 512L << 20, true, null, "1002:13c0"),
+        ], new MachineLibraries("13.0", "6.2", @"C:\Program Files\AMD\ROCm\6.2", true, true, null), []);
+        var candidates = BuildSelector.Candidates(windows, release);
+        var cuda = candidates.Single(static c => c.Backend == "cuda");
+        Assert.AreEqual(("fits", "llama-b12110-bin-win-cuda-13.4-x64.zip"), (cuda.Verdict, cuda.Asset));
+        Assert.AreEqual("fits", candidates.Single(static c => c.Backend == "rocm").Verdict);
+        CollectionAssert.AreEqual(new[] { "cuda", "rocm", "vulkan" }, BuildSelector.Recommended(windows, candidates).ToArray());
+        var assets = BuildSelector.AssetsFor(release, "windows", "x64", "cuda", cuda);
+        CollectionAssert.AreEqual(new[] { "llama-b12110-bin-win-cuda-13.4-x64.zip", "cudart-llama-bin-win-cuda-13.4-x64.zip" }, assets.Select(static a => a.Name).ToArray());
+
+        var oldDriver = windows with { Libraries = windows.Libraries with { CudaDriverVersion = "12.2" } };
+        Assert.AreEqual("llama-b12110-bin-win-cuda-12.4-x64.zip", BuildSelector.Candidates(oldDriver, release).Single(static c => c.Backend == "cuda").Asset);
+        var noHipSdk = windows with { Libraries = windows.Libraries with { HipBlas = false } };
+        var rocm = BuildSelector.Candidates(noHipSdk, release).Single(static c => c.Backend == "rocm");
+        Assert.AreEqual("libraryMissing", rocm.Verdict);
+        StringAssert.Contains(rocm.Message, "HIP SDK");
+    }
+
+    [TestMethod]
+    public void BuildSelector_OnLinuxNeedsRocm7AndGlibc238()
+    {
+        var release = new LlamaRelease("b12110", 12110, DateTimeOffset.UtcNow, null,
+            [Asset("llama-b12110-bin-ubuntu-rocm-10.0-x64.tar.gz"), Asset("llama-b12110-bin-ubuntu-vulkan-x64.tar.gz"), Asset("llama-b12110-bin-ubuntu-x64.tar.gz")]);
+        var pcAi = new HardwareInventory("linux", "x64", "AMD Ryzen 9 7950X", 64L << 30,
+        [
+            new GpuInfo("gpu0", "amd", "AMD Radeon AI PRO R9700", 32624L << 20, false, "gfx1201", "1002:7551"),
+            new GpuInfo("gpu1", "amd", "AMD Radeon AI PRO R9700", 32624L << 20, false, "gfx1201", "1002:7551"),
+        ], new MachineLibraries(null, "7.2.1", "/opt/rocm-7.2.1", true, true, "2.39"), []);
+        var rocm = BuildSelector.Candidates(pcAi, release).Single(static c => c.Backend == "rocm");
+        Assert.AreEqual("fits", rocm.Verdict);
+        StringAssert.Contains(rocm.Message, "2× AMD Radeon AI PRO R9700");
+        var jammy = pcAi with { Libraries = pcAi.Libraries with { Glibc = "2.35" } };
+        Assert.AreEqual("systemTooOld", BuildSelector.Candidates(jammy, release).Single(static c => c.Backend == "rocm").Verdict);
+        var rocm6 = pcAi with { Libraries = pcAi.Libraries with { RocmVersion = "6.4.0" } };
+        Assert.AreEqual("libraryMissing", BuildSelector.Candidates(rocm6, release).Single(static c => c.Backend == "rocm").Verdict);
+    }
+
+    [TestMethod]
+    public void Gfx_ComesFromTheKfdTargetVersion()
+    {
+        Assert.AreEqual("gfx1201", HardwareProbe.GfxName(120001));
+        Assert.AreEqual("gfx90a", HardwareProbe.GfxName(90010));
+        Assert.AreEqual("gfx1151", HardwareProbe.GfxName(110501));
+        Assert.AreEqual("gfx1036", HardwareProbe.GfxName(100306));
+    }
+
+    [TestMethod]
+    public async Task HardwareProbe_ReadsALinuxTree()
+    {
+        using var temp = TestTempDirectory.Create();
+        void Write(string path, string text)
+        {
+            var full = Path.Combine(temp.Path, path.TrimStart('/'));
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, text);
+        }
+
+        Write("/sys/class/drm/card0/device/vendor", "0x1002\n");
+        Write("/sys/class/drm/card0/device/device", "0x7551\n");
+        Write("/sys/class/drm/card0/device/mem_info_vram_total", "34208743424\n");
+        Write("/sys/class/drm/card1/device/vendor", "0x1002\n");
+        Write("/sys/class/drm/card1/device/device", "0x164e\n");
+        Write("/sys/class/drm/card1/device/mem_info_vram_total", "536870912\n");
+        Write("/sys/class/kfd/kfd/topology/nodes/1/properties", "simd_count 128\ngfx_target_version 120001\nvendor_id 4098\ndevice_id 30033\n");
+        Write("/sys/class/kfd/kfd/topology/nodes/2/properties", "simd_count 4\ngfx_target_version 100306\nvendor_id 4098\ndevice_id 5710\n");
+        Write("/opt/rocm-7.2.1/.info/version", "7.2.1-81\n");
+        Write("/opt/rocm-7.2.1/lib/libamdhip64.so.7", "");
+        Write("/opt/rocm-7.2.1/lib/libhipblas.so.3", "");
+        Write("/usr/lib/x86_64-linux-gnu/libvulkan.so.1", "");
+        Write("/proc/cpuinfo", "processor : 0\nmodel name : AMD Ryzen 9 7950X 16-Core Processor\n");
+        Write("/proc/meminfo", "MemTotal:       65000000 kB\n");
+        var rocminfo = "  Name:                    gfx1201\n  Marketing Name:          AMD Radeon AI PRO R9700\n  Name:                    gfx1036\n  Marketing Name:          AMD Radeon Graphics\n";
+        var probe = new HardwareProbe((file, _, _) => Task.FromResult<string?>(file == "rocminfo" ? rocminfo : null), temp.Path);
+        var inventory = await probe.ProbeLinuxAsync("x64", "2.39", CancellationToken.None);
+        Assert.HasCount(2, inventory.Gpus);
+        Assert.AreEqual(("AMD Radeon AI PRO R9700", "gfx1201", false), (inventory.Gpus[0].Name, inventory.Gpus[0].Architecture, inventory.Gpus[0].Integrated));
+        Assert.IsTrue(inventory.Gpus[1].Integrated, "the GPU of the processor goes last");
+        Assert.AreEqual(("7.2.1", "/opt/rocm-7.2.1", true, true), (inventory.Libraries.RocmVersion, inventory.Libraries.RocmPath, inventory.Libraries.HipBlas, inventory.Libraries.Vulkan));
+        Assert.AreEqual("AMD Ryzen 9 7950X 16-Core Processor", inventory.CpuName);
+    }
+
+    [TestMethod]
+    public void Import_ReadsARunScriptOfPcAi()
+    {
+        var script = """
+            #!/bin/sh
+            export AI_MODEL="unsloth/Qwen3.8-27B-GGUF"
+            export HIP_VISIBLE_DEVICES=0
+            $LLAMA_HOME/llama-server -hf $AI_MODEL:UD-Q4_K_XL --temp 1.0 --top-p 0.95 --top-k 20 --presence_penalty 0.0 --min-p 0.0 --host pc-ai.home.arpa --reasoning-effort medium -lv 4 --tools all
+            """;
+        var imported = ServerArguments.Import(script);
+        Assert.AreEqual("unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL", imported.Model);
+        Assert.AreEqual(1.0, imported.Settings!.Sampling.Temperature);
+        Assert.AreEqual(20, imported.Settings.Sampling.TopK);
+        Assert.AreEqual(0.0, imported.Settings.Sampling.PresencePenalty);
+        Assert.AreEqual("medium", imported.Settings.ReasoningEffort);
+        CollectionAssert.AreEqual(new[] { 0 }, imported.VisibleDevices.ToArray());
+        Assert.IsTrue(imported.Ignored.Any(static item => item.StartsWith("--host", StringComparison.Ordinal)));
+        Assert.IsTrue(imported.Ignored.Any(static item => item.StartsWith("--tools", StringComparison.Ordinal)), "an option that runs commands is never taken");
+        Assert.IsFalse(imported.Settings.Options.ContainsKey("tools"));
+    }
+
+    [TestMethod]
+    public void Validate_RefusesOptionsThatRunCommandsOrTouchFiles()
+    {
+        var server = new ServerDefinition { Id = "coding", Name = "Coding", Backend = "cuda", Port = 9931, Models = [new ServerModel { Model = "a/b:Q4_K_M" }] };
+        ServerArguments.Validate(server);
+        foreach (var argument in new[] { "--tools", "--mcp-servers-json", "--agent", "--host", "--media-path", "--hf-repo", "--connect", "--slot-save-path", "--api-key" })
+        {
+            var refused = Assert.ThrowsExactly<ModelHostException>(() => ServerArguments.Validate(server with { ExtraArguments = [argument, "x"] }));
+            Assert.AreEqual("refused_option", refused.Code, argument);
+        }
+
+        var option = Assert.ThrowsExactly<ModelHostException>(() => ServerArguments.Validate(server with
+        {
+            Models = [new ServerModel { Model = "a/b:Q4_K_M", Options = new Dictionary<string, string> { ["tools-runtime"] = "ssh:x" } }],
+        }));
+        Assert.AreEqual("refused_option", option.Code);
+        ServerArguments.Validate(server with { ExtraArguments = ["--n-cpu-moe", "8"] });
+    }
+
+    [TestMethod]
+    public void Preset_NamesModelsByPathWithTheirSettings()
+    {
+        var server = new ServerDefinition
+        {
+            Id = "coding", Name = "Coding", Backend = "rocm", Port = 9931, LoadedAtOnce = 2,
+            Models =
+            [
+                new ServerModel { Model = "unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL", Devices = ["ROCm0"], ReasoningEffort = "medium",
+                    Sampling = new SamplingValues { Temperature = 1.0, TopP = 0.95, TopK = 20 }, FreeGpuAfterMinutes = 30 },
+                new ServerModel { Model = "missing/model-GGUF:Q4_K_M" },
+            ],
+        };
+        var (preset, missing) = ServerArguments.Preset(server, model => model.StartsWith("unsloth", StringComparison.Ordinal) ? ("/m/q.gguf", "/m/mmproj.gguf") : null);
+        StringAssert.Contains(preset, "[unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL]\nmodel = /m/q.gguf\nmmproj = /m/mmproj.gguf\ndevice = ROCm0\nreasoning-effort = medium\ntemp = 1\ntop-p = 0.95\ntop-k = 20\nsleep-idle-seconds = 1800\n");
+        CollectionAssert.AreEqual(new[] { "missing/model-GGUF:Q4_K_M" }, missing.ToArray());
+        var line = ServerArguments.CommandLine(server, 12110, "/s/keys", "/s/preset.ini", "/s/log", _ => null);
+        CollectionAssert.IsSubsetOf(new[] { "--offline", "--no-ui", "--models-max", "2", "--models-memory-margin", "--api-key-file", "--cors-origins" }, line.ToArray());
+        Assert.AreEqual("127.0.0.1", line[line.ToList().IndexOf("--host") + 1]);
+        var old = ServerArguments.CommandLine(server, 10200, "/s/keys", "/s/preset.ini", "/s/log", _ => null);
+        Assert.IsFalse(old.Contains("--models-memory-margin"), "an older router does not know the memory margin");
+        Assert.IsFalse(old.Contains("--cors-origins"));
+    }
+
+    [TestMethod]
+    public void ModelStore_ScansPlacesAndRemovesWithSharedBlobs()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new ModelStore(temp.Path);
+        var source = Path.Combine(temp.Path, "src");
+        Directory.CreateDirectory(source);
+        void Put(string path, string sha, int size)
+        {
+            var part = Path.Combine(source, sha);
+            File.WriteAllBytes(part, new byte[size]);
+            store.Place("org/model-GGUF", "c0ffee", path, part, sha);
+        }
+
+        Put("model-Q4_K_M.gguf", "aaaa", 100);
+        Put("model-Q4_K_L.gguf", "aaaa", 100); // the same file under two names, as bartowski publishes
+        Put("model-Q8_0.gguf", "bbbb", 200);
+        Put("mmproj-F16.gguf", "cccc", 50);
+        var models = store.Scan();
+        Assert.HasCount(3, models);
+        var q4 = models.Single(static m => m.Tag == "Q4_K_M");
+        Assert.AreEqual(("org/model-GGUF:Q4_K_M", "c0ffee", 150L, true), (q4.Id, q4.Revision, q4.SizeBytes, q4.Vision));
+        Assert.AreEqual(0L, q4.FreedBytes, "its blob and its projector are used by other models");
+        var q8 = models.Single(static m => m.Tag == "Q8_0");
+        Assert.AreEqual(200L, q8.FreedBytes);
+        Assert.AreEqual(200L, store.Remove("org/model-GGUF:Q8_0"));
+        Assert.HasCount(2, store.Scan());
+        store.Remove("org/model-GGUF:Q4_K_M");
+        store.Remove("org/model-GGUF:Q4_K_L");
+        Assert.IsEmpty(store.Scan());
+        Assert.IsFalse(Directory.Exists(store.RepoFolder("org/model-GGUF")), "a repository left empty goes");
+    }
+
+    [TestMethod]
+    public void ParseId_RefusesPathsAndOddTags()
+    {
+        Assert.AreEqual(("unsloth/Qwen3.8-27B-GGUF", "UD-Q4_K_XL"), ModelStore.ParseId("unsloth/Qwen3.8-27B-GGUF:ud-q4_k_xl"));
+        Assert.ThrowsExactly<ModelHostException>(() => ModelStore.ParseId("../x/y:Q4"));
+        Assert.ThrowsExactly<ModelHostException>(() => ModelStore.ParseId("a/b"));
+        Assert.ThrowsExactly<ModelHostException>(() => ModelStore.ParseId("a/b:Q4/../x"));
+    }
+
+    private static LlamaAsset Asset(string name) => LlamaReleases.ParseAsset(name, "https://x/" + name, 1000, "00")!;
+}
