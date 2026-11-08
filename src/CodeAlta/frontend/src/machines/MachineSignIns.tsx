@@ -81,8 +81,9 @@ export function MachineSignIns({ epoch, machine, api = machines }: { epoch: stri
 }
 
 /**
- * A sign-in that runs on the machine: the browser of this computer opens its page and the callback goes back to the machine,
- * a device code shows here with Copy, or the page shows a code that is pasted here. The dialog follows the machine until it ends.
+ * A sign-in that runs on the machine: the browser of this computer opens its page and the callback goes back to the machine (or the
+ * machine waits for the service), a device code shows here with Copy, the page shows a code that is pasted here, or a value the
+ * machine keeps as a secret (an API key) is typed here. The dialog follows the machine until it ends.
  */
 function SignInDialog({ epoch, machine, api, item, onClose }: {
   epoch: string; machine: MachineView; api: MachineSignInsApi; item: MachineSignInItemView; onClose: () => void;
@@ -133,6 +134,8 @@ function SignInDialog({ epoch, machine, api, item, onClose }: {
     setSending(true);
     try {
       const sent = await api.signInCode({ expectedEpoch: epoch, machineId: machine.id, attemptId: prompt.attemptId, code: code.trim() }, { timeoutMilliseconds: 40_000 });
+      // A value typed for the machine is not kept here once sent.
+      if (prompt.way === "secret") setCode("");
       if (sent.status === "completed") { setAccount(sent.account ?? null); setState("completed"); }
       else if (sent.status !== "waiting") { setState("failed"); setProblem({ key: signInProblem(sent.status), detail: sent.message }); }
     } catch {
@@ -159,6 +162,15 @@ function SignInDialog({ epoch, machine, api, item, onClose }: {
         {prompt.page && <div className="machine-provider-code-row"><a href={prompt.page} target="_blank" rel="noreferrer">{prompt.page}</a></div>}
         <form className="fleet-server-form" onSubmit={event => { event.preventDefault(); void sendCode(); }}>
           <InputGroup value={code} disabled={sending} autoComplete="off" spellCheck={false} aria-label={t("Code")} onChange={event => setCode(event.target.value)}
+            rightElement={<Button size="small" intent="primary" disabled={sending || !code.trim()} text={t("Send")} onClick={() => void sendCode()} />} />
+        </form>
+      </Callout>}
+      {state === "waiting" && prompt?.way === "secret" && <Callout compact intent="primary" role="status" className="machine-signin-secret">
+        <p>{t("Type it here: {machine} keeps it as a secret, and it never comes back to this computer.", { machine: machine.name })}</p>
+        {prompt.page && <div className="machine-provider-code-row"><a href={prompt.page} target="_blank" rel="noreferrer">{t("Where to get it")}</a></div>}
+        <form className="fleet-server-form" onSubmit={event => { event.preventDefault(); void sendCode(); }}>
+          <InputGroup type="password" value={code} disabled={sending} autoComplete="off" spellCheck={false} aria-label={prompt.ask ?? name} placeholder={prompt.ask ?? undefined}
+            onChange={event => setCode(event.target.value)}
             rightElement={<Button size="small" intent="primary" disabled={sending || !code.trim()} text={t("Send")} onClick={() => void sendCode()} />} />
         </form>
       </Callout>}

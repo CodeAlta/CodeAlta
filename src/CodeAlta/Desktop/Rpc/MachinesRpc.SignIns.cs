@@ -119,7 +119,7 @@ internal sealed partial class MachinesService
         return new MachineSignInPromptView("ok", null, prompt.AttemptId, prompt.Way, page.AbsoluteUri, null, null, prompt.ExpiresAt);
     }
 
-    /// <summary>Gives a sign-in of a machine the code the person pasted.</summary>
+    /// <summary>Gives a sign-in of a machine the code the person pasted, or the value typed for it to keep as a secret.</summary>
     [NeoRpcMethod("signInCode")]
     public async Task<MachineSignInStateView> SignInCodeAsync(MachineSignInCodeRequest request, CancellationToken cancellationToken)
     {
@@ -256,7 +256,7 @@ internal sealed partial class MachinesService
 /// <param name="State"><c>signed_in</c>, <c>signed_out</c> or <c>unknown</c>.</param>
 /// <param name="Account">The account it is signed in as, when known.</param>
 /// <param name="ExpiresAt">When its sign-in expires, when known.</param>
-/// <param name="Ways">How this computer signs it in: <c>browser</c>, <c>device</c>, <c>code</c>, <c>page</c>; empty when only on the machine.</param>
+/// <param name="Ways">How this computer signs it in: <c>browser</c>, <c>device</c>, <c>code</c>, <c>page</c>, <c>secret</c>; empty when only on the machine.</param>
 /// <param name="Detail">What the machine says more of it.</param>
 internal sealed record MachineSignInItemView(string Kind, string Key, string? Space, string Title, string State, string? Account, DateTimeOffset? ExpiresAt, string[] Ways,
     string? Detail);
@@ -276,17 +276,17 @@ internal sealed record MachineSignInsView(string Status, string? Message, Machin
 /// <param name="Kind"><c>provider</c>, <c>mcp</c> or <c>cli</c>.</param>
 /// <param name="Key">What to sign in.</param>
 /// <param name="Space">The space of its profile; null for the machine's own.</param>
-/// <param name="Way"><c>browser</c>, <c>device</c>, <c>code</c> or <c>page</c>; null for the first it offers.</param>
+/// <param name="Way"><c>browser</c>, <c>device</c>, <c>code</c>, <c>page</c> or <c>secret</c>; null for the first it offers.</param>
 internal sealed record MachineSignInStartRequest(string ExpectedEpoch, string MachineId, string Kind, string Key, string? Space, string? Way);
 
 /// <summary>What the page shows for a sign-in that started on a machine.</summary>
 /// <param name="Status"><c>ok</c>, <c>port_busy</c>, <c>signin.browser</c>, <c>signin.unsupported</c>, <c>not_manager</c>, <c>offline</c>...</param>
 /// <param name="Message">Why it could not start.</param>
 /// <param name="AttemptId">The attempt, for the calls that follow.</param>
-/// <param name="Way"><c>browser</c> or <c>page</c> (the browser was opened here), <c>device</c> or <c>code</c>.</param>
-/// <param name="Page">The page: opened already for <c>browser</c> and <c>page</c>; to open for <c>device</c> and <c>code</c>.</param>
+/// <param name="Way"><c>browser</c> or <c>page</c> (the browser was opened here), <c>device</c>, <c>code</c> or <c>secret</c>.</param>
+/// <param name="Page">The page: opened already for <c>browser</c> and <c>page</c>; to open for <c>device</c> and <c>code</c>; where to get the value for <c>secret</c>.</param>
 /// <param name="UserCode">For <c>device</c>: the code to enter on the page.</param>
-/// <param name="Ask">For <c>code</c>: what the person pastes.</param>
+/// <param name="Ask">For <c>code</c> and <c>secret</c>: what the person pastes or types.</param>
 /// <param name="ExpiresAt">When the attempt ends if nothing comes.</param>
 internal sealed record MachineSignInPromptView(string Status, string? Message, string? AttemptId, string? Way, string? Page, string? UserCode, string? Ask, DateTimeOffset? ExpiresAt)
 {

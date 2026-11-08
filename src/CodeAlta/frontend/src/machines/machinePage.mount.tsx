@@ -127,22 +127,34 @@ const api: MachinePageApi = {
       expiresAt: null, ways: ["browser"], detail: null },
     { kind: "provider", key: "vibe", space: null, title: "Mistral Vibe", state: signedIn.has("vibe") ? "signed_in" : "signed_out", account: null, expiresAt: null,
       ways: ["page"], detail: null },
+    { kind: "provider", key: "agent", space: null, title: "Agent", state: signedIn.has("agent") ? "signed_in" : "unknown", account: null, expiresAt: null,
+      ways: ["secret"], detail: null },
+    { kind: "provider", key: "opencode", space: null, title: "OpenCode", state: "unknown", account: null, expiresAt: null, ways: [],
+      detail: "It signs in in a terminal of the machine: run opencode auth login there." },
     { kind: "mcp", key: "linear", space: null, title: "Linear", state: "signed_in", account: null, expiresAt: null, ways: ["browser"], detail: null },
   ] }),
   signInStart: async request => {
     calls.push(JSON.stringify({ signInStart: [request.kind, request.key] }));
     signInWaits = 0;
+    if (request.key === "agent") return { status: "ok", message: null, attemptId: "agent", way: "secret", page: "https://platform.example.com/api-keys", userCode: null,
+      ask: "API key (OPENAI_API_KEY)", expiresAt: "2026-11-07T15:00:00Z" };
     return request.key === "vibe"
       ? { status: "ok", message: null, attemptId: "vibe", way: "page", page: "https://console.mistral.ai/vibe/sign-in/p1", userCode: null, ask: null, expiresAt: "2026-11-07T15:00:00Z" }
       : { status: "ok", message: null, attemptId: "codex", way: "browser", page: "https://auth.example.com/authorize?state=s1", userCode: null, ask: null,
         expiresAt: "2026-11-07T15:00:00Z" };
   },
   signInWait: async request => {
+    // A key ends its sign-in once it is typed, not before.
+    if (request.attemptId === "agent") {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      return signedIn.has("agent") ? { status: "completed", account: null, code: null, message: null } : { status: "waiting", account: null, code: null, message: null };
+    }
     if (++signInWaits < 2) { await new Promise(resolve => setTimeout(resolve, 800)); return { status: "waiting", account: null, code: null, message: null }; }
     signedIn.add(request.attemptId);
     return { status: "completed", account: request.attemptId === "codex" ? "me@example.com" : null, code: null, message: null };
   },
-  signInCode: async () => ({ status: "completed", account: null, code: null, message: null }),
+  // What is typed goes to the machine; the page records only that it was sent.
+  signInCode: async request => { calls.push(JSON.stringify({ signInCode: request.attemptId })); signedIn.add(request.attemptId); return { status: "completed", account: null, code: null, message: null }; },
   signInCancel: async () => ({ status: "failed", account: null, code: "canceled", message: null }),
   signOut: async request => { calls.push(JSON.stringify({ signOut: [request.kind, request.key] })); return { status: "ok", item: null, message: null }; },
   labels: async () => ({ status: "ok", message: null, labels: [...labels] }),

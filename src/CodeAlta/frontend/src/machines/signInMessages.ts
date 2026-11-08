@@ -22,4 +22,11 @@ export const machineSignInMessages = {
     "Die Anmeldung wurde auf der Maschine nicht abgeschlossen.", "マシンでサインインが完了しませんでした。", "登录未在该机器上完成。"],
   "The sign-in took too long: start it again.": ["El inicio de sesión tardó demasiado: vuelve a empezarlo.", "La connexion a pris trop de temps : recommencez-la.",
     "Die Anmeldung hat zu lange gedauert: Starte sie erneut.", "サインインに時間がかかりすぎました。もう一度開始してください。", "登录耗时过长：请重新开始。"],
+  "Type it here: {machine} keeps it as a secret, and it never comes back to this computer.": [
+    "Escríbelo aquí: {machine} lo guarda como secreto y nunca vuelve a este equipo.",
+    "Saisissez-la ici : {machine} la garde comme secret, et elle ne revient jamais sur cet ordinateur.",
+    "Gib ihn hier ein: {machine} bewahrt ihn als Geheimnis auf, und er kommt nie auf diesen Computer zurück.",
+    "ここに入力してください。{machine} はシークレットとして保管し、このコンピューターに戻ることはありません。",
+    "在此输入：{machine} 会将其保存为机密，且绝不会传回此计算机。"],
+  "Where to get it": ["Dónde obtenerlo", "Où l’obtenir", "Wo du ihn bekommst", "取得方法", "在哪里获取"],
 } as const satisfies Record<string, Row>;

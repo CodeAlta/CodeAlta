@@ -6,7 +6,8 @@ namespace CodeAlta.Plugin.Acp;
 
 /// <summary>
 /// The sign-in of an ACP agent, through the ways it lists when it starts (<c>authMethods</c>): one it runs itself
-/// (<c>authenticate</c>, which may open a browser), or a command the user runs in a terminal.
+/// (<c>authenticate</c>, which may open a browser), a command the user runs in a terminal, or variables of its environment the
+/// user gives (<c>env_var</c>, an API key), which the host keeps as secrets and writes to the <c>env</c> of the provider.
 /// </summary>
 internal sealed class AcpAccount(string probeDirectory, IAcpConnectionFactory connectionFactory) : IPluginProviderAccount
 {
@@ -57,6 +58,18 @@ internal sealed class AcpAccount(string probeDirectory, IAcpConnectionFactory co
             var description = AcpJson.GetString(method, "description");
             IReadOnlyList<string>? command = null;
             IReadOnlyDictionary<string, string>? environment = null;
+            if (string.Equals(AcpJson.GetString(method, "type"), "env_var", StringComparison.Ordinal))
+            {
+                // The agent reads these variables when it starts: the user gives their values, which the agent is started with.
+                result.Add(new PluginProviderSignInMethod(id, label, description)
+                {
+                    Variables = ReadVariables(method),
+                    EnvironmentSetting = AcpAgentSettings.EnvironmentKey,
+                    VariablesPage = Uri.TryCreate(AcpJson.GetString(method, "link"), UriKind.Absolute, out var link) && link.Scheme == Uri.UriSchemeHttps ? link : null,
+                });
+                continue;
+            }
+
             if (AcpJson.TryGetObject(method, "_meta", out var meta) && AcpJson.TryGetObject(meta, "terminal-auth", out var terminal) &&
                 AcpJson.GetString(terminal, "command") is { Length: > 0 } metaCommand)
             {
@@ -122,6 +135,30 @@ internal sealed class AcpAccount(string probeDirectory, IAcpConnectionFactory co
                 yield break;
             }
         }
+    }
+
+    // The variables of an env_var method: vars [{ name, label, secret, optional }], or the one varName of its first drafts.
+    private static IReadOnlyList<PluginProviderSignInVariable> ReadVariables(JsonElement method)
+    {
+        var variables = new List<PluginProviderSignInVariable>();
+        if (AcpJson.TryGetArray(method, "vars", out var array))
+        {
+            foreach (var item in array.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object || AcpJson.GetString(item, "name") is not { Length: > 0 } name) continue;
+                variables.Add(new PluginProviderSignInVariable(name, AcpJson.GetString(item, "label"))
+                {
+                    Secret = !item.TryGetProperty("secret", out var secret) || secret.ValueKind != JsonValueKind.False,
+                    Optional = item.TryGetProperty("optional", out var optional) && optional.ValueKind == JsonValueKind.True,
+                });
+            }
+        }
+        else if (AcpJson.GetString(method, "varName") is { Length: > 0 } single)
+        {
+            variables.Add(new PluginProviderSignInVariable(single, null));
+        }
+
+        return variables;
     }
 
     private static IEnumerable<string> ReadStrings(JsonElement element, string name)

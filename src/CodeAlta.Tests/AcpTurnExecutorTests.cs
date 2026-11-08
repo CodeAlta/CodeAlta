@@ -1004,6 +1004,27 @@ public sealed class AcpTurnExecutorTests
         Assert.IsNull(methods[2].TerminalCommand);
     }
 
+    // An agent that reads an API key from its environment (env_var): the user gives the value, which the host keeps as a secret and
+    // writes to the env of the provider; nothing is run.
+    [TestMethod]
+    public void SignInMethods_GiveTheVariablesOfAnEnvironmentSignIn()
+    {
+        var agent = new AcpAgentSettings("agent", [], new Dictionary<string, string>(), null, null);
+        var methods = AcpAccount.CreateMethods(agent,
+        [
+            JsonDocument.Parse("""{"id":"openai","name":"OpenAI API key","type":"env_var","vars":[{"name":"OPENAI_API_KEY","label":"API key"},{"name":"OPENAI_ORG","secret":false,"optional":true}],"link":"https://platform.openai.com/api-keys"}""").RootElement,
+            JsonDocument.Parse("""{"id":"gemini","name":"Gemini API key","type":"env_var","varName":"GEMINI_API_KEY","link":"http://example.com/keys"}""").RootElement,
+        ]);
+
+        Assert.IsNull(methods[0].TerminalCommand);
+        Assert.AreEqual("env", methods[0].EnvironmentSetting);
+        Assert.AreEqual("https://platform.openai.com/api-keys", methods[0].VariablesPage?.AbsoluteUri);
+        Assert.AreEqual(new PluginProviderSignInVariable("OPENAI_API_KEY", "API key"), methods[0].Variables![0]);
+        Assert.AreEqual(new PluginProviderSignInVariable("OPENAI_ORG", null) { Secret = false, Optional = true }, methods[0].Variables![1]);
+        Assert.AreEqual(new PluginProviderSignInVariable("GEMINI_API_KEY", null), methods[1].Variables!.Single());
+        Assert.IsNull(methods[1].VariablesPage, "a page of the agent is https or none");
+    }
+
     private const string SideSystemMessage = "Answer the side question from the transcript.";
 
     [TestMethod]

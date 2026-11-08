@@ -106,8 +106,12 @@ test("the computer that manages a machine sees why each provider is not ready, g
 test("the computer that manages a machine signs it in from here: the page opens in this browser, and the machine keeps the sign-in", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     const section = ".machine-signins-section";
-    await page.until(`document.querySelectorAll('${section} li').length === 3`, "the sign-ins of the machine");
-    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('${section} li')].map(row => row.dataset.state)`), ["signed_out", "signed_out", "signed_in"]);
+    await page.until(`document.querySelectorAll('${section} li').length === 5`, "the sign-ins of the machine");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('${section} li')].map(row => row.dataset.state)`), ["signed_out", "signed_out", "unknown", "unknown", "signed_in"]);
+    // An agent that signs in on the machine only says how, with no button.
+    assert.equal(await page.evaluate(`document.querySelector('${section} li:nth-child(4) .machine-provider-problem')?.textContent`),
+      "It signs in in a terminal of the machine: run opencode auth login there.");
+    assert.equal(await page.evaluate(`document.querySelectorAll('${section} li:nth-child(4) .bp6-button').length`), 0);
     await page.evaluate(`document.querySelector('${section}').scrollIntoView({ block: "nearest" })`);
     await page.shot("machine-signins");
 
@@ -126,12 +130,24 @@ test("the computer that manages a machine signs it in from here: the page opens 
     await page.clickText(".machine-provider-signin-dialog .bp6-button", "Done");
     await page.until(`document.querySelector('${section} li:nth-child(2)')?.dataset.state === 'signed_in'`, "Vibe signed in on the page");
 
+    // An ACP agent reads its API key from its environment: it is typed here, where it is not shown, and the machine keeps it as a secret.
+    await page.clickText(`${section} li:nth-child(3) .bp6-button`, "Sign in…");
+    await page.until(`document.querySelector('.machine-signin-secret input[type=password]')`, "the field of the key");
+    assert.equal(await page.evaluate(`document.querySelector('.machine-signin-secret input').getAttribute('aria-label')`), "API key (OPENAI_API_KEY)");
+    assert.equal(await page.evaluate(`document.querySelector('.machine-signin-secret a').getAttribute('href')`), "https://platform.example.com/api-keys");
+    await page.evaluate(type(".machine-signin-secret input", "sk-agent-typed"));
+    await page.clickText(".machine-signin-secret .bp6-button", "Send");
+    await page.until(`document.querySelector('.machine-provider-signin-dialog [role=status]')?.textContent.includes('Agent is signed in on build-box.')`, "the agent signed in");
+    await page.clickText(".machine-provider-signin-dialog .bp6-button", "Done");
+    await page.until(`document.querySelector('${section} li:nth-child(3)')?.dataset.state === 'signed_in'`, "the agent signed in on the list");
+
     // Sign out: the machine deletes the tokens of the MCP server.
-    await page.clickText(`${section} li:nth-child(3) .bp6-button`, "Sign out");
+    await page.clickText(`${section} li:nth-child(5) .bp6-button`, "Sign out");
     await page.until(`window.machineFixture.calls.some(call => call.includes('signOut'))`, "the sign-out asked");
-    const asked = (await calls(page)).filter(call => call.signInStart || call.signOut);
+    const asked = (await calls(page)).filter(call => call.signInStart || call.signInCode || call.signOut);
     assert.deepEqual(asked.filter((call, index, all) => all.findIndex(other => JSON.stringify(other) === JSON.stringify(call)) === index),
-      [{ signInStart: ["provider", "codex"] }, { signInStart: ["provider", "vibe"] }, { signOut: ["mcp", "linear"] }]);
+      [{ signInStart: ["provider", "codex"] }, { signInStart: ["provider", "vibe"] }, { signInStart: ["provider", "agent"] }, { signInCode: "agent" }, { signOut: ["mcp", "linear"] }]);
+    assert.ok(!JSON.stringify(await calls(page)).includes("sk-agent"), "the key is never recorded by the page");
     assert.deepEqual(page.problems, []);
   }, options);
 });

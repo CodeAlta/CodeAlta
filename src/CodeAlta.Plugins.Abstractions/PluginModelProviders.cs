@@ -246,6 +246,33 @@ public sealed record PluginProviderSignInMethod(string Id, string Label, string?
     /// back to the computer that runs the sign-in: another computer completes it, as the desktop does for a machine.
     /// </summary>
     public bool ShowsCode { get; init; }
+
+    /// <summary>
+    /// Gets the variables of the environment of the provider that the user gives to sign in with this method, such as an API key:
+    /// the host keeps each value as a secret of the machine and writes a <c>${secret:NAME}</c> reference to it in the map setting
+    /// <see cref="EnvironmentSetting" /> of the provider, whose runtime is given the value. Nothing calls
+    /// <see cref="IPluginProviderAccount.SignInAsync(PluginProviderSettings, string, Func{PluginProviderSignInPrompt, CancellationToken, ValueTask}, CancellationToken)" />
+    /// for such a method. <see langword="null" /> for a method that is not one.
+    /// </summary>
+    public IReadOnlyList<PluginProviderSignInVariable>? Variables { get; init; }
+
+    /// <summary>Gets the key of the map setting of the provider that holds its environment (<c>env</c>), where <see cref="Variables" /> are written.</summary>
+    public string? EnvironmentSetting { get; init; }
+
+    /// <summary>Gets the page where the user gets the values of <see cref="Variables" /> (the API keys of the account), or <see langword="null" />.</summary>
+    public Uri? VariablesPage { get; init; }
+}
+
+/// <summary>A variable of the environment of a provider that a sign-in method asks the user for.</summary>
+/// <param name="Name">The name of the variable, such as <c>OPENAI_API_KEY</c>.</param>
+/// <param name="Label">What it is, for the user, or <see langword="null" /> for its name.</param>
+public sealed record PluginProviderSignInVariable(string Name, string? Label)
+{
+    /// <summary>Gets whether the value is a secret (a key, a token), typed where it is not shown; true unless the method says otherwise.</summary>
+    public bool Secret { get; init; } = true;
+
+    /// <summary>Gets whether the method signs in without it.</summary>
+    public bool Optional { get; init; }
 }
 
 /// <summary>What the user opens, and for a device flow enters, to continue a sign-in a plugin runs.</summary>

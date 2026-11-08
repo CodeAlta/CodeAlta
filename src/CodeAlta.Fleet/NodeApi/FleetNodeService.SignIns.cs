@@ -37,8 +37,9 @@ public sealed partial class FleetNodeService
     private async Task<FleetMachineSignInPrompt> ControlStartSignInAsync(FleetNodeCall call, FleetMachineSignInStartParams parameters, CancellationToken cancellationToken)
     {
         RequireSignInTarget(parameters.Kind, parameters.Key, parameters.Space);
-        if (parameters.Way is { } way && way is not (FleetMachineSignInWays.Browser or FleetMachineSignInWays.Device or FleetMachineSignInWays.Code or FleetMachineSignInWays.Page))
-            throw new FleetException(FleetErrorCodes.InvalidParams, null, "A way of signing in is browser, device, code or page.");
+        if (parameters.Way is { } way && way is not (FleetMachineSignInWays.Browser or FleetMachineSignInWays.Device or FleetMachineSignInWays.Code or FleetMachineSignInWays.Page
+            or FleetMachineSignInWays.Secret))
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, "A way of signing in is browser, device, code, page or secret.");
         try
         {
             var prompt = await SignIns.StartAsync(parameters, cancellationToken).ConfigureAwait(false);

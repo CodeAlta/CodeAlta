@@ -33,6 +33,7 @@ public sealed class NodePluginSignInTests
         Assert.AreEqual(FleetMachineSignInStates.Unknown, cli.State, "the node does not know whether a plugin is signed in");
         var terminal = items.Single(static item => item.Key == "terminal");
         Assert.AreEqual(0, terminal.Ways.Count, "a sign-in in a terminal of the machine does not run from another computer");
+        Assert.AreEqual("It signs in in a terminal of the machine: run agent login there.", terminal.Detail, "the list says the command to run there");
 
         var prompt = await signIns.StartAsync(new FleetMachineSignInStartParams(FleetMachineSignInKinds.Provider, "cli", null, null), token);
         Assert.AreEqual((FleetMachineSignInWays.Device, "https://auth.example.com/device", "WXYZ-1234"), (prompt.Way, prompt.Page, prompt.UserCode));
@@ -45,13 +46,63 @@ public sealed class NodePluginSignInTests
         var waiting = new CodeAccount();
         types.Attach(() => [Contribution("fake-agent", waiting), Contribution("terminal-agent", new TerminalAccount())]);
         var pending = await signIns.StartAsync(new FleetMachineSignInStartParams(FleetMachineSignInKinds.Provider, "cli", null, null), token);
-        await Assert.ThrowsExactlyAsync<KeyNotFoundException>(() => signIns.SignOutAsync(new FleetMachineSignInTarget(FleetMachineSignInKinds.Provider, "cli", null), token),
+        await Assert.ThrowsExactlyAsync<NotSupportedException>(() => signIns.SignOutAsync(new FleetMachineSignInTarget(FleetMachineSignInKinds.Provider, "cli", null), token),
             "a provider of a plugin keeps its own login");
         Assert.AreEqual((FleetMachineSignInStates.Failed, "canceled"), ((await signIns.WaitAsync(pending.AttemptId, TimeSpan.FromSeconds(10), token)) is var state ? (state.Status, state.Code) : default));
 
         var refused = await Assert.ThrowsExactlyAsync<NotSupportedException>(() => signIns.StartAsync(
             new FleetMachineSignInStartParams(FleetMachineSignInKinds.Provider, "terminal", null, null), token));
-        StringAssert.Contains(refused.Message, "on the machine itself");
+        StringAssert.Contains(refused.Message, "run agent login there");
+    }
+
+    // An ACP agent that reads an API key from its environment (env_var): the person types it on the desktop, the node keeps it as a
+    // secret of the machine and names it in the env of the provider, whose runtime is given the value; never written in the clear.
+    [TestMethod]
+    public async Task AnAgentThatReadsAKeyFromItsEnvironment_IsGivenItFromTheDesktop_AsASecretOfTheMachine()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options(), token);
+        File.WriteAllText(node.Host.CatalogOptions.ConfigPath, "[providers.agent]\ntype = \"key-agent\"\ndisplay_name = \"Agent\"\nenv = { MODE = \"fast\" }\n\n"
+            + "[providers.browser]\ntype = \"browser-agent\"\n");
+        await using var endpoints = new LoopbackHarnessToolEndpoints();
+        var types = new PluginModelProviderTypes(endpoints);
+        PluginProviderSettings? started = null;
+        types.Attach(() => [Contribution("key-agent", new KeyAccount()) with { CreateRuntime = context => { started = context.Settings; throw new NotSupportedException("No runtime."); } },
+            Contribution("browser-agent", new BrowserAccount())]);
+        var signIns = new NodeSignIns(node.Host, new NodeProviders(node.Host, null)) { PluginProviderTypes = types };
+
+        var items = (await signIns.ListAsync(token)).Items.Where(static item => item.Kind == FleetMachineSignInKinds.Provider).ToArray();
+        var agent = items.Single(static item => item.Key == "agent");
+        CollectionAssert.AreEqual(new[] { FleetMachineSignInWays.Secret }, agent.Ways.ToArray());
+        Assert.AreEqual((FleetMachineSignInStates.Unknown, "Agent"), (agent.State, agent.Title));
+        var browser = items.Single(static item => item.Key == "browser");
+        Assert.AreEqual(0, browser.Ways.Count);
+        StringAssert.Contains(browser.Detail, "comes back to that machine only", "a browser on the loopback of the machine is said plainly");
+
+        var prompt = await signIns.StartAsync(new FleetMachineSignInStartParams(FleetMachineSignInKinds.Provider, "agent"), token);
+        Assert.AreEqual((FleetMachineSignInWays.Secret, "https://platform.example.com/api-keys", "API key (OPENAI_API_KEY)"), (prompt.Way, prompt.Page, prompt.Ask));
+        var ended = await signIns.CompleteAsync(new FleetMachineSignInCompleteParams(prompt.AttemptId, null, "sk-typed-on-the-desktop"), token);
+        Assert.AreEqual(FleetMachineSignInStates.Completed, ended.Status);
+
+        var name = NodeSignIns.ProviderSecretName("OPENAI_API_KEY", "agent");
+        var config = File.ReadAllText(node.Host.CatalogOptions.ConfigPath);
+        StringAssert.Contains(config, $"OPENAI_API_KEY = \"${{secret:{name}}}\"");
+        StringAssert.Contains(config, "MODE = \"fast\"", "the rest of its environment stays");
+        Assert.IsFalse(config.Contains("sk-typed", StringComparison.Ordinal), "the value is a secret, never written in the configuration");
+        Assert.IsTrue(CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForMachine(node.Host.CatalogOptions.GlobalRoot)
+            .TryGet(new CodeAlta.Catalog.Secrets.SecretReference(CodeAlta.Catalog.Secrets.SecretReferenceKind.Secret, name), out var kept));
+        Assert.AreEqual("sk-typed-on-the-desktop", kept);
+        // Registered again by its plugin: its runtime is given the value.
+        try { _ = await node.Host.ModelProviderRegistry.GetOrCreateRuntimeAsync(new CodeAlta.Agent.ModelProviderId("agent")); }
+        catch (Exception exception) when (exception is not OperationCanceledException) { /* No runtime in this test: its settings are what is checked. */ }
+        Assert.AreEqual("sk-typed-on-the-desktop", started!.GetMap("env")["OPENAI_API_KEY"]);
+
+        Assert.AreEqual(FleetMachineSignInStates.SignedIn, (await signIns.ListAsync(token)).Items.Single(static item => item.Key == "agent").State);
+        var signedOut = await signIns.SignOutAsync(new FleetMachineSignInTarget(FleetMachineSignInKinds.Provider, "agent"), token);
+        Assert.AreEqual(FleetMachineSignInStates.Unknown, signedOut.State);
+        Assert.IsFalse(File.ReadAllText(node.Host.CatalogOptions.ConfigPath).Contains("OPENAI_API_KEY", StringComparison.Ordinal));
+        Assert.IsFalse(new CodeAlta.Catalog.Secrets.LocalSecretStore(node.Host.CatalogOptions.GlobalRoot).ListSecrets().Any(secret => secret.Name == name));
     }
 
     // Claude Code keeps a token of the account as a secret of the machine, which its CLAUDE_CODE_OAUTH_TOKEN names; signing it out
@@ -114,6 +165,29 @@ public sealed class NodePluginSignInTests
             await onPrompt(new PluginProviderSignInPrompt(new Uri("https://auth.example.com/device"), "WXYZ-1234", null), cancellationToken);
             await Done.Task.WaitAsync(cancellationToken);
         }
+    }
+
+    // An ACP agent that reads its API key from its environment (env_var), and one optional variable.
+    private sealed class KeyAccount : IPluginProviderAccount
+    {
+        public Task<IReadOnlyList<PluginProviderSignInMethod>> GetSignInMethodsAsync(PluginProviderSettings settings, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<PluginProviderSignInMethod>>([new("browser", "Browser", null), new("openai", "OpenAI API key", null)
+            {
+                Variables = [new("OPENAI_API_KEY", "API key"), new("OPENAI_ORG", null) { Optional = true, Secret = false }],
+                EnvironmentSetting = "env",
+                VariablesPage = new Uri("https://platform.example.com/api-keys"),
+            }]);
+
+        public Task SignInAsync(PluginProviderSettings settings, string methodId, CancellationToken cancellationToken) => throw new InvalidOperationException("Nothing runs for a key.");
+    }
+
+    // An ACP agent that signs in with a browser it opens on its own machine.
+    private sealed class BrowserAccount : IPluginProviderAccount
+    {
+        public Task<IReadOnlyList<PluginProviderSignInMethod>> GetSignInMethodsAsync(PluginProviderSettings settings, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<PluginProviderSignInMethod>>([new("oauth", "Log in with Google", null)]);
+
+        public Task SignInAsync(PluginProviderSettings settings, string methodId, CancellationToken cancellationToken) => throw new InvalidOperationException();
     }
 
     // A plugin whose sign-in is a command of a terminal, as an ACP agent.

@@ -178,6 +178,41 @@ models_order = "release_date"
         Assert.AreEqual(0, types.GetProvidersOf([running]).Count);
     }
 
+    // The environment of a provider of a plugin names secrets of the machine (${secret:NAME}), as the CLI providers do: the runtime is
+    // given their values, each told to the masking of the host first, while the settings written keep the reference.
+    [TestMethod]
+    public async Task TheRuntime_IsGivenTheValuesOfTheSecretsItsEnvironmentNames_AndAProviderWithoutThemIsLeftOut()
+    {
+        using var root = new TempRoot("""
+[providers.agent-one]
+type = "fake-agent"
+command = "agent-one"
+env = { OPENAI_API_KEY = "${secret:AGENT_KEY}", MODE = "fast" }
+
+[providers.agent-two]
+type = "fake-agent"
+command = "agent-two"
+env = { OPENAI_API_KEY = "${secret:MISSING_KEY}" }
+""");
+        new CodeAlta.Catalog.Secrets.LocalSecretStore(root.Path).SetSecret("AGENT_KEY", "sk-agent-123", "test");
+        await using var endpoints = new LoopbackHarnessToolEndpoints();
+        var types = new PluginModelProviderTypes(endpoints);
+        PluginModelProviderContext? created = null;
+        types.Attach(() => [CreateContribution(context => { created = context; return new FakeRuntime(context.Descriptor); })]);
+        var told = new List<string>();
+        var registry = new ModelProviderRegistry { SecretIssued = told.Add };
+
+        var registered = types.RegisterOrReplace(registry, root.Store, root.Path, includeDisabled: false);
+
+        CollectionAssert.AreEqual(new[] { "agent-one" }, registered.Select(static provider => provider.ProviderId.Value).ToArray(), "a secret that is not set leaves its provider out");
+        _ = await registry.GetOrCreateRuntimeAsync(registered.Single().ProviderId);
+        Assert.AreEqual("sk-agent-123", created!.Settings.GetMap("env")["OPENAI_API_KEY"]);
+        Assert.AreEqual("fast", created.Settings.GetMap("env")["MODE"]);
+        CollectionAssert.Contains(told, "sk-agent-123", "masked before the provider gets it");
+        Assert.AreEqual("${secret:AGENT_KEY}", PluginModelProviderTypes.CreateSettings(root.Store.LoadGlobalExternalProviders()[0], null).GetMap("env")["OPENAI_API_KEY"],
+            "the settings of the forms keep the reference");
+    }
+
     [TestMethod]
     public void Signature_ChangesWithAnotherContribution()
     {

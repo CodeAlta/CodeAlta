@@ -30,6 +30,12 @@ public static class FleetMachineSignInWays
     /// signed in there (Mistral Vibe).
     /// </summary>
     public const string Page = "page";
+
+    /// <summary>
+    /// The desktop asks for a value the person types (an API key), sent once to the machine, which keeps it as a secret of its own
+    /// and never gives it back (an ACP agent that reads it from its environment).
+    /// </summary>
+    public const string Secret = "secret";
 }
 
 /// <summary>Where a sign-in of a machine stands, or what it is.</summary>
@@ -93,14 +99,14 @@ public sealed record FleetMachineSignInStartParams(string Kind, string Key, stri
 /// <param name="Page">The page to open in the browser of the desktop (for <see cref="FleetMachineSignInWays.Page"/>, the whole sign-in).</param>
 /// <param name="Redirect">For <see cref="FleetMachineSignInWays.Browser"/>: the loopback address of the desktop the browser comes back to.</param>
 /// <param name="UserCode">For <see cref="FleetMachineSignInWays.Device"/>: the code to enter on the page.</param>
-/// <param name="Ask">For <see cref="FleetMachineSignInWays.Code"/>: what the person pastes, in words.</param>
+/// <param name="Ask">For <see cref="FleetMachineSignInWays.Code"/> and <see cref="FleetMachineSignInWays.Secret"/>: what the person pastes or types, in words.</param>
 /// <param name="ExpiresAt">When the attempt ends if nothing comes.</param>
 public sealed record FleetMachineSignInPrompt(string AttemptId, string Way, string? Page, string? Redirect, string? UserCode, string? Ask, DateTimeOffset ExpiresAt);
 
 /// <summary>What the desktop gives back to a sign-in of a machine (<c>control.signins.complete</c>).</summary>
 /// <param name="AttemptId">The attempt.</param>
 /// <param name="Callback">For <see cref="FleetMachineSignInWays.Browser"/>: the address the browser came back to, with its query.</param>
-/// <param name="Code">For <see cref="FleetMachineSignInWays.Code"/>: the code the person pasted.</param>
+/// <param name="Code">For <see cref="FleetMachineSignInWays.Code"/>: the code the person pasted; for <see cref="FleetMachineSignInWays.Secret"/>, the value typed.</param>
 public sealed record FleetMachineSignInCompleteParams(string AttemptId, string? Callback = null, string? Code = null);
 
 /// <summary>A wait for a sign-in of a machine to end (<c>control.signins.wait</c>).</summary>

@@ -182,6 +182,9 @@ internal sealed partial class NodeSignIns(CodeAltaHost host, NodeProviders provi
             case FleetMachineSignInKinds.Provider when ClaudeProvider(target.Key) is { } claude:
                 SignOutClaude(claude);
                 break;
+            case FleetMachineSignInKinds.Provider when PluginAccount(target.Key) is { } plugin:
+                SignOutPlugin(plugin.Provider);
+                break;
             case FleetMachineSignInKinds.Provider:
             {
                 var definition = Provider(target.Key);

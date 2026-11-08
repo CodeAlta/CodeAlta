@@ -143,6 +143,27 @@ public sealed class PluginModelProviderTypes
         string stateRootPath,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
+        => TryCreateProviderRegistration(settings, stateRootPath, null, out descriptor, out createRuntime);
+
+    /// <summary>
+    /// Tries to compose the descriptor of a provider of a contributed type and its lazy runtime factory, without
+    /// registering or invoking it. The runtime is given the values of the references of the tables of the settings (its
+    /// environment: <c>${secret:NAME}</c>, <c>${var:NAME}</c>, <c>${env:NAME}</c>); a reference that is not set leaves the provider out.
+    /// </summary>
+    /// <param name="settings">The settings of the provider.</param>
+    /// <param name="stateRootPath">The state folder of the application, whose store holds the secrets of the machine.</param>
+    /// <param name="secretIssued">Told each secret read for the runtime, before the runtime gets it (the masking of the host); null for none.</param>
+    /// <param name="descriptor">The descriptor, or null when the provider is skipped.</param>
+    /// <param name="createRuntime">The factory, or null when the provider is skipped.</param>
+    /// <returns>Whether a running plugin contributes the type and accepts the settings.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="settings"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="stateRootPath"/> is empty.</exception>
+    public bool TryCreateProviderRegistration(
+        PluginProviderSettings settings,
+        string stateRootPath,
+        Action<string>? secretIssued,
+        out ModelProviderDescriptor descriptor,
+        out Func<IModelProviderRuntime> createRuntime)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
@@ -169,10 +190,16 @@ public sealed class PluginModelProviderTypes
             return false;
         }
 
+        if (ResolveReferences(settings, stateRootPath, secretIssued, out var problem) is not { } resolved)
+        {
+            Logger.Warn($"Skipped model provider key={settings.ProviderKey} type={settings.ProviderType}: {problem ?? "a reference of its settings is not set."}");
+            return false;
+        }
+
         var created = CreateDescriptor(contribution, settings);
         descriptor = created;
         var endpoints = _toolEndpoints;
-        createRuntime = () => contribution.CreateRuntime(new PluginModelProviderContext(settings, created, stateRootPath, endpoints)
+        createRuntime = () => contribution.CreateRuntime(new PluginModelProviderContext(resolved, created, stateRootPath, endpoints)
         {
             Logger = LogManager.GetLogger($"CodeAlta.Provider.{settings.ProviderType}"),
             ModelCatalog = new HostModelCatalog(this),
@@ -217,7 +244,7 @@ public sealed class PluginModelProviderTypes
                 continue;
             }
 
-            if (TryCreateProviderRegistration(settings, stateRootPath, out var descriptor, out var createRuntime))
+            if (TryCreateProviderRegistration(settings, stateRootPath, registry.SecretIssued, out var descriptor, out var createRuntime))
             {
                 registry.RegisterOrReplace(descriptor, createRuntime);
                 registered.Add(descriptor);
@@ -227,6 +254,43 @@ public sealed class PluginModelProviderTypes
 
         lock (_gate) _registered = owners;
         return registered;
+    }
+
+    // The settings a runtime is given: the texts of the tables of the section (the environment of an agent) with the values of their
+    // references, each secret told to the masking first; the settings themselves when nothing refers; null with what is not set.
+    private static PluginProviderSettings? ResolveReferences(PluginProviderSettings settings, string stateRootPath, Action<string>? secretIssued, out string? problem)
+    {
+        problem = null;
+        Dictionary<string, object?>? values = null;
+        CodeAlta.Catalog.Secrets.SecretReferenceResolver? resolver = null;
+        foreach (var (key, value) in settings.Values)
+        {
+            if (value is not IReadOnlyDictionary<string, object?> table || !table.Values.Any(static item => item is string text && text.Contains("${", StringComparison.Ordinal))) continue;
+            resolver ??= CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForMachine(stateRootPath, secretIssued);
+            var resolved = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var (name, item) in table)
+            {
+                if (item is string text && text.Contains("${", StringComparison.Ordinal))
+                {
+                    if (!resolver.TryResolve(text, out var given, out var missing))
+                    {
+                        problem = $"{key}.{name}: {missing}";
+                        return null;
+                    }
+
+                    resolved[name] = given;
+                }
+                else
+                {
+                    resolved[name] = item;
+                }
+            }
+
+            values ??= new Dictionary<string, object?>(settings.Values, StringComparer.OrdinalIgnoreCase);
+            values[key] = resolved;
+        }
+
+        return values is null ? settings : new PluginProviderSettings(settings.ProviderKey, settings.ProviderType, values) { IsDefault = settings.IsDefault };
     }
 
     // The catalog of the host as a plugin sees it: none yet describes nothing.

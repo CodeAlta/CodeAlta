@@ -243,6 +243,34 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
         }
     }
 
+    /// <summary>
+    /// Sets or removes a variable of the environment of a provider of a plugin (a <c>${secret:NAME}</c> reference), in its map setting
+    /// that holds it. The provider is registered again by its plugin, not here.
+    /// </summary>
+    /// <param name="key">The key of the provider.</param>
+    /// <param name="setting">The key of the map setting of its environment (<c>env</c>).</param>
+    /// <param name="variable">The name of the variable.</param>
+    /// <param name="value">Its value; null to remove it.</param>
+    /// <returns>The provider as written; null when no provider of a plugin has the key.</returns>
+    internal CodeAltaExternalProvider? SetPluginEnvironment(string key, string setting, string variable, string? value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(setting);
+        ArgumentException.ThrowIfNullOrWhiteSpace(variable);
+        lock (_gate)
+        {
+            var store = Store;
+            if (store.LoadGlobalExternalProviders().FirstOrDefault(provider => string.Equals(provider.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) is not { } written) return null;
+            var values = new Dictionary<string, object?>(written.Values, StringComparer.OrdinalIgnoreCase);
+            var environment = values.GetValueOrDefault(setting) is IReadOnlyDictionary<string, object?> current
+                ? new Dictionary<string, object?>(current, StringComparer.Ordinal) : new Dictionary<string, object?>(StringComparer.Ordinal);
+            if (value is null) environment.Remove(variable); else environment[variable] = value;
+            if (environment.Count > 0) values[setting] = environment; else values.Remove(setting);
+            store.SaveGlobalExternalProvider(written.ProviderKey, written.ProviderType, values);
+            return written with { Values = values };
+        }
+    }
+
     // The sign-in, run beside the calls that started it: its first prompt is the code the desktop shows; once signed in, the
     // provider is enabled and the providers are started again, so that it is ready without a restart. Never throws.
     private Task<FleetProviderSignInState> RunSignInAsync(CodeAltaProviderDocument definition, SignIn signIn) => Task.Run(async () =>

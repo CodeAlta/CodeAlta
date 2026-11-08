@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.RegularExpressions;
 using CodeAlta.Catalog;
@@ -22,15 +23,28 @@ internal sealed partial class NodeSignIns
     /// <summary>The name of the secret that keeps the token of a Claude Code provider.</summary>
     /// <param name="key">The key of the provider.</param>
     /// <returns>The name, such as <c>CLAUDE_CODE_OAUTH_TOKEN_CLAUDE_1A2B3C4D</c>: the key as letters, then 128 bits of a hash of the key, so that two keys never share one.</returns>
-    internal static string ClaudeSecretName(string key)
+    internal static string ClaudeSecretName(string key) => ProviderSecretName(ClaudeTokenVariable, key);
+
+    /// <summary>The name of the secret that keeps the value of a variable of the environment of a provider, given from the desktop.</summary>
+    /// <param name="variable">The variable, a name of at most 64 characters.</param>
+    /// <param name="key">The key of the provider.</param>
+    /// <returns>The variable, the key as letters, then 128 bits of a hash of the key: at most 128 characters, and two keys never share one.</returns>
+    internal static string ProviderSecretName(string variable, string key)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        var name = new StringBuilder(ClaudeTokenVariable).Append('_');
-        foreach (var character in key.Length > 64 ? key[..64] : key) name.Append(char.IsAsciiLetterOrDigit(character) ? char.ToUpperInvariant(character) : '_');
+        if (!IsVariableName(variable)) throw new ArgumentException("A variable is a name of at most 64 letters, digits and _.", nameof(variable));
+        var name = new StringBuilder(variable).Append('_');
+        var letters = Math.Min(64, 94 - variable.Length);
+        foreach (var character in key.Length > letters ? key[..letters] : key) name.Append(char.IsAsciiLetterOrDigit(character) ? char.ToUpperInvariant(character) : '_');
         // Provider keys are one key whatever their case.
         var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(key.ToLowerInvariant()));
         return name.Append('_').Append(Convert.ToHexString(hash, 0, 16)).ToString();
     }
+
+    /// <summary>Whether a text is the name of a variable a provider can be given from the desktop: a name of a secret of at most 64 characters.</summary>
+    /// <param name="name">The text.</param>
+    /// <returns>Whether it is.</returns>
+    internal static bool IsVariableName([NotNullWhen(true)] string? name) => name is { Length: <= 64 } && LocalSecretStore.IsName(name);
 
     /// <summary>Reads what <c>claude setup-token</c> printed in its terminal: the page to open, once it asks for the code; null before.</summary>
     /// <param name="output">What it printed, escapes of the terminal included.</param>
