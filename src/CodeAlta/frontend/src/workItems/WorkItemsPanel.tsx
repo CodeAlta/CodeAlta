@@ -10,8 +10,8 @@ import { AppIcon } from "../AppIcon";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 import { WorkItemTags, WorkItemText, WorkStartButtons } from "./WorkItemCards";
-import { filterWorkItems, stageCounts, taskCategoryIcon, taskCategoryTone, workFilterLabel, workFilters, workItemKey, workItems, workKindIcon, workStatusLabel,
-  workStatusTone, type WorkFilter, type WorkItem, type WorkKind, type WorkStart } from "./workItems";
+import { createdDay, filterWorkItems, sortWorkItems, stageCounts, taskCategoryIcon, taskCategoryTone, workDateGroup, workFilterLabel, workFilters, workItemKey, workItems,
+  workKindIcon, workStatusLabel, workStatusTone, type WorkFilter, type WorkGrouping, type WorkItem, type WorkKind, type WorkOrder, type WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
 import { PlanReview } from "./PlanReview";
 import { reviewSessions } from "../review/reviewSessions";
@@ -54,12 +54,15 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   onOpenFile: (projectId: string, file: string) => void;
   onOpenSettings: () => void;
 }) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
   const state = useSyncExternalStore(hub.subscribe, hub.getSnapshot, hub.getSnapshot);
   const [scope, setScope] = useState<string | null>(projectId);
   const [kind, setKind] = useState<WorkKind | "all">("all");
   const [stage, setStage] = useState<WorkFilter>("todo");
   const [query, setQuery] = useState("");
+  // How the list is read: newest or oldest first, by day or by project; kept for the next time.
+  const [view, setView] = useState(readWorkView);
+  const changeView = (change: Partial<WorkView>) => setView(current => { const next = { ...current, ...change }; writeWorkView(next); return next; });
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const [removing, setRemoving] = useState<WorkItem | null>(null);
@@ -78,7 +81,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   // A project that has nothing is not one to choose: the list would be empty.
   const scoped = scope !== null && all.some(item => item.projectId === scope) ? scope : null;
   const counts = stageCounts(all, scoped, kind);
-  const shown = useMemo(() => filterWorkItems(all, { projectId: scoped, kind, stage, query }), [all, scoped, kind, stage, query]);
+  const shown = useMemo(() => sortWorkItems(filterWorkItems(all, { projectId: scoped, kind, stage, query }), view.order), [all, scoped, kind, stage, query, view.order]);
   const current = shown.find(item => workItemKey(item) === selected) ?? shown[0] ?? null;
   useEffect(() => { if (visible) void hub.refresh(); }, [hub, visible]);
   useEffect(() => {
@@ -109,7 +112,12 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   if (!state.loaded) return <div className="work-page" onPointerDown={onActivate}><p className="work-empty"><ActivitySpinner size={16} /></p></div>;
   if (!state.available) return <div className="work-page" onPointerDown={onActivate}><p className="work-empty">{t("Work items are unavailable in this window.")}</p></div>;
   const withItems = projects.filter(project => all.some(item => item.projectId === project.id));
-  const groups = scoped === null ? withItems.filter(project => shown.some(item => item.projectId === project.id)) : withItems.filter(project => project.id === scoped);
+  // By project only while every project is listed: one project is one group.
+  const byProject = scoped === null && view.grouping === "project";
+  const groups = listGroups(shown, byProject ? withItems : null, t, locale);
+  const dayFormat = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short" });
+  const yearFormat = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", year: "numeric" });
+  const longFormat = new Intl.DateTimeFormat(locale, { dateStyle: "full" });
   return <div className="work-page" onPointerDown={onActivate} data-empty={all.length === 0 || undefined}>
     <header className="work-header">
       <span className="work-emblem"><AppIcon name="task" size={22} /></span>
@@ -134,6 +142,14 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
           </HTMLSelect>
           <InputGroup size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={query} placeholder={t("Search work items")}
             aria-label={t("Search work items")} onChange={event => setQuery(event.target.value)} />
+          <span className="work-view" role="group" aria-label={t("Order")}>
+            <Button size="small" variant="minimal" className="work-order" icon={<AppIcon name={view.order === "newest" ? "arrowDown" : "arrowUp"} size={14} />}
+              title={t(view.order === "newest" ? "Oldest first" : "Newest first")} aria-pressed={view.order === "oldest"}
+              onClick={() => changeView({ order: view.order === "newest" ? "oldest" : "newest" })}>{t(view.order === "newest" ? "Newest first" : "Oldest first")}</Button>
+            {scoped === null && <HTMLSelect minimal className="work-grouping" aria-label={t("Group by")} value={view.grouping}
+              onChange={event => changeView({ grouping: event.target.value as WorkGrouping })}
+              options={[{ value: "date", label: t("Group by date") }, { value: "project", label: t("Group by project") }]} />}
+          </span>
         </div>
         <Tabs id="work-stages" className="work-stages" selectedTabId={stage} onChange={next => setStage(next as WorkFilter)}>
           {workFilters.map(filter => <Tab key={filter} id={filter} disabled={false} title={<>{t(workFilterLabel(filter))}<span className="work-count" data-zero={counts[filter] === 0 || undefined}>{counts[filter]}</span></>} />)}
@@ -142,11 +158,12 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
           <div className="work-list" role="listbox" aria-label={t(workFilterLabel(stage))}>
             {shown.length === 0 && <p className="work-empty">{t(query.trim() ? "No work item matches." : stage === "todo" ? "Nothing waits for a decision." : stage === "running" ? "Nothing is in progress."
               : stage === "later" ? "Nothing is set aside for later." : "Nothing here. The settings say whether closed tasks and completed plans are kept.")}</p>}
-            {groups.map(project => <section key={project.id} className="work-group">
-              {scoped === null && <h3><AppIcon name="folder" size={13} />{project.name}<span className="work-count">{shown.filter(item => item.projectId === project.id).length}</span></h3>}
-              {shown.filter(item => item.projectId === project.id).map(item => {
+            {groups.map(group => <section key={group.key} className="work-group" data-group={group.key}>
+              {<h3><AppIcon name={byProject ? "folder" : "calendar"} size={13} />{group.label}<span className="work-count">{group.items.length}</span></h3>}
+              {group.items.map(item => {
                 const key = workItemKey(item);
                 const runner = item.runner ? sessionById.get(item.runner) : undefined;
+                const day = createdDay(item.created);
                 return <button type="button" key={key} role="option" aria-selected={current !== null && workItemKey(current) === key} className="work-row" data-kind={item.kind}
                   data-selected={current !== null && workItemKey(current) === key || undefined} onClick={() => setSelected(key)}>
                   <span className="work-row-glyph" data-tone={item.kind === "task" ? taskCategoryTone(item.category) : item.kind === "review" ? "warning" : "primary"}>
@@ -155,6 +172,9 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                     <small>{item.summary ?? item.statusText ?? item.file}</small></span>
                   <span className="work-row-meta">
                     {busy.has(key) && <span className="work-row-starting"><ActivitySpinner size={11} /></span>}
+                    {scoped === null && !byProject && <span className="work-row-project" title={projectById.get(item.projectId)?.name}>{projectById.get(item.projectId)?.name}</span>}
+                    {day && <time className="work-row-date" dateTime={item.created ?? undefined} title={t("Created {date}", { date: longFormat.format(day) })}>
+                      {(day.getFullYear() === new Date().getFullYear() ? dayFormat : yearFormat).format(day)}</time>}
                     {item.kind === "plan" && underReview.has(`${item.projectId}\n${item.file}`) && <span className="work-row-review" title={t("Under review")}><AppIcon name="eye" size={13} /></span>}
                     {runner && <span className="work-runner" title={runner.title}>{runningSessions.has(runner.id) ? <ActivitySpinner size={11} /> : <AppIcon name="chat" size={11} />}<span>{runner.title}</span></span>}
                     <Tag minimal round intent={workStatusTone(item)}>{t(workStatusLabel(item))}</Tag>
@@ -187,6 +207,46 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
 }
 
 const noProviders: readonly RunProvider[] = [];
+
+/** How the list is read: its order and what groups it. */
+type WorkView = Readonly<{ order: WorkOrder; grouping: WorkGrouping }>;
+const workViewKey = "codealta.desktop.workItems.view.v1";
+const defaultWorkView: WorkView = { order: "newest", grouping: "date" };
+
+// The view chosen the last time, in the storage of the window; the default when it reads as nothing known.
+function readWorkView(): WorkView {
+  try {
+    const value = JSON.parse(globalThis.localStorage?.getItem(workViewKey) ?? "null") as Partial<WorkView> | null;
+    return { order: value?.order === "oldest" ? "oldest" : "newest", grouping: value?.grouping === "project" ? "project" : "date" };
+  } catch {
+    return defaultWorkView;
+  }
+}
+
+function writeWorkView(view: WorkView) {
+  try { globalThis.localStorage?.setItem(workViewKey, JSON.stringify(view)); } catch { /* A storage that is full or refused keeps the view for this window only. */ }
+}
+
+type ListGroup = Readonly<{ key: string; label: string; items: readonly WorkItem[] }>;
+
+/**
+ * The groups of the list, in its order: the items of each project, the projects as the window lists them; or, without
+ * projects, the days the items were created (Today, Yesterday, This week, Last week, then each month), as they come.
+ */
+function listGroups(items: readonly WorkItem[], projects: readonly WorkspaceProject[] | null, t: ReturnType<typeof useShellLanguage>["t"], locale: string): ListGroup[] {
+  if (projects) return projects.map(project => ({ key: project.id, label: project.name, items: items.filter(item => item.projectId === project.id) })).filter(group => group.items.length > 0);
+  const now = new Date();
+  const month = new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" });
+  const groups: { key: string; label: string; items: WorkItem[] }[] = [];
+  for (const item of items) {
+    const group = workDateGroup(item.created, now);
+    const last = groups.at(-1);
+    if (last?.key === group.key) { last.items.push(item); continue; }
+    const label = group.label === null ? t("No date") : "key" in group.label ? t(group.label.key) : month.format(group.label.month);
+    groups.push({ key: group.key, label, items: [item] });
+  }
+  return groups;
+}
 
 // The reviews of the projects, read while the tab is shown, and again when the reviews of the window change.
 function useReviewOverview(epoch: string | null, visible: boolean): readonly ReviewsOverviewProject[] & { refresh: () => void } {

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkItemRow, WorkItemsProject } from "#neoastra";
-import { carriedBy, filterWorkItems, readingOrder, sessionCards, stageCounts, startChoices, workCounts, workItemKey, workItems, workStage, workStatusLabel } from "./workItems";
+import { carriedBy, createdDay, filterWorkItems, readingOrder, sessionCards, sortWorkItems, stageCounts, startChoices, workCounts, workDateGroup, workItemKey, workItems, workStage,
+  workStatusLabel } from "./workItems";
 
 const row = (id: string, kind: "task" | "plan", status: string, more: Partial<WorkItemRow> = {}): WorkItemRow => ({ id, kind, title: `Title of ${id}`, summary: null,
   category: kind === "task" ? "gap" : null, status, statusText: null, created: "2026-10-07", file: `.alta/${kind}s/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, ...more });
@@ -88,4 +89,38 @@ test("the list is one stage of one project, of one kind, matching what is typed"
   assert.deepEqual(ids({ projectId: null, kind: "all", stage: "todo", query: "  DRIVE windows " }), ["fix-locator"]);
   assert.deepEqual(ids({ projectId: "one", kind: "all", stage: "later", query: "" }), ["other"]);
   assert.deepEqual(ids({ projectId: "one", kind: "plan", stage: "later", query: "" }), []);
+});
+test("the day a task or a plan was created is that day here, whatever the time zone", () => {
+  assert.equal(createdDay("2026-11-08")?.getTime(), new Date(2026, 10, 8).getTime());
+  assert.equal(createdDay("2026-11-08T23:30:00")?.getTime(), new Date(2026, 10, 8).getTime(), "a moment is the day it falls on here");
+  assert.equal(createdDay(null), null);
+  assert.equal(createdDay("someday"), null);
+});
+
+test("the list orders the items by when they were created, newest or oldest first, those without a date last", () => {
+  const items = workItems([project("one", [row("old", "task", "pending", { created: "2026-10-01", title: "B" }), row("new", "task", "pending", { created: "2026-11-08", title: "Z" }),
+    row("none", "task", "pending", { created: null, title: "A" }), row("same", "task", "pending", { created: "2026-11-08", title: "M" })],
+    [row("plan", "plan", "draft", { created: "2026-11-05", title: "P" })])], sessions);
+  assert.deepEqual(sortWorkItems(items, "newest").map(item => item.id), ["same", "new", "plan", "old", "none"], "the same day by title");
+  assert.deepEqual(sortWorkItems(items, "oldest").map(item => item.id), ["old", "plan", "same", "new", "none"]);
+});
+
+test("the groups of the list are today, yesterday, this week from Monday, last week, then each month", () => {
+  // Sunday 8 November 2026: its week started on Monday the 2nd, the week before on the 26th of October.
+  const now = new Date(2026, 10, 8, 15, 0, 0);
+  const group = (created: string | null) => workDateGroup(created, now).key;
+  assert.equal(group("2026-11-08"), "today");
+  assert.equal(group("2026-11-09"), "today", "a day ahead of this clock is today");
+  assert.equal(group("2026-11-07"), "yesterday");
+  assert.equal(group("2026-11-02"), "this-week");
+  assert.equal(group("2026-11-01"), "last-week");
+  assert.equal(group("2026-10-26"), "last-week");
+  assert.equal(group("2026-10-25"), "2026-10");
+  assert.equal(group("2026-09-30"), "2026-9");
+  assert.equal(group(null), "unknown");
+  assert.deepEqual(workDateGroup("2026-11-07", now).label, { key: "Yesterday" });
+  assert.deepEqual(workDateGroup("2026-10-03", now).label, { month: new Date(2026, 9, 1) });
+  // On a Monday, the day before is yesterday, and last week starts a week before.
+  assert.equal(workDateGroup("2026-11-01", new Date(2026, 10, 2)).key, "yesterday");
+  assert.equal(workDateGroup("2026-10-26", new Date(2026, 10, 2)).key, "last-week");
 });

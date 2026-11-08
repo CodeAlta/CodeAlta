@@ -150,6 +150,66 @@ export function filterWorkItems(items: readonly WorkItem[], filter: Readonly<{ p
     && words.every(word => `${item.title} ${item.summary ?? ""} ${item.id}`.toLowerCase().includes(word)));
 }
 
+/** The order of the list: the newest items first, or the oldest. */
+export type WorkOrder = "newest" | "oldest";
+/** What the list is grouped by: the day an item was created (Today, Yesterday, This week…), or its project. */
+export type WorkGrouping = "date" | "project";
+
+/**
+ * The day an item was created, at midnight here; null when it does not say. A task or a plan says only its day
+ * (`2026-11-08`), which is that day here, not the midnight of UTC; a review says the moment it changed.
+ */
+export function createdDay(created: string | null | undefined): Date | null {
+  const text = created?.trim();
+  if (!text) return null;
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(text);
+  const date = day ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3])) : new Date(text);
+  return Number.isNaN(date.getTime()) ? null : new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+/**
+ * The items in the order chosen: by the moment they were created, to the day for a task or a plan and to the moment for a
+ * review; an item that does not say comes last. The same moment is ordered by title, so that the list does not move.
+ */
+export function sortWorkItems(items: readonly WorkItem[], order: WorkOrder): WorkItem[] {
+  const sign = order === "newest" ? -1 : 1;
+  return items.map(item => ({ item, at: createdTime(item.created) })).sort((left, right) => {
+    if (left.at === null || right.at === null) return left.at === right.at ? left.item.title.localeCompare(right.item.title) : left.at === null ? 1 : -1;
+    return (left.at - right.at) * sign || left.item.title.localeCompare(right.item.title);
+  }).map(entry => entry.item);
+}
+
+// The moment an item was created: the midnight here of the day of a task or a plan, the moment of a review.
+function createdTime(created: string | null | undefined): number | null {
+  const text = created?.trim();
+  if (!text) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/u.test(text)) return createdDay(text)?.getTime() ?? null;
+  const time = new Date(text).getTime();
+  return Number.isNaN(time) ? null : time;
+}
+
+/** The group of the day an item was created, as the list names it: a day close to today, a week, or a month. */
+export type WorkDateGroup = Readonly<{ key: string; label: Readonly<{ key: MessageKey }> | Readonly<{ month: Date }> | null }>;
+
+/**
+ * The group an item falls in, seen from `now`: Today, Yesterday, This week (from Monday), Last week, then the month it was
+ * created in; an item that does not say when it was created is in a group of its own.
+ */
+export function workDateGroup(created: string | null | undefined, now: Date): WorkDateGroup {
+  const day = createdDay(created);
+  if (!day) return { key: "unknown", label: null };
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((today.getTime() - day.getTime()) / 86_400_000);
+  // Monday starts a week; a day of the future (a clock that differs) is today.
+  const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (today.getDay() + 6) % 7);
+  const lastMonday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - 7);
+  if (days <= 0) return { key: "today", label: { key: "Today" } };
+  if (days === 1) return { key: "yesterday", label: { key: "Yesterday" } };
+  if (day >= monday) return { key: "this-week", label: { key: "This week" } };
+  if (day >= lastMonday) return { key: "last-week", label: { key: "Last week" } };
+  return { key: `${day.getFullYear()}-${day.getMonth() + 1}`, label: { month: new Date(day.getFullYear(), day.getMonth(), 1) } };
+}
+
 /** How many items each stage has, for the tabs of the list. */
 export function stageCounts(items: readonly WorkItem[], projectId: string | null, kind: WorkKind | "all"): Readonly<Record<WorkStage, number>> {
   const counts = { todo: 0, running: 0, later: 0, closed: 0 };

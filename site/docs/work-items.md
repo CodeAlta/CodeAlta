@@ -49,6 +49,7 @@ Open it with **Work items** in the title bar (in its **…** menu when the windo
 - **To do**, **In progress**, **Later** and **Closed** separate what waits from what is done.
 - **Runs with** is the [Agent chip](workspace/prompt.md#agent-and-model) of the new session. With **Use the defaults** on, it runs with the provider, model and reasoning effort of the session that proposed the item, else the [default provider](model-providers/readme.md) and its model. Turn it off to choose them, the agent prompt, the permission mode, review before commit and the sandbox, before you start. **More options** turns [sub-sessions](sessions/delegation.md#sessions-without-sub-sessions) off for the new session.
 - Filter by tasks, plans or [reviews](reviews.md#all-your-reviews), by project, or by text. **All projects** are those of the [space](spaces.md) the window shows.
+- Items are listed under the day they were created (**Today**, **Yesterday**, **This week**, **Last week**, then each month), each with its date. **Newest first** turns to **Oldest first**, and with **All projects**, **Group by project** lists them under their projects instead. The tab remembers your choice.
 - Select an item to read it, start it, mark it done, open its file, or remove it.
 - Start several items at once: a spinner marks each while its worktree is made. A ready session opens if you still read its item; otherwise a notification offers it with **Show**.
 
