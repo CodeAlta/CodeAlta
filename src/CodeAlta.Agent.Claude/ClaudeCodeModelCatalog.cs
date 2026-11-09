@@ -198,6 +198,10 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         AgentModelInfo? byDefault = null;
+        // Fast mode: the models the CLI marks support it, unless something blocks it (no usage credits, the organization
+        // turned it off); the state is the one the user's settings put the CLI in.
+        var fastModeBlocked = response.TryGetProperty("fast_mode_disabled_reason", out var blocked) && blocked.ValueKind is not JsonValueKind.Null;
+        var fastModeOn = IsFastModeOn(response);
         foreach (var entry in entries.EnumerateArray())
         {
             // An entry the CLI shows as unavailable (an update is required) cannot run a turn.
@@ -255,7 +259,10 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
                 ClaudeCodeJson.GetString(entry, "description"),
                 Provider: "Claude Code",
                 SupportedReasoningEfforts: efforts is { Count: > 0 } ? efforts : null,
-                Capabilities: capabilities);
+                Capabilities: capabilities)
+            {
+                FastMode = !fastModeBlocked && ClaudeCodeJson.GetBoolean(entry, "supportsFastMode") ? fastModeOn : null,
+            };
             if (string.Equals(value, DefaultModelId, StringComparison.OrdinalIgnoreCase))
             {
                 byDefault = model;
@@ -287,6 +294,14 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
 
         return models;
     }
+
+    /// <summary>
+    /// Gets whether the CLI runs in fast mode, as its <c>initialize</c> answer says (<c>fast_mode_state</c>): <c>on</c>, or
+    /// <c>cooldown</c> while a rate limit runs it at standard speed for a while.
+    /// </summary>
+    /// <param name="initialized">The answer to <c>initialize</c>.</param>
+    internal static bool IsFastModeOn(JsonElement initialized)
+        => ClaudeCodeJson.GetString(initialized, "fast_mode_state") is "on" or "cooldown";
 
     private static string? ResolvedModel(AgentModelInfo model)
         => model.Capabilities is { } capabilities && capabilities.TryGetValue(ResolvedModelCapability, out var resolved) ? resolved as string : null;

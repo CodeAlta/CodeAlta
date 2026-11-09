@@ -765,6 +765,22 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [TestMethod]
+    public void Models_HaveTheFastModeTheCliSays()
+    {
+        static IReadOnlyList<AgentModelInfo> Read(string state) => ClaudeCodeModelCatalog.ReadModels(JsonDocument.Parse($$"""
+            {"models":[{"value":"opus","displayName":"Opus 5.5","supportsFastMode":true},{"value":"haiku","displayName":"Haiku 5.5"}]{{state}}}
+            """).RootElement);
+
+        var on = Read(""","fast_mode_state":"on" """);
+        Assert.IsTrue(on[0].FastMode, "the user's settings run it fast");
+        Assert.IsNull(on[1].FastMode, "a model without fast mode");
+        Assert.IsTrue(Read(""","fast_mode_state":"cooldown" """)[0].FastMode, "a rate limit runs it at standard speed for a while; fast mode stays on");
+        Assert.IsFalse(Read(""","fast_mode_state":"off" """)[0].FastMode);
+        Assert.IsFalse(Read("")[0].FastMode, "a CLI that says no state runs at standard speed");
+        Assert.IsNull(Read(""","fast_mode_state":"off","fast_mode_disabled_reason":"no_usage_credits" """)[0].FastMode, "what blocks it leaves no switch");
+    }
+
+    [TestMethod]
     public void Models_SayThatTheEffortsTheyListAreAllTheyHave()
     {
         // The CLI lists every effort of a model, and a session gives a model no effort it does not list: a model that

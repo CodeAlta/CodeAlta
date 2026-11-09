@@ -360,6 +360,52 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task FastMode_IsAppliedToTheRunningCli_OnlyWhenItDiffersFromItsState()
+    {
+        var cli = new ClaudeCodeFakeCli { FastModeState = "off" };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var conversation = new List<AgentConversationMessage> { User("one") };
+        var previous = await ExecuteAsync(executor, CreateRequest(conversation));
+        var process = cli.Last;
+        Assert.AreEqual(0, process.FastModeRequests.Count, "A session that chose nothing leaves the CLI as its settings put it.");
+
+        async Task SendAsync(string text, bool? fastMode)
+        {
+            conversation.AddRange([previous.AssistantMessage, User(text)]);
+            previous = await ExecuteAsync(executor, CreateRequest(conversation, previous) with { FastMode = fastMode });
+        }
+
+        await SendAsync("two", false);
+        Assert.AreEqual(0, process.FastModeRequests.Count, "The CLI already runs at standard speed.");
+        await SendAsync("three", true);
+        await SendAsync("four", true);
+        await SendAsync("five", false);
+        Assert.AreSame(process, cli.Last, "The CLI is switched, not started again.");
+        CollectionAssert.AreEqual(new[] { true, false }, process.FastModeRequests.ToArray());
+    }
+
+    [TestMethod]
+    public async Task FastMode_ThatTheCliRefuses_IsAWarningOfTheTurn()
+    {
+        var cli = new ClaudeCodeFakeCli { FastModeState = "off", RefuseFlagSettings = true };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var updates = new List<AgentTurnSessionUpdate>();
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateRequest([User("one")]) with { FastMode = true },
+            static (_, _) => ValueTask.CompletedTask,
+            (update, _) =>
+            {
+                updates.Add(update);
+                return ValueTask.CompletedTask;
+            }).WaitAsync(Timeout);
+
+        Assert.AreEqual(1, cli.Last.FastModeRequests.Count);
+        Assert.IsTrue(updates.Any(static update => update.Kind == AgentSessionUpdateKind.Warning && update.Message?.Contains("fast mode on", StringComparison.Ordinal) == true));
+        Assert.IsNotEmpty(response.AssistantMessage.Parts, "The turn runs all the same, at the speed of the settings.");
+    }
+
+    [TestMethod]
     public async Task PermissionModeOfTheTurn_StartsTheCliInsteadOfTheOneOfTheProvider()
     {
         var cli = new ClaudeCodeFakeCli();
