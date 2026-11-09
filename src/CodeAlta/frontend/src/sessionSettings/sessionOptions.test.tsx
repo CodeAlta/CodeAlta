@@ -3,7 +3,7 @@ import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ShellLanguageContext } from "../shellLanguage";
 import { SessionOptionsFields } from "./SessionOptionsFields";
-import { changedSessionOptions, defaultSessionOptions, sessionContextSize, sessionFastMode, sessionOptionsOf, storedSessionOptions } from "./sessionOptions";
+import { changedSessionOptions, defaultSessionOptions, sessionContextSize, sessionFastMode, sessionFastModeFellBack, sessionOptionsOf, storedSessionOptions } from "./sessionOptions";
 
 const render = (node: React.ReactNode, locale = "en") => renderToStaticMarkup(<ShellLanguageContext.Provider value={{ locale: locale as "en", choice: locale as "en", setLanguage: () => {} }}>
   {node}</ShellLanguageContext.Provider>);
@@ -56,6 +56,16 @@ test("a session runs in the fast mode it chose, else in the one its provider rep
   assert.equal(sessionFastMode(off, null, true), true, "an OpenAI project whose default tier is fast");
   assert.equal(sessionFastMode(off, { subSessions: true, fastMode: true }, false), true);
   assert.equal(sessionFastMode(on, { subSessions: true, fastMode: false }, true), false, "the choice wins");
+});
+
+test("a session that chose fast mode, whose last turn ran at standard speed, fell back", () => {
+  const model = { fastMode: false }, on = { subSessions: true, fastMode: true };
+  assert.equal(sessionFastModeFellBack(model, on, false), true, "a rate limit, no usage credits, the default tier served");
+  assert.equal(sessionFastModeFellBack(model, on, true), false);
+  assert.equal(sessionFastModeFellBack(model, on, null), false, "no turn since the choice");
+  assert.equal(sessionFastModeFellBack(model, { subSessions: true, fastMode: false }, false), false, "standard was asked");
+  assert.equal(sessionFastModeFellBack(model, null, false), false, "a session that chose nothing follows what ran");
+  assert.equal(sessionFastModeFellBack({ fastMode: null }, on, false), false, "a model without fast mode");
 });
 
 test("a fast mode is recorded once chosen, on or off, and counts as changed where it differs from the one of the model", () => {

@@ -40,6 +40,23 @@ public sealed class AnthropicFastModeTests
     }
 
     [TestMethod]
+    [DataRow("fast", true)]
+    [DataRow("standard", false)]
+    [DataRow(null, null)]
+    public async Task TheSpeedAResponseRanAt_IsReported(string? speed, bool? reported)
+    {
+        var usage = speed is null ? "\"input_tokens\":1,\"output_tokens\":0" : $"\"input_tokens\":1,\"output_tokens\":0,\"speed\":\"{speed}\"";
+        var stream = AnthropicStopReasonTests.Stream(
+                AnthropicStopReasonTests.TextBlock(0, "ok"),
+                """{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}""")
+            .Replace("\"usage\":{\"input_tokens\":1,\"output_tokens\":0}", $"\"usage\":{{{usage}}}", StringComparison.Ordinal);
+
+        var response = await ExecuteAsync(new Uri("https://api.anthropic.com"), "claude-opus-5-5", fastMode: true, stream).ConfigureAwait(false);
+
+        Assert.AreEqual(reported, response.Usage?.LastOperation?.FastMode);
+    }
+
+    [TestMethod]
     public void TheModelsOfTheClaudeApi_ThatRunFast_HaveFastModeOff()
     {
         static IReadOnlyList<AgentModelInfo> Enrich(Uri? baseUri)
@@ -63,6 +80,15 @@ public sealed class AnthropicFastModeTests
         var stream = AnthropicStopReasonTests.Stream(
             AnthropicStopReasonTests.TextBlock(0, "ok"),
             """{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}""");
+        _ = await ExecuteAsync(baseUri, modelId, fastMode, stream, bodies, reasoningEffort).ConfigureAwait(false);
+
+        Assert.AreEqual(1, bodies.Count, "One request was sent.");
+        return JsonDocument.Parse(bodies[0]);
+    }
+
+    private static async Task<AgentTurnResponse> ExecuteAsync(Uri baseUri, string modelId, bool? fastMode, string stream,
+        List<string>? bodies = null, AgentReasoningEffort? reasoningEffort = null)
+    {
         var executor = AnthropicModelProviderRuntime.CreateTurnExecutor(new AnthropicProviderOptions
         {
             ProviderKey = "anthropic",
@@ -70,7 +96,7 @@ public sealed class AnthropicFastModeTests
             BaseUri = baseUri,
             HttpClient = new HttpClient(new StubHandler(request =>
             {
-                bodies.Add(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+                bodies?.Add(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(stream, Encoding.UTF8, "text/event-stream") };
             })),
         });
@@ -83,10 +109,7 @@ public sealed class AnthropicFastModeTests
             ReasoningEffort = reasoningEffort,
             FastMode = fastMode,
         };
-        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
-
-        Assert.AreEqual(1, bodies.Count, "One request was sent.");
-        return JsonDocument.Parse(bodies[0]);
+        return await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
     }
 
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler

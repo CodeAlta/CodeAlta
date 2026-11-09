@@ -18,7 +18,7 @@ import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
 import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionSteerRequest, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse, type SessionOptionsChoice } from "#neoastra";
 import { SessionOptionsFields } from "./sessionSettings/SessionOptionsFields";
-import { changedSessionOptions, sessionContextSize, sessionFastMode, sessionOptionsOf } from "./sessionSettings/sessionOptions";
+import { changedSessionOptions, sessionContextSize, sessionFastMode, sessionFastModeFellBack, sessionOptionsOf } from "./sessionSettings/sessionOptions";
 import { activateSessionModels } from "./activateSessionModels";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, pluginPromptOutcome, refreshSubmissions, sendAvailable, type PluginPromptOutcome, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -1235,6 +1235,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     }
 
     setSessionOptions({ key: reviewKey, options: result.options });
+    // The host forgets the speed it was told before another choice of fast mode: the chip reads it again.
+    void runtimeScope.current?.refresh();
   }
   // The sandbox the session runs in: read with the session and again after each turn (the settings may have changed
   // meanwhile), and changed at once from the form of the Agent chip. What the settings give is known while the session
@@ -1493,6 +1495,7 @@ ${value}` : value);
         reasoning: reasoning.effort ?? (loadingChoices ? t("Loading…") : null), permission: permissionSummary, review: shownReview?.effective ?? null,
         sandbox: sessionSandboxSummary(shownSandbox?.reply), subSessions: shownOptions?.subSessions ?? null,
         fastMode: sessionFastMode(selectedModel, shownOptions, reportedFastMode),
+        fastModeFellBack: sessionFastModeFellBack(selectedModel, shownOptions, reportedFastMode),
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: selectedModel!.name })
           : reasoning.note === "unused" ? `${t("Reasoning")}: ${selected?.reasoningEffort} · ${t("Not used")}` : null }}
       agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>

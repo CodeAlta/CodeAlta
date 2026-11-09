@@ -26,6 +26,8 @@ export type ComposerSelectionSummary = Readonly<{ agent: string; provider: strin
   subSessions?: boolean | null;
   /** Whether the model runs in fast mode, at a higher price: a colored lightning before its name; null where it has none. */
   fastMode?: boolean | null;
+  /** Whether the last turn of a session in fast mode ran at standard speed, as its provider reported: the lightning is dimmed. */
+  fastModeFellBack?: boolean;
   /** What the tooltip says of the reasoning when the chip shows none ("Haiku 4.5 has no reasoning effort"). */
   reasoningNote?: string | null }>;
 
@@ -105,7 +107,7 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
     onInteraction={(next: boolean, event?: SyntheticEvent<HTMLElement>) => { if (locked && !next) { event?.preventDefault(); return; } setOpen(next); }}>
     <Button variant="minimal" className="composer-selection" aria-label={t("Session configuration")} disabled={disabled} data-defaults={defaults?.on || undefined}
       title={[defaults?.on && t("Use the defaults"), `${t("Agent prompt")}: ${summary.agent}`, `${t("Provider")}: ${summary.provider}`, `${t("Model")}: ${summary.model}`,
-        summary.fastMode && `${t("Fast mode")}: ${t("On")}`,
+        summary.fastMode && `${t("Fast mode")}: ${t("On")}` + (summary.fastModeFellBack ? ` · ${t("The last turn ran at standard speed.")}` : ""),
         summary.reasoning ? `${t("Reasoning")}: ${summary.reasoning}` : summary.reasoningNote,
         summary.permission && `${t("Permissions")}: ${summary.permission.name}`,
         summary.review != null && `${t("Review before commit")}: ${t(summary.review ? "On" : "Off")}`,
@@ -122,7 +124,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
         <span className="composer-selection-model-line">
           <span className="composer-selection-model-unit">{modelLogo && <ModelIcon modelId={summary.modelId} size={14} />}
             {/* Fast mode costs more: the lightning keeps its color, right before the name it stays with. */}
-            <span className="composer-selection-model-name">{summary.fastMode && <span className="composer-selection-fast" aria-hidden="true">{"⚡️"}</span>}
+            <span className="composer-selection-model-name">{summary.fastMode && <span className="composer-selection-fast" aria-hidden="true"
+              data-standard={summary.fastModeFellBack || undefined}>{"⚡️"}</span>}
               {summary.model}</span></span>
           <span className="composer-selection-provider">{modelLogo && <ProviderIcon providerKey={summary.providerKey} size={14} />}
             <span className="composer-selection-provider-name">{summary.provider}</span><span className="composer-selection-slash" aria-hidden="true">/</span></span>

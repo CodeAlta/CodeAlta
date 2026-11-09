@@ -160,6 +160,8 @@ public sealed class SessionOptionsRuntimeTests
             Assert.IsTrue((await host.RuntimeService.GetCurrentStateAsync(sessionId)).Entry?.ReportedFastMode, "the speed the response reported");
 
             Assert.AreEqual("ok", (await host.Commands.SetSessionOptionsAsync(sessionId, new AgentSessionOptions { FastMode = false })).Status);
+            Assert.IsNull((await host.RuntimeService.GetCurrentStateAsync(sessionId)).Entry?.ReportedFastMode,
+                "a speed reported before another choice says nothing of the turns to come");
             await SendAsync(host, sessionId, "Second.");
             Assert.IsFalse(provider.FastModes[^1], "off is sent: the provider runs its standard speed");
 

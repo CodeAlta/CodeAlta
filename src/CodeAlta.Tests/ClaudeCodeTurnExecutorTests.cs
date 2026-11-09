@@ -385,6 +385,30 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    [DataRow("fast", true)]
+    [DataRow("standard", false)]
+    [DataRow(null, null)]
+    public async Task TheSpeedAnAnswerRanAt_IsReported(string? speed, bool? reported)
+    {
+        var cli = new ClaudeCodeFakeCli
+        {
+            OnUserMessage = (process, user) =>
+            {
+                var usage = CacheUsage(read: 2000, write: 300, write1h: 300, write5m: 0);
+                if (speed is not null) usage["speed"] = speed;
+                process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.TextBlock("one")), usage: usage);
+                process.EmitResult("one", user);
+                return Task.CompletedTask;
+            },
+        };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+
+        var response = await ExecuteAsync(executor, CreateRequest([User("one")]));
+
+        Assert.AreEqual(reported, response.Usage!.LastOperation!.FastMode);
+    }
+
+    [TestMethod]
     public async Task FastMode_ThatTheCliRefuses_IsAWarningOfTheTurn()
     {
         var cli = new ClaudeCodeFakeCli { FastModeState = "off", RefuseFlagSettings = true };

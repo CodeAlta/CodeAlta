@@ -62,7 +62,12 @@ public sealed partial class SessionRuntimeService
             ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
             await GetActorForWork(session.SessionId).QueryAsync(async actorCancellationToken =>
             {
-                if (_entries.TryGetValue(session.SessionId, out var entry) && !entry.IsTerminated) entry.Options = AgentSessionOptions.Of(stored);
+                if (_entries.TryGetValue(session.SessionId, out var entry) && !entry.IsTerminated)
+                {
+                    // A speed the provider reported before another choice of fast mode says nothing of the turns to come.
+                    if (entry.Options.FastMode != AgentSessionOptions.Of(stored).FastMode) entry.ReportedFastMode = null;
+                    entry.Options = AgentSessionOptions.Of(stored);
+                }
                 var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, actorCancellationToken).ConfigureAwait(false);
                 if (!Equals(AgentSessionOptions.Stored(localState?.Options), stored))
                 {

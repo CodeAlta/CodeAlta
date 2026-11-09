@@ -137,6 +137,12 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     /// </summary>
     public AgentRefusedReasoning RefusedReasoning { get; init; } = new();
 
+    /// <summary>
+    /// Gets or initializes what reads, from the updates of a response, whether the provider ran it in fast mode
+    /// (<see cref="AgentOperationUsageSnapshot.FastMode"/>); null for a provider that does not say it.
+    /// </summary>
+    public Func<IReadOnlyList<ChatResponseUpdate>, bool?>? ReadFastMode { get; init; }
+
     /// <summary>Gets or sets how long a response that stopped in the middle waits before it is asked again.</summary>
     internal TimeSpan MidStreamRetryDelay { get; init; } = TimeSpan.FromSeconds(2);
 
@@ -260,12 +266,19 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                 }
 
                 var (assistantMessage, assistantPartContentIds) = MapAssistantMessage(response, request);
+                var usage = CreateUsage(request, response, requestStartedAt);
+                // The speed the response ran at, where the provider says it.
+                if (usage?.LastOperation is { } operation && ReadFastMode?.Invoke(updates) is { } fastMode)
+                {
+                    usage = usage with { LastOperation = operation with { FastMode = fastMode } };
+                }
+
                 return new AgentTurnResponse
                 {
                     AssistantMessage = assistantMessage,
                     AssistantPartContentIds = assistantPartContentIds,
                     UnrunnableToolCalls = FindUnrunnableToolCalls(response),
-                    Usage = CreateUsage(request, response, requestStartedAt),
+                    Usage = usage,
                     ProviderSessionId = response.ConversationId,
                     ProviderState = CreateProviderState(response),
                     Summary = ExtractSummary(assistantMessage),

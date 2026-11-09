@@ -30,6 +30,15 @@ export function sessionFastMode(model: SessionOptionsModel | null | undefined, o
   return model?.fastMode == null ? null : options?.fastMode ?? reported ?? model.fastMode;
 }
 
+/**
+ * Whether a session that chose fast mode had its last turn run at standard speed, as its provider reported it (after a
+ * rate limit, without usage credits, or where the provider served the default tier): its lightning is dimmed.
+ */
+export function sessionFastModeFellBack(model: SessionOptionsModel | null | undefined, options: SessionOptionsChoice | null | undefined,
+  reported: boolean | null = null): boolean {
+  return model?.fastMode != null && options?.fastMode === true && reported === false;
+}
+
 /** The options a value stands for: null is the defaults. */
 export function sessionOptionsOf(options: SessionOptionsChoice | null | undefined): SessionOptionsChoice {
   return options ?? defaultSessionOptions;

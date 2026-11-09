@@ -3221,6 +3221,8 @@ dialog.mcp-session-dialog:has(> .app-window) > .app-window > .app-window-body { 
 .composer-selection-provider { flex: none; }
 .composer-selection-model-name { min-width: 0; overflow: hidden; font-weight: 500; text-overflow: ellipsis; }
 .composer-selection-fast { margin-right: 2px; }
+/* Fast mode was chosen, but the provider ran the last turn at standard speed. */
+.composer-selection-fast[data-standard] { filter: grayscale(1); opacity: 0.55; }
 .composer-selection-slash { color: var(--muted); }
 .composer-selection-permission-name { display: none; }
 /* The shield follows the reasoning with a separator; without the reasoning it stands beside the model name. */

@@ -136,7 +136,43 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             AttachFailureDiagnostics = AttachFailureDiagnostics,
             IsRefusedReplayedReasoning = IsRefusedThinkingSignature,
             RefusedReasoning = provider.RefusedReasoning ?? new AgentRefusedReasoning(),
+            ReadFastMode = ReadFastMode,
         };
+    }
+
+    // The speed a response ran at, "fast" or "standard", which its usage gives: in the message_start event of a stream,
+    // in the message of a response that was not streamed. Null when the endpoint says nothing of it.
+    internal static bool? ReadFastMode(IReadOnlyList<ChatResponseUpdate> updates)
+    {
+        foreach (var update in updates)
+        {
+            global::Anthropic.Models.Messages.Usage? usage = update.RawRepresentation switch
+            {
+                global::Anthropic.Models.Messages.RawMessageStreamEvent { Value: global::Anthropic.Models.Messages.RawMessageStartEvent start } => start.Message.Usage,
+                global::Anthropic.Models.Messages.Message message => message.Usage,
+                _ => null,
+            };
+            if (usage is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                return usage.Speed?.Raw() switch
+                {
+                    "fast" => true,
+                    "standard" => false,
+                    _ => null,
+                };
+            }
+            catch (global::Anthropic.Exceptions.AnthropicInvalidDataException)
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     // The Claude API drops a block it cannot match (the binding control of AnthropicAdaptiveThinkingChatClient); an

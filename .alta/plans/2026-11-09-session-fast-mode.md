@@ -132,6 +132,7 @@ flowchart LR
   - that turning it on mid-conversation reads the conversation again at the fast price.
 
   In `site/docs/model-providers/setup.md`, next to `service_tier`, say that a session can override it.
+- [x] 8. **The speed that actually ran (added on request, after the approval).** The Anthropic API reports `usage.speed` of the `message_start` event (`ReadFastMode` of `ChatClientTurnExecutor`, read from the raw SDK event as the fallback and the refusal are), and Claude Code `usage.speed` of its assistant messages (`ClaudeCodeSession.Reducer.CreateUsage`), as OpenAI and Codex report `service_tier`. The runtime forgets a reported speed when the choice of fast mode changes. The chip dims its ⚡, and its tooltip says "The last turn ran at standard speed.", when a session chose fast mode and the last turn ran at standard speed. SDK 13.6.0 is the latest release and has `Usage.Speed`: no dependency change. Tests: `AnthropicFastModeTests`, `ClaudeCodeTurnExecutorTests`, `SessionOptionsRuntimeTests`, `sessionOptions.test.tsx`. Whether the ChatGPT Codex backend sends `service_tier` is not verified.
 
 ## How it is verified
 
@@ -179,7 +180,6 @@ flowchart LR
 - The `codex-cli` plugin: a follow-up. Its app-server takes `serviceTier` on `turn/start` and gives the thread's tier on `thread/start`.
 - Azure OpenAI, and the Anthropic research-preview models.
 - Ultrafast.
-- The speed actually used at Anthropic and in Claude Code (`usage.speed`, the cooldown).
 - Provider settings and the TUI.
 
 <details>

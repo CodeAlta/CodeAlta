@@ -15,6 +15,8 @@ export const sessionSettingsMessages = {
   "Faster output, at a higher price per token.": ["Respuestas más rápidas, a un precio por token más alto.", "Réponses plus rapides, à un prix par jeton plus élevé.",
     "Schnellere Ausgabe zu einem höheren Preis pro Token.", "出力が速くなり、トークンあたりの料金が高くなります。", "输出更快，每个令牌的价格更高。"],
   "Standard speed and price.": ["Velocidad y precio estándar.", "Vitesse et prix standard.", "Standardgeschwindigkeit und -preis.", "標準の速度と料金。", "标准速度和价格。"],
+  "The last turn ran at standard speed.": ["El último turno se ejecutó a velocidad estándar.", "Le dernier tour s'est exécuté à vitesse standard.",
+    "Der letzte Durchgang lief mit Standardgeschwindigkeit.", "最後のターンは標準の速度で実行されました。", "上一轮以标准速度运行。"],
   "Context size": ["Tamaño del contexto", "Taille du contexte", "Kontextgröße", "コンテキストサイズ", "上下文大小"],
   "The conversation is compacted before it exceeds this size.": ["La conversación se compacta antes de superar este tamaño.",
     "La conversation est compactée avant de dépasser cette taille.", "Die Unterhaltung wird verdichtet, bevor sie diese Größe überschreitet.",

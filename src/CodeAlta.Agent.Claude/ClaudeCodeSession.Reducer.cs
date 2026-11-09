@@ -842,7 +842,9 @@ internal sealed partial class ClaudeCodeSession
                 CacheWriteTokens: cacheWrite,
                 CachedInputTokens: cacheRead,
                 Cost: _resultCost,
-                DurationMs: _resultDurationMs),
+                DurationMs: _resultDurationMs,
+                // The speed the request ran at: standard after a rate limit or without usage credits, even in fast mode.
+                FastMode: ClaudeCodeJson.GetString(usage, "speed") switch { "fast" => true, "standard" => false, _ => null }),
             RateLimits: _rateLimits,
             Scope: AgentUsageScope.CurrentWindow,
             Source: AgentUsageSource.ProviderUsage,
