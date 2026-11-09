@@ -585,7 +585,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const viewRevision = useRef(0);
   function advanceBrowserRevision(catalog = false) { batchDeletion.invalidate(); if (!catalog) viewRevision.current++; renderInfoRevision(++browserRevision.current); }
   const [browserCapture, setBrowserCapture] = useState<{ snapshot: WorkspaceSnapshot; projectId: string | null; revision: number; hostReady: boolean } | null>(null);
-  const invalidateCreation = (paletteTransition = false) => { creationGeneration.current++; if (!paletteTransition) commandGeneration.current++; runtimeObservations.invalidate(); };
+  const invalidateCreation = (paletteTransition = false) => { creationGeneration.current++; if (!paletteTransition) commandGeneration.current++; };
   const [logClearActions] = useState(() => createApplicationLogClearActions(applicationLogs.clear));
   const [status, writeStatus] = useState<BootStatus>();
   function setStatus(value: BootStatus) { advanceBrowserRevision(); invalidateCreation(); writeStatus(value); }
@@ -2722,6 +2722,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     });
     return runtimeObservationControls().refresh(observed);
   };
+  // What runs is observed per session, whatever is selected, listed or open: only another host makes the observations
+  // stale, before the refresh below asks it. Otherwise every running spinner of the sidebar would hide until the next poll.
+  useEffect(() => { runtimeObservations.invalidate(); }, [runtimeObservations, status?.hostEpoch]);
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
