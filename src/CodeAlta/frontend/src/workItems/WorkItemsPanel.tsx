@@ -93,7 +93,9 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
     projectId: project.projectId, projectName: scoped === null ? projectById.get(project.projectId)?.name ?? null : null, proposal,
     tasks: proposal.tasks.map(match => all.find(item => item.projectId === project.projectId && item.kind === "task" && item.id === match.id)).filter((item): item is WorkItem => !!item) })))
     .filter(shown => shown.tasks.length > 0), [state.projects, scoped, projectById, all]);
-  const shown = useMemo(() => sortWorkItems(filterWorkItems(all, { projectId: scoped, kind, stage, query, tags: tagFilter }), view.order), [all, scoped, kind, stage, query, tagFilter, view.order]);
+  // A tag chosen for another project does not empty the list of this one.
+  const chosenTags = useMemo(() => new Set([...tagFilter].filter(name => tags.some(tag => tag.name === name))), [tagFilter, tags]);
+  const shown = useMemo(() => sortWorkItems(filterWorkItems(all, { projectId: scoped, kind, stage, query, tags: chosenTags }), view.order), [all, scoped, kind, stage, query, chosenTags, view.order]);
   const current = shown.find(item => workItemKey(item) === selected) ?? shown[0] ?? null;
   useEffect(() => { if (visible) void hub.refresh(); }, [hub, visible]);
   useEffect(() => {
@@ -154,7 +156,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
           </HTMLSelect>
           <InputGroup size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={query} placeholder={t("Search work items")}
             aria-label={t("Search work items")} onChange={event => setQuery(event.target.value)} />
-          <TagFilter tags={tags} chosen={tagFilter} onChange={setTagFilter} onManage={() => setManagingTags(true)} />
+          <TagFilter tags={tags} chosen={chosenTags} onChange={setTagFilter} onManage={() => setManagingTags(true)} />
           <span className="work-view" role="group" aria-label={t("Order")}>
             <Button size="small" variant="minimal" className="work-order" icon={<AppIcon name={view.order === "newest" ? "arrowDown" : "arrowUp"} size={14} />}
               title={t(view.order === "newest" ? "Oldest first" : "Newest first")} aria-pressed={view.order === "oldest"}
@@ -170,7 +172,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
         </Tabs>
         <div className="work-body">
           <div className="work-list" role="listbox" aria-label={t(workFilterLabel(stage))}>
-            {shown.length === 0 && <p className="work-empty">{t(query.trim() ? "No work item matches." : stage === "todo" ? "Nothing waits for a decision." : stage === "running" ? "Nothing is in progress."
+            {shown.length === 0 && <p className="work-empty">{t(query.trim() || chosenTags.size ? "No work item matches." : stage === "todo" ? "Nothing waits for a decision." : stage === "running" ? "Nothing is in progress."
               : stage === "later" ? "Nothing is set aside for later." : "Nothing here. The settings say whether closed tasks and completed plans are kept.")}</p>}
             {groups.map(group => <section key={group.key} className="work-group" data-group={group.key}>
               {<h3><AppIcon name={byProject ? "folder" : "calendar"} size={13} />{group.label}<span className="work-count">{group.items.length}</span></h3>}
