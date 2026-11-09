@@ -1,11 +1,13 @@
 // The page's link to the automations of the application: what they are now, and the calls that change them.
-import type { automations, AutomationInput, AutomationItem, AutomationPublishTarget, AutomationRunItem, AutomationScriptItem, AutomationsListResponse, AutomationTeamItem,
-  AutomationTriggerItem, AutomationTriggerTypeItem } from "#neoastra";
+import type { automations, AutomationInput, AutomationItem, AutomationPoolMachineItem, AutomationPublishTarget, AutomationRunItem, AutomationScriptItem, AutomationsListResponse,
+  AutomationTeamItem, AutomationTriggerItem, AutomationTriggerTypeItem } from "#neoastra";
 
 /** The calls of the host; `scripts` is missing from a host that has no library of scripts. */
 export type AutomationsApi = Pick<typeof automations, "list" | "refresh" | "save" | "delete" | "setEnabled" | "allow" | "startPlaced" | "setPaused" | "run" | "runs" | "preview" | "watch">
   & Partial<Pick<typeof automations, "scripts" | "triggerTypes" | "testTrigger" | "sampleEvent" | "tryRun" | "createHook" | "hookAddress" | "takeOver" | "publishTargets"
-  | "teamAutomations" | "openTeamAutomation">>;
+  | "teamAutomations" | "openTeamAutomation" | "poolMachines">>;
+/** The tags the machines have, and the machines that have all the tags asked: the members of a pool now. */
+export type PoolMachines = Readonly<{ tags: readonly string[]; members: readonly AutomationPoolMachineItem[]; problem: string | null }>;
 /** What a test or a sample of a trigger of another tool answered: a text, or what is wrong. */
 export type TriggerCheck = Readonly<{ ok: boolean; message: string | null; detail?: string | null; prompt?: string | null; replyTo?: string | null }>;
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
@@ -144,6 +146,16 @@ export function createAutomationsHub(api: AutomationsApi, timers: Timers = { set
         const reply = await api.publishTargets({ expectedEpoch: host, machineId }, { signal, timeoutMilliseconds: 15_000 });
         return reply.status === "ok" ? reply.targets : [];
       } catch { return []; }
+    },
+    /** The tags the machines of the servers have, and the machines of the person that have all the tags given now. */
+    async poolMachines(tags: readonly string[], publishTo: string | null, signal: AbortSignal): Promise<PoolMachines> {
+      const host = epoch;
+      const none: PoolMachines = { tags: [], members: [], problem: null };
+      if (!host || !api.poolMachines) return none;
+      try {
+        const reply = await api.poolMachines({ expectedEpoch: host, tags: [...tags], publishTo }, { signal, timeoutMilliseconds: 30_000 });
+        return reply.status === "ok" ? { tags: reply.tags, members: reply.members, problem: reply.problem ?? null } : none;
+      } catch { return none; }
     },
     /** The automations of the teams this person maintains, and of the organization, that another person gave their machines. */
     async teamAutomations(signal?: AbortSignal): Promise<readonly AutomationTeamItem[]> {

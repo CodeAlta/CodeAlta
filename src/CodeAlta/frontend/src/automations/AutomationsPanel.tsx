@@ -143,8 +143,10 @@ function AutomationCard({ item, paused, selected, busy, now, onSelect, onRun, on
   </li>;
 }
 
-function RunList({ runs, sessions, now, named, busy, onOpen, onTakeOver }: {
+function RunList({ runs, sessions, now, named, busy, onOpen, onTakeOver, machines }: {
   runs: readonly AutomationRunItem[]; sessions: ReadonlyMap<string, WorkspaceSession>; now: number;
+  /** The names of the machines of the pools, by id: a run of a pool says which machine ran it. */
+  machines?: ReadonlyMap<string, string>;
   /** Whether each run says which automation it is of: in the list of all of them. */
   named: boolean; busy: ReadonlySet<string>; onOpen: (sessionId: string, projectId: string | null) => void;
   /** Takes a run that waits for a person over. */
@@ -164,7 +166,8 @@ function RunList({ runs, sessions, now, named, busy, onOpen, onTakeOver }: {
         <RunMark status={run.status} />
         <span className="automation-run-text">
           <strong>{named ? run.name ?? t("Automation") : status}</strong>
-          <span title={run.output ?? undefined}>{[named ? status : null, t(runTriggerLabel(run.trigger)), run.detail, run.message, run.reply].filter(Boolean).join(" · ")}</span>
+          <span title={run.output ?? undefined}>{[named ? status : null, run.machineId && machines?.get(run.machineId) ? t("On {machine}", { machine: machines.get(run.machineId)! }) : null,
+            t(runTriggerLabel(run.trigger)), run.detail, run.message, run.reply].filter(Boolean).join(" · ")}</span>
         </span>
         <time dateTime={when.dateTime} title={when.title}>{when.label}</time>
         {(session || remote) && <AppIcon name="chevronRight" size={14} />}
@@ -209,6 +212,9 @@ function AutomationDetail({ hub, item, paused, busy, taking, now, sessions, epoc
   const runsWith = runsWithFacts(item, t, providerName);
   const placed = placementLabel(item, t);
   const notCopied = !item.problem ? placementProblem(item) : null;
+  // The machines of its pool, which its runs name.
+  const members = item.placement?.members ?? [];
+  const machines = useMemo(() => poolMachineNames([item]), [item]);
   return <section className="automation-detail" aria-label={item.name}>
     <header>
       <span className="automation-card-glyph" data-file-tone={triggerTone(item.triggers[0]?.type)}><TriggerIcon type={item.triggers[0]?.type} size={20} /></span>
@@ -231,7 +237,10 @@ function AutomationDetail({ hub, item, paused, busy, taking, now, sessions, epoc
         <li key={index}><span data-file-tone={triggerTone(trigger.type)}><TriggerIcon type={trigger.type} size={13} /></span>{describeTrigger(trigger, t, locale, true)}</li>)}</ul>}</dd>
       {/* It runs on its machine, by its triggers there: this computer shows where and whether the machine has it as it is. */}
       {placed && <><dt>{t("Runs on")}</dt>
-        <dd title={item.placement?.message ?? undefined}>{item.placement?.state === "copied"
+        <dd title={item.placement?.message ?? undefined}>{item.runsOnTags
+          ? [placed, members.length > 0 ? t("Runs on now: {machines}", { machines: members.map(member => member.machineName ?? member.machineId).join(", ") }) : null,
+            item.placement?.state === "copied" ? null : item.placement?.message].filter(Boolean).join(" · ")
+          : item.placement?.state === "copied"
           ? t("Copied to {machine}", { machine: item.placement.machineName ?? t("Unavailable machine") }) : [placed, item.placement?.message].filter(Boolean).join(" · ")}</dd></>}
       {item.triggers.length > 0 && !placed && <><dt>{t("Next run")}</dt>
         <dd>{waits ? t("Waits for you to allow it") : !item.enabled ? t("Disabled") : paused ? t("Paused") : next?.label ?? t("Waits for its event")}</dd></>}
@@ -254,8 +263,13 @@ function AutomationDetail({ hub, item, paused, busy, taking, now, sessions, epoc
       <pre className="automation-prompt">{item.scriptArguments ? `${item.script}(${item.scriptArguments})` : item.script}</pre></>
       : <><h4>{t("Prompt")}</h4><pre className="automation-prompt">{item.prompt}</pre></>}
     <h4>{t("Runs")}</h4>
-    {runs === null ? <p className="automation-empty"><ActivitySpinner size={13} /></p> : <RunList runs={runs} sessions={sessions} now={now} named={false} busy={taking} onOpen={onOpen} onTakeOver={onTakeOver} />}
+    {runs === null ? <p className="automation-empty"><ActivitySpinner size={13} /></p> : <RunList runs={runs} sessions={sessions} now={now} named={false} busy={taking} onOpen={onOpen} onTakeOver={onTakeOver} machines={machines} />}
   </section>;
+}
+
+/** The names of the machines of the pools of some automations, by id. */
+export function poolMachineNames(items: readonly AutomationItem[]): ReadonlyMap<string, string> {
+  return new Map(items.flatMap(item => item.placement?.members ?? []).map(member => [member.machineId, member.machineName ?? member.machineId] as const));
 }
 
 function Templates({ onPick, chatOnly }: { onPick: (template: AutomationTemplate) => void; chatOnly: boolean }) {
@@ -314,6 +328,8 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
   const byId = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions]);
   const shown = useMemo(() => filterAutomations(state.items, query, scope), [state.items, query, scope]);
   const current = state.items.find(item => item.id === selected) ?? null;
+  // The machines of the pools, which the runs of all name.
+  const poolNames = useMemo(() => poolMachineNames(state.items), [state.items]);
   useEffect(() => { if (visible) void hub.refresh(); }, [hub, visible]);
   useEffect(() => {
     if (!visible) return;
@@ -447,7 +463,7 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
               onOpen={onOpenSession} onTakeOver={run => void takeOver(run)} />
           : <section className="automation-detail" aria-label={t("Recent runs")}>
               <h4>{t("Recent runs")}</h4>
-              <RunList runs={state.runs} sessions={byId} now={now} named busy={busy} onOpen={onOpenSession} onTakeOver={run => void takeOver(run)} />
+              <RunList runs={state.runs} sessions={byId} now={now} named busy={busy} onOpen={onOpenSession} onTakeOver={run => void takeOver(run)} machines={poolNames} />
             </section>}
       </aside>}
     </div>

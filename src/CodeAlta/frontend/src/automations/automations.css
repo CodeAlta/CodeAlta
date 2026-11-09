@@ -202,6 +202,14 @@ button.automation-run:hover, button.automation-run:focus-visible { background: v
 .automation-autonomy-grid .bp6-numeric-input, .automation-autonomy-grid .bp6-numeric-input .bp6-input-group { width: 96px; min-width: 0; }
 .automation-autonomy-approvers-field { display: grid; gap: 4px; justify-items: start; }
 .automation-autonomy-timeout { display: flex; gap: 8px; align-items: center; }
+/* Runs on, with Add a machine… beside it; the tags of a pool take the whole row, with the tags machines have and the machines that match. */
+.automation-runs-on { display: flex; align-items: center; gap: 6px; }
+.automation-runs-on .bp6-html-select { flex: 1 1 auto; min-width: 0; }
+.automation-pool { grid-column: 1 / -1; }
+.automation-pool-suggested { display: flex; flex-wrap: wrap; gap: 2px 4px; margin-top: 4px; }
+.automation-pool-members, .automation-pool-refused { margin: 6px 0 0; font-size: 12px; color: var(--muted, inherit); }
+.automation-pool-refused { color: var(--bp-intent-warning-text, #c87619); }
+.automation-more-options { align-self: flex-start; margin-bottom: 6px; }
 .automation-editor-switches { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-bottom: 8px; }
 .automation-editor-switches .bp6-control { margin: 0; }
 .automation-editor-footer { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 18px 14px; border-top: 1px solid var(--line); }

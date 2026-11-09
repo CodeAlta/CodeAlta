@@ -11,12 +11,13 @@ import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettin
 import { sessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import { useShellLanguage } from "../shellLanguage";
 import type { RunProvider } from "../workItems/runsWith";
-import { dayName, formProblem, formSettings, inputOf, isIntegration, isSchedule as schedule, isSourceType, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumTriggers, needsProject,
+import { dayName, formProblem, formSettings, inputOf, isIntegration, isSchedule as schedule, isSourceType, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumRunsAtOnce, maximumTriggers, needsProject,
   newSourceTrigger, newTrigger, scriptArgumentsTemplate, sessionSettingsOf, triggerLabel, triggerTone, triggerTypes, weekDays, type AutomationForm, type TriggerType } from "./automations";
 import { SourceTriggerFields } from "./SourceTriggerFields";
 import type { AutomationsHub } from "./automationsHub";
 import { IntegrationTriggerFields, type IntegrationContext } from "./IntegrationTriggerFields";
 import { AutonomyFields } from "./AutonomyFields";
+import { RunsOnField } from "./RunsOnField";
 
 const hours = [1, 2, 3, 4, 6, 8, 12];
 
@@ -192,6 +193,8 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
   const settings = sessionSettingsOf(form);
   const choices = useSessionSettingsChoices(api, runProviders, null, settings);
   const [kind, setKind] = useState<"prompt" | "script">(initial.script ? "script" : "prompt");
+  // More options opens by itself for an automation that uses one.
+  const [more, setMore] = useState(!!initial.maxRuns && initial.maxRuns > 1);
   // Whom it may be published to on the server of its machine: the team of the machine, the organization, beside the person.
   const [targets, setTargets] = useState<readonly AutomationPublishTarget[]>([]);
   useEffect(() => {
@@ -275,15 +278,8 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
             <SegmentedControl size="small" value={form.storeInProject ? "project" : "user"} disabled={busy} onValueChange={value => edit({ storeInProject: value === "project" })}
               options={[{ value: "user", label: t("My configuration") }, { value: "project", label: t("The project") }]} />
           </FormGroup>}
-          {/* Another machine runs it while this computer is closed: offered once one is paired or listed by a server, for an automation of yours. */}
-          {!form.storeInProject && (reachable.length > 0 || form.runsOn) && <FormGroup label={t("Runs on")} labelFor="automation-machine">
-            <HTMLSelect id="automation-machine" fill value={form.runsOn ?? ""} disabled={busy} onChange={event => edit({ runsOn: event.target.value || null, publishTo: null })}>
-              <option value="">{t("This computer")}</option>
-              {form.runsOn && !reachable.some(machine => machine.id === form.runsOn) && <option value={form.runsOn}>{t("Unavailable machine")}</option>}
-              {reachable.map(machine => <option key={machine.id} value={machine.id}>
-                {machineState(machine) === "online" ? machine.name : t("{machine} (offline)", { machine: machine.name })}</option>)}
-            </HTMLSelect>
-          </FormGroup>}
+          {/* Another machine, or the machines with some tags, run it while this computer is closed; always shown, so that it is found. */}
+          <RunsOnField hub={hub} form={form} reachable={reachable} disabled={busy} edit={edit} />
           {/* On a machine of a team the person maintains, or of the organization: whose automation it is, which then runs as their service identity. */}
           {!form.storeInProject && form.runsOn && (targets.length > 0 || form.publishTo) && <FormGroup label={t("Publish to")} labelFor="automation-publish"
             helperText={form.publishTo ? t("It runs as a service identity, with account credentials only.") : undefined}>
@@ -326,6 +322,14 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
           {form.triggers.length > 0 && <Switch checked={form.catchUp} disabled={busy} label={t("Catch up on what was missed while CodeAlta was closed")}
             onChange={event => edit({ catchUp: event.currentTarget.checked })} />}
         </div>
+        {/* What most automations leave as it is: how many of its runs work at once on a machine. */}
+        <Button className="automation-more-options" size="small" variant="minimal" disabled={busy} endIcon={<AppIcon name={more ? "chevronDown" : "chevronRight"} size={13} />}
+          text={t(more ? "Fewer options" : "More options")} aria-expanded={more} onClick={() => setMore(value => !value)} />
+        {more && <FormGroup label={t("Runs at once on a machine")} labelFor="automation-max-runs"
+          helperText={t("How many runs of this automation work at the same time on one machine; with 1, a run waits for the previous one to end.")}>
+          <NumericInput id="automation-max-runs" min={1} max={maximumRunsAtOnce} stepSize={1} minorStepSize={null} majorStepSize={null} clampValueOnBlur disabled={busy}
+            value={form.maxRuns ?? 1} onValueChange={value => edit({ maxRuns: Number.isFinite(value) && value > 1 ? Math.min(Math.round(value), maximumRunsAtOnce) : null })} />
+        </FormGroup>}
         {problem && <Callout intent="danger" compact role="alert">{problem}</Callout>}
       </div>
       <footer className="automation-editor-footer">

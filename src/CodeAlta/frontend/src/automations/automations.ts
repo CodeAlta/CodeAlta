@@ -242,6 +242,10 @@ export type AutomationForm = Readonly<{
   options: SessionOptionsChoice | null;
   /** The paired machine it runs on (its id); null for this computer. Only an automation kept in the configuration of the user runs elsewhere. */
   runsOn: string | null;
+  /** The tags of the machines it runs on (a pool), in place of `runsOn`; null when it is not a pool. */
+  runsOnTags: readonly string[] | null;
+  /** How many of its runs work at once on a machine; null for one. */
+  maxRuns: number | null;
   /** Whom it is published to on the server of its machine: `team:<id>`, `organization`, or null (absent) for the person's own. */
   publishTo?: string | null;
   triggers: readonly AutomationTriggerItem[];
@@ -278,7 +282,7 @@ export const toolNames = (text: string): readonly string[] => [...new Set(text.s
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {
   return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", withoutModel: false, writes: false, projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
-    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, publishTo: null, triggers: [], autonomy: null };
+    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, runsOnTags: null, maxRuns: null, publishTo: null, triggers: [], autonomy: null };
 }
 
 /** The form of an automation that exists. */
@@ -287,11 +291,12 @@ export function formOf(item: AutomationItem): AutomationForm {
     withoutModel: item.scriptMode === "direct", writes: item.scriptMode === "direct" && item.scriptAccess === "write", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
     provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
     permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options),
-    runsOn: item.runsOn ?? null, publishTo: item.publishTo ?? null, triggers: item.triggers, autonomy: item.autonomy ?? null };
+    runsOn: item.runsOn ?? null, runsOnTags: item.runsOnTags ?? null, maxRuns: item.maxRuns ?? null, publishTo: item.publishTo ?? null, triggers: item.triggers, autonomy: item.autonomy ?? null };
 }
 
 /** The machine an automation runs on, in words: null for this computer. */
-export function placementLabel(item: Pick<AutomationItem, "runsOn" | "placement">, t: Translate): string | null {
+export function placementLabel(item: Pick<AutomationItem, "runsOn" | "placement"> & Partial<Pick<AutomationItem, "runsOnTags">>, t: Translate): string | null {
+  if (item.runsOnTags && item.runsOnTags.length > 0) return t("On the machines with {tags}", { tags: item.runsOnTags.join(", ") });
   if (!item.runsOn) return null;
   return t("On {machine}", { machine: item.placement?.machineName ?? t("Unavailable machine") });
 }
@@ -354,13 +359,27 @@ export function formProblem(form: AutomationForm): MessageKey | null {
     if (trigger.type === "command" && !(trigger.command ?? "").trim()) return "Write the command of the trigger.";
     if (trigger.type === "command" && form.runsOn && !form.storeInProject) return "A command trigger runs on this computer only.";
   }
+  if (form.runsOnTags && !form.storeInProject) {
+    if (form.runsOnTags.length === 0) return "Choose the tags of the machines it runs on.";
+    if (form.triggers.some(trigger => !poolTakes(trigger.type))) return "Machines with tags take schedules, cron, issues, pull requests and Jira: remove the other triggers, or run it on one machine.";
+  }
   // Kept with a project, a script that writes without a model names its sandbox: only your own configuration runs one without.
   if (form.script.trim() && form.withoutModel && form.writes && form.storeInProject && (!form.sandbox.trim() || form.sandbox.trim().toLowerCase() === notSandboxed))
     return "A script of a project that writes without a model runs in a sandbox: choose one in Runs with.";
   // A team or the organization runs it with the key of an account: the machine and the server check the provider it names.
-  if (form.publishTo && form.runsOn && !form.storeInProject && !form.provider.trim()) return "An automation of a team or of the organization names the provider it runs with.";
+  if (form.publishTo && (form.runsOn || form.runsOnTags) && !form.storeInProject && !form.provider.trim()) return "An automation of a team or of the organization names the provider it runs with.";
   return null;
 }
+
+/** The triggers the machines of a pool fire and claim by themselves: the others are bound to one machine. */
+export const poolTriggerTypes: readonly string[] = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira", "jira_version", "jira_query"];
+/** Whether the machines of a pool take a trigger. */
+export const poolTakes = (type: string): boolean => poolTriggerTypes.includes(type);
+/** The most tags a pool names, and the most runs of an automation at once on a machine. */
+export const maximumPoolTags = 8;
+export const maximumRunsAtOnce = 16;
+/** Whether a text is a tag of a machine: letters, digits, -, _, . and :, at most 64. */
+export const isMachineTag = (tag: string): boolean => /^[A-Za-z0-9._:-]{1,64}$/.test(tag);
 
 /** What is sent to the host for a form. */
 export function inputOf(form: AutomationForm): AutomationInput {
@@ -376,9 +395,11 @@ export function inputOf(form: AutomationForm): AutomationInput {
     permissionMode: form.permissionMode.trim() || null, reviewBeforeCommit: form.reviewBeforeCommit, sandbox: form.sandbox.trim() || null,
     options: storedSessionOptions(form.options),
     // The configuration of a project runs its automations on the machines that have it.
-    runsOn: form.storeInProject ? null : form.runsOn,
+    runsOn: form.storeInProject || form.runsOnTags ? null : form.runsOn,
+    runsOnTags: form.storeInProject || !form.runsOnTags || form.runsOnTags.length === 0 ? null : [...form.runsOnTags],
+    maxRuns: form.maxRuns && form.maxRuns > 1 ? form.maxRuns : null,
     // Published to a team or the organization of the machine it runs on; on this computer it stays the person's.
-    publishTo: form.storeInProject || !form.runsOn ? null : form.publishTo ?? null,
+    publishTo: form.storeInProject || !(form.runsOn || form.runsOnTags) ? null : form.publishTo ?? null,
     autonomy: form.autonomy ? autonomyInput(form.autonomy) : null,
     // An automation that is run by hand misses nothing.
     catchUp: form.catchUp && form.triggers.length > 0,

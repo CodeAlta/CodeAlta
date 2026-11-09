@@ -15,7 +15,7 @@ const trigger = (type: string, change: Partial<AutomationTriggerItem> = {}): Aut
   ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null, source: null, ...change });
 const item = (id: string, change: Partial<AutomationItem> = {}): AutomationItem => ({
   id, name: `Automation ${id}`, enabled: true, prompt: "Do the thing.", projectId: "p", projectName: "Alpha", projectFolder: "/p", storeProjectId: null, file: "/home/config.toml",
-  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, scriptMode: null, scriptAccess: null, options: null, runsOn: null, publishTo: null, placement: null, autonomy: null, ...change,
+  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, scriptMode: null, scriptAccess: null, options: null, runsOn: null, runsOnTags: null, maxRuns: null, publishTo: null, placement: null, autonomy: null, ...change,
 });
 const run = (id: string, change: Partial<AutomationRunItem> = {}): AutomationRunItem =>
   ({ id, automationId: "a", name: "Nightly", sessionId: null, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "daily", detail: null, status: "completed", message: null, machineId: null, reply: null, output: null, calls: null, ...change });
@@ -88,7 +88,7 @@ test("a card says what starts its automation, where it runs and what it waits fo
 });
 
 test("a card of an automation that runs on a paired machine names the machine, and what kept it from being copied", () => {
-  const placed = (state: string, message: string | null) => ({ machineId: "mini", machineName: "Mac mini", state, message, copiedAt: null });
+  const placed = (state: string, message: string | null) => ({ machineId: "mini", machineName: "Mac mini", state, message, copiedAt: null, members: null });
   const html = render({ items: [
     item("copied", { name: "On the mini", runsOn: "mini", publishTo: null, placement: placed("copied", null), triggers: [trigger("daily", { at: ["09:00"] })] }),
     item("refused", { name: "Refused", runsOn: "mini", publishTo: null, placement: placed("failed", "Mac mini does not let this computer give it automations."), triggers: [trigger("daily", { at: ["09:00"] })] }),
