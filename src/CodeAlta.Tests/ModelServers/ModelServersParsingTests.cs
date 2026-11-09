@@ -134,6 +134,18 @@ public sealed class ModelServersParsingTests
     }
 
     [TestMethod]
+    public void WindowsAdapters_OfGpusRemovedFromTheMachine_AreLeftOut()
+    {
+        // Windows keeps the driver key of a card taken out (an R9700 here) and of an earlier instance of the GPU of the processor.
+        var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"{4d36e968-e325-11ce-bfc1-08002be10318}\0000", @"{4D36E968-E325-11CE-BFC1-08002BE10318}\0002" };
+        Assert.IsTrue(HardwareProbe.IsPresentDriver("0000", present));
+        Assert.IsTrue(HardwareProbe.IsPresentDriver("0002", present), "the case of the class does not matter");
+        Assert.IsFalse(HardwareProbe.IsPresentDriver("0001", present));
+        Assert.IsTrue(HardwareProbe.IsPresentDriver("0001", null), "without the devices present, every adapter counts");
+        Assert.IsTrue(HardwareProbe.IsPresentDriver("0001", new HashSet<string>()), "nor when none was found on PCI");
+    }
+
+    [TestMethod]
     public void LemonadeRocm_TakesThePlaceOfAnOfficialRocmBuildThatCannotRun()
     {
         using var json = JsonDocument.Parse("""

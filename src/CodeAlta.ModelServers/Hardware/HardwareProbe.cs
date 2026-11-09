@@ -57,6 +57,50 @@ public sealed partial class HardwareProbe
         return await ProbeLinuxAsync(CurrentArchitecture, ReadGlibc(), cancellationToken).ConfigureAwait(false);
     }
 
+    private const string DisplayClass = "{4d36e968-e325-11ce-bfc1-08002be10318}";
+
+    /// <summary>
+    /// Whether a driver key of the display class belongs to a GPU present now: Windows keeps the key of a GPU that was
+    /// removed (a card taken out, an earlier instance of the GPU of the processor). Without the list of present devices,
+    /// every key counts.
+    /// </summary>
+    /// <param name="driverKey">The subkey of the class (<c>0003</c>).</param>
+    /// <param name="present">The driver keys of the display devices present (<c>{class}\0003</c>), or null when they could not be read.</param>
+    /// <returns>Whether it counts.</returns>
+    internal static bool IsPresentDriver(string driverKey, IReadOnlySet<string>? present)
+        => present is null || present.Count == 0 || present.Contains(DisplayClass + "\\" + driverKey);
+
+    // The driver keys of the display devices on PCI that are present now (CM_Locate_DevNode finds no phantom without its flag).
+    [SupportedOSPlatform("windows")]
+    private static HashSet<string>? PresentDisplayDrivers()
+    {
+        try
+        {
+            using var pci = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Enum\PCI");
+            if (pci is null) return null;
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var device in pci.GetSubKeyNames())
+            {
+                using var deviceKey = pci.OpenSubKey(device);
+                foreach (var instance in deviceKey?.GetSubKeyNames() ?? [])
+                {
+                    using var instanceKey = deviceKey!.OpenSubKey(instance);
+                    if (instanceKey?.GetValue("ClassGUID") is not string classGuid || !string.Equals(classGuid, DisplayClass, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (instanceKey.GetValue("Driver") is string driver && CM_Locate_DevNodeW(out _, $@"PCI\{device}\{instance}", 0) == 0) result.Add(driver);
+                }
+            }
+
+            return result;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or System.Security.SecurityException or IOException or DllNotFoundException or EntryPointNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int CM_Locate_DevNodeW(out uint deviceInstance, string deviceId, uint flags);
+
     [SupportedOSPlatform("windows")]
     private async Task<HardwareInventory> ProbeWindowsAsync(CancellationToken cancellationToken)
     {
@@ -64,10 +108,11 @@ public sealed partial class HardwareProbe
         var gpus = new List<GpuInfo>();
         try
         {
-            using var classKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}");
+            using var classKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\" + DisplayClass);
+            var present = PresentDisplayDrivers();
             foreach (var name in classKey?.GetSubKeyNames() ?? [])
             {
-                if (!name.All(char.IsAsciiDigit)) continue;
+                if (!name.All(char.IsAsciiDigit) || !IsPresentDriver(name, present)) continue;
                 using var adapter = classKey!.OpenSubKey(name);
                 if (adapter?.GetValue("DriverDesc") is not string description) continue;
                 var deviceId = adapter.GetValue("MatchingDeviceId") as string;
