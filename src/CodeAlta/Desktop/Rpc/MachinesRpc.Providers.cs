@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using CodeAlta.Desktop.Fleet;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
@@ -40,13 +41,14 @@ internal sealed partial class MachinesService
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
         if (request!.MachineId is not { Length: > 0 and <= 64 } id || !FleetNodeService.IsProviderKey(request.Key) || request.Type is { Length: > 64 }
             || request.DisplayName is { Length: > MaximumNameLength } || request.Model is { Length: > MaximumNameLength } || request.ApiUrl is { Length: > MaximumPathLength }
-            || request.ApiKey is { Length: > MaximumProviderKeyLength })
+            || request.ApiKey is { Length: > MaximumProviderKeyLength } || request.MaxConcurrentRequests is < 0)
             return new("invalid_request", null, null);
         if (_fleet!.Find(id) is not { } host) return new("not_found", null, null);
         try
         {
             var status = await host.ManageAsync((client, token) => client.SetProviderAsync(new FleetProviderSetParams(request.Key, request.Type, request.DisplayName, request.Model,
-                request.ApiUrl, string.IsNullOrEmpty(request.ApiKey) ? null : request.ApiKey, request.Enabled, request.MakeDefault), token), changes: true, cancellationToken).ConfigureAwait(false);
+                request.ApiUrl, string.IsNullOrEmpty(request.ApiKey) ? null : request.ApiKey, request.Enabled, request.MakeDefault)
+                { MaxConcurrentRequests = request.MaxConcurrentRequests }, token), changes: true, cancellationToken).ConfigureAwait(false);
             Changed();
             return new("ok", View(status), null);
         }
@@ -94,7 +96,7 @@ internal sealed partial class MachinesService
 
     private static MachineProviderStatusView View(FleetProviderStatus status)
         => new(status.Key, status.Name, status.Type, status.Enabled, status.State, status.Reason, status.Detail, status.Credential, status.KeySecret, status.SignIn, status.IsDefault,
-            status.Model, status.ApiUrl);
+            status.Model, status.ApiUrl) { MaxConcurrentRequests = status.MaxConcurrentRequests };
 }
 
 /// <summary>A provider of a machine as the person who manages it sees it: never its key, only the secret that holds it.</summary>
@@ -112,7 +114,12 @@ internal sealed partial class MachinesService
 /// <param name="Model">Its default model; null for the one of its type.</param>
 /// <param name="ApiUrl">Its endpoint, when written.</param>
 internal sealed record MachineProviderStatusView(string Key, string Name, string Type, bool Enabled, string State, string? Reason, string? Detail, string Credential,
-    string? KeySecret, bool SignIn, bool IsDefault, string? Model, string? ApiUrl);
+    string? KeySecret, bool SignIn, bool IsDefault, string? Model, string? ApiUrl)
+{
+    /// <summary>The most requests it takes at once; null for no limit, or the default of its type.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxConcurrentRequests { get; init; }
+}
 
 /// <summary>A type a provider added to a machine can have.</summary>
 /// <param name="Type">The type.</param>
@@ -144,7 +151,12 @@ internal sealed record MachineProvidersView(string Status, string? Message, Mach
 /// <param name="Enabled">Whether it is enabled.</param>
 /// <param name="MakeDefault">Whether sessions that name no provider run on it.</param>
 internal sealed record MachineProviderRequest(string ExpectedEpoch, string MachineId, string Key, string? Type, string? DisplayName, string? Model, string? ApiUrl, string? ApiKey,
-    bool Enabled, bool MakeDefault);
+    bool Enabled, bool MakeDefault)
+{
+    /// <summary>The most requests it takes at once: null keeps the limit it has, 0 removes it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxConcurrentRequests { get; init; }
+}
 
 /// <summary>A provider of a machine, by its key.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>

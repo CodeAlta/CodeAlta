@@ -6,6 +6,7 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { Copyable } from "../ProviderAccount";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
+import { requestLimit } from "../providerForm";
 import { managementProblem, newProviderKey, providerFix, providerProblem, providerState, providerStateIntent, providerStateLabel } from "./machineManagement";
 
 /** The calls of the providers of a machine. */
@@ -96,12 +97,14 @@ function ProviderDialog({ epoch, machine, api, view, provider, onClose }: {
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(provider?.model ?? "");
   const [apiUrl, setApiUrl] = useState(provider?.apiUrl ?? "");
+  const [requests, setRequests] = useState(provider?.maxConcurrentRequests?.toString() ?? "");
   const [makeDefault, setMakeDefault] = useState(provider?.isDefault ?? view.providers.length === 0);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<Problem>(null);
   const chosen = view.types.find(value => value.type === type);
   const takesKey = provider ? provider.credential === "key" : chosen?.credential === "key";
-  const ready = !!type && (!takesKey || !!apiKey.trim() || !!provider?.keySecret && provider.reason !== "secret_missing");
+  const requestsValid = !requests.trim() || requestLimit(requests) !== null;
+  const ready = !!type && requestsValid && (!takesKey || !!apiKey.trim() || !!provider?.keySecret && provider.reason !== "secret_missing");
   async function save() {
     if (!ready) return;
     setSaving(true);
@@ -110,6 +113,8 @@ function ProviderDialog({ epoch, machine, api, view, provider, onClose }: {
       const key = provider?.key ?? newProviderKey(type, view.providers.map(value => value.key));
       const result = await api.setProvider({ expectedEpoch: epoch, machineId: machine.id, key, type: provider ? null : type, displayName: name.trim() || (provider ? "" : null),
         model: model.trim() || (provider?.model ? "" : null), apiUrl: apiUrl.trim() || (provider?.apiUrl ? "" : null), apiKey: takesKey ? apiKey.trim() || null : null,
+        // Empty removes the limit a provider has: 0 says so to the machine.
+        maxConcurrentRequests: requestLimit(requests) ?? (provider?.maxConcurrentRequests ? 0 : null),
         enabled: true, makeDefault }, { timeoutMilliseconds: 60_000 });
       const failed = managementProblem(result.status);
       if (failed) { setProblem({ key: failed, detail: result.message }); return; }
@@ -136,6 +141,9 @@ function ProviderDialog({ epoch, machine, api, view, provider, onClose }: {
           <InputGroup value={model} disabled={saving} placeholder={t("The default of the provider")} aria-label={t("Model")} onChange={event => setModel(event.target.value)} /></label>
         {takesKey && <label><span>{t("Endpoint")}</span>
           <InputGroup value={apiUrl} disabled={saving} placeholder={t("The default of the provider")} aria-label={t("Endpoint")} onChange={event => setApiUrl(event.target.value)} /></label>}
+        <label><span>{t("Requests at once")}</span>
+          <InputGroup value={requests} disabled={saving} inputMode="numeric" spellCheck={false} placeholder={t("No limit")} aria-label={t("Requests at once")}
+            intent={requestsValid ? "none" : "danger"} onChange={event => setRequests(event.target.value)} /></label>
         <Checkbox checked={makeDefault} disabled={saving} label={t("Sessions that name no provider run on it")} onChange={event => setMakeDefault(event.currentTarget.checked)} />
         <button type="submit" hidden />
       </form>

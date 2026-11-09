@@ -29,6 +29,7 @@ import { pluginProviderMessages } from "./pluginProviders/messages";
 import { spaceResourceMessages } from "./spaces/resourceMessages";
 import { spaceSettingsMessages } from "./spaces/spaceSettingsMessages";
 import { providerSpaceMessages } from "./providerSpaces/messages";
+import { providerRequestMessages } from "./providerRequestMessages";
 import { spaceIdentityMessages } from "./spaces/spaceIdentityMessages";
 import { disabledToolMessages } from "./disabledToolMessages";
 import { skillFolderMessages } from "./skillFolderMessages";
@@ -3025,6 +3026,7 @@ export const messages = dictionary({
   ...spaceResourceMessages,
   ...spaceSettingsMessages,
   ...providerSpaceMessages,
+  ...providerRequestMessages,
   ...spaceIdentityMessages,
   ...disabledToolMessages,
   ...skillFolderMessages,

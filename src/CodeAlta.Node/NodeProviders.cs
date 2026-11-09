@@ -122,6 +122,12 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
                 if (server is not null) definition.ApiUrl = null;
             }
 
+            if (parameters.MaxConcurrentRequests is { } limit)
+            {
+                if (limit < 0) throw new ArgumentException("The requests at once of a provider are a whole number, 0 for no limit.", nameof(parameters));
+                definition.MaxConcurrentRequests = limit == 0 ? null : limit;
+            }
+
             definition.Enabled = parameters.Enabled;
             if (Optional(parameters.ApiKey) is { } apiKey)
             {
@@ -431,7 +437,10 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
         }
 
         return new FleetProviderStatus(key, Bounded(name)!, type, definition.Enabled != false, status, reason, detail, credential, keySecret, SignsInWithCode(type), isDefault,
-            Bounded(definition.Model), Bounded(Masked(definition, definition.ApiUrl)));
+            Bounded(definition.Model), Bounded(Masked(definition, definition.ApiUrl)))
+        {
+            MaxConcurrentRequests = definition.MaxConcurrentRequests is > 0 ? definition.MaxConcurrentRequests : null,
+        };
     }
 
     // Why a provider that takes a key has none: a secret named and not set (its name), else no key at all (the variable it waits for).

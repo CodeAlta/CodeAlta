@@ -257,9 +257,17 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
     if (entry.eventType === "contentCompleted" && isToolOutput(entry.kind) && entry.parentActivityId && entry.tool)
       outputs.set(parentActivityKey(entry), entry);
   }
+  // A wait in a queue shows its latest record, until a record says it ended.
+  const waits = new Map<string, HistoryEntry>();
+  for (const entry of entries) {
+    const wait = waitNotice(entry);
+    if (wait) waits.set(wait.waitId, entry);
+  }
   const result: TimelineItem[] = [];
 
   for (const entry of entries) {
+    const wait = waitNotice(entry);
+    if (wait && (!wait.waiting || waits.get(wait.waitId) !== entry)) continue;
     // Raw provider records are persistence/runtime plumbing duplicated by typed content and
     // activity events. The TUI intentionally keeps them out of its visual timeline too.
     // The records of a run of a script describe the card of its exec call, not rows of their own.
@@ -267,7 +275,7 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
     // These update the TUI's status/usage surfaces, not its conversation timeline.
     // The cancellation of a resume after a limit is said where its card said when the session would resume.
     if (entry.eventType === "sessionUpdate" && !["warning", "reconnecting", "modelchanged", "providerfallback", "compactionstarted", "compactioncompleted", "diffupdated"].includes(entry.kind?.toLowerCase() ?? "")
-      && !cancelledResume(entry) && !adaptiveCard(entry) && !workFolderCard(entry)) continue;
+      && !cancelledResume(entry) && !adaptiveCard(entry) && !workFolderCard(entry) && !wait) continue;
     if ((entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") &&
         isToolOutput(entry.kind) && entry.parentActivityId && calls.has(parentActivityKey(entry))) {
       // The text of an output is shown on the tile of its call; the images the model was given get a card.
@@ -680,6 +688,11 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
       detailMarkdown = model.keepMessage ? entry.text : null;
       markdown = null;
       detailsLabel = "Model details";
+    } else if (waitNotice(entry)) {
+      // A request that waits for a free request of its provider, or a free slot of its model server, with its place.
+      icon = "reminder";
+      title = stringAt(parsedDetails, "wait") === "model-server-slot" ? "Waiting for a free slot" : "Waiting for a free request";
+      subtitle = stringAt(parsedDetails, "name");
     } else if (normalizedKind === "info" && stringAt(parsedDetails, "resume") === "cancelled") {
       // The resume a session waited for after a limit was cancelled.
       icon = "reminder";
@@ -844,6 +857,15 @@ function modelPresentation(text: string | null, details: JsonObject | null) {
 // An informational update that says a resume after a limit was cancelled.
 function cancelledResume(entry: HistoryEntry): boolean {
   return entry.kind?.toLowerCase() === "info" && !!entry.details?.includes("cancelled") && stringAt(parseDetails(entry.details), "resume") === "cancelled";
+}
+
+// The notice of a request that waits in a queue (a free request of its provider, a free slot of its model server): its
+// details name the wait, the same in each record of it, and say whether it still waits.
+function waitNotice(entry: HistoryEntry): { waitId: string; waiting: boolean } | null {
+  if (entry.eventType !== "sessionUpdate" || entry.kind?.toLowerCase() !== "info" || !entry.details?.includes("waitId")) return null;
+  const details = parseDetails(entry.details);
+  const waitId = stringAt(details, "waitId");
+  return waitId ? { waitId, waiting: stringAt(details, "state") === "waiting" } : null;
 }
 
 // A card about the folder a session works in, which its details name.

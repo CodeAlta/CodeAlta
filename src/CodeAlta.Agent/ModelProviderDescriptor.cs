@@ -121,4 +121,26 @@ public sealed record ModelProviderDescriptor
     /// session. The provider of a session without it is never asked for them.
     /// </summary>
     public bool SharesConversations { get; init; }
+
+    /// <summary>
+    /// Gets the most requests that go to the provider at once (<c>max_concurrent_requests</c>), or <see langword="null"/>
+    /// for no limit. A request is one model request with its stream, or one turn of a provider whose requests CodeAlta
+    /// does not see; the others wait in turn (<see cref="ProviderRequestGate"/>).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is zero or negative.</exception>
+    public int? MaxConcurrentRequests
+    {
+        get => _maxConcurrentRequests;
+        init
+        {
+            if (value is <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(MaxConcurrentRequests), value, "The limit of requests at once must be greater than zero.");
+            }
+
+            _maxConcurrentRequests = value;
+        }
+    }
+
+    private readonly int? _maxConcurrentRequests;
 }

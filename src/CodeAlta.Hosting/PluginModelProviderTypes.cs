@@ -318,6 +318,8 @@ public sealed class PluginModelProviderTypes
             ModelVisibility = ModelVisibility.ParseValid(settings.GetList("models_hide"), settings.GetList("models_show"), out _),
             PermissionModes = contribution.PermissionModes,
             DefaultPermissionMode = permissionMode is not null && contribution.PermissionModes.Contains(permissionMode, StringComparer.Ordinal) ? permissionMode : null,
+            // The agent of the type runs its own loop: what the limit counts is its turns.
+            MaxConcurrentRequests = settings.GetInt64("max_concurrent_requests") is > 0 and var limit ? (int)Math.Min(limit, int.MaxValue) : null,
         };
     }
 }

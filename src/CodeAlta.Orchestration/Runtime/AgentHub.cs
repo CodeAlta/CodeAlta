@@ -802,6 +802,18 @@ public sealed partial class AgentHub : IAsyncDisposable
         return registration.TurnExecutor is IAgentProviderExternalConversations reader ? (reader, registration.Provider) : null;
     }
 
+    // The sessions of the provider take its request gate, which the registry keeps across its registrations.
+    private static AgentRuntimeProviderRegistration WithRequestGate(AgentRuntimeProviderRegistration registration, ProviderRequestGate? gate)
+        => gate is null || registration.RequestGate is not null
+            ? registration
+            : new AgentRuntimeProviderRegistration
+            {
+                Provider = registration.Provider,
+                TurnExecutor = registration.TurnExecutor,
+                ModelCatalog = registration.ModelCatalog,
+                RequestGate = gate,
+            };
+
     private async Task<ProviderSessionRuntimeLease> CreateStartedProviderRuntimeAsync(
         ModelProviderId providerId,
         CancellationToken cancellationToken)
@@ -850,7 +862,7 @@ public sealed partial class AgentHub : IAsyncDisposable
                     SessionProjectionCache = _sessionProjectionCache,
                     JournalFile = JournalFile,
                     SecretMasker = SecretMasker,
-                    Providers = [agentProviderRuntime.CreateProviderRegistration()],
+                    Providers = [WithRequestGate(agentProviderRuntime.CreateProviderRegistration(), _modelProviderRegistry.GetRequestGate(providerId))],
                 });
             await InvokeOriginalAsync(() => providerRuntime.StartAsync(cancellationToken)).ConfigureAwait(false);
             await InvokeOriginalAsync(() => runtime.StartAsync(cancellationToken)).ConfigureAwait(false);

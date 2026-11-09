@@ -48,6 +48,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private volatile AgentRunTrace? _runTrace;
     private readonly IAgentSessionJournalStore _store;
     private readonly IModelProviderTurnExecutor _turnExecutor;
+    // What sends the requests of the session: the turn executor, behind the request gate of the provider when it has one.
+    private IModelProviderTurnExecutor _requestExecutor;
     private IReadOnlyList<AgentModelInfo> _cachedModels;
     private readonly AgentCompactionSummarizer _compactionSummarizer;
     // What the summary requests of the compaction that runs used, and the run it belongs to.
@@ -179,6 +181,16 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     /// </summary>
     internal AgentSecretMasker? SecretMasker { get; init; }
 
+    /// <summary>
+    /// The gate that bounds the requests at once of the provider, taken around each request of the session (a turn of an
+    /// agent that runs its own loop); null for no limit.
+    /// </summary>
+    internal ProviderRequestGate? RequestGate
+    {
+        get => (_requestExecutor as ProviderRequestGatedTurnExecutor)?.Gate;
+        init => _requestExecutor = value is null ? _turnExecutor : new ProviderRequestGatedTurnExecutor(_turnExecutor, value);
+    }
+
     // earlierHistory: what the journal holds before history, for a session read again without all of it.
     internal AgentSession(
         ModelProviderId providerId,
@@ -209,9 +221,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         _toolImages = new AgentSessionToolImages(store as IAgentSessionAttachmentStore, summary.SessionId);
         _readFileGuard = new AgentReadFileGuard(AgentBuiltInToolOptions.DefaultReadFileLines, AgentBuiltInToolOptions.MaxReadFileLines);
         _turnExecutor = turnExecutor;
+        _requestExecutor = turnExecutor;
         _cachedModels = cachedModels ?? LoadConstructorModelCache(provider, turnExecutor);
         _compactionSummarizer = new AgentCompactionSummarizer(
-            new AgentTurnExecutorCompactionSummaryExecutor(turnExecutor),
+            new AgentTurnExecutorCompactionSummaryExecutor(new SessionRequestExecutor(this)),
             RecordCompactionSummaryUsageAsync);
         _options = options;
         _permissionMode = NormalizeOptionalText(options.PermissionMode);
@@ -3595,7 +3608,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         try
         {
             _runTrace?.RequestStarting();
-            return await _turnExecutor.ExecuteTurnAsync(
+            return await _requestExecutor.ExecuteTurnAsync(
                     request,
                     (delta, ct) => OnStreamingDeltaAsync(runId, delta, ct),
                     (update, ct) => OnSessionUpdateAsync(runId, update, ct),
@@ -3632,7 +3645,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             try
             {
                 _runTrace?.RequestStarting();
-                return await _turnExecutor.ExecuteTurnAsync(
+                return await _requestExecutor.ExecuteTurnAsync(
                         request with
                         {
                             Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(_conversation, request.ModelInfo), request.ModelInfo, _pdfInputs).ToArray(),
@@ -5684,6 +5697,23 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         return condensed.Length <= 240
             ? condensed
             : condensed[..237] + "...";
+    }
+
+    // The requests of the compaction summaries go through the request executor of the session, known once it is initialized.
+    private sealed class SessionRequestExecutor(AgentSession owner) : IModelProviderTurnExecutor
+    {
+        public Task<AgentTurnResponse> ExecuteTurnAsync(
+            AgentTurnRequest request,
+            Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+            CancellationToken cancellationToken = default)
+            => owner._requestExecutor.ExecuteTurnAsync(request, onUpdate, cancellationToken);
+
+        public Task<AgentTurnResponse> ExecuteTurnAsync(
+            AgentTurnRequest request,
+            Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+            Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
+            CancellationToken cancellationToken = default)
+            => owner._requestExecutor.ExecuteTurnAsync(request, onUpdate, onSessionUpdate, cancellationToken);
     }
 
     private static IReadOnlyList<AgentModelInfo> LoadConstructorModelCache(

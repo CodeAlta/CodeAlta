@@ -28,6 +28,8 @@ export type ProviderForm = Readonly<{
   modelsHide: readonly ModelRuleDraft[]; modelsShow: readonly ModelRuleDraft[];
   /** The size of context, in input tokens, of the sessions whose model has it; null for the size of their model. */
   contextSize: number | null;
+  /** The most requests that go to the provider at once (`max_concurrent_requests`), as typed; blank for no limit, or the default of its type. */
+  maxConcurrentRequests: string;
   /** For a provider whose type a plugin runs: the values of the settings of its type, by key. */
   plugin: PluginFieldValues;
 }>;
@@ -41,10 +43,10 @@ export function providerForm(provider: GlobalConfigProvider | null, defaultProvi
       anthropicApiKey: provider.anthropicApiKey ?? "", permissionMode: provider.permissionMode ?? "",
       configDir: provider.configDir ?? "", environment: environmentText(provider.environment), modelsOrder: provider.modelsOrder ?? "",
       modelsHide: (provider.modelsHide ?? []).map(parseModelRule), modelsShow: (provider.modelsShow ?? []).map(parseModelRule),
-      contextSize: provider.contextSize ?? null, plugin: pluginFieldValues(provider) }
+      contextSize: provider.contextSize ?? null, maxConcurrentRequests: provider.maxConcurrentRequests?.toString() ?? "", plugin: pluginFieldValues(provider) }
     : { key: "", type: types[0] ?? "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "", apiUrl: "", apiKeyEnv: "",
       apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "",
-      modelsHide: [], modelsShow: [], contextSize: null, plugin: {} };
+      modelsHide: [], modelsShow: [], contextSize: null, maxConcurrentRequests: "", plugin: {} };
 }
 
 export function providerFormDirty(form: ProviderForm, baseline: ProviderForm): boolean {
@@ -63,6 +65,7 @@ export function validateProviderForm(form: ProviderForm, providers: readonly Pic
   if (form.apiUrl.trim() && !/^https?:\/\/\S+$/i.test(form.apiUrl.trim())) return "The API URL must start with http:// or https://.";
   if (form.makeDefault && !form.enabled) return "Only an enabled provider can be the default.";
   if (form.color.trim() && !brandColor(form.color)) return "A color is written as #rgb or #rrggbb.";
+  if (form.maxConcurrentRequests.trim() && requestLimit(form.maxConcurrentRequests) === null) return "Requests at once is a whole number greater than zero.";
   if (runsOwnCli(form.type) && !validConfigDir(form.configDir)) return "A folder is a full path or starts with ~.";
   if (runsOwnCli(form.type)) return environmentProblem(form.environment);
   return null;
@@ -96,7 +99,15 @@ export function providerEdit(form: ProviderForm, baseline: ProviderForm | null =
     configDir: cli ? optional(form.configDir) : null,
     // And the variables its CLI starts with: an empty list removes them.
     environment: cli ? environmentEntries(form.environment) : null, modelsOrder: optional(form.modelsOrder),
-    ...providerRules(form, baseline), contextSize: form.contextSize };
+    ...providerRules(form, baseline), contextSize: form.contextSize, maxConcurrentRequests: requestLimit(form.maxConcurrentRequests) };
+}
+
+/** The limit of requests at once typed in the form: a whole number greater than zero, else null (no limit, or not a number). */
+export function requestLimit(text: string): number | null {
+  const value = text.trim();
+  if (!/^\d{1,9}$/.test(value)) return null;
+  const limit = Number(value);
+  return limit > 0 ? limit : null;
 }
 
 /** The orders of the models of a provider, by their value in the configuration file. */

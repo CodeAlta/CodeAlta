@@ -2948,6 +2948,12 @@ public sealed partial class CodeAltaConfigStore
             throw new InvalidOperationException($"providers.{definition.ProviderKey} network_timeout_seconds must be greater than zero.");
         }
 
+        // Every type takes it: the requests of a provider beyond it wait in turn (a turn of an agent that runs its own loop).
+        if (definition.MaxConcurrentRequests is <= 0)
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} max_concurrent_requests must be greater than zero.");
+        }
+
         ValidateModelsIncludeRegex(definition);
         ValidateModelRules(definition);
         if (definition.ModelsOrder is not null && !ModelOrdering.TryParse(definition.ModelsOrder, out _))
@@ -3010,7 +3016,6 @@ public sealed partial class CodeAltaConfigStore
 
             case CopilotDirectProviderType:
                 RejectUnsupportedField(definition, "account_id", definition.AccountId);
-                RejectUnsupportedField(definition, "max_concurrent_requests", definition.MaxConcurrentRequests);
                 RejectUnsupportedField(definition, "text_verbosity", definition.TextVerbosity);
                 RejectUnsupportedField(definition, "include_encrypted_reasoning", definition.IncludeEncryptedReasoning);
                 RejectUnsupportedField(definition, "response_transport", definition.ResponseTransport);
@@ -3123,7 +3128,6 @@ public sealed partial class CodeAltaConfigStore
 
             case XaiDirectProviderType:
                 RejectUnsupportedField(definition, "account_id", definition.AccountId);
-                RejectUnsupportedField(definition, "max_concurrent_requests", definition.MaxConcurrentRequests);
                 RejectUnsupportedField(definition, "text_verbosity", definition.TextVerbosity);
                 RejectUnsupportedField(definition, "include_encrypted_reasoning", definition.IncludeEncryptedReasoning);
                 RejectUnsupportedField(definition, "response_transport", definition.ResponseTransport);
@@ -3165,7 +3169,6 @@ public sealed partial class CodeAltaConfigStore
     {
         RejectUnsupportedField(definition, "auth_source", definition.AuthSource);
         RejectUnsupportedField(definition, "account_id", definition.AccountId);
-        RejectUnsupportedField(definition, "max_concurrent_requests", definition.MaxConcurrentRequests);
         if (!string.Equals(definition.ProviderType, "openai-responses", StringComparison.Ordinal))
         {
             RejectUnsupportedField(definition, "text_verbosity", definition.TextVerbosity);
@@ -3223,11 +3226,6 @@ public sealed partial class CodeAltaConfigStore
         if (definition.WebSearch is not (null or "cached" or "live" or "disabled"))
         {
             throw new InvalidOperationException($"providers.{definition.ProviderKey} web_search must be one of: cached, live, disabled.");
-        }
-
-        if (definition.MaxConcurrentRequests is <= 0)
-        {
-            throw new InvalidOperationException($"providers.{definition.ProviderKey} max_concurrent_requests must be greater than zero.");
         }
 
         if (definition.AuthSource != "codealta_oauth")

@@ -258,6 +258,35 @@ public static class ConfiguredModelProviderRegistryBuilder
         ArgumentNullException.ThrowIfNull(codexSubscriptionConcurrencyLimiter);
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
 
+        if (!TryCreateProviderRegistrationOfType(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
+                externalConversationHeaders, providerProcesses, application, out descriptor, out createRuntime, issued, modelServerTransports))
+        {
+            return false;
+        }
+
+        // The registry bounds the requests at once of the provider with it. A codex provider keeps its own guard, per
+        // ChatGPT account, which takes the same setting with its default.
+        if (!string.Equals(definition.ProviderType, "codex", StringComparison.Ordinal) && definition.MaxConcurrentRequests is > 0)
+        {
+            descriptor = descriptor with { MaxConcurrentRequests = definition.MaxConcurrentRequests };
+        }
+
+        return true;
+    }
+
+    private static bool TryCreateProviderRegistrationOfType(
+        CodeAltaProviderDocument definition,
+        string stateRootPath,
+        ModelsDevCatalogService? modelCatalog,
+        CodexSubscriptionConcurrencyLimiter codexSubscriptionConcurrencyLimiter,
+        IAgentExternalConversationHeaderStore? externalConversationHeaders,
+        AgentProviderProcesses? providerProcesses,
+        string? application,
+        out ModelProviderDescriptor descriptor,
+        out Func<IModelProviderRuntime> createRuntime,
+        Action<string>? issued,
+        Func<string, HttpMessageHandler?>? modelServerTransports)
+    {
         switch (definition.ProviderType)
         {
             case "openai-chat":

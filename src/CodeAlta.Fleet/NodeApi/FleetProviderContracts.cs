@@ -24,7 +24,11 @@ namespace CodeAlta.Fleet.NodeApi;
 /// <param name="Model">Its default model; null for the one of its type.</param>
 /// <param name="ApiUrl">Its endpoint, when the configuration names one.</param>
 public sealed record FleetProviderStatus(string Key, string Name, string Type, bool Enabled, string State, string? Reason, string? Detail, string Credential,
-    string? KeySecret, bool SignIn, bool IsDefault, string? Model, string? ApiUrl);
+    string? KeySecret, bool SignIn, bool IsDefault, string? Model, string? ApiUrl)
+{
+    /// <summary>Gets the most requests it takes at once (<c>max_concurrent_requests</c>); null for no limit, or the default of its type. An older node says none.</summary>
+    public int? MaxConcurrentRequests { get; init; }
+}
 
 /// <summary>A type of provider a node can be given from the desktop, and how it gets its credential.</summary>
 /// <param name="Type">The type.</param>
@@ -56,6 +60,12 @@ public sealed record FleetProviderSetParams(string Key, string? Type, string? Di
 {
     /// <summary>Gets the model server a <c>llama-cpp</c> provider uses (<c>local/&lt;server&gt;</c> for one of the machine); null keeps it, empty clears it.</summary>
     public string? Server { get; init; }
+
+    /// <summary>
+    /// Gets the most requests the provider takes at once (<c>max_concurrent_requests</c>): null keeps the limit it has, 0 removes it.
+    /// An older node ignores it.
+    /// </summary>
+    public int? MaxConcurrentRequests { get; init; }
 }
 
 /// <summary>A provider of a node, by its key.</summary>

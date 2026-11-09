@@ -97,6 +97,10 @@ public sealed partial class AgentHub
         };
         Func<AgentTurnDelta, CancellationToken, ValueTask> onDelta =
             (delta, token) => delta.Kind == AgentContentKind.Assistant && delta.Text.Length > 0 ? onText(delta.Text, token) : ValueTask.CompletedTask;
+        // A side question is a request of the provider like the others: it waits for a free one in turn.
+        using var slot = _modelProviderRegistry.GetRequestGate(providerId) is { } gate
+            ? await gate.AcquireAsync(cancellationToken).ConfigureAwait(false)
+            : null;
         var response = standalone is not null
             ? await standalone.ExecuteStandaloneTurnAsync(request, onDelta, cancellationToken).ConfigureAwait(false)
             : await registration.TurnExecutor.ExecuteTurnAsync(request, onDelta, cancellationToken).ConfigureAwait(false);

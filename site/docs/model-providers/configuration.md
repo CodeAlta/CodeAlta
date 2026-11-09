@@ -28,6 +28,7 @@ A type your version of CodeAlta does not know, one a newer version added, leaves
 | `context_size` | Default [context size](readme.md#context-and-compaction), in input tokens, for the models that offer it. |
 | `api_key` / `api_key_secret` / `api_key_env` | The API key, the [secret](../secrets.md) of this computer that holds it, or the environment variable that holds it, in this order. Prefer `api_key_secret` or `api_key_env`. |
 | `api_url` | Endpoint. Azure OpenAI, Codex and Copilot require HTTPS, except on localhost. |
+| `max_concurrent_requests` | The most requests the provider gets at once; the others wait their turn. See [Requests at once](#requests-at-once). Missing means no limit, 16 for `codex`. |
 | `network_timeout_seconds` | Network timeout of `openai-chat`, `openai-responses`, `azure-openai`, `codex` and `llama-cpp`; 100 seconds when unset. |
 | `protocol_trace` | Traces the requests of the OpenAI, Codex and Copilot providers. |
 | `models_dev_provider_id` | The models.dev provider that describes the models. |
@@ -68,6 +69,24 @@ A type your version of CodeAlta does not know, one a newer version added, leaves
 - Not set, each model gets its own default: `low` for most GPT-5 and GPT-6 models, as in Codex.
 - On `openai-responses`, that default goes to the OpenAI API only. An endpoint at another `api_url` gets `text_verbosity` only when you set it.
 - A model that takes no verbosity, such as GPT-4.1 or o3, gets none.
+
+## Requests at once
+
+`max_concurrent_requests` bounds what one endpoint is given at once, such as a vLLM server that serves two sessions well:
+
+```toml
+[providers.spark-vllm]
+type = "openai-chat"
+api_url = "http://dgx-spark:8000/v1"
+max_concurrent_requests = 2
+```
+
+- A request is one model request with its answer. For a provider that runs an agent of its own (`claude-code`, `codex-cli`, `acp`), it is a whole turn.
+- The requests beyond the limit wait in the order they came. The session says so in its timeline, with its place: **Waiting for a free request** of `spark-vllm`, 1 before it. The notice goes away once its request is sent.
+- A new limit applies at once, also to the requests that wait.
+- In CodeAlta Desktop, it is **Requests at once** in the form of the provider, and in the form of a provider of a [machine](../fleet/machines.md).
+- The limit is counted by each computer: several machines that call the same endpoint each have their own.
+- A `codex` provider keeps its own guard, shared by the providers of one ChatGPT account, with 16 by default.
 
 ## Codex, Copilot and xAI
 

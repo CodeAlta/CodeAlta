@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { GlobalConfigProvider } from "#neoastra";
-import { modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerRules, providerProblem, providerStateProblem, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
+import { modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerFormDirty, providerRules, providerProblem, providerStateProblem, requestLimit, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
 
 const types = ["openai-chat", "anthropic", "codex"];
 const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled: true, displayName: "Local", effectiveName: "Local", model: "model-a",
@@ -12,10 +12,10 @@ const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled
 test("a form starts from the written values, never from the stored secret", () => {
   const form = providerForm(local, "local", types);
   assert.deepEqual(form, { key: "local", type: "openai-chat", enabled: true, displayName: "Local", model: "model-a", reasoningEffort: "",
-    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", modelsHide: [], modelsShow: [], contextSize: null, plugin: {} });
+    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", modelsHide: [], modelsShow: [], contextSize: null, maxConcurrentRequests: "", plugin: {} });
   assert.equal(providerForm(local, "other", types).makeDefault, false);
   assert.deepEqual(providerForm(null, "local", types), { key: "", type: "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "",
-    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", modelsHide: [], modelsShow: [], contextSize: null, plugin: {} });
+    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", environment: "", modelsOrder: "", modelsHide: [], modelsShow: [], contextSize: null, maxConcurrentRequests: "", plugin: {} });
   assert.equal(providerFormDirty(form, form), false);
   assert.equal(providerFormDirty({ ...form, model: "model-b" }, form), true);
 });
@@ -54,7 +54,7 @@ test("the wire edit sends blank fields as null and keeps an untouched secret", (
   const form = providerForm(local, "local", types);
   assert.deepEqual(providerEdit({ ...form, key: " Local ", model: "  " }), { key: "local", type: "openai-chat", enabled: true, displayName: "Local",
     model: null, reasoningEffort: null, apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: null, apiKey: null, clearApiKey: false, icon: null, color: null, anthropicApiKey: null,
-    permissionMode: null, configDir: null, environment: null, modelsOrder: null, modelsHide: [], modelsShow: [], contextSize: null });
+    permissionMode: null, configDir: null, environment: null, modelsOrder: null, modelsHide: [], modelsShow: [], contextSize: null, maxConcurrentRequests: null });
   assert.equal(providerEdit({ ...form, apiKey: "new-secret" }).apiKey, "new-secret");
   const cleared = providerEdit({ ...form, apiKey: "ignored", clearApiKey: true });
   assert.equal(cleared.apiKey, null);
@@ -135,6 +135,20 @@ test("the size of context is read and sent in tokens, null for the size of the m
   assert.equal(providerEdit(form).contextSize, 1_000_000);
   assert.equal(providerEdit({ ...form, contextSize: null }).contextSize, null);
   assert.equal(providerFormDirty({ ...form, contextSize: 272_000 }, form), true);
+});
+
+test("the requests at once are read and sent as a whole number, blank for no limit", () => {
+  const form = providerForm({ ...local, maxConcurrentRequests: 2 }, "local", types);
+  assert.equal(form.maxConcurrentRequests, "2");
+  assert.equal(providerEdit(form).maxConcurrentRequests, 2);
+  assert.equal(providerEdit({ ...form, maxConcurrentRequests: " " }).maxConcurrentRequests, null);
+  assert.equal(providerFormDirty({ ...form, maxConcurrentRequests: "3" }, form), true);
+  assert.equal(validateProviderForm({ ...form, maxConcurrentRequests: " 4 " }, [{ key: "local" }], "local"), null);
+  for (const wrong of ["0", "-1", "1.5", "two"])
+    assert.equal(validateProviderForm({ ...form, maxConcurrentRequests: wrong }, [{ key: "local" }], "local"), "Requests at once is a whole number greater than zero.", wrong);
+  assert.equal(requestLimit("12"), 12);
+  assert.equal(requestLimit(""), null);
+  assert.equal(requestLimit("0"), null);
 });
 
 test("the order of the models is read and sent as the file names it, blank for the order of the type", () => {

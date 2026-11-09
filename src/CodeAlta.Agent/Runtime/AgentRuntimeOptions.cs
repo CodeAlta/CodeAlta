@@ -56,4 +56,10 @@ public sealed class AgentRuntimeProviderRegistration
     /// Gets or initializes the model catalog for provider probing. Session execution does not require this service.
     /// </summary>
     public IModelProviderModelCatalog? ModelCatalog { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the gate that bounds the requests at once of the provider, taken by the sessions around each
+    /// call of <see cref="TurnExecutor"/> that sends a request; <see langword="null"/> for no limit.
+    /// </summary>
+    public ProviderRequestGate? RequestGate { get; init; }
 }

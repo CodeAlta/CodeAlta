@@ -524,6 +524,7 @@ internal sealed partial class GlobalConfigService
                           ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command), ModelsOrder = ConfiguredModelsOrder(definition?.ModelsOrder, definition?.SortModels),
                           ModelsHide = ModelRules(definition?.ModelsHide), ModelsShow = ModelRules(definition?.ModelsShow),
                           ContextSize = ContextSizeContract.Of(definition?.ContextSize),
+                          MaxConcurrentRequests = definition?.MaxConcurrentRequests is > 0 ? definition.MaxConcurrentRequests : null,
                           ApiKeySecret = Bound(definition?.ApiKeySecret),
                           ApiKeySecretSet = definition?.ApiKeySecret is { } secretName ? IsSecretSet(secretName) : null,
                           KeyInEnvironment = definition?.ApiKeyEnv is { } variable && !string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable(variable.Trim())) ? true : null,
@@ -648,6 +649,8 @@ internal sealed partial class GlobalConfigService
             definition.Model = Optional(edit.Model);
             definition.ReasoningEffort = Optional(edit.ReasoningEffort);
             definition.ContextSize = edit.ContextSize is > 0 ? edit.ContextSize : null;
+            // Empty for no limit; a codex provider takes its default of the store then.
+            definition.MaxConcurrentRequests = edit.MaxConcurrentRequests is > 0 ? edit.MaxConcurrentRequests : null;
             definition.ApiUrl = Optional(edit.ApiUrl);
             definition.ApiKeyEnv = Optional(edit.ApiKeyEnv);
             // Only the CLI of Claude Code reads that variable by itself.
@@ -1373,6 +1376,10 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? ContextSize { get; init; }
 
+    /// <summary>The most requests that go to the provider at once (<c>max_concurrent_requests</c>); null for no limit, or the default of its type.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxConcurrentRequests { get; init; }
+
     /// <summary>
     /// The order of its models the file names: <c>models_order</c>, else the older <c>sort_models</c> read as <c>name</c> or
     /// <c>provider</c>; null for the order of its type.
@@ -1449,6 +1456,10 @@ internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool 
     /// <summary>The size of context, in input tokens, of the sessions of the provider whose model has it; null for the size of their model.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? ContextSize { get; init; }
+
+    /// <summary>The most requests that go to the provider at once (<c>max_concurrent_requests</c>); null for no limit, or the default of its type.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxConcurrentRequests { get; init; }
 
     /// <summary>
     /// The variables a <c>claude-code</c> provider starts its CLI with (<c>env</c>); empty or null for none. Kept for

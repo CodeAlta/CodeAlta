@@ -223,7 +223,7 @@ public sealed class AgentRuntime : IAsyncDisposable
             registration.TurnExecutor,
             options,
             allowProviderContinuation: true,
-            cachedModels: GetCachedModels(registration)) { ModelCatalog = ResolveModelCatalog(registration), SecretMasker = _options.SecretMasker };
+            cachedModels: GetCachedModels(registration)) { ModelCatalog = ResolveModelCatalog(registration), SecretMasker = _options.SecretMasker, RequestGate = registration.RequestGate };
     }
 
     // Preparation is deliberately separate from legacy resume: no repair, cache upsert,
@@ -243,7 +243,7 @@ public sealed class AgentRuntime : IAsyncDisposable
         var state = TransferStateToProvider(snapshot.State, provider.Provider, now);
         cancellationToken.ThrowIfCancellationRequested();
         var candidate = new AgentSession(ProviderId, provider.Provider, summary, state, snapshot.History,
-            Store, provider.TurnExecutor, options, allowProviderContinuation: false, cachedModels: GetCachedModels(provider)) { ModelCatalog = ResolveModelCatalog(provider), SecretMasker = _options.SecretMasker };
+            Store, provider.TurnExecutor, options, allowProviderContinuation: false, cachedModels: GetCachedModels(provider)) { ModelCatalog = ResolveModelCatalog(provider), SecretMasker = _options.SecretMasker, RequestGate = provider.RequestGate };
         return new AgentPreparedTransfer(candidate, snapshot.Summary, snapshot.State, summary, state, snapshot.Revision);
     }
 
@@ -302,7 +302,7 @@ public sealed class AgentRuntime : IAsyncDisposable
             options,
             allowProviderContinuation: false,
             cachedModels: GetCachedModels(provider),
-            earlierHistory: earlier) { ModelCatalog = ResolveModelCatalog(provider), SecretMasker = _options.SecretMasker };
+            earlierHistory: earlier) { ModelCatalog = ResolveModelCatalog(provider), SecretMasker = _options.SecretMasker, RequestGate = provider.RequestGate };
     }
 
     // What a session read again reads of its journal: what its provider needs, the rest when an action needs it.

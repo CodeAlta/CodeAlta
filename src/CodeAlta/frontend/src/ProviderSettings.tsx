@@ -15,7 +15,7 @@ import { providerBrand } from "./brands";
 import { Logo, ProviderIcon } from "./ProviderIcon";
 import { ProviderColorInput, ProviderIconPicker } from "./ProviderIconFields";
 import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
-import { isSignedOut, modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerRules, providerFormDirty, providerProblem, providerStateProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
+import { isSignedOut, modelsOrderLabel, modelsOrders, providerEdit, providerForm, providerRules, providerFormDirty, providerProblem, providerStateProblem, requestLimit, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
 import { GuidedTour, type GuidedTourStep } from "./GuidedTour";
 import { providerTourSteps, providerTourStorageKey, startsProviderTour } from "./providerTour";
 import { SettingsFileLocations } from "./SettingsFileLocation";
@@ -254,7 +254,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
         enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model), reasoningEffort: optional(form.reasoningEffort),
         values: pluginSettingValues(formPlugin, form.plugin), makeDefault: form.makeDefault, icon: optional(form.icon)?.toLowerCase() ?? null,
         color: optional(form.color), permissionMode: optional(form.permissionMode), modelsOrder: optional(form.modelsOrder),
-        ...providerRules(form, original ? baseline : null), contextSize: form.contextSize },
+        ...providerRules(form, original ? baseline : null), contextSize: form.contextSize, maxConcurrentRequests: requestLimit(form.maxConcurrentRequests) },
         { timeoutMilliseconds: 60000 }), key, renamed(key));
       return;
     }
@@ -417,6 +417,11 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
             <ProviderContextSize key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch}
               providerId={modelProvider && availability.get(modelProvider.toLowerCase())?.availability === "Ready" ? modelProvider : null}
               model={form.model.trim() || fallback("model")} value={form.contextSize} disabled={busy} readModels={readModels} onChange={contextSize => edit({ contextSize })} />
+            {/* Beyond it, the requests of the sessions wait their turn: a turn, for an agent that runs its own loop. */}
+            <FormGroup label={t("Requests at once")} labelFor="provider-max-requests" helperText={t("The most requests this provider gets at once; the sessions beyond it wait their turn.")}>
+              <InputGroup id="provider-max-requests" value={form.maxConcurrentRequests} disabled={busy} inputMode="numeric" spellCheck={false}
+                intent={form.maxConcurrentRequests.trim() && requestLimit(form.maxConcurrentRequests) === null ? "danger" : "none"}
+                placeholder={form.type === "codex" ? "16" : t("No limit")} onChange={event => edit({ maxConcurrentRequests: event.target.value })} /></FormGroup>
             {/* A provider is assigned to spaces once it is saved; each click of the chip saves at once. */}
             {spaceScope && original && <FormGroup label={t("Spaces")} className="provider-settings-wide">
               <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={original.key} name={original.effectiveName} disabled={busy} /></FormGroup>}

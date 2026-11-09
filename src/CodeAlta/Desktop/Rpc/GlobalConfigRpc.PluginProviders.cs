@@ -22,6 +22,8 @@ internal sealed partial class GlobalConfigService
     private const string SortModelsKey = "sort_models";
     // The size of context every provider type has (see PluginProviderSettings.DefaultContextSize).
     private const string ContextSizeKey = "context_size";
+    // The limit of requests at once every provider type has (see PluginModelProviderTypes): turns, for an agent of a plugin.
+    private const string MaxConcurrentRequestsKey = "max_concurrent_requests";
     // The rules that hide some models of a provider, and those that show some again (see ModelVisibility).
     private const string ModelsHideKey = "models_hide";
     private const string ModelsShowKey = "models_show";
@@ -127,6 +129,7 @@ internal sealed partial class GlobalConfigService
                     ModelsHide = ModelRules(settings.GetList(ModelsHideKey)),
                     ModelsShow = ModelRules(settings.GetList(ModelsShowKey)),
                     ContextSize = ContextSizeContract.Of(settings.DefaultContextSize),
+                    MaxConcurrentRequests = settings.GetInt64(MaxConcurrentRequestsKey) is > 0 and var limit ? (int)Math.Min(limit, int.MaxValue) : null,
                     Plugin = new GlobalConfigPluginProviderValues(
                         Bound(contribution.Tag),
                         [.. contribution.Settings.Select(setting => ToValue(setting, settings))],
@@ -225,6 +228,7 @@ internal sealed partial class GlobalConfigService
             if (request.ModelsHide is not null) Set(values, ModelsHideKey, modelsHide?.Select(static rule => (object?)rule).ToArray());
             if (request.ModelsShow is not null) Set(values, ModelsShowKey, modelsShow?.Select(static rule => (object?)rule).ToArray());
             Set(values, ContextSizeKey, request.ContextSize is > 0 and var size ? (long)size : null);
+            Set(values, MaxConcurrentRequestsKey, request.MaxConcurrentRequests is > 0 and var limit ? (long)limit : null);
             foreach (var setting in contribution.Settings.Where(static setting => !setting.ReadOnly))
             {
                 var value = request.Values?.FirstOrDefault(value => string.Equals(value.Key, setting.Key, StringComparison.Ordinal));
@@ -700,6 +704,10 @@ internal sealed record GlobalConfigSavePluginProviderRequest(string? ExpectedEpo
     /// <summary>The size of context, in input tokens, of the sessions whose model has it (<c>context_size</c>); null for the size of their model.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? ContextSize { get; init; }
+
+    /// <summary>The most turns of the agent at once (<c>max_concurrent_requests</c>); null for no limit.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxConcurrentRequests { get; init; }
 }
 
 internal sealed record GlobalConfigPluginCatalogRequest(string? ExpectedEpoch, string? Type, bool Refresh);

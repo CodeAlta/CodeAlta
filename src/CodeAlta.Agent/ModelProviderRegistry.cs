@@ -10,6 +10,9 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     private readonly object _lock = new();
     private readonly Dictionary<string, Registration> _registrations = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _preparations = new(StringComparer.OrdinalIgnoreCase);
+    // The gate of a provider outlives its registrations: the requests of the sessions that still run on a former runtime
+    // count with those of the new one, and a new limit applies to all of them.
+    private readonly Dictionary<string, ProviderRequestGate> _requestGates = new(StringComparer.OrdinalIgnoreCase);
     private long _lastVersion;
     private bool _closed;
 
@@ -47,7 +50,8 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     public Runtime.AgentProviderProcesses ProviderProcesses { get; } = new();
 
     /// <summary>
-    /// Registers or replaces a provider runtime factory.
+    /// Registers or replaces a provider runtime factory. The limit of requests at once of the descriptor
+    /// (<see cref="ModelProviderDescriptor.MaxConcurrentRequests"/>) is applied in place to the gate of the provider.
     /// </summary>
     /// <param name="descriptor">The provider descriptor.</param>
     /// <param name="runtimeFactory">The runtime factory.</param>
@@ -70,6 +74,29 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
             }
 
             _registrations[key] = new Registration(descriptor, runtimeFactory, null, ++_lastVersion);
+            if (_requestGates.TryGetValue(key, out var gate))
+            {
+                gate.SetLimit(descriptor.MaxConcurrentRequests);
+            }
+            else
+            {
+                _requestGates[key] = new ProviderRequestGate(descriptor.ProviderId.Value, descriptor.MaxConcurrentRequests);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the gate that bounds the requests at once of a provider. It is the same across the registrations of the
+    /// provider: replacing the provider changes its limit, not its count.
+    /// </summary>
+    /// <param name="providerId">The provider identifier.</param>
+    /// <returns>The gate, or <see langword="null"/> when the provider was never registered.</returns>
+    public ProviderRequestGate? GetRequestGate(ModelProviderId providerId)
+    {
+        var key = ModelProviderId.NormalizeValue(providerId.Value);
+        lock (_lock)
+        {
+            return _requestGates.GetValueOrDefault(key);
         }
     }
 

@@ -572,6 +572,21 @@ test("a card that schedules a resume after a limit offers it, and the cards of i
   assert.equal(plain.resumeOffer, undefined);
 });
 
+test("a request that waits in a queue shows its latest place, until its wait ends", () => {
+  const wait = (offset: string, waitId: string, state: string, before?: number, wait = "provider-request") => entry({ eventType: "sessionUpdate", kind: "Info", offset,
+    text: before === undefined ? "Got a free request of spark-vllm" : `Waits for a free request of spark-vllm (${before} before it)`,
+    details: JSON.stringify({ wait, waitId, name: "spark-vllm", ...before === undefined ? {} : { before }, state }) });
+  const waiting = buildTimelineItems([wait("1", "w1", "waiting", 2), wait("2", "w1", "waiting", 1)]);
+  assert.equal(waiting.length, 1, "a new place replaces the former one");
+  assert.equal(waiting[0].title, "Waiting for a free request");
+  assert.equal(waiting[0].subtitle, "spark-vllm");
+  assert.equal(waiting[0].icon, "reminder");
+  assert.match(waiting[0].markdown ?? "", /1 before it/);
+  assert.deepEqual(buildTimelineItems([wait("1", "w1", "waiting", 1), wait("2", "w1", "ended")]), [], "the notice goes once the request is sent");
+  const slot = buildTimelineItems([wait("1", "w1", "ended"), wait("2", "w2", "waiting", 0, "model-server-slot")]);
+  assert.deepEqual(slot.map(item => item.title), ["Waiting for a free slot"]);
+});
+
 test("the cards of Adaptive are shown and titled by what it did, other information is not", () => {
   const items = buildTimelineItems([
     entry({ eventType: "sessionUpdate", kind: "Info", offset: "20", text: "The turn changed code: Haiku 5.5 checks the change against the request.",

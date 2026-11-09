@@ -236,7 +236,12 @@ internal sealed class SessionRuntimeStateReducer
                     sessionStatus = new SessionRuntimeStatusUpdate(update.Message, true, StatusTone.Info);
                 }
 
-                if (update.Kind is AgentSessionUpdateKind.Info or AgentSessionUpdateKind.Warning &&
+                if (CodeAlta.Agent.Runtime.AgentWaitNotice.IsEnded(update.Details))
+                {
+                    // The request that waited for a free request of its provider went out: its notice ends.
+                    clearSessionStatus = true;
+                }
+                else if (update.Kind is AgentSessionUpdateKind.Info or AgentSessionUpdateKind.Warning &&
                     !string.IsNullOrWhiteSpace(update.Message))
                 {
                     sessionStatus = new SessionRuntimeStatusUpdate(
