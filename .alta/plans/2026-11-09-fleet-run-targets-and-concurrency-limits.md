@@ -172,18 +172,18 @@ Each phase ships alone, in this order.
 
 **Phase 2: requests at once to a provider**
 
-- [ ] 8. `ProviderRequestGate` in `CodeAlta.Agent`, owned by `ModelProviderRegistry` and keyed by provider: first in first out, cancellable, with the place of each waiter. A decorator of `IModelProviderTurnExecutor` takes it around `ExecuteTurnAsync` (verify first that one call is one model request for the API providers, and wrap the attempt if it is the whole loop).
-- [ ] 9. Accept `max_concurrent_requests` for every provider type in `CodeAltaConfigStore` (validation, copy, overlay); `codex` keeps its default of 16 and its own account guard. Pass it in `ConfiguredModelProviderRegistryBuilder`.
-- [ ] 10. The wait as a session update that is replaced when the place changes and removed when the slot is taken.
-- [ ] 11. **Requests at once** in the provider form (`GlobalConfigRpc`, `providerForm.ts`, `ProviderSettings.tsx`) and for a provider of a machine (`FleetProviderSetParams`, `NodeProviders.cs`). No new screen in the TUI; its editor keeps the field it does not show.
-- [ ] 12. Docs: `site/docs/model-providers/configuration.md`.
+- [x] 8. `ProviderRequestGate` in `CodeAlta.Agent`, owned by `ModelProviderRegistry` and keyed by provider: first in first out, cancellable, with the place of each waiter. A decorator of `IModelProviderTurnExecutor` takes it around `ExecuteTurnAsync` (verify first that one call is one model request for the API providers, and wrap the attempt if it is the whole loop). Done without a decorator of the executor: the session sends its requests through `ProviderRequestGatedTurnExecutor`, so that its checks of what the executor offers still see the executor.
+- [x] 9. Accept `max_concurrent_requests` for every provider type in `CodeAltaConfigStore` (validation, copy, overlay); `codex` keeps its default of 16 and its own account guard. Pass it in `ConfiguredModelProviderRegistryBuilder`.
+- [x] 10. The wait as a session update that is replaced when the place changes and removed when the slot is taken.
+- [x] 11. **Requests at once** in the provider form (`GlobalConfigRpc`, `providerForm.ts`, `ProviderSettings.tsx`) and for a provider of a machine (`FleetProviderSetParams`, `NodeProviders.cs`). No new screen in the TUI; its editor keeps the field it does not show.
+- [x] 12. Docs: `site/docs/model-providers/configuration.md`.
 
 **Phase 3: model servers**
 
-- [ ] 13. A gate per model of a server in `ModelHost`, sized by its slots; `LocalModelServerHandler` and `LlamaHttpAsync` take it for the paths of inference. Released when the answer ends or its connection closes.
-- [ ] 14. `llama.http.queued` events with the place; `FleetModelServerHandler` turns them into the session update of step 10. A `llama-cpp` provider with `server` refuses `max_concurrent_requests`, since its server decides.
-- [ ] 15. Start servers with `--metrics`, read `llamacpp:requests_deferred` in `ServerSupervisor`, and show waiting requests in `ServerModelStatus`, `llama.servers.list`, the **Servers** tab and `alta llama`.
-- [ ] 16. Docs: `site/docs/fleet/model-servers.md`, `doc/fleet/model-servers.md` (who owns the gate).
+- [x] 13. A gate per model of a server in `ModelHost`, sized by its slots; `LocalModelServerHandler` and `LlamaHttpAsync` take it for the paths of inference. Released when the answer ends or its connection closes.
+- [x] 14. `llama.http.queued` events with the place; `FleetModelServerHandler` turns them into the session update of step 10. A `llama-cpp` provider with `server` refuses `max_concurrent_requests`, since its server decides.
+- [x] 15. Start servers with `--metrics`, read `llamacpp:requests_deferred` in `ServerSupervisor`, and show waiting requests in `ServerModelStatus`, `llama.servers.list`, the **Servers** tab and `alta llama`. Adapted: the requests wait in the gate of the host, not in `llama-server`, so the count of those that wait comes from the gate (`ServerModelStatus.Waiting`) and `--metrics` is not needed.
+- [x] 16. Docs: `site/docs/fleet/model-servers.md`, `doc/fleet/model-servers.md` (who owns the gate).
 
 **Phase 4: runs on tags**
 

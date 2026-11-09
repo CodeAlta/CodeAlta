@@ -188,7 +188,44 @@ public sealed partial class ModelHost
 
     /// <summary>The servers.</summary>
     /// <returns>Each server and where it stands.</returns>
-    public IReadOnlyList<ServerView> ListServers() => Supervisors().Select(static s => new ServerView(s.Definition, s.Status)).ToList();
+    public IReadOnlyList<ServerView> ListServers() => Supervisors().Select(View).ToList();
+
+    /// <summary>
+    /// Gets the slots of the models of the servers, which the requests of inference of this machine and of the others take
+    /// before they reach a server (<see cref="ModelSlotGates"/>).
+    /// </summary>
+    public ModelSlotGates Slots => LazyInitializer.EnsureInitialized(ref _slots, () => new ModelSlotGates(NotifyChanged));
+
+    private ModelSlotGates? _slots;
+
+    /// <summary>
+    /// Gets the gate of the slots of the model a request of inference names on a server: sized by the slots the server reports
+    /// for it, else by the slots its settings give it; one that names no model is for the one model of a server.
+    /// </summary>
+    /// <param name="id">The server.</param>
+    /// <param name="model">The model the request names (its <c>model</c>), or null.</param>
+    /// <returns>The gate and the model it is for, or null for a server that is not on this machine.</returns>
+    public (ModelSlotGate Gate, string Model)? SlotsOf(string id, string? model)
+    {
+        if (Find(id) is not { } supervisor) return null;
+        var definition = supervisor.Definition;
+        // The model as the server knows it: by the name the router lists it with, or by its own; the one model of a server else.
+        var named = model is { Length: > 0 } ? definition.Models.FirstOrDefault(m => m.Model == model || supervisor.RouterName(m.Model) == model) : null;
+        var served = named ?? (definition.Models.Count == 1 ? definition.Models[0] : null);
+        var key = served?.Model ?? model ?? string.Empty;
+        var status = served is null ? null : supervisor.Status.Models.FirstOrDefault(m => m.Model == served.Model);
+        var slots = status is { TotalSlots: > 0 } ? status.TotalSlots : served?.Parallel;
+        return (Slots.For(id, key, slots), key);
+    }
+
+    // A server as it is listed: its models with the requests that wait for their slots here.
+    private ServerView View(ServerSupervisor supervisor)
+    {
+        var status = supervisor.Status;
+        var id = supervisor.Definition.Id;
+        var waiting = status.Models.Select(model => model with { Waiting = Slots.Waiting(id, model.Model) }).ToList();
+        return new ServerView(supervisor.Definition, status with { Models = waiting });
+    }
 
     /// <summary>A server for a command line of llama-server (a <c>run_*.sh</c> script), not saved yet.</summary>
     /// <param name="text">The command or the script.</param>

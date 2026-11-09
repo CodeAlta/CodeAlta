@@ -108,6 +108,8 @@ name = "Coder"
 server = "local/coder"        # this computer's server "coder"; "<machine>/<server>" for one of a paired machine
 ```
 
+A model serves as many requests at once as its slots (**Requests** of its server, such as `2/2`). Beyond them, the requests of this computer and of your other machines wait on the machine of the server, in the order they came: a session says **Waiting for a free slot** with its place in the queue, such as `pc-ai/coder (2 before it)`, and **Model servers** shows how many wait, such as `2 of 2 requests, 3 waiting`. Such a provider has no **Requests at once** of its own: the slots decide.
+
 ## Update llama.cpp
 
 llama.cpp publishes builds every day and a stable release every few weeks. In the **llama.cpp** tab, a machine with a newer build shows **update**. Click the machine, then:

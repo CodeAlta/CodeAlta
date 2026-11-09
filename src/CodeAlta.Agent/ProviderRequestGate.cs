@@ -37,6 +37,12 @@ public sealed class ProviderRequestGate
     /// <summary>Gets the name of what the requests go to: the key of the provider.</summary>
     public string Name { get; }
 
+    /// <summary>
+    /// Gets where a request that holds a slot says to its session what it waits for below the provider (a slot of a model
+    /// server); null for nowhere.
+    /// </summary>
+    public Runtime.AgentWaitScope? WaitScope { get; init; }
+
     /// <summary>Gets the most requests at once, or <see langword="null"/> when there is no limit.</summary>
     public int? Limit
     {

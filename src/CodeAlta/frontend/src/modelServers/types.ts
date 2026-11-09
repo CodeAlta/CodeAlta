@@ -53,6 +53,8 @@ export type ServerDefinition = Readonly<{ id: string; name: string; kind: Server
 export type ModelState = "unloaded" | "loading" | "loaded" | "sleeping" | "failed" | "missing" | "downloading" | "incomplete";
 
 export type ServerModelStatus = Readonly<{ model: string; state: ModelState; progress?: number; context?: number; trainedContext?: number; busySlots: number; totalSlots: number;
+  /** The requests that wait for one of its slots on its machine, those of other machines included. */
+  waiting?: number;
   tokensPerSecond?: number; vision: boolean }>;
 
 export type ServerState = "stopped" | "waiting" | "starting" | "ready" | "failed" | "updating";

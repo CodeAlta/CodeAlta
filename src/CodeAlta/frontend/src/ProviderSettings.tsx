@@ -417,11 +417,12 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
             <ProviderContextSize key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch}
               providerId={modelProvider && availability.get(modelProvider.toLowerCase())?.availability === "Ready" ? modelProvider : null}
               model={form.model.trim() || fallback("model")} value={form.contextSize} disabled={busy} readModels={readModels} onChange={contextSize => edit({ contextSize })} />
-            {/* Beyond it, the requests of the sessions wait their turn: a turn, for an agent that runs its own loop. */}
-            <FormGroup label={t("Requests at once")} labelFor="provider-max-requests" helperText={t("The most requests this provider gets at once; the sessions beyond it wait their turn.")}>
+            {/* Beyond it, the requests of the sessions wait their turn: a turn, for an agent that runs its own loop. A provider of a
+                model server has none: the slots of its models decide, and their machine holds the queue. */}
+            {!original?.modelServer && <FormGroup label={t("Requests at once")} labelFor="provider-max-requests" helperText={t("The most requests this provider gets at once; the sessions beyond it wait their turn.")}>
               <InputGroup id="provider-max-requests" value={form.maxConcurrentRequests} disabled={busy} inputMode="numeric" spellCheck={false}
                 intent={form.maxConcurrentRequests.trim() && requestLimit(form.maxConcurrentRequests) === null ? "danger" : "none"}
-                placeholder={form.type === "codex" ? "16" : t("No limit")} onChange={event => edit({ maxConcurrentRequests: event.target.value })} /></FormGroup>
+                placeholder={form.type === "codex" ? "16" : t("No limit")} onChange={event => edit({ maxConcurrentRequests: event.target.value })} /></FormGroup>}
             {/* A provider is assigned to spaces once it is saved; each click of the chip saves at once. */}
             {spaceScope && original && <FormGroup label={t("Spaces")} className="provider-settings-wide">
               <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={original.key} name={original.effectiveName} disabled={busy} /></FormGroup>}

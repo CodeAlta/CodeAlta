@@ -163,12 +163,13 @@ export function loadingProgress(server: ServerView): number | null {
   return loading?.progress ?? null;
 }
 
-/** How many requests a server works on now, and how many it serves at once. */
-export function activityOf(server: ServerView): Readonly<{ busy: number; total: number; tokensPerSecond: number | null }> {
+/** How many requests a server works on now, how many it serves at once, and how many wait for a slot. */
+export function activityOf(server: ServerView): Readonly<{ busy: number; total: number; waiting: number; tokensPerSecond: number | null }> {
   const busy = server.status.models.reduce((sum, model) => sum + model.busySlots, 0);
   const total = server.status.models.reduce((sum, model) => sum + model.totalSlots, 0);
+  const waiting = server.status.models.reduce((sum, model) => sum + (model.waiting ?? 0), 0);
   const speeds = server.status.models.map(model => model.tokensPerSecond).filter((speed): speed is number => typeof speed === "number" && speed > 0);
-  return { busy, total, tokensPerSecond: speeds.length > 0 ? Math.max(...speeds) : null };
+  return { busy, total, waiting, tokensPerSecond: speeds.length > 0 ? Math.max(...speeds) : null };
 }
 
 /** The settings a new model of a server starts with. */

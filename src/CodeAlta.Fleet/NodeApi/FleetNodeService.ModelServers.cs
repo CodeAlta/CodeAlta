@@ -41,6 +41,9 @@ public static class FleetModelServerMethods
     /// <summary>The end of the answer of an inference request.</summary>
     public const string HttpEndEvent = "llama.http.end";
 
+    /// <summary>An inference request waits for a slot of its model (<see cref="FleetLlamaHttpQueued"/>): its place, each time it changes.</summary>
+    public const string HttpQueuedEvent = "llama.http.queued";
+
     /// <summary>The error of a server, a model or a download that is not on the machine.</summary>
     public const string NotFound = "llama.not_found";
 }
@@ -87,6 +90,11 @@ public sealed record FleetLlamaHttpEnd(string RequestId, long Count, string? Err
 /// <param name="RequestId">The request.</param>
 public sealed record FleetLlamaHttpCancel(string RequestId);
 
+/// <summary>An inference request that waits for a slot of its model on the machine of its server.</summary>
+/// <param name="RequestId">The request.</param>
+/// <param name="Before">How many requests are before it, from this machine and the others.</param>
+public sealed record FleetLlamaHttpQueued(string RequestId, int Before);
+
 /// <summary>The model host changed.</summary>
 /// <param name="Revision">Its revision now.</param>
 public sealed record FleetLlamaChanged(long Revision);
@@ -104,6 +112,7 @@ public sealed record FleetLlamaEnded(DownloadInfo? Download, HostTask? Task);
 [JsonSerializable(typeof(FleetLlamaHttpChunk))]
 [JsonSerializable(typeof(FleetLlamaHttpEnd))]
 [JsonSerializable(typeof(FleetLlamaHttpCancel))]
+[JsonSerializable(typeof(FleetLlamaHttpQueued))]
 [JsonSerializable(typeof(FleetLlamaChanged))]
 [JsonSerializable(typeof(FleetLlamaEnded))]
 [JsonSerializable(typeof(FleetEmpty))]
@@ -245,13 +254,24 @@ public sealed partial class FleetNodeService
             catch (ObjectDisposedException) { }
         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         HttpResponseMessage response;
+        IDisposable? slot = null;
         try
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stop.Token);
+            // A slot of its model first, in turn with the sessions of this machine and the requests of the others: the caller is
+            // told its place, and its channel is seen alive meanwhile.
+            if (body is not null && Client.ModelServerSlotWait.TakesSlot(parameters.Method, path)
+                && ModelServersHost.SlotsOf(server.Definition.Id, Client.ModelServerSlotWait.ModelOf(body)) is { } slots)
+            {
+                var requestId = parameters.RequestId;
+                slot = await slots.Gate.AcquireAsync((before, token) => SendLlamaQueuedAsync(connection, requestId, before, token), linked.Token).ConfigureAwait(false);
+            }
+
             response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
         {
+            slot?.Dispose();
             _llamaRequests.TryRemove((connection, parameters.RequestId), out _);
             stop.Dispose();
             request.Dispose();
@@ -267,11 +287,26 @@ public sealed partial class FleetNodeService
             response.Content.Headers.ContentType = type;
         }
 
-        _ = Task.Run(() => PumpLlamaAnswerAsync(connection, parameters.RequestId, request, response, stop), CancellationToken.None);
+        _ = Task.Run(() => PumpLlamaAnswerAsync(connection, parameters.RequestId, request, response, stop, slot), CancellationToken.None);
         return new FleetLlamaHttpResponse((int)response.StatusCode, response.Content.Headers.ContentType?.ToString());
     }
 
-    private async Task PumpLlamaAnswerAsync(FleetConnection connection, string requestId, HttpRequestMessage request, HttpResponseMessage response, CancellationTokenSource stop)
+    // The place of a request that waits for a slot, told to the channel that asked it.
+    private static async ValueTask SendLlamaQueuedAsync(FleetConnection connection, string requestId, int before, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await connection.SendEventAsync(new FleetEvent(FleetModelServerMethods.HttpQueuedEvent,
+                JsonSerializer.SerializeToElement(new FleetLlamaHttpQueued(requestId, before), FleetModelServersJsonContext.Default.FleetLlamaHttpQueued)), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is FleetConnectionClosedException or ObjectDisposedException or IOException)
+        {
+            // The channel closed: its request stops waiting with it.
+        }
+    }
+
+    private async Task PumpLlamaAnswerAsync(FleetConnection connection, string requestId, HttpRequestMessage request, HttpResponseMessage response, CancellationTokenSource stop,
+        IDisposable? slot)
     {
         long sequence = 0;
         string? error = null;
@@ -297,6 +332,8 @@ public sealed partial class FleetNodeService
         }
         finally
         {
+            // The answer ended, or its channel closed: the slot goes to the next request.
+            slot?.Dispose();
             _llamaRequests.TryRemove((connection, requestId), out _);
             response.Dispose();
             request.Dispose();

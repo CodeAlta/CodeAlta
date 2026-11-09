@@ -84,7 +84,7 @@ test("A failed download stays a row until a later download of its model ends", (
 test("A ready server that loads a model says it loads, and its activity adds its models up", () => {
   assert.equal(serverStateOf(server("a", "m:Q", "ready", "loading")), "loading");
   assert.equal(serverStateOf(server("a", "m:Q", "failed")), "failed");
-  assert.deepEqual(activityOf(server("a", "m:Q")), { busy: 1, total: 4, tokensPerSecond: 42 });
+  assert.deepEqual(activityOf(server("a", "m:Q")), { busy: 1, total: 4, waiting: 0, tokensPerSecond: 42 });
 });
 test("Updating machines in turn waits for each, and the first that fails stops the others", async () => {
   const task = (id: string, state: HostTask["state"], ended: boolean, message?: string): HostTask => ({ id, kind: "update", title: "Update llama.cpp", state, done: 0, total: 0,

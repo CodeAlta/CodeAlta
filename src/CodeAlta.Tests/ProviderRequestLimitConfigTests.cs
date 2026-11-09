@@ -42,6 +42,19 @@ public sealed class ProviderRequestLimitConfigTests
     }
 
     [TestMethod]
+    public void LoadGlobalProviderDefinitions_RefusesALimitForAProviderOfAModelServer()
+    {
+        // The slots of the models of the server decide, and its machine holds their queue for the whole fleet.
+        using var temp = TestTempDirectory.Create();
+        File.WriteAllText(Path.Combine(temp.Path, "config.toml"), "[providers.coder]\ntype = \"llama-cpp\"\nserver = \"local/coder\"\nmax_concurrent_requests = 2\n");
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+
+        var exception = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+
+        StringAssert.Contains(exception.InnerException?.Message, "the slots of its models decide");
+    }
+
+    [TestMethod]
     public void LoadGlobalProviderDefinitions_CodexKeepsItsDefault()
     {
         using var temp = TestTempDirectory.Create();

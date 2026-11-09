@@ -12,6 +12,11 @@ namespace CodeAlta.Fleet.Client;
 public sealed partial class FleetNodeClient
 {
     private readonly ConcurrentDictionary<string, Channel<FleetLlamaHttpChunk?>> _llamaAnswers = new(StringComparer.Ordinal);
+    // The requests that may wait for a slot of their model there, by their id: the notice their session reads.
+    private readonly ConcurrentDictionary<string, RemoteWait> _llamaWaits = new(StringComparer.Ordinal);
+
+    /// <summary>The longest wait for the start of the answer of an inference request, its wait for a slot of its model included.</summary>
+    public static readonly TimeSpan ModelServerRequestTimeout = TimeSpan.FromHours(1);
     private event Action<long>? LlamaChanged;
     private event Action<FleetLlamaEnded>? LlamaEnded;
     private int _llamaWatching;
@@ -88,7 +93,21 @@ public sealed partial class FleetNodeClient
     /// <returns>The answer.</returns>
     /// <exception cref="FleetException">The node refused the request.</exception>
     /// <exception cref="HttpRequestException">The body of the request is too large for the channel.</exception>
-    public async Task<HttpResponseMessage> SendModelServerRequestAsync(string server, HttpRequestMessage request, CancellationToken cancellationToken)
+    public Task<HttpResponseMessage> SendModelServerRequestAsync(string server, HttpRequestMessage request, CancellationToken cancellationToken)
+        => SendModelServerRequestAsync(server, null, request, cancellationToken);
+
+    /// <summary>
+    /// Sends an inference request to a server of the machine; the body of its answer streams as it comes. While it waits for a
+    /// slot of its model there, the session that sends it reads its place (<see cref="CodeAlta.Agent.Runtime.AgentWaitScope.RequestOption"/>).
+    /// </summary>
+    /// <param name="server">The server.</param>
+    /// <param name="name">What a session that waits reads it waits for (<c>pc-ai/coder</c>); null for <paramref name="server"/>.</param>
+    /// <param name="request">The request.</param>
+    /// <param name="cancellationToken">Stops the request.</param>
+    /// <returns>The answer.</returns>
+    /// <exception cref="FleetException">The node refused the request.</exception>
+    /// <exception cref="HttpRequestException">The body of the request is too large for the channel.</exception>
+    public async Task<HttpResponseMessage> SendModelServerRequestAsync(string server, string? name, HttpRequestMessage request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         var body = request.Content is null ? null : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
@@ -103,17 +122,27 @@ public sealed partial class FleetNodeClient
             if (_llamaAnswers.TryRemove(id, out var orphan)) orphan.Writer.TryComplete(new IOException("The channel to the machine of the model server closed."));
         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         var path = request.RequestUri is { } uri ? uri.PathAndQuery : "/";
+        var notice = ModelServerSlotWait.UpdatesOf(request) is { } updates
+            ? new CodeAlta.Agent.Runtime.AgentWaitNotice(CodeAlta.Agent.Runtime.AgentWaitKind.ModelServerSlot, name ?? server, updates) : null;
+        if (notice is not null) _llamaWaits[id] = new RemoteWait(notice);
         FleetLlamaHttpResponse answer;
         try
         {
-            answer = await CallAsync(FleetModelServerMethods.Http,
-                new FleetLlamaHttpRequest(id, server, request.Method.Method, path, request.Content?.Headers.ContentType?.ToString(), body is null ? null : Convert.ToBase64String(body)),
-                FleetModelServersJsonContext.Default.FleetLlamaHttpRequest, FleetModelServersJsonContext.Default.FleetLlamaHttpResponse, null, cancellationToken).ConfigureAwait(false);
+            // It may wait there for a slot of its model, told its place: longer than a call of the channel.
+            var result = await _channel.Connection.SendRequestAsync(FleetModelServerMethods.Http, JsonSerializer.SerializeToElement(
+                    new FleetLlamaHttpRequest(id, server, request.Method.Method, path, request.Content?.Headers.ContentType?.ToString(), body is null ? null : Convert.ToBase64String(body)),
+                    FleetModelServersJsonContext.Default.FleetLlamaHttpRequest),
+                new FleetRequestOptions { Timeout = ModelServerRequestTimeout }, cancellationToken).ConfigureAwait(false);
+            answer = Read(result, FleetModelServersJsonContext.Default.FleetLlamaHttpResponse);
         }
         catch
         {
             _llamaAnswers.TryRemove(id, out _);
             throw;
+        }
+        finally
+        {
+            if (_llamaWaits.TryRemove(id, out var waited)) await waited.EndAsync().ConfigureAwait(false);
         }
 
         var response = new HttpResponseMessage((HttpStatusCode)answer.Status) { RequestMessage = request };
@@ -137,12 +166,51 @@ public sealed partial class FleetNodeClient
                 }
 
                 break;
+            case FleetModelServerMethods.HttpQueuedEvent when fleetEvent.Payload?.Deserialize(FleetModelServersJsonContext.Default.FleetLlamaHttpQueued) is { } queued:
+                // The place of a request in the queue of the slots of its model there: its session reads it, the next one replaces it.
+                if (_llamaWaits.TryGetValue(queued.RequestId, out var wait) && queued.Before >= 0) wait.Report(queued.Before);
+                break;
             case FleetModelServerMethods.ChangedEvent when fleetEvent.Payload?.Deserialize(FleetModelServersJsonContext.Default.FleetLlamaChanged) is { } changed:
                 LlamaChanged?.Invoke(changed.Revision);
                 break;
             case FleetModelServerMethods.EndedEvent when fleetEvent.Payload?.Deserialize(FleetModelServersJsonContext.Default.FleetLlamaEnded) is { } finished:
                 LlamaEnded?.Invoke(finished);
                 break;
+        }
+    }
+
+    // The notice of a request that waits there, its places and its end told in their order, one after the other: a place that
+    // comes after its end is not told.
+    private sealed class RemoteWait(CodeAlta.Agent.Runtime.AgentWaitNotice notice)
+    {
+        private readonly Lock _gate = new();
+        private Task _last = Task.CompletedTask;
+        private bool _ended;
+
+        public void Report(int before)
+        {
+            lock (_gate)
+            {
+                if (_ended) return;
+                _last = _last.ContinueWith(async _ =>
+                {
+                    try { await notice.ReportAsync(before).ConfigureAwait(false); }
+                    catch (Exception exception) when (exception is not OutOfMemoryException) { /* A session that cannot take it any more is left as it is. */ }
+                }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+            }
+        }
+
+        public async Task EndAsync()
+        {
+            Task last;
+            lock (_gate)
+            {
+                _ended = true;
+                last = _last;
+            }
+
+            await last.ConfigureAwait(false);
+            await notice.EndAsync().ConfigureAwait(false);
         }
     }
 
@@ -238,6 +306,9 @@ public sealed class FleetModelServerHandler : HttpMessageHandler
     private readonly Func<CancellationToken, Task<FleetNodeClient>> _client;
     private readonly string _server;
 
+    /// <summary>Gets the server as the provider names it (<c>pc-ai/coder</c>), which a session that waits for a slot there reads.</summary>
+    public string? Name { get; init; }
+
     /// <summary>Creates the transport.</summary>
     /// <param name="client">Gives the client of the machine now (a channel that reconnects gives a new one).</param>
     /// <param name="server">The server on that machine.</param>
@@ -264,7 +335,7 @@ public sealed class FleetModelServerHandler : HttpMessageHandler
 
         try
         {
-            return await client.SendModelServerRequestAsync(_server, request, cancellationToken).ConfigureAwait(false);
+            return await client.SendModelServerRequestAsync(_server, Name, request, cancellationToken).ConfigureAwait(false);
         }
         catch (FleetException exception)
         {

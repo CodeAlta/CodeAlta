@@ -286,7 +286,11 @@ public static class ServerKinds
 /// <param name="TokensPerSecond">Its generation speed over the last requests, or null.</param>
 /// <param name="Vision">Whether it reads images.</param>
 public sealed record ServerModelStatus(string Model, string State, double? Progress, int? Context, int? TrainedContext, int BusySlots, int TotalSlots,
-    double? TokensPerSecond, bool Vision);
+    double? TokensPerSecond, bool Vision)
+{
+    /// <summary>Gets how many requests of inference wait for one of its slots on this machine (<see cref="ModelSlotGates"/>).</summary>
+    public int Waiting { get; init; }
+}
 
 /// <summary>Where a server stands.</summary>
 /// <param name="State"><c>stopped</c>, <c>waiting</c> (for its build or a model), <c>starting</c>, <c>ready</c>, <c>failed</c> or <c>updating</c>.</param>

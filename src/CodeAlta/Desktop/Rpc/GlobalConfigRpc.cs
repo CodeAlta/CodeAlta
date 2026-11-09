@@ -525,6 +525,7 @@ internal sealed partial class GlobalConfigService
                           ModelsHide = ModelRules(definition?.ModelsHide), ModelsShow = ModelRules(definition?.ModelsShow),
                           ContextSize = ContextSizeContract.Of(definition?.ContextSize),
                           MaxConcurrentRequests = definition?.MaxConcurrentRequests is > 0 ? definition.MaxConcurrentRequests : null,
+                          ModelServer = Bound(definition?.Server),
                           ApiKeySecret = Bound(definition?.ApiKeySecret),
                           ApiKeySecretSet = definition?.ApiKeySecret is { } secretName ? IsSecretSet(secretName) : null,
                           KeyInEnvironment = definition?.ApiKeyEnv is { } variable && !string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable(variable.Trim())) ? true : null,
@@ -1379,6 +1380,10 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
     /// <summary>The most requests that go to the provider at once (<c>max_concurrent_requests</c>); null for no limit, or the default of its type.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxConcurrentRequests { get; init; }
+
+    /// <summary>The model server it names (<c>server = "&lt;machine&gt;/&lt;server&gt;"</c>), whose slots decide its requests at once; null for none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModelServer { get; init; }
 
     /// <summary>
     /// The order of its models the file names: <c>models_order</c>, else the older <c>sort_models</c> read as <c>name</c> or

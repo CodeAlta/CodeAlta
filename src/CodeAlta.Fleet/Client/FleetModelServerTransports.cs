@@ -26,21 +26,26 @@ public sealed class FleetModelServerTransports
     public HttpMessageHandler? Resolve(string server)
     {
         if (server?.Split('/') is not [{ Length: > 0 } machine, { Length: > 0 } id]) return null;
-        if (machine == LocalMachine) return new LocalModelServerHandler(() => Local, id);
+        if (machine == LocalMachine) return new LocalModelServerHandler(() => Local, id) { Name = server };
         return new FleetModelServerHandler(cancellationToken => Remote?.Invoke(machine) is { } client
             ? client(cancellationToken)
-            : throw new InvalidOperationException($"The machine {machine} is not paired with this computer."), id);
+            : throw new InvalidOperationException($"The machine {machine} is not paired with this computer."), id) { Name = server };
     }
 }
 
 /// <summary>
 /// The transport of a provider to a model server of this machine: the request goes to its loopback port with its key, read
-/// at each request, and the list of models carries the context each one last loaded with.
+/// at each request, and the list of models carries the context each one last loaded with. A request of inference first takes
+/// a slot of its model (<see cref="ModelHost.SlotsOf"/>), in turn with the requests other machines relay here, and holds it
+/// until its answer is read to its end.
 /// </summary>
 public sealed class LocalModelServerHandler : DelegatingHandler
 {
     private readonly Func<ModelHost?> _host;
     private readonly string _server;
+
+    /// <summary>Gets the server as the provider names it (<c>local/coder</c>), which a session that waits for a slot reads.</summary>
+    public string? Name { get; init; }
 
     /// <summary>Creates the transport.</summary>
     /// <param name="host">Gives the model host of this machine.</param>
@@ -63,6 +68,18 @@ public sealed class LocalModelServerHandler : DelegatingHandler
         var path = request.RequestUri is { } uri ? uri.PathAndQuery : "/";
         request.RequestUri = new Uri(endpoint.Address + path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", endpoint.Key);
+        IDisposable? slot = null;
+        if (ModelServerSlotWait.TakesSlot(request.Method.Method, path) && request.Content is { } content)
+        {
+            // The model it names decides its slots: the body is read once, and sent as it was.
+            var body = await content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+            var copy = new ByteArrayContent(body);
+            foreach (var header in content.Headers) copy.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            request.Content = copy;
+            if (host.SlotsOf(_server, ModelServerSlotWait.ModelOf(body)) is { } slots)
+                slot = await ModelServerSlotWait.AcquireAsync(slots.Gate, Name ?? _server, ModelServerSlotWait.UpdatesOf(request), cancellationToken).ConfigureAwait(false);
+        }
+
         HttpResponseMessage response;
         try
         {
@@ -70,8 +87,16 @@ public sealed class LocalModelServerHandler : DelegatingHandler
         }
         catch (HttpRequestException exception)
         {
+            slot?.Dispose();
             return Unavailable(request, $"The model server {_server} does not answer: is it started? ({exception.Message})");
         }
+        catch
+        {
+            slot?.Dispose();
+            throw;
+        }
+
+        if (slot is not null) return await ModelServerSlotWait.HoldUntilReadAsync(response, slot, cancellationToken).ConfigureAwait(false);
 
         if (request.Method == HttpMethod.Get && path.StartsWith("/v1/models", StringComparison.Ordinal) && response.IsSuccessStatusCode)
         {

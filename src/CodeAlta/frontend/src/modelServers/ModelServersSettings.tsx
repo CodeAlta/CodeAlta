@@ -289,6 +289,7 @@ function ServersTab({ machines, view, onView, busy, run, read, onUse, onEdit, on
     { id: "activity", label: "Activity", width: "10rem", secondary: true, sort: row => activityOf(row.server).busy, cell: row => {
       const activity = activityOf(row.server);
       return activity.total === 0 ? <span className="muted-text">—</span> : <span>{t("{busy} of {total} requests", { busy: activity.busy, total: activity.total })}
+        {activity.waiting > 0 ? <span>, {t("{count} waiting", { count: activity.waiting })}</span> : null}
         {activity.tokensPerSecond ? <span className="muted-text"> · {t("{count} tokens/s", { count: Math.round(activity.tokensPerSecond) })}</span> : null}</span>;
     } },
     { id: "build", label: "llama.cpp", width: "8rem", secondary: true, sort: row => row.server.status.buildTag, cell: row => <span>{row.server.status.buildTag ?? "—"}
@@ -410,7 +411,8 @@ function ServerDetails({ row, busy, run, read, onUse, onEdit, onCopy }: { row: S
           <td><strong>{modelName(model.model)}</strong> <span className="muted-text">{model.model.split(":")[0]}</span>{status?.vision && <Tag minimal className="model-servers-vision">{t("vision")}</Tag>}</td>
           <td><State state={state} progress={status?.progress} /></td>
           <td>{status?.context ? new Intl.NumberFormat(locale).format(status.context) : model.context ? new Intl.NumberFormat(locale).format(model.context) : t("fit")}</td>
-          <td>{status && status.totalSlots > 0 ? `${status.busySlots}/${status.totalSlots}` : "—"}</td>
+          <td>{status && status.totalSlots > 0 ? `${status.busySlots}/${status.totalSlots}` : "—"}
+            {status?.waiting ? <span className="muted-text"> · {t("{count} waiting", { count: status.waiting })}</span> : null}</td>
           <td>{status?.tokensPerSecond ? t("{count} tokens/s", { count: Math.round(status.tokensPerSecond) }) : "—"}</td>
           <td className="model-servers-model-actions">{running && manage && server.definition.kind === "several" && (state === "loaded" || state === "sleeping"
             ? <Button size="small" variant="minimal" text={t("Unload")} disabled={busy} onClick={() => void act("unload", model.model)} />

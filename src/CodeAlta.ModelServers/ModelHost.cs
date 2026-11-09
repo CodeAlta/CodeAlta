@@ -195,7 +195,7 @@ public sealed partial class ModelHost : IAsyncDisposable
         var measured = ReadFits();
         var shown = models.Select(model => (downloading.ContainsKey(model.Id) ? model with { State = "downloading" } : model) is var view
             && measured.TryGetValue(FitKey(model), out var fit) ? view with { Measured = fit } : view).ToList();
-        var servers = Supervisors().Select(static supervisor => new ServerView(supervisor.Definition, supervisor.Status)).OrderBy(static view => view.Definition.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var servers = Supervisors().Select(View).OrderBy(static view => view.Definition.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         return new ModelHostStatus(hardware, builds, candidates, latest, settings, ReadPlanned(), ReadHistory(), store.Root, models.Sum(static model => model.FreedBytes)
             + SharedBytes(models), store.FreeBytes(), shown, downloads, servers, _unmanaged, Warnings(), tasks, Interlocked.Read(ref _revision));
     }

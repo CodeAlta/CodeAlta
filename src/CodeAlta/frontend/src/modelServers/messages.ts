@@ -43,6 +43,8 @@ export const modelServersMessages = {
   "Rerank": ["Reordenación", "Reclassement", "Reranking", "リランク", "重排序"],
   "{busy} of {total} requests": ["{busy} de {total} solicitudes", "{busy} sur {total} requêtes", "{busy} von {total} Anfragen", "{total} 件中 {busy} 件のリクエスト", "{busy} / {total} 个请求"],
   "{count} tokens/s": ["{count} tokens/s", "{count} jetons/s", "{count} Token/s", "{count} トークン/秒", "{count} 词元/秒"],
+  // The requests of this machine and of the others that wait for a slot of a model, in turn.
+  "{count} waiting": ["{count} en espera", "{count} en attente", "{count} wartend", "{count} 件待機中", "{count} 个等待中"],
   "update": ["actualización", "mise à jour", "Update", "更新あり", "有更新"],
   "loaded": ["cargado", "chargé", "geladen", "読み込み済み", "已加载"],
   "port {port}": ["puerto {port}", "port {port}", "Port {port}", "ポート {port}", "端口 {port}"],

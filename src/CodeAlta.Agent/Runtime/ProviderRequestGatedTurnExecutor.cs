@@ -31,9 +31,10 @@ internal sealed class ProviderRequestGatedTurnExecutor(IModelProviderTurnExecuto
         CancellationToken cancellationToken)
     {
         using var slot = await AcquireAsync(onSessionUpdate, cancellationToken).ConfigureAwait(false);
-        return onSessionUpdate is null
-            ? await inner.ExecuteTurnAsync(request, onUpdate, cancellationToken).ConfigureAwait(false)
-            : await inner.ExecuteTurnAsync(request, onUpdate, onSessionUpdate, cancellationToken).ConfigureAwait(false);
+        if (onSessionUpdate is null) return await inner.ExecuteTurnAsync(request, onUpdate, cancellationToken).ConfigureAwait(false);
+        // What the request waits for below the provider (a slot of its model server) tells the session, for this request.
+        using var waits = gate.WaitScope?.Enter(onSessionUpdate);
+        return await inner.ExecuteTurnAsync(request, onUpdate, onSessionUpdate, cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask<IDisposable> AcquireAsync(

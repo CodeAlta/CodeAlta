@@ -41,7 +41,20 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     /// Gets or sets what gives the transport of a provider that names a model server (<c>server = "&lt;machine&gt;/&lt;server&gt;"</c>):
     /// the host knows where its servers and the servers of its machines are. Null knows none.
     /// </summary>
-    public Func<string, HttpMessageHandler?>? ModelServerTransports { get; set; }
+    public Func<string, HttpMessageHandler?>? ModelServerTransports
+    {
+        get => _modelServerTransports;
+        // Each transport carries the updates of the session that sends a request, so that a wait for a slot of the server says so.
+        set => _modelServerTransports = value is null ? null : server => value(server) is { } transport ? WaitScope.Wrap(transport) : null;
+    }
+
+    private Func<string, HttpMessageHandler?>? _modelServerTransports;
+
+    /// <summary>
+    /// Gets where a request that waits below its provider (a slot of a model server) tells its session: the sessions give
+    /// their updates for the time of each request, and the transports of the model servers take them.
+    /// </summary>
+    public Runtime.AgentWaitScope WaitScope { get; } = new();
 
     /// <summary>
     /// Gets the processes the runtimes of the providers registered here started and still run. It outlives the
@@ -80,7 +93,7 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
             }
             else
             {
-                _requestGates[key] = new ProviderRequestGate(descriptor.ProviderId.Value, descriptor.MaxConcurrentRequests);
+                _requestGates[key] = new ProviderRequestGate(descriptor.ProviderId.Value, descriptor.MaxConcurrentRequests) { WaitScope = WaitScope };
             }
         }
     }

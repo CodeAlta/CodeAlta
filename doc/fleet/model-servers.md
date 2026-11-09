@@ -98,6 +98,15 @@ or key of a server is in the configuration. The node forwards only the paths of 
 management, and only for a server whose access lets the person's computers in. The context the model runs with, which
 the router does not report, is added to `/v1/models` by the model host from what its slots say.
 
+A request of inference takes a slot of the model it names before it reaches the server: a FIFO gate per model of a
+server, in the `ModelHost` of its machine (`ModelSlotGates`), sized by the slots the server reports for the model, else
+by its `parallel`. Both ways in take it, the transport of a session of that machine and `llama.http` for the others, so
+the machine of the server holds the whole queue of a model across the fleet, in order, and nothing is shared between
+machines. The slot is held until the answer is read to its end or its channel closes. While a relayed request waits, the
+node sends `llama.http.queued` with its place; the session reads it as the wait notice of a provider request, which the
+session gives its transport for the time of the request (`AgentWaitScope`). The waiting requests are in the status of
+the model (`waiting`), since they wait here and not in `llama-server`.
+
 ## Permissions
 
 - The owner of a machine and a device with Manage change its model servers; a device with View reads them.

@@ -2894,6 +2894,9 @@ public sealed partial class CodeAltaConfigStore
     {
         if (definition.Server is not null && !string.Equals(definition.ProviderType, LlamaCppProviderType, StringComparison.Ordinal))
             throw new InvalidOperationException($"providers.{definition.ProviderKey} server is only for type 'llama-cpp'.");
+        // A model server decides how many requests it serves at once: its slots, whose queue its machine holds for the whole fleet.
+        if (definition.Server is not null && definition.MaxConcurrentRequests is not null)
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} max_concurrent_requests is not for a provider of a model server: the slots of its models decide.");
         if (!string.Equals(definition.ProviderType, ClaudeCodeProviderType, StringComparison.Ordinal))
         {
             RejectUnsupportedField(definition, "command", definition.Command);
