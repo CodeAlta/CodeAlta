@@ -87,6 +87,11 @@ internal sealed class CodexSubscriptionHttpStreamSession
                 }
 
                 _trace?.WriteLine($"<<< SSE event={sseEvent.EventType ?? "message"} bytes={System.Text.Encoding.UTF8.GetByteCount(sseEvent.Data)}");
+                if (_trace is not null)
+                {
+                    TraceEventDetails(_trace, sseEvent.EventType, sseEvent.Data);
+                }
+
                 yield return CodexProtocolEventParser.Parse(
                     CodexProtocolTransport.Http,
                     BinaryData.FromString(sseEvent.Data),
@@ -102,6 +107,37 @@ internal sealed class CodexSubscriptionHttpStreamSession
                 _httpClient.Dispose();
             }
         }
+    }
+
+    // What a trace says of an event beyond its size: the status, the model and the service tier of the response an event
+    // carries (the tier that ran it, which may not be the one asked), and the small metadata event of Codex as it is.
+    internal static void TraceEventDetails(OpenAIProtocolTraceLogger trace, string? eventType, string data)
+    {
+        if (eventType == "response.metadata")
+        {
+            trace.WriteLine($"<<< SSE data: {(data.Length <= 2048 ? data : data[..2048] + "…")}");
+            return;
+        }
+
+        if (eventType is not ("response.created" or "response.completed" or "response.incomplete" or "response.failed"))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(data);
+            if (document.RootElement.TryGetProperty("response", out var response) && response.ValueKind == JsonValueKind.Object)
+            {
+                trace.WriteLine($"<<< SSE response: status={Field(response, "status")} model={Field(response, "model")} service_tier={Field(response, "service_tier")}");
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        static string Field(JsonElement element, string name)
+            => !element.TryGetProperty(name, out var value) ? "-" : value.ValueKind == JsonValueKind.String ? value.GetString()! : value.GetRawText();
     }
 
     private async Task<HttpRequestMessage> CreateRequestAsync(
