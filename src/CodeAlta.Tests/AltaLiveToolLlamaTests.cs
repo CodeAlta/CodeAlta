@@ -50,12 +50,12 @@ public sealed partial class AltaLiveToolTests
 
         var machines = await dispatcher.InvokeAsync(["llama", "machine", "list"], caller: AltaCallerIdentity.Cli);
         Assert.AreEqual(AltaExitCodes.Success, machines.ExitCode, machines.Stderr);
-        Assert.AreEqual(3, ReadJsonLines(machines.Stdout).Count(static record => record.GetProperty("type").GetString() == "alta.llama.machine"));
+        Assert.AreEqual(4, ReadJsonLines(machines.Stdout).Count(static record => record.GetProperty("type").GetString() == "alta.llama.machine"));
 
         var status = await dispatcher.InvokeAsync(["llama", "status", "--machine", "pc-ai"], caller: AltaCallerIdentity.Cli);
         Assert.AreEqual(AltaExitCodes.Success, status.ExitCode, status.Stderr);
         var record = ReadJsonLines(status.Stdout).Single(static item => item.GetProperty("type").GetString() == "alta.llama.status");
-        Assert.AreEqual("device-1", record.GetProperty("machine").GetString());
+        Assert.AreEqual("device-1", record.GetProperty("machine").GetString(), "of two machines named pc-ai, the one that answers");
         Assert.AreEqual("rocm", record.GetProperty("recommended").GetString());
         Assert.IsTrue(record.GetProperty("updateAvailable").GetBoolean());
 
@@ -226,6 +226,8 @@ public sealed partial class AltaLiveToolTests
             => Task.FromResult<IReadOnlyList<AltaModelServersMachine>>(
             [
                 new("local", "this-pc", true, "online", true, true, null),
+                // An old pairing of pc-ai that no longer answers, listed before the one that does.
+                new("device-0", "pc-ai", false, "connecting", true, true, null),
                 new("device-1", "pc-ai", false, "online", true, true, null),
                 new("device-2", "mac", false, "online", false, true, null),
             ]);

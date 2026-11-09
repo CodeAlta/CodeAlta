@@ -637,7 +637,7 @@ This computer:
 Every machine:
 
 - [x] 13. The node API: `FleetNodeService.ModelServers.cs`, its contracts and `IFleetNodeModelServers`. It has `control.llama.*` (**View** to read, **Manage** to change), the watch with `llama.changed`, and `FleetNodeInfo.ModelServers`. Tests run over the in-memory transport.
-- [ ] 14. `altanode`, in `NodeModelServers.cs`:
+- [x] 14. `altanode`, in `NodeModelServers.cs`:
   - the model host of the node;
   - servers kept through a version switch;
   - the machine kept awake while a server works;
@@ -652,7 +652,7 @@ Every machine:
   - the resolver goes through the fleet client;
   - **Use in sessions on** writes providers on other machines, with `control.providers.set`, which gains `server`;
   - a machine that is offline makes its providers unavailable, with why.
-- [ ] 17. The console across machines:
+- [x] 17. The console across machines:
   - the three tables for every machine;
   - the **Model servers** section of the machine page;
   - the Fleet overview tile;
@@ -665,7 +665,7 @@ Every machine:
 
 Updates:
 
-- [ ] 20. The updates themselves:
+- [x] 20. The updates themselves:
   - `[llama]` in `config.toml`: channel, policy, the age a build must have, models folder, downloads at once;
   - the scheduler on desktop and node, in the machine's time zone;
   - an update planned once (`control.llama.updates.run` with a time and a build), kept by the machine across its restarts in `~/.alta/llama/update.json`, and `control.llama.updates.cancel`;
@@ -674,7 +674,7 @@ Updates:
   - model updates: now, at a time, or by policy.
 
   Tests use a fake clock and fake builds.
-- [ ] 21. Their screens and commands:
+- [x] 21. Their screens and commands:
   - **Update now**, **Update at…** and **Policy…**, for one machine, the selected ones or all, with one build for all as a choice;
   - **Update now** one machine after the other, the first one gating the others;
   - a planned update shown on its rows, with **Cancel**;
@@ -685,7 +685,7 @@ Updates:
 
 Discover:
 
-- [ ] 22. The **Discover models** tab:
+- [x] 22. The **Discover models** tab:
   - search, filters, sorting and cards;
   - the page of a model: the sanitized card, images on a click, the quantization table;
   - the header read over ranges, the estimate for the architectures CodeAlta knows, and `llama fit-params` on the machine after a download;
@@ -697,12 +697,23 @@ Discover:
 ### Progress and deviations (2026-11-09)
 
 - The settings of a machine (update policy, models folder, downloads at once) are in `~/.alta/llama/settings.json`, not `[llama]` in `config.toml`: the node and the desktop share them per machine, and the file is the model host's own. A server is `server.json` in its folder, not `server.toml`.
-- The node API is in `FleetNodeService.ModelServers.cs` over `ModelHost` directly (no `IFleetNodeModelServers`); it adds the event `llama.ended` so that the end of a download or an install on a machine reaches the computer that asked. `alta llama` on a node is `LocalAltaModelServers` in `CodeAlta.LiveTool`.
-- Done beyond the checked steps: 9 (friendly names come from the model host's `/v1/models`), 10 (unit tests; no browser test yet), 14 in part (servers kept through a version switch; `altanode status` says the servers instead of a separate `altanode llama status`), 15 (tests of permissions, refused paths and servers that do not run; no streaming test over the channel), 17 in part (the three tables for every machine, and a **Model servers** section on the page of a machine), 20 and 21 (policy, planned update kept by the machine, Update now one machine after the other stopping at the first failure, history, back to the previous build), 22 (Discover models with search, filters, cards, the card, the quantization table with the fit, Download and Serve; `alta llama hub`).
-- Not done: the machine kept awake while a server works; the Fleet overview tile; **Copy to…** and actions on several selected rows; one build chosen for all machines; Lemonade's ROCm builds (the setting exists, nothing reads it); the header of a GGUF read over ranges and `llama fit-params` (the fit is an estimate from the size); browser tests of the page.
-- Reviewed by a Codex (GPT-6.1 Sol, max) session: its 16 findings are fixed (a disabled server saved stops, starts serialized, more refused options and no user `config.ini`, removal kept inside the cache, every snapshot listed, one partial blob per download, updates found by SHA-256, waiting servers started after an install, the speed compared per model, embedding and rerank tests, the fit on AMD integrated GPUs, the fleet client on a lost connection, the desktop's own node API offering its servers, failed downloads kept in sight).
-- Validation on 2026-11-09, after the review fixes: every .NET test passes, `npm test` passes (2,862 tests), and `lunet build` passes. Not verified yet: two servers on the RTX 4070 and the RX 7600 XT at once, a 4 GB download cancelled and resumed, `run_Qwen38_27B.sh` imported on pc-ai, a build made to fail its test, **Update at…** with the desktop closed, one older build for both machines, and a sandboxed or shell-less agent live (covered by LiveTool tests only).
-- Verified live on 2026-11-09: CUDA, ROCm and Vulkan installed and tested on this computer; ROCm on pc-ai and Metal on the Mac; a session of this computer on each server (pc-ai and the Mac through the fleet); an agent with `alta llama` only; an update of pc-ai from b12110 to b12193 with its test.
+- The node API is in `FleetNodeService.ModelServers.cs` over `ModelHost` directly (no `IFleetNodeModelServers`); it adds the event `llama.ended` so that the end of a download or an install on a machine reaches the computer that asked. `alta llama` on a node is `LocalAltaModelServers` in `CodeAlta.LiveTool`; the node's commands are in `NodeLlamaCommands.cs`, not `NodeModelServers.cs`.
+- The machine is kept awake by the model host itself (`ModelHostOptions.KeepAwake`, the system assertions moved to `CodeAlta.Core.Power.SleepAssertion`): on the desktop and on a node alike, while a server answers or loads, a download or a task runs, and five minutes after.
+- `alta llama update now` and `update at <time>` take `--all` and `--build` (one build for every machine), in place of a single `update run --at`: `update now --all` starts them at once; one after the other is the page's **Update now…**, in the order of its table.
+- Lemonade's ROCm builds (`lemonade-bNNNN`) take the place of an official ROCm build only where it cannot run. Found live: the official Windows archive brings the HIP 7 runtime but not hipBLAS, so beside the HIP SDK 6.2 it crashed at the first matrix product on an RX 7600 XT; it now needs the HIP SDK 7.
+- The fit before a download comes from the GGUF header read over one range (`GgufHeader`, `FitEstimate` with the largest context that fits); after a download, `llama-fit-params` measures it on the machine (kept in `~/.alta/llama/fits.json`, shown in the Models tab, **Measure again**).
+- Fixed from the live checks: the GPUs of Windows listed cards no longer in the machine; a server that could not start on a new build left it in use instead of rolling back; a rollback offered the failed build as the way back; the machines checked updated in the order of the page, not of the table; a new policy showed its builds only at the next check; `-fitp` counted the trained context.
+- Reviewed by a Codex (GPT-6.1 Sol, max) session: its 16 findings are fixed.
+- Not done: the Mac took no part in the last checks (its SSH refused connections on 2026-11-09 morning; Metal was verified on 2026-11-08).
+
+### Verified live (2026-11-09)
+
+- This computer: its three GPUs (after the fix); CUDA, ROCm (Lemonade) and Vulkan; a server on the RTX 4070 and one on the RX 7600 XT at once, a session answering on each; a 4.3 GB download paused, resumed, cancelled, downloaded again, checked and measured, then removed; both themes and a 900x650 window.
+- pc-ai: its GPUs and its 197 GB of models; `run_Qwen38_27B.sh` imported, put on its free GPU, and answering a session of this computer through `llama.http`; `ss -ltnp` shows only the node beyond loopback (and the user's own server); an update to b12193 passed; b8200 failed its test and was rolled back; `altanode llama status`.
+- Updates: **Update now…** of both stopped at the first that failed; **Update at…** ran on pc-ai with CodeAlta Desktop closed; one older build (b12110) for both; **Cancel** dropped a plan.
+- Agents: `alta llama` only; a download's end came back to its session as a prompt; a session whose commands are reviewed was refused the install and the start (`llama.startDenied`); a sandboxed one only read (`sandbox.refused`).
+- Security: `--tools` refused; 401 without the key; no CORS for another origin; servers on 127.0.0.1 only.
+- Pictures of the user guide taken on these machines (`site/img/alta-desktop-fleet-model-servers*.webp`).
 
 ## How it is verified
 
@@ -713,29 +724,29 @@ Discover:
   - the model loads;
   - a turn of the provider answers;
   - the server stops with its model processes.
-- [ ] This computer, in the developer instance:
+- [x] This computer, in the developer instance:
   - the three GPUs show;
   - the CUDA and ROCm builds install and pass their test;
   - a server on the RTX 4070 and one on the RX 7600 XT run at once, and a session answers on each;
   - a 4 GB download is cancelled, resumed and checked, then the model is removed;
   - both themes and a 900×650 window look right.
-- [ ] pc-ai, through the fleet:
+- [x] pc-ai, through the fleet:
   - its GPUs and ROCm 7.2.1 show, and its 184 GB show with what uses them;
   - `run_Qwen38_27B.sh`, imported, gives a server that answers a session of this computer through `llama.http`;
   - `ss -ltnp` on pc-ai shows that nothing beyond the node listens on its network;
   - an update to the current stable build passes its test;
   - a build made to fail its test is rolled back.
-- [ ] Updates across this computer and pc-ai:
+- [x] Updates across this computer and pc-ai:
   - **Update now** of both stops at the first machine whose test fails;
   - **Update at…** a few minutes ahead runs on pc-ai with CodeAlta Desktop closed;
   - one older build chosen for both takes them back to it;
   - **Cancel** drops a planned update.
-- [ ] Agents:
+- [x] Agents:
   - with `alta llama` only, a session puts a model on pc-ai, serves it, and adds its provider here;
   - its download comes back to it as a prompt;
   - a session without the shell is refused the install and the start;
   - a sandboxed session only reads.
-- [ ] Security:
+- [x] Security:
   - `tools = true` in **Extra arguments** is refused;
   - a server answers 401 without its key, and refuses another origin;
   - by default nothing listens beyond loopback.

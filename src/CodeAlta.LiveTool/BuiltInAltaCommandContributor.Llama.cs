@@ -807,9 +807,12 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static AltaModelServersMachine? FindLlamaMachine(IReadOnlyList<AltaModelServersMachine> machines, string given)
     {
         if (given is "local" or "this" or "here") return machines.FirstOrDefault(static machine => machine.Local);
+        // A name a machine paired again shares with its old pairing: this computer first, then the one that answers.
+        static AltaModelServersMachine? Best(IEnumerable<AltaModelServersMachine> named)
+            => named.OrderByDescending(static machine => machine.Local).ThenByDescending(static machine => machine.State == "online").FirstOrDefault();
         return machines.FirstOrDefault(machine => string.Equals(machine.Id, given, StringComparison.OrdinalIgnoreCase))
-            ?? machines.FirstOrDefault(machine => string.Equals(machine.Name, given, StringComparison.OrdinalIgnoreCase))
-            ?? machines.FirstOrDefault(machine => machine.Name.StartsWith(given + ".", StringComparison.OrdinalIgnoreCase));
+            ?? Best(machines.Where(machine => string.Equals(machine.Name, given, StringComparison.OrdinalIgnoreCase)))
+            ?? Best(machines.Where(machine => machine.Name.StartsWith(given + ".", StringComparison.OrdinalIgnoreCase)));
     }
 
     // Why the caller may not download code or start a program through the model host, or null when it may.
