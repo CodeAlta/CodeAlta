@@ -34,3 +34,5 @@
   .discover-models-body.has-details .discover-models-list { display: none; }
   .discover-model-page { border-left: 0; }
 }
+/* The headers of the quantizations stay on one line: a narrow page wraps the cells instead. */
+.discover-model-quants th { white-space: nowrap; }
