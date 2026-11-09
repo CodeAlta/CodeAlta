@@ -22,6 +22,8 @@ import { DeletedWorktreesChoice } from "./worktrees/DeletedWorktreesChoice";
 import { deletedSessionsWorktrees, type DeletedWorktree } from "./worktrees/worktrees";
 
 const noSubscribe = () => () => {};
+const rowHeight = 30;
+const headerHeight = 31;
 const noSnapshot = () => null;
 
 type SortColumn = "title" | "provider" | "updated" | "messages";
@@ -101,6 +103,7 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   const table = useRef<Table2>(null);
   const results = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
+  const [height, setHeight] = useState(0);
   // The question of the deletion of the checked sessions, with the worktrees as the host checked them.
   const [deletingChecked, setDeletingChecked] = useState<Readonly<{ error: string | null }> | null>(null);
   const [removingWorktrees, setRemovingWorktrees] = useState(false);
@@ -191,7 +194,9 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   const titleOf = (row: WorkspaceSession) => plainTitle(row.fullTitle || row.title) || t("Untitled session");
   // The check column, then the provider, the time and the messages at their width; the title takes the rest.
   const fixed = (checking ? 40 : 0) + 150 + 130 + 96;
-  const columnWidths = [...(checking ? [40] : []), Math.max(220, width - fixed - 2), 150, 130, 96];
+  // Rows taller than the table leave the width of its vertical scroll bar: the title gives it up, so nothing scrolls sideways.
+  const scrollBar = rows.length * rowHeight + headerHeight > height ? 16 : 0;
+  const columnWidths = [...(checking ? [40] : []), Math.max(220, width - fixed - 2 - scrollBar), 150, 130, 96];
   const cellClass = (index: number, name: string) => [name, index === selected ? "session-browser-selected" : "",
     stale || !rows[index].valid ? "session-browser-unavailable" : "", rows[index].match ? "" : "session-browser-context"].filter(Boolean).join(" ");
   function cellContent(index: number, column: SortColumn) {
@@ -214,9 +219,10 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   useEffect(() => {
     const element = results.current;
     if (!element) return;
-    const observer = new ResizeObserver(() => setWidth(element.clientWidth));
+    const observer = new ResizeObserver(() => { setWidth(element.clientWidth); setHeight(element.clientHeight); });
     observer.observe(element);
     setWidth(element.clientWidth);
+    setHeight(element.clientHeight);
     return () => observer.disconnect();
   }, []);
   function activate(index: number) {
@@ -271,7 +277,7 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
     <div ref={results} id="session-browser-results" className="session-browser-results" role="region" aria-label={t(archive ? "Archived sessions" : "Saved sessions")}>
       {/* Drawn once the window is open and measured: the table sees its own resizes only when it starts visible. */}
       {rows.length > 0 && width > 0 && <Table2 ref={table} numRows={rows.length} enableRowHeader={false} enableMultipleSelection={false} enableColumnInteractionBar={false}
-        enableGhostCells={false} defaultRowHeight={30} columnWidths={columnWidths} selectionModes={SelectionModes.ROWS_AND_CELLS}
+        enableGhostCells={false} defaultRowHeight={rowHeight} columnWidths={columnWidths} selectionModes={SelectionModes.ROWS_AND_CELLS}
         // At most 200 rows: drawn at once. Drawn in batches, the table starts again with each change of what it shows.
         renderMode={RenderMode.NONE}
         selectedRegionTransform={region => region.rows ? Regions.row(region.rows[0]) : region} selectedRegions={[Regions.row(selected)]}
