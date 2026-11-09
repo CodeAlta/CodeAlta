@@ -611,14 +611,14 @@ This computer:
   - the RPC service of the page, with `demo-api.ts` and the fixture exports;
   - the toasts;
   - stopping servers when CodeAlta quits, unless they are kept.
-- [ ] 9. Providers:
+- [x] 9. Providers:
   - `server` for `llama-cpp` in `CodeAltaConfigStore`;
   - its resolution in `ConfiguredModelProviderRegistryBuilder`, through a resolver the host gives;
   - the models with their friendly names and last context, in `LlamaCppModelCatalog`;
   - **Use in sessions on** for this computer.
 
   Tests.
-- [ ] 10. The page, in `frontend/src/modelServers`:
+- [x] 10. The page, in `frontend/src/modelServers`:
   - **Settings** > **Fleet** > **Model servers** with its three tabs;
   - the page of a server;
   - **Add a model server…** with a Hugging Face name and a quantization picker;
@@ -627,7 +627,7 @@ This computer:
 
   Unit and browser tests.
 - [x] 11. `alta llama` for this computer: machine, build, model, download and server commands, with what each declares, their refusals and their receipts. LiveTool tests.
-- [ ] 12. Docs:
+- [x] 12. Docs:
   - `site/docs/fleet/model-servers.md`, listed in `menu.yml`;
   - the llama.cpp section of `site/docs/model-providers/setup.md`;
   - `doc/model-servers.md`, and the projects table of `doc/architecture.md`;
@@ -642,7 +642,7 @@ Every machine:
   - servers kept through a version switch;
   - the machine kept awake while a server works;
   - `altanode llama status` for the owner on the machine.
-- [ ] 15. `llama.http`:
+- [x] 15. `llama.http`:
   - **On the node:** the allowed paths (the OpenAI and Anthropic APIs, `/health`, `/props`); management paths refused; the key added; the body bounded; the stream with credits; cancellation.
   - **On the client:** `FleetModelServerHandler`, an `HttpMessageHandler`.
   - **The `models` permission:** its default at pairing, the switch of the page, `altanode permissions --allow models`.
@@ -700,13 +700,15 @@ Discover:
 - The node API is in `FleetNodeService.ModelServers.cs` over `ModelHost` directly (no `IFleetNodeModelServers`); it adds the event `llama.ended` so that the end of a download or an install on a machine reaches the computer that asked. `alta llama` on a node is `LocalAltaModelServers` in `CodeAlta.LiveTool`.
 - Done beyond the checked steps: 9 (friendly names come from the model host's `/v1/models`), 10 (unit tests; no browser test yet), 14 in part (servers kept through a version switch; `altanode status` says the servers instead of a separate `altanode llama status`), 15 (tests of permissions, refused paths and servers that do not run; no streaming test over the channel), 17 in part (the three tables for every machine, and a **Model servers** section on the page of a machine), 20 and 21 (policy, planned update kept by the machine, Update now one machine after the other stopping at the first failure, history, back to the previous build), 22 (Discover models with search, filters, cards, the card, the quantization table with the fit, Download and Serve; `alta llama hub`).
 - Not done: the machine kept awake while a server works; the Fleet overview tile; **Copy to…** and actions on several selected rows; one build chosen for all machines; Lemonade's ROCm builds (the setting exists, nothing reads it); the header of a GGUF read over ranges and `llama fit-params` (the fit is an estimate from the size); browser tests of the page.
+- Reviewed by a Codex (GPT-6.1 Sol, max) session: its 16 findings are fixed (a disabled server saved stops, starts serialized, more refused options and no user `config.ini`, removal kept inside the cache, every snapshot listed, one partial blob per download, updates found by SHA-256, waiting servers started after an install, the speed compared per model, embedding and rerank tests, the fit on AMD integrated GPUs, the fleet client on a lost connection, the desktop's own node API offering its servers, failed downloads kept in sight).
+- Validation on 2026-11-09, after the review fixes: every .NET test passes, `npm test` passes (2,862 tests), and `lunet build` passes. Not verified yet: two servers on the RTX 4070 and the RX 7600 XT at once, a 4 GB download cancelled and resumed, `run_Qwen38_27B.sh` imported on pc-ai, a build made to fail its test, **Update at…** with the desktop closed, one older build for both machines, and a sandboxed or shell-less agent live (covered by LiveTool tests only).
 - Verified live on 2026-11-09: CUDA, ROCm and Vulkan installed and tested on this computer; ROCm on pc-ai and Metal on the Mac; a session of this computer on each server (pc-ai and the Mac through the fleet); an agent with `alta llama` only; an update of pc-ai from b12110 to b12193 with its test.
 
 ## How it is verified
 
-- [ ] Build with `dotnet build -c <Configuration>`. Then run `dotnet test --no-build` and `npm test` as two jobs, and `lunet build` from `site/`. All pass.
-- [ ] `ArchitectureGuardrailTests` holds: `CodeAlta.ModelServers` references no host, window or runtime project.
-- [ ] An opt-in live test, with `CODEALTA_TEST_LLAMA_BUILD` and `CODEALTA_TEST_LLAMA_MODEL` naming a real build and a model under 200 MB:
+- [x] Build with `dotnet build -c <Configuration>`. Then run `dotnet test --no-build` and `npm test` as two jobs, and `lunet build` from `site/`. All pass.
+- [x] `ArchitectureGuardrailTests` holds: `CodeAlta.ModelServers` references no host, window or runtime project.
+- [x] An opt-in live test, with `CODEALTA_TEST_LLAMA_BUILD` and `CODEALTA_TEST_LLAMA_MODEL` naming a real build and a model under 200 MB:
   - the router starts with its preset;
   - the model loads;
   - a turn of the provider answers;

@@ -19,7 +19,7 @@ test("the computer that manages a machine changes what its devices may do, its p
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.machine-device:not(.machine-device-head) .machine-device-name strong')].map(item => item.textContent)`),
       ["desktop", "phone"]);
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.machine-device:nth-child(3) input[type=checkbox]')].map(input => input.checked)`),
-      [true, false, false, false, false, false], "the phone may only view");
+      [true, false, false, false, false, false, false], "the phone may only view");
     // What the worktrees of its sessions take, and when one goes.
     assert.equal(await page.evaluate(`document.querySelector('.machine-worktrees').textContent`),
       "Its sessions work in 3 worktrees, which take 2.5 GB on its disk. A worktree goes once its session is archived, deleted or idle for 7 days, and nothing in it is left uncommitted.");
