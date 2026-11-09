@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSession } from "#neoastra";
-import { checkedRange, sessionDeletionPlan, withChecked } from "./sessionBrowserSelection";
+import { checkedRange, sessionDeletionPlan, sessionTreeRows, treeCheckState, withChecked, withCheckedTree } from "./sessionBrowserSelection";
 
 const session = (id: string, parentSessionId: string | null = null, changes: Partial<WorkspaceSession> = {}): WorkspaceSession => ({
   id, title: id, fullTitle: id, fullTitleTruncated: false, workspacePath: "/p1", providerKey: "codex", updatedAt: "2026-11-09T10:00:00Z",
@@ -45,4 +45,37 @@ test("checked sessions are deleted the deepest first, and one with a session bel
   assert.deepEqual(partial.missing.map(row => row.id), ["grandchild"]);
 
   assert.deepEqual(sessionDeletionPlan([], catalog), { order: [], kept: [], missing: [] });
+});
+
+test("the sessions of a scope are a tree, sorted within each level; a search shows its matches with what they belong to", () => {
+  // b ─ b1 ─ b11; b ─ b2; a; c, whose parent is in another scope
+  const sessions = [session("a"), session("b"), session("b1", "b"), session("b11", "b1"), session("b2", "b"), session("c", "elsewhere")];
+  const byName = (x: WorkspaceSession, y: WorkspaceSession) => x.id.localeCompare(y.id);
+  const shown = (matched: ReadonlySet<string> | null, compare = byName) => sessionTreeRows(sessions, matched, compare).map(row => `${"-".repeat(row.depth)}${row.session.id}${row.match ? "" : "?"}`);
+  assert.deepEqual(shown(null), ["a", "b", "-b1", "--b11", "-b2", "c"]);
+  // Each level in the order given: the children too.
+  assert.deepEqual(shown(null, (x, y) => -byName(x, y)), ["c", "b", "-b2", "-b1", "--b11", "a"]);
+  // b1 matches: b above it and b11 below it are shown, not as matches; b2, a sibling, is not shown.
+  assert.deepEqual(shown(new Set(["b1"])), ["b?", "-b1", "--b11?"]);
+  // b matches too: shown as a match, with all that is below it.
+  assert.deepEqual(shown(new Set(["b", "b11"])), ["b", "-b1?", "--b11", "-b2?"]);
+  assert.deepEqual(shown(new Set()), []);
+  // A cycle is shown once, at the top.
+  assert.deepEqual(sessionTreeRows([session("x", "y"), session("y", "x")], null, byName).map(row => row.session.id), ["x", "y"]);
+});
+
+test("checking a session checks the sessions below it; unchecking one unchecks those below and above it", () => {
+  const sessions = [session("p"), session("c1", "p"), session("g", "c1"), session("c2", "p"), session("other")];
+  let checked = withCheckedTree(new Set(), sessions, ["p"], true);
+  assert.deepEqual([...checked].sort(), ["c1", "c2", "g", "p"]);
+  assert.equal(treeCheckState(checked, sessions, "p"), "checked");
+  // Unchecking g leaves c2: p and c1 are no longer checked whole.
+  checked = withCheckedTree(checked, sessions, ["g"], false);
+  assert.deepEqual([...checked].sort(), ["c2"]);
+  assert.equal(treeCheckState(checked, sessions, "p"), "partial");
+  assert.equal(treeCheckState(checked, sessions, "c1"), "none");
+  assert.equal(treeCheckState(checked, sessions, "other"), "none");
+  checked = withCheckedTree(checked, sessions, ["c1"], true);
+  assert.deepEqual([...checked].sort(), ["c1", "c2", "g"]);
+  assert.equal(treeCheckState(checked, sessions, "p"), "partial", "p itself is not checked");
 });

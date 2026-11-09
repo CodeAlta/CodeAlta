@@ -2183,6 +2183,9 @@ dialog.session-browser > .app-window > .app-window-body { gap: 10px; padding: 12
 .session-browser-results .bp6-table-cell.session-browser-selected { background: var(--accent-soft); }
 .session-browser-results .bp6-table-cell.session-browser-selected.session-browser-check { box-shadow: inset 2px 0 var(--accent), inset 0 -1px 0 var(--line); }
 .session-browser-results .bp6-table-cell.session-browser-unavailable { opacity: .55; }
+/* Shown with a match of the search, the sessions it comes from and the ones below it, not matches themselves. */
+.session-browser-results .bp6-table-cell.session-browser-context:not(.session-browser-check) { opacity: .5; }
+.session-browser-child { flex: none; color: var(--muted); }
 .session-browser-results .bp6-table-cell.session-browser-messages { text-align: right; }
 .session-browser-results .bp6-table-selection-region { border: 0; background: transparent; }
 .session-browser-results .bp6-table-column-headers .bp6-table-header { background: var(--panel-2); box-shadow: inset 0 -1px 0 var(--line); }

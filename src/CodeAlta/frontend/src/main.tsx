@@ -4740,25 +4740,32 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (sessionArchivePending.current || deletingPending.current || !owned || !mutation?.capability.canMutate() || !epoch) return [];
     sessionArchivePending.current = true;
     setSessionArchiveBusy(true);
-    const done: string[] = [];
+    // The sessions that changed, those asked and those restored with them: an answer that is an error can still say some did.
+    const changed = new Set<string>();
     let reason: string | null = null;
+    const done = () => rows.filter(row => changed.has(row.id)).map(row => row.id);
     try {
       for (const row of rows) {
+        // The sessions of an archived project are read-only.
+        if (row.scopeKind === "project" && catalog.current?.projects.find(value => value.id === row.projectId)?.archived) {
+          reason ??= t(sessionDeletionMessage("scope_missing") as MessageKey); continue;
+        }
         const result = await setSessionArchived(archive ? workspace.archiveSession : workspace.restoreSession, epoch, row.id, !archive);
-        if (!creationAlive.current) return done;
-        if (result.kind === "done") done.push(row.id);
+        if (!creationAlive.current) return done();
+        for (const id of result.changed) changed.add(id);
+        if (result.kind === "done") changed.add(row.id);
         else reason ??= t(sessionArchiveMessage(result.code));
       }
       const fresh = await refreshProjects(creationRefresh.current.signal);
-      if (!creationAlive.current) return done;
+      if (!creationAlive.current) return done();
       // The selected session left the list: its scope shows the next one.
-      if (archive && fresh?.configured && selectedSessionId.current && done.includes(selectedSessionId.current))
+      if (archive && fresh?.configured && selectedSessionId.current && changed.has(selectedSessionId.current))
         setSessionId(sessionsForProject(fresh, selectedScope.current)[0]?.id ?? null);
       refreshBrowserCapture();
-      checkedSessionsOutcome(done.length, rows.length - done.length, reason,
-        archive ? done.length === 1 ? t("Archived.") : t("Archived {count} sessions.", { count: done.length })
-          : done.length === 1 ? t("Restored.") : t("Restored {count} sessions.", { count: done.length }));
-      return done;
+      checkedSessionsOutcome(changed.size, rows.length - done().length, reason,
+        archive ? changed.size === 1 ? t("Archived.") : t("Archived {count} sessions.", { count: changed.size })
+          : changed.size === 1 ? t("Restored.") : t("Restored {count} sessions.", { count: changed.size }));
+      return done();
     } finally {
       sessionArchivePending.current = false;
       if (creationAlive.current) setSessionArchiveBusy(false);
@@ -4770,7 +4777,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   async function deleteCheckedSessions(rows: readonly WorkspaceSession[], worktrees: readonly DeletedWorktree[]): Promise<Readonly<{ deleted: readonly string[]; error: string | null }>> {
     const capability = mutation?.capability;
     const epoch = status?.hostEpoch;
-    if (sessionArchivePending.current || deletingPending.current || !owned || !capability?.canMutate() || !epoch)
+    // The locks of a single deletion, again: a deletion or a rename whose outcome is not known blocks this one too.
+    if (sessionArchivePending.current || deletingPending.current || renamingPending.current || !owned || !capability?.canMutate() || !epoch
+      || deleteLocked || renameLocked || !!uncertainDelete.current || !!uncertainRename.current)
       return { deleted: [], error: t(sessionDeletionMessage("busy") as MessageKey) };
     sessionArchivePending.current = true;
     deletingPending.current = true;
@@ -4786,7 +4795,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         if (!creationAlive.current) return { deleted, error: null };
         if (result.kind === "deleted") { deleted.push(row.id); continue; }
         reason ??= t(sessionDeletionMessage(result.code) as MessageKey);
-        if (result.code === "delete_unconfirmed") break;
+        // Not known whether it went: every deletion stays locked, as after a single one, and nothing more is asked.
+        if (result.code === "delete_unconfirmed") { uncertainDelete.current = { target, id: row.id }; setDeleteLocked(true); break; }
       }
       const fresh = await refreshProjects(creationRefresh.current.signal);
       if (!creationAlive.current) return { deleted, error: null };
@@ -4798,6 +4808,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         intent: "success", icon: "tick", timeout: 6000 });
       const left = worktreesLeft(worktrees, deleted);
       if (left.length > 0) void removeDeletedWorktrees(epoch, left);
+      // Said in a message too: the question that says it closes with the last session checked.
+      if (deleted.length < rows.length) checkedSessionsOutcome(0, rows.length - deleted.length, reason, "");
       return { deleted, error: deleted.length === rows.length ? null : reason };
     } finally {
       sessionArchivePending.current = false;

@@ -13,7 +13,7 @@ import { browseSessions } from "./sessionBrowser";
 import type { RuntimeObservationControls } from "./RuntimeObservation";
 import { sessionRunning } from "./runtimeObservations";
 import { tabKey } from "./sessionTabs";
-import { checkedRange, sessionDeletionPlan, withChecked } from "./sessionBrowserSelection";
+import { checkedRange, sessionDeletionPlan, sessionTreeRows, treeCheckState, withChecked, withCheckedTree } from "./sessionBrowserSelection";
 import { sessionTime } from "./sessionTime";
 import { plainTitle } from "./sessionTitle";
 import { useShellLanguage } from "./shellLanguage";
@@ -109,23 +109,43 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   const worktreeChecks = useRef(0);
   const archive = showArchived && archived ? archived : null;
   const archivedSnapshot = archived ? { ...snapshot, sessions: archived.sessions } : null;
-  const page = browseSessions(archive && archivedSnapshot ? archivedSnapshot : snapshot, scope, query);
+  const source = archive && archivedSnapshot ? archivedSnapshot : snapshot;
+  const page = browseSessions(source, scope, query);
+  // All the sessions of the scope: a search shows what it finds with the sessions they come from and the ones below them.
+  const scoped = query.trim() ? browseSessions(source, scope, "") : page;
   const archivedHere = archivedSnapshot ? browseSessions(archivedSnapshot, scope, "").matched : 0;
   const time = (row: WorkspaceSession) => archive ? row.archivedAt ?? row.updatedAt : row.updatedAt;
-  const order = (a: typeof page.rows[number], b: typeof page.rows[number]) => {
-    const value = sort.column === "title" ? plainTitle(a.row.title).localeCompare(plainTitle(b.row.title), locale)
-      : sort.column === "provider" ? (a.row.providerKey ?? "").localeCompare(b.row.providerKey ?? "")
-      : sort.column === "messages" ? (a.row.messageCount ?? -1) - (b.row.messageCount ?? -1)
-      : (Date.parse(time(a.row)) || 0) - (Date.parse(time(b.row)) || 0);
+  const order = (a: WorkspaceSession, b: WorkspaceSession) => {
+    const value = sort.column === "title" ? plainTitle(a.title).localeCompare(plainTitle(b.title), locale)
+      : sort.column === "provider" ? (a.providerKey ?? "").localeCompare(b.providerKey ?? "")
+      : sort.column === "messages" ? (a.messageCount ?? -1) - (b.messageCount ?? -1)
+      : (Date.parse(time(a)) || 0) - (Date.parse(time(b)) || 0);
     return sort.descending ? -value : value;
   };
-  const rows = [...page.rows].sort(order);
+  // The sessions as a tree, each under the one it comes from, sorted within each level; with a search, the sessions
+  // shown with a match are not matches themselves.
+  const scopeSessions = scoped.rows.map(item => item.row);
+  const items = new Map(scoped.rows.map(item => [item.row.id, item]));
+  const matched = query.trim() ? new Set(page.rows.map(item => item.row.id)) : null;
+  const rows = sessionTreeRows(scopeSessions, matched, order)
+    .flatMap(node => { const item = items.get(node.session.id); return item ? [{ ...item, depth: node.depth, match: node.match }] : []; });
   const selected = Math.max(0, rows.findIndex(item => tabKey(item.tab) === selectedKey));
   function setSelected(index: number) { setSelectedKey(rows[index] ? tabKey(rows[index].tab) : null); }
   // A session at work, or one whose identity is not sure, is not checked.
   const runningIn = (tab: SessionTab) => !archive && !stale && !!observations?.enabled && !!observed && observations.canObserve(tab) && sessionRunning(observed, tab);
-  const checkable = (item: typeof rows[number]) => !stale && item.valid && !runningIn(item.tab);
+  // The sessions of an archived project are read-only: none is checked.
+  const readOnly = scope !== null && !!snapshot.projects.find(row => row.id === scope)?.archived;
+  const checkable = (item: { valid: boolean; tab: SessionTab }) => !stale && !readOnly && item.valid && !runningIn(item.tab);
   const shownCheckable = rows.filter(checkable).map(item => item.row.id);
+  // The box of the header checks the matches shown, and with them the sessions below them.
+  const shownMatches = rows.filter(item => item.match && checkable(item)).map(item => item.row.id);
+  const notCheckable = new Set(scoped.rows.filter(item => !checkable(item)).map(item => item.row.id));
+  // A session is checked with the sessions below it, those that can be.
+  const checkTree = (current: ReadonlySet<string>, ids: readonly string[], value: boolean) => {
+    const next = new Set(withCheckedTree(current, scopeSessions, ids, value));
+    for (const id of notCheckable) next.delete(id);
+    return next;
+  };
   // The checked sessions of the scope and the view, also those the search hides now.
   const inScope = (row: WorkspaceSession) => scope === null ? row.scopeKind === "global" && row.projectId === null : row.scopeKind === "project" && row.projectId === scope;
   const checkedRows = (archive ? archive.sessions : snapshot.sessions).filter(row => checked.has(row.id) && inScope(row));
@@ -135,10 +155,10 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   // The sessions below the kept ones that the table can check: Select their child sessions checks them.
   const missingShown = plan ? plan.missing.filter(row => inScope(row) && rows.some(item => item.row.id === row.id && checkable(item))) : [];
   function check(id: string, event: MouseEvent) {
-    const value = !checked.has(id);
+    const value = treeCheckState(checked, scopeSessions.filter(row => !notCheckable.has(row.id)), id) !== "checked";
     const ids = event.shiftKey ? checkedRange(shownCheckable, anchor.current, id) : [id];
     anchor.current = id;
-    setChecked(current => withChecked(current, ids, value));
+    setChecked(current => checkTree(current, ids, value));
   }
   function clearChecked() { setChecked(new Set()); anchor.current = null; setDeletingChecked(null); }
   // `sessions` are the checked ones, also those checked in the same click.
@@ -157,15 +177,17 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
     setCheckingWorktrees(false);
     if (result) setCheckedWorktrees(result);
   }
+  // A question asked of a list that changed is not answered: it closes.
+  useEffect(() => { if (stale) { worktreeChecks.current++; setCheckingWorktrees(false); setDeletingChecked(null); } }, [stale]);
   async function deleteChecked() {
-    if (!checking || !plan || checking.busy) return;
+    if (!checking || !plan || checking.busy || stale) return;
     if (plan.order.length === 0) { setDeletingChecked(null); return; }
     const result = await checking.remove(plan.order, removingWorktrees ? worktrees.filter(worktree => !worktree.shared) : []);
     setChecked(current => withChecked(current, result.deleted, false));
     setDeletingChecked(result.error ? { error: result.error } : null);
   }
   async function archiveChecked() {
-    if (!checking || checking.busy || checkedRows.length === 0) return;
+    if (!checking || checking.busy || stale || checkedRows.length === 0) return;
     const done = await (archive ? checking.restore(checkedRows) : checking.archive(checkedRows));
     setChecked(current => withChecked(current, done, false));
   }
@@ -174,10 +196,11 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   const fixed = (checking ? 40 : 0) + 150 + 130 + 96;
   const columnWidths = [...(checking ? [40] : []), Math.max(220, width - fixed - 2), 150, 130, 96];
   const cellClass = (index: number, name: string) => [name, index === selected ? "session-browser-selected" : "",
-    stale || !rows[index].valid ? "session-browser-unavailable" : ""].filter(Boolean).join(" ");
+    stale || !rows[index].valid ? "session-browser-unavailable" : "", rows[index].match ? "" : "session-browser-context"].filter(Boolean).join(" ");
   function cellContent(index: number, column: SortColumn) {
-    const { row, valid, tab } = rows[index];
-    if (column === "title") return <span className="session-browser-title-cell">
+    const { row, valid, tab, depth } = rows[index];
+    if (column === "title") return <span className="session-browser-title-cell" style={{ paddingInlineStart: depth * 18 }}>
+      {depth > 0 && <span className="session-browser-child" aria-hidden="true">↳</span>}
       {runningIn(tab) ? <ActivitySpinner size={12} label={t("Running")} /> : <AppIcon name={archive ? "archive" : "assistant"} size={13} />}
       <strong className="session-browser-name">{titleOf(row)}</strong>
       {!valid && <small>{t("Ambiguous or unverified identity — unavailable")}</small>}</span>;
@@ -245,7 +268,7 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
         onClick={() => { setShowArchived(value => !value); setSelectedKey(null); setDeleting(null); clearChecked(); }}>
         {t("Archived")}{archivedHere > 0 && <span className="session-browser-count">{archivedHere}</span>}</Button>}
       <span className="settings-editor-spacer" />
-      <span className="bp6-text-muted" role="status">{t("{shown} of {matching} sessions", { shown: rows.length, matching: page.matched })}{page.hidden > 0 && <>{" · "}{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}</>}</span>
+      <span className="bp6-text-muted" role="status">{t("{shown} of {matching} sessions", { shown: rows.filter(item => item.match).length, matching: page.matched })}{page.hidden > 0 && <>{" · "}{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}</>}</span>
     </div>
     {(stale || refused) && <p role="alert">{t("Catalog, host or selection changed, or identity is ambiguous. Close and reopen the browser; nothing was opened.")}</p>}
     <div ref={results} id="session-browser-results" className="session-browser-results" role="region" aria-label={t(archive ? "Archived sessions" : "Saved sessions")}>
@@ -257,15 +280,17 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
         selectedRegionTransform={region => region.rows ? Regions.row(region.rows[0]) : region} selectedRegions={[Regions.row(selected)]}
         onSelection={regions => { const index = regions[0]?.rows?.[0]; if (index !== undefined && rows[index]) setSelected(index); }}
         // What the cells show, as values that stay the same while it does: a new list of the same rows draws nothing again.
-        cellRendererDependencies={[rows.map(item => tabKey(item.tab)).join("\n"), [...checked].join("\n"), selected, stale, observed, !!archive, locale, sort.column, sort.descending]}>
+        cellRendererDependencies={[rows.map(item => `${tabKey(item.tab)}:${item.depth}:${item.match}`).join("\n"), [...checked].join("\n"), selected, stale, observed, !!archive, locale, sort.column, sort.descending]}>
         {[...(checking ? [<Column key="check" columnHeaderCellRenderer={() => <ColumnHeaderCell className="session-browser-check" nameRenderer={() =>
           <input type="checkbox" aria-label={t("Select every session shown")} disabled={shownCheckable.length === 0}
-            checked={shownCheckable.length > 0 && shownCheckable.every(id => checked.has(id))}
-            ref={element => { if (element) element.indeterminate = shownCheckable.some(id => checked.has(id)) && !shownCheckable.every(id => checked.has(id)); }}
-            onChange={() => { const all = shownCheckable.every(id => checked.has(id)); anchor.current = null; setChecked(current => withChecked(current, shownCheckable, !all)); }} />} />}
+            checked={shownMatches.length > 0 && shownMatches.every(id => checked.has(id))}
+            ref={element => { if (element) element.indeterminate = shownCheckable.some(id => checked.has(id)) && !shownMatches.every(id => checked.has(id)); }}
+            onChange={() => { const all = shownMatches.every(id => checked.has(id)); anchor.current = null; setChecked(current => checkTree(current, shownMatches, !all)); }} />} />}
           cellRenderer={index => <Cell interactive className={cellClass(index, "session-browser-check")}>
             <input type="checkbox" aria-label={t("Select {title}", { title: titleOf(rows[index].row) })}
-              checked={checked.has(rows[index].row.id)} disabled={!checkable(rows[index])} onClick={event => check(rows[index].row.id, event)} onChange={() => { }} /></Cell>} />] : []),
+              checked={checked.has(rows[index].row.id)} disabled={!checkable(rows[index])}
+              ref={element => { if (element) element.indeterminate = !checked.has(rows[index].row.id) && treeCheckState(checked, scopeSessions, rows[index].row.id) === "partial"; }}
+              onClick={event => check(rows[index].row.id, event)} onChange={() => { }} /></Cell>} />] : []),
           ...(archive ? archivedColumns : columns).map(([column, label]) => <Column key={column} columnHeaderCellRenderer={() => <ColumnHeaderCell
             nameRenderer={() => <button type="button" className="session-browser-sort" data-column={column}
               aria-sort={sort.column === column ? sort.descending ? "descending" : "ascending" : "none"}

@@ -22,6 +22,86 @@ export function checkedRange(shown: readonly string[], anchor: string | null, cl
   return shown.slice(Math.min(from, to), Math.max(from, to) + 1);
 }
 
+/** A row of the tree of the sessions of a scope: how deep it is, and whether the search found it or it is shown with what it found. */
+export type SessionTreeRow = Readonly<{ session: WorkspaceSession; depth: number; match: boolean }>;
+
+/**
+ * The sessions of a scope as a tree: each session under the one it comes from, the sessions of a level in the order
+ * `compare` gives. A session whose parent is not in the scope is at the top. With a search, `matched` are the sessions
+ * it found: each is shown with the sessions above it and below it, which are not matches themselves.
+ */
+export function sessionTreeRows(sessions: readonly WorkspaceSession[], matched: ReadonlySet<string> | null,
+  compare: (a: WorkspaceSession, b: WorkspaceSession) => number): readonly SessionTreeRow[] {
+  const byId = new Map(sessions.map(session => [session.id, session]));
+  const children = new Map<string, WorkspaceSession[]>();
+  const roots: WorkspaceSession[] = [];
+  for (const session of sessions) {
+    const parent = session.parentSessionId;
+    if (parent !== null && parent !== session.id && byId.has(parent)) {
+      const list = children.get(parent) ?? [];
+      list.push(session);
+      children.set(parent, list);
+    } else roots.push(session);
+  }
+  let shown: Set<string> | null = null;
+  if (matched) {
+    shown = new Set<string>();
+    for (const id of matched) {
+      if (!byId.has(id)) continue;
+      // The sessions above it, then the ones below it.
+      for (let at: string | null = id; at !== null && byId.has(at) && !shown.has(at); at = byId.get(at)!.parentSessionId) shown.add(at);
+      shown.add(id);
+      for (let level = [id]; level.length > 0;) {
+        level = level.flatMap(parent => (children.get(parent) ?? []).map(child => child.id)).filter(child => !shown!.has(child));
+        for (const child of level) shown.add(child);
+      }
+    }
+  }
+  const rows: SessionTreeRow[] = [];
+  const visited = new Set<string>();
+  const visit = (session: WorkspaceSession, depth: number) => {
+    if (visited.has(session.id) || shown && !shown.has(session.id)) return;
+    visited.add(session.id);
+    rows.push({ session, depth, match: !matched || matched.has(session.id) });
+    for (const child of [...(children.get(session.id) ?? [])].sort(compare)) visit(child, depth + 1);
+  };
+  for (const root of [...roots].sort(compare)) visit(root, 0);
+  // A session of a cycle has no top: it is shown at the top, once.
+  for (const session of sessions) if (!visited.has(session.id)) visit(session, 0);
+  return rows;
+}
+
+/** The sessions of `sessions` below a session, and those above it, by id. */
+function relatives(sessions: readonly WorkspaceSession[], id: string): Readonly<{ below: readonly string[]; above: readonly string[] }> {
+  const below = descendants(sessions, id).map(session => session.id);
+  const above: string[] = [];
+  const byId = new Map(sessions.map(session => [session.id, session]));
+  for (let parent = byId.get(id)?.parentSessionId ?? null; parent !== null && byId.has(parent) && !above.includes(parent) && parent !== id; parent = byId.get(parent)!.parentSessionId) above.push(parent);
+  return { below, above };
+}
+
+/**
+ * The checked sessions after `ids` are checked or unchecked as a tree does: checking a session checks the sessions
+ * below it, unchecking one unchecks the sessions below it and the ones above it, which are no longer checked whole.
+ */
+export function withCheckedTree(checked: ReadonlySet<string>, sessions: readonly WorkspaceSession[], ids: readonly string[], value: boolean): ReadonlySet<string> {
+  const next = new Set(checked);
+  for (const id of ids) {
+    const { below, above } = relatives(sessions, id);
+    if (value) for (const each of [id, ...below]) next.add(each);
+    else for (const each of [id, ...below, ...above]) next.delete(each);
+  }
+  return next;
+}
+
+/** Whether a session is checked with all the sessions below it, partly (it or some of them), or not at all. */
+export function treeCheckState(checked: ReadonlySet<string>, sessions: readonly WorkspaceSession[], id: string): "checked" | "partial" | "none" {
+  const below = descendants(sessions, id).map(session => session.id);
+  const all = [id, ...below];
+  const count = all.filter(each => checked.has(each)).length;
+  return count === all.length ? "checked" : count > 0 ? "partial" : "none";
+}
+
 /** The sessions below each session of the catalog, wherever they are, archived ones included. */
 function descendants(catalog: readonly WorkspaceSession[], id: string): readonly WorkspaceSession[] {
   const found: WorkspaceSession[] = [];

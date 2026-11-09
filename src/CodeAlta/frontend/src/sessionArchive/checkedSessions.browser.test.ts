@@ -59,36 +59,50 @@ test("sessions checked in the saved sessions are archived, restored and deleted 
     const checkedTitles = `[...${dialog}.querySelectorAll('.session-browser-results input[aria-label^="Select "]:not([aria-label="Select every session shown"])')].filter(input=>input.checked).map(input=>input.getAttribute('aria-label').slice(7))`;
     const status = `${dialog}.querySelector('.checked-footer [role=status]')?.textContent`;
 
-    // The sessions of the project, the newest first, each with a box; nothing checked, the usual footer.
+    // The sessions of the project as a tree, the newest first, each with a box; nothing checked, the usual footer.
     await evaluate("checkedFixture.show()");
     assert.equal(await wait(`${dialog} && ${titles}.length===4`), true);
-    assert.deepEqual(await evaluate(titles), ["Write the tests", "Check the lexer", "Review the parser", "Plan the release"]);
+    assert.deepEqual(await evaluate(titles), ["Write the tests", "Review the parser", "Check the lexer", "Plan the release"], "Check the lexer is under the session it comes from.");
+    assert.equal(await evaluate(`[...${dialog}.querySelectorAll('.session-browser-title-cell')].map(cell=>parseFloat(cell.style.paddingInlineStart)||0).join()`), "0,0,18,0");
     assert.equal(await evaluate(`!!${footerButton("Open")}`), true);
 
-    // A click checks one; a Shift-click the rows down to it; the footer says how many and what to do with them.
+    // A click checks one; a Shift-click the rows down to it, and the sessions below them; the footer says how many.
     await evaluate(`${box("Write the tests")}.click()`);
     assert.equal(await wait(`${status}==='1 selected'`), true);
     await evaluate(shiftClick("Review the parser"));
     assert.equal(await wait(`${status}==='3 selected'`), true);
-    assert.deepEqual(await evaluate(checkedTitles), ["Write the tests", "Check the lexer", "Review the parser"]);
+    assert.deepEqual(await evaluate(checkedTitles), ["Write the tests", "Review the parser", "Check the lexer"]);
     assert.equal(await evaluate(`${all}.indeterminate`), true);
     assert.equal(await evaluate(`!!${footerButton("Archive 3")} && !!${footerButton("Delete 3…")}`), true);
+    // Unchecking a child unchecks the session above it, which is no longer checked whole; checking it again leaves that one partly checked.
+    await evaluate(`${box("Check the lexer")}.click()`);
+    assert.equal(await wait(`${status}==='1 selected'`), true);
+    assert.deepEqual(await evaluate(checkedTitles), ["Write the tests"]);
+    await evaluate(`${box("Check the lexer")}.click()`);
+    assert.equal(await wait(`${status}==='2 selected' && ${box("Review the parser")}.indeterminate`), true);
     // The box of the header checks every session shown, then none.
     await evaluate(`${all}.click()`);
     assert.equal(await wait(`${status}==='4 selected'`), true);
     await evaluate(`${all}.click()`);
     assert.equal(await wait(`!${status} && !!${footerButton("Open")}`), true);
-    // A search keeps what is checked; Clear selection unchecks it.
+
+    // A search shows what it finds with the sessions it belongs to, grayed; it keeps what is checked.
     await evaluate(`${box("Plan the release")}.click()`);
-    await evaluate(`(()=>{const input=${dialog}.querySelector('input[type=search]');const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,'tests');input.dispatchEvent(new Event('input',{bubbles:true}))})()`);
-    assert.equal(await wait(`${titles}.length===1 && ${status}==='1 selected'`), true);
+    await evaluate(`(()=>{const input=${dialog}.querySelector('input[type=search]');const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,'lexer');input.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+    assert.equal(await wait(`${titles}.length===2 && ${status}==='1 selected'`), true);
+    assert.deepEqual(await evaluate(titles), ["Review the parser", "Check the lexer"]);
+    assert.deepEqual(await evaluate(`[...${dialog}.querySelectorAll('.bp6-table-cell.session-browser-title')].map(cell=>cell.classList.contains('session-browser-context'))`), [true, false]);
+    assert.match(await evaluate<string>(`${dialog}.querySelector('.session-browser-toolbar [role=status]').textContent`), /^1 of 1 sessions/);
+    await evaluate(`(()=>{const input=${dialog}.querySelector('input[type=search]');const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,'review');input.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+    assert.equal(await wait(`${titles}.length===2`), true, "A match shows the sessions below it.");
+    assert.deepEqual(await evaluate(`[...${dialog}.querySelectorAll('.bp6-table-cell.session-browser-title')].map(cell=>cell.classList.contains('session-browser-context'))`), [false, true]);
     await evaluate(`${footerButton("Clear selection")}.click()`);
     assert.equal(await wait(`!${status}`), true);
 
     // Plan has a child session in another project: it is kept. Tests goes, and its worktree is offered.
-    await evaluate(`${box("Write the tests")}.click()`);
     await evaluate(`(()=>{const input=${dialog}.querySelector('input[type=search]');const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,'');input.dispatchEvent(new Event('input',{bubbles:true}))})()`);
     assert.equal(await wait(`${titles}.length===4`), true);
+    await evaluate(`${box("Write the tests")}.click()`);
     await evaluate(`${box("Plan the release")}.click()`);
     await evaluate(`${footerButton("Delete 2…")}.click()`);
     assert.equal(await wait(confirm), true);
@@ -106,12 +120,12 @@ test("sessions checked in the saved sessions are archived, restored and deleted 
     assert.equal(await wait(`${status}==='1 selected'`), true);
     await evaluate(`${footerButton("Clear selection")}.click()`);
 
-    // Review has its child here: the question checks it too, and both go, the child first.
+    // Review is checked with its child: both go, the child first.
     await evaluate(`${box("Review the parser")}.click()`);
-    await evaluate(`${footerButton("Delete 1…")}.click()`);
-    assert.equal(await wait(`${confirm}?.textContent.includes('One of them has child sessions you did not select')`), true);
-    await evaluate(`[...${confirm}.querySelectorAll('button')].find(button=>button.textContent==='Select their child sessions').click()`);
-    assert.equal(await wait(`${confirm}?.textContent.includes('Delete 2 sessions?') && !${confirm}.textContent.includes('you did not select')`), true);
+    assert.equal(await wait(`${status}==='2 selected'`), true);
+    await evaluate(`${footerButton("Delete 2…")}.click()`);
+    assert.equal(await wait(`${confirm}?.textContent.includes('Delete 2 sessions?')`), true);
+    assert.doesNotMatch(await evaluate<string>(`${confirm}.textContent`), /you did not select/);
     assert.match(await evaluate<string>(`${confirm}.textContent`), /Review the parser and 1 more.*Their history is deleted/s);
     await evaluate(`[...${confirm}.querySelectorAll('button')].find(button=>button.textContent==='Delete').click()`);
     assert.equal(await wait(`!${confirm}`), true);
