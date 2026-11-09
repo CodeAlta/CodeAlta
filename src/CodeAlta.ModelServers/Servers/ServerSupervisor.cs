@@ -383,19 +383,57 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
     /// <summary>Reads the end of the log.</summary>
     /// <param name="lines">How many lines.</param>
     /// <returns>The lines.</returns>
-    public IReadOnlyList<string> ReadLog(int lines)
+    public IReadOnlyList<string> ReadLog(int lines) => ReadLogTail(LogPath, lines);
+
+    /// <summary>
+    /// Reads the end of a log, back from its last line, without the lines of the router that only say it passed a request
+    /// on to a model (the reads of the status every few seconds write two of them): what a person or an agent looks for
+    /// is above them. It reads 8 MB at most.
+    /// </summary>
+    /// <param name="path">The log.</param>
+    /// <param name="lines">How many lines.</param>
+    /// <returns>The lines, the last one last.</returns>
+    internal static IReadOnlyList<string> ReadLogTail(string path, int lines)
     {
+        lines = Math.Max(1, lines);
         try
         {
-            if (!File.Exists(LogPath)) return [];
-            using var stream = new FileStream(LogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            var start = Math.Max(0, stream.Length - Math.Max(1, lines) * 400L);
-            stream.Seek(start, SeekOrigin.Begin);
-            using var reader = new StreamReader(stream);
-            var text = reader.ReadToEnd();
-            var all = text.Split('\n').Select(static line => line.TrimEnd('\r')).Where(static line => line.Length > 0).ToList();
-            if (start > 0 && all.Count > 0) all.RemoveAt(0);
-            return all.TakeLast(lines).ToList();
+            if (!File.Exists(path)) return [];
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            const int Chunk = 64 * 1024;
+            var collected = new List<string>();
+            var buffer = new byte[Chunk];
+            var end = stream.Length;
+            var carry = Array.Empty<byte>();
+            while (end > 0 && collected.Count < lines && stream.Length - end < 8L << 20)
+            {
+                var size = (int)Math.Min(Chunk, end);
+                end -= size;
+                stream.Seek(end, SeekOrigin.Begin);
+                stream.ReadExactly(buffer, 0, size);
+                // The bytes of a line cut by the chunk wait for the chunk before it, so that a character is never cut.
+                var block = new byte[size + carry.Length];
+                Buffer.BlockCopy(buffer, 0, block, 0, size);
+                Buffer.BlockCopy(carry, 0, block, size, carry.Length);
+                var first = end > 0 ? Array.IndexOf(block, (byte)'\n') : -1;
+                if (end > 0 && first < 0)
+                {
+                    carry = block;
+                    continue;
+                }
+
+                carry = end > 0 ? block[..first] : [];
+                var text = System.Text.Encoding.UTF8.GetString(block, first + 1, block.Length - first - 1);
+                var parts = text.Split('\n');
+                for (var i = parts.Length - 1; i >= 0 && collected.Count < lines; i--)
+                {
+                    var line = parts[i].TrimEnd('\r');
+                    if (line.Length > 0 && !line.Contains("proxying request to model", StringComparison.Ordinal)) collected.Add(line);
+                }
+            }
+
+            collected.Reverse();
+            return collected;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

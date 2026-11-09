@@ -140,6 +140,26 @@ public sealed class ModelServersParsingTests
     }
 
     [TestMethod]
+    public void TheEndOfALog_LeavesOutTheRequestsTheRouterPassesOn()
+    {
+        using var temp = TestTempDirectory.Create();
+        var path = Path.Combine(temp.Path, "server.log");
+        var text = new System.Text.StringBuilder();
+        for (var i = 0; i < 2000; i++) text.Append("early line ").Append(i).Append('\n');
+        text.Append("E ggml_cuda_mul_mat: hipblasGemmEx failed — current device: 1\n");
+        text.Append("I srv run: instance name=a/b:Q4_K_M exited with status -1073740791\r\n");
+        // The reads of the status, every few seconds, long after the failure: well over one chunk of 64 KB.
+        for (var i = 0; i < 4000; i++) text.Append("1.40.433.446 I srv  proxy_reques: proxying request to model a/b:Q4_K_M on port 52980\n");
+        File.WriteAllText(path, text.ToString());
+        var lines = ServerSupervisor.ReadLogTail(path, 3);
+        CollectionAssert.AreEqual(new[] { "early line 1999", "E ggml_cuda_mul_mat: hipblasGemmEx failed — current device: 1", "I srv run: instance name=a/b:Q4_K_M exited with status -1073740791" },
+            lines.ToArray());
+        Assert.HasCount(10, ServerSupervisor.ReadLogTail(path, 10));
+        Assert.AreEqual("early line 0", ServerSupervisor.ReadLogTail(path, 5000)[0], "a short log is read whole");
+        Assert.IsEmpty(ServerSupervisor.ReadLogTail(Path.Combine(temp.Path, "none.log"), 5));
+    }
+
+    [TestMethod]
     public void WindowsAdapters_OfGpusRemovedFromTheMachine_AreLeftOut()
     {
         // Windows keeps the driver key of a card taken out (an R9700 here) and of an earlier instance of the GPU of the processor.
