@@ -141,11 +141,8 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   const shownMatches = rows.filter(item => item.match && checkable(item)).map(item => item.row.id);
   const notCheckable = new Set(scoped.rows.filter(item => !checkable(item)).map(item => item.row.id));
   // A session is checked with the sessions below it, those that can be.
-  const checkTree = (current: ReadonlySet<string>, ids: readonly string[], value: boolean) => {
-    const next = new Set(withCheckedTree(current, scopeSessions, ids, value));
-    for (const id of notCheckable) next.delete(id);
-    return next;
-  };
+  const checkTree = (current: ReadonlySet<string>, ids: readonly string[], value: boolean) =>
+    withCheckedTree(current, scopeSessions, ids, value, id => !notCheckable.has(id));
   // The checked sessions of the scope and the view, also those the search hides now.
   const inScope = (row: WorkspaceSession) => scope === null ? row.scopeKind === "global" && row.projectId === null : row.scopeKind === "project" && row.projectId === scope;
   const checkedRows = (archive ? archive.sessions : snapshot.sessions).filter(row => checked.has(row.id) && inScope(row));

@@ -74,12 +74,12 @@ test("sessions checked in the saved sessions are archived, restored and deleted 
     assert.deepEqual(await evaluate(checkedTitles), ["Write the tests", "Review the parser", "Check the lexer"]);
     assert.equal(await evaluate(`${all}.indeterminate`), true);
     assert.equal(await evaluate(`!!${footerButton("Archive 3")} && !!${footerButton("Delete 3…")}`), true);
-    // Unchecking a child unchecks the session above it, which is no longer checked whole; checking it again leaves that one partly checked.
+    // Unchecking a child unchecks the session above it, which is no longer checked whole; checking its last child checks it again.
     await evaluate(`${box("Check the lexer")}.click()`);
     assert.equal(await wait(`${status}==='1 selected'`), true);
     assert.deepEqual(await evaluate(checkedTitles), ["Write the tests"]);
     await evaluate(`${box("Check the lexer")}.click()`);
-    assert.equal(await wait(`${status}==='2 selected' && ${box("Review the parser")}.indeterminate`), true);
+    assert.equal(await wait(`${status}==='3 selected' && ${box("Review the parser")}.checked && !${box("Review the parser")}.indeterminate`), true);
     // The box of the header checks every session shown, then none.
     await evaluate(`${all}.click()`);
     assert.equal(await wait(`${status}==='4 selected'`), true);

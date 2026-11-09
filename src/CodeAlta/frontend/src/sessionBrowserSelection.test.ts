@@ -76,7 +76,17 @@ test("checking a session checks the sessions below it; unchecking one unchecks t
   assert.equal(treeCheckState(checked, sessions, "p"), "partial");
   assert.equal(treeCheckState(checked, sessions, "c1"), "none");
   assert.equal(treeCheckState(checked, sessions, "other"), "none");
+  // Checking c1 again: all that is below p is checked, so p is too.
   checked = withCheckedTree(checked, sessions, ["c1"], true);
-  assert.deepEqual([...checked].sort(), ["c1", "c2", "g"]);
-  assert.equal(treeCheckState(checked, sessions, "p"), "partial", "p itself is not checked");
+  assert.deepEqual([...checked].sort(), ["c1", "c2", "g", "p"]);
+  assert.equal(treeCheckState(checked, sessions, "p"), "checked");
+  // One child after the other: the parent is checked with the last one.
+  let one = withCheckedTree(new Set(), sessions, ["c2"], true);
+  assert.equal(treeCheckState(one, sessions, "p"), "partial");
+  one = withCheckedTree(one, sessions, ["g"], true);
+  assert.deepEqual([...one].sort(), ["c1", "c2", "g", "p"], "g checks c1, then p");
+  // A session that cannot be checked, one at work, is never checked, and keeps the ones above it from being checked whole.
+  const atWork = withCheckedTree(new Set(), sessions, ["p"], true, id => id !== "g");
+  assert.deepEqual([...atWork].sort(), ["c2"]);
+  assert.equal(treeCheckState(atWork, sessions, "p"), "partial");
 });

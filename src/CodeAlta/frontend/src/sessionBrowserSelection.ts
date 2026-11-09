@@ -89,14 +89,25 @@ function relatives(sessions: readonly WorkspaceSession[], id: string): Readonly<
 
 /**
  * The checked sessions after `ids` are checked or unchecked as a tree does: checking a session checks the sessions
- * below it, unchecking one unchecks the sessions below it and the ones above it, which are no longer checked whole.
+ * below it, and each session above it all of whose sessions below are now checked; unchecking one unchecks the
+ * sessions below it and the ones above it, which are no longer checked whole. `canCheck` says which sessions can be
+ * checked: one that cannot is never checked, and the sessions above it are not checked whole.
  */
-export function withCheckedTree(checked: ReadonlySet<string>, sessions: readonly WorkspaceSession[], ids: readonly string[], value: boolean): ReadonlySet<string> {
+export function withCheckedTree(checked: ReadonlySet<string>, sessions: readonly WorkspaceSession[], ids: readonly string[], value: boolean,
+  canCheck: (id: string) => boolean = () => true): ReadonlySet<string> {
   const next = new Set(checked);
   for (const id of ids) {
     const { below, above } = relatives(sessions, id);
-    if (value) for (const each of [id, ...below]) next.add(each);
-    else for (const each of [id, ...below, ...above]) next.delete(each);
+    if (!value) { for (const each of [id, ...below, ...above]) next.delete(each); continue; }
+    const added = [id, ...below].filter(canCheck);
+    for (const each of added) next.add(each);
+    // The deepest first: a session is checked only with all that is below it, which one that cannot be checked prevents.
+    for (const each of [...added].reverse()) if (!descendants(sessions, each).every(child => next.has(child.id))) next.delete(each);
+    // The nearest first: a session above is checked once all that is below it is.
+    for (const parent of above) {
+      if (!canCheck(parent) || !descendants(sessions, parent).every(below => next.has(below.id))) break;
+      next.add(parent);
+    }
   }
   return next;
 }
