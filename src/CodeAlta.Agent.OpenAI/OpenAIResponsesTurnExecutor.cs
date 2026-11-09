@@ -474,7 +474,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     {
                         AssistantMessage = assistantMessage,
                         AssistantPartContentIds = assistantPartContentIds,
-                        Usage = CreateUsage(request, completedResponse, codexMetadata, provider.PromptCacheLifetime),
+                        Usage = CreateUsage(request, completedResponse, codexMetadata, provider.PromptCacheLifetime, readsServiceTier: provider.CodexSubscription is null),
                         UsageIsIncremental = attemptState.SentContinuation,
                         ProviderSessionId = string.IsNullOrWhiteSpace(completedResponse.Id) ? null : completedResponse.Id,
                         ProviderState = CreateProviderState(completedResponse, codexMetadata),
@@ -2171,7 +2171,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
         AgentTurnRequest request,
         ResponseResult response,
         CodexMetadataAccumulator codexMetadata,
-        TimeSpan? promptCacheLifetime)
+        TimeSpan? promptCacheLifetime,
+        bool readsServiceTier)
     {
         var cachedTokens = response.Usage?.InputTokenDetails?.CachedTokenCount;
         var cacheWriteTokens = response.Usage?.InputTokenDetails?.CacheWriteTokenCount;
@@ -2188,7 +2189,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 updatedAt: response.CreatedAt == default ? DateTimeOffset.UtcNow : response.CreatedAt,
                 cacheWriteTokens: cacheWriteTokens is > 0 ? cacheWriteTokens : null);
         // The tier that ran the request, which may not be the one asked: priority (named fast by later models) is the fast mode.
-        if (operationUsage?.LastOperation is { } operation && response.ServiceTier?.ToString() is { Length: > 0 } tier)
+        // Not for Codex: with a ChatGPT sign-in it routes fast mode on its side, and its responses say "default" whatever
+        // ran them (openai/codex#14204).
+        if (readsServiceTier && operationUsage?.LastOperation is { } operation && response.ServiceTier?.ToString() is { Length: > 0 } tier)
         {
             operationUsage = operationUsage with { LastOperation = operation with { FastMode = tier is "priority" or "fast" } };
         }

@@ -2805,6 +2805,33 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual(warns, updates.Any(static update => update.Kind == AgentSessionUpdateKind.Warning), "A session that turned fast mode off is not warned about it.");
     }
 
+    [TestMethod]
+    [DataRow("default")]
+    [DataRow("priority")]
+    public async Task OpenAIResponsesTurnExecutor_CodexReportsNoSpeed_FromTheTierOfItsResponse(string served)
+    {
+        // With a ChatGPT sign-in, Codex routes fast mode on its side, and the service_tier of a response is not the tier
+        // that ran it: "default" does not mean that fast mode was ignored (openai/codex#14204, #30413).
+        var responsesClient = new RecordingOpenAIResponseClient([[CreateCompletedUpdateServedBy(served)]]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions { ResponseTransport = "http" },
+        });
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = "gpt-5.4",
+            ModelInfo = new AgentModelInfo("gpt-5.4", Capabilities: new Dictionary<string, object?> { ["source"] = "codex-endpoint", ["serviceTiers"] = new[] { "priority" } }),
+            FastMode = true,
+        };
+
+        var response = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        Assert.IsNotNull(response.Usage?.LastOperation);
+        Assert.IsNull(response.Usage.LastOperation.FastMode);
+    }
+
     // A completed response with its usage, served by a tier.
     private static StreamingResponseUpdate CreateCompletedUpdateServedBy(string tier)
         => DeserializeStreamingResponseUpdate(
