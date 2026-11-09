@@ -34,8 +34,8 @@ export async function continueHeldRun(api: Pick<typeof fleetServer, "status" | "
   } catch { return "failed"; }
 }
 
-/** The id of the plugin of the Fleet canvas and of the canvas itself (`DesktopFleetPlugin`). */
-export const fleetCanvasRef = { pluginKey: "fleet", id: "fleet" } as const;
+/** The key of the plugin of the Fleet canvas and the id of the canvas itself (`DesktopFleetPlugin`): a plugin of the application is keyed `builtin:<id>`. */
+export const fleetCanvasRef = { pluginKey: "builtin:fleet", id: "fleet" } as const;
 
 /** The Fleet canvas among the canvases of the window, which the Fleet button opens; null while its plugin does not run. */
 export function fleetCanvasOf<T extends { pluginKey: string; id: string }>(canvases: readonly T[]): T | null {

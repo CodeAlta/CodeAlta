@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { FleetBudgetHoldView, FleetServerView } from "#neoastra";
-import { continueHeldRun, heldRunToastKey } from "./approvals";
+import { continueHeldRun, fleetCanvasOf, heldRunToastKey } from "./approvals";
 
 const server = (id: string, controller: boolean): FleetServerView => ({ id, url: `https://${id}.example`, organization: id, link: "approved", connection: "online",
   problem: null, controller, spaces: [], recoveryKey: true, shareUrl: null, stop: null }) as FleetServerView;
@@ -34,4 +34,11 @@ test("A hold the server does not list yet, or a Continue anyway refused, is said
   assert.equal(await continueHeldRun(api({ home: [hold("h1", "other")] }).api, "epoch", "s1"), "not_found");
   assert.equal(await continueHeldRun(api({ home: [hold("h1", "s1")] }, "refused").api, "epoch", "s1"), "failed");
   assert.equal(heldRunToastKey("s1"), "fleet-held-run:s1");
+});
+
+test("The Fleet button finds the Fleet canvas as the host declares it: the key of a plugin of the application", () => {
+  const catalog = [{ pluginKey: "builtin:statistics", id: "statistics" }, { pluginKey: "builtin:fleet", id: "models" }, { pluginKey: "builtin:fleet", id: "fleet" }];
+  assert.deepEqual(fleetCanvasOf(catalog), { pluginKey: "builtin:fleet", id: "fleet" });
+  assert.equal(fleetCanvasOf([{ pluginKey: "fleet", id: "fleet" }]), null, "a plugin named fleet that is not the application's");
+  assert.equal(fleetCanvasOf([]), null, "while its plugin does not run");
 });
