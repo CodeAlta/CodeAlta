@@ -78,8 +78,9 @@ public sealed class MxcContainerTests
     public async Task AProtectedFile_IsNeitherReplacedNorDeleted_NorMovedAwayWithAFolderAboveIt()
     {
         // A read-only grant stops a write to the file, not a rename in its writable folder that replaces it, nor the move of
-        // a folder above it: what the sandbox puts there (core.fsmonitor) would run later outside the sandbox.
-        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("The protected entries are held open on Windows; Seatbelt and Bubblewrap are checked on their systems.");
+        // a folder above it: what the sandbox puts there (core.fsmonitor) would run later outside the sandbox. Windows
+        // holds the entries open. Seatbelt refuses the replacement by itself, by path, but not yet the move of a folder
+        // above the entry, which mxc cannot express there: only the replacement is tried elsewhere.
         var backend = new MxcSandboxBackend();
         if (backend.GetAvailability() is { IsAvailable: false } availability) Assert.Inconclusive(availability.Reason ?? "No sandbox on this computer.");
         using var temp = new TempTree();
@@ -99,25 +100,41 @@ public sealed class MxcContainerTests
         var originalGitConfig = File.ReadAllText(gitConfig);
         var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve(SandboxProfiles.Strict, []), new SandboxSessionFolders { WorkingDirectory = project },
             host, [], "test");
-        File.WriteAllLines(Path.Combine(project, "attempts.cmd"),
-        [
-            "@echo off",
-            $"\"{git}\" config core.fsmonitor evil",
-            "echo evil> config.new",
-            "move /y config.new .git\\config",
-            "del /f .alta\\config.toml",
-            "attrib -h .git",
-            "move .git moved",
-            "echo [core]> moved\\config",
-            "echo fsmonitor = evil>> moved\\config",
-            "move moved .git",
-            "move .alta moved-alta",
-            "echo evil> moved-alta\\mcp.json",
-            "move moved-alta .alta",
-        ]);
+        string commandLine;
+        if (OperatingSystem.IsWindows())
+        {
+            File.WriteAllLines(Path.Combine(project, "attempts.cmd"),
+            [
+                "@echo off",
+                $"\"{git}\" config core.fsmonitor evil",
+                "echo evil> config.new",
+                "move /y config.new .git\\config",
+                "del /f .alta\\config.toml",
+                "attrib -h .git",
+                "move .git moved",
+                "echo [core]> moved\\config",
+                "echo fsmonitor = evil>> moved\\config",
+                "move moved .git",
+                "move .alta moved-alta",
+                "echo evil> moved-alta\\mcp.json",
+                "move moved-alta .alta",
+            ]);
+            commandLine = $"\"{Path.Combine(Environment.SystemDirectory, "cmd.exe")}\" /d /c attempts.cmd";
+        }
+        else
+        {
+            File.WriteAllLines(Path.Combine(project, "attempts.sh"),
+            [
+                $"'{git}' config core.fsmonitor evil",
+                "echo evil > config.new",
+                "mv -f config.new .git/config",
+                "rm -f .alta/config.toml",
+            ]);
+            commandLine = "/bin/sh attempts.sh";
+        }
 
         var outputs = new List<string>();
-        await using (var process = await backend.StartAsync(policy, $"\"{Path.Combine(Environment.SystemDirectory, "cmd.exe")}\" /d /c attempts.cmd", null, CancellationToken.None))
+        await using (var process = await backend.StartAsync(policy, commandLine, null, CancellationToken.None))
         {
             var output = new StreamReader(process.StandardOutput, Encoding.UTF8).ReadToEndAsync();
             var errors = new StreamReader(process.StandardError, Encoding.UTF8).ReadToEndAsync();
@@ -129,8 +146,11 @@ public sealed class MxcContainerTests
         var report = string.Join("\n", outputs);
         Assert.AreEqual(originalGitConfig, File.ReadAllText(gitConfig), report);
         Assert.AreEqual("original", File.ReadAllText(altaConfig), report);
-        Assert.IsFalse(File.Exists(Path.Combine(project, ".alta", "mcp.json")), "a denied entry is not made by moving its folder away and back\n" + report);
-        Assert.IsFalse(Directory.Exists(Path.Combine(project, "moved")) || Directory.Exists(Path.Combine(project, "moved-alta")), report);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.IsFalse(File.Exists(Path.Combine(project, ".alta", "mcp.json")), "a denied entry is not made by moving its folder away and back\n" + report);
+            Assert.IsFalse(Directory.Exists(Path.Combine(project, "moved")) || Directory.Exists(Path.Combine(project, "moved-alta")), report);
+        }
 
         // Released with the container: the user's own programs replace the file again.
         File.WriteAllText(Path.Combine(project, ".alta", "config.new"), "changed");
@@ -140,8 +160,10 @@ public sealed class MxcContainerTests
 
     private static string? FindGit(SandboxHost host)
     {
+        // A folder of the developer tools, or one of the system that the sandbox reads (/usr/bin/git of macOS and Linux).
         var name = OperatingSystem.IsWindows() ? "git.exe" : "git";
-        return host.ToolFolders.Select(folder => Path.Combine(folder, name)).FirstOrDefault(File.Exists);
+        var path = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+        return host.ToolFolders.Concat(path).Select(folder => Path.Combine(folder, name)).FirstOrDefault(File.Exists);
     }
 
     private static void RunGit(string git, string folder, params string[] arguments)

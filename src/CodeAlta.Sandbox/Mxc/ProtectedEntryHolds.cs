@@ -14,7 +14,8 @@ namespace CodeAlta.Sandbox.Mxc;
 /// delete, rename or replace what a process holds open without sharing its deletion, whatever its permissions: each
 /// protected entry that exists and each folder between it and the writable folder that holds it are held that way, read
 /// and write shared. The programs of the user cannot replace them either until the container ends; CodeAlta's own writes
-/// go in place (<c>SafeFile</c>). On macOS and Linux nothing is held: what refuses such a rename there is the container.
+/// go in place (<c>SafeFile</c>). On macOS and Linux nothing is held: Seatbelt refuses the replacement by path, not the
+/// move of a folder above the entry, which mxc cannot express there.
 /// </remarks>
 internal sealed partial class ProtectedEntryHolds : IDisposable
 {
