@@ -9,7 +9,7 @@ import { createSessionOverlayMemory } from "./sessionOverlayMemory";
 import { saveWindowGeometry, type WindowGeometry } from "./windowGeometry";
 import { createDockPreference } from "./workItems/proposalsDock";
 import { WorkItemCards } from "./workItems/WorkItemCards";
-import { workItems } from "./workItems/workItems";
+import { defaultWorkSettings, workItems } from "./workItems/workItems";
 import type { WorkItemsHub } from "./workItems/workItemsHub";
 
 const storageKey = "codealta.desktop.notes-window.v1";
@@ -29,7 +29,9 @@ const reader = () => createNotesReader(async request => {
 }, forbidden);
 const readers = { fixture: reader(), second: reader() };
 const capability = createMutationCapability(epoch);
-const hub = { act: forbidden, read: forbidden } as unknown as WorkItemsHub;
+// The cards read the tag proposals of the hub: there are none.
+const noWork = { loaded: true, complete: true, available: true, projects: [], settings: defaultWorkSettings };
+const hub = { act: forbidden, read: forbidden, subscribe: () => () => { }, getSnapshot: () => noWork } as unknown as WorkItemsHub;
 const task = (id: string, title: string) => ({
   id, kind: "task" as const, status: "pending", title,
   summary: "A proposal should stay beside the notes without hiding the checklist or its controls.",
