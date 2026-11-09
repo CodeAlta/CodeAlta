@@ -1,6 +1,6 @@
 ---
 title: Turn fast mode on or off for each session
-status: in-progress
+status: done
 created: 2026-11-09
 summary: A Fast mode switch under More options in the Agent chip, for the models whose provider has one (Claude Code, Anthropic API, OpenAI API, Codex), showing what the provider runs until it is used; a colored ⚡ before the model name while it is on.
 ---
