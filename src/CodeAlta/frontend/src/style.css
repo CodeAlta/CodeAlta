@@ -437,7 +437,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .composer { flex: 0 0 auto; position: relative; margin: 10px 4px 0; border: 1px solid var(--line-strong); border-radius: 14px; background: color-mix(in srgb, var(--panel-2) 96%, transparent); box-shadow: var(--shadow); overflow: hidden; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 65%, var(--line)); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }
 .session-browser { width: min(720px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow: auto; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
-.session-browser [role="alert"] { color: var(--red); }
+.session-browser p[role="alert"] { color: var(--red); }
 .reference-presentation { font-size: .8rem; min-width: 0; }
 .reference-presentation p { margin: .3rem 0; }
 .reference-presentation pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 10rem; overflow: auto; margin: .3rem 0; }
