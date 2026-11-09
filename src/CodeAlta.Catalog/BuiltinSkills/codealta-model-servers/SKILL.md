@@ -22,10 +22,10 @@ A machine is `local` (this computer) or a paired machine, by its name; `--machin
 ## Choose a model that fits
 
 1. `alta llama hub search <words> --author unsloth` finds GGUF models (the trending ones first; `--sort downloads`).
-2. `alta llama hub show <publisher/repository>` gives each quantization with its size and, for each managed machine, its `fit`: `gpu` (on one GPU), `gpus` (split across them), `partly` (in part in the memory of the system: slow) or `too_large`. Prefer the largest quantization that fits on the GPUs, and Q4_K_M or better for chats.
+2. `alta llama hub show <publisher/repository>` gives each quantization with its size and, for each managed machine, its `fit`: `gpu` (on one GPU), `gpus` (split across them), `partly` (in part in the memory of the system: slow) or `too_large`, and `context`, the largest context that fits, from the header of the model (`shape` gives its KV cache per 1,000 tokens). Prefer the largest quantization that fits on the GPUs with the context the work needs (32k tokens or more for an agent), and Q4_K_M or better for chats.
 3. `alta llama model download <publisher/repository:QUANT> --machine <machine>` downloads it into the Hugging Face cache of the machine. Its end is sent to you as a prompt.
 
-`alta llama model list --machine <machine>` lists the models on its disk, the servers that use each and what removing it frees.
+`alta llama model list --machine <machine>` lists the models on its disk, the servers that use each and what removing it frees. After a download, the machine measures how the model fits its GPUs with llama-fit-params (`measured`: the context that fits and what each GPU takes): trust it over the estimate.
 
 ## Serve a model and use it in sessions
 
@@ -47,7 +47,8 @@ A machine is `local` (this computer) or a paired machine, by its name; `--machin
 
 - `alta llama update now --machine <machine>` updates its builds now: it waits for its servers to be idle, tests each with the new build, and goes back to the previous one when a test fails. Its end is sent to you as a prompt.
 - `alta llama update at <time> --machine <machine>` plans one update; the machine keeps it, even while this computer is off. `alta llama update cancel` cancels it.
-- `alta llama update policy` says the policy; with `--schedule daily --time 04:00` (or `weekly --day sunday`), `--channel stable|every|pinned` and `--models on`, it changes it. Change it only when the user asks.
+- `--all` instead of `--machine` updates or plans every machine this computer manages and reaches; `--build <bNNNN>` takes them all to one build (an older one takes them back). `update now --all` updates them at once: to update them one after the other, update one and the next when its end comes.
+- `alta llama update policy` says the policy; with `--schedule daily --time 04:00` (or `weekly --day sunday`), `--channel stable|every|pinned` and `--models on`, it changes it. Change it only when the user asks. Where the official ROCm build cannot run (no HIP SDK, an older Linux), the user may allow Lemonade's ROCm builds in Settings > Fleet > Model servers > Policy; their builds are named `lemonade-bNNNN`.
 - `alta llama build use --backend <backend> --build <bNNNN>` goes back to an earlier build.
 
 ## What you may do

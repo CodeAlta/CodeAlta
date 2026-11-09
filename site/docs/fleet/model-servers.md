@@ -14,6 +14,8 @@ In CodeAlta Desktop, open **Settings** > **Fleet** > **Model servers**. The page
 - **Models**: the models on the disk of each machine, their size, the servers that use them, the downloads under way. Above the table, the disk of each machine: what the models take, what is free, and **Clean up…** for the models no server uses.
 - **llama.cpp**: each machine with its GPUs, its build, the latest build and its update policy. Click a row for the builds that fit the machine and why, the builds installed, and the last updates.
 
+Tick the box at the start of rows to act on several at once: **Start**, **Stop**, **Restart** or **Remove** servers, **Download to…** another machine or **Remove** models, **Update now…**, **Update at…** or **Policy…** of machines. The **Model servers** tile of **Fleet** > **Overview** counts the servers ready and opens this page.
+
 A machine you [paired](machines.md) shows when it runs CodeAlta 4.2 or later. A machine whose **Manage** permission this computer has is changed from here; one where it has **Models** only is used, not changed.
 
 ## Install llama.cpp
@@ -30,18 +32,22 @@ Open the **llama.cpp** tab, click the machine, then **Install llama.cpp**. CodeA
 
 The details of a machine list each build with why it fits or not (**driver too old**, **GPU not supported**...) and **Install** for another one. Each build is checked against the digest GitHub gives, then tested: a build that sees none of the GPUs of its kind is refused.
 
+Where the official ROCm build cannot run (Windows without the AMD HIP SDK, an older Linux, a GPU it has no code for), tick **Use Lemonade's ROCm builds** in **Policy…**: [Lemonade](https://github.com/lemonade-sdk/llamacpp-rocm) builds llama.cpp for each family of AMD GPUs with its own ROCm runtime. Its builds are named `lemonade-b1371`, and **Update now** takes the newest of them.
+
 ## Download a model
 
 1. Click **Download a model…**, or open **Discover models** (below).
 2. Choose the machine and type the repository of Hugging Face, such as `unsloth/Qwen3-8B-GGUF`, or paste its address.
-3. Choose a quantization: each says its size and whether it **fits its GPU**, **fits its GPUs** (split across them), runs **partly on the GPU** (slowly, in the memory of the system), or is **too large**.
+3. Choose a quantization: each says its size and whether it **fits its GPU**, **fits its GPUs** (split across them), runs **partly on the GPU** (slowly, in the memory of the system), or is **too large**, with the largest context that fits.
 4. Click **Download**.
 
 The model goes into the Hugging Face cache of the machine, where llama.cpp and other tools find it too. A download uses several connections, resumes after a break or a restart, and is checked when it ends. A toast says when the model is on the disk.
 
+The fit before the download is an estimate, read from the header of the model: the memory its architecture takes for each token of context. Once the model is on the disk, the machine measures it with llama.cpp: its row in **Models** says the context that fits and what each GPU takes, and **Measure again** measures it after a change of GPUs or build.
+
 ## Discover models
 
-**Discover models** is a tab of its own: open it from the page, or with **Discover models** in the command palette. Search the GGUF models of Hugging Face, sort them by trend, downloads, likes or date, and narrow them by kind and publisher. Click a model for its facts, its card, and its quantizations with their fit on the machine you choose: **Download** puts it on the disk, **Serve** downloads it and starts a server with it.
+**Discover models** is a tab of its own: open it from the page, or with **Discover models** in the command palette. Search the GGUF models of Hugging Face, sort them by trend, downloads, likes or date, and narrow them by kind and publisher. Click a model for its facts (its KV cache per 1,000 tokens among them), its card, and its quantizations with their fit and the context that fits on the machine you choose: **Download** puts it on the disk, **Serve** downloads it and starts a server with it.
 
 ## Add a model server
 
@@ -59,6 +65,8 @@ The model goes into the Hugging Face cache of the machine, where llama.cpp and o
 The server starts once its build and its models are there; until then it shows **Waiting**. A server that fails is restarted a few times, then shows **Failed** with the reason: read the end of its log in its details.
 
 Already running a `llama-server` by hand? **Import a command line…** reads its command, its models, GPUs and options, into a new server for you to check and add.
+
+**Copy to…** in the details of a server adds the same server to another machine: on that machine's build, GPUs and first free port. Its models are downloaded there first.
 
 ## Use a model server in sessions
 
@@ -83,7 +91,7 @@ llama.cpp publishes builds every day and a stable release every few weeks. In th
 - **Update at…**: one update at a date and a time. The machine keeps it, and updates then even when this computer is off.
 - **Policy…**: which builds (**Stable**, **Every build**, or **This build** to stay on one) and when: **When I click Update**, **Every day** or **Every week** at a time of the machine, with or without its models.
 
-With several machines, **Update all now** updates them one after the other and stops at the first that fails; **Update all at…** and **Policy of all…** set them all at once. **Back to it** in the details of a machine returns its servers to the previous build.
+With several machines, **Update all now…** updates them one after the other and stops at the first that fails; **Update all at…** and **Policy of all…** set them all at once, as do the same actions on the machines you tick. Both updates take one build for all, such as `b12110`: an older one takes the machines back to it. A planned update shows on the row of its machine; **Cancel the planned update** drops it. **Back to it** in the details of a machine returns its servers to the previous build.
 
 ## Let agents manage model servers
 
@@ -93,7 +101,9 @@ An agent removes a model or a server, or changes the update policy, only when yo
 
 ## Machines without CodeAlta Desktop
 
-A machine that runs [CodeAlta Node](machines.md) runs its model servers too: they keep running while the node updates, and its sessions manage them with `alta llama`. Manage it from CodeAlta Desktop on a computer paired with it; on the machine, `altanode status` says its builds of llama.cpp and what each server runs.
+A machine that runs [CodeAlta Node](machines.md) runs its model servers too: they keep running while the node updates, and its sessions manage them with `alta llama`. Manage it from CodeAlta Desktop on a computer paired with it; on the machine, `altanode llama status` says its GPUs, its builds and their update policy, its models and downloads, and what each server runs.
+
+A machine stays awake while one of its servers answers or loads a model, or a download or an update runs, and a few minutes after: it sleeps again as its system decides.
 
 ## Where things are
 

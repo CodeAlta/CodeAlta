@@ -37,6 +37,20 @@ loader exists, CPU last. An install checks the digest of each asset, extracts be
 `--list-devices`, and refuses a build that sees no GPU of its backend. The previous build is kept for a way back; a build
 that failed its test is marked and not offered again.
 
+Lemonade's ROCm builds (`lemonade-sdk/llamacpp-rocm`, one archive per family of AMD GPUs with its ROCm runtime) are a
+second source the policy may allow. They only take the place of an official ROCm build that cannot run, are tagged
+`lemonade-bNNNN` because Lemonade numbers its builds itself, and take the llama.cpp build number their probe reports.
+A build asked by number is always one of llama.cpp.
+
+## Fit
+
+Before a download, the fit is an estimate (`FitEstimate`): the weights, the buffers, and the KV cache for a context. The
+cache comes from the GGUF header, read with one range request of a few megabytes (`GgufHeader`): the layers that keep
+every token, those that keep a sliding window, the recurrent layers of hybrid models that keep none, and latent attention.
+An architecture whose layout is not known counts every layer as full and says the estimate is rough. After a download,
+the machine measures the model with `llama-fit-params` of its best build, on the devices a server would use, and keeps
+the measure per revision (`fits.json`): the measure, not the estimate, is what the machine shows.
+
 ## Servers
 
 A server of several models runs `llama-server` in router mode: a preset names each model by its path in the cache, the
@@ -46,7 +60,9 @@ llama.cpp never downloads anything by itself. The model host starts processes de
 log to a file, follows them every two seconds, restarts a failed one with a growing delay, and says why from its log.
 
 A server can outlive its host (CodeAlta Node always, CodeAlta Desktop when asked): the host records what it started and
-takes it back at its next start, by process id and start time.
+takes it back at its next start, by process id and start time. While a server answers or loads a model, or a download
+or an install runs, the host holds an assertion of the system against idle sleep (`SleepAssertion` of `CodeAlta.Core`,
+which CodeAlta Desktop uses for its own setting too), and lets it go a few minutes after.
 
 ## Updates
 
