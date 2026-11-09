@@ -79,8 +79,8 @@ public sealed class MxcContainerTests
     {
         // A read-only grant stops a write to the file, not a rename in its writable folder that replaces it, nor the move of
         // a folder above it: what the sandbox puts there (core.fsmonitor) would run later outside the sandbox. Windows
-        // holds the entries open. Seatbelt refuses the replacement by itself, by path, but not yet the move of a folder
-        // above the entry, which mxc cannot express there: only the replacement is tried elsewhere.
+        // holds the entries open. Seatbelt (by path) and Bubblewrap (by mount) refuse the replacement by themselves, but not
+        // yet the move of a folder above the entry, which mxc cannot express there: only the replacement is tried elsewhere.
         var backend = new MxcSandboxBackend();
         if (backend.GetAvailability() is { IsAvailable: false } availability) Assert.Inconclusive(availability.Reason ?? "No sandbox on this computer.");
         using var temp = new TempTree();

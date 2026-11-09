@@ -175,7 +175,13 @@ Open the context usage with `Ctrl+G Ctrl+U`. Press `Ctrl+F11` to compact an idle
 
 A session whose [sandbox](sessions/sandbox.md) cannot run runs no command, and says why. **Settings > Sandbox > Check** shows the step that fails:
 
-- **Linux**: install `bubblewrap`, and `slirp4netns` for a profile with a network.
+- **Linux**: install `bubblewrap`, and `slirp4netns` for a profile with a network. On Ubuntu 24.04 and later, `bwrap` cannot create the user namespace of the sandbox (`setting up uid map: Permission denied`) until it has an AppArmor profile that allows it:
+
+  ```bash
+  sudo apt-get install -y bubblewrap slirp4netns
+  printf 'abi <abi/4.0>,\ninclude <tunables/global>\n\nprofile bwrap /usr/bin/bwrap flags=(unconfined) {\n  userns,\n\n  include if exists <local/bwrap>\n}\n' | sudo tee /etc/apparmor.d/bwrap > /dev/null
+  sudo apparmor_parser -r /etc/apparmor.d/bwrap
+  ```
 - **The profile cannot be used**: a profile was removed or renamed while a provider, a space or a project still names it. Choose another one there.
 - **A host is refused**: the profile does not list it. `alta sandbox status --session <id>` names the hosts refused last; add them to the hosts of a profile of yours.
 - **The provider runs its own tools** and the sandbox cannot start it: choose another provider for the session, or turn its sandbox off.

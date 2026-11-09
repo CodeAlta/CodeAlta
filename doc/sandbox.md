@@ -79,8 +79,10 @@ Bubblewrap on Linux. Invariants:
   that exists and each folder between it and its writable folder, from before the container starts until it ends:
   Windows then refuses to delete, rename or replace them, whatever the permissions. The user's programs cannot replace
   them either in that time (git cannot write `.git/config`); `SafeFile` writes such a file in place, which the hold
-  shares. On macOS and Linux nothing is held. Seatbelt grants by path, so it refuses the replacement of an entry, but not
-  the move of a folder above it: mxc has no rule there that keeps a folder from moving while its content stays writable.
+  shares. On macOS and Linux nothing is held. Seatbelt grants by path and Bubblewrap mounts each entry, so both refuse
+  the replacement of an entry, but not the move of a folder above it: the sandbox can then change the entry there
+  (Seatbelt) or put a new folder in its place (both). mxc has no rule that keeps a folder from moving while its content
+  stays writable.
 - **No telemetry.** No request enables it.
 - **The UI stays enabled** (a disabled one stops tools at start); the clipboard stays closed.
 
