@@ -161,12 +161,12 @@ public sealed partial class SessionRuntimeService
 
     private static bool HasProjectParent(AgentSessionMetadata metadata, IReadOnlySet<string> ids)
         => metadata.ParentSessionId is { } parent && ids.Contains(parent)
-            || metadata.CreatedBySessionId is { } creator && ids.Contains(creator)
+            || SessionLineage.CreatorLink(metadata) is { } creator && ids.Contains(creator)
             || metadata.ViewState?.ParentSessionId is { } viewParent && ids.Contains(viewParent);
 
     private static bool HasProjectParent(AgentSessionMetadata metadata, string id)
         => string.Equals(metadata.ParentSessionId, id, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(metadata.CreatedBySessionId, id, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(SessionLineage.CreatorLink(metadata), id, StringComparison.OrdinalIgnoreCase)
             || string.Equals(metadata.ViewState?.ParentSessionId, id, StringComparison.OrdinalIgnoreCase);
 
     private async Task<string> DeleteOwnedCatalogSessionBodyAsync(string sessionId, string? projectId, string workspacePath, string confirmedTitle,
@@ -193,7 +193,7 @@ public sealed partial class SessionRuntimeService
             {
                 if (candidate.SessionId != sessionId &&
                     (string.Equals(candidate.ParentSessionId, sessionId, StringComparison.OrdinalIgnoreCase)
-                     || string.Equals(candidate.CreatedBySessionId, sessionId, StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(SessionLineage.CreatorLink(candidate), sessionId, StringComparison.OrdinalIgnoreCase)
                      || string.Equals(candidate.ViewState?.ParentSessionId, sessionId, StringComparison.OrdinalIgnoreCase)))
                     return "has_children";
             }

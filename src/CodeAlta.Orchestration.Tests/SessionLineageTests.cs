@@ -33,6 +33,23 @@ public sealed class SessionLineageTests
     }
 
     [TestMethod]
+    public void ASessionCreatedWithoutParent_IsNoChildOfItsCreator_ButOfAParentItNames()
+    {
+        var sessions = new[]
+        {
+            Session("root", 0),
+            Session("independent", 1, createdBy: "root") with { NoParent = true },
+            Session("adopted", 2, parent: "independent", createdBy: "root") with { NoParent = true },
+            Session("child", 3, createdBy: "root"),
+        };
+
+        Assert.IsFalse(SessionLineage.IsChildOf(sessions[1], "root"), "Its creator is not its parent.");
+        Assert.IsTrue(SessionLineage.IsChildOf(sessions[2], "independent"), "A parent it names still is.");
+        CollectionAssert.AreEqual(new[] { "child" }, SessionLineage.Descendants("root", sessions).Select(static descendant => descendant.Session.SessionId).ToArray());
+        CollectionAssert.AreEqual(new[] { "adopted" }, SessionLineage.Descendants("independent", sessions).Select(static descendant => descendant.Session.SessionId).ToArray());
+    }
+
+    [TestMethod]
     public void ASessionReachedTwiceIsListedOnceUnderTheNearest_AndACycleEnds()
     {
         var sessions = new[]

@@ -11,10 +11,16 @@ public sealed record SessionDescendant(AgentSessionMetadata Session, string Pare
 /// <summary>
 /// The sessions that come from a session, wherever they are: in another project, in the chats, in another space.
 /// A session is a child of the one its journal names as its parent, as the session that created it, or as the
-/// parent its view keeps: the links a deletion refuses to break.
+/// parent its view keeps: the links a deletion refuses to break. The session that created it is no link when it created
+/// it without making itself its parent (<see cref="AgentSessionMetadata.NoParent"/>).
 /// </summary>
 public static class SessionLineage
 {
+    /// <summary>The session that created <paramref name="session"/>, as a link of its lineage; null when there is none.</summary>
+    /// <param name="session">A stored session.</param>
+    /// <returns>Its creator, unless it created it without making itself its parent.</returns>
+    internal static string? CreatorLink(AgentSessionMetadata session) => session.NoParent ? null : session.CreatedBySessionId;
+
     /// <summary>Tells whether <paramref name="session"/> names <paramref name="parentSessionId"/> as its parent.</summary>
     /// <param name="session">A stored session.</param>
     /// <param name="parentSessionId">The session that could be its parent.</param>
@@ -26,7 +32,7 @@ public static class SessionLineage
         ArgumentNullException.ThrowIfNull(parentSessionId);
         return !string.Equals(session.SessionId, parentSessionId, StringComparison.OrdinalIgnoreCase)
             && (string.Equals(session.ParentSessionId, parentSessionId, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(session.CreatedBySessionId, parentSessionId, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(CreatorLink(session), parentSessionId, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(session.ViewState?.ParentSessionId, parentSessionId, StringComparison.OrdinalIgnoreCase));
     }
 

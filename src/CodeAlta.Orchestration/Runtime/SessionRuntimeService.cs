@@ -1192,7 +1192,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             session.MessageCount = messageCount;
         }
 
-        var parentSessionId = ResolveParentSessionId(localState.ParentSessionId, localState.CreatedBy?.SourceSessionId, session.ForkedFrom is not null);
+        var parentSessionId = ResolveParentSessionId(localState.ParentSessionId, localState.CreatedBy?.SourceSessionId,
+            session.ForkedFrom is not null || localState.CreatedBy?.NoParent == true || session.CreatedBy?.NoParent == true);
         if (!string.IsNullOrWhiteSpace(parentSessionId))
         {
             session.ParentSessionId = parentSessionId;
@@ -2242,6 +2243,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             SessionId = requestedSessionId,
             ParentSessionId = NormalizeOptionalText(session.ParentSessionId),
             CreatedBySessionId = NormalizeOptionalText(session.CreatedBy?.SourceSessionId),
+            NoParent = session.CreatedBy?.NoParent == true,
             // The journal header records this instant; the provider's own record must not name a later one.
             CreatedAt = session.CreatedAt == default ? null : session.CreatedAt,
             Title = title,
@@ -5382,6 +5384,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     Summary = session.LatestSummary,
                     ParentSessionId = NormalizeOptionalText(session.ParentSessionId),
                     CreatedBySessionId = NormalizeOptionalText(session.CreatedBy?.SourceSessionId ?? session.ParentSessionId),
+                    NoParent = session.CreatedBy?.NoParent == true,
                     ForkedFrom = session.ForkedFrom,
                     RewindCount = session.RewindCount,
                     CreatedAt = session.CreatedAt,
@@ -5638,7 +5641,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         var normalizedCwd = NormalizePath(cwd);
-        var parentSessionId = ResolveParentSessionId(session.ParentSessionId, session.CreatedBySessionId, session.ForkedFrom is not null);
+        var parentSessionId = ResolveParentSessionId(session.ParentSessionId, session.CreatedBySessionId, session.ForkedFrom is not null || session.NoParent);
         if (string.Equals(normalizedCwd, NormalizePath(_catalogOptions.GlobalRoot), StringComparison.OrdinalIgnoreCase))
         {
             return new SessionViewDescriptor
@@ -5914,9 +5917,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
     // A session an agent created without naming a parent is the sub-agent of that agent. Not a fork, nor the session
     // that keeps what a rewind removed: whoever made it, it continues another session and reports to none, unless it
-    // was given a parent. Listed as a child of its creator, it would get the instructions of a sub-agent.
-    private static string? ResolveParentSessionId(string? parentSessionId, string? createdBySessionId, bool forked = false)
-        => NormalizeOptionalText(parentSessionId) ?? (forked ? null : NormalizeOptionalText(createdBySessionId));
+    // was given a parent. Listed as a child of its creator, it would get the instructions of a sub-agent. Nor a session
+    // created with --no-parent, whose creator is recorded as not being its parent.
+    private static string? ResolveParentSessionId(string? parentSessionId, string? createdBySessionId, bool creatorIsNotParent)
+        => NormalizeOptionalText(parentSessionId) ?? (creatorIsNotParent ? null : NormalizeOptionalText(createdBySessionId));
 
     private static string NormalizePath(string path)
     {

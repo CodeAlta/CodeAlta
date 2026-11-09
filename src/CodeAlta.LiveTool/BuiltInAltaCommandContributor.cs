@@ -1153,7 +1153,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("global", "Create a global coordinator session.", value => options.Global = value is not null);
         command.Add("title=", "Session title.", value => options.Title = value);
         command.Add("parent=", "Explicit parent session id for lineage.", value => options.ParentSessionId = value);
-        command.Add("no-parent", "Suppress automatic parent assignment.", value => options.NoParent = value is not null);
+        command.Add("no-parent", "The session is not a child of the calling session: its answers are not sent to it; it still records who created it.", value => options.NoParent = value is not null);
         command.Add("worktree", "Create a git worktree for the session: a checkout of its own, on a new branch `alta/<name>`.", value => options.Worktree = value is not null);
         command.Add("base=", "Branch or commit a new worktree starts from. Defaults to the commit the project folder is on.", value => options.WorktreeBase = value);
         command.Add("no-worktree", "Work in the project folder, also when the calling session works in a worktree.", value => options.NoWorktree = value is not null);
@@ -3057,10 +3057,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         // Nor does it have a tool that the session that creates it does without: it takes what the command line of a run
         // turns off from its parent or from that session, and its own settings must leave out the rest.
+        // A session created with --no-parent records that its creator is not its parent: it is never taken for one.
+        var createdBy = CreateProvenance(context) with { NoParent = options.NoParent };
         var newSession = new SessionViewDescriptor
         {
             ProjectRef = project?.Id, SpaceId = space.SpaceId, AgentPromptId = promptId, ParentSessionId = parentResolution.ParentSessionId,
-            CreatedBy = CreateProvenance(context),
+            CreatedBy = createdBy,
         };
         if (await RefuseWiderToolsAsync(context, runtime => runtime.GetDisabledToolsAsync(newSession, promptId, context.CancellationToken), "the session it creates",
                 "Create it with an agent prompt that does without them too (`--prompt-id`), or do the work here.").ConfigureAwait(false) is { } wider)
@@ -3122,7 +3124,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         string? createdSessionId = null;
-        var createdBy = CreateProvenance(context);
         var executionOptions = BuildExecutionOptions(
             context,
             modelSelection.Selection!,

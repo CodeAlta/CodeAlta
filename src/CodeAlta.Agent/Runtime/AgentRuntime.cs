@@ -198,6 +198,7 @@ public sealed class AgentRuntime : IAsyncDisposable
             Summary = null,
             ParentSessionId = NormalizeOptionalText(options.ParentSessionId),
             CreatedBySessionId = NormalizeOptionalText(options.CreatedBySessionId ?? options.ParentSessionId),
+            NoParent = options.NoParent,
             CreatedByRunId = options.CreatedByRunId,
             CreatedAt = options.CreatedAt ?? now,
             UpdatedAt = now,
