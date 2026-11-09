@@ -143,16 +143,16 @@ flowchart LR
 ## How it is verified
 
 - [x] Focused tests of steps 1–6 pass.
-- [ ] Following "Debug or Release" in `AGENTS.md`: `dotnet build` from `src`, then `dotnet test --no-build` and `npm test` as two background jobs; `lunet build` from `site`.
-  - `dotnet build -c Release`: 0 warnings, 0 errors. `npm test` with `CODEALTA_TEST_BROWSER` set to Chrome (Edge is not installed): 2,779 passed, none skipped.
-  - `dotnet test -c Release --no-build`: every project passes but two, whose failures are outside this work: Catalog (3: Windows symlink privilege, Git index snapshot) and Desktop (1: `DesktopWorktreeTests.RemoveMany_RemovesWhatCanGo_AndSaysWhyEachOtherStays`, fails alone too, worktree removal). The same failures were recorded on 2026-10-29; this branch touches neither area.
-  - The `RequiresDotNet10FileBuild` tests, `AltaPluginCommandTests` and `PluginBuildServiceTests` were left out of the final run: each waits 15 minutes, then fails, because MSBuild cannot start its task host under the installed .NET SDK `11.0.100-rc.3`.
-  - `lunet build` not run: Lunet is not installed.
+- [x] Following "Debug or Release" in `AGENTS.md`: `dotnet build` from `src`, then `dotnet test --no-build` and `npm test` as two background jobs; `lunet build` from `site`.
+  - Final run, after the Codex fix (2026-11-09): `dotnet build -c Release`: 0 warnings, 0 errors. `npm test` with `CODEALTA_TEST_BROWSER` set to Chrome (Edge is not installed): 2,780 passed, none skipped. `lunet build` (Lunet 1.1.2): 331 files, no warning or error.
+  - `dotnet test -c Release --no-build`: every project passes but two, whose failures are outside this work and fail alone too: Catalog (3: `LinksAndLinkedRoots_AreSkipped` and `DirectoryReplacedByLinkAfterDiscoveryIsNotTraversed`, Windows refuses symbolic links with an `IOException` the tests do not treat as inconclusive, proposed as a task; `ASnapshot_WhoseIndexGitCannotReplace_IsWrittenThroughAnIndexGitCreates`) and Desktop (1: `DesktopWorktreeTests.RemoveMany_RemovesWhatCanGo_AndSaysWhyEachOtherStays`). The same failures were recorded on 2026-10-29; this branch touches neither area.
+  - The `RequiresDotNet10FileBuild` tests, `AltaPluginCommandTests` and `PluginBuildServiceTests` were left out: each waits 15 minutes, then fails, because MSBuild cannot start its task host under the installed .NET SDK `11.0.100-rc.3`.
 - [x] Developer instance (`codealta-dev`), light and dark, large and 900×650 windows. The switch shows for a supported model and not for Copilot. The ⚡ appears before the name and goes when turned off. The choice is still there after reopening the session.
   - Checked on a new chat with Claude Code Opus 5.5 (`Release` build): switch under Private, off, then on with the colored ⚡ before the name and `Fast mode: On` in the tooltip, then off again; dark and light; 900×650 without overflow; no console error. Copilot and reopening a session are covered by the tests (`changedSessionOptions`, `SessionOptionsRuntimeTests` restart), not by this inspection.
-- [ ] Optional, paid, by you: one short prompt with fast mode on for each provider.
+- [x] Optional, paid, by you: one short prompt with fast mode on for each provider.
   - The Anthropic response's `usage.speed` should be `fast`, and the OpenAI response's `service_tier` should be `priority`.
   - On an OpenAI project whose default tier is fast, a session that did not choose should show the ⚡ after its first response.
+  - Done on 2026-11-09: Claude Code (once usage credits were added), the Anthropic API and the OpenAI API ran fast with the colored ⚡. Codex reports no tier; its fast mode was measured instead (step 8). The OpenAI project whose default tier is fast was not tried.
 
 ## Decisions
 
