@@ -414,6 +414,8 @@ public sealed class SystemPromptInfrastructureTests
         // How an answer names a file, so that the frontends open it: a link relative to the root that is named above.
         StringAssert.Contains(developerInstructions, "- Links to files: to point the user to a file, write a Markdown link whose target is the path of the file relative to the project root, with forward slashes, and `#L<line>` after it");
         StringAssert.Contains(developerInstructions, "`[Program.cs](src/Program.cs#L42)`");
+        // How an answer names a session, so that the desktop shows it as a chip that opens it.
+        StringAssert.Contains(developerInstructions, "- Links to sessions: to point the user to a session, such as one you delegated to, write a Markdown link whose target is `session:` and the id of the session");
         // Where long instructions of the user are written down: a file the agent names after the day and the request,
         // which ends with a short hash of the session, under the CodeAlta root of the user (of their profile by default).
         var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData("session-1"u8), 0, 3);

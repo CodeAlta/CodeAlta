@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { ExternalEditorIcon, useExternalOpener } from "./externalEditors/externalEditors";
 import { markdownHrefKind, type MarkdownLinkScope } from "./markdownLinks";
+import { sessionLinkTarget } from "./sessionLinks";
 import { SessionTabMenu, type SessionMenuEntry } from "./SessionTabMenu";
 import { revealLabel } from "./SettingsFileLocation";
 import { useShellLanguage } from "./shellLanguage";
@@ -25,7 +26,10 @@ export type LinkMenu = Readonly<{ address: string; anchor: HTMLElement; at?: Rea
 
 const copy = (text: string) => void navigator.clipboard?.writeText(text).catch(() => { /* The clipboard is unavailable: nothing was copied. */ });
 
-/** The context menu of a link of the Markdown: it opens the link, copies it, and shows its file outside CodeAlta. */
+/**
+ * The context menu of a link of the Markdown: it opens the link, copies it, and shows its file outside CodeAlta. A link
+ * to a session opens it, and copies its id or the link.
+ */
 export function MarkdownLinkMenu({ menu, scope, onOpen, onClose }: {
   menu: LinkMenu; scope: MarkdownLinkScope | null; onOpen: (address: string) => void; onClose: () => void;
 }) {
@@ -33,18 +37,22 @@ export function MarkdownLinkMenu({ menu, scope, onOpen, onClose }: {
   const files = useContext(MarkdownLinkFilesContext);
   const external = useExternalOpener();
   const { address } = menu;
+  const session = sessionLinkTarget(address);
   const web = markdownHrefKind(address) === "web";
   // Asked when the menu opens: a system may refuse the clipboard once the press that chose the line is over.
   const [fullPath, setFullPath] = useState<string | null | undefined>(undefined);
   useEffect(() => {
-    if (web || !files) return;
+    if (web || session || !files) return;
     let current = true;
     void files.path(address, scope).then(path => { if (current) setFullPath(path); }, () => { if (current) setFullPath(null); });
     return () => { current = false; };
   }, [address, web, files]);
   const open: SessionMenuEntry = { key: "open", label: t("Open"), icon: web ? "openExternal" : "code", onSelect: () => onOpen(address) };
   const reveal = files && revealLabel(files.platform);
-  const items: SessionMenuEntry[] = web
+  const items: SessionMenuEntry[] = session
+    ? [{ ...open, icon: "childSession" }, { key: "copyId", label: t("Copy session id"), icon: "copy", onSelect: () => copy(session.sessionId) },
+      { key: "copy", label: t("Copy link"), icon: "copy", onSelect: () => copy(address) }]
+    : web
     ? [open, { key: "copy", label: t("Copy link"), icon: "copy", onSelect: () => copy(address) }]
     : [open,
       // A link the host cannot read is copied as it is written.

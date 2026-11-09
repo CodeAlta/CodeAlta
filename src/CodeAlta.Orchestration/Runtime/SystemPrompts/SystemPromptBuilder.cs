@@ -726,6 +726,10 @@ public sealed class SystemPromptBuilder
             lines.Add($"- Links to files: to point the user to a file, write a Markdown link whose target is the path of the file relative to {root}, with forward slashes, and `#L<line>` after it for a place in the file, as in `[Program.cs](src/Program.cs#L42)`. The user opens the file from the link. Give a full path only to a file outside {root}.");
         }
 
+        // How an answer names a session, such as a child it delegated to: CodeAlta Desktop shows such a link as a chip
+        // that says what the session is doing, and opens it.
+        lines.Add("- Links to sessions: to point the user to a session, such as one you delegated to, write a Markdown link whose target is `session:` and the id of the session, as in `[Review the parser](session:01a1c0e2-5e37-770c-acd2-7cf2590445c5)`, with `#<offset>` after it for one of its messages (the `offset` of a bookmark). The user opens the session from the link.");
+
         if (!string.IsNullOrWhiteSpace(request.Session.ParentSessionId))
         {
             sessionLines.Add($"- Parent session: {request.Session.ParentSessionId}");

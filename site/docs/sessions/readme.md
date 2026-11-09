@@ -45,10 +45,11 @@ In CodeAlta Desktop, the links of your messages and of the agent's answers work:
 - **A web link** opens in your browser.
 - **A link to a file** opens it in the [code editor](../workspace/code.md#code-editor), at the line it names (`src/Program.cs#L42` or `src/Program.cs:42`). A relative path is read from the folder the session works in. A file outside every project opens with its folder in the editor. Pictures open; other files that are not text do not.
 - **A `file://` link to an HTML page or a PDF** opens in the program your system uses for it.
+- **A link to a session**, `[title](session:<id>)`, is a chip with a dot of its state (green while it runs), its title and its project; pointing at it says its state and when it was last active. It opens the session's tab; `session:<id>#<offset>` opens it at that message, as a [bookmark](../bookmarks.md) does (the `offset` of a bookmark). A session that is archived, or that CodeAlta does not know, has a muted, dashed chip. Agents are asked to name the sessions they delegate to with such links.
 
 Click a link, or press `Enter` on it after moving to it with `Tab`. Ctrl-click (Cmd-click on macOS), Shift-click and middle click work too. A link of more than 2,048 characters, such as a prefilled GitHub link that carries a whole text, does not open: CodeAlta says so and offers to copy its address, which you can paste in your browser. Agents are asked to write file names as such links. The same links work in session notes, issues, pull requests, work items and the Markdown preview of the code editor.
 
-Right-click a link, or press the menu key on it, for its menu. A web link has **Open** and **Copy link**. A link to a file has **Open**, **Copy path**, **Reveal in File Explorer** (**Reveal in Finder** on macOS) and **Open in** your [external editor](../workspace/code.md#external-editor), at the line it names.
+Right-click a link, or press the menu key on it, for its menu. A web link has **Open** and **Copy link**, a link to a session **Open**, **Copy session id** and **Copy link**. A link to a file has **Open**, **Copy path**, **Reveal in File Explorer** (**Reveal in Finder** on macOS) and **Open in** your [external editor](../workspace/code.md#external-editor), at the line it names.
 
 ## Session titles
 

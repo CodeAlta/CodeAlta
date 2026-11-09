@@ -10,6 +10,7 @@ import { loadMath } from "./math";
 import type { MarkdownImage, MarkdownImages } from "./markdownImages";
 import { markdownHrefKind, markdownLinkActivation, maximumMarkdownHrefLength, tooLongMarkdownHref, type MarkdownLinkScope } from "./markdownLinks";
 import { isSessionContextKey } from "./sessionRowActions";
+import { dressSessionLinks, SessionLinkHostContext, sessionLinkTarget, type SessionLinkInfo } from "./sessionLinks";
 import { shellCommandOf } from "./terminal/shellBlocks";
 import { appearanceKey, subscribeAppearance } from "./shellColors";
 import { useShellLanguage } from "./shellLanguage";
@@ -149,6 +150,29 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     // A card stays while its chip does: a text written again replaces its chips.
     setTaskCard(current => current && current.anchor.isConnected && current.anchor.hasAttribute(taskReferenceAttribute) ? current : null);
   }, [codeMarkup, tasks, scope, locale]);
+  // The links to a session are chips that say what it is doing (`[title](session:<id>)`), and open it, at the message
+  // they name. Not in a text whose links are inert.
+  const windowSessions = useContext(SessionLinkHostContext);
+  const sessions = onOpenLink === null ? null : windowSessions;
+  useLayoutEffect(() => {
+    const element = content.current;
+    if (!element) return;
+    const state = (info: SessionLinkInfo) => translate(locale, info.state === "running" ? "Running" : info.state === "archived" ? "Archived" : "Idle");
+    const time = (value: string | null) => {
+      const date = value ? new Date(value) : null;
+      return date && !Number.isNaN(date.getTime()) ? date.toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }) : "—";
+    };
+    dressSessionLinks(element, sessions && (id => sessions.describe(id)), (target, info) => !info
+      ? translate(locale, "Unknown session {id}", { id: target.sessionId })
+      : info.scope ? translate(locale, "Session {title}: {state}, in {scope}, last active {time}", { title: info.title, state: state(info), scope: info.scope, time: time(info.updatedAt) })
+      : translate(locale, "Session {title}: {state}, last active {time}", { title: info.title, state: state(info), time: time(info.updatedAt) }));
+  }, [codeMarkup, sessions, locale]);
+  // Follows a link of the text: a session in the window, anything else with the opener of the links.
+  const follow = (address: string) => {
+    const session = sessionLinkTarget(address);
+    if (session) sessions?.open(session);
+    else openLink?.(address);
+  };
   useEffect(() => {
     if (!taskCard) return;
     const { anchor } = taskCard;
@@ -236,6 +260,8 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
       || target?.closest("button") || modalDialogOpen() && !inModalDialog(link)) return;
     const address = link.getAttribute("href"); // Read the sanitized literal, not the browser-resolved property.
     if (!address) return;
+    const session = sessionLinkTarget(address);
+    if (session) { sessions?.open(session); return; }
     if (!markdownHrefKind(address)) {
       const length = openLink ? tooLongMarkdownHref(address) : null;
       if (length !== null) showToast({ intent: "warning", icon: "warning-sign", timeout: 12_000,
@@ -256,11 +282,11 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   const [linkMenu, setLinkMenu] = useState<LinkMenu | null>(null);
   function openLinkMenu(target: EventTarget, at?: LinkMenu["at"]): boolean {
     const link = target instanceof Element ? target.closest("a") : null;
-    if (!openLink || !link || !content.current?.contains(link) || link.closest("[inert], [hidden]") || modalDialogOpen() && !inModalDialog(link)) return false;
+    if (!link || !content.current?.contains(link) || link.closest("[inert], [hidden]") || modalDialogOpen() && !inModalDialog(link)) return false;
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed && selection.containsNode(link, true)) return false;
     const address = link.getAttribute("href");
-    if (!address || !markdownHrefKind(address)) return false;
+    if (!address || (sessionLinkTarget(address) ? !sessions : !openLink || !markdownHrefKind(address))) return false;
     setLinkMenu({ address, anchor: link, at });
     return true;
   }
@@ -310,7 +336,7 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
       }
       if (timelineCodeBlocks) scrollCode(event);
     }} dangerouslySetInnerHTML={codeMarkup} />
-    {linkMenu && openLink && <MarkdownLinkMenu key={linkMenu.address} menu={linkMenu} scope={scope} onOpen={openLink}
+    {linkMenu && (openLink || sessions) && <MarkdownLinkMenu key={linkMenu.address} menu={linkMenu} scope={scope} onOpen={follow}
       onClose={() => queueMicrotask(() => setLinkMenu(value => value === linkMenu ? null : value))} />}
     {viewing && <TimelineImageViewer images={[{ index: 0, title: viewing.title, mediaType: null }]}
       source={inlineImageSource(viewing.image.path, [viewing.image])} index={0} initialSize={viewing.size} onIndex={() => { /* One picture. */ }}

@@ -240,6 +240,7 @@ import { filterOpens, filterSessionRows, sidebarFilterView, toggleFilterFold, un
 import { SidebarFilterBox } from "./explorer/SidebarFilterBox";
 import { readQuery } from "./search/searchResults";
 import { SessionLinksContext, type SessionLinks } from "./SessionReference";
+import { SessionLinkHostContext, type SessionLinkHost } from "./sessionLinks";
 import { SessionFamilyContext, SessionLinkRow, SessionOriginLine, sessionFamilyHover, type SessionFamily } from "./explorer/sessionFamily";
 import { SessionWidthContext, SessionWidthGrips, useSessionWidthStyle, type SessionWidthControl } from "./SessionWidthGrips";
 import { applySessionWidth, defaultSessionWidth, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
@@ -3031,6 +3032,29 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     .map(session => [session.id, session.projectId!])), [sessionSignature]);
   const openTaskReference = useRef<(item: WorkItem) => void>(() => { });
   openTaskReference.current = item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) });
+  // The links of a text to a session (`session:<id>`): what the session is doing, and the way to open it, at a message.
+  const openSessionLink = useRef<SessionLinkHost["open"]>(() => { });
+  openSessionLink.current = target => {
+    if (target.offset) bookmarkHost.reveals.open(target.sessionId, target.offset);
+    void openAutomationSession(target.sessionId).then(opened => {
+      if (!opened && creationAlive.current) showToast({ message: t("The session of this link could not be found."), intent: "warning", icon: "warning-sign", timeout: 6000 });
+    });
+  };
+  const sessionLinkHost = useMemo<SessionLinkHost>(() => {
+    const known = catalog.current ?? snapshot;
+    const sessions = new Map((known?.sessions ?? []).map(session => [session.id.toLowerCase(), session]));
+    const projects = new Map((known?.projects ?? []).map(project => [project.id, project.name]));
+    return {
+      describe: id => {
+        const session = sessions.get(id.toLowerCase());
+        if (!session) return null;
+        return { title: plainTitle(session.title), updatedAt: session.updatedAt,
+          scope: session.scopeKind === "project" ? projects.get(session.projectId ?? "") ?? null : t("Chats"),
+          state: session.archived ? "archived" : runningSessionIds.has(session.id) ? "running" : "idle" };
+      },
+      open: target => openSessionLink.current(target),
+    };
+  }, [snapshot, runningSessionIds, language.locale]);
   const taskReferences = useMemo<TaskReferences>(() => ({
     find: (scope, text) => findTaskReference(taskIndex, scope?.projectId ?? (scope?.sessionId ? sessionProjects.get(scope.sessionId) : null), text),
     open: item => openTaskReference.current(item),
@@ -5904,7 +5928,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, wholeCatalog ?? snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><DiagramSourceEditorContext.Provider value={DiagramSourceEditor}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><TaskReferencesContext.Provider value={taskReferences}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><MarkdownLinkFilesContext.Provider value={markdownLinkFiles}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><TerminalPasteContext.Provider value={owned ? pasteSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
+  return <ShellLanguageContext.Provider value={language}><DiagramSourceEditorContext.Provider value={DiagramSourceEditor}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><SessionLinkHostContext.Provider value={sessionLinkHost}><TaskReferencesContext.Provider value={taskReferences}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><MarkdownLinkFilesContext.Provider value={markdownLinkFiles}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><TerminalPasteContext.Provider value={owned ? pasteSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
       style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
     {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
@@ -6750,7 +6774,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></TerminalPasteContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></TaskReferencesContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></DiagramSourceEditorContext.Provider></ShellLanguageContext.Provider>;
+  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></TerminalPasteContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownLinkFilesContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></TaskReferencesContext.Provider></SessionLinkHostContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></DiagramSourceEditorContext.Provider></ShellLanguageContext.Provider>;
 }
 
 /** The way to Fleet at the foot of the Explorer, with how many of the machines it lists are online. */

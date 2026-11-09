@@ -349,6 +349,16 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .markdown-content code[data-task-tone="warning"]::before { background: var(--yellow); }
 .markdown-content code[data-task-closed] { color: var(--muted); text-decoration: line-through; opacity: .8; }
 .markdown-content code[data-task-closed]::before { background: currentColor; }
+/* A link to a session (sessionLinks.ts): a chip with a dot of its state, its title and the name of its project, which opens it.
+   A session that is archived or that the window does not know is muted. */
+.markdown-content a[data-session-link] { display: inline; padding: 1px 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); background: var(--panel-2);
+  text-decoration: none; white-space: normal; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.markdown-content a[data-session-link]::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-inline-end: 5px; border-radius: 50%; vertical-align: .08em; background: var(--muted); }
+.markdown-content a[data-session-link][data-session-scope]::after { content: attr(data-session-scope); margin-inline-start: 6px; color: var(--muted); font-size: .88em; }
+.markdown-content a[data-session-state="running"]::before { background: var(--green); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 25%, transparent); }
+.markdown-content a[data-session-state="archived"], .markdown-content a[data-session-state="unknown"] { color: var(--muted); border-style: dashed; background: transparent; }
+.markdown-content a[data-session-state="unknown"]::before { background: transparent; box-shadow: inset 0 0 0 1px var(--muted); }
+.markdown-content a[data-session-link]:hover, .markdown-content a[data-session-link]:focus-visible { outline: none; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel-2)); }
 .task-reference-card { position: fixed; z-index: 40; display: grid; gap: 5px; width: max-content; max-width: min(360px, calc(100vw - 12px)); padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
   color: var(--text); background: var(--panel); box-shadow: 0 4px 14px rgba(0, 0, 0, .22); font-size: 12.5px; line-height: 1.4; pointer-events: none; }
 .task-reference-card-kind { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; }
