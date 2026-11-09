@@ -152,7 +152,7 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
     // that endpoint): another endpoint of the protocol may refuse the field. Opus 5.5 takes it without a beta header.
     private ChatOptions? WithFastMode(ChatOptions? options)
     {
-        if (options is null || !dropMismatchedThinking ||
+        if (options is null || !dropMismatchedThinking || !TakesFastMode(options.ModelId) ||
             options.AdditionalProperties?.TryGetValue(FastModeKey, out var fastMode) != true || fastMode is not true)
         {
             return options;

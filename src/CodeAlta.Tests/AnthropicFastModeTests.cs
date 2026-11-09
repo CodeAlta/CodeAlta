@@ -40,6 +40,17 @@ public sealed class AnthropicFastModeTests
     }
 
     [TestMethod]
+    [DataRow("claude-sonnet-5-5")]
+    [DataRow("claude-opus-5")]
+    [DataRow("claude-opus-4-8")]
+    public async Task AnUnsupportedModel_IsSentNoSpeed(string modelId)
+    {
+        using var sent = await SendAsync(new Uri("https://api.anthropic.com"), modelId, fastMode: true).ConfigureAwait(false);
+
+        Assert.IsFalse(sent.RootElement.TryGetProperty("speed", out _), "The request path also guards model support.");
+    }
+
+    [TestMethod]
     [DataRow("fast", true)]
     [DataRow("standard", false)]
     [DataRow(null, null)]
