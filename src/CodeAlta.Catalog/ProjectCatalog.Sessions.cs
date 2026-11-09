@@ -27,4 +27,28 @@ public sealed partial class ProjectCatalog
 
         return projects.FirstOrDefault(project => project.ProjectPath == workingDirectory);
     }
+
+    /// <summary>
+    /// Tells the project a project session belongs to when the folder of that project changed since the session was
+    /// recorded: the session records a project of the catalog, which is not archived and now has another folder, the
+    /// folder the session records no longer exists, and the folder of the project does. Such a session is listed under
+    /// no project (<see cref="ResolveSessionProject"/>) until it is bound to the new folder. A folder that still exists
+    /// may be another checkout the session works in: its session is left as it is.
+    /// </summary>
+    /// <param name="recordedProjectId">The project the journal of the session records.</param>
+    /// <param name="workingDirectory">The folder the journal of the session records.</param>
+    /// <param name="projects">The projects of the catalog.</param>
+    /// <param name="folderExists">Tells whether a folder exists.</param>
+    /// <returns>The project whose folder moved, or <see langword="null"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="projects"/> or <paramref name="folderExists"/> is <see langword="null"/>.</exception>
+    public static ProjectDescriptor? FindMovedSessionProject(string? recordedProjectId, string? workingDirectory, IReadOnlyList<ProjectDescriptor> projects,
+        Func<string, bool> folderExists)
+    {
+        ArgumentNullException.ThrowIfNull(projects);
+        ArgumentNullException.ThrowIfNull(folderExists);
+        if (string.IsNullOrWhiteSpace(recordedProjectId) || string.IsNullOrWhiteSpace(workingDirectory)) return null;
+        var project = projects.FirstOrDefault(candidate => candidate.Id == recordedProjectId);
+        if (project is null || project.Archived || string.IsNullOrWhiteSpace(project.ProjectPath) || project.ProjectPath == workingDirectory) return null;
+        return !folderExists(workingDirectory) && folderExists(project.ProjectPath) ? project : null;
+    }
 }

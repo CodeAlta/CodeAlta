@@ -168,6 +168,163 @@ public sealed class SessionRuntimeMoveTests
     }
 
     [TestMethod]
+    public async Task FollowMovedProjectFoldersAsync_BindsTheSessionsOfAProjectWhoseFolderMoved_ToItsNewFolder()
+    {
+        var relocations = new List<(string From, string To)>();
+        await using var f = await Fixture.CreateAsync(registry => registry.RegisterOrReplace(new(new("relocating"), "Relocating", "relocating"),
+            () => new RelocatingRuntime(relocations)));
+        await f.CreateSessionAsync("root", f.Source, title: "Root", provider: "relocating");
+        await f.CreateSessionAsync("child", f.Source, title: "Child", parent: "root");
+        await f.CreateSessionAsync("other", f.Target, title: "Other");
+        var oldPath = f.Source.ProjectPath;
+        var newPath = Path.Combine(f.Root, "moved-source");
+        Directory.Move(oldPath, newPath);
+        var moved = f.Source.Copy();
+        moved.ProjectPath = newPath;
+        await f.Projects.SaveAsync(moved);
+
+        var result = await f.Runtime.FollowMovedProjectFoldersAsync(static _ => false);
+
+        Assert.AreEqual("ok", result.Status, string.Join(" ", result.Warnings));
+        CollectionAssert.AreEquivalent(new[] { "root", "child" }, result.Moved.Select(static value => value.SessionId).ToArray());
+        var store = f.Journal.CreateSessionStore();
+        foreach (var id in new[] { "root", "child" })
+        {
+            var header = await f.Journal.ReadHeaderAsync(id, CreatedAt);
+            Assert.AreEqual(f.Source.Id, header!.ProjectRef, "The session stays in its project.");
+            Assert.AreEqual(newPath, header.WorkingDirectory);
+            Assert.AreEqual(newPath, (await store.GetSessionSummaryAsync(id))!.WorkingDirectory);
+        }
+        Assert.AreEqual("Root", (await store.GetSessionSummaryAsync("root"))!.Title, "Its title stays.");
+        Assert.AreEqual(f.Target.ProjectPath, (await f.Journal.ReadHeaderAsync("other", CreatedAt))!.WorkingDirectory);
+        CollectionAssert.AreEqual(new[] { (oldPath, newPath) }, relocations, "What the provider keeps follows the folder.");
+        var notice = f.Runtime.TakeMovedNotice("root");
+        StringAssert.Contains(notice, oldPath);
+        StringAssert.Contains(notice, newPath);
+        Assert.IsNotNull(ProjectCatalog.ResolveSessionProject(f.Source.Id, newPath, await f.Projects.LoadAsync()), "The lists find the session in its project again.");
+
+        var again = await f.Runtime.FollowMovedProjectFoldersAsync(static _ => false);
+        Assert.AreEqual(("ok", 0), (again.Status, again.Moved.Count), "Nothing is left to bind.");
+    }
+
+    [TestMethod]
+    public async Task Host_FollowsAProjectWhoseFileNamesANewFolder_WhenTheSessionListFindsItsSessions()
+    {
+        using var temp = new TempDirectory();
+        var global = Directory.CreateDirectory(Path.Combine(temp.Path, "global")).FullName;
+        var source = Directory.CreateDirectory(Path.Combine(temp.Path, "docs-old")).FullName;
+        var provider = new AccountProvider();
+        await using var host = await CodeAlta.Orchestration.Hosting.CodeAltaHost.CreateAsync(new()
+        {
+            GlobalRoot = global, CurrentProjectPath = source, IsHeadless = true, AutoApproveOwnedPermissions = true, OwnedCommandReceiptCapacity = 8,
+            ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
+        }, CancellationToken.None);
+        var sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Review the docs")).SessionId;
+        host.FollowMovedProjectFolders();
+        await host.MovedProjectFoldersPass.WaitAsync(TestDeadlines.Hang);
+
+        // The folder is moved, and the project file is written by hand: no change of the catalog is told.
+        var target = Path.Combine(temp.Path, "docs");
+        Directory.Move(source, target);
+        var project = (await host.ProjectCatalog.GetByIdAsync(host.CurrentProject.Id))!.Copy();
+        project.ProjectPath = target;
+        await new ProjectCatalog(host.CatalogOptions).SaveAsync(project);
+
+        // The session list finds the session of the project in the folder that is gone, and the host binds it to the new one.
+        _ = await host.WorkspaceReads.ReadSnapshotAsync(CancellationToken.None);
+        await host.MovedProjectFoldersPass.WaitAsync(TestDeadlines.Hang);
+        var snapshot = await host.WorkspaceReads.ReadSnapshotAsync(CancellationToken.None);
+        var listed = snapshot.Sessions.Single(session => session.SessionId == sessionId);
+        Assert.AreEqual(target, listed.WorkspacePath);
+        Assert.AreEqual(project.Id, ProjectCatalog.ResolveSessionProject(snapshot.SessionHeaders[sessionId].ProjectRef, listed.WorkspacePath, snapshot.Projects)?.Id);
+    }
+
+    [TestMethod]
+    public async Task FollowMovedProjectFoldersAsync_LeavesASessionAtWork_AndOneWhoseFolderStillExists()
+    {
+        await using var f = await Fixture.CreateAsync();
+        await f.CreateSessionAsync("busy", f.Source, title: "Busy");
+        var oldPath = f.Source.ProjectPath;
+        var copy = Directory.CreateDirectory(Path.Combine(f.Root, "copy")).FullName;
+        var moved = f.Source.Copy();
+        moved.ProjectPath = copy;
+        await f.Projects.SaveAsync(moved);
+
+        var kept = await f.Runtime.FollowMovedProjectFoldersAsync(static _ => false);
+        Assert.AreEqual(0, kept.Moved.Count, "A folder that still exists may be the one the session works in: it is left.");
+
+        Directory.Delete(oldPath);
+        var atWork = await f.Runtime.FollowMovedProjectFoldersAsync(static id => id == "busy");
+        Assert.AreEqual(("move_partial", 0), (atWork.Status, atWork.Moved.Count), "A session at work is left for a later pass.");
+        Assert.AreEqual(oldPath, (await f.Journal.ReadHeaderAsync("busy", CreatedAt))!.WorkingDirectory);
+
+        var later = await f.Runtime.FollowMovedProjectFoldersAsync(static _ => false);
+        Assert.AreEqual(("ok", 1), (later.Status, later.Moved.Count));
+        Assert.AreEqual(copy, (await f.Journal.ReadHeaderAsync("busy", CreatedAt))!.WorkingDirectory);
+    }
+
+    [TestMethod]
+    public void FindMovedSessionProject_IsTheRecordedProject_WhoseFolderChanged_WhenTheRecordedFolderIsGone()
+    {
+        var project = new ProjectDescriptor { Id = "docs", Slug = "docs", Name = "docs", ProjectPath = "/work/docs" };
+        var archived = new ProjectDescriptor { Id = "old", Slug = "old", Name = "old", ProjectPath = "/work/old-new", Archived = true };
+        ProjectDescriptor[] projects = [project, archived];
+        var existing = new HashSet<string>(StringComparer.Ordinal) { "/work/docs", "/work/old-new", "/work/still-here" };
+        bool Exists(string path) => existing.Contains(path);
+
+        Assert.AreSame(project, ProjectCatalog.FindMovedSessionProject("docs", "/work/docs-old", projects, Exists));
+        Assert.IsNull(ProjectCatalog.FindMovedSessionProject("docs", "/work/docs", projects, Exists), "A session in the folder of its project did not move.");
+        Assert.IsNull(ProjectCatalog.FindMovedSessionProject("docs", "/work/still-here", projects, Exists), "A folder that exists keeps its sessions.");
+        Assert.IsNull(ProjectCatalog.FindMovedSessionProject("DOCS", "/work/docs-old", projects, Exists), "Another identifier names another project.");
+        Assert.IsNull(ProjectCatalog.FindMovedSessionProject("old", "/work/old", projects, Exists), "An archived project takes no session.");
+        Assert.IsNull(ProjectCatalog.FindMovedSessionProject("missing", "/work/docs-old", projects, Exists));
+        existing.Remove("/work/docs");
+        Assert.IsNull(ProjectCatalog.FindMovedSessionProject("docs", "/work/docs-old", projects, Exists), "A project whose folder is gone too takes nothing.");
+    }
+
+    [TestMethod]
+    public async Task MovedProjectFolders_RunsOnePassAtATime_AndOneMoreForWhatCameMeanwhile()
+    {
+        var runs = 0;
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var follower = new MovedProjectFolders(async () =>
+        {
+            Interlocked.Increment(ref runs);
+            await gate.Task;
+            return new OwnedSessionMoveResult("ok", [], []);
+        });
+
+        follower.Follow();
+        follower.Follow();
+        follower.Found(["a|/old"]);
+        gate.SetResult();
+        await follower.Current.WaitAsync(TestDeadlines.Hang);
+        Assert.AreEqual(2, runs, "The requests made while a pass ran give one more pass.");
+
+        follower.Found(["a|/old"]);
+        await follower.Current.WaitAsync(TestDeadlines.Hang);
+        Assert.AreEqual(2, runs, "A session already looked at starts no pass by itself.");
+        follower.Found(["a|/old", "b|/old"]);
+        await follower.Current.WaitAsync(TestDeadlines.Hang);
+        Assert.AreEqual(3, runs);
+        follower.ProjectChanged();
+        await follower.Current.WaitAsync(TestDeadlines.Hang);
+        follower.Found(["a|/old"]);
+        await follower.Current.WaitAsync(TestDeadlines.Hang);
+        Assert.AreEqual(5, runs, "A change of a project looks at every session again.");
+    }
+
+    [TestMethod]
+    public async Task MovedProjectFolders_TriesAgainWhenAnotherChangeOfTheCatalogHeldIt()
+    {
+        var statuses = new Queue<string>(["busy", "busy", "ok"]);
+        var follower = new MovedProjectFolders(() => Task.FromResult(new OwnedSessionMoveResult(statuses.Dequeue(), [], [])), static _ => Task.CompletedTask);
+        follower.Follow();
+        await follower.Current.WaitAsync(TestDeadlines.Hang);
+        Assert.AreEqual(0, statuses.Count);
+    }
+
+    [TestMethod]
     public void KeptWorktree_KeepsAWorktreeOfTheRepositoryOfTheTarget_Only()
     {
         using var temp = new TempDirectory();
@@ -193,8 +350,9 @@ public sealed class SessionRuntimeMoveTests
         private readonly AgentHub _hub;
 
         private Fixture(TempDirectory temp, AgentHub hub, SessionRuntimeService runtime, SessionViewJournalStore journal,
-            ProjectDescriptor source, ProjectDescriptor target)
+            ProjectCatalog projects, ProjectDescriptor source, ProjectDescriptor target)
         {
+            Projects = projects;
             _temp = temp;
             _hub = hub;
             Runtime = runtime;
@@ -204,6 +362,8 @@ public sealed class SessionRuntimeMoveTests
         }
 
         public SessionRuntimeService Runtime { get; }
+
+        public ProjectCatalog Projects { get; }
 
         public string Root => _temp.Path;
 
@@ -226,7 +386,7 @@ public sealed class SessionRuntimeMoveTests
             var target = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(temp.Path, "target")).FullName);
             var runtime = new SessionRuntimeService(hub, new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore()), projects,
                 sessionViewCatalog, new AgentInstructionTemplateProvider(catalogOptions: options), options);
-            return new Fixture(temp, hub, runtime, sessionViewCatalog.JournalStore, source, target);
+            return new Fixture(temp, hub, runtime, sessionViewCatalog.JournalStore, projects, source, target);
         }
 
         public async Task CreateSessionAsync(string id, ProjectDescriptor project, string? title, string? parent = null, string provider = "codex",

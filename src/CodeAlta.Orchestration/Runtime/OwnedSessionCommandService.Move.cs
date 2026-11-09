@@ -66,6 +66,46 @@ public sealed partial class OwnedSessionCommandService
                 if (_runtime.RemoteControlWanted(moved.SessionId)) _ = ReconnectRemoteControlAsync(moved.SessionId);
     }
 
+    /// <summary>
+    /// Binds to the folder of their project the idle sessions recorded for that project in a folder that is gone, as
+    /// when the folder of the project was moved and its file names the new one. Without it such a session is listed under
+    /// no project and cannot be opened. A session at work or that waits for an answer is left for a later call.
+    /// </summary>
+    /// <remarks>Uses the exclusive catalog-mutation reservation shared with deletion and moves. No automatic retry is performed.</remarks>
+    /// <returns>The sessions that now work in the folder of their project; <c>busy</c> when another change of the catalog runs.</returns>
+    public Task<OwnedSessionMoveResult> FollowMovedProjectFoldersAsync()
+    {
+        TaskCompletionSource<OwnedSessionMoveResult> completion;
+        TaskCompletionSource<string> reservation;
+        lock (_gate)
+        {
+            if (_closed || _retained) return Task.FromResult(OwnedSessionMoveResult.Refused("closed"));
+            if (_deleteWork is not null) return Task.FromResult(OwnedSessionMoveResult.Refused("busy"));
+            completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            reservation = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            _deleteWork = reservation.Task;
+            _ = FollowMovedProjectFoldersOwnedAsync(completion, reservation);
+        }
+        return completion.Task;
+    }
+
+    private async Task FollowMovedProjectFoldersOwnedAsync(TaskCompletionSource<OwnedSessionMoveResult> completion, TaskCompletionSource<string> reservation)
+    {
+        try
+        {
+            completion.TrySetResult(await _runtime.FollowMovedProjectFoldersAsync(OwnerBusyOrAsking).ConfigureAwait(false));
+        }
+        catch (Exception)
+        {
+            completion.TrySetResult(OwnedSessionMoveResult.Refused("move_unconfirmed"));
+        }
+        finally
+        {
+            lock (_gate) { if (ReferenceEquals(_deleteWork, reservation.Task)) _deleteWork = null; }
+            reservation.TrySetResult(completion.Task.IsCompletedSuccessfully ? completion.Task.Result.Status : "move_unconfirmed");
+        }
+    }
+
     private async Task ReconnectRemoteControlAsync(string sessionId)
     {
         try { await SetRemoteControlAsync(sessionId, true).ConfigureAwait(false); }

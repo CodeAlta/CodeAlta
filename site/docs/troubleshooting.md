@@ -167,6 +167,10 @@ When the desktop app cannot read a page of a session's history, the session file
 
 A warning names a project file that cannot be read: its project is left out of the lists, and the other projects and sessions are listed. The file is under `~/.alta/projects/`. A Windows path written by hand needs single quotes (`path: 'C:\Users\me\code'`) or doubled backslashes between double quotes. Fix the file, or remove it.
 
+### A project folder was moved
+
+Move the folder, then change `path` in the project's file under `~/.alta/projects/`. The project's sessions follow it: when CodeAlta starts, or the next time it lists the sessions, it binds those recorded in the old folder (now gone) to the new one, and tells their agent where they work now. A session that is working at that moment follows once it is idle and CodeAlta starts again. A session whose old folder still exists stays there.
+
 ### Context is too large
 
 Open the context usage with `Ctrl+G Ctrl+U`. Press `Ctrl+F11` to compact an idle session. If compaction keeps missing its target, check the size of attached files and the [context limits of the model](model-providers/configuration.md#model-metadata-overrides).

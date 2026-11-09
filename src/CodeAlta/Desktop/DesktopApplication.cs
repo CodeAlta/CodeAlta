@@ -1013,6 +1013,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 }
                 // The runs of scripts are kept with the results of their steps: one CodeAlta ended during is resumed from its card.
                 _ = host.KeepCodeModeRunsAsync();
+                // A session recorded for a project in a folder that is gone follows the project to its new folder (its file names it).
+                host.FollowMovedProjectFolders();
                 // The settings as one catalog: the built-in ones bound to the stores their pages use, for alta settings and the search of Settings.
                 Action? loggingSaved = null;
                 // The settings of the plugins: their values in config.toml, their changes told to them.

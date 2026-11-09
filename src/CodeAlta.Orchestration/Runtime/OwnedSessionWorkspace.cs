@@ -396,7 +396,30 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         var sessions = new List<AgentSessionMetadata>();
         // Fully consume the cached iterator, including its final awaited cache-completion write.
         await foreach (var session in _sessions(CancellationToken.None).ConfigureAwait(false)) sessions.Add(session);
-        return new(load.Projects, sessions) { SessionHeaders = ReadSessionHeaders(sessions), UnreadableProjects = load.Unreadable };
+        var headers = ReadSessionHeaders(sessions);
+        if (MovedProjectFolders is { } found && MovedProjectSessions(load.Projects, sessions, headers, Directory.Exists) is { Count: > 0 } moved) found(moved);
+        return new(load.Projects, sessions) { SessionHeaders = headers, UnreadableProjects = load.Unreadable };
+    }
+
+    /// <summary>
+    /// Told when a snapshot finds sessions recorded for a project in a folder that is gone while the project now has
+    /// another folder (<see cref="ProjectCatalog.FindMovedSessionProject"/>), with each such session as
+    /// <c>id|folder</c>. The host binds them to the new folder. Null where nothing does.
+    /// </summary>
+    public Action<IReadOnlyList<string>>? MovedProjectFolders { get; set; }
+
+    /// <summary>The sessions of a snapshot whose project moved to another folder, as <c>id|recorded folder</c>.</summary>
+    internal static List<string> MovedProjectSessions(IReadOnlyList<ProjectDescriptor> projects, IReadOnlyList<AgentSessionMetadata> sessions,
+        IReadOnlyDictionary<string, SessionViewJournalHeader> headers, Func<string, bool> folderExists)
+    {
+        var moved = new List<string>();
+        foreach (var session in sessions)
+        {
+            if (!headers.TryGetValue(session.SessionId, out var header) || header.Kind != SessionViewKind.ProjectSession) continue;
+            if (ProjectCatalog.FindMovedSessionProject(header.ProjectRef, session.WorkspacePath, projects, folderExists) is not null)
+                moved.Add($"{session.SessionId}|{session.WorkspacePath}");
+        }
+        return moved;
     }
 
     // Snapshots are read again and again (each change of the Explorer, each sessions.list of a node): a file is logged

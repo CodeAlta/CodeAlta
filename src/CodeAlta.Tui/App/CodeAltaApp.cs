@@ -160,6 +160,8 @@ internal sealed class CodeAltaApp : IAsyncDisposable, IShellFrontendHostLifecycl
         _frontendHost = new ShellFrontendHost(this);
         // The runs of scripts are kept with the results of their steps, for a resume after a restart.
         _ = ownedServices?.KeepCodeModeRunsAsync();
+        // A session recorded for a project in a folder that is gone follows the project to its new folder.
+        ownedServices?.FollowMovedProjectFolders();
         var composition = CodeAltaFrontendComposition.Create(
             providerDescriptors,
             projectCatalog,

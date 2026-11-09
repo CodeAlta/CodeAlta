@@ -120,6 +120,9 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
     /// <returns>A task that completes when the sessions of the interrupted runs were told.</returns>
     public Task KeepCodeModeRunsAsync() => _host.KeepCodeModeRunsAsync();
 
+    /// <summary>Binds the sessions of a project whose folder moved to its new folder (<see cref="CodeAltaHost.FollowMovedProjectFolders"/>).</summary>
+    public void FollowMovedProjectFolders() => _host.FollowMovedProjectFolders();
+
     /// <summary>Gets the sessions the scripts of Code Mode start, made when a script first starts one.</summary>
     public CodeAlta.Orchestration.Runtime.Scripts.ICodeModeAgents CodeModeAgents => _host.CodeModeAgents;
 

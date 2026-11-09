@@ -107,6 +107,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             pluginEvents.RunEndHooks = new PluginRunEndHooks(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins,
                 (sessionId, prompt, token) => runtimeService.DeliverHostPromptAsync(sessionId, prompt, AgentPromptProvenance.Plugin, token));
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
+        _movedProjectFolders = new MovedProjectFolders(Commands.FollowMovedProjectFoldersAsync);
         // A script that went on in the background gives its result to its session as a prompt.
         CodeModeRuns = new Runtime.Scripts.CodeModeRunRegistry(
             (sessionId, prompt, images, token) => runtimeService.DeliverHostPromptAsync(sessionId, prompt, AgentPromptProvenance.Workflow, images, token),
@@ -312,6 +313,26 @@ public sealed class CodeAltaHost : IAsyncDisposable
         => CodeModeRuns.Store is not null
             ? Task.CompletedTask
             : CodeModeRuns.UseStoreAsync(new Runtime.Scripts.CodeModeRunStore(Runtime.Scripts.CodeModeRunStore.RootOf(CatalogOptions)));
+
+    /// <summary>
+    /// Binds to the new folder of their project the sessions recorded for it in a folder that is gone, as when the folder
+    /// of a project was moved and its file names the new one: now, each time a project file is written, and each time
+    /// the session list finds such a session. Called once by a frontend whose state lasts (CodeAlta Desktop, the TUI);
+    /// a second call does nothing.
+    /// </summary>
+    public void FollowMovedProjectFolders()
+    {
+        if (Interlocked.Exchange(ref _followingProjectFolders, 1) != 0) return;
+        ProjectCatalog.Changed += change => { if (change.Kind == ProjectCatalogChangeKind.Saved) _movedProjectFolders.ProjectChanged(); };
+        WorkspaceReads.MovedProjectFolders = _movedProjectFolders.Found;
+        _movedProjectFolders.Follow();
+    }
+
+    /// <summary>The pass of <see cref="FollowMovedProjectFolders"/> that runs, or the last one.</summary>
+    internal Task MovedProjectFoldersPass => _movedProjectFolders.Current;
+
+    private readonly MovedProjectFolders _movedProjectFolders;
+    private int _followingProjectFolders;
 
     /// <summary>Gets the library of the scripts of Code Mode: the user's scripts, those of the projects, and those of the running plugins.</summary>
     public Runtime.Scripts.CodeModeScriptLibrary CodeModeScripts => _codeModeScripts ??= new Runtime.Scripts.CodeModeScriptLibrary(CatalogOptions, Runtime.Scripts.CodeModeScriptLibrary.ShippedRoot)
