@@ -21,9 +21,11 @@ const currentTickOff = `(() => { const view = ${scroller}, frame = view.getBound
   if (!mark) return 999; const at = (${current}.getBoundingClientRect().top - frame.top + view.scrollTop) / view.scrollHeight * view.clientHeight;
   return Math.abs(mark.getBoundingClientRect().top - frame.top - at); })()`;
 
-async function find(page: Page) {
-  await page.command("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "f", code: "KeyF", windowsVirtualKeyCode: 70, modifiers: process.platform === "darwin" ? 4 : 2 });
-  await page.command("Input.dispatchKeyEvent", { type: "keyUp", key: "f", code: "KeyF", windowsVirtualKeyCode: 70, modifiers: process.platform === "darwin" ? 4 : 2 });
+/** Ctrl+F, Cmd+F on macOS: the find in a session. The search of the sessions is Ctrl+F on every system (`ctrl`). */
+async function find(page: Page, ctrl = false) {
+  const modifiers = !ctrl && process.platform === "darwin" ? 4 : 2;
+  await page.command("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "f", code: "KeyF", windowsVirtualKeyCode: 70, modifiers });
+  await page.command("Input.dispatchKeyEvent", { type: "keyUp", key: "f", code: "KeyF", windowsVirtualKeyCode: 70, modifiers });
 }
 const key = async (page: Page, name: string, code: number, modifiers = 0) => {
   await page.command("Input.dispatchKeyEvent", { type: "rawKeyDown", key: name, code: name, windowsVirtualKeyCode: code, modifiers });
@@ -106,7 +108,7 @@ test("Ctrl+F in a session finds in its timeline: every match marked and counted,
 
     // Outside the session Ctrl+F is still the search of the sessions.
     await page.evaluate("(() => { const other = document.createElement('button'); other.id = 'outside'; document.body.appendChild(other); other.focus(); })()");
-    await find(page);
+    await find(page, true);
     await page.until("timelineFindFixture.state.searchedSessions === 1", "the search of the sessions");
     assert.equal(await page.evaluate(bar), null);
   }, options);

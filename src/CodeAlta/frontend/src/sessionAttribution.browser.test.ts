@@ -23,7 +23,9 @@ const instruction = ".attribution-markdown .monaco-editor textarea";
 const saved = `JSON.stringify(attributionFixture.saved.map(request => Object.fromEntries(Object.entries(request).filter(([key, value]) => key !== 'expectedEpoch' && value !== null))))`;
 const selectAll = async (page: Page) => {
   const modifiers = process.platform === "darwin" ? 4 : 2;
-  await page.command("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers });
+  // On macOS the browser selects through its menu, which a key sent over the DevTools protocol does not reach: the command
+  // of the key is given with it, as the system would run it.
+  await page.command("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers, commands: ["selectAll"] });
   await page.command("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers });
 };
 
