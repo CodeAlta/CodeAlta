@@ -22,12 +22,6 @@
 .runtime-observation { display: block; font-size: .75rem; line-height: 1.5; font-weight: normal; overflow-wrap: anywhere; }
 .observed-activity, .unknown-activity { display: block; overflow-wrap: anywhere; }
 .unknown-activity { border-top: 1px dashed var(--muted); padding-top: .25rem; color: var(--muted); }
-.session-batch-delete { border: 1px solid var(--muted); padding: .5rem; overflow-wrap: anywhere; }
-.session-batch-delete fieldset { max-height: 12rem; overflow: auto; min-width: 0; }
-.session-browser .session-batch-delete label { display: block; }
-.session-batch-delete input[type="checkbox"] { width: auto; margin-right: .5rem; }
-.session-batch-report { max-height: 24rem; overflow: auto; }
-.session-batch-report input { max-width: 100%; }
 .runtime-observation-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; max-width: 100%; }
 /* Stable line boxes prevent CJK fallback metrics shifting the retained timeline. */
 .runtime-observation-controls button { line-height: 1.5; }
@@ -2213,8 +2207,6 @@ dialog.session-browser > .app-window > .app-window-body > footer { margin-inline
 .session-browser-delete { position: relative; display: inline-flex; }
 .session-browser-archived .session-browser-count { margin-left: 6px; min-width: 16px; padding: 0 5px; border-radius: 999px; color: var(--muted);
   background: color-mix(in srgb, var(--text) 9%, transparent); font-size: 10.5px; font-variant-numeric: tabular-nums; line-height: 16px; text-align: center; }
-dialog.session-browser .session-batch-delete { flex: none; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
-dialog.session-browser .session-batch-delete summary { cursor: pointer; color: var(--muted); }
 
 /* The working folder, its git branch and the lines changed, in the form of a new session. */
 .project-context { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--muted); font-size: 12px; white-space: nowrap; }

@@ -165,8 +165,6 @@ import { useSessionRowDrag, type ClaudeCodeConversationDrag, type SessionMoveDra
 import type { ProjectRowDrop } from "./explorer/ProjectRowActions";
 import { MoveSessionDialog } from "./MoveSessionDialog";
 import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
-import { batchDeleteCandidate, createSessionBatchDeletion } from "./sessionBatchDeletion";
-import type { BatchDeleteControls } from "./SessionBatchDeletePanel";
 import { ConfirmPopover } from "./ConfirmPopover";
 import { OverflowTip } from "./OverflowTip";
 import { RenamePopover } from "./RenamePopover";
@@ -567,9 +565,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     // The archived sessions stay in the catalog, for the saved sessions and the search; the window lists the others.
     return withoutArchived(scopeSnapshot(fresh, view));
   } }));
-  const [batchDeletion] = useState(() => createSessionBatchDeletion(workspace.deleteSession));
-  const batchDeletionState = useSyncExternalStore(batchDeletion.subscribe, batchDeletion.getSnapshot);
-  useEffect(() => () => batchDeletion.invalidate(), [batchDeletion]);
   const [runtimeObservations] = useState(() => createRuntimeObservations(sessionRuntimeState.observe));
   useEffect(() => () => runtimeObservations.invalidate(), [runtimeObservations]);
   // Original create presentation authority only; never a backend receipt or retry grant.
@@ -585,7 +580,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The same transitions but a new catalog: a navigation that waits for its admission is superseded by what the user
   // does meanwhile (another view, a tab closed), not by the catalog a running session has read again.
   const viewRevision = useRef(0);
-  function advanceBrowserRevision(catalog = false) { batchDeletion.invalidate(); if (!catalog) viewRevision.current++; renderInfoRevision(++browserRevision.current); }
+  function advanceBrowserRevision(catalog = false) { if (!catalog) viewRevision.current++; renderInfoRevision(++browserRevision.current); }
   const [browserCapture, setBrowserCapture] = useState<{ snapshot: WorkspaceSnapshot; projectId: string | null; revision: number; hostReady: boolean } | null>(null);
   const invalidateCreation = (paletteTransition = false) => { creationGeneration.current++; if (!paletteTransition) commandGeneration.current++; };
   const [logClearActions] = useState(() => createApplicationLogClearActions(applicationLogs.clear));
@@ -930,7 +925,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [projectFolder, setProjectFolder] = useState<string | null>(null);
   const addingFolder = useRef(false);
   function setDialog(value: typeof dialog) {
-    batchDeletion.invalidate(); invalidateCreation(); writeDialog(value);
+    invalidateCreation(); writeDialog(value);
     if (value !== "project") setProjectFolder(null);
     if (value !== "worktrees") setWorktreesProject(null);
   }
@@ -2561,23 +2556,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     } };
   }
 
-  function batchDeleteControls(): BatchDeleteControls {
-    const capability = mutation?.capability;
-    const epoch = currentHostEpoch.current ?? "";
-    const captured = browserCapture;
-    const available = () => !!captured && captured.revision === browserRevision.current && currentSnapshot.current === captured.snapshot
-      && currentHostEpoch.current === epoch && owned && !!epoch && !!mutation?.capability.canMutate()
-      && currentView.current === "workspace" && !settingsVisible.current && !deletingPending.current && !uncertainDelete.current
-      && !deleteLocked && !renamingPending.current && !uncertainRename.current && !renameLocked;
-    return { owner: batchDeletion, epoch, canReview: available(), review: requests => {
-      if (!available() || !captured) return false;
-      const exact = requests.every(request => {
-        const verified = batchDeleteCandidate(captured.snapshot, { sessionId: request.sessionId, projectId: request.projectId, path: request.projectPath ?? "" }, epoch);
-        return verified && Object.keys(verified).every(key => verified[key as keyof typeof verified] === request[key as keyof typeof request]);
-      });
-      return exact && !!capability && batchDeletion.review(requests, available, capability);
-    } };
-  }
   function captureInfoLifetime(): SessionInfoLifetime {
     const revision = browserRevision.current;
     return { revision, current: () => revision === browserRevision.current && currentView.current === "workspace" && !settingsVisible.current };
@@ -3508,7 +3486,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const settingsCatalog = useSyncExternalStore(settingsHub.subscribe, settingsHub.getSnapshot, settingsHub.getSnapshot);
   const settingEntries = useMemo(() => mergeSettings(settingsCatalog.descriptors), [settingsCatalog]);
   const windowSettings = useWindowSettingBindings({ theme, setTheme, darker, setDarker, colorScheme, setColorScheme, customSchemes, projectSort, setProjectSort,
-    recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); }, subAgentCount, setSubAgentCount,
+    recentSessionCount, setRecentSessionCount: setRecentSessionCount, subAgentCount, setSubAgentCount,
     railCollapsed: railState.desktopCollapsed, setRailCollapsed: setDesktopCollapsed, confirms, setConfirm, singleTab, setSingleTab,
     language: language.choice, setLanguage: language.setLanguage });
   useWindowSettingsBridge(secondary ? null : settingsHub, !!pluginEpoch, windowSettings);
@@ -3676,7 +3654,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     return sessionActionAccess(session,
       { id: session.id, projectId, hostEpoch: status?.hostEpoch ?? null }, selectedSessionId.current, selectedScope.current, selectedProject,
       currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
-      batchDeletion.locked() || renamingBusy || deletingBusy || movingBusy || renamingPending.current || deletingPending.current,
+      renamingBusy || deletingBusy || movingBusy || renamingPending.current || deletingPending.current,
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
   }
 
@@ -4156,7 +4134,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (rows.length !== 1) return;
     const access = sessionActionAccess(rows[0], { id: pending.sessionId, projectId, hostEpoch: status?.hostEpoch ?? null }, pending.sessionId,
       selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
-      mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
+      mutation?.capability.canMutate() ?? false, renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
     if (!access[pending.action]) return;
     if (isOpenElsewhereAction(pending.action)) { void openSessionElsewhere(pending.action, rows[0]); return; }
@@ -4209,7 +4187,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       extended={extra > 0} tree={sessionTree} marks={session => sessionMarks(session, scope)} claudeCode={claudeCodeGroup}
       access={session => sessionActionAccess(session, { id: session.id, projectId: scope, hostEpoch: status?.hostEpoch ?? null }, session.id, scope, project,
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
-        batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
+        renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
       onAction={(session, action, focusPrompt) => openScopeSession(scope, session, action, focusPrompt)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionCloudEntries(session), ...sessionBookmarkEntries(session), ...sessionLineageEntries(session), ...sessionReviewEntries(session), ...sessionMachineEntries(session)]}
       openEntries={sessionEditorEntries} deleteAsks={confirms.sessionDelete}
@@ -4455,7 +4433,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       || settingsVisible.current || dialog || modalDialogOpen()) return;
     if (!sessionActionAccess(row, { id: row.id, projectId, hostEpoch: status?.hostEpoch ?? null }, row.id,
       selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
-      mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
+      mutation?.capability.canMutate() ?? false, renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current).delete) return;
     setMenuTarget(null);
     if (selectedSessionId.current !== row.id) { setSessionId(row.id); setRenamingMessage(""); }
@@ -4471,7 +4449,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         || settingsVisible.current || dialog || modalDialogOpen()) return;
       const access = sessionActionAccess(row, { id: row.id, projectId, hostEpoch: status?.hostEpoch ?? null }, row.id,
         selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
-        mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
+        mutation?.capability.canMutate() ?? false, renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
       if (!access[action] || action === "archive" && sessionArchiveBusy) return;
       setMenuTarget(null);
@@ -4494,7 +4472,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const access = sessionActionAccess(row, target,
       row.id,
       selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
-      mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
+      mutation?.capability.canMutate() ?? false, renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
     if (!access.open) return;
     if (action === "rename" && !access.rename || action === "delete" && !access.delete || action === "fork" && !access.fork
@@ -4573,7 +4551,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const capability = mutation?.capability;
     const root = tree.root;
     const project = root.scopeKind === "project" ? catalog.current?.projects.find(value => value.id === root.projectId) : undefined;
-    if (batchDeletion.locked() || deletingPending.current || !owned || !capability?.canMutate() || !root.workspacePath
+    if (deletingPending.current || !owned || !capability?.canMutate() || !root.workspacePath
       || root.scopeKind === "project" && (!project || project.archived)) return { kind: "error", code: "busy", deleted: [], blocking: null };
     const target: RenameTarget = project ? { scope: "project", projectId: project.id, projectPath: project.path }
       : { scope: "global", projectPath: root.workspacePath };
@@ -4792,7 +4770,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   async function deleteCheckedSessions(rows: readonly WorkspaceSession[], worktrees: readonly DeletedWorktree[]): Promise<Readonly<{ deleted: readonly string[]; error: string | null }>> {
     const capability = mutation?.capability;
     const epoch = status?.hostEpoch;
-    if (sessionArchivePending.current || deletingPending.current || batchDeletion.locked() || !owned || !capability?.canMutate() || !epoch)
+    if (sessionArchivePending.current || deletingPending.current || !owned || !capability?.canMutate() || !epoch)
       return { deleted: [], error: t(sessionDeletionMessage("busy") as MessageKey) };
     sessionArchivePending.current = true;
     deletingPending.current = true;
@@ -4860,7 +4838,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   function sessionDragSource(session: WorkspaceSession, scope: string | null): SessionRowDrag {
     const project = scope === null ? undefined : snapshot?.projects.find(value => value.id === scope);
     if (!project || !sessionMoveAccess(session, project, currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
-      batchDeletion.locked() || renamingBusy || deletingBusy || movingBusy || renamingPending.current || deletingPending.current,
+      renamingBusy || deletingBusy || movingBusy || renamingPending.current || deletingPending.current,
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)) return {};
     return rowDrag.source({ id: session.id, title: plainTitle(session.title), from: { projectId: project.id, projectPath: project.path } });
   }
@@ -4888,7 +4866,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const capability = mutation?.capability;
     if (movingPending.current || !owned || !capability?.canMutate() || target.archived || target.id === moving.from.projectId) return;
     // The locks of the menu, again: a rename or a delete may have become pending or unconfirmed while the window was open.
-    if (batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current
+    if (renamingBusy || deletingBusy || renamingPending.current || deletingPending.current
       || renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current) {
       setMovingSession(null);
       showToast({ message: t(sessionMoveMessage("busy")), intent: "warning", icon: "warning-sign", timeout: 6000 });
@@ -5576,7 +5554,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   branchActions.current = { fork: forkSessionOfPane, rewind: rewindSessionOfPane };
 
   async function renameSelectedSession() {
-    if (batchDeletion.locked()) return;
     const session = selectedSession;
     if (!session || session.id !== renamingId || selectedSessionId.current !== session.id
       || selectedScope.current !== (selectedProject?.id ?? null) || renamingPending.current
@@ -5689,7 +5666,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // Deletes the selected session. What went wrong is told in the question that was answered, or in a notice when
   // nothing was asked.
   async function deleteSessionRow(session: WorkspaceSession, asked: boolean, worktree: Readonly<{ name: string; path: string }> | null = null) {
-    if (batchDeletion.locked()) return;
     if (selectedSessionId.current !== session.id
       || selectedScope.current !== (selectedProject?.id ?? null) || deletingPending.current || uncertainDelete.current
       || !owned || !mutation?.capability.canMutate() || !session.workspacePath || selectedProject?.archived) return;
@@ -5831,7 +5807,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   function beginProjectDelete() {
     const target = projectDeleteScope();
     if (!target || projectDeletion.locked || projectArchive.locked || archiveBusy || projectRenamePending.current || !!projectRenameTarget
-      || deletingPending.current || renamingPending.current || batchDeletion.locked()) return;
+      || deletingPending.current || renamingPending.current) return;
     setProjectDeleteMessage("");
     setArchiveAsk(null);
     setArchiveMessage("");
@@ -6131,7 +6107,6 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             <button type="button" className="quiet-button" onClick={() => void refreshDeletedSession()}>{t("Refresh session list")}</button>
           </div>}
           {!owned && <p className="muted-text">{t("Session creation requires an owned host.")}</p>}
-          {batchDeletionState.phase !== "idle" && <p role="status">Batch deletion: {batchDeletionState.phase}. {batchDeletionState.items.filter(item => item.outcome === "deleted").length} confirmed deleted; {batchDeletionState.items.filter(item => item.outcome === "uncertain").length} uncertain. Single deletion is blocked. Reopen Browse saved sessions for the retained exact-target report.</p>}
           <div className="session-list">
             {selectedList.entries.map((entry, index) => {
               if (entry.kind === "more") return <SubAgentDisclosure key={`more:${entry.parentId}`} entry={entry}
@@ -6144,7 +6119,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 menu ?? { id: session.id, projectId, hostEpoch: status?.hostEpoch ?? null },
                 menu ? session.id : selectedSession === session && selectedSessionId.current === session.id ? sessionId : null,
                 selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
-                mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
+                mutation?.capability.canMutate() ?? false, renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
                 renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
               return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id} data-family-id={session.id} data-rename-keys data-session-keys {...sessionDragSource(session, projectId)}
                 onContextMenu={event => {
@@ -6500,7 +6475,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           onOpen={openSearchedSetting} /> : null }}>
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
-          onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); }, subAgentCount, setSubAgentCount,
+          onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: setRecentSessionCount, subAgentCount, setSubAgentCount,
         sessionWidth, setSessionWidth }} />
       : settingsSection === "windows" ? <WindowSettings hub={windowsHub} state={windowsState} />
       : settingsSection === "general" ? <GeneralSettings
@@ -6724,7 +6699,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     {fileClosing && <UnsavedFileDialog name={fileEditors.unsaved(fileTabKey(fileClosing.tab)).join(", ")} mode="close" busy={fileClosing.busy}
       onSave={() => void saveAndCloseFile(fileClosing.tab)} onDiscard={() => closeFile(fileClosing.tab, true)}
       onCancel={() => { cancelSaveFollowUp(); setFileClosing(null); }} />}
-    {dialog === "sessions" && browserCapture && <SessionBrowser snapshot={browserCapture.snapshot} projectId={browserCapture.projectId} observations={runtimeObservationControls()} recentCount={recentSessionCount} activeSessionId={sessionId} batch={batchDeleteControls()}
+    {dialog === "sessions" && browserCapture && <SessionBrowser snapshot={browserCapture.snapshot} projectId={browserCapture.projectId} observations={runtimeObservationControls()} recentCount={recentSessionCount} activeSessionId={sessionId}
       archived={archivedSessionControls()} checking={checkedSessionControls()}
       stale={browserCapture.revision !== browserRevision.current || browserCapture.hostReady !== (mutation?.capability.canMutate() ?? false) || view !== "workspace" || settingsOpen}
       close={() => setDialog(null)} open={tab => {

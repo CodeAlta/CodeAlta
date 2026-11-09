@@ -11,8 +11,6 @@ import { browseSessions } from "./sessionBrowser";
 import type { RuntimeObservationControls } from "./RuntimeObservation";
 import { sessionRunning } from "./runtimeObservations";
 import { tabKey } from "./sessionTabs";
-import { batchDeleteCandidate } from "./sessionBatchDeletion";
-import { SessionBatchDeletePanel, type BatchDeleteControls } from "./SessionBatchDeletePanel";
 import { checkedRange, sessionDeletionPlan, withChecked } from "./sessionBrowserSelection";
 import { sessionTime } from "./sessionTime";
 import { plainTitle } from "./sessionTitle";
@@ -72,12 +70,11 @@ export type CheckedSessionControls = Readonly<{
  * the archived sessions instead, where Enter restores the selected one. Sessions checked in the first column are
  * archived, restored or deleted together; a session at work is not checked.
  */
-export function SessionBrowser({ snapshot, projectId, stale, open, close, observations, batch, archived, checking }: {
+export function SessionBrowser({ snapshot, projectId, stale, open, close, observations, archived, checking }: {
   snapshot: WorkspaceSnapshot; projectId: string | null; stale: boolean;
   open: (tab: SessionTab) => boolean; close: () => void;
   observations?: RuntimeObservationControls;
   recentCount?: number; activeSessionId?: string | null;
-  batch?: BatchDeleteControls;
   archived?: ArchivedSessionControls;
   checking?: CheckedSessionControls;
 }) {
@@ -185,7 +182,6 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
     if (archive.deleteAsks) setDeleting({ id: row.id, error: null }); else void remove(row, false);
   }
   const selectedRow = rows[selected]?.row;
-  function change(action: () => void) { batch?.owner.invalidate(); action(); }
   return <dialog ref={element => { dialog.current = element; setLayer(element); }} className="session-browser" aria-labelledby="session-browser-title"
     onCancel={event => { event.preventDefault(); close(); }} onKeyDown={event => {
       event.stopPropagation();
@@ -194,7 +190,7 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
         return;
       }
       if (event.key === "Escape") { event.preventDefault(); close(); return; }
-      if (event.target instanceof HTMLElement && event.target.closest("select, button, .session-batch-delete")) return;
+      if (event.target instanceof HTMLElement && event.target.closest("select, button")) return;
       if (event.target instanceof HTMLInputElement && event.target !== search.current) return;
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault(); setSelected(Math.max(0, Math.min(rows.length - 1, selected + (event.key === "ArrowDown" ? 1 : -1))));
@@ -206,16 +202,16 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
     <div className="session-browser-toolbar">
       <InputGroup inputRef={search} className="session-browser-filter" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />}
         placeholder={t("Title or ID")} aria-label={t("Find saved sessions")} maxLength={256} value={query}
-        onChange={event => change(() => { setQuery(event.target.value); setSelectedKey(null); })} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="session-browser-results"
+        onChange={event => { setQuery(event.target.value); setSelectedKey(null); }} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="session-browser-results"
         aria-activedescendant={rows[selected] ? `session-browser-row-${selected}` : undefined} />
       <HTMLSelect aria-label={t("Session browser scope")} value={scope === null ? "global" : "project"}
-        onChange={event => change(() => { setScope(event.target.value === "global" ? null : projectId); setSelectedKey(null); clearChecked(); })}>
+        onChange={event => { setScope(event.target.value === "global" ? null : projectId); setSelectedKey(null); clearChecked(); }}>
         {projectId !== null && <option value="project">{project.length === 1 ? project[0].name : t("ambiguous or missing")}{project[0]?.archived ? t(" (archived, read-only)") : ""}</option>}
         <option value="global">{t("Chats")}</option>
       </HTMLSelect>
       {archived && <Button className="session-browser-archived" size="small" variant={showArchived ? "solid" : "outlined"} active={showArchived}
         aria-pressed={showArchived} icon={<AppIcon name="archive" size={14} className="bp6-icon" />}
-        onClick={() => change(() => { setShowArchived(value => !value); setSelectedKey(null); setDeleting(null); clearChecked(); })}>
+        onClick={() => { setShowArchived(value => !value); setSelectedKey(null); setDeleting(null); clearChecked(); }}>
         {t("Archived")}{archivedHere > 0 && <span className="session-browser-count">{archivedHere}</span>}</Button>}
       <span className="settings-editor-spacer" />
       <span className="bp6-text-muted" role="status">{t("{shown} of {matching} sessions", { shown: rows.length, matching: page.matched })}{page.hidden > 0 && <>{" · "}{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}</>}</span>
@@ -230,7 +226,7 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
             onChange={() => { const all = shownCheckable.every(id => checked.has(id)); anchor.current = null; setChecked(current => withChecked(current, shownCheckable, !all)); }} /></th>}
           {(archive ? archivedColumns : columns).map(([column, label]) => <th key={column} scope="col" data-column={column}
           aria-sort={sort.column === column ? sort.descending ? "descending" : "ascending" : "none"}>
-          <button type="button" onClick={() => change(() => setSort(current => ({ column, descending: current.column === column ? !current.descending : column === "updated" || column === "messages" })))}>
+          <button type="button" onClick={() => setSort(current => ({ column, descending: current.column === column ? !current.descending : column === "updated" || column === "messages" }))}>
             {t(label)}{sort.column === column && <AppIcon name="chevronDown" size={12} className={sort.descending ? undefined : "sort-ascending"} />}</button></th>)}</tr></thead>
         <tbody>{rows.map(({ row, valid, tab }, index) => {
           // A time after the browser opened (an archive since) is said as now, not as to come.
@@ -295,8 +291,5 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
       <span className="bp6-text-muted">{t("Enter or double-click opens the selected session.")}</span>
       <button type="button" className="bp6-button bp6-small bp6-intent-primary" disabled={stale || !rows[selected]?.valid} onClick={() => activate(selected)}>{t("Open")}</button>
     </footer>}
-    {batch && !archive && <SessionBatchDeletePanel controls={{ ...batch, canReview: batch.canReview && !stale }}
-      inputKey={JSON.stringify([scope, query, sort, stale, rows.map(item => tabKey(item.tab))])}
-      candidates={rows.flatMap(item => { const request = batchDeleteCandidate(snapshot, item.tab, batch.epoch); return request ? [request] : []; })} />}
   </AppWindowSurface></dialog>;
 }
