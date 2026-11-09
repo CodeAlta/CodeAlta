@@ -41,7 +41,9 @@ folders of the session and the computer (`SandboxHost`) into a `SandboxPolicy`:
   granted.
 - **Protected**: the entries of the working tree that other programs run later (git hooks and configuration, the
   `.alta` settings and plugins, the folders of editors and coding agents). One that exists is read-only, one that
-  does not is denied, which keeps it from being created.
+  does not is denied, which keeps it from being created. A missing file that a program reads and fails on when it is
+  denied, rather than missing (the `config.worktree` git reads with `extensions.worktreeConfig`), is made empty before
+  the start, so that it is read-only.
 - **Denied**: the user's secrets wherever a grant would reach them.
 - **Environment**: built from scratch. Variables named like a secret pass only when the profile names them.
 

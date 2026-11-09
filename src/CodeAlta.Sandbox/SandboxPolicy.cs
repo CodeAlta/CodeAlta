@@ -99,6 +99,13 @@ public sealed record SandboxPolicy
     /// <summary>Gets the entries inside the writable folders that are read-only, or denied while they do not exist.</summary>
     public required IReadOnlyList<string> Protected { get; init; }
 
+    /// <summary>
+    /// Gets the files of <see cref="Protected"/> that are made empty before the sandbox starts, when they do not exist,
+    /// so that they are read-only rather than denied: a program reads them, and fails on one it is denied where a
+    /// missing one means no settings (the <c>config.worktree</c> git reads with <c>extensions.worktreeConfig</c>).
+    /// </summary>
+    public IReadOnlyList<string> EmptyFiles { get; init; } = [];
+
     /// <summary>Gets what the network reaches.</summary>
     public required SandboxNetwork Network { get; init; }
 

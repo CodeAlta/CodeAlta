@@ -219,11 +219,24 @@ internal static class MxcRequests
     /// <summary>
     /// Makes the parent folders of the protected entries that are missing inside the writable folders: empty
     /// folders, which git does not track (an empty <c>.alta</c> lets <c>.alta/plans</c> be created while
-    /// <c>.alta/plugins</c> stays denied).
+    /// <c>.alta/plugins</c> stays denied). Makes the empty files of the policy, which are then read-only.
     /// </summary>
     public static void Prepare(SandboxPolicy policy)
     {
         foreach (var folder in policy.ReadWrite) Directory.CreateDirectory(folder);
+        foreach (var file in policy.EmptyFiles)
+        {
+            if (File.Exists(file) || Directory.Exists(file) || !Directory.Exists(Path.GetDirectoryName(file))) continue;
+            try
+            {
+                using var _ = new FileStream(file, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Made by another program meanwhile, or not writable here: it is read-only, or denied, as it is found.
+            }
+        }
+
         foreach (var path in policy.Protected)
         {
             if (Directory.Exists(path) || File.Exists(path) || Path.GetDirectoryName(path) is not { } parent || Directory.Exists(parent)) continue;

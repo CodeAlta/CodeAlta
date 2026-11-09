@@ -117,11 +117,15 @@ public static class SandboxPolicyBuilder
         }
 
         // The git folder of each writable root is protected as it is found, whatever a `.git` file names.
+        var emptyFiles = new List<string>();
         foreach (var gitFolder in gitFolders.Concat(roots.Select(static root => Path.Combine(root, ".git")).Where(Directory.Exists)).Distinct(comparer))
         {
             protectedEntries.Add(Path.Combine(gitFolder, "hooks"));
             protectedEntries.Add(Path.Combine(gitFolder, "config"));
-            protectedEntries.Add(Path.Combine(gitFolder, "config.worktree"));
+            var worktreeConfig = Path.Combine(gitFolder, "config.worktree");
+            protectedEntries.Add(worktreeConfig);
+            // Git fails on a configuration of the worktree it reads and is denied: one that is missing is made empty.
+            if (!File.Exists(worktreeConfig) && !Directory.Exists(worktreeConfig) && ReadsWorktreeConfig(gitFolder)) emptyFiles.Add(worktreeConfig);
         }
 
         var granted = readWrite.Concat(readOnly).ToList();
@@ -138,6 +142,7 @@ public static class SandboxPolicyBuilder
             ReadOnly = Distinct(readOnly.Where(path => !readWrite.Any(grant => comparer.Equals(grant, path)))),
             Denied = Distinct(denied),
             Protected = Distinct(protectedEntries),
+            EmptyFiles = Distinct(emptyFiles),
             Network = profile.Network,
             Hosts = profile.Hosts,
             LocalPorts = profile.LocalPorts,
@@ -257,6 +262,68 @@ public static class SandboxPolicyBuilder
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             return [];
+        }
+    }
+
+    // Whether git reads the configuration of each worktree in a git folder: `extensions.worktreeConfig` is on in the
+    // configuration of its repository, in the common folder a worktree's folder names, or in the folder itself.
+    internal static bool ReadsWorktreeConfig(string gitFolder)
+    {
+        try
+        {
+            var commonFile = Path.Combine(gitFolder, "commondir");
+            var common = File.Exists(commonFile) ? Path.GetFullPath(File.ReadAllText(commonFile).Trim(), gitFolder) : gitFolder;
+            var config = Path.Combine(common, "config");
+            return File.Exists(config) && WorktreeConfigIsOn(File.ReadAllText(config));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    // Whether a git configuration turns `extensions.worktreeConfig` on, as git reads it: the last value in an
+    // `[extensions]` section, names in any case, a key alone for true, comments and quotes. Includes are not followed.
+    internal static bool WorktreeConfigIsOn(string config)
+    {
+        var on = false;
+        var inExtensions = false;
+        foreach (var rawLine in config.Split('\n'))
+        {
+            var line = WithoutComment(rawLine).Trim();
+            if (line.StartsWith('['))
+            {
+                var end = line.IndexOf(']');
+                inExtensions = end > 0 && line[1..end].Trim().Equals("extensions", StringComparison.OrdinalIgnoreCase);
+                line = end > 0 ? line[(end + 1)..].Trim() : string.Empty;
+            }
+
+            if (!inExtensions || line.Length == 0) continue;
+            var equals = line.IndexOf('=');
+            if (!(equals < 0 ? line : line[..equals]).Trim().Equals("worktreeConfig", StringComparison.OrdinalIgnoreCase)) continue;
+            if (equals < 0)
+            {
+                on = true;
+                continue;
+            }
+
+            var value = line[(equals + 1)..].Trim().Replace("\"", string.Empty, StringComparison.Ordinal).Trim();
+            on = value.Equals("true", StringComparison.OrdinalIgnoreCase) || value.Equals("yes", StringComparison.OrdinalIgnoreCase)
+                 || value.Equals("on", StringComparison.OrdinalIgnoreCase) || (int.TryParse(value, out var number) && number != 0);
+        }
+
+        return on;
+
+        static string WithoutComment(string line)
+        {
+            var quoted = false;
+            for (var index = 0; index < line.Length; index++)
+            {
+                if (line[index] == '"') quoted = !quoted;
+                else if (!quoted && line[index] is '#' or ';') return line[..index];
+            }
+
+            return line;
         }
     }
 

@@ -111,6 +111,60 @@ public sealed class SandboxPolicyBuilderTests
     }
 
     [TestMethod]
+    public void TheConfigurationOfAWorktreeGitReads_IsMadeEmptyWhenMissing_SoThatItIsReadOnlyRatherThanDenied()
+    {
+        // With extensions.worktreeConfig git reads config.worktree, and fails on one it is denied where a missing one is
+        // no settings; without it, git never reads the file, which stays denied while it does not exist.
+        using var temp = new TempTree();
+        var repository = temp.Folder("repo");
+        var common = Path.Combine(repository, ".git");
+        var gitDir = Path.Combine(common, "worktrees", "wt");
+        Directory.CreateDirectory(gitDir);
+        File.WriteAllText(Path.Combine(gitDir, "commondir"), "../..\n");
+        var worktree = temp.Folder("worktrees/wt");
+        File.WriteAllText(Path.Combine(worktree, ".git"), $"gitdir: {gitDir}\n");
+        var strict = SandboxProfiles.Resolve("strict", []);
+        var config = Path.Combine(common, "config");
+
+        File.WriteAllText(config, "[core]\n\tbare = false\n");
+        Assert.AreEqual(0, Build(temp, strict, worktree, repositories: [repository]).EmptyFiles.Count, "git does not read it");
+
+        File.WriteAllText(config, "[core]\n\tbare = false\n[Extensions]\n\tWorktreeConfig = true ; one per worktree\n");
+        var policy = Build(temp, strict, worktree, repositories: [repository]);
+        CollectionAssert.AreEquivalent(new[] { Path.Combine(common, "config.worktree"), Path.Combine(gitDir, "config.worktree") }, policy.EmptyFiles.ToList());
+        CollectionAssert.IsSubsetOf(policy.EmptyFiles.ToList(), policy.Protected.ToList(), "still protected: read-only once it exists");
+
+        File.WriteAllText(Path.Combine(gitDir, "config.worktree"), "[core]\n\tsparseCheckout = true\n");
+        CollectionAssert.AreEqual(new[] { Path.Combine(common, "config.worktree") }, Build(temp, strict, worktree, repositories: [repository]).EmptyFiles.ToList(),
+            "one that exists stays as it is");
+
+        var project = temp.Folder("project");
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
+        File.WriteAllText(Path.Combine(project, ".git", "config"), "[extensions]\n\tworktreeConfig\n");
+        CollectionAssert.AreEqual(new[] { Path.Combine(project, ".git", "config.worktree") }, Build(temp, strict, project).EmptyFiles.ToList());
+    }
+
+    [TestMethod]
+    [DataRow("[extensions]\n\tworktreeConfig = true", true)]
+    [DataRow("[EXTENSIONS]\r\n\tWORKTREECONFIG = Yes\r\n", true)]
+    [DataRow("[extensions]\n\tworktreeConfig", true)]
+    [DataRow("[extensions]\n\tworktreeConfig = on", true)]
+    [DataRow("[extensions]\n\tworktreeConfig = 1", true)]
+    [DataRow("[extensions]\n\tworktreeConfig = \"true\" # quoted", true)]
+    [DataRow("[extensions] worktreeConfig = true", true)]
+    [DataRow("[extensions]\n\tworktreeConfig = false", false)]
+    [DataRow("[extensions]\n\tworktreeConfig = 0", false)]
+    [DataRow("[extensions]\n\tworktreeConfig =", false)]
+    [DataRow("[extensions]\n\tworktreeConfig = true\n[extensions]\n\tworktreeConfig = false", false)]
+    [DataRow("[extensions]\n\t# worktreeConfig = true", false)]
+    [DataRow("[core]\n\tworktreeConfig = true", false)]
+    [DataRow("[extensions \"x\"]\n\tworktreeConfig = true", false)]
+    [DataRow("[extensions]\n\tobjectFormat = sha1\n[core]\n\tworktreeConfig = true", false)]
+    [DataRow("", false)]
+    public void WorktreeConfig_IsReadAsGitReadsIt(string config, bool expected)
+        => Assert.AreEqual(expected, SandboxPolicyBuilder.WorktreeConfigIsOn(config));
+
+    [TestMethod]
     public void Secrets_AreDeniedWhereAProfileGrantsAFolderThatHoldsThem()
     {
         using var temp = new TempTree();

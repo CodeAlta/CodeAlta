@@ -24,6 +24,29 @@ public sealed class MxcRequestTests
     }
 
     [TestMethod]
+    public void AnEmptyFileOfThePolicy_IsMadeBeforeTheStart_AndIsReadOnlyRatherThanDenied()
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        var git = temp.Folder("project/.git");
+        File.WriteAllText(Path.Combine(git, "config"), "[extensions]\n\tworktreeConfig = true\n");
+        var worktreeConfig = Path.Combine(git, "config.worktree");
+        var policy = Policy(temp, project, SandboxNetwork.Off);
+
+        MxcRequests.Prepare(policy);
+        var request = MxcRequests.Create(policy, "cmd /c echo", null);
+
+        Assert.AreEqual(0, new FileInfo(worktreeConfig).Length);
+        CollectionAssert.Contains(request.Filesystem!.ReadonlyPaths, worktreeConfig);
+        CollectionAssert.DoesNotContain(request.Filesystem.DeniedPaths, worktreeConfig);
+
+        // One the user writes meanwhile is kept as it is.
+        File.WriteAllText(worktreeConfig, "[core]\n\tsparseCheckout = true\n");
+        MxcRequests.Prepare(policy);
+        Assert.AreEqual("[core]\n\tsparseCheckout = true\n", File.ReadAllText(worktreeConfig));
+    }
+
+    [TestMethod]
     public void TheParentsOfAGrant_AreReadOnlyWithTheirOtherEntriesDenied_AndTheVolumeRootIsOnlyListed()
     {
         if (!OperatingSystem.IsWindows()) Assert.Inconclusive("The chain of parent folders is for Windows.");
