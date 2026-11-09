@@ -63,6 +63,47 @@ public sealed record FleetAutomationVersion(
     /// <returns><see cref="AutonomyVersion"/> with autonomy, <see cref="CurrentVersion"/> otherwise.</returns>
     public static int VersionFor(bool autonomy) => autonomy ? AutonomyVersion : CurrentVersion;
 
+    /// <summary>
+    /// The version of the format of a version given to the machines of a pool (<see cref="Tags"/>): a machine that does not
+    /// know pools reads versions 1 and 2 only, so it refuses the version rather than run alone, without the claim of its
+    /// server, what every machine of the pool holds. It knows autonomy too.
+    /// </summary>
+    public const int PoolVersion = 3;
+
+    /// <summary>Gets the version of the format of a version.</summary>
+    /// <param name="autonomy">Whether its definition decides what its runs do without a person.</param>
+    /// <param name="pooled">Whether it is given to the machines of a pool.</param>
+    /// <returns><see cref="PoolVersion"/> for a pool, else as <see cref="VersionFor(bool)"/>.</returns>
+    public static int VersionFor(bool autonomy, bool pooled) => pooled ? PoolVersion : VersionFor(autonomy);
+
+    /// <summary>The most tags a version of a pool names.</summary>
+    public const int MaxTags = 8;
+
+    /// <summary>
+    /// Gets the tags of the machines of the pool the version is given to (<c>runs_on = { tags = [...] }</c>), signed: the
+    /// machine runs it only while it has them all, and each run only once its server granted the claim of its due time or
+    /// event; null for a version given to one machine, which writes the format as before.
+    /// </summary>
+    [JsonPropertyName("tags")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Tags { get; init; }
+
+    /// <summary>Gets whether the version is given to the machines of a pool.</summary>
+    [JsonIgnore]
+    public bool IsPooled => Tags is not null;
+
+    /// <summary>Gets the tags of a pool a machine with the given tags lacks, compared without case; empty when it has them all.</summary>
+    /// <param name="machineTags">The tags of the machine.</param>
+    /// <returns>The tags it lacks.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="machineTags"/> is null.</exception>
+    public IReadOnlyList<string> MissingTags(IEnumerable<string> machineTags)
+    {
+        ArgumentNullException.ThrowIfNull(machineTags);
+        if (Tags is not { } tags) return [];
+        var held = machineTags.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return [.. tags.Where(tag => !held.Contains(tag))];
+    }
+
     /// <summary>The prefix of the scope of an automation of a team.</summary>
     public const string TeamScopePrefix = "team:";
 
@@ -180,7 +221,19 @@ public static class FleetAutomationVersionDocuments
     public static string? Check(FleetAutomationVersion version)
     {
         ArgumentNullException.ThrowIfNull(version);
-        if (version.Version is not (FleetAutomationVersion.CurrentVersion or FleetAutomationVersion.AutonomyVersion)) return $"version {version.Version.ToString(CultureInfo.InvariantCulture)} of the format is not known";
+        if (version.Version is not (FleetAutomationVersion.CurrentVersion or FleetAutomationVersion.AutonomyVersion or FleetAutomationVersion.PoolVersion))
+            return $"version {version.Version.ToString(CultureInfo.InvariantCulture)} of the format is not known";
+        if (version.Tags is { } tags)
+        {
+            if (version.Version != FleetAutomationVersion.PoolVersion) return $"a version given to a pool is of version {FleetAutomationVersion.PoolVersion} of the format";
+            if (version.OrganizationId is null) return "a version given to a pool goes through a server, which claims its runs";
+            if (tags.Count is 0 or > FleetAutomationVersion.MaxTags || tags.Any(static tag => !IsTag(tag)) || tags.Distinct(StringComparer.OrdinalIgnoreCase).Count() != tags.Count)
+                return $"a version given to a pool names 1 to {FleetAutomationVersion.MaxTags} tags, each letters, digits, -, _, . and :";
+        }
+        else if (version.Version == FleetAutomationVersion.PoolVersion && !version.Removed)
+        {
+            return "a version of the format of a pool names the tags of its machines";
+        }
         if (!IsName(version.AutomationId, MaxIdLength)) return "the id of the automation is 1 to 128 characters, without control characters";
         if (version.Number <= 0) return "the number of a version starts at 1";
         if (!IsName(version.MachineId, MaxIdLength)) return "a version names the machine that runs it";
@@ -411,6 +464,9 @@ public static class FleetAutomationVersionDocuments
     }
 
     private static bool IsName(string? text, int maxLength) => !string.IsNullOrEmpty(text) && text.Length <= maxLength && !text.Any(char.IsControl);
+
+    // A tag of a machine, as the machine keeps them (FleetMachineLabels).
+    private static bool IsTag(string? text) => text is { Length: > 0 and <= 64 } && text.All(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.' or ':');
 
     private static bool IsWord(string? text) => !string.IsNullOrEmpty(text) && text.Length <= MaxTriggerLength && text.All(static c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '-');
 }

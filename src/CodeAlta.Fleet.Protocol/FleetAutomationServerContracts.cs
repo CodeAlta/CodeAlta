@@ -85,7 +85,15 @@ public sealed record FleetAutomationClaimRequest(string AutomationId, long Numbe
 /// <summary>The answer to a claim.</summary>
 /// <param name="Granted">Whether the run may start.</param>
 /// <param name="Message">Why not; null when granted.</param>
-public sealed record FleetAutomationClaimResult(bool Granted, string? Message);
+public sealed record FleetAutomationClaimResult(bool Granted, string? Message)
+{
+    /// <summary>
+    /// Gets the machine whose run took the due time or the event, when another run took it: a machine of a pool then records
+    /// nothing of it. Null when granted, or refused for another reason; an older server never says it.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TakenBy { get; init; }
+}
 
 /// <summary>Runs a machine reports, and when the schedules of its automations are next due.</summary>
 /// <param name="Runs">The runs, the newest last; none when only the schedules changed.</param>

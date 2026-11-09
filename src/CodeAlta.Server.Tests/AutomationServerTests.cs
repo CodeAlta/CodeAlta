@@ -96,6 +96,47 @@ public sealed class AutomationServerTests
     }
 
     [TestMethod]
+    public async Task APool_EachMemberHoldsItsVersion_AndTwoMembersClaimingOneDueTimeGiveOneRun()
+    {
+        await using var fixture = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("laptop");
+        using var node = new TestDevice("node");
+        using var other = new TestDevice("other");
+        var (setup, _) = await fixture.SetUpWithNodeAsync(owner, node);
+        var organization = setup.Organization.Id;
+        var pending = await fixture.EnrollAsync(owner, other);
+        var entry = await fixture.NextEntryAsync(owner, FleetDeviceListOperations.Add, pending.Id, other.PublicKey, FleetDeviceKinds.Node, setup.Owner.Id, organization);
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{pending.Id}/approve", new DeviceListChangeRequest(entry))).Status);
+
+        // A version of the pool for each member, of the format of a pool, with the tags it signs: the server holds both.
+        FleetAutomationVersion Pooled(string machine, long number) => Version(organization, machine, number) with { Version = FleetAutomationVersion.PoolVersion, Tags = ["gpu"] };
+        foreach (var (machine, number) in new[] { (node.DeviceId, 1L), (other.DeviceId, 2L) })
+        {
+            var put = await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}", new PutAutomationRequest(Sign(owner, Pooled(machine, number))));
+            Assert.AreEqual(HttpStatusCode.OK, put.Status, put.Body.ToString());
+        }
+
+        Assert.AreEqual(2, (await ListAsync(fixture, owner)).Count(static item => item.Id == Id && !item.Removed), "one version per member");
+        // A version of a pool without its tags, or tags in the format of one machine, does not hold.
+        Assert.AreEqual("automation.invalid", (await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}",
+            new PutAutomationRequest(Sign(owner, Pooled(node.DeviceId, 3) with { Tags = null })))).Code);
+        Assert.AreEqual("automation.invalid", (await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}",
+            new PutAutomationRequest(Sign(owner, Version(organization, node.DeviceId, 3) with { Tags = ["gpu"] })))).Code);
+
+        var (first, _) = await ConnectNodeAsync(fixture, node, Channel.CreateUnbounded<FleetSignedAutomationVersion>());
+        await using var _1 = first;
+        var (second, _) = await ConnectNodeAsync(fixture, other, Channel.CreateUnbounded<FleetSignedAutomationVersion>());
+        await using var _2 = second;
+        // Both fire the same due time and claim it at once: one is granted, the other is told which machine took it.
+        var claims = await Task.WhenAll(ClaimAsync(first, "run-a", "hourly@2026-11-09T10:00:00Z"), ClaimAsync(second, "run-b", "hourly@2026-11-09T10:00:00Z", number: 2));
+        Assert.AreEqual(1, claims.Count(static claim => claim.Granted), "two members and one due time give one run");
+        var refused = claims.Single(static claim => !claim.Granted);
+        Assert.AreEqual(claims[0].Granted ? node.DeviceId : other.DeviceId, refused.TakenBy, "the member that did not get it learns who did");
+        // The next due time is free again for either.
+        Assert.IsTrue((await ClaimAsync(second, "run-c", "hourly@2026-11-09T11:00:00Z", number: 2)).Granted);
+    }
+
+    [TestMethod]
     public async Task ADueTimeRunsOnce_WhateverTheMachine_AndRunsAreReported()
     {
         await using var fixture = await ServerFixture.StartAsync();

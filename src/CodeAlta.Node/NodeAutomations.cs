@@ -100,6 +100,12 @@ internal sealed record NodeAutomationAssignment(string DeviceId, string DeviceNa
 
     /// <summary>Gets whether the automation was taken away: nothing runs, and the number stays so that an older version stays refused.</summary>
     public bool Removed { get; init; }
+
+    /// <summary>
+    /// Gets the tags of the pool the version was given to, as it signs them (<see cref="FleetAutomationVersion.Tags"/>): the
+    /// node runs it while it has them all, and each run once its server claimed it; null for a version of this machine alone.
+    /// </summary>
+    public IReadOnlyList<string>? Tags { get; init; }
 }
 
 /// <summary>What a node answers to a version of an automation a server delivers.</summary>
@@ -127,6 +133,12 @@ internal sealed record NodeAutomationOptions
 
     /// <summary>Gets what the triggers of other tools use (Jira, Slack, hooks); null for the clients and the secrets of the profile.</summary>
     public AutomationIntegrationOptions? Integrations { get; init; }
+
+    /// <summary>
+    /// Gets how long a machine of a pool that has no free seat waits before it claims a due time, so that a member with a free
+    /// seat takes it first. Default 30 seconds.
+    /// </summary>
+    public TimeSpan PoolWait { get; init; } = TimeSpan.FromSeconds(30);
 }
 
 /// <summary>
@@ -190,11 +202,13 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             // A command runs with the identity of the space of its project, as in CodeAlta Desktop.
             new ShellAutomationCommands(projectId => host.Identities.ResolveAsync(null, projectId).GetAwaiter().GetResult().Environment),
             entry => entry.Definition.Script is { } script ? host.CodeModeScripts.FindHash(script, entry.ProjectPath) : null,
-            new NodeAutomationClaims(new AutomationClaimStore(Path.Combine(_fleetRoot, ClaimsFileName), _options.Holder), this),
+            Claims = new NodeAutomationClaims(new AutomationClaimStore(Path.Combine(_fleetRoot, ClaimsFileName), _options.Holder), this),
             Path.Combine(_fleetRoot, AssignedFileName))
         {
             // Jira, Slack and the hooks of its servers, with the secrets of this machine: the node watches them while nobody is at the keyboard.
             Integrations = _options.Integrations ?? AutomationIntegrationOptions.ForHost(catalog.GlobalRoot),
+            // A machine of a pool that lacks one of its tags arms none of its triggers.
+            ArmedHere = entry => PoolProblem(entry.Id) is null,
         };
         // The triggers of CodeAlta, and those its plugins give, as they run now.
         Engine.AddProjectTrigger(host.ProjectCatalog);
@@ -858,7 +872,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             if (Engine.Snapshot.Find(definition.Id) is not { Source.IsAssigned: true } saved) throw Invalid("The automation was not read back on this machine.");
             var assignment = new NodeAutomationAssignment(deviceId, deviceName, saved.Definition.Fingerprint(), _options.TimeProvider.GetUtcNow())
             {
-                Number = version.Number, Signed = signed, Via = via,
+                Number = version.Number, Signed = signed, Via = via, Tags = version.Tags,
             };
             lock (_gate)
             {
@@ -986,7 +1000,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         => new(entry.Id, entry.Definition.Name, entry.Definition.Enabled, entry.Definition.Fingerprint())
         {
             AssignedBy = assignment?.DeviceId, AssignedByName = assignment?.DeviceName, AssignedAt = assignment?.AssignedAt,
-            Project = entry.ProjectPath, NextDue = Engine.NextDue(entry.Id), Running = Engine.IsRunning(entry.Id), Problem = entry.Problem,
+            Project = entry.ProjectPath, NextDue = Engine.NextDue(entry.Id), Running = Engine.IsRunning(entry.Id), Problem = entry.Problem ?? PoolProblem(entry.Id),
         };
 
     /// <summary>Tells the credential kind a provider runs with on this machine, as the check before a run does.</summary>

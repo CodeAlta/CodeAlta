@@ -132,7 +132,8 @@ follows carries the state.
   (run the try for real, run the automation unguarded). Such a feature comes with something the older machine refuses: a
   method of its own (`automations.try`, answered `method_not_found`), a feature the machine announces and the sender
   requires, or, for a signed document a server relays, a format version the older machine does not read (a try is a run
-  request of version 2, a version of an automation with autonomy is of version 2). Senders refuse a machine without it, and
+  request of version 2, a version of an automation with autonomy is of version 2, one given to the machines of a pool, which
+  signs their tags, of version 3). Senders refuse a machine without it, and
   say why, rather than send it something it would half understand.
 - `protocol {min, max}` in the handshake; a breaking change is a new major version, announced in the release notes.
 - **Signed documents** (device-list entries, the access document, settings and policies) keep their format version

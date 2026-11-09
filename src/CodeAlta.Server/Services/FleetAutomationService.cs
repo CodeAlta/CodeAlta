@@ -541,9 +541,10 @@ internal sealed class FleetAutomationService
             request.Number, request.Occurrence.StartsWith("event:", StringComparison.Ordinal) ? "event" : "schedule", AutomationRunRecord.Claimed, request.Occurrence, now, null, lease, null, null, now), cancellationToken).ConfigureAwait(false);
         if (outcome.Granted) return new FleetAutomationClaimResult(true, null);
         var holder = outcome.Holder!;
+        // The machines of a pool each claim every due time and event: the one that took it is named, so that the others record nothing.
         return new FleetAutomationClaimResult(false, holder.MachineId == device.Id
             ? "This due time was already taken by another run of this machine."
-            : $"This due time was already taken by a run of another machine ({holder.MachineId}).");
+            : $"This due time was already taken by a run of another machine ({holder.MachineId}).") { TakenBy = holder.MachineId };
     }
 
     /// <summary>Records the runs a machine reports, for automations the server holds for it.</summary>

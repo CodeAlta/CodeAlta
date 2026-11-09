@@ -42,31 +42,157 @@ internal sealed partial class NodeAutomations
     /// <returns>Why the run does not start; null when it starts (the server agreed, or did not answer).</returns>
     internal async ValueTask<string?> ConfirmWithServerAsync(string automationId, string occurrence, string runId, CancellationToken cancellationToken)
     {
-        if (AssignmentOf(automationId) is not { Via: { } link } assignment || ServerClaim is not { } claim) return null;
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(ClaimTimeout);
-        FleetAutomationClaimResult? result;
-        try
+        if (AssignmentOf(automationId) is not { } held) return null;
+        if (held.Tags is not null)
         {
-            result = await claim(link, new FleetAutomationClaimRequest(automationId, assignment.Number, occurrence, runId,
-                _options.TimeProvider.GetUtcNow() + AutomationClaimStore.LeaseDuration), timeout.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            result = null;
+            // A machine of a pool: its tags first, then, without a free seat, the others of the pool look first.
+            if (PoolProblem(held) is { } problem) return problem;
+            if (!HasFreeSeat())
+            {
+                try { await Task.Delay(_options.PoolWait, _options.TimeProvider, cancellationToken).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return "The machine stopped before its run was claimed."; }
+            }
         }
 
+        if (held is not { Via: { } link } assignment || ServerClaim is not { } claim)
+            return held.Tags is not null ? NoServerClaim : null;
+        var result = await ClaimAtServerAsync(link, automationId, assignment, occurrence, runId, cancellationToken).ConfigureAwait(false);
         if (result is null)
         {
+            // A machine of a pool runs nothing without the claim of its server: another machine may have it. The claim of this
+            // machine is given back, and the time recorded as skipped.
+            if (assignment.Tags is not null)
+            {
+                Log($"The server did not answer the claim of {occurrence} of the automation {automationId}: a machine of a pool does not run it without its claim.");
+                Claims?.GiveBack(runId);
+                return NoServerClaim;
+            }
+
             // The schedule fires while its server is away: the claim of this node holds, and the run is reported later.
             Log($"The server did not answer the claim of {occurrence} of the automation {automationId}: this machine runs it.");
             return null;
         }
 
-        if (!result.Granted) return result.Message ?? "This due time was already taken by another run.";
+        if (!result.Granted)
+            return assignment.Tags is not null && result.TakenBy is not null ? AutomationClaimAnswers.TakenInPool : result.Message ?? "This due time was already taken by another run.";
         lock (_gate) _serverClaims[runId] = (link, new FleetAutomationClaimRequest(automationId, assignment.Number, occurrence, runId, default));
         return null;
     }
+
+    // Why a pooled run does not start without its server.
+    private const string NoServerClaim = "The server of its pool did not answer its claim: a machine of a pool runs nothing that its server did not give it.";
+
+    // Claims a due time or an event at the server of a link; null when the server did not answer in time.
+    private async Task<FleetAutomationClaimResult?> ClaimAtServerAsync(string link, string automationId, NodeAutomationAssignment assignment, string occurrence, string runId,
+        CancellationToken cancellationToken)
+    {
+        if (ServerClaim is not { } claim) return null;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(ClaimTimeout);
+        try
+        {
+            return await claim(link, new FleetAutomationClaimRequest(automationId, assignment.Number, occurrence, runId,
+                _options.TimeProvider.GetUtcNow() + AutomationClaimStore.LeaseDuration), timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException && exception is not OperationCanceledException)
+        {
+            Log($"The claim of {occurrence} could not be sent to the server: {exception.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>Gets the claims of the node; null until its engine exists.</summary>
+    internal NodeAutomationClaims? Claims { get; private set; }
+
+    // The events of pooled automations a machine without a free seat let the others of its pool look at first, once each.
+    private readonly HashSet<(string Id, string Occurrence)> _deferredEvents = [];
+    private const int MaximumDeferredEvents = 1024;
+
+    /// <summary>
+    /// Claims an event of a pooled automation before its run, here and at its server: refused while this machine lacks a tag
+    /// of the pool, let for a look to the others of the pool when this machine has no free seat, given back when the server
+    /// does not answer (it is looked at again later), and seen without running when another machine took it.
+    /// </summary>
+    internal async ValueTask<AutomationPoolClaim> ClaimPoolEventAsync(AutomationClaimStore local, string automationId, string occurrence, string runId, DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        if (AssignmentOf(automationId) is not { Tags: not null } assignment)
+            return local.TryClaim(automationId, occurrence, runId, now) ? AutomationPoolClaim.Granted : AutomationPoolClaim.Taken;
+        if (PoolProblem(assignment) is not null || assignment.Via is not { } link) return AutomationPoolClaim.Later;
+        // The seats are read outside the gate of the automations: they have a lock of their own.
+        var free = HasFreeSeat();
+        lock (_gate)
+        {
+            // One look of the trigger for the others of the pool, then this machine claims it too.
+            if (!free && _deferredEvents.Add((automationId, occurrence)))
+            {
+                if (_deferredEvents.Count > MaximumDeferredEvents) _deferredEvents.Clear();
+                return AutomationPoolClaim.Later;
+            }
+
+            _deferredEvents.Remove((automationId, occurrence));
+        }
+
+        if (!local.TryClaim(automationId, occurrence, runId, now)) return AutomationPoolClaim.Taken;
+        var result = await ClaimAtServerAsync(link, automationId, assignment, occurrence, runId, cancellationToken).ConfigureAwait(false);
+        if (result is null)
+        {
+            Log($"The server did not answer the claim of an event of the automation {automationId}: it is looked at again later.");
+            local.GiveBack(runId);
+            return AutomationPoolClaim.Later;
+        }
+
+        if (!result.Granted) return AutomationPoolClaim.Taken;
+        lock (_gate) _serverClaims[runId] = (link, new FleetAutomationClaimRequest(automationId, assignment.Number, occurrence, runId, default));
+        return AutomationPoolClaim.Granted;
+    }
+
+    /// <summary>Gets whether an automation this node holds was given to a pool (<see cref="NodeAutomationAssignment.Tags"/>).</summary>
+    internal bool IsPooled(string automationId) => AssignmentOf(automationId) is { Tags: not null };
+
+    /// <summary>
+    /// Gets or sets what reads the tags of this machine (<c>fleet/labels.json</c>); null reads the file of the profile, at most
+    /// every few seconds.
+    /// </summary>
+    internal Func<IReadOnlyList<string>>? OwnTags { get; set; }
+
+    private IReadOnlyList<string> _tagsRead = [];
+    private long _tagsReadAt = long.MinValue;
+
+    private IReadOnlyList<string> TagsOfThisMachine()
+    {
+        if (OwnTags is { } read) return read();
+        var now = Environment.TickCount64;
+        lock (_gate)
+        {
+            if (now - _tagsReadAt < 5000 && _tagsReadAt != long.MinValue) return _tagsRead;
+        }
+
+        var tags = CodeAlta.Fleet.Server.FleetMachineLabels.Read(_fleetRoot);
+        lock (_gate) (_tagsRead, _tagsReadAt) = (tags, now);
+        return tags;
+    }
+
+    /// <summary>
+    /// Says why a pooled automation does not run here: this machine lacks one of the tags its version signs, also while the
+    /// computer that placed it is closed. Null for one it runs, or that is not pooled.
+    /// </summary>
+    internal string? PoolProblem(string automationId) => AssignmentOf(automationId) is { } assignment ? PoolProblem(assignment) : null;
+
+    private string? PoolProblem(NodeAutomationAssignment assignment)
+    {
+        if (assignment.Tags is not { } tags) return null;
+        var held = TagsOfThisMachine().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missing = tags.Where(tag => !held.Contains(tag)).ToArray();
+        return missing.Length == 0 ? null : $"This machine no longer has the tag{(missing.Length > 1 ? "s" : "")} {string.Join(", ", missing)} of its pool: it takes no more runs of it.";
+    }
+
+    // Whether this machine has a seat for one more run now: no limit, or fewer at work and waiting than its limit.
+    private bool HasFreeSeat() => Seats?.Snapshot() is not { Limit: { } limit } seats || seats.Working + seats.Queue.Count < limit;
 
     /// <summary>
     /// Renews with their servers the leases of the due times this node claimed there for the runs still at work, at most
@@ -417,4 +543,18 @@ internal sealed class NodeAutomationClaims(AutomationClaimStore local, NodeAutom
     /// <inheritdoc />
     public ValueTask<string?> ConfirmAsync(string automationId, string occurrence, string runId, CancellationToken cancellationToken)
         => automations.ConfirmWithServerAsync(automationId, occurrence, runId, cancellationToken);
+
+    /// <inheritdoc />
+    public bool IsPooled(string automationId) => automations.IsPooled(automationId);
+
+    /// <inheritdoc />
+    public ValueTask<AutomationPoolClaim> ClaimEventAsync(string automationId, string occurrence, string runId, DateTimeOffset now, CancellationToken cancellationToken)
+        => automations.ClaimPoolEventAsync(local, automationId, occurrence, runId, now, cancellationToken);
+
+    /// <inheritdoc />
+    public void GiveBack(string runId)
+    {
+        local.GiveBack(runId);
+        automations.ReleaseServerClaim(runId);
+    }
 }

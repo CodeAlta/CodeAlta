@@ -180,6 +180,109 @@ public sealed class NodeServerAutomationTests
     }
 
     [TestMethod]
+    public async Task APooledVersion_RunsWhileTheMachineHasItsTags_OnlyWithTheClaimOfItsServer_AndTwoMembersRunADueTimeOnce()
+    {
+        var token = TestContext.CancellationToken;
+        using var rootA = new NodeTestRoot();
+        using var rootB = new NodeTestRoot();
+        var clock = new NodeClock { Now = Noon };
+        var providerA = new ScriptedNodeProvider();
+        var providerB = new ScriptedNodeProvider();
+        NodeAutomationOptions Options() => new()
+        {
+            TimeProvider = clock, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false, CredentialKind = static _ => AutomationCredentialKind.Account, PoolWait = TimeSpan.Zero,
+        };
+        await using var nodeA = await NodeHost.StartAsync(rootA.Options() with { ConfigureModelProviders = providerA.Register, Automations = Options() }, token);
+        await using var nodeB = await NodeHost.StartAsync(rootB.Options() with { ConfigureModelProviders = providerB.Register, Automations = Options() }, token);
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(rootA.Root, "laptop"));
+        using var tablet = DeviceIdentity.LoadOrCreate(Path.Combine(rootA.Root, "tablet"));
+        using var selfA = DeviceIdentity.LoadOrCreate(Path.Combine(rootA.Root, "self"));
+        using var selfB = DeviceIdentity.LoadOrCreate(Path.Combine(rootB.Root, "self"));
+        var (listA, listB) = (DeviceList(laptop, tablet, selfA, removeTablet: false), DeviceList(laptop, tablet, selfB, removeTablet: false));
+        var (a, b) = (nodeA.Automations!, nodeB.Automations!);
+        (a.DeviceId, b.DeviceId) = (selfA.DeviceId, selfB.DeviceId);
+        a.ServerDevices = _ => listA;
+        b.ServerDevices = _ => listB;
+        IReadOnlyList<string> tagsA = ["gpu", "linux"];
+        IReadOnlyList<string> tagsB = [];
+        a.OwnTags = () => tagsA;
+        b.OwnTags = () => tagsB;
+
+        // The server: one claim per due time, whichever machine asks first; away while it is away.
+        var claims = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.Ordinal);
+        var asked = new System.Collections.Concurrent.ConcurrentQueue<(string Machine, string Occurrence)>();
+        var away = false;
+        Func<string, FleetAutomationClaimRequest, CancellationToken, Task<FleetAutomationClaimResult?>> Server(string machine) => (_, request, _) =>
+        {
+            asked.Enqueue((machine, request.Occurrence));
+            if (Volatile.Read(ref away)) return Task.FromResult<FleetAutomationClaimResult?>(null);
+            var holder = claims.GetOrAdd(request.Occurrence, machine);
+            return Task.FromResult<FleetAutomationClaimResult?>(holder == machine ? new(true, null) : new(false, "taken") { TakenBy = holder });
+        };
+        a.ServerClaim = Server(selfA.DeviceId);
+        b.ServerClaim = Server(selfB.DeviceId);
+
+        // Both are given the version of the pool, which signs its tags.
+        foreach (var (node, self, list) in new[] { (a, selfA, listA), (b, selfB, listB) })
+        {
+            var outcome = await node.AcceptFromServerAsync("link-1", list, "org", SignPooled(laptop, list, "org", self.DeviceId, 1, ["gpu", "linux"]),
+                version => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, out var content, out var reason)
+                    ? (content, null) : (null, reason), token);
+            Assert.IsTrue(outcome.Applied, outcome.Message);
+            CollectionAssert.AreEqual(new[] { "gpu", "linux" }, node.AssignmentOf(Id)!.Tags!.ToArray());
+        }
+
+        // The machine without the tags arms nothing and claims nothing; the other claims the due time and runs it.
+        Assert.IsNull(a.PoolProblem(Id));
+        StringAssert.Contains(b.PoolProblem(Id), "gpu, linux");
+        var first = AutomationService.Occurrence(a.Engine.Snapshot.Find(Id)!.Definition.Triggers[0], Noon.AddMinutes(30));
+        clock.Now = Noon.AddMinutes(30).AddSeconds(5);
+        a.Engine.Tick(clock.Now);
+        b.Engine.Tick(clock.Now);
+        await WaitForAsync(() => Task.FromResult(a.Engine.Runs(Id, 10).FirstOrDefault(static run => run.Status == AutomationRun.Completed)), token);
+        Assert.IsFalse(asked.Any(item => item.Machine == selfB.DeviceId), "a machine without the tags of the pool does not claim");
+        Assert.AreEqual(0, b.Engine.Runs(Id, 10).Count);
+        Assert.AreEqual(selfA.DeviceId, claims[first]);
+
+        // It gains them: both claim the next due time, one runs it, the other records nothing of it.
+        tagsB = ["GPU", "linux", "prod"];
+        Assert.IsNull(b.PoolProblem(Id), "tags compare without case, and more tags are no matter");
+        var second = AutomationService.Occurrence(a.Engine.Snapshot.Find(Id)!.Definition.Triggers[0], Noon.AddHours(1).AddMinutes(30));
+        clock.Now = Noon.AddHours(1).AddMinutes(30).AddSeconds(5);
+        a.Engine.Tick(clock.Now);
+        b.Engine.Tick(clock.Now);
+        await WaitForAsync(() => Task.FromResult(asked.Count(item => item.Occurrence == second) >= 2 ? "both claimed" : null), token);
+        var winner = claims[second] == selfA.DeviceId ? a : b;
+        var loser = winner == a ? b : a;
+        await WaitForAsync(() => Task.FromResult(winner.Engine.Runs(Id, 10).FirstOrDefault(static run => run is { Status: AutomationRun.Completed, StartedAt.Hour: 13 })), token);
+        await Task.Delay(200, token);
+        Assert.AreEqual(1, a.Engine.Runs(Id, 10).Concat(b.Engine.Runs(Id, 10)).Count(static run => run.StartedAt.Hour == 13), "two members, one due time: one run");
+        Assert.AreEqual(0, loser.Engine.Runs(Id, 10).Count(static run => run.StartedAt.Hour == 13), "the machine that did not get it records nothing");
+
+        // The server is away: no member runs the due time, and each records why it skipped it.
+        Volatile.Write(ref away, true);
+        clock.Now = Noon.AddHours(2).AddMinutes(30).AddSeconds(5);
+        a.Engine.Tick(clock.Now);
+        b.Engine.Tick(clock.Now);
+        foreach (var node in new[] { a, b })
+        {
+            var skipped = await WaitForAsync(() => Task.FromResult(node.Engine.Runs(Id, 10).FirstOrDefault(static run => run.StartedAt.Hour == 14 && !run.InProgress)), token);
+            Assert.AreEqual(AutomationRun.Skipped, skipped.Status);
+            StringAssert.Contains(skipped.Message, "did not answer");
+        }
+
+        Assert.AreEqual(2, a.Engine.Runs(Id, 10).Concat(b.Engine.Runs(Id, 10)).Count(static run => run.Status == AutomationRun.Completed), "two due times ran, once each");
+    }
+
+    // A version given to the machines of a pool: of the format of a pool, with the tags it signs.
+    private static FleetSignedAutomationVersion SignPooled(DeviceIdentity signer, FleetDeviceListState list, string organization, string machine, long number, IReadOnlyList<string> tags)
+    {
+        var sealedText = FleetAutomationSigning.Seal(new FleetAutomationContent(Definition, null), Id, number, machine, list, signer);
+        return FleetAutomationSigning.Sign(signer, new FleetAutomationVersion(FleetAutomationVersion.PoolVersion, organization, Id, number, machine, false, true, ["hourly"],
+            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Tags = tags });
+    }
+
+    [TestMethod]
     public async Task APersonalMachineGivenToAnotherPerson_TakesNoRunRequestFromItsFormerOwner()
     {
         var token = TestContext.CancellationToken;

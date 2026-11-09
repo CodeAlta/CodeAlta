@@ -104,7 +104,29 @@ public sealed class FleetAutomationSigningTests
         var guarded = FleetAutomationSigning.Sign(devices.Laptop, Version(devices.Node.DeviceId, 5) with { Version = FleetAutomationVersion.VersionFor(autonomy: true) });
         Assert.IsTrue(FleetAutomationVersionDocuments.TryVerify(guarded, list, "org", devices.Node.DeviceId, out var version, out reason), reason);
         Assert.AreEqual(2, version.Version);
-        Assert.ThrowsExactly<ArgumentException>(() => FleetAutomationSigning.Sign(devices.Laptop, Version(devices.Node.DeviceId, 6) with { Version = 3 }));
+        Assert.ThrowsExactly<ArgumentException>(() => FleetAutomationSigning.Sign(devices.Laptop, Version(devices.Node.DeviceId, 6) with { Version = 4 }));
+
+        // A version of a pool is of a format of its own, which a machine that reads versions 1 and 2 only refuses rather than run
+        // alone what every machine of the pool holds; it names the tags it signs, and nothing else names them.
+        Assert.AreEqual(3, FleetAutomationVersion.VersionFor(autonomy: true, pooled: true));
+        Assert.AreEqual(2, FleetAutomationVersion.VersionFor(autonomy: true, pooled: false));
+        var pooled = FleetAutomationSigning.Sign(devices.Laptop, Version(devices.Node.DeviceId, 7) with { Version = FleetAutomationVersion.PoolVersion, Tags = ["gpu", "os:linux"] });
+        StringAssert.Contains(pooled.Payload, "\"tags\":[\"gpu\",\"os:linux\"]");
+        Assert.IsTrue(FleetAutomationVersionDocuments.TryVerify(pooled, list, "org", devices.Node.DeviceId, out version, out reason), reason);
+        Assert.IsTrue(version.IsPooled);
+        CollectionAssert.AreEqual(new[] { "os:linux" }, version.MissingTags(["GPU"]).ToArray(), "tags compare without case");
+        Assert.AreEqual(0, version.MissingTags(["gpu", "os:linux", "prod"]).Count);
+        Assert.IsFalse(Version(devices.Node.DeviceId, 8).IsPooled);
+        Assert.IsFalse(FleetAutomationVersionDocuments.Serialize(Version(devices.Node.DeviceId, 8)).Contains("tags", StringComparison.Ordinal), "a version of one machine writes the format as before");
+        foreach (var bad in new[]
+        {
+            Version(devices.Node.DeviceId, 9) with { Version = FleetAutomationVersion.PoolVersion },
+            Version(devices.Node.DeviceId, 9) with { Tags = ["gpu"] },
+            Version(devices.Node.DeviceId, 9) with { Version = FleetAutomationVersion.PoolVersion, Tags = [] },
+            Version(devices.Node.DeviceId, 9) with { Version = FleetAutomationVersion.PoolVersion, Tags = ["two words"] },
+            Version(devices.Node.DeviceId, 9) with { Version = FleetAutomationVersion.PoolVersion, Tags = ["gpu"], OrganizationId = null },
+        })
+            Assert.IsNotNull(FleetAutomationVersionDocuments.Check(bad), FleetAutomationVersionDocuments.Serialize(bad));
     }
 
     [TestMethod]
@@ -134,7 +156,7 @@ public sealed class FleetAutomationSigningTests
         StringAssert.Contains(FleetAutomationVersionDocuments.Check(Version("node", 1) with { Removed = true }), "holds nothing else");
         Assert.IsNull(FleetAutomationVersionDocuments.Check(Version("node", 1) with { Removed = true, Definition = null }));
         StringAssert.Contains(FleetAutomationVersionDocuments.Check(Version("node", 1) with { Triggers = ["Hourly Now"] }), "short word");
-        StringAssert.Contains(FleetAutomationVersionDocuments.Check(Version("node", 1) with { Version = 3 }), "not known");
+        StringAssert.Contains(FleetAutomationVersionDocuments.Check(Version("node", 1) with { Version = 4 }), "not known");
         StringAssert.Contains(FleetAutomationVersionDocuments.Check(Version("node", 1) with { Definition = null, Sealed = "x", Repository = "github.com/a/b" }), "in clear beside");
     }
 
