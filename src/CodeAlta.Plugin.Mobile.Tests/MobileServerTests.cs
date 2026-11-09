@@ -11,6 +11,24 @@ namespace CodeAlta.Plugin.Mobile.Tests;
 public sealed class MobileServerTests
 {
     [TestMethod]
+    public async Task ArchiveChildren_RequiresPairing_AndPassesTheChoiceToAlta()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.Client.GetAsync("/api/sessions/a/archive-children")).StatusCode);
+        await fixture.SignInAsync();
+        fixture.Alta.Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session children a", FakeAlta.Session("b", "p1", "personal", "2026-10-24T10:00:00Z"), new JsonObject { ["type"] = "alta.session.children.summary" })
+            .Answer("session archive a", new JsonObject { ["type"] = "alta.session.archived", ["changed"] = new JsonArray("a", "b") });
+        var children = JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/a/archive-children"))!;
+        Assert.IsTrue((bool)children["hasChildren"]!);
+        using var response = await fixture.PostAsync("/api/sessions/a/archive?withChildren=true", new JsonObject());
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var result = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        Assert.AreEqual("b", (string?)result["changed"]![1]);
+        CollectionAssert.Contains(fixture.Alta.CallsOf("session archive a")[0], "--with-children");
+    }
+
+    [TestMethod]
     public async Task ThePage_IsServedFromTheFilesOfTheApplication_WithItsPolicy()
     {
         await using var fixture = await Fixture.StartAsync();

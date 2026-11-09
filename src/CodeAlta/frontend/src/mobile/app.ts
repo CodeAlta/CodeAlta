@@ -1149,7 +1149,6 @@ export function startMobile(window: Window & typeof globalThis) {
   $("menu-archive").addEventListener("click", () => barMenu.close(() => {
     const id = detail.id;
     if (!id) return;
-    window.location.hash = "#/";
     archive(id);
   }));
   $("menu-new").addEventListener("click", () => barMenu.close(startNew));
@@ -1438,8 +1437,9 @@ export function startMobile(window: Window & typeof globalThis) {
   $("new").addEventListener("click", startNew);
 
   // ---- Swipe a card for its action, Gmail-style: the drag is the action ----
-  // Right: Archive, on green. Past 40% of the width a release archives and the card leaves; short of it the card springs
-  // back. A drag that starts vertical is the page's scroll (touch-action: pan-y). A toast offers Restore for 5 s.
+  // Right: Archive, on green. Past 40% of the width a release archives and the card leaves, or comes back while the phone
+  // asks about the session's child sessions; short of it the card springs back. A drag that starts vertical is the page's
+  // scroll (touch-action: pan-y). A toast offers Restore for 5 s.
   let swipe: { row: HTMLElement; card: HTMLElement; x: number; y: number; dx: number; dragging: boolean; pointer: number } | null = null;
   function place(item: HTMLElement, x: number, how?: "spring" | "out") {
     const element = item.querySelector<HTMLElement>(".card")!;
@@ -1475,7 +1475,7 @@ export function startMobile(window: Window & typeof globalThis) {
     window.setTimeout(() => delete done.row.dataset.dragged, 0);
     if (event.type === "pointerup" && done.dx >= done.row.offsetWidth * 0.4) {
       place(done.row, done.row.offsetWidth + 24, "out");
-      archive(done.row.dataset.id!);
+      void archive(done.row.dataset.id!);
     } else place(done.row, 0, "spring");
   }
   list.addEventListener("pointerup", endSwipe);
@@ -1496,24 +1496,59 @@ export function startMobile(window: Window & typeof globalThis) {
     if (item) { item.classList.remove("collapsing"); item.style.height = ""; place(item, 0, "spring"); }
     renderList();
   }
-  function archive(id: string) {
+  let archiveQuestion: string | null = null;
+  const archiveSheet = createSheet(document, $("archive-sheet"), () => { archiveQuestion = null; });
+  let checkingArchive = false;
+  $("archive-cancel").addEventListener("click", () => { archiveQuestion = null; archiveSheet.close(); });
+  for (const [button, withChildren] of [["archive-no", false], ["archive-yes", true]] as const) {
+    $(button).addEventListener("click", () => {
+      const id = archiveQuestion;
+      archiveQuestion = null;
+      archiveSheet.close();
+      if (id) doArchive(id, withChildren);
+    });
+  }
+  // A swiped card left its row: it comes back when the session is not archived at once.
+  function springBack(id: string) { const item = rowOf(id); if (item) place(item, 0, "spring"); }
+  async function archive(id: string) {
+    if (checkingArchive || archiveSheet.shown) { springBack(id); return; }
+    checkingArchive = true;
+    try {
+      const result = await api.archiveChildren(id);
+      if (result.error || typeof result.hasChildren !== "boolean") throw new Error(result.error || "The child sessions could not be checked.");
+      if (result.hasChildren) { springBack(id); archiveQuestion = id; archiveSheet.open($("archive-yes")); }
+      else doArchive(id, false);
+    } catch (error) {
+      springBack(id);
+      if (!(error instanceof SignedOutError)) showToast(`Not archived: ${failureText(error, host)}`);
+    } finally { checkingArchive = false; }
+  }
+  function doArchive(id: string, withChildren: boolean) {
+    if (detail.id === id) window.location.hash = "#/";
     const title = sessions.view(id)?.title || "Session";
     sessions.hide(id);
     const item = rowOf(id);
-    if (item) window.setTimeout(() => collapse(item), 180); else renderList();
-    const archiving = api.archive(id).then(() => sessions.settled(id));
+    if (item) window.setTimeout(() => { if (sessions.hidden(id) && item.isConnected) collapse(item); }, 180); else renderList();
+    const archiving = api.archive(id, withChildren).then(result => { sessions.settled(id); scheduleListRead(0); return result; });
     archiving.catch(error => {
       if (toast?.id === id) hideToast();
       bringBack(id);
+      scheduleListRead(0);
       if (!(error instanceof SignedOutError)) showToast(`Not archived: ${failureText(error, host)}`);
     });
     const restore = async () => {
       if (toast?.id !== id) return;
       hideToast();
-      try { await archiving; await api.restore(id); }
-      catch (error) { if (!(error instanceof SignedOutError)) showToast(`Not restored: ${failureText(error, host)}`); return; }
+      try {
+        const result = await archiving;
+        if (withChildren && !Array.isArray(result.changed)) throw new Error("The archived sessions could not be confirmed; check them before restoring.");
+        for (const changed of result.changed ?? [id]) await api.restore(changed);
+      }
+      catch (error) { scheduleListRead(0); if (!(error instanceof SignedOutError)) showToast(`Not restored: ${failureText(error, host)}`); return; }
+      // A read of the list started before the restore would take the session out again: the row comes back with a read
+      // made after it.
+      await readList();
       bringBack(id);
-      scheduleListRead(0);
     };
     showToast(`Archived “${title.length > 40 ? `${title.slice(0, 39)}…` : title}”`, { label: "Restore", run: () => void restore() });
     toast!.id = id;

@@ -6,6 +6,36 @@ namespace CodeAlta.Plugin.Mobile.Tests;
 public sealed class MobileSessionsTests
 {
     [TestMethod]
+    public async Task ArchiveChildren_ChecksAllDescendantsAndRespectsAssignedSpaces()
+    {
+        var alta = new FakeAlta()
+            .Answer("session status parent", FakeAlta.Status("parent", "p1", "personal"))
+            .Answer("session children parent", FakeAlta.Session("child", "p1", "personal", "2026-10-24T10:00:00Z"),
+                FakeAlta.Session("old", "p1", "personal", "2026-10-24T10:00:00Z", state: "archived"), new JsonObject { ["type"] = "alta.session.children.summary" })
+            .Answer("session archive parent", new JsonObject { ["type"] = "alta.session.archived", ["changed"] = new JsonArray("parent", "child") });
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces("personal"), new MobileLive()));
+        Assert.IsTrue((bool)(await api.ArchiveChildrenAsync("parent", default))!["hasChildren"]!);
+        var archived = await api.ArchiveAsync("parent", true, default);
+        CollectionAssert.AreEqual(new[] { "parent", "child" }, archived!["changed"]!.AsArray().Select(x => (string)x!).ToArray());
+        CollectionAssert.Contains(alta.CallsOf("session archive")[0], "--with-children");
+        alta.Answer("session children parent", FakeAlta.Session("other", "p1", "work", "2026-10-24T10:00:00Z"), new JsonObject { ["type"] = "alta.session.children.summary" });
+        var refused = await api.ArchiveAsync("parent", true, default);
+        Assert.IsFalse((bool)refused!["ok"]!);
+        Assert.AreEqual(1, alta.CallsOf("session archive").Length);
+        alta.Answer("session children parent", FakeAlta.Session("child", "p1", "personal", "2026-10-24T10:00:00Z"),
+            FakeAlta.Session("gone", "p1", "work", "2026-10-24T10:00:00Z", state: "archived"), new JsonObject { ["type"] = "alta.session.children.summary" });
+        Assert.IsTrue((bool)(await api.ArchiveAsync("parent", true, default))!["ok"]!, "a child of another space archived before does not stop it");
+        Assert.AreEqual(2, alta.CallsOf("session archive").Length);
+        alta.Cut = args => args[1] == "children";
+        Assert.IsNotNull((await api.ArchiveChildrenAsync("parent", default))!["error"]);
+        alta.Cut = null;
+        alta.Answer("session children parent", FakeAlta.Session("old", "p1", "personal", "2026-10-24T10:00:00Z", state: "archived"), new JsonObject { ["type"] = "alta.session.children.summary" });
+        Assert.IsFalse((bool)(await api.ArchiveChildrenAsync("parent", default))!["hasChildren"]!);
+        alta.Answer("session children parent");
+        Assert.IsNotNull((await api.ArchiveChildrenAsync("parent", default))!["error"]);
+    }
+
+    [TestMethod]
     public async Task List_GivesThePageOfTheSpacesOfThePlugin_LatestFirst()
     {
         var alta = new FakeAlta()

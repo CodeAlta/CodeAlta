@@ -488,6 +488,7 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .confirm-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; margin-top: .5rem; }
 .sheet-panel .confirm-actions button { flex: 1 1 auto; width: auto; align-items: center; justify-content: center; min-height: 44px; font-weight: 600; text-align: center; }
 .sheet-panel .confirm-actions .ghost { border: 1px solid var(--line); background: var(--panel-2); }
+.sheet-panel .confirm-actions .primary { background: var(--accent); color: #fff; }
 .sheet-panel .confirm-actions .danger { background: var(--red); color: #fff; }
 
 /* The selection of a prompt, on the line of its buttons: a chip with the model and its effort (it opens the model sheet), and "⋯"
