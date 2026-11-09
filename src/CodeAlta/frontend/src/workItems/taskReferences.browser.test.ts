@@ -11,11 +11,16 @@ test("a code span that names a task of the project is a chip that describes the 
     await page.until(`document.querySelectorAll('.markdown-content code[data-task-ref]').length === 2`, "the chips of the two tasks");
     // A task that is done is struck through; an unknown id, a code block and a code span in a link stay what they are.
     assert.deepEqual(await page.evaluate(`Array.from(document.querySelectorAll('.markdown-content code'), code => [code.textContent, code.getAttribute('data-task-ref'),
-      code.hasAttribute('data-task-closed'), code.getAttribute('role'), code.getAttribute('aria-label')])`), [
-      ["p53b", "2026-11-08-fix-the-parser-p53b", true, "link", "Task p53b: Fix the parser"],
-      ["q9rh", "2026-11-08-report-the-provider-error-q9rh", false, "link", "Task q9rh: Report the provider error"],
-      ["zzzz", null, false, null, null], ["p53b\n", null, false, null, null], ["q9rh", null, false, null, null]]);
+      code.getAttribute('data-task-tone'), code.hasAttribute('data-task-closed'), code.getAttribute('role'), code.getAttribute('aria-label')])`), [
+      ["p53b", "2026-11-08-fix-the-parser-p53b", "danger", true, "link", "Task p53b: Fix the parser"],
+      ["q9rh", "2026-11-08-report-the-provider-error-q9rh", "danger", false, "link", "Task q9rh: Report the provider error"],
+      ["zzzz", null, null, false, null, null], ["p53b\n", null, null, false, null, null], ["q9rh", null, null, false, null, null]]);
     assert.equal(await page.evaluate(`getComputedStyle(${chip("p53b")}).textDecorationLine`), "line-through");
+    // The id of an open task has the color of the text; its icon has the color of its kind, red for a problem.
+    assert.deepEqual(await page.evaluate(`(() => { const probe = (color) => document.body.appendChild(Object.assign(document.createElement('span'), { style: 'color: ' + color }));
+      const text = probe('var(--text)'), red = probe('var(--red)');
+      const result = [getComputedStyle(${chip("q9rh")}).color === getComputedStyle(text).color, getComputedStyle(${chip("q9rh")}, '::before').backgroundColor === getComputedStyle(red).color];
+      text.remove(); red.remove(); return result; })()`), [true, true]);
 
     // The pointer on a chip shows its card, which the chip names for a screen reader.
     const box = await page.evaluate<{ x: number; y: number; width: number; height: number }>(`${chip("q9rh")}.getBoundingClientRect().toJSON()`);

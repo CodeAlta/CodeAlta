@@ -2,7 +2,7 @@
 // say what the task is and open it in the Work items page.
 import { createContext } from "react";
 import type { MarkdownLinkScope } from "../markdownLinks";
-import type { WorkItem } from "./workItems";
+import { taskCategoryTone, type WorkItem } from "./workItems";
 
 /** What finds the tasks the texts of the window name, and shows one. */
 export type TaskReferences = Readonly<{
@@ -58,10 +58,11 @@ export function dressTaskReferences(root: HTMLElement, find: ((text: string) => 
     if (!find && !marked) continue;
     const item = find && !code.closest("pre, a, button") ? find(code.textContent ?? "") : null;
     if (!item) {
-      if (marked) for (const name of [taskReferenceAttribute, "data-task-closed", "tabindex", "role", "aria-label"]) code.removeAttribute(name);
+      if (marked) for (const name of [taskReferenceAttribute, "data-task-tone", "data-task-closed", "tabindex", "role", "aria-label"]) code.removeAttribute(name);
       continue;
     }
     code.setAttribute(taskReferenceAttribute, item.id);
+    code.setAttribute("data-task-tone", taskCategoryTone(item.category));
     code.toggleAttribute("data-task-closed", closedTask(item));
     code.setAttribute("tabindex", "0");
     code.setAttribute("role", "link");
