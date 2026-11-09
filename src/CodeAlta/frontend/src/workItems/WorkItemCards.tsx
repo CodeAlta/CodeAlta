@@ -198,8 +198,8 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
     ? <Button intent="primary" size="small" disabled={working} icon={<AppIcon name="check" size={14} />} title={t("Put the card away. The task stays in Work items.")}
       onClick={acknowledge}>{t("OK")}</Button>
     : <>
-    <Button variant="minimal" size="small" disabled={working} icon={<AppIcon name="later" size={14} />} title={t(plan ? "Keep the plan for later. It stays in Work items." : "Keep the task for later. It stays in Work items.")}
-      onClick={later}>{t("Later")}</Button>
+    <Button variant="minimal" size="small" disabled={working} icon={<AppIcon name="later" size={14} />} title={t(plan ? "Keep the plan for later. It stays in Work items." : "Keep the task in the Backlog of Work items.")}
+      onClick={later}>{t(plan ? "Later" : "Backlog")}</Button>
     {!plan && <Button variant="minimal" size="small" disabled={working} icon={<AppIcon name="close" size={14} />} title={t("This task is not worth doing.")} onClick={dismiss}>{t("Dismiss")}</Button>}
   </>;
 

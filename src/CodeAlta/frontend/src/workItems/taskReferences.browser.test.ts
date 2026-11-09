@@ -26,7 +26,7 @@ test("a code span that names a task of the project is a chip that describes the 
     const box = await page.evaluate<{ x: number; y: number; width: number; height: number }>(`${chip("q9rh")}.getBoundingClientRect().toJSON()`);
     await page.command("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.x + box.width / 2, y: box.y + box.height / 2 });
     await page.until(`${card}?.textContent.includes('Report the provider error')`, "the card of the task");
-    assert.equal(await page.evaluate(`${card}.textContent.includes('The model list shows nothing when a provider fails.') && ${card}.textContent.includes('To do')`), true);
+    assert.equal(await page.evaluate(`${card}.textContent.includes('The model list shows nothing when a provider fails.') && ${card}.textContent.includes('Inbox')`), true);
     assert.equal(await page.evaluate(`${chip("q9rh")}.getAttribute('aria-describedby') === ${card}.id`), true);
     await page.command("Input.dispatchMouseEvent", { type: "mouseMoved", x: 4, y: 600 });
     await page.until(`!${card}`, "the card put away when the pointer leaves");

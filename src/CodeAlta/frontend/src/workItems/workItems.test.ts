@@ -23,7 +23,7 @@ test("an item is where its file and its session put it", () => {
   assert.equal(workStage(row("p", "plan", "done", { runner: "s2" }), sessions), "closed");
   assert.equal(workStatusLabel({ kind: "plan", status: "approved", stage: "todo" }), "Ready");
   assert.equal(workStatusLabel({ kind: "task", status: "pending", stage: "running" }), "In progress");
-  assert.equal(workStatusLabel({ kind: "task", status: "pending", stage: "todo" }), "To do");
+  assert.equal(workStatusLabel({ kind: "task", status: "pending", stage: "todo" }), "Inbox");
 });
 
 test("a project counts what waits and what a session works on now", () => {

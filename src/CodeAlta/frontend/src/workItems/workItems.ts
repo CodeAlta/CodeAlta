@@ -92,7 +92,7 @@ export function workStatusLabel(item: Pick<WorkItem, "kind" | "status" | "stage"
   // A review says who it waits for.
   if (item.kind === "review") return item.stage === "todo" ? "Waiting for you" : item.stage === "running" ? "Waiting for the agent" : "Done";
   if (item.stage === "running") return "In progress";
-  if (item.kind === "task") return item.status === "later" ? "Later" : item.status === "done" ? "Done" : item.status === "dismissed" ? "Dismissed" : "To do";
+  if (item.kind === "task") return item.status === "later" ? "Backlog" : item.status === "done" ? "Done" : item.status === "dismissed" ? "Dismissed" : "Inbox";
   return item.status === "approved" ? "Ready" : item.status === "blocked" ? "Blocked" : item.status === "done" ? "Done" : "Draft";
 }
 
@@ -144,7 +144,7 @@ export const startIcon = (start: WorkStart): IconName => start === "worktree" ? 
 export type WorkFilter = WorkStage;
 export const workFilters: readonly WorkFilter[] = ["todo", "running", "later", "closed"];
 export function workFilterLabel(filter: WorkFilter): MessageKey {
-  return filter === "todo" ? "To do" : filter === "running" ? "In progress" : filter === "later" ? "Later" : "Closed";
+  return filter === "todo" ? "Inbox" : filter === "running" ? "In progress" : filter === "later" ? "Backlog" : "Closed";
 }
 
 /** The items the list shows: of one project or of all, of one kind or of both, at one stage, matching what is typed. */

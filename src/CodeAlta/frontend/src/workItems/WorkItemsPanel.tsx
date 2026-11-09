@@ -391,10 +391,10 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
       </div>}
       {startable && <WorkStartButtons preferred={preferredStart} here={false} disabled={busy} onStart={way => onStart(way, startRequest(settings, choices.shown))} />}
       <div className="work-detail-buttons">
-        {task && item.stage === "todo" && <Button size="small" disabled={busy} icon={<AppIcon name="later" size={14} />} onClick={() => onAct("later")}>{t("Later")}</Button>}
-        {task && (item.stage === "later" || item.stage === "closed") && <Button size="small" disabled={busy} icon={<AppIcon name="restore" size={14} />} onClick={() => onAct("reopen")}>{t("Back to To do")}</Button>}
+        {task && item.stage === "todo" && <Button size="small" disabled={busy} icon={<AppIcon name="later" size={14} />} onClick={() => onAct("later")}>{t("Backlog")}</Button>}
+        {task && (item.stage === "later" || item.stage === "closed") && <Button size="small" disabled={busy} icon={<AppIcon name="restore" size={14} />} onClick={() => onAct("reopen")}>{t("Back to Inbox")}</Button>}
         {item.stage === "running" && item.runner && <Button size="small" disabled={busy} icon={<AppIcon name="restore" size={14} />} title={t("No session does it any more.")}
-          onClick={() => onAct("release")}>{t("Back to To do")}</Button>}
+          onClick={() => onAct("release")}>{t("Back to Inbox")}</Button>}
         {task && item.stage !== "closed" && <Button size="small" disabled={busy} icon={<AppIcon name="check" size={14} />} onClick={() => onAct("complete")}>{t("Mark done")}</Button>}
         {!task && item.status === "draft" && <Button size="small" disabled={busy} icon={<AppIcon name="checked" size={14} />} onClick={() => onAct("status", "approved")}>{t("Mark ready")}</Button>}
         {!task && item.stage !== "closed" && <Button size="small" disabled={busy} icon={<AppIcon name="check" size={14} />} onClick={() => onAct("status", "done")}>{t("Mark done")}</Button>}

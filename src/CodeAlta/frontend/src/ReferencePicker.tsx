@@ -28,7 +28,7 @@ const control = isMac ? "⌘" : "Ctrl";
 
 // The state of a row, as the user reads it.
 function stateKey(item: ReferenceItem): MessageKey | null {
-  if (item.kind === "task") return item.state === "done" ? "Done" : item.state === "dismissed" ? "Dismissed" : item.state === "later" ? "Later" : "To do";
+  if (item.kind === "task") return item.state === "done" ? "Done" : item.state === "dismissed" ? "Dismissed" : item.state === "later" ? "Backlog" : "Inbox";
   if (item.kind === "plan") return item.state === "done" ? "Done" : item.state === "blocked" ? "Blocked" : item.state === "in-progress" ? "In progress"
     : item.state === "approved" ? "Ready" : "Draft";
   if (item.kind === "session") return item.state === "running" ? "Running" : "Idle";

@@ -29,7 +29,7 @@ You decide on each card:
 | **Start in a new worktree** | A new session does the task in its own [worktree](worktrees.md), on a new branch. |
 | **Do it in this session** | The session does it after its current work. |
 | **Start in a new session** | A new session does it in the folder of the project. |
-| **Later** | The task is kept, out of the way. |
+| **Backlog** | You keep the task, out of the way, in the **Backlog** of the Work items tab. |
 | **Dismiss** | The task is not worth doing. |
 
 - A new session started from a card uses the provider, model and reasoning effort of the session that shows the card.
@@ -55,7 +55,7 @@ Once you approve it, the session shows the plan as a card with the same choices 
 
 Open it with **Work items** in the title bar (in its **…** menu when the window is narrow), with `Ctrl+G Ctrl+I`, or with the mark of a project in the Explorer.
 
-- **To do**, **In progress**, **Later** and **Closed** separate what waits from what is done.
+- **Inbox** holds what waits for your decision: the tasks proposed to you, and the plans and reviews that wait for you. **Backlog** holds the tasks you keep for later. **In progress** and **Closed** hold what is being done and what is done.
 - **Runs with** is the [Agent chip](workspace/prompt.md#agent-and-model) of the new session. With **Use the defaults** on, it runs with the provider, model and reasoning effort of the session that proposed the item, else the [default provider](model-providers/readme.md) and its model. Turn it off to choose them, the agent prompt, the permission mode, review before commit and the sandbox, before you start. **More options** turns [sub-sessions](sessions/delegation.md#sessions-without-sub-sessions) off for the new session.
 - Filter by tasks, plans or [reviews](reviews.md#all-your-reviews), by project, or by text. **All projects** are those of the [space](spaces.md) the window shows.
 - Items are listed under the day they were created (**Today**, **Yesterday**, **This week**, **Last week**, then each month), each with its date. **Newest first** turns to **Oldest first**, and with **All projects**, **Group by project** lists them under their projects instead. The tab remembers your choice.

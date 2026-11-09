@@ -41,7 +41,7 @@ test("a session shows one proposal at a time, with how many there are and every 
   assert.ok(html.includes("Later") && !html.includes(">Dismiss<"));
 
   const task = render(createElement(WorkItemCards, { hub: hub(state()), dockPreference: createDockPreference(), items: cards.filter(item => item.kind === "task"), preferredStart: "here", busy: new Set<string>(), onStart: never, onOpenList: never }));
-  assert.ok(task.includes("Proposed task") && task.includes("Problem") && task.includes("Dismiss") && !task.includes("1 of 1"));
+  assert.ok(task.includes("Proposed task") && task.includes("Problem") && task.includes(">Backlog<") && task.includes("Dismiss") && !task.includes("1 of 1"));
   assert.match(task, /class="bp6-button bp6-intent-primary work-start-primary"[^>]*>.*?Do it in this session/s, "the way of starting the user prefers is the first button");
 
   assert.equal(render(createElement(WorkItemCards, { hub: hub(state()), dockPreference: createDockPreference(), items: [], preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never })), "");
@@ -61,7 +61,7 @@ test("a task the session started itself says so, with nothing left to decide but
   const html = render(createElement(WorkItemCards, { hub: hub(state()), dockPreference: createDockPreference(), items: started, preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never }));
   assert.ok(html.includes("Task in progress") && html.includes("This session is working on this task."), html);
   assert.match(html, /title="Put the card away\. The task stays in Work items\."[^>]*>.*?OK/s);
-  for (const gone of ["Proposed task", "Start in a new worktree", "Do it in this session", ">Later<", ">Dismiss<"]) assert.equal(html.includes(gone), false, gone);
+  for (const gone of ["Proposed task", "Start in a new worktree", "Do it in this session", ">Later<", ">Backlog<", ">Dismiss<"]) assert.equal(html.includes(gone), false, gone);
 });
 
 test("a project says how many work items wait and whether one is being worked on", () => {
@@ -80,8 +80,8 @@ test("the tab lists what waits, with the item that is read and what can be done 
     visible: false, onActivate: never, onStart: never, onOpenSession: never, onOpenFile: never, onOpenSettings: never }));
   const html = view(state());
   // The stages are tabs with their counts: what is done or set aside does not hide what waits.
-  for (const tab of ["To do", "In progress", "Later", "Closed"]) assert.ok(html.includes(`${tab}<span class="work-count"`), tab);
-  assert.match(html, /To do<span class="work-count">2<\/span>/);
+  for (const tab of ["Inbox", "In progress", "Backlog", "Closed"]) assert.ok(html.includes(`${tab}<span class="work-count"`), tab);
+  assert.match(html, /Inbox<span class="work-count">2<\/span>/);
   assert.match(html, /In progress<span class="work-count">1<\/span>/);
   assert.match(html, /Closed<span class="work-count" data-zero="true">0<\/span>/);
   assert.equal([...html.matchAll(/class="work-row"/g)].length, 2);
