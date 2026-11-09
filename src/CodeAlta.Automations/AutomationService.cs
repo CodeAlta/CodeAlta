@@ -141,6 +141,12 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// </summary>
     internal IAutomationPlacement? Placement { get; set; }
 
+    /// <summary>
+    /// Gets or sets whether the triggers of an automation may start it on this host beyond what the service checks itself: a
+    /// machine of a pool that lost one of its tags arms none of its triggers. Null arms them all.
+    /// </summary>
+    internal Func<AutomationEntry, bool>? ArmedHere { get; set; }
+
     /// <summary>Gets the automations as they were last read.</summary>
     internal AutomationSnapshot Snapshot
     {
@@ -202,7 +208,8 @@ internal sealed partial class AutomationService : IAsyncDisposable
     // Whether the triggers of an automation start it here: it is enabled, can run as defined, is allowed, is not placed
     // on another machine, which fires its triggers in place of this one, and no machine it left may still run its copy.
     private bool Armed(AutomationEntry entry)
-        => entry is { Definition.Enabled: true, Definition.RunsOn: null, Problem: null } && IsAllowed(entry) && Placement?.WaitsHere(entry.Id) is null;
+        => entry is { Definition.Enabled: true, Definition.IsPlaced: false, Problem: null } && IsAllowed(entry) && Placement?.WaitsHere(entry.Id) is null
+            && ArmedHere?.Invoke(entry) != false;
 
     // What is allowed is what the automation does and the file it is in: the same table in another folder is another one.
     private string Allowance(AutomationEntry entry)
@@ -393,6 +400,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
             // A project's own file runs its automations in that project.
             Project = projectId is null ? definition.Project : null,
             RunsOn = projectId is null ? definition.RunsOn : null,
+            RunsOnTags = projectId is null ? definition.RunsOnTags : null,
         }, token => SourceAsync(projectId, token), cancellationToken);
     }
 
@@ -409,7 +417,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(definition);
         if (_assignedConfigPath is null) throw new InvalidOperationException("This host takes no automation from other devices.");
-        return SaveAsync(definition with { RunsOn = null }, _ => Task.FromResult<AutomationSource?>(AssignedSource), cancellationToken);
+        return SaveAsync(definition with { RunsOn = null, RunsOnTags = null }, _ => Task.FromResult<AutomationSource?>(AssignedSource), cancellationToken);
     }
 
     /// <summary>Whether an automation is one another device assigned to this machine.</summary>
@@ -584,7 +592,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
     {
         if (Snapshot.Find(id) is not { } entry) return null;
         if (runId is not null && Runs(id, AutomationStateStore.MaximumRuns).FirstOrDefault(run => run.Id == runId) is { } known) return known;
-        if (entry.Definition.RunsOn is not null)
+        if (entry.Definition.IsPlaced)
         {
             // It runs on the machine it is placed on, which records the run.
             if (Placement is { } placement) return await placement.RunAsync(entry, dryRun, cancellationToken).ConfigureAwait(false);
@@ -749,16 +757,23 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// <returns>Whether a run was started.</returns>
     internal bool Trigger(AutomationEntry entry, string trigger, string? detail, string prompt, bool waits = false, string? occurrence = null, AutomationReplyTarget? reply = null,
         string? eventJson = null, string? cause = null)
+        => Trigger(entry, trigger, detail, prompt, waits, occurrence, reply, eventJson, cause, claimedRunId: null);
+
+    // As above; claimedRunId is the run an event of a pool was claimed for already (ClaimEventAsync), which then claims nothing more.
+    private bool Trigger(AutomationEntry entry, string trigger, string? detail, string prompt, bool waits, string? occurrence, AutomationReplyTarget? reply,
+        string? eventJson, string? cause, string? claimedRunId)
     {
         bool busy;
         lock (_gate)
         {
             if (_closed) return false;
-            busy = _running.GetValueOrDefault(entry.Id) > 0;
+            busy = IsBusy(entry);
         }
 
         // A look at a repository that was in progress when the user paused starts nothing more.
         if (_state.Paused || busy && waits) return false;
+        // A machine of a pool that runs as many as it may lets the others take the time: nothing is recorded here.
+        if (busy && occurrence is not null && _claims?.IsPooled(entry.Id) == true) return false;
         if (busy)
         {
             var now = _time.GetUtcNow();
@@ -771,8 +786,8 @@ internal sealed partial class AutomationService : IAsyncDisposable
             return false;
         }
 
-        var runId = NewRunId();
-        if (occurrence is not null && _claims is not null && !_claims.TryClaim(entry.Id, occurrence, runId, _time.GetUtcNow()))
+        var runId = claimedRunId ?? NewRunId();
+        if (claimedRunId is null && occurrence is not null && _claims is not null && !_claims.TryClaim(entry.Id, occurrence, runId, _time.GetUtcNow()))
         {
             // Another run took this time already (fired twice, or caught up after a restart): it runs once.
             var now = _time.GetUtcNow();
@@ -785,7 +800,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
             return false;
         }
 
-        var start = BeginAsync(entry, trigger, detail, prompt, _stop.Token, runId, occurrence, reply, eventJson, cause);
+        var start = BeginAsync(entry, trigger, detail, prompt, _stop.Token, runId, occurrence, reply, eventJson, cause, confirmed: claimedRunId is not null);
         lock (_gate)
         {
             _observers.RemoveAll(static task => task.IsCompleted);
@@ -795,9 +810,53 @@ internal sealed partial class AutomationService : IAsyncDisposable
         return true;
     }
 
+    // Under the gate. Whether an automation runs already as many runs as it lets work at once (max_runs, one by default).
+    private bool IsBusy(AutomationEntry entry) => _running.GetValueOrDefault(entry.Id) >= (entry.Definition.MaxRuns ?? 1);
+
+    /// <summary>What starting the run of an event gave.</summary>
+    internal enum EventStart
+    {
+        /// <summary>Its run started.</summary>
+        Started,
+
+        /// <summary>Another run took it (on another machine of the pool): it is seen, and starts nothing here.</summary>
+        Taken,
+
+        /// <summary>It waits: its automation runs as many as it may, the service is paused, or the claim is for later.</summary>
+        Held,
+    }
+
+    /// <summary>
+    /// Starts the run of an event that can wait, as <see cref="Trigger(AutomationEntry, string, string?, string, bool, string?, AutomationReplyTarget?, string?, string?)"/>
+    /// with <c>waits</c> does; for a pooled automation (<see cref="IAutomationClaims.IsPooled"/>) the event is claimed at the
+    /// server first, so that one another machine took is seen without running, and one that could not be claimed now waits.
+    /// </summary>
+    internal async Task<EventStart> TriggerEventAsync(AutomationEntry entry, string trigger, string? detail, string prompt, string eventKey, AutomationTrigger source,
+        AutomationReplyTarget? reply, CancellationToken cancellationToken)
+    {
+        if (_claims is not { } claims || !claims.IsPooled(entry.Id))
+            return Trigger(entry, trigger, detail, prompt, waits: true, reply: reply) ? EventStart.Started : EventStart.Held;
+        lock (_gate)
+        {
+            if (_closed || IsBusy(entry)) return EventStart.Held;
+        }
+
+        if (_state.Paused) return EventStart.Held;
+        var occurrence = EventOccurrence(source, eventKey);
+        var runId = NewRunId();
+        AutomationPoolClaim claimed;
+        try { claimed = await claims.ClaimEventAsync(entry.Id, occurrence, runId, _time.GetUtcNow(), cancellationToken).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is not OutOfMemoryException && exception is not OperationCanceledException) { claimed = AutomationPoolClaim.Later; }
+        if (claimed != AutomationPoolClaim.Granted) return claimed == AutomationPoolClaim.Taken ? EventStart.Taken : EventStart.Held;
+        if (Trigger(entry, trigger, detail, prompt, waits: true, occurrence, reply, null, null, claimedRunId: runId)) return EventStart.Started;
+        // Busy or paused meanwhile: the claim is given back, and the event is looked at again.
+        claims.GiveBack(runId);
+        return EventStart.Held;
+    }
+
     // Records the run, starts its session and returns once the session exists; what follows is observed apart.
     private async Task<AutomationRun?> BeginAsync(AutomationEntry entry, string trigger, string? detail, string prompt, CancellationToken cancellationToken, string? runId = null,
-        string? occurrence = null, AutomationReplyTarget? reply = null, string? eventJson = null, string? cause = null)
+        string? occurrence = null, AutomationReplyTarget? reply = null, string? eventJson = null, string? cause = null, bool confirmed = false)
     {
         var run = new AutomationRun(runId ?? NewRunId(), entry.Id, _time.GetUtcNow(), trigger) { Name = entry.Definition.Name, ProjectId = entry.ProjectId, Detail = detail, Cause = cause };
         lock (_gate)
@@ -811,11 +870,33 @@ internal sealed partial class AutomationService : IAsyncDisposable
             _running[entry.Id] = _running.GetValueOrDefault(entry.Id) + 1;
         }
 
+        // A time of a pool is claimed at the server before its run is recorded: the machines that do not get it record nothing.
+        string? taken = null;
+        if (!confirmed && occurrence is not null && _claims is { } pool && pool.IsPooled(entry.Id))
+        {
+            try { taken = await pool.ConfirmAsync(entry.Id, occurrence, run.Id, cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) { taken = "The application closed before the run started."; }
+            // A machine of a pool runs nothing without the claim of its server.
+            catch (Exception exception) when (exception is not OutOfMemoryException) { taken = "The server of its pool did not answer its claim: " + FirstLine(exception.Message); }
+            if (taken == AutomationClaimAnswers.TakenInPool)
+            {
+                lock (_gate)
+                {
+                    var count = _running.GetValueOrDefault(entry.Id) - 1;
+                    if (count > 0) _running[entry.Id] = count;
+                    else _running.Remove(entry.Id);
+                }
+
+                return null;
+            }
+
+            confirmed = true;
+        }
+
         _state.Add(run);
         Changed?.Invoke();
         // A time claimed here may be taken elsewhere already (the automation ran on another machine before it came here).
-        string? taken = null;
-        if (occurrence is not null && _claims is not null)
+        if (!confirmed && occurrence is not null && _claims is not null)
         {
             try { taken = await _claims.ConfirmAsync(entry.Id, occurrence, run.Id, cancellationToken).ConfigureAwait(false); }
             catch (OperationCanceledException) { taken = "The application closed before the run started."; }

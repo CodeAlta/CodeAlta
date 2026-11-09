@@ -100,8 +100,20 @@ internal static class AutomationConfig
         if (definition.Project is { } project && (project.Length is 0 or > 4096 || project.Any(char.IsControl))) return "The project of an automation is the path of its folder.";
         if (definition.RunsOn is { } machine && (machine.Length is 0 or > AutomationDefinition.MaximumMachineLength || machine.Any(static character => char.IsControl(character) || char.IsWhiteSpace(character))))
             return "The machine an automation runs on is the id of a paired machine.";
+        if (definition.RunsOnTags is { } tags)
+        {
+            if (definition.RunsOn is not null) return "An automation runs on one machine or on the machines with some tags, not both.";
+            if (tags.Count is 0 or > AutomationDefinition.MaximumTags || !tags.All(AutomationDefinition.IsTag)
+                || tags.Distinct(StringComparer.OrdinalIgnoreCase).Count() != tags.Count)
+                return $"The tags an automation runs on are 1 to {AutomationDefinition.MaximumTags} tags of machines, each letters, digits, -, _, . and :, such as runs_on = {{ tags = [\"gpu\", \"linux\"] }}.";
+            if (definition.Triggers.FirstOrDefault(static trigger => !AutomationPools.Takes(trigger)) is { } kept)
+                return $"The machines with some tags take schedules, cron, issues, pull requests and Jira, not a {kept.KindName} trigger: {AutomationPools.Why(kept)}";
+        }
+
+        if (definition.MaxRuns is { } maxRuns && maxRuns is < 1 or > AutomationDefinition.MaximumRuns)
+            return $"max_runs is how many runs of the automation work at once on a machine: 1 to {AutomationDefinition.MaximumRuns}.";
         if (definition.PublishTo is { } scope && (scope != "organization" && !(scope.StartsWith("team:", StringComparison.Ordinal) && scope.Length is > 5 and <= 133
-                && !scope.Any(static character => char.IsControl(character) || char.IsWhiteSpace(character))) || definition.RunsOn is null))
+                && !scope.Any(static character => char.IsControl(character) || char.IsWhiteSpace(character))) || !definition.IsPlaced))
             return "An automation is published to a team (team:<id>) or to the organization of the machine it runs on.";
         if (definition.Agent is { } agent && (agent.Length is 0 or > 256 || agent.Any(char.IsControl))) return "The agent prompt of an automation is a name.";
         if (definition.PermissionMode is { } mode && (mode.Length is 0 or > 64 || mode.Any(char.IsControl) || mode.Trim() != mode))
@@ -261,9 +273,20 @@ internal static class AutomationConfig
             || !TryFlag(table, "catch_up", false, out var catchUp, out problem) || !TryText(table, "permission_mode", out var permissionMode, out problem)
             || !TryText(table, "sandbox", out var sandbox, out problem) || !TryText(table, "script", out var script, out problem)
             || !TryText(table, "script_args", out var scriptArguments, out problem) || !TryFlag(table, "sub_sessions", true, out var subSessions, out problem)
-            || !TryText(table, "runs_on", out var runsOn, out problem) || !TryText(table, "environment", out var environment, out problem)
+            || !TryRunsOn(table, out var runsOn, out var runsOnTags, out problem) || !TryText(table, "environment", out var environment, out problem)
             || !TryText(table, "publish_to", out var publishTo, out problem) || !TryText(table, "script_mode", out var scriptMode, out problem)
             || !TryText(table, "script_access", out var scriptAccess, out problem)) return false;
+        int? maxRuns = null;
+        if (table.TryGetValue("max_runs", out var maxRunsValue))
+        {
+            if (maxRunsValue is not long read || read is < 1 or > AutomationDefinition.MaximumRuns)
+            {
+                problem = $"max_runs is how many runs of the automation work at once on a machine: 1 to {AutomationDefinition.MaximumRuns}.";
+                return false;
+            }
+
+            maxRuns = (int)read;
+        }
         bool? review = null;
         if (table.ContainsKey("review_before_commit"))
         {
@@ -322,7 +345,9 @@ internal static class AutomationConfig
             Project = source.IsGlobal ? Blank(project) : null,
             // Only an automation of the user is placed on another machine; one a device assigned here runs here.
             RunsOn = source.IsGlobal && !source.IsAssigned ? Blank(runsOn) : null,
+            RunsOnTags = source.IsGlobal && !source.IsAssigned ? runsOnTags : null,
             PublishTo = source.IsGlobal && !source.IsAssigned ? Blank(publishTo) : null,
+            MaxRuns = maxRuns,
             Model = reference,
             Agent = Blank(agent),
             PermissionMode = Blank(permissionMode),
@@ -508,6 +533,27 @@ internal static class AutomationConfig
         return true;
     }
 
+    // runs_on is the id of one machine, or { tags = [...] } for the machines that have all of these tags.
+    private static bool TryRunsOn(TomlTable table, out string? machine, out IReadOnlyList<string>? tags, out string? problem)
+    {
+        (machine, tags, problem) = (null, null, null);
+        if (!table.TryGetValue("runs_on", out var value)) return true;
+        if (value is string text)
+        {
+            machine = text;
+            return true;
+        }
+
+        if (value is TomlTable target && target.Count == 1 && target.TryGetValue("tags", out var listed) && listed is TomlArray array && array.All(static item => item is string))
+        {
+            tags = [.. array.Cast<string>().Select(static tag => tag.Trim())];
+            return true;
+        }
+
+        problem = "runs_on is the id of a machine, or the tags of machines, such as runs_on = { tags = [\"gpu\", \"linux\"] }.";
+        return false;
+    }
+
     internal static bool TryTexts(TomlTable table, string key, out IReadOnlyList<string> texts, out string? problem)
     {
         (texts, problem) = ([], null);
@@ -555,6 +601,8 @@ internal static class AutomationConfig
         // A folder of Windows is written with the slashes every system reads, which need no escape.
         if (definition.Project is { } project) builder.Append("project = ").Append(Quote(OperatingSystem.IsWindows() ? project.Replace('\\', '/') : project)).Append(newline);
         if (definition.RunsOn is { } machine) builder.Append("runs_on = ").Append(Quote(machine)).Append(newline);
+        if (definition.RunsOnTags is { } tags) builder.Append("runs_on = { tags = [").Append(string.Join(", ", tags.Select(Quote))).Append("] }").Append(newline);
+        if (definition.MaxRuns is { } maxRuns) builder.Append("max_runs = ").Append(maxRuns.ToString(CultureInfo.InvariantCulture)).Append(newline);
         if (definition.PublishTo is { } scope) builder.Append("publish_to = ").Append(Quote(scope)).Append(newline);
         if (definition.Model.Format() is { } model) builder.Append("model = ").Append(Quote(model)).Append(newline);
         if (definition.Agent is { } agent) builder.Append("agent = ").Append(Quote(agent)).Append(newline);

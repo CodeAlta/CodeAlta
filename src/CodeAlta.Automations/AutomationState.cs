@@ -11,6 +11,9 @@ namespace CodeAlta.Automations;
 /// <param name="Trigger">What started it: <c>manual</c>, or the kind of the trigger.</param>
 internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOffset StartedAt, string Trigger)
 {
+    /// <summary>The machine the run worked on, for a run another machine reported (an automation of a pool); null for one of this host.</summary>
+    public string? MachineId { get; init; }
+
     /// <summary>The run is in progress.</summary>
     internal const string Running = "running";
 

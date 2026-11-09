@@ -616,6 +616,32 @@ internal sealed record AutomationDefinition(string Id, string Name)
     /// </summary>
     public string? RunsOn { get; init; }
 
+    /// <summary>The most tags a pool of machines names.</summary>
+    internal const int MaximumTags = 8;
+
+    /// <summary>The longest tag of a machine.</summary>
+    internal const int MaximumTagLength = 64;
+
+    /// <summary>The most runs of one automation <see cref="MaxRuns"/> lets work at once on a machine.</summary>
+    internal const int MaximumRuns = 16;
+
+    /// <summary>
+    /// In the configuration of the user only, in place of <see cref="RunsOn"/>: the tags of the machines it runs on (a pool,
+    /// <c>runs_on = { tags = [...] }</c>). Every machine of its server that has them all holds a copy, and each due time or
+    /// event is claimed at the server by one of them. Null for no pool.
+    /// </summary>
+    public IReadOnlyList<string>? RunsOnTags { get; init; }
+
+    /// <summary>How many runs of the automation work at once on a machine (<c>max_runs</c>); null for one.</summary>
+    public int? MaxRuns { get; init; }
+
+    /// <summary>Whether it runs elsewhere than here: on a machine (<see cref="RunsOn"/>) or a pool (<see cref="RunsOnTags"/>).</summary>
+    internal bool IsPlaced => RunsOn is not null || RunsOnTags is not null;
+
+    /// <summary>Whether the text is a tag of a machine: letters, digits, <c>-</c>, <c>_</c>, <c>.</c> and <c>:</c>, at most <see cref="MaximumTagLength"/>.</summary>
+    internal static bool IsTag(string? tag)
+        => tag is { Length: > 0 and <= MaximumTagLength } && tag.All(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.' or ':');
+
     /// <summary>
     /// In the configuration of the user only, beside <see cref="RunsOn"/>: whom the automation is published to on the server
     /// of its machine (<c>doc/fleet/orchestration.md</c>, scopes): <c>team:&lt;id&gt;</c> for a team its person maintains,
@@ -678,6 +704,9 @@ internal sealed record AutomationDefinition(string Id, string Name)
         if (ScriptMode is not null || ScriptAccess is not null) text += "\nscript_mode\n" + ScriptMode + "\n" + ScriptAccess;
         // Nor without a machine of their own.
         if (RunsOn is not null) text += "\nruns_on\n" + RunsOn;
+        // Nor without a pool, nor without runs at once of their own.
+        if (RunsOnTags is not null) text += "\nruns_on_tags\n" + string.Join(',', RunsOnTags);
+        if (MaxRuns is { } runs) text += "\nmax_runs\n" + runs.ToString(System.Globalization.CultureInfo.InvariantCulture);
         // Nor without a scope of its own.
         if (PublishTo is not null) text += "\npublish_to\n" + PublishTo;
         // Nor without an environment.

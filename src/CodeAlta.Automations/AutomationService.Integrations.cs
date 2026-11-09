@@ -127,6 +127,9 @@ internal sealed partial class AutomationService
 
     private static bool IsPolled(AutomationTrigger trigger) => trigger.Kind is AutomationTriggerKind.JiraVersion or AutomationTriggerKind.JiraQuery;
 
+    // Whether the runs of an automation are shared by the machines of a pool this host is one of.
+    private bool IsPooledHere(AutomationEntry entry) => _claims?.IsPooled(entry.Id) == true;
+
     /// <summary>What the run of an event claims: its trigger and the id of the event, bounded for the claim.</summary>
     internal static string EventOccurrence(AutomationTrigger trigger, string eventId)
     {
@@ -230,8 +233,11 @@ internal sealed partial class AutomationService
             foreach (var version in released)
             {
                 if (seen.Contains(version.Id)) continue;
-                if (!Trigger(entry, trigger.KindName, AutomationText.Line($"{project} {version.Name} released", 120), JiraVersionPrompt(entry.Definition.Prompt, site, project, version),
-                        waits: true, occurrence: EventOccurrence(trigger, "version:" + version.Id)))
+                if (IsPooledHere(entry)
+                        ? await TriggerEventAsync(entry, trigger.KindName, AutomationText.Line($"{project} {version.Name} released", 120), JiraVersionPrompt(entry.Definition.Prompt, site, project, version),
+                            "version:" + version.Id, trigger, null, cancellationToken).ConfigureAwait(false) == EventStart.Held
+                        : !Trigger(entry, trigger.KindName, AutomationText.Line($"{project} {version.Name} released", 120), JiraVersionPrompt(entry.Definition.Prompt, site, project, version),
+                            waits: true, occurrence: EventOccurrence(trigger, "version:" + version.Id)))
                 {
                     held = true;
                     break;
@@ -274,8 +280,11 @@ internal sealed partial class AutomationService
             if (due && !waiting)
             {
                 var reply = trigger.Reply ? new AutomationReplyTarget(trigger, $"the Jira issue {issue.Key}") { IssueKey = issue.Key } : null;
-                if (!Trigger(entry, trigger.KindName, AutomationText.Line($"{issue.Key} {issue.Summary}", 120), JiraIssuePrompt(entry.Definition.Prompt, site, jira, issue, updated, reply),
-                        waits: true, occurrence: EventOccurrence(trigger, issue.Key + "@" + stamp), reply: reply))
+                if (IsPooledHere(entry)
+                        ? await TriggerEventAsync(entry, trigger.KindName, AutomationText.Line($"{issue.Key} {issue.Summary}", 120), JiraIssuePrompt(entry.Definition.Prompt, site, jira, issue, updated, reply),
+                            issue.Key + "@" + stamp, trigger, reply, cancellationToken).ConfigureAwait(false) == EventStart.Held
+                        : !Trigger(entry, trigger.KindName, AutomationText.Line($"{issue.Key} {issue.Summary}", 120), JiraIssuePrompt(entry.Definition.Prompt, site, jira, issue, updated, reply),
+                            waits: true, occurrence: EventOccurrence(trigger, issue.Key + "@" + stamp), reply: reply))
                 {
                     // Its automation is running: found again at the next look.
                     waiting = true;
@@ -708,7 +717,7 @@ internal sealed partial class AutomationService
         if (entry.Problem is { } problem) return (null, problem);
         // Without an event: its own prompt, the tools its autonomy allows replaced by fakes; on its machine for one placed there.
         if (triggerIndex == -1) return (await RunAsync(id, null, dryRun: true, cancellationToken).ConfigureAwait(false), null);
-        if (entry.Definition.RunsOn is not null) return (null, "It runs on another machine: try it there, or here before you place it.");
+        if (entry.Definition.IsPlaced) return (null, "It runs on another machine: try it there, or here before you place it.");
         var trigger = entry.Definition.Triggers[triggerIndex];
         var (sample, missing) = await SampleAsync(entry.ProjectId, entry.Definition.Prompt, trigger, body, cancellationToken).ConfigureAwait(false);
         if (sample is null) return (null, missing);

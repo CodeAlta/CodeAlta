@@ -274,8 +274,10 @@ internal sealed partial class AutomationService
                 continue;
             }
 
-            // What someone who is not of the repository wrote starts nothing, and is not asked about again.
-            if (trusted == true && !Trigger(entry, trigger.KindName, Detail(item), EventPrompt(entry.Definition.Prompt, trigger, page.Repository!, item), waits: true))
+            // What someone who is not of the repository wrote starts nothing, and is not asked about again. An event of a pool
+            // another machine runs is seen here too.
+            if (trusted == true && await TriggerEventAsync(entry, trigger.KindName, Detail(item), EventPrompt(entry.Definition.Prompt, trigger, page.Repository!, item),
+                    updated ? number + "@" + item.Head : number, trigger, null, cancellationToken).ConfigureAwait(false) == EventStart.Held)
             {
                 held = true;
                 break;
@@ -337,7 +339,8 @@ internal sealed partial class AutomationService
             var id = AutomationText.Line(item.Item.Id, 64);
             if (id.Length == 0) continue;
             if (kind == CodeAlta.Plugins.Abstractions.TrackedEventKind.Created ? next.Seen.Contains(id) : next.Heads.GetValueOrDefault(id) == item.Stamp) continue;
-            if (!Trigger(entry, trigger.KindName, $"{id} {AutomationText.Line(item.Item.Title, 120)}".TrimEnd(), TrackerEventPrompt(entry.Definition.Prompt, page, item.Item, kind), waits: true))
+            if (await TriggerEventAsync(entry, trigger.KindName, $"{id} {AutomationText.Line(item.Item.Title, 120)}".TrimEnd(), TrackerEventPrompt(entry.Definition.Prompt, page, item.Item, kind),
+                    kind == CodeAlta.Plugins.Abstractions.TrackedEventKind.Created ? id : id + "@" + item.Stamp, trigger, null, cancellationToken).ConfigureAwait(false) == EventStart.Held)
             {
                 // Its automation is running: the window stays where it was, and the event is found again.
                 next = next with { Since = mark.Since };

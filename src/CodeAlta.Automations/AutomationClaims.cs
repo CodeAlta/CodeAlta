@@ -37,6 +37,58 @@ internal interface IAutomationClaims
     /// <param name="cancellationToken">Cancels the confirmation.</param>
     /// <returns>Why the run does not start (another run took that time elsewhere); null when it starts.</returns>
     ValueTask<string?> ConfirmAsync(string automationId, string occurrence, string runId, CancellationToken cancellationToken) => ValueTask.FromResult<string?>(null);
+
+    /// <summary>
+    /// Whether the runs of an automation are shared by the machines of a pool (<c>runs_on = { tags = [...] }</c>): each due time
+    /// and each event runs only once the server granted its claim to this machine, and one another machine of the pool took is
+    /// not recorded here.
+    /// </summary>
+    /// <param name="automationId">The automation.</param>
+    /// <returns>Whether it is pooled.</returns>
+    bool IsPooled(string automationId) => false;
+
+    /// <summary>
+    /// Claims an event of a pooled automation, here and at the server, before its run starts and before the event is taken as
+    /// seen: an event this machine cannot claim now (the server did not answer, or the machine lets the others of its pool look
+    /// first) is looked at again later.
+    /// </summary>
+    /// <param name="automationId">The automation.</param>
+    /// <param name="occurrence">The event, as <c>EventOccurrence</c> names it.</param>
+    /// <param name="runId">The run that would take it.</param>
+    /// <param name="now">The time of the claim.</param>
+    /// <param name="cancellationToken">Cancels the claim.</param>
+    /// <returns>Whether the run starts, another machine runs the event, or it is looked at again later.</returns>
+    ValueTask<AutomationPoolClaim> ClaimEventAsync(string automationId, string occurrence, string runId, DateTimeOffset now, CancellationToken cancellationToken)
+        => ValueTask.FromResult(TryClaim(automationId, occurrence, runId, now) ? AutomationPoolClaim.Granted : AutomationPoolClaim.Taken);
+
+    /// <summary>Gives back the claim of a run that did not start, so that its occurrence can be claimed again.</summary>
+    /// <param name="runId">The run.</param>
+    void GiveBack(string runId)
+    {
+    }
+}
+
+/// <summary>What the claim of an event of a pooled automation gave.</summary>
+internal enum AutomationPoolClaim
+{
+    /// <summary>This machine runs it.</summary>
+    Granted,
+
+    /// <summary>Another run took it, here or on another machine: it is seen, and runs no more.</summary>
+    Taken,
+
+    /// <summary>It is looked at again later: the server did not answer, or the machine lets the others of its pool look first.</summary>
+    Later,
+}
+
+/// <summary>The answers of a claim that the service reads.</summary>
+internal static class AutomationClaimAnswers
+{
+    /// <summary>
+    /// What <see cref="IAutomationClaims.ConfirmAsync"/> answers when another machine of the pool of the automation took the
+    /// time: the run is not recorded on this machine.
+    /// </summary>
+    internal const string TakenInPool = "Another machine of its pool runs it.";
 }
 
 /// <summary>
@@ -126,6 +178,21 @@ internal sealed class AutomationClaimStore : IAutomationClaims
             {
                 if (claim.RunId != runId || claim.EndedAt is not null) continue;
                 _file.Claims[key] = claim with { EndedAt = now, LeaseUntil = now };
+                Save();
+                return;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public void GiveBack(string runId)
+    {
+        lock (_gate)
+        {
+            foreach (var (key, claim) in _file.Claims.ToArray())
+            {
+                if (claim.RunId != runId) continue;
+                _file.Claims.Remove(key);
                 Save();
                 return;
             }

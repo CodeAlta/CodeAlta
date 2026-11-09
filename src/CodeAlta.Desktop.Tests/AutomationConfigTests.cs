@@ -181,6 +181,46 @@ public sealed class AutomationConfigTests
     }
 
     [TestMethod]
+    public void RunsOn_AMachineOrTags_AndMaxRuns_AreReadWrittenValidatedAndFingerprinted()
+    {
+        var plain = new AutomationDefinition(First, "Nightly") { Prompt = "Review.", Triggers = [new AutomationTrigger(AutomationTriggerKind.Hourly) { Minute = 30 }] };
+        var pooled = plain with { RunsOnTags = ["gpu", "linux"], MaxRuns = 3 };
+        var written = AutomationConfig.Write(string.Empty, pooled);
+        StringAssert.Contains(written, "runs_on = { tags = [\"gpu\", \"linux\"] }\nmax_runs = 3\n");
+        AssertSame(pooled, AutomationConfig.Read(written, Global).Definitions.Single());
+        // One machine, as before, in the same key.
+        var placed = plain with { RunsOn = "9f3c-machine" };
+        StringAssert.Contains(AutomationConfig.Write(string.Empty, placed), "runs_on = \"9f3c-machine\"\n");
+        AssertSame(placed, AutomationConfig.Read(AutomationConfig.Write(string.Empty, placed), Global).Definitions.Single());
+        Assert.IsTrue(pooled.IsPlaced && placed.IsPlaced && !plain.IsPlaced);
+        Assert.IsFalse(AutomationConfig.Write(string.Empty, plain).Contains("max_runs", StringComparison.Ordinal), "nothing is written for one run at once");
+
+        // A project, or the file of what other devices assigned, places nothing: the tags are read there as nothing.
+        Assert.IsNull(AutomationConfig.Read(written, Project).Definitions.Single().RunsOnTags);
+        Assert.IsNull(AutomationConfig.Read(written, Global with { IsAssigned = true }).Definitions.Single().RunsOnTags);
+        Assert.AreEqual(3, AutomationConfig.Read(written, Global with { IsAssigned = true }).Definitions.Single().MaxRuns, "a machine keeps how many run at once");
+
+        // Where it runs and how many run at once change what it is.
+        Assert.AreEqual(5, new[] { plain, pooled, pooled with { RunsOnTags = ["gpu"] }, pooled with { MaxRuns = 2 }, placed }.Select(static candidate => candidate.Fingerprint()).Distinct().Count());
+        Assert.AreEqual(plain.Fingerprint(), (plain with { RunsOnTags = null, MaxRuns = null }).Fingerprint(), "an automation without them keeps its fingerprint");
+
+        StringAssert.Contains(AutomationConfig.Validate(pooled with { RunsOn = "machine" }), "not both");
+        StringAssert.Contains(AutomationConfig.Validate(pooled with { RunsOnTags = [] }), "tags");
+        StringAssert.Contains(AutomationConfig.Validate(pooled with { RunsOnTags = ["two words"] }), "tags");
+        StringAssert.Contains(AutomationConfig.Validate(pooled with { RunsOnTags = ["gpu", "GPU"] }), "tags");
+        StringAssert.Contains(AutomationConfig.Validate(pooled with { MaxRuns = 0 }), "max_runs");
+        StringAssert.Contains(AutomationConfig.Validate(pooled with { MaxRuns = AutomationDefinition.MaximumRuns + 1 }), "max_runs");
+        // A pool takes schedules, cron, issues, pull requests and Jira; a command, Slack or a hook are bound to one machine.
+        StringAssert.Contains(AutomationConfig.Validate(pooled with { Triggers = [new AutomationTrigger(AutomationTriggerKind.Command) { Command = "make check" }] }), "command");
+        Assert.IsNull(AutomationConfig.Validate(pooled with { PublishTo = "team:infra" }), "a pool is published to a team as one machine is");
+        foreach (var bad in new[] { "runs_on = { tags = \"gpu\" }", "runs_on = { machine = \"x\" }", "runs_on = 3", "max_runs = 0", "max_runs = \"two\"" })
+        {
+            var (_, faults) = AutomationConfig.Read($"[automations.{First}]\nname = \"n\"\nprompt = \"p\"\n{bad}\n", Global);
+            Assert.AreEqual(1, faults.Count, bad);
+        }
+    }
+
+    [TestMethod]
     public void TheOptionsOfItsSessions_AreWrittenOnlyOff_AndAllowedAgain()
     {
         var plain = new AutomationDefinition(First, "Nightly") { Prompt = "Review." };
@@ -434,7 +474,8 @@ public sealed class AutomationConfigTests
 
     private static void AssertSame(AutomationDefinition expected, AutomationDefinition actual)
     {
-        Assert.AreEqual(expected with { Triggers = [] }, actual with { Triggers = [] });
+        Assert.AreEqual(expected with { Triggers = [], RunsOnTags = null }, actual with { Triggers = [], RunsOnTags = null });
+        CollectionAssert.AreEqual(expected.RunsOnTags?.ToArray(), actual.RunsOnTags?.ToArray());
         CollectionAssert.AreEqual(expected.Triggers.Select(static trigger => trigger.Key).ToArray(), actual.Triggers.Select(static trigger => trigger.Key).ToArray());
     }
 }
