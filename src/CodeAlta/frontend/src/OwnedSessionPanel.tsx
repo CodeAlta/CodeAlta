@@ -1234,9 +1234,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       return;
     }
 
+    const fastModeChanged = (result.options.fastMode ?? null) !== (shownOptions?.fastMode ?? null);
     setSessionOptions({ key: reviewKey, options: result.options });
     // The host forgets the speed it was told before another choice of fast mode: the chip reads it again.
-    void runtimeScope.current?.refresh();
+    if (fastModeChanged) void runtimeScope.current?.refresh();
   }
   // The sandbox the session runs in: read with the session and again after each turn (the settings may have changed
   // meanwhile), and changed at once from the form of the Agent chip. What the settings give is known while the session

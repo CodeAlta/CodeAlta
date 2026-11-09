@@ -309,8 +309,8 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
     // of the process turn fast mode on (apply_flag_settings): the choice of the session is that opt-in, which also
     // lifts a pending or failed check of availability.
     private static bool IsFastModeBlocked(JsonElement initialized)
-        => initialized.TryGetProperty("fast_mode_disabled_reason", out var reason) && reason.ValueKind is not JsonValueKind.Null
-            && ClaudeCodeJson.GetString(initialized, "fast_mode_disabled_reason") is not ("sdk_opt_in_required" or "pending" or "network_error");
+        => ClaudeCodeJson.GetString(initialized, "fast_mode_disabled_reason") is { } reason
+            && reason is not ("sdk_opt_in_required" or "pending" or "network_error");
 
     private static string? ResolvedModel(AgentModelInfo model)
         => model.Capabilities is { } capabilities && capabilities.TryGetValue(ResolvedModelCapability, out var resolved) ? resolved as string : null;

@@ -64,9 +64,10 @@ public sealed partial class SessionRuntimeService
             {
                 if (_entries.TryGetValue(session.SessionId, out var entry) && !entry.IsTerminated)
                 {
+                    var next = AgentSessionOptions.Of(stored);
                     // A speed the provider reported before another choice of fast mode says nothing of the turns to come.
-                    if (entry.Options.FastMode != AgentSessionOptions.Of(stored).FastMode) entry.ReportedFastMode = null;
-                    entry.Options = AgentSessionOptions.Of(stored);
+                    if (entry.Options.FastMode != next.FastMode) entry.ReportedFastMode = null;
+                    entry.Options = next;
                 }
                 var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, actorCancellationToken).ConfigureAwait(false);
                 if (!Equals(AgentSessionOptions.Stored(localState?.Options), stored))

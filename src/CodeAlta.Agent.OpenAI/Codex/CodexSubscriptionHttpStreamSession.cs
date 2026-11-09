@@ -110,7 +110,8 @@ internal sealed class CodexSubscriptionHttpStreamSession
     }
 
     // What a trace says of an event beyond its size: the status, the model and the service tier of the response an event
-    // carries (the tier that ran it, which may not be the one asked), and the small metadata event of Codex as it is.
+    // carries (as Codex names it: with a ChatGPT sign-in, "default" whatever ran it, openai/codex#14204), and the small
+    // metadata event of Codex as it is.
     internal static void TraceEventDetails(OpenAIProtocolTraceLogger trace, string? eventType, string data)
     {
         if (eventType == "response.metadata")

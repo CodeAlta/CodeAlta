@@ -79,23 +79,29 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
         }
 
         // The "default" form routes by the category of the refusal, so no model list is kept here.
-        var originalRawRepresentationFactory = withThinking.RawRepresentationFactory;
-        var adjusted = withThinking.Clone();
-        adjusted.RawRepresentationFactory = implementation =>
+        return WithCreateParams(withThinking, static createParams =>
         {
-            var createParams = originalRawRepresentationFactory?.Invoke(implementation) as MessageCreateParams ?? new MessageCreateParams
-            {
-                MaxTokens = withThinking.MaxOutputTokens ?? throw new InvalidOperationException(
-                    "An Anthropic request requires an explicit maximum output-token limit."),
-                Messages = [],
-                Model = withThinking.ModelId!,
-            };
             var body = new Dictionary<string, JsonElement>(createParams.RawBodyData, StringComparer.Ordinal)
             {
                 ["fallbacks"] = ParseJson("\"default\""),
             };
             return AddBeta(MessageCreateParams.FromRawUnchecked(createParams.RawHeaderData, createParams.RawQueryData, body), RefusalFallbackBeta);
-        };
+        });
+    }
+
+    // Options whose request is the one of the given options, changed: the request their factory builds, else one of their model.
+    private static ChatOptions WithCreateParams(ChatOptions options, Func<MessageCreateParams, MessageCreateParams> change)
+    {
+        var originalRawRepresentationFactory = options.RawRepresentationFactory;
+        var adjusted = options.Clone();
+        adjusted.RawRepresentationFactory = implementation => change(
+            originalRawRepresentationFactory?.Invoke(implementation) as MessageCreateParams ?? new MessageCreateParams
+            {
+                MaxTokens = options.MaxOutputTokens ?? throw new InvalidOperationException(
+                    "An Anthropic request requires an explicit maximum output-token limit."),
+                Messages = [],
+                Model = options.ModelId!,
+            });
         return adjusted;
     }
 
@@ -152,20 +158,7 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
             return options;
         }
 
-        var originalRawRepresentationFactory = options.RawRepresentationFactory;
-        var adjusted = options.Clone();
-        adjusted.RawRepresentationFactory = implementation =>
-        {
-            var createParams = originalRawRepresentationFactory?.Invoke(implementation) as MessageCreateParams ?? new MessageCreateParams
-            {
-                MaxTokens = options.MaxOutputTokens ?? throw new InvalidOperationException(
-                    "An Anthropic request requires an explicit maximum output-token limit."),
-                Messages = [],
-                Model = options.ModelId!,
-            };
-            return createParams with { Speed = Speed.Fast };
-        };
-        return adjusted;
+        return WithCreateParams(options, static createParams => createParams with { Speed = Speed.Fast });
     }
 
     // The models the Claude API runs in fast mode without a beta header: Claude Opus 5.5. Opus 5 needs access the account

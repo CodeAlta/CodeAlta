@@ -1001,7 +1001,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         ReadRemoteControlAvailability(initialized);
 
         // The fast mode the process starts in, off until the session opts in; an older CLI does not say it.
-        if (initialized.ValueKind == JsonValueKind.Object && initialized.TryGetProperty("fast_mode_state", out _))
+        if (ClaudeCodeJson.GetString(initialized, "fast_mode_state") is not null)
         {
             lock (_gate)
             {

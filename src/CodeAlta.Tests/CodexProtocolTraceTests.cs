@@ -5,8 +5,8 @@ using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Tests;
 
-// The protocol trace of Codex names the tier that ran a response, which may not be the one asked, and keeps the small
-// metadata event of Codex; the text of an answer stays out of it.
+// The protocol trace of Codex names the tier of each response as Codex gives it, and keeps the small metadata event of
+// Codex; the text of an answer stays out of it.
 [TestClass]
 public sealed class CodexProtocolTraceTests
 {
