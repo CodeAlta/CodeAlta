@@ -96,6 +96,16 @@ Every event has an id, so a run happens once even when two machines see the same
 - **Through a server** (personal scope), **Runs on** a machine of the person that the desktop reaches only through the
   server gives the server the signed, sealed version; the machine verifies it against the device list it anchored,
   claims each due time with the server, and reports its runs ([protocol](protocol.md#server-api-over-the-control-connection)).
+- **On tags** (`runs_on = { tags = [...] }`, a pool), what exists instead of the server picking: the desktop gives every
+  node of one server that has all the tags its own signed, sealed copy, which signs the tags too (a format of version a
+  node without pools refuses rather than run it alone), and takes it from a node that lost a tag. The server cannot read
+  a sealed automation, so it evaluates no trigger: each member fires its triggers itself and **claims** each due time
+  and each event (issue, pull request, Jira) at the server before it runs it, and the claim, already atomic per
+  automation and occurrence, grants it to one member. A member checks its own tags against the signed ones before it
+  arms and before it claims; one without a free seat lets the others claim first (30 seconds for a schedule, one look of
+  its trigger for an event); one that cannot reach the server runs nothing, since at most once comes before
+  availability. Triggers bound to one machine (a command, Slack, the hooks of a server, the events of a machine) keep an
+  automation off a pool. A pool needs a server: paired machines have no arbiter.
 
 ## Who a run acts as
 

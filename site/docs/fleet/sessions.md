@@ -80,7 +80,7 @@ Turning the space off, or `altanode agents deny --space <id>` (or `--all`), turn
 An automation of yours can run on a paired machine, or on a machine of your server, by its triggers, while this computer is closed.
 
 1. Let this computer give the machine automations: on its page in **Settings** > **Fleet** > **Machines**, turn on **Automate** for **This computer** (or, on the machine, `altanode permissions <device> --allow automate`).
-2. In the **Automations** tab, edit the automation and choose the machine in **Runs on**. It is offered for an automation kept in your configuration, once a machine is paired or your server lists one.
+2. In the **Automations** tab, edit the automation and choose the machine in **Runs on**. Until a machine is paired or your server lists one, **Runs on** offers **This computer** alone, with **Add a machine…** beside it. An automation kept in the configuration of a project runs on the machines that have the project, so **Runs on** is off for it.
 3. Save. CodeAlta copies the automation to the machine: its card says **On** and the name of the machine, and its details say **Copied to** that machine. A machine that is offline gets it when it answers.
 
 The machine fires its schedules and starts its sessions; **Run now** runs it there too. When a [budget](operations.md#set-budgets-for-your-machines) of the machine holds new runs, **Run now** says at once that the run waits, with **Continue anyway**, and the run is listed as **Waits for Continue anyway** until you decide. Its runs are listed with the automation, as the machine reports them, and their sessions are those of the machine. Choose **This computer** to bring it back: the machine no longer has it.
@@ -96,6 +96,24 @@ The machine fires its schedules and starts its sessions; **Run now** runs it the
 A machine of your server that is not paired with this computer gets the automation through the server, with no permission to give on the machine: it must be one of your machines. The server keeps it sealed, so it cannot read nor change it, and the machine gets it when it connects. Its details say whether the machine took it or refused it, and why. **Run now** asks the machine through the server while it is online; its triggers run it either way, also while the server is away.
 
 On the machine, what it runs is up to it: `altanode automations policy off` turns automations off (`on` again), and `altanode automations policy credentials account` limits them to account credentials (API keys and local models, never a personal plan; `any` again). A node that runs applies the change at its next run. `altanode automations` lists what the devices gave the machine, and `altanode automations runs` their latest runs. A run the machine refuses is listed with its reason. A computer that loses the permission, or is revoked, no longer gets its automations run.
+
+### Run it on the machines with some tags
+
+An automation can run on whichever of your machines has some [tags](machines.md#tag-your-machines), such as `gpu` and `linux`, as a job of GitHub Actions chooses its runner. This needs a [CodeAlta Server](server.md): it decides which machine runs each time.
+
+1. In **Runs on**, choose **Machines with tags…**, then add the tags. The tags your machines have are offered under the field, and **Runs on now** names the machines that have them all.
+2. Save. Every machine of your server that has all the tags gets the automation, and its details list each machine with where its copy stands.
+
+Each machine fires the triggers itself and asks the server before it runs one: one machine runs each due time and each issue, pull request or Jira event. A machine that already runs as many sessions as it [lets work at once](machines.md#limit-the-sessions-at-work) lets the others take it first.
+
+- A machine that gains the tags gets the automation, and one that loses a tag has its copy taken away. Also while this computer is closed, a machine that lost a tag runs nothing more of it.
+- A machine that cannot reach the server runs nothing of it: a due time is listed as skipped with why, and an event is looked at again later.
+- Machines with tags take schedules, cron, issues, pull requests and Jira. A command, Slack and the hooks of a server keep an automation on one machine; the editor says which trigger does.
+- **Run now** runs it on the machine with the most free seats. Its runs are listed together, each with its machine.
+- A machine with an older CodeAlta refuses the automation, and its details say so: update it.
+
+Under **More options**, **Runs at once on a machine** lets several runs of the automation work at the same time on one machine (`max_runs` in the configuration file); with 1, a run waits for the previous one.
+
 
 ## Move a session
 
