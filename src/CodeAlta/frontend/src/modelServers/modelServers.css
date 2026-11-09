@@ -101,7 +101,8 @@
 }
 
 /* The rows checked, and what can be done to them. */
-.model-servers-settings .fleet-table td[data-column="pick"] { padding-right: 0; }
+/* The first column of a Fleet table is wide enough for a name: the column of the boxes is not one. */
+.model-servers-settings .fleet-table :is(th, td)[data-column="pick"] { min-width: 0; width: 2.4rem; padding-right: 0; }
 .model-servers-pick.bp6-control { margin: 0; }
 .model-servers-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 10px; border-radius: 6px;
   background: color-mix(in srgb, var(--fleet-blue) 10%, transparent); border: 1px solid color-mix(in srgb, var(--fleet-blue) 30%, transparent); }

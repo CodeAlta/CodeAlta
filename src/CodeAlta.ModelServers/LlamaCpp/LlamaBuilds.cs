@@ -338,7 +338,10 @@ public sealed partial class LlamaBuilds
         if (!File.Exists(program)) return null;
         string[] arguments = devices.Count > 0 ? ["-m", modelPath, "--device", string.Join(',', devices)] : ["-m", modelPath];
         var (fitted, fittedLog) = await RunAsync(program, arguments, cancellationToken).ConfigureAwait(false);
-        var (memory, _) = await RunAsync(program, [.. arguments, "-fitp", "on"], cancellationToken).ConfigureAwait(false);
+        // The memory is that of the context it fitted: without it, -fitp counts the whole context the model was trained for.
+        var context = ParseFit(build, fitted, "", at).Context;
+        string[] memoryArguments = context is { } tokens ? [.. arguments, "-c", tokens.ToString(CultureInfo.InvariantCulture), "-fitp", "on"] : [.. arguments, "-fitp", "on"];
+        var (memory, _) = await RunAsync(program, memoryArguments, cancellationToken).ConfigureAwait(false);
         var measure = ParseFit(build, fitted, memory, at);
         // Nothing printed: the reason is the last error of its log (a file it cannot read, an architecture this build does not know).
         return measure.Arguments.Length > 0 || measure.Devices.Count > 0 ? measure
