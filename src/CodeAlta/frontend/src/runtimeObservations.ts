@@ -98,7 +98,7 @@ export function createRuntimeObservations(read: Read) {
   function invalidate() {
     cancel();
     if (state.rows.size) publish(new Map([...state.rows].map(([key, row]) => [key, { ...row,
-      label: row.label.startsWith("Loading") ? "Unknown · canceled/omitted" : row.label, stale: true }])), "Stale observations — scope changed. Refresh explicitly.");
+      label: row.label.startsWith("Loading") ? "Unknown · canceled/omitted" : row.label, stale: true }])), "Stale observations — host changed. Refresh explicitly.");
   }
   return {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -125,8 +125,9 @@ export function createRuntimeObservations(read: Read) {
       const selected = [...unique.values()].slice(0, maximumRuntimeRows);
       fences = new Map(selected.flatMap(target => { const key = tabKey(target.tab); const prior = fences.get(key); return prior ? [[key, prior] as const] : []; }));
       const missing = omitted + targets.length - selected.length;
-      // A row keeps its last known activity while it reloads, so a running indicator does not blink on every refresh.
-      const rows = new Map<string, RuntimeObservation>(selected.map(target => { const key = tabKey(target.tab), prior = before.get(key);
+      // A row keeps its last known activity while it reloads, so a running indicator does not blink on every refresh;
+      // an invalidated one (another host) keeps none.
+      const rows = new Map<string, RuntimeObservation>(selected.map(target => { const key = tabKey(target.tab), known = before.get(key), prior = known?.stale ? undefined : known;
         return [key, { label: "Loading observation…", details: "Explicit read only; no permission implied.", running: prior?.running, background: prior?.background, projectId: prior?.projectId }]; }));
       const summary = (count: number) => `${count}/${selected.length} observed responses; ${missing} omitted/unverified (maximum 32 per refresh). Not atomic across actors; never a recentness or liveness report.`;
       publish(rows, summary(0));

@@ -104,6 +104,22 @@ test("a row keeps its activity while it reloads, and an open panel's report wins
   assert.equal(running(), false); assert.equal(projectRunning(owner.getSnapshot(), null), false);
 });
 
+test("an invalidated row does not carry its activity into the next refresh", async () => {
+  let release: (() => void) | undefined;
+  const owner = createRuntimeObservations(async () => { if (release !== undefined) await new Promise<void>(resolve => { release = resolve; }); return reply(); });
+  const tab = target().tab, running = () => sessionRunning(owner.getSnapshot(), tab);
+  await owner.refresh([target()]);
+  assert.equal(running(), true);
+  // A new host runs none of the sessions of the old one: what it said is not shown while the new one is asked.
+  owner.invalidate();
+  assert.equal(running(), false);
+  release = () => { };
+  const reloading = owner.refresh([target()]);
+  assert.equal(running(), false, "nothing known of the new host yet");
+  release(); await reloading;
+  assert.equal(running(), true);
+});
+
 test("a refresh that changes no running session keeps the running set, and never shows it stale on the way", async () => {
   const owner = createRuntimeObservations(async request => reply(request.sessionId));
   await owner.refresh([target("one"), target("two")]);
