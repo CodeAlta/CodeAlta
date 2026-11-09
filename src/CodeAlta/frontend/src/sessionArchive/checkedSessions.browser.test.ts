@@ -126,7 +126,10 @@ test("sessions checked in the saved sessions are archived, restored and deleted 
     await evaluate(`${footerButton("Delete 2…")}.click()`);
     assert.equal(await wait(`${confirm}?.textContent.includes('Delete 2 sessions?')`), true);
     assert.doesNotMatch(await evaluate<string>(`${confirm}.textContent`), /you did not select/);
-    assert.match(await evaluate<string>(`${confirm}.textContent`), /Review the parser and 1 more.*Their history is deleted/s);
+    // Counted, not named: no session of several matters more than the others.
+    assert.equal(await evaluate(`!!${confirm}.querySelector('.confirm-subject')`), false);
+    assert.doesNotMatch(await evaluate<string>(`${confirm}.textContent`), /Review the parser|Check the lexer/);
+    assert.match(await evaluate<string>(`${confirm}.textContent`), /Delete 2 sessions\?Their history is deleted/);
     await evaluate(`[...${confirm}.querySelectorAll('button')].find(button=>button.textContent==='Delete').click()`);
     assert.equal(await wait(`!${confirm}`), true);
     assert.deepEqual((await state<string[][]>("removed"))[1], ["check", "review"]);

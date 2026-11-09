@@ -313,8 +313,8 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
           text={t("Delete {count}…", { count: checkedRows.length })} onClick={() => void askDeleteChecked()} />
         {deletingChecked && plan && layer && <PortalProvider portalContainer={layer}><ConfirmPopover always placement="top-end" intent="danger" busy={checking.busy} error={deletingChecked.error}
           title={plan.order.length === 0 ? t("Nothing can be deleted.") : plan.order.length === 1 ? t("Delete this session?") : t("Delete {count} sessions?", { count: plan.order.length })}
-          subject={plan.order.length === 0 ? "" : plan.order.length === 1 ? plainTitle(plan.order[0].title)
-            : t("{title} and {count} more", { title: plainTitle(plan.order[plan.order.length - 1].title), count: plan.order.length - 1 })}
+          // Several sessions are counted in the title: none of them is named, since none matters more than the others.
+          subject={plan.order.length === 1 ? plainTitle(plan.order[0].title) : ""}
           detail={plan.order.length === 1 ? t("Its history is deleted and cannot be restored. The files of the project are kept.")
             : t("Their history is deleted and cannot be restored. The files of the projects are kept.")}
           confirmLabel={t("Delete")} onConfirm={() => void deleteChecked()} onCancel={() => { worktreeChecks.current++; setCheckingWorktrees(false); setDeletingChecked(null); }}>
