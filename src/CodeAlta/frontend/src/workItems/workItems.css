@@ -250,3 +250,7 @@
 .work-tag-review-task strong { font-size: 13px; font-weight: 600; }
 .work-tag-review-task small { grid-column: 2; font-size: 12px; color: var(--muted); }
 .work-tag-review .work-tag-id { margin: 0; }
+.work-card-tag-suggestion { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 4px 8px; border-radius: 8px; font-size: 12px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.work-card-tag-suggestion small { color: var(--muted); }
+.work-card-tag-suggestion .bp6-button { margin-left: auto; }

@@ -56,6 +56,15 @@ test("a card shows the short id of its task after the date, in the color of its 
   assert.equal(card(null).includes("work-tag-id"), false, "a task without a short id shows none");
 });
 
+test("the card of a task says the new tag its session proposed with it", () => {
+  const proposal = { name: "parser", description: "The parser of the files.", newTag: true, sessionId: "s1", tasks: [{ id: "lead", reason: null }, { id: "a", reason: null }, { id: "b", reason: null }] };
+  const projects = [{ projectId: "p", truncated: false, plans: [], tasks: [row("lead", "task", "pending"), row("other", "task", "pending")], tags: null, declinedTags: null, tagProposals: [proposal] }];
+  const card = (id: string) => render(createElement(WorkItemCards, { hub: hub(state({ projects })), dockPreference: createDockPreference(),
+    items: workItems(projects, new Set(["s1"])).filter(item => item.id === id), preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never }));
+  assert.match(card("lead"), /<p class="work-card-tag-suggestion">.*Suggested tag<span class="work-tag"[^>]* title="The parser of the files.">parser<\/span><small>for 3 open tasks<\/small>.*Review/s);
+  assert.equal(card("other").includes("work-card-tag-suggestion"), false, "only the tasks the proposal names");
+});
+
 test("a card and a row show the tags of their task, and its detail lets the user change them", () => {
   const tagged = workItems([{ projectId: "p", truncated: false, plans: [], tasks: [row("tagged", "task", "pending", { tags: ["mobile", "flaky-tests"] })],
     tags: [{ name: "mobile", description: "The phone app.", openTasks: 1, listed: true }, { name: "flaky-tests", description: null, openTasks: 1, listed: true }], declinedTags: null, tagProposals: null }],

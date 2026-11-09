@@ -5,9 +5,9 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon, type IconName } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { MarkdownContent } from "../MarkdownContent";
-import { TagChips } from "./WorkItemTagViews";
+import { TagChip, TagChips, TagProposalDialog, type ShownTagProposal } from "./WorkItemTagViews";
 import { useShellLanguage } from "../shellLanguage";
-import { startChoices, startDetail, startIcon, startLabel, taskCategoryIcon, taskCategoryLabel, taskCategoryTone, workItemKey, workItemTone, workKindIcon,
+import { startChoices, startDetail, startIcon, startLabel, taskCategoryIcon, taskCategoryLabel, taskCategoryTone, workItemKey, workItems, workItemTone, workKindIcon,
   type WorkItem, type WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
 import { notesSurface, useWorkCardsPlacement } from "./useWorkCardsPlacement";
@@ -102,6 +102,8 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   const [collapsed, setCollapsed] = useState(remembered.collapsed);
   useEffect(() => { remembered.collapsed = collapsed; }, [remembered, collapsed]);
   const [detail, setDetail] = useState(false);
+  const [reviewing, setReviewing] = useState<ShownTagProposal | null>(null);
+  const workState = useSyncExternalStore(hub.subscribe, hub.getSnapshot, hub.getSnapshot);
   const [cards, setCards] = useState<HTMLElement | null>(null);
   // The side of Notes the user chose for the cards, for the whole window; null leaves it to the room around Notes.
   const dock = useSyncExternalStore(dockPreference.subscribe, dockPreference.get, dockPreference.get);
@@ -129,6 +131,14 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   const plan = item.kind === "plan";
   // The session works on it: there is nothing to start or to decide, only to see.
   const running = item.stage === "running";
+  // A new tag the session proposed with this task: the card says so, and its review is the one of Work items.
+  const project = item.kind === "task" ? workState.projects.find(candidate => candidate.projectId === item.projectId) : undefined;
+  const suggestion = project?.tagProposals?.find(proposal => proposal.newTag && proposal.sessionId === item.proposedBy && proposal.tasks.some(match => match.id === item.id)) ?? null;
+  const review = () => {
+    if (!project || !suggestion) return;
+    const tasks = workItems([project], new Set()).filter(task => task.kind === "task" && suggestion.tasks.some(match => match.id === task.id));
+    setReviewing({ projectId: project.projectId, projectName: null, proposal: suggestion, tasks });
+  };
   const acknowledge = () => void hub.act(item, "acknowledge");
   const later = () => void hub.act(item, plan ? "acknowledge" : "later");
   const dismiss = () => void hub.act(item, "dismiss");
@@ -221,11 +231,15 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
           <h3 id={titleId}>{item.title}</h3>
           <WorkItemTags item={item} shortId tags />
           {item.summary && <p className="work-card-summary">{item.summary}</p>}
+          {suggestion && <p className="work-card-tag-suggestion"><AppIcon name="tag" size={13} />{t("Suggested tag")}<TagChip name={suggestion.name} title={suggestion.description} />
+            <small>{t(suggestion.tasks.length === 1 ? "for one open task" : "for {count} open tasks", { count: suggestion.tasks.length })}</small>
+            <Button size="small" variant="minimal" onClick={review}>{t("Review")}</Button></p>}
           <button type="button" className="work-card-more" onClick={() => setDetail(true)}>{t(plan ? "Read the plan" : "Details")}<AppIcon name="chevronRight" size={13} /></button>
           {running ? <p className="work-card-running" role="status"><ActivitySpinner size={13} />{t("This session is working on this task.")}</p>
             : <WorkStartButtons preferred={preferredStart} here disabled={working} compact onStart={start => onStart(item, start)} />}
           <footer>{working && <ActivitySpinner size={13} />}{decisions}</footer>
         </section>}
+    {reviewing && <TagProposalDialog hub={hub} shown={reviewing} onClose={() => setReviewing(null)} />}
     {detail && <AppWindow storageKey="codealta.desktop.work-item-window.v1" title={item.title} titleId={`${titleId}-window`} className="work-item-window"
       preferredSize={viewport => ({ width: Math.min(860, viewport.width - 80), height: Math.min(720, viewport.height - 80) })}
       onClose={() => setDetail(false)} closeLabel={t("Close")} onCancel={event => { event.preventDefault(); setDetail(false); }}
