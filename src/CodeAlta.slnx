@@ -95,6 +95,7 @@
     <Project Path="CodeAlta.Tests/CodeAlta.Tests.csproj" />
     <Project Path="CodeAlta.Tests.LockProbe/CodeAlta.Tests.LockProbe.csproj" />
     <Project Path="CodeAlta.Tests.TinyMcpServer/CodeAlta.Tests.TinyMcpServer.csproj" />
+    <Project Path="CodeAlta.Tests.FakeLlamaServer/CodeAlta.Tests.FakeLlamaServer.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="CodeAlta.Acp.Generator/CodeAlta.Acp.Generator.csproj" />

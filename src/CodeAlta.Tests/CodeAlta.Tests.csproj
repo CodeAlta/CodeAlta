@@ -36,6 +36,8 @@
     <ProjectReference Include="..\CodeAlta.Plugin.Jira\CodeAlta.Plugin.Jira.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.Mcp\CodeAlta.Plugin.Mcp.csproj" />
     <ProjectReference Include="..\CodeAlta.Tests.TinyMcpServer\CodeAlta.Tests.TinyMcpServer.csproj" />
+    <!-- The llama-server of the model host tests, packed as the builds of a fake GitHub. -->
+    <ProjectReference Include="..\CodeAlta.Tests.FakeLlamaServer\CodeAlta.Tests.FakeLlamaServer.csproj" />
   </ItemGroup>
 
   <ItemGroup>

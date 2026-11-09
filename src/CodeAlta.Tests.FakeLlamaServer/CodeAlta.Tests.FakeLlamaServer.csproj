@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A llama-server for the tests of the model host: what CodeAlta asks of llama.cpp (its version, its devices, a router
+       on loopback with a key), from a fake-llama.json beside it. The tests pack it as the builds of a fake GitHub. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Kestrel comes from the shared framework of ASP.NET Core, named in the runtimeconfig.json of this program. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>
