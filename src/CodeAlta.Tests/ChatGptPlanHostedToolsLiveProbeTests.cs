@@ -151,8 +151,9 @@ public sealed class ChatGptPlanHostedToolsLiveProbeTests
     {
         // The catalog of the subscription offers the priority tier (gpt-6-astra) and the request takes it, but the
         // response starts as "auto" and is served as "default", as without a tier; "fast" is refused (400 Unsupported
-        // service_tier: fast). Codex's own backend routes the tier with an x-codex-routing-hint header: it changes nothing
-        // here (live probes of 2026-11-09, gpt-6-astra). The fast mode of a Codex session asks it all the same.
+        // service_tier: fast). The x-codex-routing-hint header of Codex changes nothing here, and the Codex CLI on its own
+        // backend is served "default" as well for the same Pro account with credits (live probes of 2026-11-09,
+        // gpt-6-astra, gpt-6-luna). The fast mode of a Codex session asks it all the same.
         var body = JsonNode.Parse(ChatGptPlanRequestNormalizer.Normalize(BinaryData.FromString(Request(null)), isHttp: true).ToString())!.AsObject();
         body["service_tier"] = "priority";
         var result = await PostAsync(BinaryData.FromString(body.ToJsonString()));
