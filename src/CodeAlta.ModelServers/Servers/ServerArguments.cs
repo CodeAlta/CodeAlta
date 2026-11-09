@@ -46,9 +46,17 @@ public static partial class ServerArguments
     public static bool IsRefused(string option)
     {
         var name = option.TrimStart('-').Split('=', 2)[0].ToLowerInvariant().Replace('_', '-');
-        return Refused.Contains(name) || name.StartsWith("mcp", StringComparison.Ordinal) || name.StartsWith("tools", StringComparison.Ordinal)
-            || name.StartsWith("ssl", StringComparison.Ordinal) || name.StartsWith("hf-", StringComparison.Ordinal);
+        // By families, not one by one: llama.cpp adds options and aliases with each build, and one that reads or writes a
+        // file, runs a program, opens the network or names a model must not get in through a name not listed yet.
+        return Refused.Contains(name) || RefusedFamily().IsMatch(name) || RefusedAlias().IsMatch(name);
     }
+
+    [GeneratedRegex(@"(^|-)(file|files|dir|path|paths|url|proxy|mcp|ffmpeg|ffprobe|video|tool|tools|agent|repo|hf|log|logs|logdir|media|ssl|cors|webui|ui|api|host|port|props|alias|offline|lora|control|rpc|connect|preset|model|models|image|grammar|prompt-cache|lookup-cache|slot-save|docker|exec|script|plugin)(-|$)")]
+    private static partial Regex RefusedFamily();
+
+    // The short aliases of options that name a file, a model or a download.
+    [GeneratedRegex(@"^(m|mm|mu|md|mmu|a|hfr|hff|hft|hfd|lcs|lcd|jf|dr|o|lp|ld)$")]
+    private static partial Regex RefusedAlias();
 
     /// <summary>Checks the options a person or an agent gave a server.</summary>
     /// <param name="definition">The server.</param>

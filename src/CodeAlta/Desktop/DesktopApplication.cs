@@ -811,15 +811,18 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var sessionHosts = new SessionHosts.SessionHostRegistry(new SessionHosts.LocalSessionHost(host));
                 // The paired machines, the sessions agents start on them and the CodeAlta Servers of this instance: wired here,
                 // started once the window shows the application, with no key and no network for a profile that stays local.
-                var fleetStartup = Fleet.DesktopFleetStartup.Create(host, sessionHosts, Environment.MachineName, DesktopCommandLine.Version, privateNetworks: privateNetworks);
+                // The model host of this computer: its node API offers its servers to the paired computers too. An instance on
+                // explicit roots (automation, tests) runs none and downloads nothing.
+                var localModelHost = roots.Home is null ? CodeAlta.Fleet.FleetModelHosts.Create(host.CatalogOptions, serversOutliveHost: false) : null;
+                var fleetStartup = Fleet.DesktopFleetStartup.Create(host, sessionHosts, Environment.MachineName, DesktopCommandLine.Version, privateNetworks: privateNetworks,
+                    modelServers: localModelHost);
                 fleet = fleetStartup.Fleet;
                 remoteChildren = fleetStartup.RemoteChildren;
                 fleetServers = fleetStartup.Servers;
                 desktopNode = fleetStartup.Node;
                 // The model servers of this computer, and those of the paired machines. An instance on explicit roots
                 // (automation, tests) runs none and downloads nothing.
-                modelServers = new ModelServers.DesktopModelServers(roots.Home is null ? CodeAlta.Fleet.FleetModelHosts.Create(host.CatalogOptions, serversOutliveHost: false) : null,
-                    fleet, modelServerTransports);
+                modelServers = new ModelServers.DesktopModelServers(localModelHost, fleet, modelServerTransports);
                 modelServers.SaveLocalProvider = async (key, name, server, token) =>
                 {
                     var store = new CodeAltaConfigStore(host.CatalogOptions);

@@ -22,7 +22,7 @@ export type BuildCandidate = Readonly<{ backend: string; asset?: string; verdict
 export type InstalledBuild = Readonly<{ tag: string; build: number; backend: string; backendVersion?: string; folder: string; sizeBytes: number; installedAt: string;
   devices: readonly LlamaDevice[]; versionLine?: string; current: boolean; previous: boolean; bad: boolean; source: string }>;
 
-export type StoredFile = Readonly<{ path: string; size: number; kind: string; shared: boolean }>;
+export type StoredFile = Readonly<{ path: string; size: number; kind: string; shared: boolean; sha256?: string }>;
 
 export type StoredModel = Readonly<{ id: string; repo: string; tag: string; revision: string; files: readonly StoredFile[]; sizeBytes: number; freedBytes: number;
   vision: boolean; state: "ready" | "incomplete" | "downloading"; modelPath?: string; mmprojPath?: string; modified?: string }>;

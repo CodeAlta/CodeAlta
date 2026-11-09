@@ -124,6 +124,9 @@ internal sealed class DesktopNode : IAsyncDisposable
     /// <summary>Gets the names of the servers this computer is linked to, whose relay can reach it; null for none.</summary>
     public Func<IReadOnlyList<string>>? Servers { get; init; }
 
+    /// <summary>Gets the model host of this computer, whose servers its paired computers manage and use; null for none.</summary>
+    public CodeAlta.ModelServers.ModelHost? ModelServers { get; init; }
+
     /// <summary>
     /// Gets what records a computer that paired with this one both ways as a machine of this computer
     /// (<see cref="DesktopFleet.AddPairedBackAsync"/>): whether it was recorded. Null pairs one way only.
@@ -454,6 +457,7 @@ internal sealed class DesktopNode : IAsyncDisposable
             Host = _host, Identity = identity, TrustedDevices = _trusted, Name = Name, Version = _version,
             PairingAddresses = () => Volatile.Read(ref _addresses),
             PairBack = PairBackAsync,
+            ModelServers = ModelServers,
         })
         {
             Policy = Policy,

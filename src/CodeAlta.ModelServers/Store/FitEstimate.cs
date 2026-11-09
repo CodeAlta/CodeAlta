@@ -26,8 +26,8 @@ public static class FitEstimate
         var need = quant.TotalBytes + GiB + quant.ModelBytes / 10;
         var discrete = hardware.Gpus.Where(static gpu => gpu.MemoryBytes is > 0 && !gpu.Integrated).Select(static gpu => gpu.MemoryBytes!.Value).OrderDescending().ToList();
         // Apple Silicon and the processors with a large shared memory (Strix Halo) run on their integrated GPU.
-        if (discrete.Count == 0 && hardware.Gpus.FirstOrDefault(static gpu => gpu.Integrated && gpu.Vendor is "apple" || gpu.MemoryBytes > 16 * GiB) is { MemoryBytes: { } shared })
-            discrete.Add(hardware.Gpus.First(static gpu => gpu.Vendor == "apple") is { } apple ? shared * 3 / 4 : shared);
+        if (discrete.Count == 0 && hardware.Gpus.FirstOrDefault(static gpu => gpu.Integrated && (gpu.Vendor == "apple" || gpu.MemoryBytes > 16 * GiB)) is { MemoryBytes: { } shared } integrated)
+            discrete.Add(integrated.Vendor == "apple" ? shared * 3 / 4 : shared);
         var ram = hardware.MemoryBytes ?? 0;
         if (discrete.Count > 0 && need <= discrete[0])
             return new FitResult("gpu", $"Fits on one GPU ({Gb(need)} of {Gb(discrete[0])}).", true);

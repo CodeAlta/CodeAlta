@@ -92,17 +92,49 @@ public sealed class ModelStore
         return (repo, tag.ToUpperInvariant());
     }
 
+    private static bool IsInside(string folder, string path)
+    {
+        var root = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return Path.GetFullPath(path).StartsWith(root, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    }
+
+    // Every snapshot of a repository: a quantization downloaded at an older revision stays with it while another one moves
+    // main. A quantization in several snapshots is the one of main, else the newest.
     private List<StoredModel> ScanRepo(string folder, string repo)
     {
         var refs = Path.Combine(folder, "refs", "main");
         var commit = File.Exists(refs) ? File.ReadAllText(refs).Trim() : null;
         var snapshots = Path.Combine(folder, "snapshots");
         if (!Directory.Exists(snapshots)) return [];
-        // The revision of main, or the newest snapshot when main names none.
-        var snapshot = commit is not null && Directory.Exists(Path.Combine(snapshots, commit)) ? Path.Combine(snapshots, commit)
-            : Directory.EnumerateDirectories(snapshots).OrderByDescending(Directory.GetLastWriteTimeUtc).FirstOrDefault();
-        if (snapshot is null) return [];
-        var revision = Path.GetFileName(snapshot);
+        var ordered = Directory.EnumerateDirectories(snapshots)
+            .OrderByDescending(snapshot => string.Equals(Path.GetFileName(snapshot), commit, StringComparison.Ordinal))
+            .ThenByDescending(Directory.GetLastWriteTimeUtc).ToList();
+        var scanned = ordered.Select(snapshot => (Snapshot: snapshot, Entries: ReadSnapshot(snapshot))).ToList();
+        // How many quantizations of every snapshot use each file: what removing one frees.
+        var uses = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var (_, entries) in scanned)
+        {
+            foreach (var quant in GgufNames.Quantizations(entries.Select(static entry => entry.File).ToList()))
+            {
+                foreach (var identity in quant.Files.Select(file => entries.First(entry => entry.File.Path == file.Path).Identity).Distinct())
+                    uses[identity] = uses.GetValueOrDefault(identity) + 1;
+            }
+        }
+
+        var models = new List<StoredModel>();
+        foreach (var (snapshot, entries) in scanned)
+        {
+            foreach (var model in ModelsOf(snapshot, entries, repo, uses))
+            {
+                if (!models.Any(known => string.Equals(known.Tag, model.Tag, StringComparison.OrdinalIgnoreCase))) models.Add(model);
+            }
+        }
+
+        return models;
+    }
+
+    private static List<(HubFile File, string Identity, string Full, DateTime Modified)> ReadSnapshot(string snapshot)
+    {
         var entries = new List<(HubFile File, string Identity, string Full, DateTime Modified)>();
         foreach (var path in Directory.EnumerateFiles(snapshot, "*.gguf", SearchOption.AllDirectories))
         {
@@ -125,15 +157,14 @@ public sealed class ModelStore
             entries.Add((new HubFile(relative, size, null), identity, path, info.LastWriteTimeUtc));
         }
 
-        var files = entries.Select(static entry => entry.File).ToList();
-        var quants = GgufNames.Quantizations(files);
-        var uses = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var quant in quants)
-        {
-            foreach (var identity in quant.Files.Select(file => entries.First(entry => entry.File.Path == file.Path).Identity).Distinct())
-                uses[identity] = uses.GetValueOrDefault(identity) + 1;
-        }
+        return entries;
+    }
 
+    private static List<StoredModel> ModelsOf(string snapshot, List<(HubFile File, string Identity, string Full, DateTime Modified)> entries, string repo,
+        Dictionary<string, int> uses)
+    {
+        var revision = Path.GetFileName(snapshot);
+        var quants = GgufNames.Quantizations(entries.Select(static entry => entry.File).ToList());
         var models = new List<StoredModel>();
         foreach (var quant in quants)
         {
@@ -142,7 +173,7 @@ public sealed class ModelStore
             var size = unique.Sum(static entry => entry.File.Size);
             var freed = unique.Where(entry => uses.GetValueOrDefault(entry.Identity) <= 1).Sum(static entry => entry.File.Size);
             var stored = mine.Select(entry => new StoredFile(entry.File.Path, entry.File.Size, GgufNames.IsMmproj(entry.File.Path) ? "mmproj" : "model",
-                uses.GetValueOrDefault(entry.Identity) > 1)).ToList();
+                uses.GetValueOrDefault(entry.Identity) > 1, entry.Identity == entry.Full ? null : Path.GetFileName(entry.Identity))).ToList();
             var main = mine.First(entry => !GgufNames.IsMmproj(entry.File.Path));
             var mmproj = mine.FirstOrDefault(entry => GgufNames.IsMmproj(entry.File.Path));
             models.Add(new StoredModel($"{repo}:{quant.Tag}", repo, quant.Tag, revision, stored, size, freed, quant.Vision, "ready",
@@ -173,7 +204,9 @@ public sealed class ModelStore
                 try
                 {
                     File.Delete(path);
-                    if (blob is { Exists: true } && !IsLinkedElsewhere(folder, blob.FullName, path)) blob.Delete();
+                    // Only a blob of this repository's cache goes: a link to a file elsewhere (an original on another disk)
+                    // loses its link, never its target.
+                    if (blob is { Exists: true } && IsInside(Path.Combine(folder, "blobs"), blob.FullName) && !IsLinkedElsewhere(folder, blob.FullName, path)) blob.Delete();
                     freed += file.Size;
                 }
                 catch (IOException exception)
@@ -229,6 +262,12 @@ public sealed class ModelStore
         Directory.CreateDirectory(Path.GetDirectoryName(refs)!);
         SafeFile.WriteAllText(refs, revision);
     }
+
+    /// <summary>Whether the blob of a file is in the cache of a repository already: placed by another download.</summary>
+    /// <param name="repo">The repository.</param>
+    /// <param name="sha256">The SHA-256 of the file.</param>
+    /// <returns>Whether it is.</returns>
+    public bool HasBlob(string repo, string sha256) => File.Exists(Path.Combine(RepoFolder(repo), "blobs", sha256));
 
     /// <summary>The file a download writes before it is checked: <c>blobs/&lt;sha256&gt;.incomplete</c>, the name huggingface_hub uses.</summary>
     /// <param name="repo">The repository.</param>

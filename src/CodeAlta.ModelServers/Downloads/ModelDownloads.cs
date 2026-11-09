@@ -27,6 +27,8 @@ public sealed class ModelDownloads : IAsyncDisposable
     private readonly Lock _gate = new();
     private readonly List<DownloadInfo> _jobs = [];
     private readonly Dictionary<string, Running> _running = new(StringComparer.Ordinal);
+    // One download at a time of each file, by repository and SHA-256.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _blobGates = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _stopping = new();
     private long _lastNotify;
 
@@ -215,10 +217,29 @@ public sealed class ModelDownloads : IAsyncDisposable
             foreach (var file in missing)
             {
                 var sha = file.Sha256 ?? throw new DownloadException("checksum", $"{file.Path} has no SHA-256 in the repository: it is not downloaded.");
-                var part = _store.PartPath(repo, sha);
-                await _downloader.DownloadAsync(cancellationToken => _hub.ResolveAsync(repo, revision, file.Path, cancellationToken), part, file.Size, sha, 4,
-                    bytes => Received(id, running, bytes), () => Update(id, static current => current with { State = "checking" }), token).ConfigureAwait(false);
-                _store.Place(repo, revision, file.Path, part, sha);
+                // Two quantizations can share a file (a vision projector): one job fetches it, the other waits and links it.
+                var gate = _blobGates.GetOrAdd(repo.ToLowerInvariant() + "/" + sha, static _ => new SemaphoreSlim(1, 1));
+                await gate.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
+                    var part = _store.PartPath(repo, sha);
+                    if (_store.HasBlob(repo, sha))
+                    {
+                        Received(id, running, Math.Max(0, file.Size));
+                    }
+                    else
+                    {
+                        await _downloader.DownloadAsync(cancellationToken => _hub.ResolveAsync(repo, revision, file.Path, cancellationToken), part, file.Size, sha, 4,
+                            bytes => Received(id, running, bytes), () => Update(id, static current => current with { State = "checking" }), token).ConfigureAwait(false);
+                    }
+
+                    _store.Place(repo, revision, file.Path, part, sha);
+                }
+                finally
+                {
+                    gate.Release();
+                }
+
                 Update(id, static current => current with { State = "downloading" });
             }
 

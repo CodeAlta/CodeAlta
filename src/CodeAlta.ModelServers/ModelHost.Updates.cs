@@ -147,9 +147,11 @@ public sealed partial class ModelHost
                 }
 
                 UpdateTask(taskId, t => t with { State = "running", Message = $"Switching {backend} to {release.Tag}…" });
-                var previousSpeed = servers.SelectMany(static s => s.Status.Models).Select(static m => m.TokensPerSecond).OfType<double>().DefaultIfEmpty().Max();
+                // Each model is compared with its own speed before the switch, never with another model's.
+                var previousSpeeds = servers.SelectMany(static s => s.Status.Models.Where(static m => m.TokensPerSecond is > 0).Select(m => (Key: s.Definition.Id + "/" + m.Model, Speed: m.TokensPerSecond!.Value)))
+                    .ToDictionary(static entry => entry.Key, static entry => entry.Speed, StringComparer.Ordinal);
                 Builds.MakeCurrent(backend, release.Tag);
-                var (passed, reason) = await SwitchAndTestAsync(servers, previousSpeed, cancellationToken).ConfigureAwait(false);
+                var (passed, reason) = await SwitchAndTestAsync(servers, previousSpeeds, cancellationToken).ConfigureAwait(false);
                 if (passed)
                 {
                     Record(new UpdateRecord(_options.Time.GetUtcNow(), backend, current?.Tag, release.Tag, "updated", reason));
@@ -191,7 +193,7 @@ public sealed partial class ModelHost
     }
 
     // Each server goes to the new build; its first model loads and gives 8 tokens, at least half as fast as before.
-    private async Task<(bool Passed, string? Reason)> SwitchAndTestAsync(IReadOnlyList<ServerSupervisor> servers, double previousSpeed, CancellationToken cancellationToken)
+    private async Task<(bool Passed, string? Reason)> SwitchAndTestAsync(IReadOnlyList<ServerSupervisor> servers, IReadOnlyDictionary<string, double> previousSpeeds, CancellationToken cancellationToken)
     {
         foreach (var server in servers)
         {
@@ -200,11 +202,11 @@ public sealed partial class ModelHost
                 return (false, server.Status.Reason ?? $"{server.Definition.Name} did not start.");
             var model = server.Definition.Models.FirstOrDefault(m => Store.Find(m.Model) is not null)?.Model;
             if (model is null || server.Client is not { } client) continue;
-            var result = await client.TestAsync(server.RouterName(model), TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
+            var result = await client.TestAsync(server.RouterName(model), server.Definition.Purpose, TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
             if (!result.Passed) return (false, result.Message);
             if (server.ReadLog(400).Any(static line => line.Contains("offloaded 0/", StringComparison.Ordinal)))
                 return (false, "The model ran on the CPU: the GPU was not used.");
-            if (previousSpeed > 0 && result.TokensPerSecond is { } speed && speed < previousSpeed / 2)
+            if (previousSpeeds.TryGetValue(server.Definition.Id + "/" + model, out var previousSpeed) && result.TokensPerSecond is { } speed && speed < previousSpeed / 2)
                 return (false, string.Create(CultureInfo.InvariantCulture, $"{speed:0} tokens/s, less than half of the {previousSpeed:0} before."));
         }
 
@@ -223,6 +225,11 @@ public sealed partial class ModelHost
         return false;
     }
 
+    // A file on the disk is the one of the repository when their SHA-256 match: a file rewritten with the same size is new. A
+    // copy without a blob (no right to make links) has only its size to tell.
+    internal static bool SameFile(StoredFile mine, CodeAlta.ModelServers.HuggingFace.HubFile theirs)
+        => mine.Path == theirs.Path && (mine.Sha256 is { } sha && theirs.Sha256 is { } other ? string.Equals(sha, other, StringComparison.OrdinalIgnoreCase) : mine.Size == theirs.Size);
+
     private async Task<string> UpdateModelsAsync(CancellationToken cancellationToken)
     {
         var updated = new List<string>();
@@ -234,7 +241,7 @@ public sealed partial class ModelHost
                 if (details.Revision == model.Revision) continue;
                 var quant = CodeAlta.ModelServers.Store.GgufNames.Find(details.Files, model.Tag);
                 // A new commit that changed nothing of this model (a README) does not download it again.
-                if (quant is null || quant.Files.All(file => model.Files.Any(mine => mine.Path == file.Path && mine.Size == file.Size))) continue;
+                if (quant is null || quant.Files.All(file => model.Files.Any(mine => SameFile(mine, file)))) continue;
                 Download(model.Id, "update");
                 updated.Add(model.Id);
             }
@@ -259,7 +266,7 @@ public sealed partial class ModelHost
                 var details = await _hub.GetModelAsync(model.Repo, cancellationToken).ConfigureAwait(false);
                 if (details.Revision == model.Revision) continue;
                 var quant = CodeAlta.ModelServers.Store.GgufNames.Find(details.Files, model.Tag);
-                if (quant is not null && quant.Files.Any(file => !model.Files.Any(mine => mine.Path == file.Path && mine.Size == file.Size))) result.Add(model.Id);
+                if (quant is not null && quant.Files.Any(file => !model.Files.Any(mine => SameFile(mine, file)))) result.Add(model.Id);
             }
             catch (ModelHostException)
             {

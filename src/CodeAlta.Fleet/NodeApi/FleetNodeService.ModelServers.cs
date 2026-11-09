@@ -238,6 +238,12 @@ public sealed partial class FleetNodeService
             throw new FleetException(FleetErrorCodes.InvalidParams, null, "A request with this id is under way.");
         }
 
+        // The channel that asked closes: the request stops, and the server is not left generating for nobody.
+        _ = connection.Completion.ContinueWith(_ =>
+        {
+            try { stop.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         HttpResponseMessage response;
         try
         {

@@ -400,7 +400,7 @@ function ModelsTab({ machines, view, onView, busy, run, onServe }: {
   const rows = useMemo(() => modelRows(machines), [machines]);
   const facets = useMemo<Facet<ModelRow>[]>(() => [
     { id: "machine", values: row => [row.machine.name] },
-    { id: "use", values: row => [row.download ? "downloading" : row.usedBy.length > 0 ? "used" : "unused"] },
+    { id: "use", values: row => [row.download && isActive(row.download) ? "downloading" : row.usedBy.length > 0 ? "used" : "unused"] },
     { id: "publisher", values: row => [row.id.split("/")[0]] },
   ], []);
   const shown = useMemo(() => filterRows(rows, facets, view.values, view.query, row => [row.id, row.machine.name, ...row.usedBy].join(" ")), [rows, facets, view]);

@@ -109,13 +109,25 @@ export function serverRows(machines: readonly MachineStatus[]): ServerRow[] {
     status: entry.status!, server })) : []);
 }
 
-/** The rows of the Models tab, across machines: each model on disk, and each download of a model not there yet. */
+/** The last download of each model, kept while it runs or when it failed: a failed download stays in sight until it is resumed or another ends. */
+function shownDownloads(downloads: readonly DownloadInfo[]): Map<string, DownloadInfo> {
+  const last = new Map<string, DownloadInfo>();
+  for (const download of downloads) {
+    const key = download.model.toLowerCase();
+    const seen = last.get(key);
+    if (!seen || download.createdAt >= seen.createdAt) last.set(key, download);
+  }
+  for (const [key, download] of last) if (!isActive(download) && download.state !== "failed") last.delete(key);
+  return last;
+}
+
+/** The rows of the Models tab, across machines: each model on disk, and each download of a model not there yet, running or failed. */
 export function modelRows(machines: readonly MachineStatus[]): ModelRow[] {
   const rows: ModelRow[] = [];
   for (const entry of machines) {
     const status = entry.status;
     if (!status) continue;
-    const downloads = new Map(status.downloads.filter(isActive).map(download => [download.model.toLowerCase(), download]));
+    const downloads = shownDownloads(status.downloads);
     const users = (id: string) => status.servers.filter(server => server.definition.models.some(model => model.model.toLowerCase() === id.toLowerCase())).map(server => server.definition.name);
     for (const model of status.models) {
       rows.push({ key: `${entry.machine.id}/${model.id}`, machine: entry.machine, status, id: model.id, model, download: downloads.get(model.id.toLowerCase()) ?? null, usedBy: users(model.id) });

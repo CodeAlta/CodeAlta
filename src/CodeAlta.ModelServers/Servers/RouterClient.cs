@@ -158,7 +158,43 @@ public sealed partial class RouterClient
     /// <returns>Whether the router took it.</returns>
     public Task<bool> UnloadAsync(string model, CancellationToken cancellationToken) => PostModelAsync("/models/unload", model, cancellationToken);
 
-    /// <summary>Tests a model: 8 tokens at temperature 0.</summary>
+    /// <summary>Tests a model as its server serves it: 8 tokens for chats, a vector for embeddings, a ranking for rerank.</summary>
+    /// <param name="model">The model.</param>
+    /// <param name="purpose"><c>chat</c>, <c>embedding</c> or <c>rerank</c>.</param>
+    /// <param name="timeout">How long the load and the answer may take.</param>
+    /// <param name="cancellationToken">Ends the test.</param>
+    /// <returns>What it gave.</returns>
+    public Task<ServerTestResult> TestAsync(string model, string purpose, TimeSpan timeout, CancellationToken cancellationToken) => purpose switch
+    {
+        "embedding" => TestOtherAsync("/v1/embeddings", model, "\"input\":\"CodeAlta\"", "data", "embedding", timeout, cancellationToken),
+        "rerank" => TestOtherAsync("/v1/rerank", model, "\"query\":\"capital of France\",\"documents\":[\"Paris is the capital of France.\",\"Bananas are yellow.\"]", "results", null,
+            timeout, cancellationToken),
+        _ => TestAsync(model, timeout, cancellationToken),
+    };
+
+    private async Task<ServerTestResult> TestOtherAsync(string path, string model, string fields, string list, string? inner, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var body = "{\"model\":" + JsonSerializer.Serialize(model, ModelServersWireJson.Default.String) + "," + fields + "}";
+        try
+        {
+            using var response = await SendAsync(HttpMethod.Post, path, body, timeout, cancellationToken).ConfigureAwait(false);
+            var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return new ServerTestResult(false, null, null, $"The model answered {(int)response.StatusCode}: {text[..Math.Min(200, text.Length)]}");
+            using var document = JsonDocument.Parse(text);
+            var root = document.RootElement;
+            var items = root.ValueKind == JsonValueKind.Array ? root : root.TryGetProperty(list, out var found) ? found : default;
+            var passed = items.ValueKind == JsonValueKind.Array && items.GetArrayLength() > 0
+                && (inner is null || items[0].TryGetProperty(inner, out var vector) && vector.ValueKind == JsonValueKind.Array && vector.GetArrayLength() > 0);
+            return passed ? new ServerTestResult(true, null, null, path.EndsWith("embeddings", StringComparison.Ordinal) ? "An embedding came back." : "The documents came back ranked.")
+                : new ServerTestResult(false, null, null, "The model gave nothing back.");
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException && !cancellationToken.IsCancellationRequested)
+        {
+            return new ServerTestResult(false, null, null, $"The server did not answer the test: {exception.Message}");
+        }
+    }
+
+    /// <summary>Tests a model of chats: 8 tokens at temperature 0.</summary>
     /// <param name="model">The model.</param>
     /// <param name="timeout">How long the load and the generation may take.</param>
     /// <param name="cancellationToken">Ends the test.</param>

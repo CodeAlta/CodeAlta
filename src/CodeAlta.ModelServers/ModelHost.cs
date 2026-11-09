@@ -283,6 +283,8 @@ public sealed partial class ModelHost : IAsyncDisposable
 
                 EndTask(task.Id, failures.Count == 0 || installed.Count > 0 ? "done" : "failed",
                     string.Join(" ", new[] { installed.Count > 0 ? "Installed " + string.Join(", ", installed) + "." : null, failures.Count > 0 ? string.Join(" ", failures) : null }.OfType<string>()));
+                // A server that waited for its build starts now.
+                foreach (var backend in chosen) await StartWaitingServersAsync(definition => definition.Backend == backend).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is ModelHostException or IOException or UnauthorizedAccessException or InvalidDataException or HttpRequestException)
             {
@@ -470,24 +472,46 @@ public sealed partial class ModelHost : IAsyncDisposable
         {
             if (download.State == "done") RescanModels();
             DownloadEnded?.Invoke(download);
-            if (download.State == "done") _ = StartWaitingServersAsync(download.Model);
+            if (download.State == "done") _ = StartWaitingServersAsync(definition => definition.Models.Any(m => m.Model == download.Model));
         };
         return downloads;
     }
 
-    // A server whose models were not on disk yet starts once one arrives.
-    private async Task StartWaitingServersAsync(string model)
+    // A server that waited for its build or one of its models starts once it arrives. A router that runs already takes a
+    // model that arrived at its next restart, once none of its requests works: a restart now would cut an answer short.
+    private async Task StartWaitingServersAsync(Func<ServerDefinition, bool> concerned)
     {
-        foreach (var supervisor in Supervisors().Where(supervisor => supervisor.Definition.Enabled && supervisor.Definition.Models.Any(m => m.Model == model)))
+        foreach (var supervisor in Supervisors().Where(supervisor => supervisor.Definition.Enabled && concerned(supervisor.Definition)))
         {
             try
             {
                 if (supervisor.Status.State is "stopped" or "failed" or "waiting") await supervisor.StartAsync(_disposed.Token).ConfigureAwait(false);
-                else if (supervisor.Definition.Kind == ServerKinds.Several) await supervisor.UpdateAsync(supervisor.Definition, _disposed.Token).ConfigureAwait(false);
+                else if (supervisor.Definition.Kind == ServerKinds.Several) _ = RestartWhenIdleAsync(supervisor);
             }
             catch (Exception exception) when (exception is ModelHostException or IOException or OperationCanceledException)
             {
             }
+        }
+    }
+
+    private async Task RestartWhenIdleAsync(ServerSupervisor supervisor)
+    {
+        try
+        {
+            for (var waited = TimeSpan.Zero; waited < TimeSpan.FromHours(1); waited += TimeSpan.FromSeconds(15))
+            {
+                if (supervisor.Status.State != "ready") return;
+                if (supervisor.Status.Models.All(static model => model.BusySlots == 0))
+                {
+                    await supervisor.RestartAsync(_disposed.Token).ConfigureAwait(false);
+                    return;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(15), _options.Time, _disposed.Token).ConfigureAwait(false);
+            }
+        }
+        catch (Exception exception) when (exception is ModelHostException or IOException or OperationCanceledException)
+        {
         }
     }
 

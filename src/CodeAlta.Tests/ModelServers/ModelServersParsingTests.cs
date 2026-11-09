@@ -152,6 +152,30 @@ public sealed class ModelServersParsingTests
     }
 
     [TestMethod]
+    public void IsRefused_CoversTheFamiliesOfOptionsThatReachFilesProgramsOrTheNetwork()
+    {
+        foreach (var option in new[] { "--video-ffmpeg-dir", "--webui-mcp-proxy", "--grammar-file", "--log-prompts-dir", "--tools", "--model-draft", "-md", "--lora-scaled", "--rpc",
+                     "--chat-template-file", "--slot-save-path", "--hf-repo", "-hfr", "--api-key", "--host=0.0.0.0", "--log-file", "--mmproj-url", "--models-max", "--prompt-cache" })
+            Assert.IsTrue(ServerArguments.IsRefused(option), option);
+        foreach (var option in new[] { "--jinja", "--ctx-size", "-c", "--n-gpu-layers", "-ngl", "--flash-attn", "--cache-type-k", "--cache-reuse", "--temp", "--top-k", "--parallel", "--swa-full",
+                     "--reasoning-budget", "--chat-template", "--batch-size", "--split-mode", "--tensor-split", "--no-mmap", "--mlock", "--threads", "--draft-max" })
+            Assert.IsFalse(ServerArguments.IsRefused(option), option);
+    }
+
+    [TestMethod]
+    public void FitEstimate_UsesTheSharedMemoryOfALargeIntegratedGpu()
+    {
+        var quant = new QuantFiles("Q4_K_M", [], 20_000_000_000, 0, 4);
+        HardwareInventory Machine(GpuInfo gpu) => new("linux", "x64", null, 128L << 30, [gpu], new MachineLibraries(null, null, null, false, true, null), []);
+        var strixHalo = FitEstimate.For(quant, Machine(new GpuInfo("0", "amd", "AMD Radeon 8060S", 96L << 30, true, "gfx1151", null)));
+        Assert.AreEqual("gpu", strixHalo.Fit, "the GPU of a Strix Halo shares 96 GB");
+        var mac = FitEstimate.For(quant, Machine(new GpuInfo("0", "apple", "Apple M4 Pro", 24L << 30, true, null, null)));
+        Assert.AreEqual("partly", mac.Fit, "a Mac gives its GPU three quarters of its memory");
+        var small = FitEstimate.For(quant, Machine(new GpuInfo("0", "amd", "AMD Radeon Graphics", 512L << 20, true, "gfx1036", null)));
+        Assert.AreEqual("partly", small.Fit, "a small integrated GPU leaves the model to the processor");
+    }
+
+    [TestMethod]
     public void DisplayName_ReadsAsPeopleDo()
     {
         Assert.AreEqual("Qwen3.8 27B · UD-Q4_K_XL", GgufNames.DisplayName("unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL"));
@@ -318,6 +342,51 @@ public sealed class ModelServersParsingTests
         store.Remove("org/model-GGUF:Q4_K_L");
         Assert.IsEmpty(store.Scan());
         Assert.IsFalse(Directory.Exists(store.RepoFolder("org/model-GGUF")), "a repository left empty goes");
+    }
+
+    [TestMethod]
+    public void ModelStore_KeepsAQuantizationOfAnOlderRevision_AndNeverDeletesALinkedOriginal()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new ModelStore(temp.Path);
+        var source = Directory.CreateDirectory(Path.Combine(temp.Path, "src")).FullName;
+        void Put(string revision, string path, string sha, int size)
+        {
+            var part = Path.Combine(source, sha);
+            File.WriteAllBytes(part, new byte[size]);
+            store.Place("org/model-GGUF", revision, path, part, sha);
+        }
+
+        Put("old1", "model-Q8_0.gguf", "bbbb", 200);
+        Put("new2", "model-Q4_K_M.gguf", "aaaa", 100);
+        var models = store.Scan();
+        Assert.AreEqual("old1", models.Single(static m => m.Tag == "Q8_0").Revision, "a quantization of an older revision is still on the disk");
+        Assert.AreEqual("new2", models.Single(static m => m.Tag == "Q4_K_M").Revision);
+
+        // A snapshot that links to an original elsewhere (a model the person had before): removing it keeps the original.
+        var original = Path.Combine(Directory.CreateDirectory(Path.Combine(temp.Path, "elsewhere")).FullName, "mine.gguf");
+        File.WriteAllBytes(original, new byte[64]);
+        var snapshot = Directory.CreateDirectory(Path.Combine(store.RepoFolder("org/linked-GGUF"), "snapshots", "rev")).FullName;
+        try
+        {
+            File.CreateSymbolicLink(Path.Combine(snapshot, "linked-Q4_K_M.gguf"), original);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return; // this account may not make links: the rest is checked where it may
+        }
+
+        store.Remove("org/linked-GGUF:Q4_K_M");
+        Assert.IsTrue(File.Exists(original), "the target of a link outside the cache stays");
+    }
+
+    [TestMethod]
+    public void AModelUpdate_IsSeenByItsDigest_EvenAtTheSameSize()
+    {
+        var mine = new StoredFile("m-Q4_K_M.gguf", 100, "model", false, "aaaa");
+        Assert.IsTrue(ModelHost.SameFile(mine, new HubFile("m-Q4_K_M.gguf", 100, "AAAA")));
+        Assert.IsFalse(ModelHost.SameFile(mine, new HubFile("m-Q4_K_M.gguf", 100, "bbbb")), "the same size, other bytes");
+        Assert.IsTrue(ModelHost.SameFile(mine with { Sha256 = null }, new HubFile("m-Q4_K_M.gguf", 100, "bbbb")), "a copy without a blob has only its size");
     }
 
     [TestMethod]

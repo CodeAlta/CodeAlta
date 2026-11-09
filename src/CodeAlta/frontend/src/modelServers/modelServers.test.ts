@@ -71,6 +71,15 @@ test("The rows list each server and each model across machines, with the downloa
   assert.equal(models[1].model, null);
 });
 
+test("A failed download stays a row until a later download of its model ends", () => {
+  const download = (id: string, model: string, state: "failed" | "done", createdAt: string) => ({ id, model, state, done: 1, total: 2, bytesPerSecond: 0, files: 1, createdAt,
+    error: state === "failed" ? "disk full" : undefined });
+  const local = status({ downloads: [download("f", "u/Gemma-GGUF:Q8_0", "failed", "2026-11-09T10:00:00Z"), download("f2", "u/Phi-GGUF:Q4_0", "failed", "2026-11-09T10:00:00Z"),
+    download("d2", "u/Phi-GGUF:Q4_0", "done", "2026-11-09T11:00:00Z")] });
+  const models = modelRows([machine("local", local)]);
+  assert.deepEqual(models.map(row => [row.id, row.download?.error]), [["u/Gemma-GGUF:Q8_0", "disk full"]]);
+});
+
 test("A ready server that loads a model says it loads, and its activity adds its models up", () => {
   assert.equal(serverStateOf(server("a", "m:Q", "ready", "loading")), "loading");
   assert.equal(serverStateOf(server("a", "m:Q", "failed")), "failed");

@@ -40,10 +40,11 @@ internal sealed class DesktopFleetStartup
     /// <param name="privateNetworks">
     /// The private networks of this computer, the first of which that finds it names it in the pairing links; null for Tailscale alone.
     /// </param>
+    /// <param name="modelServers">The model host of this computer, which its node API offers its paired computers; null for none.</param>
     /// <returns>The fleet.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     public static DesktopFleetStartup Create(CodeAltaHost host, SessionHostRegistry sessionHosts, string machineName, string version, HttpMessageHandler? handler = null,
-        CodeAlta.Plugins.PrivateNetworks.PrivateNetworkRegistry? privateNetworks = null)
+        CodeAlta.Plugins.PrivateNetworks.PrivateNetworkRegistry? privateNetworks = null, CodeAlta.ModelServers.ModelHost? modelServers = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(sessionHosts);
@@ -70,6 +71,7 @@ internal sealed class DesktopFleetStartup
         // relays too: the work they start here follows the policies of those servers.
         var node = new DesktopNode(host, machineName, version, host.CatalogOptions.FleetRoot)
         {
+            ModelServers = modelServers,
             FindTailnet = privateNetworks is null ? Mcp.DesktopTailnet.FindAsync : async token =>
                 await privateNetworks.FindThisComputerAsync(token).ConfigureAwait(false) is { } found
                     ? new Mcp.DesktopTailnetNode(found.Presence.Name, found.Presence.Addresses, found.Network.DisplayName)

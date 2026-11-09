@@ -97,6 +97,11 @@ public sealed partial class FleetNodeClient
         // The parts may come before the answer of the call: they wait here.
         var parts = Channel.CreateUnbounded<FleetLlamaHttpChunk?>(new UnboundedChannelOptions { SingleReader = true });
         _llamaAnswers[id] = parts;
+        // A channel that closes ends the answer with an error: the provider retries or says why, instead of waiting forever.
+        _ = _channel.Connection.Completion.ContinueWith(_ =>
+        {
+            if (_llamaAnswers.TryRemove(id, out var orphan)) orphan.Writer.TryComplete(new IOException("The channel to the machine of the model server closed."));
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         var path = request.RequestUri is { } uri ? uri.PathAndQuery : "/";
         FleetLlamaHttpResponse answer;
         try

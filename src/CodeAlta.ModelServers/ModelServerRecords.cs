@@ -95,7 +95,8 @@ public sealed record InstalledBuild(string Tag, int Build, string Backend, strin
 /// <param name="Size">Its size in bytes.</param>
 /// <param name="Kind"><c>model</c>, <c>mmproj</c> or <c>draft</c>.</param>
 /// <param name="Shared">Whether another model of the repository uses it too.</param>
-public sealed record StoredFile(string Path, long Size, string Kind, bool Shared);
+/// <param name="Sha256">Its SHA-256, the name of its blob; null for a copy without a blob (no right to make links).</param>
+public sealed record StoredFile(string Path, long Size, string Kind, bool Shared, string? Sha256 = null);
 
 /// <summary>A model on disk: one quantization of a repository at a revision, with its parts.</summary>
 /// <param name="Id">Its id, <c>org/repo:TAG</c>.</param>

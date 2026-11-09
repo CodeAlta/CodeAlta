@@ -53,6 +53,7 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
     private Task? _monitor;
     private bool _stopping;
     private DateTimeOffset _lastFailure;
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
     // The names the router gives the models whose section it renamed, by the model.
     private readonly Dictionary<string, string> _routerNames = new(StringComparer.OrdinalIgnoreCase);
 
@@ -134,14 +135,25 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
     /// <returns>A task that ends once it is applied.</returns>
     public async Task UpdateAsync(ServerDefinition definition, CancellationToken cancellationToken)
     {
-        bool running;
-        lock (_gate)
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            _definition = definition;
-            running = _process is not null;
+            bool running;
+            lock (_gate)
+            {
+                _definition = definition;
+                running = _process is not null;
+            }
+
+            // A server turned off stops and starts nothing; one that stays on restarts to take its new settings.
+            if (running) await StopCoreAsync(cancellationToken).ConfigureAwait(false);
+            if (running && definition.Enabled) await StartCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycle.Release();
         }
 
-        if (running) await RestartAsync(cancellationToken).ConfigureAwait(false);
         Changed?.Invoke();
     }
 
@@ -195,6 +207,14 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
     /// <exception cref="ModelHostException">Its build is not installed, or it does not start.</exception>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { await StartCoreAsync(cancellationToken).ConfigureAwait(false); }
+        finally { _lifecycle.Release(); }
+    }
+
+    // Starts, stops, restarts and changes run one at a time (_lifecycle): two starts at once would leave a process nobody stops.
+    private async Task StartCoreAsync(CancellationToken cancellationToken)
+    {
         ServerDefinition definition;
         lock (_gate)
         {
@@ -237,6 +257,11 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
                      || name.StartsWith("HF_", StringComparison.OrdinalIgnoreCase) || name is "HUGGINGFACE_HUB_CACHE" or "MODEL_ENDPOINT").ToList())
             start.Environment.Remove(name);
         start.Environment["LLAMA_CACHE"] = Path.Combine(_folder, "cache");
+        // llama.cpp reads a config.ini of the person's configuration folder by itself: the server gets an empty one of its
+        // own, so that no option CodeAlta refuses (tools, media paths, logs) comes back through it.
+        var configuration = Directory.CreateDirectory(Path.Combine(_folder, "config")).FullName;
+        foreach (var name in new[] { "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME" }) start.Environment[name] = configuration;
+        if (!OperatingSystem.IsWindows()) start.Environment["HOME"] = configuration;
         Process process;
         try
         {
@@ -267,6 +292,13 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
     /// <param name="cancellationToken">Ends the wait.</param>
     /// <returns>A task that ends once it stopped.</returns>
     public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { await StopCoreAsync(cancellationToken).ConfigureAwait(false); }
+        finally { _lifecycle.Release(); }
+    }
+
+    private async Task StopCoreAsync(CancellationToken cancellationToken)
     {
         Process? process;
         RouterClient? client;
@@ -313,13 +345,21 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
     /// <returns>A task that ends once it started again.</returns>
     public async Task RestartAsync(CancellationToken cancellationToken)
     {
-        await StopAsync(cancellationToken).ConfigureAwait(false);
-        lock (_gate)
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            _status = _status with { Restarts = 0 };
-        }
+            await StopCoreAsync(cancellationToken).ConfigureAwait(false);
+            lock (_gate)
+            {
+                _status = _status with { Restarts = 0 };
+            }
 
-        await StartAsync(cancellationToken).ConfigureAwait(false);
+            await StartCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
     }
 
     /// <summary>Waits until the server answers, at most for a time.</summary>

@@ -33,15 +33,18 @@ public sealed partial class ModelHost
         {
             var supervisor = AddSupervisor(definition);
             if (definition.Enabled) await TryStartAsync(supervisor, cancellationToken).ConfigureAwait(false);
+            // A build of its backend that is not installed yet is installed; the server starts once it is.
+            if (definition.Enabled && Builds.Find(definition.Backend, definition.Build) is null) InstallBuilds([definition.Backend], definition.Build, "server " + definition.Id);
             // A model of the server that is not on disk yet is downloaded.
             foreach (var model in definition.Models.Where(model => Store.Find(model.Model) is null)) Download(model.Model, "server " + definition.Id);
         }
         else
         {
             var wasRunning = existing.Status.State != "stopped";
+            // UpdateAsync stops a server turned off and restarts one that stays on.
             await existing.UpdateAsync(definition, cancellationToken).ConfigureAwait(false);
             if (!wasRunning && definition.Enabled) await TryStartAsync(existing, cancellationToken).ConfigureAwait(false);
-            if (wasRunning && !definition.Enabled) await existing.StopAsync(cancellationToken).ConfigureAwait(false);
+            if (definition.Enabled && Builds.Find(definition.Backend, definition.Build) is null) InstallBuilds([definition.Backend], definition.Build, "server " + definition.Id);
             foreach (var model in definition.Models.Where(model => Store.Find(model.Model) is null)) Download(model.Model, "server " + definition.Id);
         }
 
@@ -121,7 +124,7 @@ public sealed partial class ModelHost
             return new ServerTestResult(false, null, null, supervisor.Status.Reason ?? $"{supervisor.Definition.Name} does not run.");
         var target = model ?? supervisor.Definition.Models.FirstOrDefault(m => Store.Find(m.Model) is not null)?.Model;
         if (target is null) return new ServerTestResult(false, null, null, "None of its models is on this machine yet.");
-        return await client.TestAsync(supervisor.RouterName(target), TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
+        return await client.TestAsync(supervisor.RouterName(target), supervisor.Definition.Purpose, TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Reads the end of the log of a server.</summary>
