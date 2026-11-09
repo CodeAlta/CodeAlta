@@ -405,6 +405,8 @@ public sealed partial class ModelHost : IAsyncDisposable
         }
 
         RescanModels();
+        // The build of the new channel, and Lemonade's when they are allowed now, show at once rather than at the next check.
+        _ = Task.Run(() => CheckLatestAsync(force: true, _disposed.Token), CancellationToken.None);
     }
 
     /// <summary>Gets the settings.</summary>

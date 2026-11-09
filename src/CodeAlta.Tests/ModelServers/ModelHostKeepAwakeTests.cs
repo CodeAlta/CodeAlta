@@ -73,6 +73,40 @@ public sealed class ModelHostKeepAwakeTests
         answer.SetResult(new HttpResponseMessage(HttpStatusCode.NotFound));
     }
 
+    [TestMethod]
+    public async Task APolicyThatAllowsLemonade_ReadsItsNewestBuildAtOnce()
+    {
+        using var temp = TestTempDirectory.Create();
+        var asked = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        await using var host = new ModelHost(new ModelHostOptions
+        {
+            SharedRoot = Path.Combine(temp.Path, "shared"), InstanceRoot = Path.Combine(temp.Path, "instance"),
+            NetworkHandler = new RecordingHandler(asked),
+        });
+        host.SetSettings(host.Settings with { Updates = host.Settings.Updates with { AllowLemonadeRocm = true } });
+        for (var i = 0; i < 200 && !asked.Any(static path => path.Contains("lemonade-sdk/llamacpp-rocm", StringComparison.Ordinal)); i++) await Task.Delay(25);
+        Assert.IsTrue(asked.Any(static path => path.EndsWith("/repos/lemonade-sdk/llamacpp-rocm/releases/latest", StringComparison.Ordinal)), string.Join(", ", asked));
+    }
+
+    // Answers the GitHub API: a stable release that names b12110, that build, and Lemonade's newest; records what is asked.
+    private sealed class RecordingHandler(System.Collections.Concurrent.ConcurrentQueue<string> asked) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            asked.Enqueue(path);
+            var json = path switch
+            {
+                "/repos/ggml-org/llama.cpp/releases/latest" => """{ "tag_name": "v0.9.0", "assets": [ { "name": "nightly-tag.txt", "browser_download_url": "https://github.example/nightly-tag.txt", "size": 7 } ] }""",
+                "/nightly-tag.txt" => "b12110",
+                "/repos/ggml-org/llama.cpp/releases/tags/b12110" => """{ "tag_name": "b12110", "published_at": "2026-11-04T00:00:00Z", "assets": [ { "name": "llama-b12110-bin-win-vulkan-x64.zip", "browser_download_url": "https://x/v", "size": 1, "digest": "sha256:aa" } ] }""",
+                "/repos/lemonade-sdk/llamacpp-rocm/releases/latest" => """{ "tag_name": "b1371", "published_at": "2026-11-08T00:00:00Z", "assets": [ { "name": "llama-b1371-windows-rocm-gfx110X-x64.zip", "browser_download_url": "https://x/l", "size": 1, "digest": "sha256:bb" } ] }""",
+                _ => null,
+            };
+            return Task.FromResult(json is null ? new HttpResponseMessage(HttpStatusCode.NotFound) : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) });
+        }
+    }
+
     private sealed class SteppedTime(DateTimeOffset now) : TimeProvider
     {
         private DateTimeOffset _now = now;
