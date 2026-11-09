@@ -543,6 +543,18 @@ internal sealed partial class ClaudeCodeSession
                         cancellationToken)
                     .ConfigureAwait(false);
                 break;
+            case "notification" when ClaudeCodeJson.GetString(message, "text") is { Length: > 0 } notice:
+                // What the CLI shows in its own window, such as fast mode retried at standard speed for want of usage
+                // credits (key fast-mode-overage-rejected), a model the organization refuses, or a compaction that failed.
+                await onSessionUpdate(
+                        new AgentTurnSessionUpdate
+                        {
+                            Kind = ClaudeCodeJson.GetString(message, "color") is "error" or "warning" ? AgentSessionUpdateKind.Warning : AgentSessionUpdateKind.Info,
+                            Message = $"Claude Code: {notice}",
+                        },
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                break;
             case "api_retry":
                 var attempt = ClaudeCodeJson.GetInt64(message, "attempt");
                 var maxRetries = ClaudeCodeJson.GetInt64(message, "max_retries");

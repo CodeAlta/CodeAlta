@@ -409,6 +409,43 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ANotificationOfTheCli_IsAWarningOfTheTurn()
+    {
+        var cli = new ClaudeCodeFakeCli
+        {
+            OnUserMessage = static (process, user) =>
+            {
+                // What Claude Code 2.1.309 writes when a fast request is refused for want of usage credits and run again at
+                // standard speed.
+                process.Emit(new JsonObject
+                {
+                    ["type"] = "system", ["subtype"] = "notification", ["key"] = "fast-mode-overage-rejected",
+                    ["text"] = "Fast mode disabled · Out of usage credits", ["priority"] = "immediate", ["color"] = "error",
+                });
+                var usage = CacheUsage(read: 2000, write: 300, write1h: 300, write5m: 0);
+                usage["speed"] = "standard";
+                process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.TextBlock("one")), usage: usage);
+                process.EmitResult("one", user);
+                return Task.CompletedTask;
+            },
+        };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var updates = new List<AgentTurnSessionUpdate>();
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateRequest([User("one")]) with { FastMode = true },
+            static (_, _) => ValueTask.CompletedTask,
+            (update, _) =>
+            {
+                updates.Add(update);
+                return ValueTask.CompletedTask;
+            }).WaitAsync(Timeout);
+
+        Assert.IsTrue(updates.Any(static update => update.Kind == AgentSessionUpdateKind.Warning && update.Message == "Claude Code: Fast mode disabled · Out of usage credits"));
+        Assert.IsFalse(response.Usage!.LastOperation!.FastMode, "the answer ran at standard speed");
+    }
+
+    [TestMethod]
     public async Task FastMode_ThatTheCliRefuses_IsAWarningOfTheTurn()
     {
         var cli = new ClaudeCodeFakeCli { FastModeState = "off", RefuseFlagSettings = true };

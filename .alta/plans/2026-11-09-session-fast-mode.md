@@ -133,6 +133,7 @@ flowchart LR
 
   In `site/docs/model-providers/setup.md`, next to `service_tier`, say that a session can override it.
 - [x] 8. **The speed that actually ran (added on request, after the approval).** The Anthropic API reports `usage.speed` of the `message_start` event (`ReadFastMode` of `ChatClientTurnExecutor`, read from the raw SDK event as the fallback and the refusal are), and Claude Code `usage.speed` of its assistant messages (`ClaudeCodeSession.Reducer.CreateUsage`), as OpenAI and Codex report `service_tier`. The runtime forgets a reported speed when the choice of fast mode changes. The chip dims its ⚡, and its tooltip says "The last turn ran at standard speed.", when a session chose fast mode and the last turn ran at standard speed. SDK 13.6.0 is the latest release and has `Usage.Speed`: no dependency change. Tests: `AnthropicFastModeTests`, `ClaudeCodeTurnExecutorTests`, `SessionOptionsRuntimeTests`, `sessionOptions.test.tsx`. Whether the ChatGPT Codex backend sends `service_tier` is not verified.
+  - First manual test (Claude Code, Opus 5.5): the CLI sent `speed: "fast"` with each request and every answer came back `"speed":"standard"`, so the dimmed ⚡ was right. The account is out of usage credits (`cachedExtraUsageDisabledReason: "out_of_credits"` in `~/.claude.json`), and the CLI retries such requests at standard speed with a `system` `notification` (`fast-mode-overage-rejected`) that CodeAlta ignored. Claude Code's notifications are now warnings (`error`, `warning`) or info of the turn.
 
 ## How it is verified
 
