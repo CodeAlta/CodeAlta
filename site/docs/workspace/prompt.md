@@ -144,11 +144,12 @@ In CodeAlta Desktop, type `#` at the start of a word to name something of the pr
 </figure>
 
 
+{.table}
 | Kind | Inserted as | In a message |
 | --- | --- | --- |
 | Issue or pull request | `[#18](https://github.com/org/repo/issues/18)` | a link to its page |
-| Task | `` `p53b` `` (its short id) | a [chip](../work-items.md#short-ids) that shows and opens the task |
-| Plan | `[Release plan](.alta/plans/2026-10-01-release.md)` | a link to its file |
+| Task | its short id, `p53b`, between backticks | a [chip](../work-items.md#short-ids) that shows and opens the task |
+| Plan | a link to its file under `.alta/plans/`, named by its title | a link to its file |
 | Session | `[Review the parser](session:<id>)` | a [chip](../sessions/readme.md#links-in-messages) that opens the session |
 
 The buttons above the list show or hide each kind: **Issues** (`Ctrl+1`), **Tasks** (`Ctrl+2`), **Plans** (`Ctrl+3`) and **Sessions** (`Ctrl+4`; `Cmd` on macOS). The sessions are hidden at first. With `Shift`, or `Alt`+click, a kind is shown alone. What you choose stays for the next `#` of that prompt. **Include closed** (`Ctrl+I`) shows or hides closed issues, done tasks and plans.
