@@ -10,8 +10,8 @@ import { AppIcon } from "../AppIcon";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 import { WorkItemTags, WorkItemText, WorkStartButtons } from "./WorkItemCards";
-import { createdDay, filterWorkItems, sortWorkItems, stageCounts, taskCategoryIcon, taskCategoryTone, workDateGroup, workFilterLabel, workFilters, workItemKey, workItems,
-  workKindIcon, workStatusLabel, workStatusTone, type WorkFilter, type WorkGrouping, type WorkItem, type WorkKind, type WorkOrder, type WorkStart } from "./workItems";
+import { createdDay, filterWorkItems, sortWorkItems, stageCounts, taskCategoryIcon, workDateGroup, workFilterLabel, workFilters, workItemKey, workItems,
+  workItemTone, workKindIcon, workStatusLabel, workStatusTone, type WorkFilter, type WorkGrouping, type WorkItem, type WorkKind, type WorkOrder, type WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
 import { PlanReview } from "./PlanReview";
 import { reviewSessions } from "../review/reviewSessions";
@@ -164,7 +164,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                 const key = workItemKey(item);
                 const runner = item.runner ? sessionById.get(item.runner) : undefined;
                 const day = createdDay(item.created);
-                const tone = item.kind === "task" ? taskCategoryTone(item.category) : item.kind === "review" ? "warning" : "primary";
+                const tone = workItemTone(item);
                 return <button type="button" key={key} role="option" aria-selected={current !== null && workItemKey(current) === key} className="work-row" data-kind={item.kind}
                   data-selected={current !== null && workItemKey(current) === key || undefined} onClick={() => setSelected(key)}>
                   <span className="work-row-badge"><span className="work-row-glyph" data-tone={tone}>

@@ -15,6 +15,10 @@
 .work-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .work-tags .bp6-tag { max-width: 100%; }
 .work-date { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The short id after the date, as under the icon of its row in Work items. */
+.work-tag-id { color: var(--accent); font: 600 11px/1 var(--code-font); }
+.work-tag-id[data-tone="danger"] { color: var(--red); }
+.work-tag-id[data-tone="warning"] { color: var(--yellow); }
 .work-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px; font-size: 11px; font-weight: 600;
   font-variant-numeric: tabular-nums; letter-spacing: 0; line-height: 1; color: var(--text); background: var(--panel-3); }
 .work-count[data-zero] { color: var(--muted); background: none; }

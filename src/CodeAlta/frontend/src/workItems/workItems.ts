@@ -117,6 +117,11 @@ export function taskCategoryTone(category: string | null | undefined): WorkTone 
   return category === "problem" ? "danger" : category === "gap" ? "warning" : "primary";
 }
 
+/** The color of an item's icon and short id: a task's category, the warning of a review, the accent of a plan. */
+export function workItemTone(item: Pick<WorkItem, "kind" | "category">): WorkTone {
+  return item.kind === "task" ? taskCategoryTone(item.category) : item.kind === "review" ? "warning" : "primary";
+}
+
 export const workKindIcon = (kind: string): IconName => kind === "plan" ? "plan" : kind === "review" ? "eye" : "task";
 
 /** The ways of starting an item, the one the user prefers first. `here` needs a session to start it in. */
