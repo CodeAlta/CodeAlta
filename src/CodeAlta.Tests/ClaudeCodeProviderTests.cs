@@ -777,7 +777,10 @@ public sealed class ClaudeCodeProviderTests
         Assert.IsTrue(Read(""","fast_mode_state":"cooldown" """)[0].FastMode, "a rate limit runs it at standard speed for a while; fast mode stays on");
         Assert.IsFalse(Read(""","fast_mode_state":"off" """)[0].FastMode);
         Assert.IsFalse(Read("")[0].FastMode, "a CLI that says no state runs at standard speed");
-        Assert.IsNull(Read(""","fast_mode_state":"off","fast_mode_disabled_reason":"no_usage_credits" """)[0].FastMode, "what blocks it leaves no switch");
+        Assert.IsNull(Read(""","fast_mode_state":"off","fast_mode_disabled_reason":"extra_usage_disabled" """)[0].FastMode, "what blocks it leaves no switch");
+        // What Claude Code 2.1.309 answers a CLI driven by an SDK: blocked until the session opts in, which it does.
+        Assert.IsFalse(Read(""","fast_mode_state":"off","fast_mode_disabled_reason":"sdk_opt_in_required" """)[0].FastMode);
+        Assert.IsFalse(Read(""","fast_mode_state":"off","fast_mode_disabled_reason":"pending" """)[0].FastMode);
     }
 
     [TestMethod]
