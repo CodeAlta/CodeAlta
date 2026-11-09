@@ -254,6 +254,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         {
             yield return CreateTaskCommand(context.Invocation);
             yield return CreatePlanCommand(context.Invocation);
+            yield return CreateTagCommand(context.Invocation);
         }
 
         // The bookmarks of sessions and of their messages, in a host that keeps them.

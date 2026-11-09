@@ -68,6 +68,64 @@ public sealed class WorkItemHostTests
     }
 
     [TestMethod]
+    public async Task Tags_AreTheUsers_AndAgentsApplyThemToTasks()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var (items, project) = (fixture.Items, fixture.Project);
+        Assert.AreEqual("0", Text(await fixture.One("alta.tag.summary", ["tag", "list"]), "count"));
+        var (refused, _, why) = await fixture.Run(["task", "create", "--title", "Untagged", "--tag", "mobile", "--content", "Body."]);
+        Assert.AreEqual(AltaExitCodes.Usage, refused, "A task cannot have a tag the project does not have.");
+        StringAssert.Contains(why, "Only the user creates tags");
+
+        Assert.AreEqual(WorkTagChange.Done, items.SetTag(project, "mobile", "The phone app."));
+        Assert.AreEqual(WorkTagChange.Done, items.SetTag(project, "CI", null));
+        var tagged = await fixture.One("alta.task.created", ["task", "create", "--title", "Tagged", "--tag", "mobile", "--tag", "ci", "--content", "Body."]);
+        var shortId = Text(tagged, "shortId")!;
+        Assert.AreEqual("[\"mobile\",\"ci\"]", Text(tagged, "tags"));
+        var plain = Text(await fixture.One("alta.task.created", ["task", "create", "--title", "Plain", "--content", "Body."]), "id")!;
+        (refused, _, why) = await fixture.Run(["task", "create", "--title", "Unknown", "--tag", "desktop", "--content", "Body."]);
+        Assert.AreEqual(AltaExitCodes.Usage, refused);
+        StringAssert.Contains(why, "Its tags are: ci, mobile");
+
+        var (_, listed, _) = await fixture.Run(["tag", "list"]);
+        CollectionAssert.AreEqual(new[] { "mobile:The phone app.:1", "ci::1" },
+            Of(listed, "alta.tag").Select(static tag => $"{Text(tag, "name")}:{Text(tag, "description")}:{Text(tag, "openTasks")}").ToArray());
+        var (_, filtered, _) = await fixture.Run(["task", "list", "--tag", "#Mobile"]);
+        Assert.AreEqual(shortId, Text(Of(filtered, "alta.task").Single(), "shortId"));
+
+        Assert.AreEqual("[\"ci\",\"mobile\"]", Text(await fixture.One("alta.task.tagged", ["task", "tag", plain[^4..], "--add", "ci", "--add", "mobile", "--remove", "none"]), "tags"));
+        Assert.AreEqual("[\"ci\"]", Text(await fixture.One("alta.task.tagged", ["task", "tag", plain[^4..], "--remove", "mobile"]), "tags"));
+        Assert.AreEqual(AltaExitCodes.Usage, (await fixture.Run(["task", "tag", plain[^4..], "--add", "desktop"])).Code);
+
+        // Renaming and deleting change the tags file and every task that has the tag.
+        Assert.AreEqual(WorkTagChange.Exists, items.RenameTag(project, "mobile", "ci"));
+        Assert.AreEqual(WorkTagChange.NotFound, items.RenameTag(project, "desktop", "web"));
+        Assert.AreEqual(WorkTagChange.Done, items.RenameTag(project, "mobile", "phone"));
+        Assert.AreEqual(WorkTagChange.Done, items.DeleteTag(project, "ci"));
+        CollectionAssert.AreEqual(new[] { "phone" }, items.FindTasks(project, shortId).Single().Tags.ToArray());
+        Assert.AreEqual(0, items.FindTasks(project, plain[^4..]).Single().Tags.Count);
+        var file = File.ReadAllText(Path.Combine(project.ProjectPath, ".alta", "tags.yaml"));
+        StringAssert.Contains(file, "  phone: \"The phone app.\"\n");
+        Assert.IsFalse(file.Contains("ci:", StringComparison.Ordinal), file);
+
+        // A tag written on a task by hand is a tag of the project, not listed in its file until the user describes it.
+        Assert.IsTrue(items.SetTaskTags(project, plain, ["handmade"]));
+        Assert.IsFalse(items.ListTags(project).Tags.Single(tag => tag.Name == "handmade").Listed);
+        Assert.AreEqual(WorkTagChange.Done, items.SetTag(project, "handmade", "Written by hand."));
+        Assert.IsTrue(items.ListTags(project).Tags.Single(tag => tag.Name == "handmade").Listed);
+
+        Assert.AreEqual(WorkTagChange.Done, items.SetTagDeclined(project, "ci-noise", declined: true));
+        Assert.AreEqual("[\"ci-noise\"]", Text(await fixture.One("alta.tag.summary", ["tag", "list"]), "declined"));
+        Assert.AreEqual(WorkTagChange.Done, items.SetTag(project, "ci-noise", null));
+        Assert.AreEqual(0, items.ListTags(project).Declined.Count, "A declined name the user creates is no longer declined.");
+
+        // A tags file that cannot be read is not written over.
+        File.WriteAllText(Path.Combine(project.ProjectPath, ".alta", "tags.yaml"), "tags: [unclosed\n  - : :");
+        Assert.AreEqual(WorkTagChange.Failed, items.SetTag(project, "new", null));
+        Assert.AreEqual("tags: [unclosed\n  - : :", File.ReadAllText(Path.Combine(project.ProjectPath, ".alta", "tags.yaml")));
+    }
+
+    [TestMethod]
     public async Task TaskCommands_ListStartCompleteAndSetAside()
     {
         await using var fixture = await Fixture.CreateAsync();

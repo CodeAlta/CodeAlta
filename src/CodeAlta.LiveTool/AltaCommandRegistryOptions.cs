@@ -35,6 +35,7 @@ public sealed record AltaCommandRegistryOptions
         "plugin",
         "task",
         "plan",
+        "tag",
         "bookmark",
         "issue",
         "issues",
