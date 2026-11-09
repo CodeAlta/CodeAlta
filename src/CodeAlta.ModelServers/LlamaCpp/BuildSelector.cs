@@ -27,7 +27,17 @@ public static class BuildSelector
     /// <param name="hardware">The machine.</param>
     /// <param name="release">The release, or null to judge by the machine alone.</param>
     /// <returns>A candidate per backend.</returns>
-    public static IReadOnlyList<BuildCandidate> Candidates(HardwareInventory hardware, LlamaRelease? release)
+    public static IReadOnlyList<BuildCandidate> Candidates(HardwareInventory hardware, LlamaRelease? release) => Candidates(hardware, release, null);
+
+    /// <summary>
+    /// Says what each backend of a release would do on a machine, the best first; with Lemonade's ROCm builds allowed, one of
+    /// them takes the place of an official ROCm build that cannot run, for the AMD GPUs it has the code of.
+    /// </summary>
+    /// <param name="hardware">The machine.</param>
+    /// <param name="release">The release, or null to judge by the machine alone.</param>
+    /// <param name="lemonade">The newest of Lemonade's ROCm builds, or null when they are not allowed.</param>
+    /// <returns>A candidate per backend.</returns>
+    public static IReadOnlyList<BuildCandidate> Candidates(HardwareInventory hardware, LlamaRelease? release, LlamaRelease? lemonade)
     {
         ArgumentNullException.ThrowIfNull(hardware);
         var result = new List<BuildCandidate>();
@@ -88,6 +98,8 @@ public static class BuildSelector
                     : "The ROCm build needs libhipblas.so.3 of ROCm.", 0, Ids(supported)));
             else
                 result.Add(new("rocm", rocm, "fits", $"ROCm {hardware.Libraries.RocmVersion} on {Names(supported)}.", 90, Ids(supported)));
+
+            if (lemonade is not null && result[^1].Verdict != "fits" && LemonadeCandidate(hardware, amd, lemonade) is { } replacement) result[^1] = replacement;
         }
 
         if (hardware.Os != "macos")
@@ -146,6 +158,18 @@ public static class BuildSelector
         if (backend != "cuda") return [build];
         var runtime = release.Assets.FirstOrDefault(asset => asset.IsCudaRuntime && asset.Os == os && asset.Arch == arch && asset.BackendVersion == build.BackendVersion);
         return runtime is null ? [build] : [build, runtime];
+    }
+
+    // The Lemonade archive with the code of the most AMD GPUs of the machine; it brings its ROCm runtime, so it needs neither
+    // the HIP SDK nor a recent glibc.
+    private static BuildCandidate? LemonadeCandidate(HardwareInventory hardware, List<GpuInfo> amd, LlamaRelease lemonade)
+    {
+        var assets = lemonade.Assets.Where(asset => asset.Os == hardware.Os && asset.Arch == hardware.Architecture && asset.Backend == "rocm" && asset.BackendVersion is not null).ToList();
+        bool Covers(LlamaAsset asset, GpuInfo gpu) => gpu.Architecture is { } gfx && LlamaReleases.LemonadeCovers(asset.BackendVersion!, gfx);
+        var best = assets.Select(asset => (Asset: asset, Gpus: amd.Where(gpu => Covers(asset, gpu)).ToList())).Where(static entry => entry.Gpus.Count > 0)
+            .OrderByDescending(static entry => entry.Gpus.Count).FirstOrDefault();
+        return best.Asset is null ? null
+            : new("rocm", best.Asset.Name, "fits", $"ROCm of Lemonade ({lemonade.Tag}, with its own ROCm runtime) on {Names(best.Gpus)}.", 85, Ids(best.Gpus));
     }
 
     private static string? Asset(List<LlamaAsset> assets, string backend, LlamaRelease? release)

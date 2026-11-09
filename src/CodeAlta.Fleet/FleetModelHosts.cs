@@ -25,6 +25,7 @@ public static class FleetModelHosts
             InstanceRoot = Path.Combine(catalog.StateRoot, "llama"),
             ServersOutliveHost = serversOutliveHost,
             HuggingFaceToken = () => HuggingFaceToken(root),
+            KeepAwake = CodeAlta.Core.Power.SleepAssertion.Acquire,
         });
     }
 

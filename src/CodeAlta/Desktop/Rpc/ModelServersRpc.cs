@@ -137,7 +137,7 @@ internal sealed class ModelServersService
             var card = await local.Hub.GetCardAsync(details.Model.Id, details.Revision, cancellationToken).ConfigureAwait(false);
             var views = model.Quantizations.Select(static quant => new HubQuantView(quant.Tag, quant.Bits, quant.ModelBytes, quant.MmprojBytes, quant.Files,
                 [.. quant.Fits.Select(static fit => new HubFitView(fit.Machine, fit.Fit, fit.OnDisk))])).ToList();
-            var view = new HubModelView(details.Model, details.Revision, details.License, [.. details.BaseModels], details.Parameters, details.Architecture, details.ContextLength, views, card);
+            var view = new HubModelView(details.Model, details.Revision, details.License, [.. details.BaseModels], details.Parameters, details.Architecture, details.ContextLength, views, card, model.Shape);
             return new("ok", JsonSerializer.Serialize(view, ModelServersPageJson.Default.HubModelView), null);
         }
         catch (ModelHostException exception)
@@ -198,7 +198,7 @@ public sealed record HubQuantView(string Tag, int Bits, long ModelBytes, long Mm
 
 /// <summary>A model of Hugging Face, as the page shows it.</summary>
 public sealed record HubModelView(HubModel Model, string Revision, string? License, IReadOnlyList<string> BaseModels, long? Parameters, string? Architecture, int? ContextLength,
-    IReadOnlyList<HubQuantView> Quantizations, string Card);
+    IReadOnlyList<HubQuantView> Quantizations, string Card, GgufShape? Shape = null);
 
 /// <summary>The JSON of the model servers for the page.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

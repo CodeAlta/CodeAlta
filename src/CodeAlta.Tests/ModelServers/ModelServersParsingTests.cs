@@ -134,6 +134,47 @@ public sealed class ModelServersParsingTests
     }
 
     [TestMethod]
+    public void LemonadeRocm_TakesThePlaceOfAnOfficialRocmBuildThatCannotRun()
+    {
+        using var json = JsonDocument.Parse("""
+            { "tag_name": "b1371", "published_at": "2026-11-08T14:23:35Z", "assets": [
+              { "name": "checksums.txt", "size": 2126, "state": "uploaded", "browser_download_url": "https://x/checksums.txt", "digest": "sha256:aa" },
+              { "name": "llama-b1371-windows-rocm-gfx110X-x64.zip", "size": 530775730, "state": "uploaded", "browser_download_url": "https://x/w110", "digest": "sha256:bb" },
+              { "name": "llama-b1371-windows-rocm-gfx120X-x64.zip", "size": 688393394, "state": "uploaded", "browser_download_url": "https://x/w120", "digest": "sha256:cc" },
+              { "name": "llama-b1371-ubuntu-rocm-gfx120X-x64.zip", "size": 1171721570, "state": "uploaded", "browser_download_url": "https://x/u120", "digest": "sha256:dd" },
+              { "name": "qualification-llama-b1371-ubuntu-rocm-gfx120X-x64.json", "size": 155572, "state": "uploaded", "browser_download_url": "https://x/q", "digest": "sha256:ee" }
+            ] }
+            """);
+        var lemonade = LlamaReleases.ReadLemonadeRelease(json.RootElement)!;
+        Assert.AreEqual(("lemonade-b1371", "lemonade", 3), (lemonade.Tag, lemonade.Source, lemonade.Assets.Count));
+        var w120 = lemonade.Assets.Single(static asset => asset.Name == "llama-b1371-windows-rocm-gfx120X-x64.zip");
+        Assert.AreEqual(("windows", "rocm", "gfx120X", "x64", "cc"), (w120.Os, w120.Backend, w120.BackendVersion, w120.Arch, w120.Sha256));
+        Assert.IsTrue(LlamaReleases.LemonadeCovers("gfx120X", "gfx1201"));
+        Assert.IsTrue(LlamaReleases.LemonadeCovers("gfx1151", "gfx1151"));
+        Assert.IsFalse(LlamaReleases.LemonadeCovers("gfx120X", "gfx12010"));
+        Assert.IsFalse(LlamaReleases.LemonadeCovers("gfx1151", "gfx1150"));
+
+        var release = new LlamaRelease("b12110", 12110, DateTimeOffset.UtcNow, null,
+            [Asset("llama-b12110-bin-win-rocm-10.0-x64.zip"), Asset("llama-b12110-bin-win-vulkan-x64.zip"), Asset("llama-b12110-bin-win-cpu-x64.zip")]);
+        var noHipSdk = new HardwareInventory("windows", "x64", null, 64L << 30, [new GpuInfo("gpu0", "amd", "AMD Radeon RX 7600 XT", 16L << 30, false, "gfx1102", null)],
+            new MachineLibraries(null, null, null, false, true, null), []);
+        Assert.AreEqual("libraryMissing", BuildSelector.Candidates(noHipSdk, release).Single(static c => c.Backend == "rocm").Verdict, "not allowed: the official build's verdict");
+        var rocm = BuildSelector.Candidates(noHipSdk, release, lemonade).Single(static c => c.Backend == "rocm");
+        Assert.AreEqual(("fits", "llama-b1371-windows-rocm-gfx110X-x64.zip"), (rocm.Verdict, rocm.Asset));
+        StringAssert.Contains(rocm.Message, "Lemonade");
+        CollectionAssert.AreEqual(new[] { "llama-b1371-windows-rocm-gfx110X-x64.zip" }, BuildSelector.AssetsFor(lemonade, "windows", "x64", "rocm", rocm).Select(static a => a.Name).ToArray());
+
+        var withSdk = noHipSdk with { Libraries = noHipSdk.Libraries with { HipBlas = true, RocmVersion = "6.4" } };
+        Assert.AreEqual("llama-b12110-bin-win-rocm-10.0-x64.zip", BuildSelector.Candidates(withSdk, release, lemonade).Single(static c => c.Backend == "rocm").Asset,
+            "an official build that runs stays the choice");
+        var jammy = new HardwareInventory("linux", "x64", null, 64L << 30, [new GpuInfo("gpu0", "amd", "AMD Radeon AI PRO R9700", 32L << 30, false, "gfx1201", null)],
+            new MachineLibraries(null, "7.2.1", "/opt/rocm", true, true, "2.35"), []);
+        Assert.AreEqual("llama-b1371-ubuntu-rocm-gfx120X-x64.zip", BuildSelector.Candidates(jammy, release, lemonade).Single(static c => c.Backend == "rocm").Asset);
+        var unknownGpu = noHipSdk with { Gpus = [noHipSdk.Gpus[0] with { Architecture = "gfx1036" }] };
+        Assert.AreEqual("libraryMissing", BuildSelector.Candidates(unknownGpu, release, lemonade).Single(static c => c.Backend == "rocm").Verdict, "Lemonade has no code for it");
+    }
+
+    [TestMethod]
     public void DiscreteDevices_LeaveOutTheGpuOfTheProcessor()
     {
         static InstalledBuild Build(params LlamaDevice[] devices) => new("b1", 1, "rocm", null, "f", 1, DateTimeOffset.UnixEpoch, devices, null, true, false, false, "ggml-org");

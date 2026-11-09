@@ -1,7 +1,3 @@
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
-
 namespace CodeAlta.Desktop;
 
 /// <summary>
@@ -55,7 +51,7 @@ internal sealed class DesktopKeepAwake : IDisposable
 
     /// <summary>The assertions of the operating system the application runs on.</summary>
     internal static IDesktopKeepAwakeBackend PlatformBackend()
-        => OperatingSystem.IsMacOS() ? new MacKeepAwake() : OperatingSystem.IsWindows() ? new WindowsKeepAwake() : new LinuxKeepAwake();
+        => new SystemBackend();
 
     /// <summary>Whether the computer is kept awake now.</summary>
     internal bool IsActive { get { lock (_gate) return _assertion is not null; } }
@@ -118,179 +114,9 @@ internal sealed class DesktopKeepAwake : IDisposable
         }
     }
 
-    // macOS: an IOKit assertion that prevents idle system sleep, not display sleep (`pmset -g assertions`).
-    private sealed class MacKeepAwake : IDesktopKeepAwakeBackend
+    // The assertions of the operating system, shared with the model servers of a node.
+    private sealed class SystemBackend : IDesktopKeepAwakeBackend
     {
-        private const string IOKit = "/System/Library/Frameworks/IOKit.framework/IOKit";
-        private const string CoreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
-        private const uint Utf8 = 0x08000100; // kCFStringEncodingUTF8
-        private const uint LevelOn = 255; // kIOPMAssertionLevelOn
-
-        public IDisposable? Acquire(string reason)
-        {
-            var type = CFStringCreateWithCString(0, "PreventUserIdleSystemSleep", Utf8);
-            var name = CFStringCreateWithCString(0, reason, Utf8);
-            try
-            {
-                if (type == 0 || name == 0) throw new InvalidOperationException("CoreFoundation did not create the assertion's strings.");
-                var result = IOPMAssertionCreateWithName(type, LevelOn, name, out var id);
-                if (result != 0) throw new InvalidOperationException($"IOPMAssertionCreateWithName failed with 0x{result:X8}.");
-                return new Assertion(id);
-            }
-            finally
-            {
-                if (name != 0) CFRelease(name);
-                if (type != 0) CFRelease(type);
-            }
-        }
-
-        private sealed class Assertion(uint id) : IDisposable
-        {
-            private int _released;
-
-            public void Dispose()
-            {
-                if (Interlocked.Exchange(ref _released, 1) == 0) _ = IOPMAssertionRelease(id);
-            }
-        }
-
-        [DllImport(IOKit)]
-        private static extern int IOPMAssertionCreateWithName(nint type, uint level, nint name, out uint id);
-
-        [DllImport(IOKit)]
-        private static extern int IOPMAssertionRelease(uint id);
-
-        [DllImport(CoreFoundation)]
-        private static extern nint CFStringCreateWithCString(nint allocator, [MarshalAs(UnmanagedType.LPUTF8Str)] string text, uint encoding);
-
-        [DllImport(CoreFoundation)]
-        private static extern void CFRelease(nint value);
-    }
-
-    // Windows: a power request, which belongs to no thread and shows in `powercfg /requests`.
-    [SupportedOSPlatform("windows")]
-    private sealed class WindowsKeepAwake : IDesktopKeepAwakeBackend
-    {
-        private const uint SimpleString = 0x1; // POWER_REQUEST_CONTEXT_SIMPLE_STRING
-        private const int SystemRequired = 1; // PowerRequestSystemRequired
-
-        public IDisposable? Acquire(string reason)
-        {
-            var text = Marshal.StringToHGlobalUni(reason);
-            try
-            {
-                var context = new ReasonContext { Version = 0, Flags = SimpleString, Reason = text };
-                var request = PowerCreateRequest(ref context);
-                if (request == 0 || request == -1) throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError());
-                if (!PowerSetRequest(request, SystemRequired))
-                {
-                    var error = Marshal.GetLastPInvokeError();
-                    CloseHandle(request);
-                    throw new System.ComponentModel.Win32Exception(error);
-                }
-
-                return new Request(request);
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(text);
-            }
-        }
-
-        private sealed class Request(nint handle) : IDisposable
-        {
-            private int _released;
-
-            public void Dispose()
-            {
-                if (Interlocked.Exchange(ref _released, 1) != 0) return;
-                PowerClearRequest(handle, SystemRequired);
-                CloseHandle(handle);
-            }
-        }
-
-        // REASON_CONTEXT with a simple reason string.
-        [StructLayout(LayoutKind.Sequential)]
-        private struct ReasonContext
-        {
-            public uint Version;
-            public uint Flags;
-            public nint Reason;
-        }
-
-        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
-        private static extern nint PowerCreateRequest(ref ReasonContext context);
-
-        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool PowerSetRequest(nint request, int type);
-
-        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool PowerClearRequest(nint request, int type);
-
-        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool CloseHandle(nint handle);
-    }
-
-    // Linux, as far as systemd goes: an inhibitor held by a `systemd-inhibit` that waits on `cat`, whose input is
-    // this process. It ends when it is released, and when this process ends, since its input closes then.
-    private sealed class LinuxKeepAwake : IDesktopKeepAwakeBackend
-    {
-        public IDisposable? Acquire(string reason)
-        {
-            var start = new ProcessStartInfo("systemd-inhibit")
-            {
-                UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
-            };
-            foreach (var argument in new[] { "--what=idle:sleep", "--who=CodeAlta", "--why=" + reason, "--mode=block", "cat" }) start.ArgumentList.Add(argument);
-            Process process;
-            try
-            {
-                process = Process.Start(start) ?? throw new InvalidOperationException("systemd-inhibit did not start.");
-            }
-            catch (System.ComponentModel.Win32Exception exception)
-            {
-                throw new InvalidOperationException($"systemd-inhibit is unavailable ({exception.Message}).", exception);
-            }
-
-            // Nothing is read from it, but its pipes must not fill up.
-            process.OutputDataReceived += static (_, _) => { };
-            process.ErrorDataReceived += static (_, _) => { };
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-            if (process.WaitForExit(200))
-            {
-                var code = process.ExitCode;
-                process.Dispose();
-                throw new InvalidOperationException($"systemd-inhibit exited with code {code}.");
-            }
-
-            return new Inhibitor(process);
-        }
-
-        private sealed class Inhibitor(Process process) : IDisposable
-        {
-            private int _released;
-
-            public void Dispose()
-            {
-                if (Interlocked.Exchange(ref _released, 1) != 0) return;
-                try
-                {
-                    process.StandardInput.Close(); // cat ends, and with it the inhibitor.
-                    if (!process.WaitForExit(2_000)) process.Kill(entireProcessTree: true);
-                }
-                catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
-                {
-                    // It has ended already.
-                }
-                finally
-                {
-                    process.Dispose();
-                }
-            }
-        }
+        public IDisposable? Acquire(string reason) => CodeAlta.Core.Power.SleepAssertion.Acquire(reason);
     }
 }

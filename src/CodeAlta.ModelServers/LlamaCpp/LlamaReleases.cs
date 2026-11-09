@@ -17,6 +17,9 @@ public sealed partial class LlamaReleases
     /// <summary>The repository of the official builds.</summary>
     public const string Repository = "ggml-org/llama.cpp";
 
+    /// <summary>The repository of Lemonade's ROCm builds: one archive per family of AMD GPUs, with its ROCm runtime.</summary>
+    public const string LemonadeRepository = "lemonade-sdk/llamacpp-rocm";
+
     private readonly HttpClient _http;
     private readonly string _api;
     private readonly Dictionary<string, (string ETag, string Body)> _cache = new(StringComparer.Ordinal);
@@ -71,6 +74,55 @@ public sealed partial class LlamaReleases
     {
         using var list = await GetJsonAsync($"/repos/{Repository}/releases?per_page={Math.Clamp(count, 1, 100)}", cancellationToken).ConfigureAwait(false);
         return list.RootElement.EnumerateArray().Select(ReadRelease).OfType<LlamaRelease>().OrderByDescending(static release => release.Build).ToList();
+    }
+
+    /// <summary>
+    /// Reads the newest of Lemonade's ROCm builds. They bring their ROCm runtime, so they run where the official ROCm build
+    /// cannot: Windows without the HIP SDK, a Linux older than the official archives need, GPUs they have no code for.
+    /// </summary>
+    /// <param name="cancellationToken">Ends the reading.</param>
+    /// <returns>The build, its tag <c>lemonade-bNNNN</c> (Lemonade numbers its builds itself).</returns>
+    /// <exception cref="ModelHostException">GitHub could not be read, or the release has no archive.</exception>
+    public async Task<LlamaRelease> GetLemonadeAsync(CancellationToken cancellationToken)
+    {
+        using var latest = await GetJsonAsync($"/repos/{LemonadeRepository}/releases/latest", cancellationToken).ConfigureAwait(false);
+        return ReadLemonadeRelease(latest.RootElement) ?? throw new ModelHostException("not_found", "The newest release of Lemonade's ROCm builds has no archive yet.");
+    }
+
+    /// <summary>Reads a release of Lemonade's ROCm builds; null for one whose archives are not all there.</summary>
+    /// <param name="release">The release.</param>
+    /// <returns>The build, or null.</returns>
+    internal static LlamaRelease? ReadLemonadeRelease(JsonElement release)
+    {
+        var tag = release.GetProperty("tag_name").GetString() ?? "";
+        if (!BuildTagPattern().IsMatch(tag)) return null;
+        var assets = new List<LlamaAsset>();
+        foreach (var asset in release.GetProperty("assets").EnumerateArray())
+        {
+            if (asset.TryGetProperty("state", out var state) && state.GetString() is { } value && value != "uploaded") return null;
+            var match = LemonadeAssetPattern().Match(asset.GetProperty("name").GetString() ?? "");
+            if (!match.Success) continue;
+            var digest = asset.TryGetProperty("digest", out var d) && d.GetString() is { } text && text.StartsWith("sha256:", StringComparison.Ordinal) ? text[7..] : null;
+            assets.Add(new LlamaAsset(match.Value, asset.GetProperty("browser_download_url").GetString() ?? "", asset.GetProperty("size").GetInt64(), digest,
+                match.Groups["os"].Value == "windows" ? "windows" : "linux", "rocm", match.Groups["target"].Value, match.Groups["arch"].Value, false));
+        }
+
+        if (assets.Count == 0) return null;
+        var published = release.TryGetProperty("published_at", out var at) && at.ValueKind == JsonValueKind.String && at.TryGetDateTimeOffset(out var date) ? date : DateTimeOffset.MinValue;
+        return new LlamaRelease("lemonade-" + tag, int.Parse(tag.AsSpan(1), CultureInfo.InvariantCulture), published, null, assets, "lemonade");
+    }
+
+    /// <summary>Whether a Lemonade archive has the code of a GPU: its gfx, or its family (<c>gfx120X</c> for gfx1200 and gfx1201).</summary>
+    /// <param name="target">The target of the archive.</param>
+    /// <param name="gfx">The gfx of the GPU.</param>
+    /// <returns>Whether it does.</returns>
+    public static bool LemonadeCovers(string target, string gfx)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(gfx);
+        return target.EndsWith('X')
+            ? gfx.Length == target.Length && gfx.StartsWith(target[..^1], StringComparison.OrdinalIgnoreCase)
+            : string.Equals(target, gfx, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Reads a release of the GitHub API; null for one that is not a build or whose archives are not all there.</summary>
@@ -180,6 +232,9 @@ public sealed partial class LlamaReleases
 
     [GeneratedRegex(@"^llama-b\d+-bin-(?<os>win|ubuntu|macos)(?:-(?<rest>[a-z0-9.\-]+?))?-(?<arch>x64|arm64)\.(?:zip|tar\.gz)$")]
     private static partial Regex AssetPattern();
+
+    [GeneratedRegex(@"^llama-b\d+-(?<os>windows|ubuntu)-rocm-(?<target>gfx[0-9a-fA-FX]+)-(?<arch>x64|arm64)\.zip$")]
+    private static partial Regex LemonadeAssetPattern();
 
     [GeneratedRegex(@"^cudart-llama-(?:b\d+-)?bin-(?<os>win|ubuntu)-cuda-(?<version>[\d.]+)-(?<arch>x64|arm64)\.(?:zip|tar\.gz)$")]
     private static partial Regex CudaRuntimePattern();

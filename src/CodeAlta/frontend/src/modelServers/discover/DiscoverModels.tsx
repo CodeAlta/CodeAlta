@@ -155,7 +155,11 @@ function ModelPage({ api, repo, machines, actions, onClose }: {
       <dl className="discover-model-facts-list">
         {view.parameters ? <div><dt>{t("Parameters")}</dt><dd>{compactCount(view.parameters, locale)}</dd></div> : null}
         {view.architecture && <div><dt>{t("Architecture")}</dt><dd>{view.architecture}</dd></div>}
-        {view.contextLength ? <div><dt>{t("Context")}</dt><dd>{new Intl.NumberFormat(locale).format(view.contextLength)}</dd></div> : null}
+        {view.contextLength || view.shape?.trainedContext ? <div><dt>{t("Context")}</dt><dd>{new Intl.NumberFormat(locale).format(view.shape?.trainedContext || view.contextLength || 0)}</dd></div> : null}
+        {view.shape && <div><dt>{t("KV cache")}</dt><dd title={view.shape.known ? undefined : t("The layout of its architecture is not known here: the estimate is rough.")}>
+          {t("{size} per 1,000 tokens", { size: formatBytes(view.shape.kvBytesPerToken * 1000 + view.shape.slidingKvBytesPerToken * Math.min(1000, view.shape.slidingWindow || 1000), locale) })}
+          {view.shape.slidingWindow > 0 && <span className="muted-text"> · {t("sliding window of {count} tokens", { count: new Intl.NumberFormat(locale).format(view.shape.slidingWindow) })}</span>}
+          {!view.shape.known && <span className="muted-text"> · {t("rough")}</span>}</dd></div>}
         {view.license && <div><dt>{t("License")}</dt><dd>{view.license}</dd></div>}
         {view.baseModels.length > 0 && <div><dt>{t("Base model")}</dt><dd>{view.baseModels.join(", ")}</dd></div>}
       </dl>
@@ -164,7 +168,7 @@ function ModelPage({ api, repo, machines, actions, onClose }: {
           options={machines.map(item => ({ value: item.id, label: item.local ? `${item.name} (${t("this computer")})` : item.name }))} /></label>
         : <p className="muted-text">{t("No machine to download to: this computer runs no model host, and it manages no machine that does.")}</p>}
       <table className="model-servers-models-table discover-model-quants">
-        <thead><tr><th>{t("Quantization")}</th><th>{t("Size")}</th><th>{t("Fit")}</th><th aria-label={t("Actions")} /></tr></thead>
+        <thead><tr><th>{t("Quantization")}</th><th>{t("Size")}</th><th>{t("Fit")}</th><th>{t("Context that fits")}</th><th aria-label={t("Actions")} /></tr></thead>
         <tbody>{view.quantizations.map(quant => {
           const fit = quant.fits.find(item => item.machine === machine);
           return <tr key={quant.tag}>
@@ -172,6 +176,8 @@ function ModelPage({ api, repo, machines, actions, onClose }: {
             <td className="numeric">{formatBytes(quant.modelBytes + quant.mmprojBytes, locale)}</td>
             <td>{fit ? <Tag minimal intent={fitIntent(fit.fit.fit)} title={fit.fit.message}>{t(fitLabel(fit.fit.fit))}</Tag> : <span className="muted-text">—</span>}
               {fit?.onMachine && <Tag minimal intent="success" className="model-servers-vision">{t("on the disk")}</Tag>}</td>
+            <td className="numeric">{fit?.fit.context ? <span title={t("An estimate from the header of the model; the machine measures it after the download.")}>
+              {t("{count} tokens", { count: new Intl.NumberFormat(locale).format(fit.fit.context) })}</span> : <span className="muted-text">—</span>}</td>
             <td className="model-servers-model-actions">{target && <>
               <Button size="small" variant="minimal" icon={working === quant.tag ? <ActivitySpinner size={12} /> : <AppIcon name="download" size={13} />} disabled={!!working || fit?.onMachine}
                 text={t("Download")} onClick={() => void act(quant, false)} />

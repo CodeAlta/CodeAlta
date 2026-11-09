@@ -14,6 +14,9 @@ import { serverConnection, serverConnectionIntent, serverConnectionLabel } from 
 import { AddMachineDialog, type AddMachineApi } from "../../machines/AddMachineDialog";
 import { PairMachineDialog } from "../../machines/MachinesSettings";
 import { FleetHelp } from "./FleetHelp";
+import type { ModelServersApi } from "../../modelServers/api";
+import { modelServersSummary } from "../../modelServers/modelServers";
+import type { ModelHostStatus } from "../../modelServers/types";
 import { fleetAttention, fleetSteps, hasFleet, machineTotals, spacesFleet, type FleetAttention, type FleetStep } from "./overviewModel";
 
 /** What the Overview reads: the machines, and the servers this computer is linked to. */
@@ -47,8 +50,11 @@ const attentionText: Readonly<Record<FleetAttention["kind"], MessageKey>> = {
  * then what a server adds); once there is a fleet, how it stands (machines online, sessions, the server), what needs the
  * person, the server each space publishes to, and the parts left to set up.
  */
-export function FleetOverview({ epoch, spaces, api = defaultApi }: { epoch: string | null; spaces: readonly Space[]; api?: FleetOverviewApi }) {
+export function FleetOverview({ epoch, spaces, api = defaultApi, modelServersApi }: { epoch: string | null; spaces: readonly Space[]; api?: FleetOverviewApi;
+  /** What reads the model servers of a window's epoch, for their tile; none for no tile. */
+  modelServersApi?: (epoch: string) => ModelServersApi }) {
   const { t } = useShellLanguage();
+  const modelServers = useMemo(() => epoch && modelServersApi ? modelServersApi(epoch) : null, [epoch, modelServersApi]);
   const [machineList, setMachineList] = useState<readonly MachineView[] | null>(null);
   const [servers, setServers] = useState<readonly FleetServerView[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -100,7 +106,7 @@ export function FleetOverview({ epoch, spaces, api = defaultApi }: { epoch: stri
     {machineList === null || (servers === null && list.length === 0)
       ? <SettingsUnavailable loading={loading || !epoch} icon="fleet" title="The fleet could not be read." />
       : !started ? <Onboarding onAdd={() => setAdding(true)} onOpen={open} epoch={epoch} />
-      : <Running machines={list} servers={linked} spaces={spaces} onOpen={open} onAdd={() => setAdding(true)} />}
+      : <Running machines={list} servers={linked} spaces={spaces} onOpen={open} onAdd={() => setAdding(true)} modelServers={modelServers} generation={generation} />}
     {adding && epoch && <AddMachineDialog epoch={epoch} api={{ ...machines, ...api.machines } as AddMachineApi} onPairLink={() => { setAdding(false); setPairing(true); }}
       onClose={added => { setAdding(false); if (added) reload(); }} onOpen={machineId => { setAdding(false); open(`machines/${machineId}`); }} />}
     {pairing && epoch && <PairMachineDialog epoch={epoch} api={api.machines} guide onClose={paired => { setPairing(false); if (paired) reload(); }} />}
@@ -149,8 +155,9 @@ function StepCard({ step, large = false, disabled = false, action, onClick }: { 
 }
 
 /** A fleet that runs: how it stands, what needs the person, the spaces, and what is left to set up. */
-function Running({ machines: list, servers, spaces, onOpen, onAdd }: {
+function Running({ machines: list, servers, spaces, onOpen, onAdd, modelServers, generation }: {
   machines: readonly MachineView[]; servers: readonly FleetServerView[]; spaces: readonly Space[]; onOpen: (page: string) => void; onAdd: () => void;
+  modelServers: ModelServersApi | null; generation: number;
 }) {
   const { t } = useShellLanguage();
   const totals = useMemo(() => machineTotals(list), [list]);
@@ -172,6 +179,7 @@ function Running({ machines: list, servers, spaces, onOpen, onAdd }: {
         detail={connection ? <Tag minimal round intent={serverConnectionIntent(connection)}>{t(serverConnectionLabel(connection))}</Tag> : t("Machines you paired only")} />
       <Tile icon="space" color="teal" label={t("Spaces")} value={<>{linkedSpaces}<small> / {bySpace.length}</small></>} detail={t("on a server")}
         onClick={() => onOpen("fleetServer")} />
+      {modelServers && <ModelServersTile api={modelServers} generation={generation} onOpen={() => onOpen("modelServers")} />}
     </ul>
     {attention.length > 0 && <section className="fleet-panel fleet-attention" aria-label={t("Needs your attention")}>
       <h3 className="fleet-section-title"><AppIcon name="warning" size={15} />{t("Needs your attention")}<Tag minimal round intent="warning">{attention.length}</Tag></h3>
@@ -207,6 +215,34 @@ function Running({ machines: list, servers, spaces, onOpen, onAdd }: {
       </section>
     </div>
   </div>;
+}
+
+/**
+ * The llama.cpp servers of this computer and of the machines it reaches: those ready of all, and the models on their disks.
+ * It shows once a machine runs a model host, and opens the Model servers page.
+ */
+function ModelServersTile({ api, generation, onOpen }: { api: ModelServersApi; generation: number; onOpen: () => void }) {
+  const { t } = useShellLanguage();
+  const [statuses, setStatuses] = useState<readonly ModelHostStatus[] | null>(null);
+  useEffect(() => {
+    const abort = new AbortController();
+    void (async () => {
+      try {
+        const listed = await api.machines(abort.signal);
+        const read = await Promise.allSettled(listed.filter(machine => machine.local || machine.state === "online").map(machine => api.status(machine.id, abort.signal)));
+        if (!abort.signal.aborted) setStatuses(read.flatMap(result => result.status === "fulfilled" ? [result.value] : []));
+      } catch {
+        if (!abort.signal.aborted) setStatuses([]);
+      }
+    })();
+    return () => abort.abort();
+  }, [api, generation]);
+  if (!statuses || statuses.length === 0 || statuses.every(status => status.servers.length === 0 && status.models.length === 0 && status.builds.length === 0)) return null;
+  const summary = modelServersSummary(statuses);
+  return <Tile icon="model" color="orange" label={t("Model servers")} onClick={onOpen}
+    value={<>{summary.ready}<small> / {summary.servers}</small></>}
+    detail={summary.working > 0 ? t("{count} updates or downloads at work", { count: summary.working }) : t("ready · {count} models on {machines} machines", { count: summary.models, machines: summary.machines })}
+    meter={summary.servers > 0 ? summary.ready / summary.servers : 0} />;
 }
 
 /** A figure of the fleet: what it counts, its value, a word about it, and the page it opens. */

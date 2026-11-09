@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { updateInTurn, activityOf, defaultBackend, formatBytes, gpuSummary, modelName, modelRows, parseModelReference, serverRows, serverStateOf, timeLeft, updateAvailable,
-  type MachineStatus } from "./modelServers";
+import { updateInTurn, activityOf, copiedServer, defaultBackend, formatBytes, gpuSummary, knownBuilds, modelName, modelRows, modelServersSummary, parseModelReference, serverRows,
+  serverStateOf, timeLeft, updateAvailable, type MachineStatus } from "./modelServers";
+import { buildChoiceProblem } from "./ModelServerDialogs";
 import type { HostTask, InstalledBuild, ModelHostStatus, ServerView } from "./types";
 
 const build = (backend: string, number: number, current = true): InstalledBuild => ({ tag: `b${number}`, build: number, backend, folder: "", sizeBytes: 1, installedAt: "",
@@ -97,4 +98,30 @@ test("Updating machines in turn waits for each, and the first that fails stops t
   assert.deepEqual(started, ["a", "b"], "the machine after the one that failed is not updated");
   assert.equal(await updateInTurn(["a", "c"], async machine => task(outcomes[machine].id, "running", false), async machine => outcomes[machine], async () => {}), null);
   assert.equal(await updateInTurn(["a"], async () => null, async () => null, async () => {}), "a", "an update that did not start stops them");
+});
+
+test("A server copied to another machine keeps its models and settings, on that machine's build, GPUs and first free port", () => {
+  const source = server("coder", "u/Qwen-GGUF:Q4_K_M").definition;
+  const definition = { ...source, backend: "cuda", port: 9931, build: "b12110", devices: ["CUDA0"], models: source.models.map(model => ({ ...model, devices: ["CUDA0"], context: 32768 })) };
+  const rocm = status({ builds: [build("rocm", 12110)], servers: [server("other", "u/Gemma-GGUF:Q8_0")] });
+  const copy = copiedServer(definition, rocm);
+  assert.deepEqual({ id: copy.id, port: copy.port, backend: copy.backend, build: copy.build, devices: copy.devices }, { id: "", port: 0, backend: "rocm", build: undefined, devices: [] });
+  assert.deepEqual(copy.models.map(model => [model.model, model.devices, model.context]), [["u/Qwen-GGUF:Q4_K_M", [], 32768]]);
+  assert.equal(copiedServer(definition, status({ builds: [build("cuda", 12110)] })).backend, "cuda", "the same backend where it runs");
+  assert.equal(copiedServer(definition, status({ servers: [server("coder", "x/y:Q")] })).name, `${definition.name} (2)`, "a name the machine has is not taken twice");
+});
+
+test("One build for several machines is one of llama.cpp, or the newest of each channel", () => {
+  const a = status({ builds: [build("cuda", 12110), { ...build("rocm", 1371), tag: "lemonade-b1371", source: "lemonade" }], latest: { tag: "b12193", build: 12193, publishedAt: "", assets: [], source: "ggml-org" } });
+  const b = status({ builds: [build("rocm", 12000)] });
+  assert.deepEqual(knownBuilds([a, b]), ["b12193", "b12110", "b12000"], "newest first, without Lemonade's own numbers");
+  assert.equal(buildChoiceProblem(""), null);
+  assert.equal(buildChoiceProblem("b12110"), null);
+  assert.notEqual(buildChoiceProblem("12110"), null);
+});
+
+test("The Fleet tile counts the servers ready, the models and the work under way", () => {
+  const running = { id: "t", kind: "update" as const, title: "Update", state: "running" as const, done: 0, total: 1, startedAt: "" };
+  const summary = modelServersSummary([status({ servers: [server("a", "m:Q"), server("b", "m:Q", "failed")], tasks: [running] }), status({ servers: [server("c", "m:Q")] })]);
+  assert.deepEqual(summary, { ready: 2, servers: 3, models: 0, machines: 2, working: 1 });
 });

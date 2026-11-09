@@ -298,6 +298,7 @@ import { isMachineProject, machineRowState, readMachinePageLink } from "./machin
 import { FleetServerSettings } from "./fleet/FleetServerSettings";
 import { FleetSecretsSettings } from "./fleet/FleetSecretsSettings";
 import { ModelServersSettings } from "./modelServers/ModelServersSettings";
+import { modelServersApi } from "./modelServers/api";
 import { useModelServerToasts } from "./modelServers/useModelServerToasts";
 import { FleetBudgetsSettings } from "./fleet/FleetBudgetsSettings";
 import { FleetAccessSettings } from "./fleet/access/FleetAccessSettings";
@@ -6440,7 +6441,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
       : settingsSection === "secrets" ? <SecretsSettings epoch={owned ? status!.hostEpoch : null} />
-      : settingsSection === "fleet" ? <FleetOverview epoch={owned ? status!.hostEpoch : null} spaces={spacesState.spaces} />
+      : settingsSection === "fleet" ? <FleetOverview epoch={owned ? status!.hostEpoch : null} spaces={spacesState.spaces} modelServersApi={modelServersApi} />
       : settingsSection === "machines" ? <MachinesSettings key={machineFocus ? `${machineFocus.id}:${machineFocus.ticket}` : ""} epoch={owned ? status!.hostEpoch : null}
         initialMachine={machineFocus?.id ?? null} />
       : settingsSection === "modelServers" ? <ModelServersSettings epoch={owned ? status!.hostEpoch : null}

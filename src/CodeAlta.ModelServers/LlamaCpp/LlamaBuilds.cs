@@ -122,7 +122,9 @@ public sealed partial class LlamaBuilds
     {
         ArgumentNullException.ThrowIfNull(release);
         ArgumentNullException.ThrowIfNull(assets);
-        if (release.Build < MinimumBuild) throw new ModelHostException("too_old", $"{release.Tag} is older than b{MinimumBuild}, which fixed a flaw of the GGUF parser.");
+        // Lemonade numbers its builds itself: the llama.cpp build it carries is the one its probe tells.
+        var lemonade = release.Source == "lemonade";
+        if (!lemonade && release.Build < MinimumBuild) throw new ModelHostException("too_old", $"{release.Tag} is older than b{MinimumBuild}, which fixed a flaw of the GGUF parser.");
         if (assets.Count == 0) throw new ModelHostException("not_found", $"{release.Tag} has no {backend} build for this machine.");
         if (assets.Any(static asset => asset.Sha256 is null))
             throw new ModelHostException("checksum", $"{release.Tag} publishes no SHA-256 for its archives: it is not installed.");
@@ -162,6 +164,12 @@ public sealed partial class LlamaBuilds
         foreach (var asset in assets) Extract(Path.Combine(downloads, asset.Name), partial);
         Flatten(partial);
         var probe = await ProbeAsync(partial, cancellationToken).ConfigureAwait(false);
+        if (lemonade && probe.Build is < MinimumBuild)
+        {
+            Directory.Delete(partial, recursive: true);
+            throw new ModelHostException("too_old", $"{release.Tag} carries llama.cpp b{probe.Build}, older than b{MinimumBuild}, which fixed a flaw of the GGUF parser.");
+        }
+
         if (backend is not ("cpu" or "metal") && !probe.Devices.Any(device => DeviceBackend(device.Name) == backend))
         {
             var seen = probe.Devices.Count == 0 ? "no device" : string.Join(", ", probe.Devices.Select(static device => $"{device.Name} ({device.Description})"));
@@ -172,7 +180,7 @@ public sealed partial class LlamaBuilds
         if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
         Directory.Move(partial, folder);
         foreach (var asset in assets) TryDelete(Path.Combine(downloads, asset.Name));
-        var build = new InstalledBuild(release.Tag, release.Build, backend, assets[0].BackendVersion, folder, FolderSize(folder), DateTimeOffset.UtcNow,
+        var build = new InstalledBuild(release.Tag, lemonade ? probe.Build ?? 0 : release.Build, backend, assets[0].BackendVersion, folder, FolderSize(folder), DateTimeOffset.UtcNow,
             probe.Devices, probe.VersionLine, false, false, false, release.Source);
         lock (_gate)
         {
@@ -309,6 +317,57 @@ public sealed partial class LlamaBuilds
         var line = versionError.Split('\n').Select(static text => text.Trim()).FirstOrDefault(static text => text.StartsWith("version:", StringComparison.Ordinal));
         int? number = line is not null && BuildNumberPattern().Match(line) is { Success: true } match ? int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) : null;
         return new BuildProbe(line, number, ParseDevices(devices));
+    }
+
+    /// <summary>
+    /// Measures how a model fits the devices of a build with its <c>llama-fit-params</c>, which reads the model without
+    /// loading its weights: the context and the layers that fit, then what each device takes.
+    /// </summary>
+    /// <param name="build">The build.</param>
+    /// <param name="modelPath">The main file of the model.</param>
+    /// <param name="devices">The devices, as a server that names none uses them; empty for the build's choice.</param>
+    /// <param name="at">When.</param>
+    /// <param name="cancellationToken">Ends the measure.</param>
+    /// <returns>The measure; null when the build has no llama-fit-params.</returns>
+    /// <exception cref="ModelHostException">It does not start or does not answer in time.</exception>
+    public static async Task<MeasuredFit?> MeasureFitAsync(InstalledBuild build, string modelPath, IReadOnlyList<string> devices, DateTimeOffset at, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(build);
+        ArgumentNullException.ThrowIfNull(devices);
+        var program = Path.Combine(build.Folder, OperatingSystem.IsWindows() ? "llama-fit-params.exe" : "llama-fit-params");
+        if (!File.Exists(program)) return null;
+        string[] arguments = devices.Count > 0 ? ["-m", modelPath, "--device", string.Join(',', devices)] : ["-m", modelPath];
+        var (fitted, fittedLog) = await RunAsync(program, arguments, cancellationToken).ConfigureAwait(false);
+        var (memory, _) = await RunAsync(program, [.. arguments, "-fitp", "on"], cancellationToken).ConfigureAwait(false);
+        var measure = ParseFit(build, fitted, memory, at);
+        // Nothing printed: the reason is the last error of its log (a file it cannot read, an architecture this build does not know).
+        return measure.Arguments.Length > 0 || measure.Devices.Count > 0 ? measure
+            : measure with { Problem = fittedLog.Split('\n').Select(static line => line.Trim()).LastOrDefault(static line => line.Contains("error", StringComparison.OrdinalIgnoreCase)) ?? "llama-fit-params printed nothing." };
+    }
+
+    /// <summary>Reads what <c>llama-fit-params</c> printed: <c>-c 40960 -ngl -1</c>, and with <c>-fitp on</c> a line per device of MiB (<c>CUDA0 1050 4480 352</c>).</summary>
+    /// <param name="build">The build that measured.</param>
+    /// <param name="fitted">The arguments it printed.</param>
+    /// <param name="memory">The memory it printed.</param>
+    /// <param name="at">When.</param>
+    /// <returns>The measure.</returns>
+    public static MeasuredFit ParseFit(InstalledBuild build, string fitted, string memory, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(build);
+        var line = (fitted ?? "").Split('\n').Select(static text => text.Trim()).LastOrDefault(static text => text.StartsWith('-')) ?? "";
+        var words = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        int? Value(params string[] names)
+        {
+            var index = Array.FindIndex(words, word => names.Contains(word, StringComparer.Ordinal));
+            return index >= 0 && index + 1 < words.Length && int.TryParse(words[index + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : null;
+        }
+
+        const long MiB = 1024 * 1024;
+        var devices = (memory ?? "").Split('\n').Select(static text => text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .Where(static parts => parts.Length == 4 && parts.Skip(1).All(static part => long.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)))
+            .Select(static parts => new DeviceMemory(parts[0], long.Parse(parts[1], CultureInfo.InvariantCulture) * MiB, long.Parse(parts[2], CultureInfo.InvariantCulture) * MiB,
+                long.Parse(parts[3], CultureInfo.InvariantCulture) * MiB)).ToList();
+        return new MeasuredFit(build.Backend, build.Tag, Value("-c", "--ctx-size"), Value("-ngl", "--n-gpu-layers"), line, devices, at);
     }
 
     /// <summary>Reads what <c>--list-devices</c> printed: <c>  CUDA0: NVIDIA GeForce RTX 4070 (12281 MiB, 11106 MiB free)</c>.</summary>

@@ -44,6 +44,12 @@ public sealed record ModelHostOptions
 
     /// <summary>Gets whether its servers keep running when the host stops (a node does; a desktop stops those not kept).</summary>
     public bool ServersOutliveHost { get; init; }
+
+    /// <summary>
+    /// Gets what keeps the machine from idle sleep, given why, while a server answers or loads a model, or a download or an
+    /// install runs; it returns what lets the machine sleep again. Null: the machine sleeps as its system decides.
+    /// </summary>
+    public Func<string, IDisposable>? KeepAwake { get; init; }
 }
 
 /// <summary>
@@ -67,6 +73,9 @@ public sealed partial class ModelHost : IAsyncDisposable
     private HardwareInventory _hardware = new(HardwareProbe.CurrentOs, HardwareProbe.CurrentArchitecture, null, null, [], new MachineLibraries(null, null, null, false, false, null), []);
     private LlamaRelease? _latest;
     private DateTimeOffset _latestAt;
+    private LlamaRelease? _lemonade;
+    private readonly Dictionary<string, GgufShape?> _shapes = new(StringComparer.Ordinal);
+    private readonly Lock _fitsGate = new();
     private ModelHostSettings _settings;
     private ModelStore _store;
     private ModelDownloads _downloads;
@@ -74,6 +83,11 @@ public sealed partial class ModelHost : IAsyncDisposable
     private IReadOnlyList<UnmanagedServer> _unmanaged = [];
     private long _revision;
     private Task? _background;
+    // Touched by the background loop only.
+    private IDisposable? _awake;
+    private bool _awakeRefused;
+    private DateTimeOffset _lastWork = DateTimeOffset.MinValue;
+    private static readonly TimeSpan AwakeAfterWork = TimeSpan.FromMinutes(5);
 
     /// <summary>Creates the model host; <see cref="StartAsync"/> reads the machine and starts its servers.</summary>
     /// <param name="options">Where it keeps its files.</param>
@@ -158,6 +172,7 @@ public sealed partial class ModelHost : IAsyncDisposable
         var builds = Builds.List();
         HardwareInventory hardware;
         LlamaRelease? latest;
+        LlamaRelease? lemonade;
         ModelHostSettings settings;
         IReadOnlyList<StoredModel> models;
         ModelStore store;
@@ -166,17 +181,20 @@ public sealed partial class ModelHost : IAsyncDisposable
         {
             hardware = _hardware;
             latest = _latest;
+            lemonade = _settings.Updates.AllowLemonadeRocm ? _lemonade : null;
             settings = _settings;
             models = _models;
             store = _store;
             tasks = [.. _tasks];
         }
 
-        var candidates = BuildSelector.Candidates(hardware, latest);
+        var candidates = BuildSelector.Candidates(hardware, latest, lemonade);
         var downloads = _downloads.List();
         var downloading = downloads.Where(static download => download.State is "queued" or "downloading" or "checking" or "paused")
             .ToDictionary(static download => download.Model, static download => download, StringComparer.Ordinal);
-        var shown = models.Select(model => downloading.ContainsKey(model.Id) ? model with { State = "downloading" } : model).ToList();
+        var measured = ReadFits();
+        var shown = models.Select(model => (downloading.ContainsKey(model.Id) ? model with { State = "downloading" } : model) is var view
+            && measured.TryGetValue(FitKey(model), out var fit) ? view with { Measured = fit } : view).ToList();
         var servers = Supervisors().Select(static supervisor => new ServerView(supervisor.Definition, supervisor.Status)).OrderBy(static view => view.Definition.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         return new ModelHostStatus(hardware, builds, candidates, latest, settings, ReadPlanned(), ReadHistory(), store.Root, models.Sum(static model => model.FreedBytes)
             + SharedBytes(models), store.FreeBytes(), shown, downloads, servers, _unmanaged, Warnings(), tasks, Interlocked.Read(ref _revision));
@@ -219,6 +237,7 @@ public sealed partial class ModelHost : IAsyncDisposable
                 _latestAt = _options.Time.GetUtcNow();
             }
 
+            await LemonadeAsync(cancellationToken).ConfigureAwait(false);
             NotifyChanged();
             return release;
         }
@@ -227,6 +246,26 @@ public sealed partial class ModelHost : IAsyncDisposable
             return _latest;
         }
     }
+
+    // The newest of Lemonade's ROCm builds when the policy allows them, else null; the one read last when GitHub does not answer.
+    private async Task<LlamaRelease?> LemonadeAsync(CancellationToken cancellationToken)
+    {
+        if (!Settings.Updates.AllowLemonadeRocm) return null;
+        try
+        {
+            var release = await _releases.GetLemonadeAsync(cancellationToken).ConfigureAwait(false);
+            lock (_gate) _lemonade = release;
+            return release;
+        }
+        catch (ModelHostException)
+        {
+            lock (_gate) return _lemonade;
+        }
+    }
+
+    // The release a backend installs from: Lemonade's when its candidate is one of Lemonade's archives.
+    private static LlamaRelease SourceOf(LlamaRelease release, LlamaRelease? lemonade, BuildCandidate? candidate)
+        => lemonade is not null && candidate?.Asset is { } asset && lemonade.Assets.Any(item => item.Name == asset) ? lemonade : release;
 
     private async Task<LlamaRelease> ResolveChannelAsync(UpdatePolicy policy, string? build, CancellationToken cancellationToken)
     {
@@ -259,21 +298,23 @@ public sealed partial class ModelHost : IAsyncDisposable
                 var release = await ResolveChannelAsync(Settings.Updates, build, _disposed.Token).ConfigureAwait(false);
                 HardwareInventory hardware;
                 lock (_gate) hardware = _hardware;
-                var candidates = BuildSelector.Candidates(hardware, release);
+                var lemonade = build is null ? await LemonadeAsync(_disposed.Token).ConfigureAwait(false) : null;
+                var candidates = BuildSelector.Candidates(hardware, release, lemonade);
                 var chosen = backends.Count > 0 ? backends : BuildSelector.Recommended(hardware, candidates);
                 var installed = new List<string>();
                 var failures = new List<string>();
                 foreach (var backend in chosen)
                 {
                     var candidate = candidates.FirstOrDefault(c => c.Backend == backend);
-                    var assets = BuildSelector.AssetsFor(release, hardware.Os, hardware.Architecture, backend, candidate);
-                    UpdateTask(task.Id, t => t with { Total = t.Total + assets.Sum(static asset => asset.Size), Message = $"Downloading {release.Tag} ({backend})…" });
+                    var source = SourceOf(release, lemonade, candidate);
+                    var assets = BuildSelector.AssetsFor(source, hardware.Os, hardware.Architecture, backend, candidate);
+                    UpdateTask(task.Id, t => t with { Total = t.Total + assets.Sum(static asset => asset.Size), Message = $"Downloading {source.Tag} ({backend})…" });
                     try
                     {
                         var makeCurrent = Builds.Find(backend, null) is null;
-                        await Builds.InstallAsync(release, backend, assets, makeCurrent, bytes => UpdateTask(task.Id, t => t with { Done = Math.Max(0, t.Done + bytes) }), _disposed.Token)
+                        await Builds.InstallAsync(source, backend, assets, makeCurrent, bytes => UpdateTask(task.Id, t => t with { Done = Math.Max(0, t.Done + bytes) }), _disposed.Token)
                             .ConfigureAwait(false);
-                        installed.Add($"{release.Tag} ({backend})");
+                        installed.Add($"{source.Tag} ({backend})");
                     }
                     catch (ModelHostException exception)
                     {
@@ -452,15 +493,109 @@ public sealed partial class ModelHost : IAsyncDisposable
         return freed;
     }
 
-    /// <summary>Lists the quantizations of a repository with their size, and whether each is on this machine.</summary>
+    /// <summary>Lists the quantizations of a repository with their size, and reads the shape of the model from the header of one of them.</summary>
     /// <param name="repo">The repository.</param>
     /// <param name="cancellationToken">Ends the reading.</param>
-    /// <returns>Its details and quantizations.</returns>
+    /// <returns>Its details, its quantizations, and its shape (null when its header could not be read).</returns>
     /// <exception cref="ModelHostException">The repository is not there.</exception>
-    public async Task<(HubModelDetails Details, IReadOnlyList<QuantFiles> Quantizations)> InspectRepoAsync(string repo, CancellationToken cancellationToken)
+    public async Task<RepoInspection> InspectRepoAsync(string repo, CancellationToken cancellationToken)
     {
         var details = await _hub.GetModelAsync(repo, cancellationToken).ConfigureAwait(false);
-        return (details, GgufNames.Quantizations(details.Files));
+        var quantizations = GgufNames.Quantizations(details.Files);
+        return new RepoInspection(details, quantizations, await ReadShapeAsync(repo, details.Revision, quantizations, cancellationToken).ConfigureAwait(false));
+    }
+
+    // The shape of a model, from the header of the first file of its smallest quantization: 4 MB, or 16 MB when its header
+    // is longer (a large vocabulary comes before the keys a few models write last). Kept per revision.
+    private async Task<GgufShape?> ReadShapeAsync(string repo, string revision, IReadOnlyList<QuantFiles> quantizations, CancellationToken cancellationToken)
+    {
+        var key = repo + "@" + revision;
+        lock (_gate)
+        {
+            if (_shapes.TryGetValue(key, out var known)) return known;
+        }
+
+        var file = quantizations.OrderBy(static quant => quant.ModelBytes).SelectMany(static quant => quant.Files)
+            .FirstOrDefault(static file => !file.Path.Contains("mmproj", StringComparison.OrdinalIgnoreCase));
+        if (file is null) return null;
+        GgufShape? shape = null;
+        foreach (var bytes in new[] { 4 << 20, 16 << 20 })
+        {
+            try
+            {
+                var head = await _hub.ReadHeadAsync(repo, revision, file.Path, (int)Math.Min(bytes, Math.Max(file.Size, 24)), cancellationToken).ConfigureAwait(false);
+                if (GgufHeader.ReadMetadata(head, out var complete) is not { } metadata) break;
+                shape = GgufHeader.ShapeOf(metadata);
+                if (complete || shape is not null && shape.Vocabulary > 0 || head.Length < bytes) break;
+            }
+            catch (DownloadException)
+            {
+                break;
+            }
+        }
+
+        lock (_gate)
+        {
+            if (_shapes.Count > 200) _shapes.Clear();
+            _shapes[key] = shape;
+        }
+
+        return shape;
+    }
+
+    /// <summary>
+    /// Measures how a model on the disk fits the GPUs of the machine, with <c>llama-fit-params</c> of the best build installed
+    /// (CUDA, ROCm or Metal before Vulkan), on the devices a server that names none runs on. Kept per revision.
+    /// </summary>
+    /// <param name="model">The model.</param>
+    /// <param name="cancellationToken">Ends the measure.</param>
+    /// <returns>The measure, or null without a build or without the model.</returns>
+    public async Task<MeasuredFit?> MeasureFitAsync(string model, CancellationToken cancellationToken)
+    {
+        if (Store.Find(model) is not { ModelPath: { } path } stored) return null;
+        HardwareInventory hardware;
+        lock (_gate) hardware = _hardware;
+        var order = new[] { "cuda", "rocm", "metal", "vulkan", "sycl", "cpu" };
+        var build = Builds.List().Where(static build => build.Current).OrderBy(build => Array.IndexOf(order, build.Backend) is var index and >= 0 ? index : order.Length).FirstOrDefault();
+        if (build is null) return null;
+        MeasuredFit? measure;
+        try
+        {
+            measure = await LlamaBuilds.MeasureFitAsync(build, path, LlamaBuilds.DiscreteDevices(build, hardware), _options.Time.GetUtcNow(), cancellationToken).ConfigureAwait(false);
+        }
+        catch (ModelHostException exception)
+        {
+            measure = new MeasuredFit(build.Backend, build.Tag, null, null, "", [], _options.Time.GetUtcNow(), exception.Message);
+        }
+
+        if (measure is null) return null;
+        lock (_fitsGate)
+        {
+            var fits = ReadFits();
+            fits[FitKey(stored)] = measure;
+            Directory.CreateDirectory(_options.SharedRoot);
+            SafeFile.WriteAllText(FitsPath, JsonSerializer.Serialize(fits, ModelServersJsonContext.Default.DictionaryStringMeasuredFit));
+        }
+
+        NotifyChanged();
+        return measure;
+    }
+
+    private string FitsPath => Path.Combine(_options.SharedRoot, "fits.json");
+
+    private static string FitKey(StoredModel model) => model.Id + "@" + model.Revision;
+
+    private Dictionary<string, MeasuredFit> ReadFits()
+    {
+        try
+        {
+            return File.Exists(FitsPath) ? JsonSerializer.Deserialize(File.ReadAllText(FitsPath), ModelServersJsonContext.Default.DictionaryStringMeasuredFit)
+                ?? new(StringComparer.Ordinal) : new(StringComparer.Ordinal);
+        }
+        catch (Exception exception) when (exception is IOException or JsonException or UnauthorizedAccessException)
+        {
+            return new(StringComparer.Ordinal);
+        }
     }
 
     private ModelDownloads CreateDownloads(ModelStore store)
@@ -473,6 +608,7 @@ public sealed partial class ModelHost : IAsyncDisposable
             if (download.State == "done") RescanModels();
             DownloadEnded?.Invoke(download);
             if (download.State == "done") _ = StartWaitingServersAsync(definition => definition.Models.Any(m => m.Model == download.Model));
+            if (download.State == "done") _ = Task.Run(() => MeasureFitAsync(download.Model, _disposed.Token));
         };
         return downloads;
     }
@@ -530,6 +666,7 @@ public sealed partial class ModelHost : IAsyncDisposable
                 return;
             }
 
+            HoldAwake();
             try
             {
                 await RunScheduledUpdatesAsync(cancellationToken).ConfigureAwait(false);
@@ -551,6 +688,44 @@ public sealed partial class ModelHost : IAsyncDisposable
             }
         }
     }
+
+    /// <summary>Whether the machine works for its model host now: a server answers or loads a model, a download or a task runs.</summary>
+    internal bool IsWorking()
+    {
+        bool tasks;
+        lock (_gate) tasks = _tasks.Any(static task => task.EndedAt is null);
+        return tasks || _downloads.List().Any(static download => download.State is "downloading" or "checking")
+            || Supervisors().Any(static supervisor => supervisor.Status.Models.Any(static model => model.BusySlots > 0 || model.State == "loading"));
+    }
+
+    // The machine stays awake while it works, and a few minutes after, so that a session that sends its next request soon
+    // finds it; then it sleeps as its system decides. A system that refuses is not asked again.
+    internal void HoldAwake()
+    {
+        if (_options.KeepAwake is not { } keepAwake) return;
+        var now = _options.Time.GetUtcNow();
+        if (IsWorking()) _lastWork = now;
+        var wanted = now - _lastWork < AwakeAfterWork;
+        if (wanted && _awake is null && !_awakeRefused)
+        {
+            try
+            {
+                _awake = keepAwake("CodeAlta keeps the computer awake while its model servers work");
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or DllNotFoundException or EntryPointNotFoundException)
+            {
+                _awakeRefused = true;
+            }
+        }
+        else if (!wanted && _awake is not null)
+        {
+            _awake.Dispose();
+            _awake = null;
+        }
+    }
+
+    /// <summary>Gets whether the machine is kept awake now.</summary>
+    internal bool IsKeptAwake => _awake is not null;
 
     private List<UnmanagedServer> FindUnmanaged()
     {
@@ -707,6 +882,8 @@ public sealed partial class ModelHost : IAsyncDisposable
             await supervisor.DisposeAsync().ConfigureAwait(false);
         }
 
+        _awake?.Dispose();
+        _awake = null;
         _network.Dispose();
         _noRedirect.Dispose();
         _local.Dispose();

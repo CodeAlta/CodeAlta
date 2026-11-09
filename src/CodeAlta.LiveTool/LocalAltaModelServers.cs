@@ -72,12 +72,12 @@ public sealed class LocalAltaModelServers : IAltaModelServers, IDisposable
     public async Task<AltaHubModel> ReadHubModelAsync(string repo, IReadOnlyList<string> machines, CancellationToken cancellationToken)
     {
         var host = Host(LocalMachine);
-        var (details, quants) = await host.InspectRepoAsync(repo, cancellationToken).ConfigureAwait(false);
+        var (details, quants, shape) = await host.InspectRepoAsync(repo, cancellationToken).ConfigureAwait(false);
         var status = host.GetStatus();
         var named = machines.Count == 0 || machines.Contains(LocalMachine, StringComparer.Ordinal);
         return new AltaHubModel(details, [.. quants.Select(quant => new AltaHubQuantization(quant.Tag, quant.Bits, quant.ModelBytes, quant.MmprojBytes, quant.Files.Count,
-            named ? [new AltaHubFit(LocalMachine, FitEstimate.For(quant, status.Hardware),
-                status.Models.Any(model => string.Equals(model.Id, $"{details.Model.Id}:{quant.Tag}", StringComparison.OrdinalIgnoreCase)))] : []))]);
+            named ? [new AltaHubFit(LocalMachine, FitEstimate.For(quant, status.Hardware, shape),
+                status.Models.Any(model => string.Equals(model.Id, $"{details.Model.Id}:{quant.Tag}", StringComparison.OrdinalIgnoreCase)))] : []))], shape);
     }
 
     /// <inheritdoc />

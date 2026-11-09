@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeAlta.Catalog;
@@ -145,6 +146,27 @@ public sealed partial class AltaLiveToolTests
         Assert.AreEqual(AltaExitCodes.Success, download.ExitCode, download.Stderr);
         Assert.AreEqual("unsloth/Qwen3-8B-GGUF:Q4_K_M", servers.Actions.Single().Action.Model);
         Assert.AreEqual("device-1", servers.Actions.Single().Machine);
+    }
+
+    [TestMethod]
+    public async Task Llama_UpdateAll_RunsOnEveryManagedMachine_WithOneBuildForAll()
+    {
+        using var root = TempDirectory.Create();
+        var (dispatcher, servers) = LlamaDispatcher(root.Path);
+        var now = await dispatcher.InvokeAsync(["llama", "update", "now", "--all", "--build", "b12000"], caller: AltaCallerIdentity.Cli);
+        Assert.AreEqual(AltaExitCodes.Success, now.ExitCode, now.Stderr);
+        CollectionAssert.AreEqual(new[] { "local", "device-1" }, servers.Actions.Select(static entry => entry.Machine).ToArray(), "the machines it manages, not mac");
+        Assert.IsTrue(servers.Actions.All(static entry => entry.Action is { Action: "updateNow", Build: "b12000" }));
+        Assert.HasCount(2, ReadJsonLines(now.Stdout).Where(static item => item.GetProperty("type").GetString() == "alta.llama.task"));
+
+        servers.Actions.Clear();
+        var at = await dispatcher.InvokeAsync(["llama", "update", "at", DateTimeOffset.Now.AddHours(2).ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture), "--all"],
+            caller: AltaCallerIdentity.Cli);
+        Assert.AreEqual(AltaExitCodes.Success, at.ExitCode, at.Stderr);
+        Assert.IsTrue(servers.Actions.Count == 2 && servers.Actions.All(static entry => entry.Action is { Action: "planUpdate", At: not null, Build: null }));
+
+        var both = await dispatcher.InvokeAsync(["llama", "update", "now", "--all", "--machine", "pc-ai"], caller: AltaCallerIdentity.Cli);
+        Assert.AreEqual(AltaExitCodes.Usage, both.ExitCode);
     }
 
     [TestMethod]

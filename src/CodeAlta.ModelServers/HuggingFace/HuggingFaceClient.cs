@@ -226,6 +226,37 @@ public sealed partial class HuggingFaceClient
         }
     }
 
+    /// <summary>Reads the first bytes of a file, with one range request: the header of a GGUF file without its tensors.</summary>
+    /// <param name="repo">The repository.</param>
+    /// <param name="revision">The revision.</param>
+    /// <param name="path">The file.</param>
+    /// <param name="bytes">How many bytes at most.</param>
+    /// <param name="cancellationToken">Ends the call.</param>
+    /// <returns>The bytes read.</returns>
+    /// <exception cref="DownloadException">The file is gated, missing, or the Hub could not be reached.</exception>
+    public async Task<byte[]> ReadHeadAsync(string repo, string revision, string path, int bytes, CancellationToken cancellationToken)
+    {
+        var source = await ResolveAsync(repo, revision, path, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(HttpMethod.Get, source.Address);
+        request.Headers.Range = new RangeHeaderValue(0, Math.Max(1, bytes) - 1);
+        if (source.Token is { } token) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        try
+        {
+            using var response = await _noRedirect.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) throw new DownloadException("network", $"Hugging Face answered {(int)response.StatusCode} for {path}.");
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            // A server that ignores the range sends the whole file: only the bytes asked for are read.
+            var buffer = new byte[bytes];
+            var read = 0;
+            while (read < bytes && await stream.ReadAsync(buffer.AsMemory(read), cancellationToken).ConfigureAwait(false) is var count and > 0) read += count;
+            return read == bytes ? buffer : buffer[..read];
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new DownloadException("network", $"Hugging Face could not be reached: {exception.Message}");
+        }
+    }
+
     /// <summary>Checks a repository name: <c>org/name</c> of letters, digits, <c>-</c>, <c>_</c> and <c>.</c>.</summary>
     /// <param name="repo">The name.</param>
     /// <exception cref="ModelHostException">It is not one.</exception>

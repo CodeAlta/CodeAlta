@@ -3,12 +3,19 @@ using CodeAlta.ModelServers.Servers;
 
 namespace CodeAlta.ModelServers;
 
+/// <summary>A repository of Hugging Face as a model host reads it.</summary>
+/// <param name="Details">Its details.</param>
+/// <param name="Quantizations">Its quantizations.</param>
+/// <param name="Shape">The shape of its model, from the header of a GGUF file; null when it could not be read.</param>
+public sealed record RepoInspection(CodeAlta.ModelServers.HuggingFace.HubModelDetails Details, IReadOnlyList<CodeAlta.ModelServers.Store.QuantFiles> Quantizations,
+    CodeAlta.ModelServers.Store.GgufShape? Shape);
+
 /// <summary>One thing asked of a model host: the same words for the page, the node API and <c>alta llama</c>.</summary>
 public sealed record ModelHostAction
 {
     /// <summary>Gets what is asked: <c>refreshHardware</c>, <c>checkLatest</c>, <c>installBuilds</c>, <c>addOwnBuild</c>, <c>removeBuild</c>,
     /// <c>useBuild</c>, <c>setSettings</c>, <c>planUpdate</c>, <c>cancelPlanned</c>, <c>updateNow</c>, <c>download</c>, <c>controlDownload</c>,
-    /// <c>removeModel</c>, <c>rescan</c>, <c>checkModelUpdates</c>, <c>setServer</c>, <c>removeServer</c>, <c>controlServer</c>, <c>testServer</c>,
+    /// <c>removeModel</c>, <c>rescan</c>, <c>checkModelUpdates</c>, <c>measureFit</c>, <c>setServer</c>, <c>removeServer</c>, <c>controlServer</c>, <c>testServer</c>,
     /// <c>serverLog</c> or <c>import</c>.</summary>
     public required string Action { get; init; }
 
@@ -99,6 +106,9 @@ public sealed record ModelHostActionResult
 
     /// <summary>Gets the build of the channel.</summary>
     public LlamaRelease? Latest { get; init; }
+
+    /// <summary>Gets how a model fits the GPUs of the machine, as measured there.</summary>
+    public MeasuredFit? Measured { get; init; }
 }
 
 /// <summary>Runs the actions of a model host.</summary>
@@ -115,7 +125,7 @@ public static class ModelHostActions
     public static bool StartsPrograms(ModelHostAction action)
     {
         ArgumentNullException.ThrowIfNull(action);
-        return action.Action is "installBuilds" or "addOwnBuild" or "useBuild" or "planUpdate" or "updateNow" or "testServer"
+        return action.Action is "installBuilds" or "addOwnBuild" or "useBuild" or "planUpdate" or "updateNow" or "testServer" or "measureFit"
             || action.Action == "setServer" && action.Server?.Enabled != false
             || action.Action == "controlServer" && action.Verb is "start" or "restart" or "load";
     }
@@ -168,6 +178,9 @@ public static class ModelHostActions
             case "rescan":
                 host.RescanModels();
                 return new();
+            case "measureFit":
+                return new() { Measured = await host.MeasureFitAsync(Required(action.Model, "a model"), cancellationToken).ConfigureAwait(false)
+                    ?? throw new ModelHostException("not_found", $"{action.Model} is not on this machine, or no build of llama.cpp is installed to measure it.") };
             case "checkModelUpdates":
                 return new() { ModelIds = await host.CheckModelUpdatesAsync(cancellationToken).ConfigureAwait(false) };
             case "setServer":

@@ -92,7 +92,8 @@ export function backendName(backend: string): string {
 export function updateAvailable(status: Pick<ModelHostStatus, "builds" | "latest">): boolean {
   const latest = status.latest;
   if (!latest) return false;
-  const current = status.builds.filter(build => build.current && build.source !== "own");
+  // A build of one's own and Lemonade's ROCm builds have numbers of their own: the channel's build says nothing of them.
+  const current = status.builds.filter(build => build.current && build.source === "ggml-org");
   return current.length > 0 && current.some(build => build.build < latest.build);
 }
 
@@ -194,6 +195,27 @@ export function defaultBackend(status: Pick<ModelHostStatus, "builds" | "candida
   return installedBackends(status)[0] ?? status.candidates.find(candidate => candidate.verdict === "fits")?.backend ?? "cpu";
 }
 
+/**
+ * A server copied to another machine: the same models and settings, on the build of that machine (the same backend when it
+ * runs it, else its best one), on the GPUs it chooses and the first free port; its models are downloaded there when saved.
+ */
+export function copiedServer(definition: ServerDefinition, target: Pick<ModelHostStatus, "builds" | "candidates" | "servers">): ServerDefinition {
+  const backend = installedBackends(target).includes(definition.backend) ? definition.backend : defaultBackend(target);
+  const names = new Set(target.servers.map(server => server.definition.name.toLowerCase()));
+  return { ...definition, id: "", port: 0, backend, build: undefined, devices: [], name: names.has(definition.name.toLowerCase()) ? `${definition.name} (2)` : definition.name,
+    models: definition.models.map(model => ({ ...model, devices: [] })) };
+}
+
+/** The builds a person may choose for several machines at once: those their channels offer and those installed, newest first. */
+export function knownBuilds(statuses: readonly Pick<ModelHostStatus, "builds" | "latest">[]): string[] {
+  const builds = new Map<string, number>();
+  for (const status of statuses) {
+    if (status.latest && status.latest.source !== "lemonade") builds.set(status.latest.tag, status.latest.build);
+    for (const build of status.builds) if (build.source === "ggml-org") builds.set(build.tag, build.build);
+  }
+  return [...builds].sort((a, b) => b[1] - a[1]).map(([tag]) => tag);
+}
+
 /** The devices a build of a backend sees on a machine, its discrete GPUs first. */
 export function devicesOf(status: Pick<ModelHostStatus, "builds">, backend: string): InstalledBuild["devices"] {
   return status.builds.find(build => build.current && build.backend === backend)?.devices ?? [];
@@ -220,6 +242,17 @@ export async function updateInTurn(machines: readonly string[], start: (machine:
   }
 
   return null;
+}
+
+/** What the Fleet overview says of the model servers: the servers ready of all, the models on the disks, the machines that have a model host. */
+export function modelServersSummary(statuses: readonly Pick<ModelHostStatus, "servers" | "models" | "tasks">[]): Readonly<{ ready: number; servers: number; models: number;
+  machines: number; working: number }> {
+  const servers = statuses.flatMap(status => status.servers);
+  return {
+    ready: servers.filter(server => server.status.state === "ready").length, servers: servers.length,
+    models: statuses.reduce((sum, status) => sum + status.models.length, 0), machines: statuses.length,
+    working: statuses.reduce((sum, status) => sum + runningTasks(status).length, 0),
+  };
 }
 
 /** The tasks of a machine that run now. */

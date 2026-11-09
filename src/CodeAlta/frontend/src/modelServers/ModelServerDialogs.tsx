@@ -5,7 +5,8 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import type { ModelServersApi } from "./api";
-import { backendName, defaultBackend, devicesOf, formatBytes, installedBackends, modelName, newServer, newServerModel, parseModelReference, type MachineStatus } from "./modelServers";
+import { backendName, copiedServer, defaultBackend, devicesOf, formatBytes, installedBackends, knownBuilds, modelName, newServer, newServerModel, parseModelReference,
+  type MachineStatus } from "./modelServers";
 import type { RunAction } from "./ModelServersSettings";
 import type { HubModelView, ServerDefinition, ServerModel, UpdatePolicy } from "./types";
 
@@ -358,6 +359,9 @@ export function PolicyDialog({ machines, run, onClose }: { machines: readonly Ma
           <label><span>{t("Time of the machine")}</span><input className="bp6-input" type="time" value={policy.time} disabled={working} onChange={event => update({ time: event.target.value || "04:00" })} /></label>
         </div>}
         <Checkbox checked={policy.updateModels} disabled={working} label={t("Update the models too, when their repository changed")} onChange={event => update({ updateModels: event.currentTarget.checked })} />
+        <Checkbox checked={policy.allowLemonadeRocm} disabled={working} label={t("Use Lemonade's ROCm builds where the official ROCm build cannot run")}
+          onChange={event => update({ allowLemonadeRocm: event.currentTarget.checked })} />
+        <p className="muted-text settings-field-help">{t("Lemonade (lemonade-sdk/llamacpp-rocm) builds llama.cpp for each family of AMD GPUs with its own ROCm runtime: no HIP SDK on Windows, and older Linux systems.")}</p>
         <p className="muted-text">{t("An update waits for the servers to be idle, tests each one with the new build, and goes back to the previous build when a test fails.")}</p>
         <button type="submit" hidden />
       </form>
@@ -378,39 +382,147 @@ function inAnHour(): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-/** Plans one update of llama.cpp at a time: each machine keeps it and runs it then, even while this computer is off. */
-export function UpdateAtDialog({ machines, run, onClose }: { machines: readonly MachineStatus[]; run: RunAction; onClose: () => void }) {
+/** Whether a build typed for several machines is one: empty for the newest of each machine's channel, else `bNNNN`. */
+export function buildChoiceProblem(build: string): MessageKey | null {
+  return build === "" || /^b\d+$/u.test(build) ? null : "Name the build as b12110, or leave it empty for the newest.";
+}
+
+/**
+ * Updates llama.cpp on one machine or several, now or at a time, to the newest build of each machine's channel or to one
+ * build for all (an older one takes them back to it). Now, the machines update one after the other and the first that
+ * fails stops the others; at a time, each machine keeps the time and updates then, even while this computer is off.
+ */
+export function UpdateDialog({ machines, mode, run, onNow, onClose }: {
+  machines: readonly MachineStatus[]; mode: "now" | "at"; run: RunAction;
+  onNow: (machines: readonly string[], build: string | undefined, models: boolean) => Promise<void>; onClose: () => void;
+}) {
   const { t } = useShellLanguage();
   const [at, setAt] = useState(inAnHour);
+  const [build, setBuild] = useState("");
   const [models, setModels] = useState(false);
   const [working, setWorking] = useState(false);
+  const builds = useMemo(() => knownBuilds(machines.flatMap(entry => entry.status ? [entry.status] : [])), [machines]);
   const when = new Date(at);
-  const invalid: MessageKey | null = Number.isNaN(when.getTime()) ? "Choose a time." : when.getTime() < Date.now() ? "Choose a time to come." : null;
-  async function plan() {
+  const invalid: MessageKey | null = buildChoiceProblem(build)
+    ?? (mode === "now" ? null : Number.isNaN(when.getTime()) ? "Choose a time." : when.getTime() < Date.now() ? "Choose a time to come." : null);
+  async function go() {
     if (invalid) return;
     setWorking(true);
+    const chosen = build || undefined;
+    if (mode === "now") {
+      onClose();
+      await onNow(machines.map(entry => entry.machine.id), chosen, models);
+      return;
+    }
+
     for (const entry of machines) {
-      const result = await run(entry.machine.id, { action: "planUpdate", at: when.toISOString(), models }, "The update is planned.");
+      const result = await run(entry.machine.id, { action: "planUpdate", at: when.toISOString(), build: chosen, models }, "The update is planned.");
       if (!result) { setWorking(false); return; }
     }
     setWorking(false);
     onClose();
   }
   const names: ReactNode = machines.map(entry => entry.machine.name).join(", ");
-  return <Dialog isOpen className="model-update-at-dialog" title={t("Update llama.cpp at a time")} canOutsideClickClose={false} onClose={() => { if (!working) onClose(); }}>
+  return <Dialog isOpen className="model-update-at-dialog" title={t(mode === "now" ? "Update llama.cpp now" : "Update llama.cpp at a time")} canOutsideClickClose={false}
+    onClose={() => { if (!working) onClose(); }}>
     <DialogBody>
       <p className="muted-text">{names}</p>
-      <form className="fleet-server-form" onSubmit={event => { event.preventDefault(); void plan(); }}>
-        <label><span>{t("Time")}</span><input className="bp6-input" type="datetime-local" value={at} disabled={working} onChange={event => setAt(event.target.value)} /></label>
+      <form className="fleet-server-form" onSubmit={event => { event.preventDefault(); void go(); }}>
+        {mode === "at" && <label><span>{t("Time")}</span><input className="bp6-input" type="datetime-local" value={at} disabled={working} onChange={event => setAt(event.target.value)} /></label>}
+        <label><span>{t("Build")}</span><InputGroup value={build} disabled={working} placeholder={t("The newest of each machine's channel")} spellCheck={false} list="model-update-builds"
+          onChange={event => setBuild(event.target.value.trim())} /></label>
+        <datalist id="model-update-builds">{builds.map(tag => <option key={tag} value={tag} />)}</datalist>
         <Checkbox checked={models} disabled={working} label={t("Update the models too")} onChange={event => setModels(event.currentTarget.checked)} />
-        <p className="muted-text">{t("Each machine keeps the time and updates then, even when this computer is off.")}</p>
+        <p className="muted-text">{t(mode === "now"
+          ? "The machines update one after the other: each waits for its servers to be idle and tests them, and the first that fails stops the others."
+          : "Each machine keeps the time and updates then, even when this computer is off.")}</p>
         <button type="submit" hidden />
       </form>
       <Problem problem={invalid ? { key: invalid } : null} />
     </DialogBody>
     <DialogFooter actions={<>
       <Button disabled={working} text={t("Cancel")} onClick={onClose} />
-      <Button intent="primary" disabled={!!invalid || working} icon={working ? <ActivitySpinner size={14} /> : <AppIcon name="timer" size={14} />} text={t("Plan")} onClick={() => void plan()} />
+      <Button intent="primary" disabled={!!invalid || working} icon={working ? <ActivitySpinner size={14} /> : <AppIcon name={mode === "now" ? "refresh" : "timer"} size={14} />}
+        text={t(mode === "now" ? "Update" : "Plan")} onClick={() => void go()} />
+    </>} />
+  </Dialog>;
+}
+
+/**
+ * Copies a server to another machine this computer manages: the same models and settings, on that machine's build, GPUs
+ * and first free port. The models it does not have are downloaded there first; the server starts once they are.
+ */
+export function CopyServerDialog({ machines, from, server, run, onClose }: {
+  machines: readonly MachineStatus[]; from: string; server: ServerDefinition; run: RunAction; onClose: () => void;
+}) {
+  const { t, locale } = useShellLanguage();
+  const targets = managedMachines(machines).filter(entry => entry.machine.id !== from);
+  const [machine, setMachine] = useState(targets[0]?.machine.id ?? "");
+  const [working, setWorking] = useState(false);
+  const target = targets.find(entry => entry.machine.id === machine)?.status ?? null;
+  const source = machines.find(entry => entry.machine.id === from)?.status ?? null;
+  const missing = target ? server.models.filter(model => !target.models.some(stored => stored.id.toLowerCase() === model.model.toLowerCase())) : [];
+  const bytes = missing.reduce((sum, model) => sum + (source?.models.find(stored => stored.id.toLowerCase() === model.model.toLowerCase())?.sizeBytes ?? 0), 0);
+  const copy = target ? copiedServer(server, target) : null;
+  async function save() {
+    if (!copy) return;
+    setWorking(true);
+    const result = await run(machine, { action: "setServer", server: copy }, "The server was copied: its models download first.");
+    setWorking(false);
+    if (result) onClose();
+  }
+  return <Dialog isOpen className="model-server-dialog" title={t("Copy {name} to another machine", { name: server.name })} canOutsideClickClose={false}
+    onClose={() => { if (!working) onClose(); }}>
+    <DialogBody>
+      {targets.length === 0 ? <p className="muted-text">{t("This computer manages no other machine it reaches now.")}</p> : <form className="fleet-server-form"
+        onSubmit={event => { event.preventDefault(); void save(); }}>
+        <MachineField machines={targets} value={machine} onChange={setMachine} disabled={working} />
+        {copy && <dl className="model-servers-copy-facts">
+          <div><dt>{t("Build")}</dt><dd>{backendName(copy.backend)}{copy.backend !== server.backend && <span className="muted-text"> · {t("instead of {backend}", { backend: backendName(server.backend) })}</span>}</dd></div>
+          <div><dt>{t("Models")}</dt><dd>{missing.length === 0 ? t("All on its disk already.")
+            : t("{count} to download ({size})", { count: missing.length, size: bytes > 0 ? formatBytes(bytes, locale) : "?" })}</dd></div>
+        </dl>}
+        <p className="muted-text">{t("It runs on the GPUs and the first free port of that machine; its other settings stay as they are.")}</p>
+        <button type="submit" hidden />
+      </form>}
+    </DialogBody>
+    <DialogFooter actions={<>
+      <Button disabled={working} text={t("Cancel")} onClick={onClose} />
+      <Button intent="primary" disabled={!copy || working} icon={working ? <ActivitySpinner size={14} /> : <AppIcon name="copy" size={14} />} text={t("Copy")} onClick={() => void save()} />
+    </>} />
+  </Dialog>;
+}
+
+/** Downloads models to another machine this computer manages: those it does not have yet. */
+export function DownloadToDialog({ machines, models, run, onClose }: { machines: readonly MachineStatus[]; models: readonly string[]; run: RunAction; onClose: () => void }) {
+  const { t } = useShellLanguage();
+  const targets = managedMachines(machines);
+  const [machine, setMachine] = useState(targets[0]?.machine.id ?? "");
+  const [working, setWorking] = useState(false);
+  const target = targets.find(entry => entry.machine.id === machine)?.status ?? null;
+  const missing = models.filter(model => !target?.models.some(stored => stored.id.toLowerCase() === model.toLowerCase()));
+  async function download() {
+    setWorking(true);
+    for (const model of missing) {
+      if (!await run(machine, { action: "download", model }, "The download started.")) break;
+    }
+    setWorking(false);
+    onClose();
+  }
+  return <Dialog isOpen className="model-server-dialog" title={t("Download {count} models to a machine", { count: models.length })} canOutsideClickClose={false}
+    onClose={() => { if (!working) onClose(); }}>
+    <DialogBody>
+      <form className="fleet-server-form" onSubmit={event => { event.preventDefault(); void download(); }}>
+        <MachineField machines={targets} value={machine} onChange={setMachine} disabled={working} />
+        <ul className="model-servers-copy-list">{models.map(model => <li key={model}>{modelName(model)}
+          {!missing.includes(model) && <span className="muted-text"> · {t("on its disk already")}</span>}</li>)}</ul>
+        <button type="submit" hidden />
+      </form>
+    </DialogBody>
+    <DialogFooter actions={<>
+      <Button disabled={working} text={t("Cancel")} onClick={onClose} />
+      <Button intent="primary" disabled={missing.length === 0 || working} icon={working ? <ActivitySpinner size={14} /> : <AppIcon name="download" size={14} />}
+        text={t("Download")} onClick={() => void download()} />
     </>} />
   </Dialog>;
 }

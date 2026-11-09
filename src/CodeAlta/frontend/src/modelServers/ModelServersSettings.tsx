@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Button, Callout, PopoverNext, ProgressBar, Tab, Tabs, TabsExpander, Tag } from "@blueprintjs/core";
+import { Button, Callout, Checkbox, PopoverNext, ProgressBar, Tab, Tabs, TabsExpander, Tag } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { SettingsPage } from "../SettingsPage";
@@ -14,7 +14,7 @@ import { updateInTurn } from "./modelServers";
 import { activityOf, backendName, currentBuilds, formatBytes, formatSpeed, gpuSummary, isActive, loadingProgress, modelName, modelRows, progressOf, runningTasks,
   serverRows, serverStateOf, stateIntent, timeLeft, updateAvailable, type MachineStatus, type ModelRow, type ServerRow } from "./modelServers";
 import type { ModelHostAction, ModelHostActionResult, ModelHostStatus, ServerDefinition } from "./types";
-import { DownloadDialog, ImportDialog, PolicyDialog, ServerDialog, UpdateAtDialog } from "./ModelServerDialogs";
+import { CopyServerDialog, DownloadDialog, DownloadToDialog, ImportDialog, PolicyDialog, ServerDialog, UpdateDialog } from "./ModelServerDialogs";
 
 type TabId = "servers" | "models" | "builds";
 
@@ -30,8 +30,13 @@ type Dialog =
   | { kind: "server"; machine: string | null; server: ServerDefinition | null; model?: string | null }
   | { kind: "download"; machine: string | null; model?: string | null }
   | { kind: "policy"; machines: readonly string[] }
-  | { kind: "updateAt"; machines: readonly string[] }
+  | { kind: "update"; mode: "now" | "at"; machines: readonly string[] }
+  | { kind: "copy"; machine: string; server: ServerDefinition }
+  | { kind: "downloadTo"; models: readonly string[] }
   | { kind: "import"; machine: string | null };
+
+/** The rows checked in each tab, for the actions on several rows at once. */
+type Checked = Readonly<Record<TabId, readonly string[]>>;
 
 /**
  * Settings > Fleet > Model servers: the llama.cpp servers of this computer and of the paired machines, the models on
@@ -138,17 +143,19 @@ export function ModelServersSettings({ epoch, api: given, onDiscover }: { epoch:
   }, [api]);
 
   const managed = machines.filter(entry => entry.machine.manages && entry.status);
-  // Update all now: one machine after the other, the first that fails stopping the others.
+  const [checked, setChecked] = useState<Checked>({ servers: [], models: [], builds: [] });
+  const check = (id: TabId) => (keys: readonly string[]) => setChecked(current => ({ ...current, [id]: keys }));
+  // Update now: one machine after the other, to one build for all or the newest of each channel; the first that fails stops the others.
   const [updating, setUpdating] = useState(false);
-  const updateAll = async () => {
+  const updateNow = async (ids: readonly string[], build: string | undefined, models: boolean) => {
     if (!api) return;
     setUpdating(true);
-    const names = new Map(managed.map(entry => [entry.machine.id, entry.machine.name]));
-    const stoppedAt = await updateInTurn(managed.map(entry => entry.machine.id),
-      async machine => (await run(machine, { action: "updateNow" }, "The update started."))?.task ?? null,
+    const names = new Map(machines.map(entry => [entry.machine.id, entry.machine.name]));
+    const stoppedAt = await updateInTurn(ids,
+      async machine => (await run(machine, { action: "updateNow", build, models }, "The update started."))?.task ?? null,
       async (machine, task) => (await api.status(machine).catch(() => null))?.tasks.find(item => item.id === task) ?? null);
     setUpdating(false);
-    setNotice(stoppedAt === null ? { key: "All the machines are updated.", intent: "success" }
+    setNotice(stoppedAt === null ? { key: ids.length > 1 ? "All the machines are updated." : "The machine is updated.", intent: "success" }
       : { key: "The update stopped at {name}: the machines after it were not updated.", intent: "warning", values: { name: names.get(stoppedAt) ?? stoppedAt } });
   };
   const view = views[tab];
@@ -173,19 +180,22 @@ export function ModelServersSettings({ epoch, api: given, onDiscover }: { epoch:
       <strong>{entry.machine.name}</strong>: {warning}</Callout>))}
     <Tabs id="model-servers-tabs" selectedTabId={tab} onChange={id => setTab(id as TabId)} renderActiveTabPanelOnly large={false}>
       <Tab id="servers" title={t("Servers")} panel={<ServersTab machines={reachable} view={views.servers} onView={setView} busy={busy} run={run} read={read} onUse={useInSessions}
-        onEdit={(machine, server) => setDialog({ kind: "server", machine, server })} />} />
+        onEdit={(machine, server) => setDialog({ kind: "server", machine, server })} onCopy={(machine, server) => setDialog({ kind: "copy", machine, server })}
+        checked={checked.servers} onCheck={check("servers")} />} />
       <Tab id="models" title={t("Models")} panel={<ModelsTab machines={reachable} view={views.models} onView={setView} busy={busy} run={run}
-        onServe={(machine, model) => setDialog({ kind: "server", machine, server: null, model })} />} />
-      <Tab id="builds" title="llama.cpp" panel={<BuildsTab machines={reachable} view={views.builds} onView={setView} busy={busy} run={run}
-        onPolicy={machine => setDialog({ kind: "policy", machines: [machine] })} onUpdateAt={machine => setDialog({ kind: "updateAt", machines: [machine] })} />} />
+        onServe={(machine, model) => setDialog({ kind: "server", machine, server: null, model })} onDownloadTo={models => setDialog({ kind: "downloadTo", models })}
+        checked={checked.models} onCheck={check("models")} />} />
+      <Tab id="builds" title="llama.cpp" panel={<BuildsTab machines={reachable} view={views.builds} onView={setView} busy={busy || updating} run={run}
+        onPolicy={ids => setDialog({ kind: "policy", machines: ids })} onUpdate={(mode, ids) => setDialog({ kind: "update", mode, machines: ids })}
+        checked={checked.builds} onCheck={check("builds")} />} />
       <TabsExpander />
       {tab === "servers" && <Button size="small" variant="minimal" icon={<AppIcon name="code" size={13} />} text={t("Import a command line…")} disabled={managed.length === 0 || busy}
         onClick={() => setDialog({ kind: "import", machine: null })} />}
       {tab === "builds" && reachable.length > 1 && <>
-        <Button size="small" variant="minimal" icon={updating ? <ActivitySpinner size={13} /> : <AppIcon name="refresh" size={13} />} text={t("Update all now")} disabled={busy || updating || managed.length === 0}
-          onClick={() => void updateAll()} />
+        <Button size="small" variant="minimal" icon={updating ? <ActivitySpinner size={13} /> : <AppIcon name="refresh" size={13} />} text={t("Update all now…")} disabled={busy || updating || managed.length === 0}
+          onClick={() => setDialog({ kind: "update", mode: "now", machines: managed.map(entry => entry.machine.id) })} />
         <Button size="small" variant="minimal" icon={<AppIcon name="timer" size={13} />} text={t("Update all at…")} disabled={busy || managed.length === 0}
-          onClick={() => setDialog({ kind: "updateAt", machines: managed.map(entry => entry.machine.id) })} />
+          onClick={() => setDialog({ kind: "update", mode: "at", machines: managed.map(entry => entry.machine.id) })} />
         <Button size="small" variant="minimal" icon={<AppIcon name="settings" size={13} />} text={t("Policy of all…")} disabled={busy || managed.length === 0}
           onClick={() => setDialog({ kind: "policy", machines: managed.map(entry => entry.machine.id) })} />
       </>}
@@ -196,7 +206,10 @@ export function ModelServersSettings({ epoch, api: given, onDiscover }: { epoch:
     {dialog?.kind === "import" && <ImportDialog machines={machines} machine={dialog.machine} run={run} onImported={(machine, server) => setDialog({ kind: "server", machine, server })}
       onClose={() => setDialog(null)} />}
     {dialog?.kind === "policy" && <PolicyDialog machines={machines.filter(entry => dialog.machines.includes(entry.machine.id))} run={run} onClose={() => setDialog(null)} />}
-    {dialog?.kind === "updateAt" && <UpdateAtDialog machines={machines.filter(entry => dialog.machines.includes(entry.machine.id))} run={run} onClose={() => setDialog(null)} />}
+    {dialog?.kind === "update" && <UpdateDialog machines={machines.filter(entry => dialog.machines.includes(entry.machine.id))} mode={dialog.mode} run={run} onNow={updateNow}
+      onClose={() => setDialog(null)} />}
+    {dialog?.kind === "copy" && <CopyServerDialog machines={machines} from={dialog.machine} server={dialog.server} run={run} onClose={() => setDialog(null)} />}
+    {dialog?.kind === "downloadTo" && <DownloadToDialog machines={machines} models={dialog.models} run={run} onClose={() => setDialog(null)} />}
   </SettingsPage>;
 }
 
@@ -234,10 +247,12 @@ export function stateLabel(state: string): MessageKey {
   }
 }
 
-function ServersTab({ machines, view, onView, busy, run, read, onUse, onEdit }: {
+function ServersTab({ machines, view, onView, busy, run, read, onUse, onEdit, onCopy, checked, onCheck }: {
   machines: readonly MachineStatus[]; view: TableView; onView: (part: Partial<TableView>) => void; busy: boolean; run: RunAction; read: ReadAction;
   onUse: (machine: string, server: ServerDefinition) => Promise<void>;
   onEdit: (machine: string, server: ServerDefinition) => void;
+  onCopy: (machine: string, server: ServerDefinition) => void;
+  checked: readonly string[]; onCheck: (keys: readonly string[]) => void;
 }) {
   const { t } = useShellLanguage();
   const rows = useMemo(() => serverRows(machines), [machines]);
@@ -256,7 +271,13 @@ function ServersTab({ machines, view, onView, busy, run, read, onUse, onEdit }: 
     { id: "backend", label: "GPU family", icon: "computer", options: options("backend", backendName) },
     { id: "model", label: "Model", icon: "model", options: options("model", value => value) },
   ];
+  const picked = shown.filter(row => checked.includes(row.key));
+  const each = async (action: (row: ServerRow) => ModelHostAction | null) => {
+    for (const row of picked) { const asked = action(row); if (asked) await run(row.machine.id, asked); }
+    onCheck([]);
+  };
   const columns: DataColumn<ServerRow>[] = [
+    pickColumn<ServerRow>(row => row.key, checked, onCheck, row => t("Select {name}", { name: row.server.definition.name }), row => row.machine.manages),
     { id: "state", label: "State", width: "8rem", sort: row => serverStateOf(row.server), cell: row => <State state={serverStateOf(row.server)} progress={loadingProgress(row.server)} /> },
     { id: "name", label: "Name", sort: row => row.server.definition.name, cell: row => <span className="model-servers-name"><AppIcon name="server" size={14} />
       <strong>{row.server.definition.name}</strong>{row.server.definition.purpose !== "chat" && <Tag minimal>{t(row.server.definition.purpose === "embedding" ? "Embeddings" : "Rerank")}</Tag>}</span> },
@@ -277,11 +298,45 @@ function ServersTab({ machines, view, onView, busy, run, read, onUse, onEdit }: 
   return <section className="fleet-table-section" aria-label={t("Servers")}>
     <FilterBar label={t("Filter the model servers")} query={view.query} onQuery={query => onView({ query })} facets={filters} values={view.values}
       onValues={values => onView({ values })} shown={shown.length} total={rows.length} />
+    {picked.length > 0 && <SelectionBar count={picked.length} total={shown.filter(row => row.machine.manages).length}
+      onAll={() => onCheck(shown.filter(row => row.machine.manages).map(row => row.key))} onClear={() => onCheck([])}>
+      <Button size="small" icon={<AppIcon name="play" size={13} />} text={t("Start")} disabled={busy}
+        onClick={() => void each(row => row.server.status.state === "stopped" || row.server.status.state === "failed" ? { action: "controlServer", id: row.server.definition.id, verb: "start" } : null)} />
+      <Button size="small" icon={<AppIcon name="stop" size={13} />} text={t("Stop")} disabled={busy}
+        onClick={() => void each(row => row.server.status.state !== "stopped" ? { action: "controlServer", id: row.server.definition.id, verb: "stop" } : null)} />
+      <Button size="small" icon={<AppIcon name="refresh" size={13} />} text={t("Restart")} disabled={busy}
+        onClick={() => void each(row => ({ action: "controlServer", id: row.server.definition.id, verb: "restart" }))} />
+      <RemoveButton busy={busy} question={t("Remove the {count} servers selected?", { count: picked.length })} detail={t("They stop and their settings go. Their models stay on the disk.")}
+        onConfirm={() => void each(row => ({ action: "removeServer", id: row.server.definition.id }))} />
+    </SelectionBar>}
     <DataTable label={t("Model servers")} rows={shown} columns={columns} rowKey={row => row.key} sort={view.sort} onSort={sort => onView({ sort })}
       selected={view.selected} onSelect={selected => onView({ selected })} rowState={row => rowMark(stateIntent(serverStateOf(row.server)))}
       empty={<EmptyState rows={rows.length} text="No model server yet: add one, or import the command line of a llama-server you run." />}
-      details={row => <ServerDetails row={row} busy={busy} run={run} read={read} onUse={() => void onUse(row.machine.id, row.server.definition)} onEdit={() => onEdit(row.machine.id, row.server.definition)} />} />
+      details={row => <ServerDetails row={row} busy={busy} run={run} read={read} onUse={() => void onUse(row.machine.id, row.server.definition)} onEdit={() => onEdit(row.machine.id, row.server.definition)}
+        onCopy={() => onCopy(row.machine.id, row.server.definition)} />} />
   </section>;
+}
+
+/** The column of the boxes that check rows, for the actions on several rows at once; a row that may not be changed has none. */
+function pickColumn<T>(key: (row: T) => string, checked: readonly string[], onCheck: (keys: readonly string[]) => void, label: (row: T) => string,
+  enabled: (row: T) => boolean): DataColumn<T> {
+  return { id: "pick", label: "Select", hiddenLabel: true, width: "2.4rem", cell: row => enabled(row)
+    ? <Checkbox className="model-servers-pick" checked={checked.includes(key(row))} aria-label={label(row)}
+      onChange={event => onCheck(event.currentTarget.checked ? [...checked, key(row)] : checked.filter(item => item !== key(row)))} />
+    : null };
+}
+
+/** What can be done to the rows checked, above the table. */
+function SelectionBar({ count, total, onAll, onClear, children }: { count: number; total: number; onAll: () => void; onClear: () => void; children: ReactNode }) {
+  const { t } = useShellLanguage();
+  return <div className="model-servers-selection" role="toolbar" aria-label={t("Actions on the rows selected")}>
+    <strong>{t("{count} selected", { count })}</strong>
+    {children}
+    <span className="model-servers-selection-end">
+      {count < total && <Button size="small" variant="minimal" text={t("Select all {count}", { count: total })} onClick={onAll} />}
+      <Button size="small" variant="minimal" text={t("Clear the selection")} onClick={onClear} />
+    </span>
+  </div>;
 }
 
 /** The mark at the start of a row, as the tables of the Fleet console draw it. */
@@ -315,7 +370,8 @@ function ModelsCell({ row }: { row: ServerRow }) {
     {models.length > 1 && <Tag minimal round className="model-servers-more">+{models.length - 1}</Tag>}</span>;
 }
 
-function ServerDetails({ row, busy, run, read, onUse, onEdit }: { row: ServerRow; busy: boolean; run: RunAction; read: ReadAction; onUse: () => void; onEdit: () => void }) {
+function ServerDetails({ row, busy, run, read, onUse, onEdit, onCopy }: { row: ServerRow; busy: boolean; run: RunAction; read: ReadAction; onUse: () => void; onEdit: () => void;
+  onCopy: () => void }) {
   const { t, locale } = useShellLanguage();
   const [log, setLog] = useState<readonly string[] | null>(null);
   const [test, setTest] = useState<Readonly<{ passed: boolean; message: string }> | null>(null);
@@ -366,6 +422,7 @@ function ServerDetails({ row, busy, run, read, onUse, onEdit }: { row: ServerRow
             onClick={() => void run(machine.id, { action: "testServer", id }).then(result => setTest(result?.test ?? null))} /></>
         : <Button size="small" intent="primary" icon={<AppIcon name="play" size={14} />} text={t("Start")} disabled={busy} onClick={() => void act("start")} />}
       <Button size="small" icon={<AppIcon name="edit" size={14} />} text={t("Change…")} disabled={busy} onClick={onEdit} />
+      <Button size="small" variant="minimal" icon={<AppIcon name="copy" size={14} />} text={t("Copy to…")} disabled={busy} onClick={onCopy} />
       {server.definition.purpose === "chat" && (row.machine.local || server.definition.access === "my-computers")
         && <Button size="small" variant="minimal" icon={<AppIcon name="provider" size={14} />} text={t("Use in sessions")} disabled={busy} onClick={onUse} />}
       <Button size="small" variant="minimal" icon={<AppIcon name="logs" size={14} />} text={t("Show the log")} disabled={busy}
@@ -392,9 +449,10 @@ function EmptyState({ rows, text }: { rows: number; text: MessageKey }) {
   return <span className="muted-text">{t(rows === 0 ? text : "Nothing matches these filters.")}</span>;
 }
 
-function ModelsTab({ machines, view, onView, busy, run, onServe }: {
+function ModelsTab({ machines, view, onView, busy, run, onServe, onDownloadTo, checked, onCheck }: {
   machines: readonly MachineStatus[]; view: TableView; onView: (part: Partial<TableView>) => void; busy: boolean; run: RunAction;
-  onServe: (machine: string, model: string) => void;
+  onServe: (machine: string, model: string) => void; onDownloadTo: (models: readonly string[]) => void;
+  checked: readonly string[]; onCheck: (keys: readonly string[]) => void;
 }) {
   const { t, locale } = useShellLanguage();
   const rows = useMemo(() => modelRows(machines), [machines]);
@@ -411,7 +469,10 @@ function ModelsTab({ machines, view, onView, busy, run, onServe }: {
     { id: "use", label: "Use", icon: "server", options: options("use", value => t(useLabels[value] ?? "Unknown")) },
     { id: "publisher", label: "Publisher", icon: "user", options: options("publisher", value => value) },
   ];
+  const picked = shown.filter(row => checked.includes(row.key));
+  const removable = picked.filter(row => row.model && row.machine.manages);
   const columns: DataColumn<ModelRow>[] = [
+    pickColumn<ModelRow>(row => row.key, checked, onCheck, row => t("Select {name}", { name: `${modelName(row.id)} · ${row.machine.name}` }), row => !!row.model),
     { id: "name", label: "Model", sort: row => modelName(row.id), cell: row => <span className="model-servers-name"><AppIcon name="model" size={14} />
       <span><strong>{modelName(row.id)}</strong><span className="muted-text model-servers-repo">{row.id.split(":")[0]}</span></span>
       {row.model?.vision && <Tag minimal className="model-servers-vision">{t("vision")}</Tag>}</span> },
@@ -427,6 +488,14 @@ function ModelsTab({ machines, view, onView, busy, run, onServe }: {
     <div className="model-servers-disks">{totals.map(entry => <DiskBar key={entry.machine.id} entry={entry} busy={busy} run={run} />)}</div>
     <FilterBar label={t("Filter the models")} query={view.query} onQuery={query => onView({ query })} facets={filters} values={view.values}
       onValues={values => onView({ values })} shown={shown.length} total={rows.length} />
+    {picked.length > 0 && <SelectionBar count={picked.length} total={shown.filter(row => row.model).length} onAll={() => onCheck(shown.filter(row => row.model).map(row => row.key))}
+      onClear={() => onCheck([])}>
+      <Button size="small" icon={<AppIcon name="download" size={13} />} text={t("Download to…")} disabled={busy}
+        onClick={() => onDownloadTo([...new Set(picked.map(row => row.id))])} />
+      {removable.length > 0 && <RemoveButton busy={busy} question={t("Remove the {count} models selected?", { count: removable.length })}
+        detail={t("The servers that use them stop first. They free {size}.", { size: formatBytes(removable.reduce((sum, row) => sum + (row.model?.freedBytes ?? 0), 0), locale) })}
+        onConfirm={() => void (async () => { for (const row of removable) await run(row.machine.id, { action: "removeModel", model: row.id, stop: true }); onCheck([]); })()} />}
+    </SelectionBar>}
     <DataTable label={t("Models")} rows={shown} columns={columns} rowKey={row => row.key} sort={view.sort} onSort={sort => onView({ sort })}
       selected={view.selected} onSelect={selected => onView({ selected })} rowState={row => row.download?.state === "failed" ? "refused" : row.download ? "connecting" : row.usedBy.length > 0 ? "online" : undefined}
       empty={<EmptyState rows={rows.length} text="No model on these machines yet: download one, or discover models on Hugging Face." />}
@@ -483,11 +552,21 @@ function ModelDetails({ row, busy, run, onServe }: { row: ModelRow; busy: boolea
       {model && <div><dt>{t("Revision")}</dt><dd><code>{model.revision.slice(0, 12)}</code></dd></div>}
       {model && <div><dt>{t("Frees")}</dt><dd>{formatBytes(model.freedBytes, locale)}{model.freedBytes < model.sizeBytes && <span className="muted-text"> · {t("its other parts are shared")}</span>}</dd></div>}
       {model?.modelPath && <div><dt>{t("Path")}</dt><dd><code className="model-servers-path">{model.modelPath}</code></dd></div>}
+      {model?.measured && <div><dt>{t("Measured fit")}</dt><dd>{model.measured.problem ? <span className="muted-text">{model.measured.problem}</span> : <>
+        {model.measured.context ? t("Up to {count} tokens of context", { count: new Intl.NumberFormat(locale).format(model.measured.context) }) : t("Context: as the model asks")}
+        {" · "}{model.measured.gpuLayers === -1 || model.measured.gpuLayers === undefined ? t("all its layers on the GPUs") : t("{count} layers on the GPUs", { count: model.measured.gpuLayers })}
+        <span className="muted-text"> · {model.measured.build} {backendName(model.measured.backend)}</span>
+        {model.measured.devices.length > 0 && <span className="model-servers-devices">{model.measured.devices.map(device => <span key={device.device}>
+          <strong>{device.device}</strong> {t("model {model}, context {context}, buffers {compute}", { model: formatBytes(device.modelBytes, locale),
+            context: formatBytes(device.contextBytes, locale), compute: formatBytes(device.computeBytes, locale) })}</span>)}</span>}</>}</dd></div>}
     </dl>
     {model && <table className="model-servers-models-table"><tbody>{model.files.map(file => <tr key={file.path}><td><code>{file.path}</code></td>
       <td>{t(file.kind === "mmproj" ? "vision projector" : "model")}{file.shared && <span className="muted-text"> · {t("shared")}</span>}</td><td className="numeric">{formatBytes(file.size, locale)}</td></tr>)}</tbody></table>}
     {manage && <div className="machine-details-actions">
       {model && <Button size="small" intent="primary" icon={<AppIcon name="server" size={14} />} text={t("Serve…")} disabled={busy} onClick={onServe} />}
+      {model && row.status.builds.some(build => build.current) && <Button size="small" variant="minimal" icon={<AppIcon name="computer" size={14} />}
+        text={t(model.measured ? "Measure again" : "Measure the fit")} disabled={busy}
+        onClick={() => void run(row.machine.id, { action: "measureFit", model: row.id }, "The fit was measured.")} />}
       {download?.state === "downloading" || download?.state === "queued" ? <>
         <Button size="small" icon={<AppIcon name="pause" size={14} />} text={t("Pause")} disabled={busy} onClick={() => void run(row.machine.id, { action: "controlDownload", id: download.id, verb: "pause" })} />
         <Button size="small" variant="minimal" intent="danger" icon={<AppIcon name="close" size={14} />} text={t("Cancel")} disabled={busy}
@@ -506,15 +585,19 @@ function ModelDetails({ row, busy, run, onServe }: { row: ModelRow; busy: boolea
 /** A machine as a row of the llama.cpp tab. */
 type BuildRow = Readonly<{ key: string; entry: MachineStatus; status: ModelHostStatus }>;
 
-function BuildsTab({ machines, view, onView, busy, run, onPolicy, onUpdateAt }: {
+function BuildsTab({ machines, view, onView, busy, run, onPolicy, onUpdate, checked, onCheck }: {
   machines: readonly MachineStatus[]; view: TableView; onView: (part: Partial<TableView>) => void; busy: boolean; run: RunAction;
-  onPolicy: (machine: string) => void; onUpdateAt: (machine: string) => void;
+  onPolicy: (machines: readonly string[]) => void; onUpdate: (mode: "now" | "at", machines: readonly string[]) => void;
+  checked: readonly string[]; onCheck: (keys: readonly string[]) => void;
 }) {
   const { t, locale } = useShellLanguage();
   const time = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }), [locale]);
   const rows = useMemo<BuildRow[]>(() => machines.map(entry => ({ key: entry.machine.id, entry, status: entry.status! })), [machines]);
   const shown = useMemo(() => filterRows(rows, [], {}, view.query, row => [row.entry.machine.name, gpuSummary(row.status.hardware, true), currentBuilds(row.status.builds)].join(" ")), [rows, view]);
+  const picked = shown.filter(row => checked.includes(row.key));
+  const ids = picked.map(row => row.entry.machine.id);
   const columns: DataColumn<BuildRow>[] = [
+    pickColumn<BuildRow>(row => row.key, checked, onCheck, row => t("Select {name}", { name: row.entry.machine.name }), row => row.entry.machine.manages),
     { id: "machine", label: "Machine", width: "10rem", sort: row => row.entry.machine.name, cell: row => <strong>{row.entry.machine.name}</strong> },
     { id: "gpus", label: "GPUs", sort: row => gpuSummary(row.status.hardware), cell: row => <span className="model-servers-gpus">{gpuSummary(row.status.hardware) || t("No GPU")}
       {row.status.hardware.gpus.filter(gpu => gpu.architecture && !gpu.integrated).length > 0 && <span className="muted-text"> ({[...new Set(row.status.hardware.gpus.filter(gpu => !gpu.integrated).map(gpu => gpu.architecture).filter(Boolean))].join(", ")})</span>}</span> },
@@ -527,7 +610,7 @@ function BuildsTab({ machines, view, onView, busy, run, onPolicy, onUpdateAt }: 
       ? <span>{row.status.latest.tag}{row.status.latest.version && <span className="muted-text"> ({row.status.latest.version})</span>}
         {updateAvailable(row.status) && <Tag minimal intent="primary" className="model-servers-update">{t("update")}</Tag>}</span> : <span className="muted-text">—</span> },
     { id: "updates", label: "Updates", width: "12rem", secondary: true, sort: row => row.status.settings.updates.schedule, cell: row => <span>{policyText(row.status, t)}
-      {row.status.planned && <span className="muted-text"> · {t("planned {time}", { time: time.format(new Date(row.status.planned.at)) })}</span>}</span> },
+      {row.status.planned && <span className="muted-text"> · {t("planned {time}", { time: time.format(new Date(row.status.planned.at)) })}{row.status.planned.build ? ` → ${row.status.planned.build}` : ""}</span>}</span> },
     { id: "last", label: "Last change", width: "9rem", secondary: true, sort: row => row.status.history[0]?.at, cell: row => row.status.history[0]
       ? <Tag minimal intent={row.status.history[0].result === "updated" ? "success" : "danger"}>{t(row.status.history[0].result === "updated" ? "Updated" : row.status.history[0].result === "rolledBack" ? "Rolled back" : "Failed")}</Tag>
       : <span className="muted-text">—</span> },
@@ -535,10 +618,19 @@ function BuildsTab({ machines, view, onView, busy, run, onPolicy, onUpdateAt }: 
   return <section className="fleet-table-section" aria-label="llama.cpp">
     <FilterBar label={t("Filter the machines")} query={view.query} onQuery={query => onView({ query })} facets={[]} values={{}} onValues={() => undefined}
       shown={shown.length} total={rows.length} />
+    {picked.length > 0 && <SelectionBar count={picked.length} total={shown.filter(row => row.entry.machine.manages).length}
+      onAll={() => onCheck(shown.filter(row => row.entry.machine.manages).map(row => row.key))} onClear={() => onCheck([])}>
+      <Button size="small" icon={<AppIcon name="refresh" size={13} />} text={t("Update now…")} disabled={busy} onClick={() => onUpdate("now", ids)} />
+      <Button size="small" icon={<AppIcon name="timer" size={13} />} text={t("Update at…")} disabled={busy} onClick={() => onUpdate("at", ids)} />
+      <Button size="small" icon={<AppIcon name="settings" size={13} />} text={t("Policy…")} disabled={busy} onClick={() => onPolicy(ids)} />
+      {picked.some(row => row.status.planned) && <Button size="small" variant="minimal" intent="danger" text={t("Cancel the planned updates")} disabled={busy}
+        onClick={() => void (async () => { for (const row of picked.filter(item => item.status.planned)) await run(row.entry.machine.id, { action: "cancelPlanned" }); })()} />}
+    </SelectionBar>}
     <DataTable label="llama.cpp" rows={shown} columns={columns} rowKey={row => row.key} sort={view.sort} onSort={sort => onView({ sort })}
       selected={view.selected} onSelect={selected => onView({ selected })} rowState={row => updateAvailable(row.status) ? "connecting" : row.status.builds.some(build => build.current) ? "online" : undefined}
       empty={<EmptyState rows={rows.length} text="No machine to show." />}
-      details={row => <BuildDetails row={row} busy={busy} run={run} time={time} onPolicy={() => onPolicy(row.entry.machine.id)} onUpdateAt={() => onUpdateAt(row.entry.machine.id)} />} />
+      details={row => <BuildDetails row={row} busy={busy} run={run} time={time} onPolicy={() => onPolicy([row.entry.machine.id])}
+        onUpdateAt={() => onUpdate("at", [row.entry.machine.id])} />} />
   </section>;
 }
 

@@ -76,7 +76,7 @@ public sealed record AltaModelServersMachine(string Id, string Name, bool Local,
 /// <summary>A model of Hugging Face, with its quantizations.</summary>
 /// <param name="Details">Its details.</param>
 /// <param name="Quantizations">Its quantizations, with their fit on each machine named.</param>
-public sealed record AltaHubModel(HubModelDetails Details, IReadOnlyList<AltaHubQuantization> Quantizations);
+public sealed record AltaHubModel(HubModelDetails Details, IReadOnlyList<AltaHubQuantization> Quantizations, CodeAlta.ModelServers.Store.GgufShape? Shape = null);
 
 /// <summary>A quantization of a model of Hugging Face.</summary>
 /// <param name="Tag">Its tag (<c>Q4_K_M</c>).</param>

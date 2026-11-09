@@ -197,7 +197,7 @@ internal sealed class DesktopModelServers : IAsyncDisposable
     public async Task<CodeAlta.LiveTool.AltaHubModel> ReadHubModelAsync(string repo, IReadOnlyList<string> machines, CancellationToken cancellationToken)
     {
         var local = Local ?? throw new ModelHostException("unavailable", "This instance runs no model host: Hugging Face is read through it.");
-        var (details, quants) = await local.InspectRepoAsync(repo, cancellationToken).ConfigureAwait(false);
+        var (details, quants, shape) = await local.InspectRepoAsync(repo, cancellationToken).ConfigureAwait(false);
         var read = await Task.WhenAll(machines.Distinct(StringComparer.Ordinal).Select(async machine =>
         {
             try
@@ -212,8 +212,8 @@ internal sealed class DesktopModelServers : IAsyncDisposable
         })).ConfigureAwait(false);
         var known = read.Where(static item => item.Status is not null).ToList();
         return new CodeAlta.LiveTool.AltaHubModel(details, [.. quants.Select(quant => new CodeAlta.LiveTool.AltaHubQuantization(quant.Tag, quant.Bits, quant.ModelBytes, quant.MmprojBytes, quant.Files.Count,
-            [.. known.Select(item => new CodeAlta.LiveTool.AltaHubFit(item.Machine, CodeAlta.ModelServers.Store.FitEstimate.For(quant, item.Status!.Hardware),
-                item.Status.Models.Any(model => string.Equals(model.Id, $"{details.Model.Id}:{quant.Tag}", StringComparison.OrdinalIgnoreCase))))]))]);
+            [.. known.Select(item => new CodeAlta.LiveTool.AltaHubFit(item.Machine, CodeAlta.ModelServers.Store.FitEstimate.For(quant, item.Status!.Hardware, shape),
+                item.Status.Models.Any(model => string.Equals(model.Id, $"{details.Model.Id}:{quant.Tag}", StringComparison.OrdinalIgnoreCase))))]))], shape);
     }
 
     /// <summary>Adds a provider for a server on each machine named, so that the sessions there use it.</summary>

@@ -102,6 +102,25 @@ public sealed class FleetNodeModelServersTests
             "Model servers: 1; llama.cpp b12110 (rocm), b12193 available.",
             "  Coder (coder): ready at http://127.0.0.1:9931, 1 model, loaded: a/b:Q4_K_M.",
         }, lines);
+
+        // altanode llama status: the GPUs, the policy, the plan, the disk and the downloads besides.
+        var detailed = status with
+        {
+            Hardware = hardware with { Gpus = [new GpuInfo("gpu0", "amd", "AMD Radeon AI PRO R9700", 32_000_000_000, false, "gfx1201", null)] },
+            Planned = new PlannedUpdate("upd-1", new DateTimeOffset(2026, 11, 9, 4, 0, 0, TimeSpan.Zero), "b12193", false, "desktop"),
+            Downloads = [new DownloadInfo("d1", "a/c:Q8_0", "downloading", 1_000_000_000, 4_000_000_000, 1, null, null, 1, DateTimeOffset.UnixEpoch, null)],
+            ModelsBytes = 18_500_000_000, FreeBytes = 1_500_000_000_000,
+        };
+        var all = CodeAlta.Node.NodeLlamaCommands.Lines(detailed, TimeZoneInfo.Utc).ToArray();
+        CollectionAssert.AreEqual(new[]
+        {
+            "GPUs: AMD Radeon AI PRO R9700 (32.0 GB).",
+            "Servers: 1; llama.cpp b12110 (rocm), b12193 available.",
+            "Updates: when you click Update, stable builds; planned 2026-11-09 04:00 to b12193.",
+            "Models: 0, 18.5 GB in m; 1500 GB free.",
+            "  a/c:Q8_0: downloading, 1.0 GB of 4.0 GB.",
+            "  Coder (coder): ready at http://127.0.0.1:9931, 1 model, loaded: a/b:Q4_K_M.",
+        }, all);
     }
 
     /// <summary>A node API over a model host of its own, two servers in it that do not run, and the viewer's channel with the permissions named.</summary>

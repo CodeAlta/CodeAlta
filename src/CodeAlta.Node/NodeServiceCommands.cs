@@ -293,7 +293,7 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
     {
         var builds = string.Join(", ", status.Builds.Where(static build => build.Current).Select(static build => $"{build.Tag} ({build.Backend})"));
         yield return $"Model servers: {status.Servers.Count}; llama.cpp {(builds.Length > 0 ? builds : "not installed")}"
-            + (status.Latest is { } latest && status.Builds.Any(build => build.Current && build.Build < latest.Build) ? $", {latest.Tag} available." : ".");
+            + (status.Latest is { } latest && status.Builds.Any(build => build.Current && build.Source == "ggml-org" && build.Build < latest.Build) ? $", {latest.Tag} available." : ".");
         foreach (var server in status.Servers)
         {
             var loaded = server.Status.Models.Where(static model => model.State == "loaded").Select(static model => model.Model).ToList();

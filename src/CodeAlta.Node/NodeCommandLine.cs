@@ -105,6 +105,9 @@ internal sealed record NodeCommandHandlers(
     /// <summary>Gets what lists and changes the labels of the machine; null for none.</summary>
     public Func<NodeLabelCommandOptions, ValueTask<int>>? Labels { get; init; }
 
+    /// <summary>Gets what tells the model servers of the running node; null for none.</summary>
+    public Func<NodeLlamaCommandOptions, ValueTask<int>>? Llama { get; init; }
+
     /// <summary>Gets what shows and changes the permission mode the sessions of the machine run in by default; null for none.</summary>
     public Func<NodePermissionModeCommandOptions, ValueTask<int>>? PermissionMode { get; init; }
 
@@ -500,6 +503,26 @@ internal static class NodeCommandLine
             return handlers.Labels?.Invoke(labels) ?? handlers.NotImplemented("labels");
         });
 
+        var llama = new NodeLlamaCommandOptions();
+        var llamaCommand = new Command("llama", "Tell the llama.cpp builds, models and servers of the running node")
+        {
+            new CommandUsage("Usage: {NAME} [status] [options]"),
+            _,
+            "The GPUs of this machine, its llama.cpp builds and their update policy,",
+            "the models on its disk and their downloads, and its model servers with",
+            "what they load. CodeAlta Desktop changes them, on Settings > Fleet >",
+            "Model servers; the servers run with the node.",
+            _,
+            "Options:",
+        };
+        AddProfile(llamaCommand, llama.Profile);
+        llamaCommand.Add("<>", "The command: status");
+        llamaCommand.Add((_, words) =>
+        {
+            llama.Words.AddRange(words);
+            return handlers.Llama?.Invoke(llama) ?? handlers.NotImplemented("llama");
+        });
+
         var permissionMode = new NodePermissionModeCommandOptions();
         var permissionModeCommand = new Command("permission-mode", "Show or change whether the sessions of this machine ask before they act")
         {
@@ -651,6 +674,7 @@ internal static class NodeCommandLine
             automationsCommand,
             secretsCommand,
             labelsCommand,
+            llamaCommand,
             permissionModeCommand,
             agentsCommand,
             joinCommand,

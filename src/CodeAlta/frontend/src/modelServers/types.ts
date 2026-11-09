@@ -24,8 +24,15 @@ export type InstalledBuild = Readonly<{ tag: string; build: number; backend: str
 
 export type StoredFile = Readonly<{ path: string; size: number; kind: string; shared: boolean; sha256?: string }>;
 
+/** What a model takes on a device, as llama-fit-params measured it, in bytes. */
+export type DeviceMemory = Readonly<{ device: string; modelBytes: number; contextBytes: number; computeBytes: number }>;
+
+/** How a model fits the GPUs of its machine, measured there after its download. */
+export type MeasuredFit = Readonly<{ backend: string; build: string; context?: number; gpuLayers?: number; arguments: string; devices: readonly DeviceMemory[]; at: string;
+  problem?: string }>;
+
 export type StoredModel = Readonly<{ id: string; repo: string; tag: string; revision: string; files: readonly StoredFile[]; sizeBytes: number; freedBytes: number;
-  vision: boolean; state: "ready" | "incomplete" | "downloading"; modelPath?: string; mmprojPath?: string; modified?: string }>;
+  vision: boolean; state: "ready" | "incomplete" | "downloading"; modelPath?: string; mmprojPath?: string; modified?: string; measured?: MeasuredFit }>;
 
 export type DownloadState = "queued" | "downloading" | "checking" | "paused" | "done" | "failed" | "cancelled";
 
@@ -82,19 +89,23 @@ export type ServerTestResult = Readonly<{ passed: boolean; text?: string; tokens
 
 export type ModelHostActionResult = Readonly<{ server?: ServerView; download?: DownloadInfo; task?: HostTask; test?: ServerTestResult; log?: readonly string[];
   imported?: ServerDefinition; notes?: readonly string[]; freed?: number; planned?: PlannedUpdate; modelIds?: readonly string[]; build?: InstalledBuild;
-  hardware?: HardwareInventory; latest?: LlamaRelease }>;
+  hardware?: HardwareInventory; latest?: LlamaRelease; measured?: MeasuredFit }>;
 
 export type HubModel = Readonly<{ id: string; author: string; downloads: number; likes: number; lastModified?: string; pipelineTag?: string; tags: readonly string[];
   gated: boolean; trending?: number }>;
 
-export type FitResult = Readonly<{ fit: "gpu" | "gpus" | "partly" | "too_large"; message: string; approximate: boolean }>;
+export type FitResult = Readonly<{ fit: "gpu" | "gpus" | "partly" | "too_large"; message: string; approximate: boolean; context?: number }>;
+
+/** What a model needs in memory besides its weights, from the header of its GGUF file. */
+export type GgufShape = Readonly<{ architecture: string; layers: number; trainedContext: number; kvBytesPerToken: number; slidingKvBytesPerToken: number; slidingWindow: number;
+  vocabulary: number; known: boolean }>;
 
 export type HubFitView = Readonly<{ machine: string; fit: FitResult; onMachine: boolean }>;
 
 export type HubQuantView = Readonly<{ tag: string; bits: number; modelBytes: number; mmprojBytes: number; files: number; fits: readonly HubFitView[] }>;
 
 export type HubModelView = Readonly<{ model: HubModel; revision: string; license?: string; baseModels: readonly string[]; parameters?: number; architecture?: string;
-  contextLength?: number; quantizations: readonly HubQuantView[]; card: string }>;
+  contextLength?: number; quantizations: readonly HubQuantView[]; card: string; shape?: GgufShape }>;
 
 /** A machine whose model servers the window shows (`ModelServersMachine`). */
 export type ModelServersMachine = Readonly<{ id: string; name: string; local: boolean; state: string; manages: boolean; uses: boolean; problem?: string | null }>;

@@ -111,8 +111,28 @@ public sealed record StoredFile(string Path, long Size, string Kind, bool Shared
 /// <param name="ModelPath">The full path of its main file (the first shard of a split one).</param>
 /// <param name="MmprojPath">The full path of its vision projector, or null.</param>
 /// <param name="Modified">When its files were written.</param>
+/// <param name="Measured">How it fits the GPUs of the machine, as <c>llama-fit-params</c> measured it after its download; null before.</param>
 public sealed record StoredModel(string Id, string Repo, string Tag, string Revision, IReadOnlyList<StoredFile> Files, long SizeBytes, long FreedBytes, bool Vision,
-    string State, string? ModelPath, string? MmprojPath, DateTimeOffset? Modified);
+    string State, string? ModelPath, string? MmprojPath, DateTimeOffset? Modified, MeasuredFit? Measured = null);
+
+/// <summary>What a model takes on a device, as <c>llama-fit-params</c> measured it, in bytes.</summary>
+/// <param name="Device">The device (<c>CUDA0</c>, <c>ROCm1</c>, <c>Host</c> for the memory of the system).</param>
+/// <param name="ModelBytes">Its weights there.</param>
+/// <param name="ContextBytes">Its KV cache there.</param>
+/// <param name="ComputeBytes">Its buffers of computation there.</param>
+public sealed record DeviceMemory(string Device, long ModelBytes, long ContextBytes, long ComputeBytes);
+
+/// <summary>How a model fits the GPUs of its machine, measured there by the build of llama.cpp that serves it.</summary>
+/// <param name="Backend">The backend of the build.</param>
+/// <param name="Build">The build.</param>
+/// <param name="Context">The context that fits, in tokens; null when it did not say.</param>
+/// <param name="GpuLayers">The layers on the GPUs; -1 for all of them.</param>
+/// <param name="Arguments">What it chose, as the arguments of llama-server (<c>-c 40960 -ngl -1</c>).</param>
+/// <param name="Devices">What each device takes.</param>
+/// <param name="At">When.</param>
+/// <param name="Problem">Why it could not measure; null when it did.</param>
+public sealed record MeasuredFit(string Backend, string Build, int? Context, int? GpuLayers, string Arguments, IReadOnlyList<DeviceMemory> Devices, DateTimeOffset At,
+    string? Problem = null);
 
 /// <summary>A download of a model.</summary>
 /// <param name="Id">Its id.</param>
@@ -411,6 +431,7 @@ public sealed class ModelHostException : Exception
 [JsonSerializable(typeof(ModelHostSettings))]
 [JsonSerializable(typeof(PlannedUpdate))]
 [JsonSerializable(typeof(List<UpdateRecord>))]
+[JsonSerializable(typeof(Dictionary<string, MeasuredFit>))]
 [JsonSerializable(typeof(List<LlamaRelease>))]
 [JsonSerializable(typeof(BuildState))]
 [JsonSerializable(typeof(ServerRun))]

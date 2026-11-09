@@ -221,28 +221,42 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         string? nowMachine = null, nowBuild = null;
         var nowModels = false;
+        var nowAll = false;
         var now = Leaf("now", "Update the builds of a machine now: it waits for its servers to be idle, tests each with the new build, and goes back when a test fails.");
         now.Add("machine=", "The machine. Defaults to this computer.", value => nowMachine = value);
-        now.Add("build=", "The build. Defaults to the latest of the channel.", value => nowBuild = value);
+        now.Add("all", "Every machine this computer manages and reaches now, each at once. To update one after the other, update the next once the end of the previous comes.",
+            value => nowAll = value is not null);
+        now.Add("build=", "The build, the same for every machine (`b12110`; an older one takes them back to it). Defaults to the latest of each machine's channel.", value => nowBuild = value);
         now.Add("models", "Update the models too, when their repository changed.", value => nowModels = value is not null);
-        now.Add(async (_, _) => await RunLlamaActionAsync(context, nowMachine, new ModelHostAction { Action = "updateNow", Build = NormalizeOptionalText(nowBuild), Models = nowModels },
-            startsPrograms: true, static result => new { type = "alta.llama.task", task = result.Task, note = "The update runs on the machine: its end is sent to this session as a prompt." }).ConfigureAwait(false));
+        now.Add(async (_, _) =>
+        {
+            var action = new ModelHostAction { Action = "updateNow", Build = NormalizeOptionalText(nowBuild), Models = nowModels };
+            static object Record(ModelHostActionResult result) => new { type = "alta.llama.task", task = result.Task, note = "The update runs on the machine: its end is sent to this session as a prompt." };
+            if (!nowAll) return await RunLlamaActionAsync(context, nowMachine, action, startsPrograms: true, Record).ConfigureAwait(false);
+            if (NormalizeOptionalText(nowMachine) is not null) return UsageError(context, "usage.allAndMachine", "Give --all or --machine, not both.", "alta llama update now");
+            return await RunLlamaActionOnAllAsync(context, action, Record).ConfigureAwait(false);
+        });
         group.Add(now);
 
         string? atMachine = null, atBuild = null, atTime = null;
         var atModels = false;
+        var atAll = false;
         var at = Leaf("at", "Plan one update of a machine at a time: the machine keeps it and runs it then, even while this computer is off.");
         at.Add("<time>", "When: an ISO date and time (`2026-11-09T03:00`, in the time zone of this computer unless it names one).", value => atTime = value);
         at.Add("machine=", "The machine. Defaults to this computer.", value => atMachine = value);
-        at.Add("build=", "The build. Defaults to the latest of the channel then.", value => atBuild = value);
+        at.Add("all", "Every machine this computer manages and reaches now: each keeps the time and updates then.", value => atAll = value is not null);
+        at.Add("build=", "The build, the same for every machine. Defaults to the latest of each machine's channel then.", value => atBuild = value);
         at.Add("models", "Update the models too.", value => atModels = value is not null);
         at.Add(async (_, _) =>
         {
             if (!DateTimeOffset.TryParse(atTime, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var when))
                 return UsageError(context, "usage.invalidTime", "Give the time as an ISO date and time, such as 2026-11-09T03:00.", "alta llama update at");
             if (when <= DateTimeOffset.Now) return UsageError(context, "usage.pastTime", "The time is past: give a time to come.", "alta llama update at");
-            return await RunLlamaActionAsync(context, atMachine, new ModelHostAction { Action = "planUpdate", At = when, Build = NormalizeOptionalText(atBuild), Models = atModels },
-                startsPrograms: true, static result => new { type = "alta.llama.planned", planned = result.Planned }).ConfigureAwait(false);
+            var action = new ModelHostAction { Action = "planUpdate", At = when, Build = NormalizeOptionalText(atBuild), Models = atModels };
+            static object Record(ModelHostActionResult result) => new { type = "alta.llama.planned", planned = result.Planned };
+            if (!atAll) return await RunLlamaActionAsync(context, atMachine, action, startsPrograms: true, Record).ConfigureAwait(false);
+            if (NormalizeOptionalText(atMachine) is not null) return UsageError(context, "usage.allAndMachine", "Give --all or --machine, not both.", "alta llama update at");
+            return await RunLlamaActionOnAllAsync(context, action, Record).ConfigureAwait(false);
         });
         group.Add(at);
 
@@ -358,6 +372,8 @@ internal sealed partial class BuiltInAltaCommandContributor
                 type = "alta.llama.hub.model", version = 1, correlationId = context.CorrelationId,
                 details.Model.Id, details.Model.Author, details.Model.Downloads, details.Model.Likes, details.Model.LastModified, kind = details.Model.PipelineTag, details.Model.Gated,
                 details.Revision, details.License, details.BaseModels, details.Parameters, details.Architecture, details.ContextLength,
+                // From the header of its GGUF: the KV cache of each token, which the fits below count.
+                shape = model.Shape is { } shape ? new { shape.Architecture, shape.Layers, shape.TrainedContext, kvBytesPer1kTokens = shape.KvBytes(1024), shape.SlidingWindow, shape.Known } : null,
             });
             foreach (var quant in model.Quantizations)
             {
@@ -365,13 +381,13 @@ internal sealed partial class BuiltInAltaCommandContributor
                 {
                     type = "alta.llama.hub.quantization", version = 1, correlationId = context.CorrelationId,
                     model = $"{details.Model.Id}:{quant.Tag}", quant.Tag, quant.Bits, sizeBytes = quant.ModelBytes + quant.MmprojBytes, visionBytes = quant.MmprojBytes, quant.Files,
-                    fits = quant.Fits.Select(static fit => new { fit.Machine, fit = fit.Fit.Fit, fit.Fit.Message, fit.Fit.Approximate, onDisk = fit.OnDisk }),
+                    fits = quant.Fits.Select(static fit => new { fit.Machine, fit = fit.Fit.Fit, fit.Fit.Message, fit.Fit.Approximate, context = fit.Fit.Context, onDisk = fit.OnDisk }),
                 });
             }
 
             return AltaExitCodes.Success;
         }).ConfigureAwait(false));
-        AddHelpText(show, "`fit` is `gpu` (on one GPU), `gpus` (split across them), `partly` (part in the memory of the system: slow) or `too_large`. Prefer the largest that fits.");
+        AddHelpText(show, "`fit` is `gpu` (on one GPU), `gpus` (split across them), `partly` (part in the memory of the system: slow) or `too_large`; `context` is the largest context that fits, from the header of the model. Prefer the largest that fits with the context the work needs.");
         group.Add(show);
         return group;
     }
@@ -864,6 +880,35 @@ internal sealed partial class BuiltInAltaCommandContributor
             foreach (var property in fields.EnumerateObject()) properties[property.Name] = property.Value;
             AltaJsonlWriter.WriteRecord(context.Stdout, properties);
             return AltaExitCodes.Success;
+        });
+
+    // An action on every machine this computer manages and reaches now: a record per machine, an error record for each that
+    // refuses; it succeeds when one machine did it.
+    private static Task<int> RunLlamaActionOnAllAsync(AltaCommandContext context, ModelHostAction action, Func<ModelHostActionResult, object> record)
+        => WithLlamaAsync(context, async servers =>
+        {
+            if (await LlamaStartRefusalAsync(context, LlamaWhat(action)).ConfigureAwait(false) is { } refused) return refused;
+            var machines = (await servers.ListMachinesAsync(context.CancellationToken).ConfigureAwait(false))
+                .Where(static machine => machine.Manages && (machine.Local || machine.State == "online")).ToList();
+            if (machines.Count == 0) return NotFound(context, "llama.noMachine", "This computer manages no machine it reaches now.");
+            var done = 0;
+            foreach (var machine in machines)
+            {
+                try
+                {
+                    var result = await servers.RunAsync(machine.Id, action, SessionOf(context), context.CancellationToken).ConfigureAwait(false);
+                    var properties = new Dictionary<string, object?> { ["type"] = null, ["version"] = 1, ["correlationId"] = context.CorrelationId, ["machine"] = machine.Id };
+                    foreach (var property in JsonSerializer.SerializeToElement(record(result), LlamaJson).EnumerateObject()) properties[property.Name] = property.Value;
+                    AltaJsonlWriter.WriteRecord(context.Stdout, properties);
+                    done++;
+                }
+                catch (ModelHostException exception)
+                {
+                    AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "llama." + exception.Code, AltaExitCodes.Failure, $"{machine.Name}: {exception.Message}");
+                }
+            }
+
+            return done > 0 ? AltaExitCodes.Success : AltaExitCodes.Failure;
         });
 
     private static string LlamaWhat(ModelHostAction action) => action.Action switch

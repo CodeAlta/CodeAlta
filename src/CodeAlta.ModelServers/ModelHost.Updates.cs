@@ -102,7 +102,9 @@ public sealed partial class ModelHost
 
             HardwareInventory hardware;
             lock (_gate) hardware = _hardware;
-            var candidates = BuildSelector.Candidates(hardware, release);
+            // A build asked by its number is one of llama.cpp: Lemonade numbers its builds itself.
+            var lemonade = build is null ? await LemonadeAsync(cancellationToken).ConfigureAwait(false) : null;
+            var candidates = BuildSelector.Candidates(hardware, release, lemonade);
             var backends = Builds.List().Where(static b => b.Current && b.Source != "own").Select(static b => b.Backend).Distinct().ToList();
             if (backends.Count == 0) backends = [.. BuildSelector.Recommended(hardware, candidates)];
             var messages = new List<string>();
@@ -110,30 +112,38 @@ public sealed partial class ModelHost
             foreach (var backend in backends)
             {
                 var current = Builds.Find(backend, null);
-                if (current?.Tag == release.Tag)
+                var candidate = candidates.FirstOrDefault(c => c.Backend == backend);
+                var source = SourceOf(release, lemonade, candidate);
+                if (build is not null && current?.Source == "lemonade")
                 {
-                    messages.Add($"{backend}: already on {release.Tag}.");
+                    messages.Add($"{backend}: runs Lemonade's {current.Tag}, which has no build {build}; it stays on it.");
                     continue;
                 }
 
-                if (build is null && Builds.IsBad(backend, release.Tag))
+                if (current?.Tag == source.Tag)
                 {
-                    messages.Add($"{backend}: {release.Tag} failed its test here before; it stays on {current?.Tag}.");
+                    messages.Add($"{backend}: already on {source.Tag}.");
                     continue;
                 }
 
-                var assets = BuildSelector.AssetsFor(release, hardware.Os, hardware.Architecture, backend, candidates.FirstOrDefault(c => c.Backend == backend));
-                UpdateTask(taskId, t => t with { State = "running", Total = t.Total + assets.Sum(static a => a.Size), Message = $"Downloading {release.Tag} ({backend})…" });
+                if (build is null && Builds.IsBad(backend, source.Tag))
+                {
+                    messages.Add($"{backend}: {source.Tag} failed its test here before; it stays on {current?.Tag}.");
+                    continue;
+                }
+
+                var assets = BuildSelector.AssetsFor(source, hardware.Os, hardware.Architecture, backend, candidate);
+                UpdateTask(taskId, t => t with { State = "running", Total = t.Total + assets.Sum(static a => a.Size), Message = $"Downloading {source.Tag} ({backend})…" });
                 InstalledBuild installed;
                 try
                 {
-                    installed = await Builds.InstallAsync(release, backend, assets, makeCurrent: false, bytes => UpdateTask(taskId, t => t with { Done = Math.Max(0, t.Done + bytes) }), cancellationToken)
+                    installed = await Builds.InstallAsync(source, backend, assets, makeCurrent: false, bytes => UpdateTask(taskId, t => t with { Done = Math.Max(0, t.Done + bytes) }), cancellationToken)
                         .ConfigureAwait(false);
                 }
                 catch (ModelHostException exception)
                 {
                     failed = true;
-                    Record(new UpdateRecord(_options.Time.GetUtcNow(), backend, current?.Tag, release.Tag, "failed", exception.Message));
+                    Record(new UpdateRecord(_options.Time.GetUtcNow(), backend, current?.Tag, source.Tag, "failed", exception.Message));
                     messages.Add($"{backend}: {exception.Message}");
                     continue;
                 }
@@ -142,35 +152,35 @@ public sealed partial class ModelHost
                 UpdateTask(taskId, t => t with { State = "waiting", Message = $"Waiting until the {backend} servers are idle…" });
                 if (!await WaitIdleAsync(servers, cancellationToken).ConfigureAwait(false))
                 {
-                    messages.Add($"{backend}: its servers stayed busy for an hour; {release.Tag} is installed and will be used at the next update.");
+                    messages.Add($"{backend}: its servers stayed busy for an hour; {source.Tag} is installed and will be used at the next update.");
                     continue;
                 }
 
-                UpdateTask(taskId, t => t with { State = "running", Message = $"Switching {backend} to {release.Tag}…" });
+                UpdateTask(taskId, t => t with { State = "running", Message = $"Switching {backend} to {source.Tag}…" });
                 // Each model is compared with its own speed before the switch, never with another model's.
                 var previousSpeeds = servers.SelectMany(static s => s.Status.Models.Where(static m => m.TokensPerSecond is > 0).Select(m => (Key: s.Definition.Id + "/" + m.Model, Speed: m.TokensPerSecond!.Value)))
                     .ToDictionary(static entry => entry.Key, static entry => entry.Speed, StringComparer.Ordinal);
-                Builds.MakeCurrent(backend, release.Tag);
+                Builds.MakeCurrent(backend, source.Tag);
                 var (passed, reason) = await SwitchAndTestAsync(servers, previousSpeeds, cancellationToken).ConfigureAwait(false);
                 if (passed)
                 {
-                    Record(new UpdateRecord(_options.Time.GetUtcNow(), backend, current?.Tag, release.Tag, "updated", reason));
-                    messages.Add($"{backend}: {current?.Tag ?? "none"} → {release.Tag}.");
+                    Record(new UpdateRecord(_options.Time.GetUtcNow(), backend, current?.Tag, source.Tag, "updated", reason));
+                    messages.Add($"{backend}: {current?.Tag ?? "none"} → {source.Tag}.");
                     var inUse = Supervisors().Select(static s => s.BuildFolder).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
                     Builds.Prune(inUse);
                 }
                 else
                 {
                     failed = true;
-                    Builds.MarkBad(backend, release.Tag);
+                    Builds.MarkBad(backend, source.Tag);
                     if (current is not null)
                     {
                         Builds.MakeCurrent(backend, current.Tag);
                         foreach (var server in servers) await server.RestartAsync(cancellationToken).ConfigureAwait(false);
                     }
 
-                    Record(new UpdateRecord(_options.Time.GetUtcNow(), backend, current?.Tag, release.Tag, "rolledBack", reason));
-                    messages.Add($"{backend}: {release.Tag} failed its test ({reason}); back on {current?.Tag}.");
+                    Record(new UpdateRecord(_options.Time.GetUtcNow(), backend, current?.Tag, source.Tag, "rolledBack", reason));
+                    messages.Add($"{backend}: {source.Tag} failed its test ({reason}); back on {current?.Tag}.");
                 }
             }
 
