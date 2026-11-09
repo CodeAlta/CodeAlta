@@ -343,6 +343,25 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .markdown-content li + li { margin-top: 3px; }
 .markdown-content blockquote { margin: 10px 0; padding: 2px 12px; border-left: 3px solid var(--accent); color: var(--muted); }
 .markdown-content code { padding: 1px 5px; border: 1px solid var(--inline-code-line); border-radius: 5px; color: var(--inline-code-text); background: var(--inline-code-surface); font-size: .9em; }
+/* A code span that names a task of the project (workItems/taskReferences.ts): a chip with the icon of a task, which opens it.
+   A task that is done or dismissed is struck through. */
+.markdown-content code[data-task-ref] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--inline-code-line)); cursor: pointer; }
+.markdown-content code[data-task-ref]::before { content: ""; display: inline-block; width: .95em; height: .95em; margin-inline-end: 4px; vertical-align: -.12em; background: currentColor; opacity: .8;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='6' height='6' rx='1'/%3E%3Cpath d='m3 17 2 2 4-4'/%3E%3Cpath d='M13 6h8'/%3E%3Cpath d='M13 12h8'/%3E%3Cpath d='M13 18h8'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='6' height='6' rx='1'/%3E%3Cpath d='m3 17 2 2 4-4'/%3E%3Cpath d='M13 6h8'/%3E%3Cpath d='M13 12h8'/%3E%3Cpath d='M13 18h8'/%3E%3C/svg%3E") center / contain no-repeat; }
+.markdown-content code[data-task-ref]:hover, .markdown-content code[data-task-ref]:focus-visible { outline: none; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--inline-code-surface)); }
+.markdown-content code[data-task-closed] { color: var(--muted); text-decoration: line-through; opacity: .8; }
+.task-reference-card { position: fixed; z-index: 40; display: grid; gap: 5px; width: max-content; max-width: min(360px, calc(100vw - 12px)); padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
+  color: var(--text); background: var(--panel); box-shadow: 0 4px 14px rgba(0, 0, 0, .22); font-size: 12.5px; line-height: 1.4; pointer-events: none; }
+.task-reference-card-kind { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; }
+.task-reference-card-kind code { margin-inline-start: auto; color: var(--muted); font: 11.5px/1 var(--code-font); }
+.task-reference-card-glyph { display: inline-flex; color: var(--accent); }
+.task-reference-card-glyph[data-tone="danger"] { color: var(--red); }
+.task-reference-card-glyph[data-tone="warning"] { color: var(--yellow); }
+.task-reference-card strong { font-weight: 600; overflow-wrap: anywhere; }
+.task-reference-card[data-closed] strong { text-decoration: line-through; color: var(--muted); }
+.task-reference-card p { margin: 0; color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.task-reference-card small { color: var(--muted); font-size: 11px; }
 .markdown-content pre { margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); font-family: var(--code-font); font-size: 12px; white-space: pre; }
 .markdown-content pre code { padding: 0; border: 0; color: inherit; background: transparent; font-size: inherit; }
 .markdown-content table { width: 100%; margin: 10px 0; border-collapse: collapse; font-size: 12px; }

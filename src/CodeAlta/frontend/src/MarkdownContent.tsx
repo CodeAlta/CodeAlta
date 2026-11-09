@@ -17,6 +17,9 @@ import { inModalDialog, modalDialogOpen } from "./modalDialogs";
 import { TimelineImageViewer } from "./TimelineImageStrip";
 import { inlineImageSource } from "./timelineImages";
 import type { WindowSize } from "./windowGeometry";
+import { dressTaskReferences, taskReferenceAt, taskReferenceAttribute, TaskReferencesContext } from "./workItems/taskReferences";
+import { TaskReferenceCard, taskReferenceCardId } from "./workItems/TaskReferenceCard";
+import type { WorkItem } from "./workItems/workItems";
 
 /**
  * Opens the links of the Markdown that the window shows: a page of the web in the system browser, a file of this
@@ -132,6 +135,46 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     }
     return () => { current = false; };
   }, [codeMarkup, images, webImages, onOpenLink, scope]);
+  // The code spans that name a task of the project of the text are chips: a card says what the task is while the
+  // pointer or the focus is on one, and a click or Enter opens it in the Work items page. Not in a text whose links
+  // are inert (the preview of a folded row).
+  const windowTasks = useContext(TaskReferencesContext);
+  const tasks = onOpenLink === null ? null : windowTasks;
+  const [taskCard, setTaskCard] = useState<Readonly<{ item: WorkItem; anchor: HTMLElement }> | null>(null);
+  useLayoutEffect(() => {
+    const element = content.current;
+    if (!element) return;
+    dressTaskReferences(element, tasks && (text => tasks.find(scope, text)),
+      item => translate(locale, "Task {id}: {title}", { id: item.shortId ?? item.id, title: item.title }));
+    // A card stays while its chip does: a text written again replaces its chips.
+    setTaskCard(current => current && current.anchor.isConnected && current.anchor.hasAttribute(taskReferenceAttribute) ? current : null);
+  }, [codeMarkup, tasks, scope, locale]);
+  useEffect(() => {
+    if (!taskCard) return;
+    const { anchor } = taskCard;
+    anchor.setAttribute("aria-describedby", taskReferenceCardId);
+    // The card stays where it was placed: a scroll puts it away.
+    const hide = () => setTaskCard(null);
+    window.addEventListener("scroll", hide, true);
+    window.addEventListener("resize", hide);
+    return () => { anchor.removeAttribute("aria-describedby"); window.removeEventListener("scroll", hide, true); window.removeEventListener("resize", hide); };
+  }, [taskCard]);
+  function showTaskCard(target: EventTarget | null) {
+    const anchor = tasks ? taskReferenceAt(target, content.current) : null;
+    const item = anchor && tasks!.find(scope, anchor.textContent ?? "");
+    setTaskCard(current => !anchor || !item ? null : current?.anchor === anchor && current.item === item ? current : { item, anchor });
+  }
+  function hideTaskCard(next: EventTarget | null) {
+    if (!(next instanceof Node) || !taskCard?.anchor.contains(next)) setTaskCard(null);
+  }
+  function openTask(target: EventTarget): boolean {
+    const anchor = tasks ? taskReferenceAt(target, content.current) : null;
+    const item = anchor && tasks!.find(scope, anchor.textContent ?? "");
+    if (!item || anchor.closest("[inert], [hidden]") || modalDialogOpen() && !inModalDialog(anchor)) return false;
+    setTaskCard(null);
+    tasks!.open(item);
+    return true;
+  }
   const focusAgain = (origin: HTMLElement | undefined) => {
     if (origin) requestAnimationFrame(() => { if (origin.isConnected && !origin.closest("[inert], [hidden]")) origin.focus(); });
   };
@@ -248,12 +291,18 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   }
   return <><div className="markdown-content" ref={content} onClick={event => {
     const handled = event.defaultPrevented;
+    // A chip is opened by a click alone: a click that ends a selection of its text keeps the selection.
+    if (!handled && window.getSelection()?.isCollapsed !== false && openTask(event.target)) return;
     activateLink(event);
     if (!handled && event.target instanceof Element && (followFootnote(event.target) || expandDiagram(event.target) || toggleRenderedSource(event.target))) return;
     if (!handled && !pasteCode(event)) copyCode(event); // Our navigation suppression must not swallow Copy inside an anchor.
   }} onAuxClick={activateLink}
     onContextMenu={event => { if (!event.defaultPrevented && openLinkMenu(event.target, { x: event.clientX, y: event.clientY })) event.preventDefault(); }}
+    onPointerOver={event => showTaskCard(event.target)} onPointerOut={event => hideTaskCard(event.relatedTarget)}
+    onFocus={event => showTaskCard(event.target)} onBlur={event => hideTaskCard(event.relatedTarget)}
     onKeyDown={event => {
+      if (event.key === "Escape" && taskCard) setTaskCard(null);
+      if (event.key === "Enter" && !event.defaultPrevented && openTask(event.target)) { event.preventDefault(); return; }
       if (event.key === "Enter") activateLink(event);
       if (isSessionContextKey(event.key, event.shiftKey, event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229, false) && openLinkMenu(event.target)) {
         event.preventDefault();
@@ -268,5 +317,6 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
       onClose={closeViewer} file={viewing.web ? undefined : { path: viewing.image.path, platform: images?.platform ?? null,
         onReveal: images ? () => images.reveal(viewing.address, scope) : undefined }} />}
     {diagram && <DiagramViewer diagram={diagram.diagram} onClose={closeDiagram} />}
+    {taskCard && <TaskReferenceCard item={taskCard.item} anchor={taskCard.anchor} />}
   </>;
 }

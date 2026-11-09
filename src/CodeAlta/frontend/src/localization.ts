@@ -2673,6 +2673,8 @@ export const messages = dictionary({
   "Open the session that does it": ["Abrir la sesión que lo hace", "Ouvrir la session qui s’en charge", "Die Sitzung öffnen, die es erledigt", "担当しているセッションを開く", "打开处理它的会话"],
   "Copy the short id": ["Copiar el id corto", "Copier l’id court", "Kurz-ID kopieren", "短い ID をコピー", "复制短 ID"],
   "Copy the short id {id}": ["Copiar el id corto {id}", "Copier l’id court {id}", "Kurz-ID {id} kopieren", "短い ID {id} をコピー", "复制短 ID {id}"],
+  "Task {id}: {title}": ["Tarea {id}: {title}", "Tâche {id} : {title}", "Aufgabe {id}: {title}", "タスク {id}: {title}", "任务 {id}：{title}"],
+  "Click to open it in Work items": ["Haz clic para abrirla en Elementos de trabajo", "Cliquez pour l’ouvrir dans Éléments de travail", "Klicken, um sie in Arbeitselementen zu öffnen", "クリックして作業項目で開く", "点击在工作项中打开"],
   "Back to To do": ["Volver a Por hacer", "Remettre dans À faire", "Zurück zu Zu erledigen", "「未着手」に戻す", "移回待办"],
   "No session does it any more.": ["Ninguna sesión lo hace ya.", "Aucune session ne s’en charge plus.", "Keine Sitzung erledigt es mehr.", "どのセッションも担当しなくなります。", "不再由任何会话处理。"],
   "Mark done": ["Marcar como hecho", "Marquer comme terminé", "Als erledigt markieren", "完了にする", "标记为完成"],
