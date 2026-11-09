@@ -1,6 +1,6 @@
 ---
 title: llama.cpp model servers on the machines of the fleet
-status: in-progress
+status: done
 created: 2026-11-08
 summary: CodeAlta installs and updates the right llama.cpp build on any machine of the fleet, downloads Hugging Face models with real progress and shows what they take on disk, runs one or several model servers per machine, and makes each one a provider that sessions use at once. Agents do all of it through `alta llama`.
 ---
@@ -703,6 +703,8 @@ Discover:
 - Lemonade's ROCm builds (`lemonade-bNNNN`) take the place of an official ROCm build only where it cannot run. Found live: the official Windows archive brings the HIP 7 runtime but not hipBLAS, so beside the HIP SDK 6.2 it crashed at the first matrix product on an RX 7600 XT; it now needs the HIP SDK 7.
 - The fit before a download comes from the GGUF header read over one range (`GgufHeader`, `FitEstimate` with the largest context that fits); after a download, `llama-fit-params` measures it on the machine (kept in `~/.alta/llama/fits.json`, shown in the Models tab, **Measure again**).
 - Fixed from the live checks: the GPUs of Windows listed cards no longer in the machine; a server that could not start on a new build left it in use instead of rolling back; a rollback offered the failed build as the way back; the machines checked updated in the order of the page, not of the table; a new policy showed its builds only at the next check; `-fitp` counted the trained context.
+- Also fixed: `alta llama --machine <name>` took an old pairing of the same name; the end of a server's log showed only the router's lines for the host's own reads, which now go to the process of each model, so the log no longer grows with them (llama-server keeps its log open without append, so it cannot be rotated while it runs).
+- Tests use a fake llama-server (`CodeAlta.Tests.FakeLlamaServer`) packed as the builds of a fake GitHub: an update that passes, tests that fail and roll back, a build the server cannot start on, a planned update on a fake clock kept across a new host, and the log of a router left alone by the reads of the status.
 - Reviewed by a Codex (GPT-6.1 Sol, max) session: its 16 findings are fixed.
 - Not done: the Mac took no part in the last checks (its SSH refused connections on 2026-11-09 morning; Metal was verified on 2026-11-08).
 
