@@ -104,13 +104,14 @@
 .work-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .work-row[data-selected] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .work-row-glyph { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; color: var(--accent); background: color-mix(in srgb, currentColor 15%, transparent); }
-.work-row-glyph[data-tone="danger"] { color: var(--red); }
-.work-row-glyph[data-tone="warning"] { color: var(--yellow); }
+.work-row-glyph[data-tone="danger"], .work-row-id[data-tone="danger"] { color: var(--red); }
+.work-row-glyph[data-tone="warning"], .work-row-id[data-tone="warning"] { color: var(--yellow); }
+/* The short id sits under the icon, in its color: the ids line up in one column and the title keeps its width. */
+.work-row-badge { display: grid; justify-items: center; gap: 4px; }
+.work-row-id { color: var(--accent); font: 600 10.5px/1 var(--code-font); }
 .work-row[data-kind="plan"] .work-row-glyph { color: #f0a03e; }
 .work-row-text { display: grid; gap: 1px; min-width: 0; }
 .work-row-text strong { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.work-row-title { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
-.work-row-id { flex: none; color: var(--muted); font: 11.5px/1 var(--code-font); }
 .work-row-text small { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work-row-meta { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .work-row-meta .work-runner { max-width: 130px; }

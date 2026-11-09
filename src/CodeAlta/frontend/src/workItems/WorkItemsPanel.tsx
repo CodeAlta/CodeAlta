@@ -164,11 +164,13 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                 const key = workItemKey(item);
                 const runner = item.runner ? sessionById.get(item.runner) : undefined;
                 const day = createdDay(item.created);
+                const tone = item.kind === "task" ? taskCategoryTone(item.category) : item.kind === "review" ? "warning" : "primary";
                 return <button type="button" key={key} role="option" aria-selected={current !== null && workItemKey(current) === key} className="work-row" data-kind={item.kind}
                   data-selected={current !== null && workItemKey(current) === key || undefined} onClick={() => setSelected(key)}>
-                  <span className="work-row-glyph" data-tone={item.kind === "task" ? taskCategoryTone(item.category) : item.kind === "review" ? "warning" : "primary"}>
+                  <span className="work-row-badge"><span className="work-row-glyph" data-tone={tone}>
                     <AppIcon name={item.kind === "task" ? taskCategoryIcon(item.category) : workKindIcon(item.kind)} size={16} /></span>
-                  <span className="work-row-text"><span className="work-row-title"><strong>{item.title}</strong>{item.shortId && <code className="work-row-id">{item.shortId}</code>}</span>
+                    {item.shortId && <code className="work-row-id" data-tone={tone}>{item.shortId}</code>}</span>
+                  <span className="work-row-text"><strong>{item.title}</strong>
                     <small>{item.summary ?? item.statusText ?? item.file}</small></span>
                   <span className="work-row-meta">
                     {busy.has(key) && <span className="work-row-starting"><ActivitySpinner size={11} /></span>}
