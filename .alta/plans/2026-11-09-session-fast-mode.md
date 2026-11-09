@@ -39,9 +39,9 @@ A session that never used the switch sends nothing new: each provider keeps doin
 
 | Provider type | Switch shown for | Shows before it is used | Not used: sends | On: sends | Off: sends |
 | --- | --- | --- | --- | --- | --- |
-| `claude-code` | models the CLI marks `supportsFastMode` | the CLI's `fast_mode_state`: your saved `fastMode` of Claude Code | nothing | `apply_flag_settings` `fastMode: true` | `apply_flag_settings` `fastMode: false` |
+| `claude-code` | models the CLI marks `supportsFastMode` | the CLI's `fast_mode_state`: off until the SDK opts in | nothing | `apply_flag_settings` `fastMode: true` | `apply_flag_settings` `fastMode: false` |
 | `anthropic` | Claude Opus 5.5 on the Claude API | off: fast mode is asked per request | nothing | `"speed": "fast"` | nothing |
-| `openai-responses` | models on `api.openai.com` | the tier the last response reported; off before the first | nothing: the project's default tier applies | `"service_tier": "priority"` | `"service_tier": "default"` |
+| `openai-responses` | base models on `api.openai.com`, not fine-tuned models | the tier the last response reported; off before the first | nothing: the project's default tier applies | `"service_tier": "priority"` | `"service_tier": "default"` |
 | `codex` | models whose discovery lists `priority` | `[providers.codex] service_tier` in `~/.alta/config.toml` | that `service_tier`, as today | `"service_tier": "priority"` | nothing |
 | `copilot`, ACP, others | never | — | — | — | — |
 
@@ -142,6 +142,15 @@ flowchart LR
 
 ## How it is verified
 
+- [x] PR review hardening:
+  - Explicit session choices override provider/model `extra_body.service_tier`; unsupported Codex models never receive a raw priority default, even when the session has not chosen. Valid unchosen defaults remain unchanged.
+  - Claude Code's result `fast_mode_state` refreshes the cached CLI state; cooldown remains enabled. The Anthropic request adapter also checks model support. Fine-tuned OpenAI models do not offer fast mode, and third-party Responses endpoints report no fast-mode state.
+  - Added JSON/backward-compatibility, fork/local/fleet move and restart coverage, new-chat model projection, and a production-composer scenario for reported speed, fallback dimming, both themes and wide/narrow layouts. Provider regressions failed before their fixes; removing the reported-speed wiring made the browser scenario fail.
+- [x] PR review validation (2026-11-09, isolated worktree, Release):
+  - Full `dotnet build -c Release`: zero warnings/errors. Core tests: 5,299 passed, 47 optional skips; orchestration: 832 passed; desktop: 1,809 passed, 12 optional skips.
+  - Full `npm test`: 2,780 passed, none skipped. TypeScript and `lunet build` passed (331 site files). After the final backend-only Codex guard, the full build, all core tests, 98 focused provider cases and the composer browser scenario passed again; frontend sources and the generated RPC contract were unchanged.
+  - The initial parallel validation had one toast test failure and one remote-session stamp test failure. Both passed alone and in the full rerun; no persistent failure remained.
+  - No CodeAlta instance was started or stopped, and no paid provider request was made during this review.
 - [x] Focused tests of steps 1–6 pass.
 - [x] Following "Debug or Release" in `AGENTS.md`: `dotnet build` from `src`, then `dotnet test --no-build` and `npm test` as two background jobs; `lunet build` from `site`.
   - Final run, after the Codex fix (2026-11-09): `dotnet build -c Release`: 0 warnings, 0 errors. `npm test` with `CODEALTA_TEST_BROWSER` set to Chrome (Edge is not installed): 2,780 passed, none skipped. `lunet build` (Lunet 1.1.2): 331 files, no warning or error.
@@ -166,14 +175,14 @@ flowchart LR
 | OpenAI API state | From the `service_tier` of each response | It is the only place the API gives it |
 | Claude Code | `apply_flag_settings` on the running CLI | No restart for a toggle; same approach as the permission mode |
 | Anthropic models | Opus 5.5 only | Generally available, no beta header. Opus 5 needs waitlist access, and Opus 4.8 loses fast mode on 2026-11-30 |
-| OpenAI API models | Every model on `api.openai.com` | The API lists no tier per model; the response says which tier ran |
+| OpenAI API models | Base models on `api.openai.com`, excluding fine-tuned models | The API lists no tier per model; fast mode explicitly excludes fine-tuned models; the response says which tier ran |
 | Sessions started by an agent | Start at the provider's default | An agent should not multiply a premium choice silently |
 | Change of model | The choice stays, applied where the model has fast mode | What Claude Code does too; the ⚡ shows when it applies |
 | Codex starting value | `[providers.codex] service_tier` in `~/.alta/config.toml` only; `~/.codex/config.toml` is not read | Approved in review: Codex sessions keep starting as they run today |
 
 ## Risks
 
-- **OpenAI support per model is not published by the API.** A model without fast mode runs at standard speed; the request does not fail, and the response says `default`. OpenAI's own fast-mode page could not be read (403) to confirm this, hence the optional paid check.
+- **OpenAI support per model is not published by the Models API.** Availability depends on the model and account. A request may be served at standard speed, which its response reports; the switch excludes fine-tuned models, which the fast-mode documentation explicitly says are unsupported.
 - **On an OpenAI project whose default tier is fast, a new session shows off until its first response.** The reported speed is not saved with the session, so a reopened session also waits for a response.
 - **Fast mode has its own rate limits on the Anthropic API.** A `429` is retried by the SDK after its `retry-after`. There is no automatic fallback to standard speed in this plan.
 - **Changing speed mid-conversation misses the prompt cache** at Anthropic. The user guide says it, and the switch is visible enough to choose at the start.
