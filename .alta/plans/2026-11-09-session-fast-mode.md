@@ -135,9 +135,14 @@ flowchart LR
 
 ## How it is verified
 
-- [ ] Focused tests of steps 1–6 pass.
+- [x] Focused tests of steps 1–6 pass.
 - [ ] Following "Debug or Release" in `AGENTS.md`: `dotnet build` from `src`, then `dotnet test --no-build` and `npm test` as two background jobs; `lunet build` from `site`.
-- [ ] Developer instance (`codealta-dev`), light and dark, large and 900×650 windows. The switch shows for a supported model and not for Copilot. The ⚡ appears before the name and goes when turned off. The choice is still there after reopening the session.
+  - `dotnet build -c Release`: 0 warnings, 0 errors. `npm test` with `CODEALTA_TEST_BROWSER` set to Chrome (Edge is not installed): 2,779 passed, none skipped.
+  - `dotnet test -c Release --no-build`: every project passes but two, whose failures are outside this work: Catalog (3: Windows symlink privilege, Git index snapshot) and Desktop (1: `DesktopWorktreeTests.RemoveMany_RemovesWhatCanGo_AndSaysWhyEachOtherStays`, fails alone too, worktree removal). The same failures were recorded on 2026-10-29; this branch touches neither area.
+  - The `RequiresDotNet10FileBuild` tests, `AltaPluginCommandTests` and `PluginBuildServiceTests` were left out of the final run: each waits 15 minutes, then fails, because MSBuild cannot start its task host under the installed .NET SDK `11.0.100-rc.3`.
+  - `lunet build` not run: Lunet is not installed.
+- [x] Developer instance (`codealta-dev`), light and dark, large and 900×650 windows. The switch shows for a supported model and not for Copilot. The ⚡ appears before the name and goes when turned off. The choice is still there after reopening the session.
+  - Checked on a new chat with Claude Code Opus 5.5 (`Release` build): switch under Private, off, then on with the colored ⚡ before the name and `Fast mode: On` in the tooltip, then off again; dark and light; 900×650 without overflow; no console error. Copilot and reopening a session are covered by the tests (`changedSessionOptions`, `SessionOptionsRuntimeTests` restart), not by this inspection.
 - [ ] Optional, paid, by you: one short prompt with fast mode on for each provider.
   - The Anthropic response's `usage.speed` should be `fast`, and the OpenAI response's `service_tier` should be `priority`.
   - On an OpenAI project whose default tier is fast, a session that did not choose should show the ⚡ after its first response.
