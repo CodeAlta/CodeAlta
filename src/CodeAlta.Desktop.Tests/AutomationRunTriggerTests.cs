@@ -40,7 +40,7 @@ public sealed class AutomationRunTriggerTests
         Assert.AreEqual(failed, fixture.Service.Run(triage.RunId)!.Cause);
         Assert.AreNotEqual(completed, failed);
         triage.Complete(new(AutomationRun.Completed, null));
-        await fixture.UntilAsync(() => !fixture.Service.IsRunning(Triage));
+        await fixture.UntilEndedAsync(triage.RunId);
 
         // Its own run that ends is never an event for it; a run read again is not an event again.
         await fixture.TickAsync(Noon.AddMinutes(3));
@@ -48,11 +48,12 @@ public sealed class AutomationRunTriggerTests
 
         // A run that starts to wait for an approval is one, once for each approval.
         fixture.State.Add(new AutomationRun("waiting-run", Build, Noon.AddMinutes(4), "manual") { Name = "Nightly build", Status = AutomationRun.Waiting, Approval = "a1" });
+        fixture.RunsChanged();
         await fixture.TickAsync(Noon.AddMinutes(4));
         var waits = await fixture.Runner.NextAsync();
         StringAssert.Contains(waits.Prompt, "(automation): Waits for an approval.\nTitle: Nightly build waits for an approval");
         waits.Complete(new(AutomationRun.Completed, null));
-        await fixture.UntilAsync(() => !fixture.Service.IsRunning(Triage));
+        await fixture.UntilEndedAsync(waits.RunId);
         await fixture.TickAsync(Noon.AddMinutes(10));
         Assert.AreEqual(4, fixture.Runner.Starts.Count, "the same approval is not an event again");
     }
@@ -81,7 +82,7 @@ public sealed class AutomationRunTriggerTests
             if (fixture.Runner.Starts.Count == step + 1) break;
             var next = await fixture.Runner.NextAsync();
             next.Complete(new(AutomationRun.Completed, null));
-            await fixture.UntilAsync(() => !fixture.Service.IsRunning(next.Entry.Id));
+            await fixture.UntilEndedAsync(next.RunId);
         }
 
         // The run by hand, then five that followed one another; the sixth is said, not run.
@@ -126,8 +127,20 @@ public sealed class AutomationRunTriggerTests
             var run = await Service.RunAsync(id, default);
             var start = await Runner.NextAsync();
             start.Complete(outcome);
-            await UntilAsync(() => !Service.IsRunning(id));
-            return run!.Id;
+            await UntilEndedAsync(run!.Id);
+            return run.Id;
+        }
+
+        // Says that the runs changed, as the service does when it records a change of a run: a run written in the state
+        // here would otherwise wait for the next regular reading of the Automation trigger, minutes later.
+        internal void RunsChanged()
+            => Service.Sources.List().Single(static source => source.Type == AutomationSourceTypes.Automation).Trigger.Signal!.Raise();
+
+        // Waits until the end of a run is recorded: the service says it no longer runs a moment before, and a tick
+        // in between would read the run as running, which is no event of the Automation trigger.
+        internal async Task UntilEndedAsync(string runId)
+        {
+            await UntilAsync(() => !Service.IsRunning(Service.Run(runId)!.AutomationId) && Service.Run(runId)!.EndedAt is not null);
         }
 
         internal async Task UntilAsync(Func<bool> condition)
