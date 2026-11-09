@@ -3405,6 +3405,9 @@ dialog.mcp-session-dialog:has(> .app-window) > .app-window > .app-window-body { 
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .sign-in-end { padding: 0 2px; }
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .sign-in-end > span { display: none; }
 .prompt-surface[data-density="tiny"] .prompt-cache-countdown svg { display: none; }
+/* Nor does the ring of the context: its tokens stay, colored by its intent, and the model name keeps room in a wider font
+   (San Francisco on macOS) than Segoe UI. */
+.prompt-surface[data-density="tiny"] .context-usage-ring { display: none; }
 .prompt-surface[data-density="tiny"] .composer-status-line[data-busy="false"] .composer-foreground-status:not([data-tone]) .composer-foreground-text { display: none; }
 
 /* The search in a rendered page (Ctrl+F): a box over the top of the page, and the places found marked in it, the one
