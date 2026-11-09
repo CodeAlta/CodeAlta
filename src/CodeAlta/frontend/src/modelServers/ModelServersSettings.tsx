@@ -120,6 +120,22 @@ export function ModelServersSettings({ epoch, api: given, onDiscover }: { epoch:
     try { return await api.act(machine, action); } catch { return null; }
   }, [api]);
 
+  // Adds the provider of a server to this computer, so that its sessions use it.
+  const useInSessions = useCallback(async (machine: string, server: ServerDefinition) => {
+    if (!api) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const results = await api.useInSessions(machine, server.id, server.name, ["local"]);
+      const failed = results.find(result => result.problem);
+      setNotice(failed ? { key: "The sessions do not use it yet.", intent: "warning", detail: failed.problem } : { key: "The sessions of this computer use it.", intent: "success" });
+    } catch (error) {
+      setNotice({ key: "The sessions do not use it yet.", intent: "warning", detail: error instanceof Error ? error.message : null });
+    } finally {
+      setBusy(false);
+    }
+  }, [api]);
+
   const managed = machines.filter(entry => entry.machine.manages && entry.status);
   const view = views[tab];
   const setView = (part: Partial<TableView>) => setViews(current => ({ ...current, [tab]: { ...current[tab], ...part } }));
@@ -136,13 +152,13 @@ export function ModelServersSettings({ epoch, api: given, onDiscover }: { epoch:
         onClick={() => setDialog({ kind: "download", machine: null })} />
       {onDiscover && <Button variant="minimal" icon={<AppIcon name="search" size={14} />} text={t("Discover models")} onClick={onDiscover} />}
     </>}>
-    {unreachable.length > 0 && <Callout intent="warning" compact className="model-servers-unreachable" icon={<AppIcon name="warning" size={14} />}>
-      {unreachable.map(entry => <div key={entry.machine.id}>{t("{name}: {problem}", { name: entry.machine.name, problem: entry.problem ?? t("Offline") })}</div>)}
-    </Callout>}
-    {reachable.flatMap(entry => entry.status!.warnings.map(warning => <Callout key={`${entry.machine.id}:${warning}`} intent="warning" compact icon={<AppIcon name="warning" size={14} />}>
+    {unreachable.length > 0 && <p className="model-servers-unreachable muted-text"><AppIcon name="remote" size={13} />{t("Not reached now:")}
+      {unreachable.map((entry, index) => <span key={entry.machine.id}>{index > 0 ? ", " : " "}<span className="model-servers-unreachable-name"
+        title={entry.problem ?? t(entry.machine.state === "connecting" ? "Connecting…" : "Offline")}>{entry.machine.name}</span></span>)}</p>}
+    {reachable.flatMap(entry => entry.status!.warnings.map(warning => <Callout key={`${entry.machine.id}:${warning}`} intent="warning" compact icon={<AppIcon name="warning" size={16} />}>
       <strong>{entry.machine.name}</strong>: {warning}</Callout>))}
     <Tabs id="model-servers-tabs" selectedTabId={tab} onChange={id => setTab(id as TabId)} renderActiveTabPanelOnly large={false}>
-      <Tab id="servers" title={t("Servers")} panel={<ServersTab machines={reachable} view={views.servers} onView={setView} busy={busy} run={run} read={read}
+      <Tab id="servers" title={t("Servers")} panel={<ServersTab machines={reachable} view={views.servers} onView={setView} busy={busy} run={run} read={read} onUse={useInSessions}
         onEdit={(machine, server) => setDialog({ kind: "server", machine, server })} />} />
       <Tab id="models" title={t("Models")} panel={<ModelsTab machines={reachable} view={views.models} onView={setView} busy={busy} run={run}
         onServe={(machine, model) => setDialog({ kind: "server", machine, server: null, model })} />} />
@@ -210,8 +226,9 @@ export function stateLabel(state: string): MessageKey {
   }
 }
 
-function ServersTab({ machines, view, onView, busy, run, read, onEdit }: {
+function ServersTab({ machines, view, onView, busy, run, read, onUse, onEdit }: {
   machines: readonly MachineStatus[]; view: TableView; onView: (part: Partial<TableView>) => void; busy: boolean; run: RunAction; read: ReadAction;
+  onUse: (machine: string, server: ServerDefinition) => Promise<void>;
   onEdit: (machine: string, server: ServerDefinition) => void;
 }) {
   const { t } = useShellLanguage();
@@ -255,7 +272,7 @@ function ServersTab({ machines, view, onView, busy, run, read, onEdit }: {
     <DataTable label={t("Model servers")} rows={shown} columns={columns} rowKey={row => row.key} sort={view.sort} onSort={sort => onView({ sort })}
       selected={view.selected} onSelect={selected => onView({ selected })} rowState={row => rowMark(stateIntent(serverStateOf(row.server)))}
       empty={<EmptyState rows={rows.length} text="No model server yet: add one, or import the command line of a llama-server you run." />}
-      details={row => <ServerDetails row={row} busy={busy} run={run} read={read} onEdit={() => onEdit(row.machine.id, row.server.definition)} />} />
+      details={row => <ServerDetails row={row} busy={busy} run={run} read={read} onUse={() => void onUse(row.machine.id, row.server.definition)} onEdit={() => onEdit(row.machine.id, row.server.definition)} />} />
   </section>;
 }
 
@@ -266,7 +283,12 @@ function rowMark(intent: string): string | undefined {
 
 function serverGpus(row: ServerRow): string {
   const build = row.status.builds.find(item => item.current && item.backend === row.server.definition.backend);
-  const devices = row.server.definition.devices.length > 0 ? row.server.definition.devices : [...new Set(row.server.definition.models.flatMap(model => model.devices))];
+  const named = row.server.definition.devices.length > 0 ? row.server.definition.devices : [...new Set(row.server.definition.models.flatMap(model => model.devices))];
+  // A server that names no GPU runs on the discrete GPUs its build sees (LlamaBuilds.DiscreteDevices): not the GPU of the processor.
+  const integrated = new Set(row.status.hardware.gpus.filter(gpu => gpu.integrated).map(gpu => gpu.name.replace(/\((TM|R)\)/giu, "").replace(/\s+/gu, " ").trim().toUpperCase()));
+  const discrete = build?.devices.filter(device => !/^cpu/iu.test(device.name) && !/\b(Ryzen|Core\(TM\)|Core Ultra|Processor)\b/iu.test(device.description)
+    && !integrated.has(device.description.replace(/\((TM|R)\)/giu, "").replace(/\s+/gu, " ").trim().toUpperCase())).map(device => device.name) ?? [];
+  const devices = named.length > 0 ? named : discrete.length > 0 ? discrete : build?.devices.map(device => device.name) ?? [];
   if (!build || devices.length === 0) return "";
   const names = devices.map(device => build.devices.find(item => item.name === device)?.description.replace(/^(AMD|NVIDIA)\s+/iu, "") ?? device);
   const counts = new Map<string, number>();
@@ -285,10 +307,10 @@ function ModelsCell({ row }: { row: ServerRow }) {
     {models.length > 1 && <Tag minimal round className="model-servers-more">+{models.length - 1}</Tag>}</span>;
 }
 
-function ServerDetails({ row, busy, run, read, onEdit }: { row: ServerRow; busy: boolean; run: RunAction; read: ReadAction; onEdit: () => void }) {
+function ServerDetails({ row, busy, run, read, onUse, onEdit }: { row: ServerRow; busy: boolean; run: RunAction; read: ReadAction; onUse: () => void; onEdit: () => void }) {
   const { t, locale } = useShellLanguage();
   const [log, setLog] = useState<readonly string[] | null>(null);
-  const [test, setTest] = useState<string | null>(null);
+  const [test, setTest] = useState<Readonly<{ passed: boolean; message: string }> | null>(null);
   const { server, machine } = row;
   const id = server.definition.id;
   const running = server.status.state !== "stopped" && server.status.state !== "waiting";
@@ -326,16 +348,18 @@ function ServerDetails({ row, busy, run, read, onEdit }: { row: ServerRow; busy:
         </tr>;
       })}</tbody>
     </table>
-    {test && <p className="model-servers-test"><AppIcon name="check" size={14} />{test}</p>}
+    {test && <p className={`model-servers-test${test.passed ? "" : " is-failed"}`}><AppIcon name={test.passed ? "check" : "error"} size={14} />{test.message}</p>}
     {log && log.length > 0 && <pre className="model-servers-log" aria-label={t("The end of its log")}>{log.join("\n")}</pre>}
     {manage && <div className="machine-details-actions">
       {running
         ? <><Button size="small" icon={<AppIcon name="stop" size={14} />} text={t("Stop")} disabled={busy} onClick={() => void act("stop")} />
           <Button size="small" icon={<AppIcon name="refresh" size={14} />} text={t("Restart")} disabled={busy} onClick={() => void act("restart")} />
           <Button size="small" icon={<AppIcon name="play" size={14} />} text={t("Test")} disabled={busy}
-            onClick={() => void run(machine.id, { action: "testServer", id }).then(result => setTest(result?.test ? `${result.test.passed ? "✓" : "✗"} ${result.test.message}` : null))} /></>
+            onClick={() => void run(machine.id, { action: "testServer", id }).then(result => setTest(result?.test ?? null))} /></>
         : <Button size="small" intent="primary" icon={<AppIcon name="play" size={14} />} text={t("Start")} disabled={busy} onClick={() => void act("start")} />}
       <Button size="small" icon={<AppIcon name="edit" size={14} />} text={t("Change…")} disabled={busy} onClick={onEdit} />
+      {server.definition.purpose === "chat" && (row.machine.local || server.definition.access === "my-computers")
+        && <Button size="small" variant="minimal" icon={<AppIcon name="provider" size={14} />} text={t("Use in sessions")} disabled={busy} onClick={onUse} />}
       <Button size="small" variant="minimal" icon={<AppIcon name="logs" size={14} />} text={t("Show the log")} disabled={busy}
         onClick={() => void read(machine.id, { action: "serverLog", id, lines: 200 }).then(result => setLog(result?.log ?? []))} />
       <RemoveButton busy={busy} question={t("Remove {name}?", { name: server.definition.name })} detail={t("It stops and its settings go. Its models stay on the disk.")}

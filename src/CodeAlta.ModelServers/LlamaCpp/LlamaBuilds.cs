@@ -320,6 +320,36 @@ public sealed partial class LlamaBuilds
                 long.Parse(match.Groups["total"].Value, CultureInfo.InvariantCulture), long.Parse(match.Groups["free"].Value, CultureInfo.InvariantCulture), null))
             .ToList();
 
+    /// <summary>
+    /// The devices a server that names none runs on: those of the build that are not the GPU of the processor, which shares
+    /// the memory of the system (ROCm names it after the processor, Vulkan as the integrated GPU of the inventory). Empty when
+    /// all are, or when none is: llama.cpp then chooses.
+    /// </summary>
+    /// <param name="build">The build.</param>
+    /// <param name="hardware">The GPUs of the machine.</param>
+    /// <returns>The names of the devices, or empty.</returns>
+    public static IReadOnlyList<string> DiscreteDevices(InstalledBuild build, HardwareInventory hardware)
+    {
+        ArgumentNullException.ThrowIfNull(build);
+        ArgumentNullException.ThrowIfNull(hardware);
+        static string Normalize(string name) => string.Join(' ', name.Replace("(TM)", "", StringComparison.OrdinalIgnoreCase).Replace("(R)", "", StringComparison.OrdinalIgnoreCase)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
+        var integrated = hardware.Gpus.Where(static gpu => gpu.Integrated).Select(gpu => Normalize(gpu.Name)).ToHashSet(StringComparer.Ordinal);
+        var discreteNames = hardware.Gpus.Where(static gpu => !gpu.Integrated).Select(gpu => Normalize(gpu.Name)).ToHashSet(StringComparer.Ordinal);
+        bool IsIntegrated(LlamaDevice device)
+        {
+            var name = Normalize(device.Description);
+            return device.Name.StartsWith("CPU", StringComparison.OrdinalIgnoreCase) || ProcessorPattern().IsMatch(device.Description)
+                || integrated.Contains(name) && !discreteNames.Contains(name);
+        }
+
+        var discrete = build.Devices.Where(device => !IsIntegrated(device)).Select(static device => device.Name).ToList();
+        return discrete.Count > 0 && discrete.Count < build.Devices.Count ? discrete : [];
+    }
+
+    [GeneratedRegex(@"\b(Ryzen|Core\(TM\)|Core Ultra|Processor)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ProcessorPattern();
+
     /// <summary>The backend of a device name: <c>CUDA0</c> is <c>cuda</c>, <c>ROCm1</c> is <c>rocm</c>, <c>Vulkan2</c> is <c>vulkan</c>.</summary>
     /// <param name="device">The device.</param>
     /// <returns>Its backend.</returns>

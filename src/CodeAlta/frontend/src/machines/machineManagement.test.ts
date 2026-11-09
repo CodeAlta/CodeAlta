@@ -33,7 +33,7 @@ test("each provider offers what makes it ready: its key, its sign-in with a code
 const device = (change: Partial<MachineDeviceView> = {}): MachineDeviceView => ({ id: "d1", name: "laptop", fingerprint: "ABCD EFGH IJKL", permissions: ["view", "drive", "start"],
   pairedAt: "2026-11-01T00:00:00Z", revokedAt: null, channels: 0, isThisComputer: false, ...change });
 
-test("The six permissions have their order, a name and what they let a device do", () => {
+test("The permissions have their order, a name and what they let a device do", () => {
   assert.deepEqual([...devicePermissions], ["view", "drive", "start", "move", "automate", "models", "manage"]);
   assert.equal(permissionLabel("manage").name, "Manage");
   assert.equal(permissionLabel("automate").description, "Run its automations there.");

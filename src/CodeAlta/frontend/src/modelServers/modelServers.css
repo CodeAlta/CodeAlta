@@ -2,7 +2,9 @@
 .model-servers-settings .bp6-tabs { display: grid; gap: 10px; }
 .model-servers-settings .bp6-tab-list { align-items: center; gap: 4px 18px; flex-wrap: wrap; }
 .model-servers-settings .bp6-tab-panel { margin-top: 0; display: grid; gap: 10px; }
-.model-servers-unreachable { display: grid; gap: 2px; }
+.model-servers-unreachable { display: flex; flex-wrap: wrap; align-items: center; margin: 0; font-size: 12px; white-space: pre-wrap; }
+.model-servers-unreachable > svg { flex: none; margin-right: 6px; }
+.model-servers-unreachable-name { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 .model-servers-state { white-space: nowrap; }
 .model-servers-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
 .model-servers-name > svg { flex: none; color: var(--fleet-blue); }
@@ -26,7 +28,8 @@
 .model-servers-reason { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: var(--muted); }
 .model-servers-reason > svg { flex: none; margin-top: 2px; }
 .model-servers-reason.is-failed { color: var(--red); }
-.model-servers-test { display: flex; align-items: center; gap: 8px; margin: 0; }
+.model-servers-test { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--green); }
+.model-servers-test.is-failed { color: var(--red); }
 .model-servers-models-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .model-servers-models-table th { padding: 4px 8px; color: var(--muted); font-weight: 500; text-align: start; border-bottom: 1px solid var(--line); }
 .model-servers-models-table td { padding: 4px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); vertical-align: middle; }

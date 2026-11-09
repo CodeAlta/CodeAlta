@@ -92,6 +92,8 @@ public sealed partial class HardwareProbe
             notes.Add($"The display adapters could not be read: {exception.Message}");
         }
 
+        // A driver installed before keeps a record without the device it matched: the same GPU, named again.
+        gpus.RemoveAll(gpu => gpu.PciId is null && gpus.Any(other => other.PciId is not null && string.Equals(other.Name, gpu.Name, StringComparison.OrdinalIgnoreCase)));
         var cuda = await ReadNvidiaAsync(gpus, cancellationToken).ConfigureAwait(false);
         var hipPath = Environment.GetEnvironmentVariable("HIP_PATH");
         string? hipVersion = null;
@@ -198,7 +200,7 @@ public sealed partial class HardwareProbe
         if (!gpus.Any(static gpu => gpu.Vendor == "nvidia") && OperatingSystem.IsWindows()) return null;
         var header = await _run("nvidia-smi", [], cancellationToken).ConfigureAwait(false);
         if (header is null) return null;
-        var cuda = CudaVersionPattern().Match(header) is { Success: true } match ? match.Groups[1].Value : null;
+        var cuda = CudaVersionOf(header);
         var query = await _run("nvidia-smi", ["--query-gpu=name,memory.total,compute_cap", "--format=csv,noheader,nounits"], cancellationToken).ConfigureAwait(false);
         var index = 0;
         foreach (var line in (query ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
@@ -366,7 +368,12 @@ public sealed partial class HardwareProbe
     [LibraryImport("libc", EntryPoint = "gnu_get_libc_version")]
     private static partial nint GnuGetLibcVersion();
 
-    [GeneratedRegex(@"CUDA Version:\s*(\d+\.\d+)")]
+    /// <summary>The CUDA version the driver supports, from the header of <c>nvidia-smi</c>: <c>CUDA Version: 13.0</c>, or <c>CUDA UMD Version: 13.3</c> since the 610 drivers.</summary>
+    /// <param name="header">What <c>nvidia-smi</c> printed.</param>
+    /// <returns>The version, or null.</returns>
+    internal static string? CudaVersionOf(string header) => CudaVersionPattern().Match(header) is { Success: true } match ? match.Groups[1].Value : null;
+
+    [GeneratedRegex(@"CUDA (?:UMD |Driver )?Version:\s*(\d+\.\d+)")]
     private static partial Regex CudaVersionPattern();
 
     /// <summary>Runs a program of the machine with <see cref="ToolTimeout"/>.</summary>

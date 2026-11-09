@@ -75,10 +75,10 @@ public sealed partial class RouterClient
     /// <summary>Reads the models of a router and where each stands.</summary>
     /// <param name="cancellationToken">Ends the call.</param>
     /// <returns>Each model with its state, progress and trained context.</returns>
-    public async Task<IReadOnlyList<(string Model, string State, double? Progress, int? TrainedContext, bool Vision, bool Failed)>> ModelsAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<(string Model, string State, double? Progress, int? TrainedContext, bool Vision, bool Failed, string? Path)>> ModelsAsync(CancellationToken cancellationToken)
     {
         using var document = await GetJsonAsync("/models", cancellationToken).ConfigureAwait(false);
-        var result = new List<(string, string, double?, int?, bool, bool)>();
+        var result = new List<(string, string, double?, int?, bool, bool, string?)>();
         if (document is null || !document.RootElement.TryGetProperty("data", out var data)) return result;
         foreach (var model in data.EnumerateArray())
         {
@@ -86,8 +86,17 @@ public sealed partial class RouterClient
             var state = "unloaded";
             double? progress = null;
             var failed = false;
+            string? path = null;
             if (model.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.Object)
             {
+                // The file the router runs the model from: what names it when the router renamed its section.
+                if (status.TryGetProperty("args", out var args) && args.ValueKind == JsonValueKind.Array)
+                {
+                    var words = args.EnumerateArray().Select(static word => word.GetString()).ToList();
+                    var at = words.IndexOf("--model");
+                    if (at >= 0 && at + 1 < words.Count) path = words[at + 1];
+                }
+
                 state = status.TryGetProperty("value", out var value) ? value.GetString() ?? state : state;
                 failed = status.TryGetProperty("failed", out var f) && f.ValueKind == JsonValueKind.True;
                 if (status.TryGetProperty("progress", out var p) && p.ValueKind == JsonValueKind.Object && p.TryGetProperty("value", out var v) && v.TryGetDouble(out var number))
@@ -97,7 +106,7 @@ public sealed partial class RouterClient
             int? context = model.TryGetProperty("context_length", out var length) && length.TryGetInt32(out var tokens) ? tokens : null;
             var vision = model.TryGetProperty("architecture", out var architecture) && architecture.TryGetProperty("input_modalities", out var inputs)
                 && inputs.EnumerateArray().Any(static input => input.GetString() == "image");
-            result.Add((id, failed ? "failed" : state, progress, context, vision, failed));
+            result.Add((id, failed ? "failed" : state, progress, context, vision, failed, path));
         }
 
         return result;

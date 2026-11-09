@@ -181,9 +181,10 @@ export function ServerDialog({ api, machines, machine: given, server, model, run
         </div>}
         <button type="submit" hidden />
       </form>
-      {notInstalled && <Callout compact intent="primary" icon={<AppIcon name="download" size={14} />}>{t("Its build of llama.cpp ({backend}) is installed first.", { backend: backendName(draft.backend) })}</Callout>}
-      {missing.length > 0 && <Callout compact intent="primary" icon={<AppIcon name="download" size={14} />}>
-        {t("{count} models are downloaded first; the server starts once they are on the disk.", { count: missing.length })}</Callout>}
+      {notInstalled && <Callout compact intent="primary" icon={<AppIcon name="download" size={16} />}>{t("Its build of llama.cpp ({backend}) is installed first.", { backend: backendName(draft.backend) })}</Callout>}
+      {missing.length > 0 && <Callout compact intent="primary" icon={<AppIcon name="download" size={16} />}>
+        {missing.length === 1 ? t("The model is downloaded first; the server starts once it is on the disk.")
+          : t("{count} models are downloaded first; the server starts once they are on the disk.", { count: missing.length })}</Callout>}
       <Problem problem={problem ?? (invalid && draft.models.length > 0 ? { key: invalid } : null)} />
     </DialogBody>
     <DialogFooter actions={<>

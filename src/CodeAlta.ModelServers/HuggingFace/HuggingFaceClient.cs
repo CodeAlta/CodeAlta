@@ -80,14 +80,27 @@ public sealed partial class HuggingFaceClient
     /// <exception cref="ModelHostException">The Hub could not be read.</exception>
     public async Task<IReadOnlyList<HubModel>> SearchAsync(string? search, string? author, string? pipeline, string sort, int limit, CancellationToken cancellationToken)
     {
-        var query = new List<string> { "filter=gguf", "full=false", "limit=" + Math.Clamp(limit, 1, 100).ToString(CultureInfo.InvariantCulture) };
+        limit = Math.Clamp(limit, 1, 100);
+        // Without a kind, the GGUF files of image, video and speech models come too: more are asked, those llama-server serves kept.
+        var asked = pipeline is { Length: > 0 } ? limit : Math.Min(100, limit * 2);
+        var query = new List<string> { "filter=gguf", "full=false", "limit=" + asked.ToString(CultureInfo.InvariantCulture) };
         if (search is { Length: > 0 }) query.Add("search=" + Uri.EscapeDataString(search));
         if (author is { Length: > 0 }) query.Add("author=" + Uri.EscapeDataString(author));
         if (pipeline is { Length: > 0 }) query.Add("pipeline_tag=" + Uri.EscapeDataString(pipeline));
         query.Add("sort=" + (sort is "downloads" or "likes" or "lastModified" ? sort : "trendingScore"));
         foreach (var expand in new[] { "downloads", "likes", "lastModified", "pipeline_tag", "tags", "gated", "trendingScore", "author" }) query.Add("expand[]=" + expand);
         using var document = await GetJsonAsync("/api/models?" + string.Join('&', query), cancellationToken).ConfigureAwait(false);
-        return document.RootElement.EnumerateArray().Select(ReadModel).ToList();
+        return document.RootElement.EnumerateArray().Select(ReadModel).Where(ServedByLlamaServer).Take(limit).ToList();
+    }
+
+    /// <summary>Whether llama-server serves what a model does: text, text and images, embeddings, reranking; not the images, video or speech it makes.</summary>
+    /// <param name="model">The model.</param>
+    /// <returns>Whether it does, or may (a model that says nothing).</returns>
+    public static bool ServedByLlamaServer(HubModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return model.PipelineTag is null or "text-generation" or "image-text-to-text" or "feature-extraction" or "sentence-similarity" or "text-ranking"
+            or "text-classification" or "any-to-any" or "audio-text-to-text" or "visual-question-answering" or "question-answering" or "summarization" or "translation";
     }
 
     /// <summary>Reads a model's page and its files.</summary>

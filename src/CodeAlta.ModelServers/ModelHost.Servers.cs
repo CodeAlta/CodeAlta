@@ -96,7 +96,8 @@ public sealed partial class ModelHost
             case "load" or "unload":
                 if (model is null || supervisor.Client is not { } client) throw new ModelHostException("not_running", $"{supervisor.Definition.Name} does not run.");
                 if (supervisor.Definition.Kind != ServerKinds.Several) throw new ModelHostException("invalid", "A one-model server keeps its model loaded.");
-                if (!(action == "load" ? await client.LoadAsync(model, cancellationToken).ConfigureAwait(false) : await client.UnloadAsync(model, cancellationToken).ConfigureAwait(false)))
+                var named = supervisor.RouterName(model);
+                if (!(action == "load" ? await client.LoadAsync(named, cancellationToken).ConfigureAwait(false) : await client.UnloadAsync(named, cancellationToken).ConfigureAwait(false)))
                     throw new ModelHostException("refused", $"The server did not {action} {model}.");
                 break;
             default:
@@ -120,7 +121,7 @@ public sealed partial class ModelHost
             return new ServerTestResult(false, null, null, supervisor.Status.Reason ?? $"{supervisor.Definition.Name} does not run.");
         var target = model ?? supervisor.Definition.Models.FirstOrDefault(m => Store.Find(m.Model) is not null)?.Model;
         if (target is null) return new ServerTestResult(false, null, null, "None of its models is on this machine yet.");
-        return await client.TestAsync(target, TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
+        return await client.TestAsync(supervisor.RouterName(target), TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Reads the end of the log of a server.</summary>
@@ -158,7 +159,8 @@ public sealed partial class ModelHost
     public byte[] AdjustModelList(string id, byte[] json)
     {
         if (Find(id) is not { } supervisor) return json;
-        var contexts = supervisor.Status.Models.Where(static m => m.Context is > 0).ToDictionary(static m => m.Model, static m => m.Context!.Value, StringComparer.Ordinal);
+        // By the name the router lists each model with.
+        var contexts = supervisor.Status.Models.Where(static m => m.Context is > 0).ToDictionary(m => supervisor.RouterName(m.Model), static m => m.Context!.Value, StringComparer.Ordinal);
         if (contexts.Count == 0) return json;
         try
         {
@@ -258,7 +260,10 @@ public sealed partial class ModelHost
 
     private ServerSupervisor AddSupervisor(ServerDefinition definition)
     {
-        var supervisor = new ServerSupervisor(Path.Combine(ServersRoot, definition.Id), definition, _local, (backend, tag) => Builds.Find(backend, tag), ModelPaths);
+        var supervisor = new ServerSupervisor(Path.Combine(ServersRoot, definition.Id), definition, _local, (backend, tag) => Builds.Find(backend, tag), ModelPaths)
+        {
+            DefaultDevices = build => { lock (_gate) return LlamaBuilds.DiscreteDevices(build, _hardware); },
+        };
         supervisor.Changed += NotifyChanged;
         lock (_gate)
         {

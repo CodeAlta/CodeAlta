@@ -426,7 +426,7 @@ public sealed partial class ModelHost : IAsyncDisposable
         foreach (var supervisor in users)
         {
             if (supervisor.Definition.Kind == ServerKinds.Several && supervisor.Client is { } client && supervisor.Definition.Models.Count > 1)
-                await client.UnloadAsync(model, cancellationToken).ConfigureAwait(false);
+                await client.UnloadAsync(supervisor.RouterName(model), cancellationToken).ConfigureAwait(false);
             else
                 await supervisor.StopAsync(cancellationToken).ConfigureAwait(false);
         }

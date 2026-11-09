@@ -400,6 +400,7 @@ import "./fleet/fleetSecrets.css";
 import "./fleet/fleetBudgets.css";
 import "./fleet/console/fleetConsole.css";
 import "./modelServers/modelServers.css";
+import "./modelServers/discover/discover.css";
 import "./fleet/access/fleetAccess.css";
 import "./fleet/audit/fleetAudit.css";
 import "./fleet/policies/fleetPolicies.css";
@@ -1999,7 +2000,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const canvasCatalog = useMemo(() => tabCanvases(declaredCanvases), [declaredCanvases]);
   const pluginPages = useMemo(() => pluginSettingsPages(declaredCanvases), [declaredCanvases]);
   const fleetCanvas = useMemo(() => fleetCanvasOf(canvasCatalog), [canvasCatalog]);
-  const modelsCanvas = useMemo(() => canvasCatalog.find(item => item.pluginKey === fleetCanvas?.pluginKey && item.id === "models") ?? null, [canvasCatalog, fleetCanvas]);
+  // Discover models, the second canvas of the built-in Fleet plugin.
+  const modelsCanvas = useMemo(() => canvasCatalog.find(item => item.pluginKey === "builtin:fleet" && item.id === "models") ?? null, [canvasCatalog]);
   // Opens the tab of a canvas in the space that is shown: one tab for each canvas, project, session and key. A settings page opens in Settings.
   function openCanvas(item: CanvasItem, target: CanvasTarget) {
     if (!owned) return;

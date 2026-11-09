@@ -835,6 +835,16 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     GlobalConfigService.ApplyProviders(store, host.ModelProviderRegistry, options.CatalogRoot!, pluginProviderTypes, modelsDev);
                     await host.ModelProviderInitializationService.RefreshProviderAfterChangeAsync(new CodeAlta.Agent.ModelProviderId(key), token).ConfigureAwait(false);
                 };
+                // A provider that names a server reads its models again once the server is ready.
+                modelServers.ServerReady += (machine, server) =>
+                {
+                    var reference = machine + "/" + server;
+                    var keys = new CodeAltaConfigStore(host.CatalogOptions).LoadGlobalProviderDefinitions(includeDisabled: false)
+                        .Where(definition => string.Equals(definition.Server, reference, StringComparison.OrdinalIgnoreCase)).Select(static definition => definition.ProviderKey).ToList();
+                    foreach (var key in keys)
+                        _ = host.ModelProviderInitializationService.RefreshProviderAsync(new CodeAlta.Agent.ModelProviderId(key))
+                            .ContinueWith(static task => _ = task.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                };
                 var startingModelServers = modelServers;
                 _ = Task.Run(async () =>
                 {

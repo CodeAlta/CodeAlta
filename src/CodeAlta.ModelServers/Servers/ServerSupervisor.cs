@@ -53,6 +53,8 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
     private Task? _monitor;
     private bool _stopping;
     private DateTimeOffset _lastFailure;
+    // The names the router gives the models whose section it renamed, by the model.
+    private readonly Dictionary<string, string> _routerNames = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Creates the supervisor of a server.</summary>
     /// <param name="folder">The folder of the server.</param>
@@ -76,6 +78,17 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
 
     /// <summary>Raised when the server changed.</summary>
     public event Action? Changed;
+
+    /// <summary>The name the router gives a model of this server: the model itself, unless llama.cpp renamed its section.</summary>
+    /// <param name="model">The model, as the server names it.</param>
+    /// <returns>The name to give the router.</returns>
+    public string RouterName(string model)
+    {
+        lock (_gate) return _routerNames.TryGetValue(model, out var name) ? name : model;
+    }
+
+    /// <summary>Gets what gives the devices of a build a server that names none runs on (<see cref="LlamaBuilds.DiscreteDevices"/>); null for llama.cpp's choice.</summary>
+    public Func<InstalledBuild, IReadOnlyList<string>>? DefaultDevices { get; init; }
 
     /// <summary>Gets what the person set.</summary>
     public ServerDefinition Definition
@@ -195,6 +208,9 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
             ?? throw new ModelHostException("no_build", definition.Build is null
                 ? $"No {definition.Backend} build of llama.cpp is installed on this machine: install one in the llama.cpp tab."
                 : $"The build {definition.Build} ({definition.Backend}) is not installed.");
+        // A server that names no GPU, nor any of its models, runs on the discrete GPUs its build sees.
+        if (definition.Devices.Count == 0 && definition.Models.All(static model => model.Devices.Count == 0) && DefaultDevices?.Invoke(build) is { Count: > 0 } discrete)
+            definition = definition with { Devices = discrete };
         if (definition.Kind == ServerKinds.Several && build.Build is > 0 and < ServerArguments.MinimumRouterBuild)
             throw new ModelHostException("too_old", $"{build.Tag} is too old for a server of several models: use b{ServerArguments.MinimumRouterBuild} or newer.");
         var presetPath = Path.Combine(_folder, "preset.ini");
@@ -267,7 +283,7 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
             if (client is not null && Definition.Kind == ServerKinds.Several)
             {
                 foreach (var model in Status.Models.Where(static model => model.State is "loaded" or "loading" or "sleeping"))
-                    await client.UnloadAsync(model.Model, cancellationToken).ConfigureAwait(false);
+                    await client.UnloadAsync(RouterName(model.Model), cancellationToken).ConfigureAwait(false);
             }
 
             try
@@ -414,6 +430,14 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
             foreach (var model in definition.Models)
             {
                 var entry = listed.FirstOrDefault(item => item.Model == model.Model);
+                // llama.cpp may name a section otherwise than its preset does (it drops the UD- of a tag): its file names it.
+                if (entry.Model is null && _paths(model.Model) is { } files)
+                {
+                    entry = listed.FirstOrDefault(item => item.Path is { } path && string.Equals(Path.GetFullPath(path), Path.GetFullPath(files.Model),
+                        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
+                    if (entry.Model is not null) lock (_gate) _routerNames[model.Model] = entry.Model;
+                }
+
                 var old = previous.Models.FirstOrDefault(item => item.Model == model.Model);
                 if (entry.Model is null)
                 {
@@ -425,9 +449,9 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
                 int? context = Context(model.Model);
                 if (entry.State == "loaded" && readDetails)
                 {
-                    (busy, total, var slotContext) = await client.SlotsAsync(model.Model, cancellationToken).ConfigureAwait(false);
+                    (busy, total, var slotContext) = await client.SlotsAsync(entry.Model, cancellationToken).ConfigureAwait(false);
                     if (slotContext is { } n) context = Remember(model.Model, n);
-                    if (await client.TokensPerSecondAsync(model.Model, cancellationToken).ConfigureAwait(false) is { } speed) lock (_gate) _speeds[model.Model] = speed;
+                    if (await client.TokensPerSecondAsync(entry.Model, cancellationToken).ConfigureAwait(false) is { } speed) lock (_gate) _speeds[model.Model] = speed;
                 }
                 else if (entry.State != "loaded")
                 {

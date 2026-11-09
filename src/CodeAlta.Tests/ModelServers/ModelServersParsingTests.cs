@@ -134,6 +134,44 @@ public sealed class ModelServersParsingTests
     }
 
     [TestMethod]
+    public void DiscreteDevices_LeaveOutTheGpuOfTheProcessor()
+    {
+        static InstalledBuild Build(params LlamaDevice[] devices) => new("b1", 1, "rocm", null, "f", 1, DateTimeOffset.UnixEpoch, devices, null, true, false, false, "ggml-org");
+        var linux = new HardwareInventory("linux", "x64", "AMD Ryzen 9 7950X 16-Core Processor", null,
+            [new GpuInfo("0", "amd", "AMD Radeon AI PRO R9700", 32L << 30, false, "gfx1201", null), new GpuInfo("1", "amd", "AMD Radeon Graphics", 512L << 20, true, "gfx1036", null)],
+            new MachineLibraries(null, "7.2.1", null, true, true, "2.39"), []);
+        var rocm = Build(new LlamaDevice("ROCm0", "AMD Radeon AI PRO R9700", 32624, 32000, null), new LlamaDevice("ROCm1", "AMD Radeon AI PRO R9700", 32624, 32000, null),
+            new LlamaDevice("ROCm2", "AMD Ryzen 9 7950X 16-Core Processor", 512, 400, null));
+        CollectionAssert.AreEqual(new[] { "ROCm0", "ROCm1" }, LlamaBuilds.DiscreteDevices(rocm, linux).ToArray(), "ROCm names the GPU of the processor after it");
+        var vulkan = Build(new LlamaDevice("Vulkan0", "AMD Radeon(TM) Graphics", 16000, 15000, null), new LlamaDevice("Vulkan1", "AMD Radeon AI PRO R9700", 32624, 32000, null));
+        CollectionAssert.AreEqual(new[] { "Vulkan1" }, LlamaBuilds.DiscreteDevices(vulkan, linux with { Gpus = [.. linux.Gpus.Select(static gpu => gpu.Integrated ? gpu with { Name = "AMD Radeon(TM) Graphics" } : gpu)] }).ToArray(),
+            "Vulkan names it as the inventory does");
+        Assert.IsEmpty(LlamaBuilds.DiscreteDevices(Build(new LlamaDevice("CUDA0", "NVIDIA GeForce RTX 4070", 12281, 11000, null)), linux), "a build of discrete GPUs only is left to llama.cpp");
+        Assert.IsEmpty(LlamaBuilds.DiscreteDevices(Build(new LlamaDevice("MTL0", "Apple M4 Pro", 40000, 39000, null)),
+            linux with { Gpus = [new GpuInfo("0", "apple", "Apple M4 Pro", null, true, null, null)] }), "a machine of one integrated GPU uses it");
+    }
+
+    [TestMethod]
+    public void HubSearch_KeepsWhatLlamaServerServes()
+    {
+        HubModel Of(string? pipeline) => new("a/b", "a", 1, 1, null, pipeline, [], false, null);
+        Assert.IsTrue(HuggingFaceClient.ServedByLlamaServer(Of("text-generation")));
+        Assert.IsTrue(HuggingFaceClient.ServedByLlamaServer(Of("image-text-to-text")));
+        Assert.IsTrue(HuggingFaceClient.ServedByLlamaServer(Of("feature-extraction")));
+        Assert.IsTrue(HuggingFaceClient.ServedByLlamaServer(Of(null)), "a model that says nothing may be one");
+        Assert.IsFalse(HuggingFaceClient.ServedByLlamaServer(Of("text-to-image")));
+        Assert.IsFalse(HuggingFaceClient.ServedByLlamaServer(Of("image-to-video")));
+    }
+
+    [TestMethod]
+    public void CudaVersion_IsReadFromTheHeaderOfOldAndNewDrivers()
+    {
+        Assert.AreEqual("13.0", HardwareProbe.CudaVersionOf("| NVIDIA-SMI 580.88      Driver Version: 580.88      CUDA Version: 13.0     |"));
+        Assert.AreEqual("13.3", HardwareProbe.CudaVersionOf("| NVIDIA-SMI 610.88                 KMD Version: 610.88        CUDA UMD Version: 13.3     |"));
+        Assert.IsNull(HardwareProbe.CudaVersionOf("NVIDIA-SMI has failed"));
+    }
+
+    [TestMethod]
     public void Gfx_ComesFromTheKfdTargetVersion()
     {
         Assert.AreEqual("gfx1201", HardwareProbe.GfxName(120001));

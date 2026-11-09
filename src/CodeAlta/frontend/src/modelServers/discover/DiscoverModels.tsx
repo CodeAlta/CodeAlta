@@ -127,7 +127,10 @@ function ModelPage({ api, repo, machines, actions, onClose }: {
     setWorking(quant.tag);
     try {
       if (serve) {
-        await api.act(target.id, { action: "setServer", server: newServer(modelName(model).split(" · ")[0], defaultBackend(target.status), [model]) });
+        const name = modelName(model).split(" · ")[0];
+        const result = await api.act(target.id, { action: "setServer", server: newServer(name, defaultBackend(target.status), [model]) });
+        // The sessions of this computer use it, as a server added from its page does by default.
+        if (result.server) await api.useInSessions(target.id, result.server.definition.id, name, ["local"]).catch(() => []);
         actions.notify(t("{model} is served on {machine} once it is downloaded.", { model: modelName(model), machine: target.name }), "success");
       } else {
         await api.act(target.id, { action: "download", model });

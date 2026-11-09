@@ -200,7 +200,7 @@ public sealed partial class ModelHost
                 return (false, server.Status.Reason ?? $"{server.Definition.Name} did not start.");
             var model = server.Definition.Models.FirstOrDefault(m => Store.Find(m.Model) is not null)?.Model;
             if (model is null || server.Client is not { } client) continue;
-            var result = await client.TestAsync(model, TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
+            var result = await client.TestAsync(server.RouterName(model), TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
             if (!result.Passed) return (false, result.Message);
             if (server.ReadLog(400).Any(static line => line.Contains("offloaded 0/", StringComparison.Ordinal)))
                 return (false, "The model ran on the CPU: the GPU was not used.");
