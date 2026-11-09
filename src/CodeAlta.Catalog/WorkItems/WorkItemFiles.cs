@@ -198,7 +198,10 @@ public static partial class WorkItemFiles
             ParseTaskStatus(values.GetValueOrDefault("status")),
             ParseDay(values.GetValueOrDefault("created")) ?? DayOfName(id),
             path,
-            body);
+            body)
+        {
+            Tags = ParseTags(values.GetValueOrDefault("tags")),
+        };
     }
 
     /// <summary>Writes the text of the file of a task.</summary>
@@ -210,6 +213,19 @@ public static partial class WorkItemFiles
     /// <param name="body">The Markdown body.</param>
     /// <returns>The text: a front matter, then the body.</returns>
     public static string SerializeTask(string title, string kind, WorkTaskStatus status, string created, string? summary, string body)
+        => SerializeTask(title, kind, status, created, summary, body, []);
+
+    /// <summary>Writes the text of the file of a task that has tags.</summary>
+    /// <param name="title">The title.</param>
+    /// <param name="kind">The kind.</param>
+    /// <param name="status">The status.</param>
+    /// <param name="created">The day it was written, as <c>yyyy-MM-dd</c>.</param>
+    /// <param name="summary">The summary, if any.</param>
+    /// <param name="body">The Markdown body.</param>
+    /// <param name="tags">The tag names; none writes no <c>tags</c> line.</param>
+    /// <returns>The text: a front matter, then the body.</returns>
+    /// <exception cref="ArgumentException">A value is blank, a tag is not a tag name, or there are too many tags.</exception>
+    public static string SerializeTask(string title, string kind, WorkTaskStatus status, string created, string? summary, string body, IReadOnlyList<string> tags)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentException.ThrowIfNullOrWhiteSpace(kind);
@@ -221,6 +237,11 @@ public static partial class WorkItemFiles
         text.Append("kind: ").Append(kind).Append('\n');
         text.Append("status: ").Append(NameOf(status)).Append('\n');
         text.Append("created: ").Append(created).Append('\n');
+        if (TagsLine(tags) is { } tagsLine)
+        {
+            text.Append(tagsLine).Append('\n');
+        }
+
         if (Clean(summary) is { } line)
         {
             text.Append("summary: ").Append(Quote(line)).Append('\n');
