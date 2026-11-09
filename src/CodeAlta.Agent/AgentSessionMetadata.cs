@@ -44,6 +44,12 @@ public sealed record AgentSessionMetadata(
     /// <summary>Gets where the session comes from when it starts with the turns of another one; null otherwise.</summary>
     public Runtime.AgentSessionForkOrigin? ForkedFrom { get; init; }
 
+    /// <summary>
+    /// Gets whether the session that created this one did so without making itself its parent
+    /// (<see cref="Runtime.AgentSessionSummary.NoParent"/>): <see cref="CreatedBySessionId"/> is then no link of its lineage.
+    /// </summary>
+    public bool NoParent { get; init; }
+
     /// <summary>Gets the number of times the session was rewound: its journal became shorter each time.</summary>
     public int RewindCount { get; init; }
 

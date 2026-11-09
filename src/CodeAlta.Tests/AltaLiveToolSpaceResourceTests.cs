@@ -60,6 +60,25 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task ASessionCreatedWithNoParent_IsNoChildOfTheCallingSession_ReadBack_AndRecordsItAsItsCreator()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync().ConfigureAwait(false);
+        var caller = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global").ConfigureAwait(false);
+
+        var detached = await fixture.CreateAsync(Agent(caller), "--global", "--no-parent").ConfigureAwait(false);
+        var child = await fixture.CreateAsync(Agent(caller), "--global").ConfigureAwait(false);
+
+        Assert.IsFalse(detached.TryGetProperty("parentSessionId", out var parent) && parent.ValueKind != JsonValueKind.Null, detached.ToString());
+        var stored = await fixture.Runtime.TryGetResumableSessionAsync(Id(detached)).ConfigureAwait(false);
+        Assert.IsNotNull(stored);
+        Assert.IsNull(stored.ParentSessionId, "Read back, the session is still not the child of the session that created it.");
+        Assert.AreEqual(Id(caller), stored.CreatedBy?.SourceSessionId, "It records who created it.");
+        Assert.IsTrue(stored.CreatedBy?.NoParent, "It records that its creator is not its parent.");
+        var storedChild = await fixture.Runtime.TryGetResumableSessionAsync(Id(child)).ConfigureAwait(false);
+        Assert.AreEqual(Id(caller), storedChild?.ParentSessionId, "Without --no-parent, the session is the child of the calling session.");
+    }
+
+    [TestMethod]
     public async Task ANewSession_StartsWithAProviderOfItsSpace_AndOneAskedForOutsideItIsRefused()
     {
         await using var fixture = await SpaceResourceFixture.CreateAsync("claude-business").ConfigureAwait(false);

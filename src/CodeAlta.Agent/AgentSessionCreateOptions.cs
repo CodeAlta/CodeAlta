@@ -21,6 +21,12 @@ public class AgentSessionCreateOptions
     public string? CreatedBySessionId { get; init; }
 
     /// <summary>
+    /// Gets or initializes whether <see cref="CreatedBySessionId" /> created this session without making itself its parent:
+    /// it is then never taken for its parent.
+    /// </summary>
+    public bool NoParent { get; init; }
+
+    /// <summary>
     /// Gets or initializes the run that created this session, when known.
     /// </summary>
     public AgentRunId? CreatedByRunId { get; init; }

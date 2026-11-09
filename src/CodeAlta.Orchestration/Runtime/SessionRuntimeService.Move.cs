@@ -133,7 +133,7 @@ public sealed partial class SessionRuntimeService
             {
                 if (seen.Contains(candidate.SessionId) || !InScope(candidate)) continue;
                 if (string.Equals(candidate.ParentSessionId, parent, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(candidate.CreatedBySessionId, parent, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(SessionLineage.CreatorLink(candidate), parent, StringComparison.OrdinalIgnoreCase)
                     || string.Equals(candidate.ViewState?.ParentSessionId, parent, StringComparison.OrdinalIgnoreCase))
                 {
                     seen.Add(candidate.SessionId);

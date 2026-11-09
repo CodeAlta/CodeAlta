@@ -57,6 +57,16 @@ public sealed record AltaActorProvenance
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool OnBehalfOfUser { get; init; }
 
+    /// <summary>
+    /// Gets a value indicating whether the actor created the session without making itself its parent
+    /// (<c>alta session create --no-parent</c>): the session is not a child of <see cref="SourceSessionId"/>, which is not
+    /// told of its answers, and the session that created it is never taken for its parent. False for every other
+    /// artifact, and for a session created before the mark existed: a session that names its creator and no parent is the
+    /// child of its creator.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool NoParent { get; init; }
+
     /// <summary>Gets the alta command correlation identifier associated with the action.</summary>
     public string? CorrelationId { get; init; }
 

@@ -95,6 +95,14 @@ public sealed record AgentSessionSummary
     public AgentRunId? CreatedByRunId { get; init; }
 
     /// <summary>
+    /// Gets or initializes whether the session that created this one did so without making itself its parent: the session
+    /// of <see cref="CreatedBySessionId"/> is then never taken for its parent. False for a session written before it was
+    /// recorded.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool NoParent { get; init; }
+
+    /// <summary>
     /// Gets or initializes where the session comes from when it starts with the turns of another one; null otherwise.
     /// </summary>
     public AgentSessionForkOrigin? ForkedFrom { get; init; }

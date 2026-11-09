@@ -1486,6 +1486,8 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             ParentSessionId = NormalizeOptionalText(snapshot.ParentSessionId) ?? NormalizeOptionalText(current.ParentSessionId),
             CreatedBySessionId = NormalizeOptionalText(snapshot.CreatedBySessionId) ?? NormalizeOptionalText(current.CreatedBySessionId),
             CreatedByRunId = snapshot.CreatedByRunId ?? current.CreatedByRunId,
+            // Nor does whether its creator is its parent.
+            NoParent = snapshot.NoParent || current.NoParent,
             // Where a session comes from never changes: a summary written without it does not erase it.
             ForkedFrom = snapshot.ForkedFrom ?? current.ForkedFrom,
             // Nor does a summary written without the count of its rewinds make the session one that never was rewound.
@@ -1749,6 +1751,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             WorktreePath: string.IsNullOrWhiteSpace(summary.WorktreeDirectory) ? null : summary.WorktreeDirectory)
         {
             ForkedFrom = summary.ForkedFrom,
+            NoParent = summary.NoParent,
             RewindCount = summary.RewindCount,
             SpaceId = spaceId,
         };

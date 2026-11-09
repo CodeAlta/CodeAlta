@@ -166,7 +166,8 @@ public sealed partial class SessionRuntimeService
         {
             if (TryCreateRecoverableSession(metadata, projects) is { } session)
             {
-                session.ParentSessionId ??= NormalizeOptionalText(metadata.ViewState?.ParentSessionId) ?? NormalizeOptionalText(metadata.CreatedBySessionId);
+                session.ParentSessionId ??= NormalizeOptionalText(metadata.ViewState?.ParentSessionId)
+                    ?? (metadata.NoParent ? null : NormalizeOptionalText(metadata.CreatedBySessionId));
                 sessions.Add(session);
             }
         }
