@@ -2,7 +2,7 @@
 title: Run automations on a machine or a pool, and queue work beyond what a machine or a model endpoint can take
 status: approved
 created: 2026-11-09
-summary: An automation targets one machine or the machines that carry some labels; a machine runs at most N sessions at once and queues the others; a provider takes at most N requests at once. Each limit is enforced by the one process the work already passes through, so no distributed lock is needed.
+summary: An automation targets one machine or the machines that carry some tags; a machine runs at most N sessions at once and queues the others; a provider takes at most N requests at once. Each limit is enforced by the one process the work already passes through, so no distributed lock is needed.
 ---
 
 # Fleet: run targets and concurrency limits
@@ -11,7 +11,7 @@ Today an automation runs on this computer or on one named machine, a machine sta
 
 Once this is done:
 
-- an automation runs on **a machine or a pool** of machines chosen by labels, as a GitHub Actions job chooses its runner;
+- an automation runs on **a machine or a pool** of machines chosen by their tags, as a GitHub Actions job chooses its runner;
 - a machine runs **at most N sessions at once**; the others wait in a queue that the person, the agents and the placement all see;
 - a provider takes **at most N requests at once**, for any endpoint: a vLLM or LiteLLM gateway, or a `llama-server` CodeAlta manages.
 
@@ -71,7 +71,7 @@ What the caller gets, and what the others see:
 { "status": "queued", "code": "queued", "position": 2 }
 
 // alta fleet machine list
-{ "name": "dgx-spark", "readiness": "ready", "working": 3, "queued": 2, "sessionLimit": 3, "labels": ["gpu", "linux"] }
+{ "name": "dgx-spark", "readiness": "ready", "working": 3, "queued": 2, "sessionLimit": 3, "tags": ["gpu", "linux"] }
 ```
 
 - The row of the session says **Queued on dgx-spark (2 before it)**; its tab says so above the prompt, with **Start now** and **Cancel**.
@@ -105,26 +105,39 @@ What `llama-server` does by itself (checked in `C:\code\llama.cpp`, see the deta
 - A request of another machine that waits gets `llama.http.queued` events with its place, so its session says **Waits for a free slot of pc-ai/coder (2 before it)** and its connection is not taken for dead.
 - The **Servers** tab shows `2 of 2 busy, 3 waiting` for a model.
 
-### 4. Runs on: a machine, or labels
+### 4. Machine tags
 
-**Runs on** offers, besides **This computer** and each machine, **Machines with labels…**. All the labels must match, as with `runs-on` of GitHub Actions:
+What says what a machine is for (`gpu`, `prod`, `always-on`) is called a **label** today. CodeAlta Desktop already has [labels](../../site/docs/labels.md): they group the projects of a space, with `alta label` for agents. Two things with one name, and the pool would make the second one prominent. For machines the word becomes **tag**, wherever a person reads or types it:
+
+| Today | Becomes |
+| --- | --- |
+| **Labels** on the page of a machine, on its card of the Fleet canvas | **Tags** |
+| `altanode labels`, `altanode labels add gpu` | `altanode tags`, `altanode tags add gpu` |
+| `alta fleet machine list --label gpu`, the field `labels` of its records | `--tag gpu`, the field `tags` |
+| An environment that names labels | An environment that names tags |
+
+Machine labels shipped in 4.0, so nothing that exists breaks: `altanode labels` and `--label` keep working, without being listed in the help, and the records of `alta fleet machine list` keep `labels` beside `tags` until the next major version. What is stored and exchanged keeps its name (`fleet/labels.json`, `Labels` of the inventory a machine publishes, `labels` of a signed environment): an older machine or server reads it unchanged, and a signed document cannot rename a field. New fields are named `tags` from the start.
+
+### 5. Runs on: a machine, or tags
+
+**Runs on** offers, besides **This computer** and each machine, **Machines with tags…**. All the tags must match, as with `runs-on` of GitHub Actions:
 
 ```toml
 runs_on = "9f3c…"                            # one machine, as today
-runs_on = { labels = ["gpu", "linux"] }      # any machine that has both labels
+runs_on = { tags = ["gpu", "linux"] }        # any machine that has both tags
 max_runs = 3                                 # runs of this automation at once on a machine (1 today)
 ```
 
 ```sh
-alta fleet automation place <automation-id> --label gpu --label linux
+alta fleet automation place <automation-id> --tag gpu --tag linux
 ```
 
 How a run reaches one machine, without a dispatcher:
 
-1. This computer gives the automation to **every** machine of its server that has the labels, each copy signed and sealed for its machine as today (the server already keeps a version per machine). The placement loop does it again when a machine gains or loses a label.
+1. This computer gives the automation to **every** machine of its server that has the tags, each copy signed and sealed for its machine as today (the server already keeps a version per machine). The placement loop does it again when a machine gains or loses a tag.
 2. Each machine fires the triggers itself, as today, and **claims** each due time or event at the server before it runs it. The claim exists and is atomic (`FleetAutomationService.ClaimAsync`): one machine gets it.
 3. A machine with a free seat claims at once. A full machine first lets the others look: 30 seconds for a schedule, one look of the trigger (five minutes) for an issue or a pull request.
-4. A machine checks its own labels against the signed labels before it claims. One that lost a label takes no more runs, also while this computer is closed.
+4. A machine checks its own tags against the signed tags before it claims. One that lost a tag takes no more runs, also while this computer is closed.
 
 Two rules keep it at most once. A pool needs a **CodeAlta Server**: it is the arbiter. And a member that cannot reach the server does **not** run (today a machine alone runs after ten seconds without an answer, which is right for one machine and wrong for a pool); an event is looked at again later, a due time is recorded as skipped with the reason.
 
@@ -132,7 +145,7 @@ Two rules keep it at most once. A pool needs a **CodeAlta Server**: it is the ar
 
 Triggers a pool takes: schedules, cron, issues, pull requests, Jira. Not yet: a hook of a server and Slack (bound to one machine), a command (this computer only), project and automation events (those of one machine). The editor says which trigger keeps it from a pool.
 
-### 5. Find Runs on
+### 6. Find Runs on
 
 The person who reported this did not find **Runs on**. It shows only when a machine is listed and the automation is kept in **My configuration**. It becomes always visible:
 
@@ -143,13 +156,17 @@ The person who reported this did not find **Runs on**. It shows only when a mach
 
 Each phase ships alone, in this order.
 
+**First: machine tags**
+
+- [ ] 0. Say **tag** for a machine wherever a person reads or types it: the section of `MachinePage.tsx` and its messages in every language, the card of the Fleet canvas, the environment form, `altanode tags` (`altanode labels` kept as a hidden alias, in `NodeCommandLine.cs` and `NodeLabelCommands.cs`), `--tag` and the field `tags` of `alta fleet machine list` (`--label` and `labels` kept), the `codealta-fleet` skill, and the user guide (`site/docs/fleet/machines.md`, whose section becomes **Tag your machines** with the links to it, `site/docs/secrets.md`, `site/docs/fleet/sessions.md`). Stored and exchanged names stay; the existing C# types keep theirs.
+
 **Phase 1: sessions at work on a machine**
 
 - [ ] 1. `FleetMachineLimits` (`src/CodeAlta.Fleet/Server/`, as `FleetMachineLabels`): reads and writes `fleet/limits.json`. `altanode limits` in `NodeCommandLine.cs`. Node API `control.limits.get/set` for the owner and a managing device (as `FleetNodeService.Labels.cs`).
 - [ ] 2. `FleetSessionSeats` (`src/CodeAlta.Fleet/NodeApi/`): the seats and the queue of one machine. Occupancy is the root sessions with a session of their tree at work and not waiting for a person, plus the runs admitted that did not start yet; it is woken by the session state changes the node already watches. Instance-owned by `FleetNodeService`, no static state.
 - [ ] 3. Ask a seat after the budgets at the three entry points: `WithinBudgetAsync` (answer `queued` with the position, kept in `FleetHeldSends` with a reason), `AdmitQueuedAsync`, and a new `IAutomationRunGate.AdmitSeatAsync` called by `AutomationRunner` after `AdmitBudgetAsync`. Wire it in both hosts of the service (`NodeFleet.Start`, the embedded node of the desktop). Check the kill switch again after the wait, as the budgets do.
-- [ ] 4. Publish the load: `Load` (working, queued, limit) and `Labels` on `FleetNodeInfo`; `QueuedSessions` and `SessionLimit` on `FleetPresenceUpdate`; a watch event when the queue changes. Older peers ignore the new fields.
-- [ ] 5. Desktop: `MachineView` and `AltaFleetMachine` get labels, working, queued and the limit. The `queued` answer in `runOn.ts`; the row, the notice with **Start now** and **Cancel** (node API `sessions.queue.start/cancel`), **Run on**, the Fleet canvas, the **Limits** section of `MachinePage.tsx`. `AutomationRun.Queued` and its label in `AutomationsPanel.tsx`.
+- [ ] 4. Publish the load: `Load` (working, queued, limit) and the tags of the machine (`Tags`) on `FleetNodeInfo`; `QueuedSessions` and `SessionLimit` on `FleetPresenceUpdate`; a watch event when the queue changes. Older peers ignore the new fields.
+- [ ] 5. Desktop: `MachineView` and `AltaFleetMachine` get tags, working, queued and the limit. The `queued` answer in `runOn.ts`; the row, the notice with **Start now** and **Cancel** (node API `sessions.queue.start/cancel`), **Run on**, the Fleet canvas, the **Limits** section of `MachinePage.tsx`. `AutomationRun.Queued` and its label in `AutomationsPanel.tsx`.
 - [ ] 6. `alta fleet machine list` and `show` report the load; `alta session create --machine` reports `queued` and the position. Update `codealta-fleet/SKILL.md`.
 - [ ] 7. Docs: `site/docs/fleet/machines.md` (Limits), `site/docs/fleet/sessions.md` (the queue), `doc/fleet/node.md` (the limit exists, where it is enforced).
 
@@ -168,14 +185,14 @@ Each phase ships alone, in this order.
 - [ ] 15. Start servers with `--metrics`, read `llamacpp:requests_deferred` in `ServerSupervisor`, and show waiting requests in `ServerModelStatus`, `llama.servers.list`, the **Servers** tab and `alta llama`.
 - [ ] 16. Docs: `site/docs/fleet/model-servers.md`, `doc/fleet/model-servers.md` (who owns the gate).
 
-**Phase 4: runs on labels**
+**Phase 4: runs on tags**
 
-- [ ] 17. `AutomationDefinition.RunsOn` becomes a target (a machine or labels) with `max_runs`; parse, validate, write and fingerprint both forms in `AutomationConfig`/`AutomationModel`. `Trigger` compares the runs in progress with `max_runs`.
-- [ ] 18. `FleetAutomationVersion` carries the signed labels, in a format an older node refuses (as `VersionFor` did for autonomy). The node checks its labels before it arms and before it claims, never runs a pooled time without the server's claim, gives back its local claim when the server did not answer, and waits before it claims while it has no free seat (`NodeAutomations.Server.cs`).
-- [ ] 19. `DesktopAutomationPlacement` keeps its records by automation and machine: resolves the members from the machines of the server and their labels, gives each its copy through the server, removes it from those that left, reads the runs of all. The wait for a machine to take its copy away stays for a single machine; among members the claim arbitrates.
-- [ ] 20. Editor: **Machines with labels…** with the labels the machines have and the members that match now; the triggers a pool does not take; `max_runs` under **More options**. The card and the runs name the machine of each run. **Run now** picks the member with the most free seats.
-- [ ] 21. `alta fleet automation place --label`, `alta fleet automation list` with the members; skill text.
-- [ ] 22. **Runs on** always visible (part 5).
+- [ ] 17. `AutomationDefinition.RunsOn` becomes a target (a machine or tags) with `max_runs`; parse, validate, write and fingerprint both forms in `AutomationConfig`/`AutomationModel`. `Trigger` compares the runs in progress with `max_runs`.
+- [ ] 18. `FleetAutomationVersion` carries the signed tags, in a format an older node refuses (as `VersionFor` did for autonomy). The node checks its tags before it arms and before it claims, never runs a pooled time without the server's claim, gives back its local claim when the server did not answer, and waits before it claims while it has no free seat (`NodeAutomations.Server.cs`).
+- [ ] 19. `DesktopAutomationPlacement` keeps its records by automation and machine: resolves the members from the machines of the server and their tags, gives each its copy through the server, removes it from those that left, reads the runs of all. The wait for a machine to take its copy away stays for a single machine; among members the claim arbitrates.
+- [ ] 20. Editor: **Machines with tags…** with the tags the machines have and the members that match now; the triggers a pool does not take; `max_runs` under **More options**. The card and the runs name the machine of each run. **Run now** picks the member with the most free seats.
+- [ ] 21. `alta fleet automation place --tag`, `alta fleet automation list` with the members; skill text.
+- [ ] 22. **Runs on** always visible (part 6).
 - [ ] 23. Docs: `site/docs/automations.md`, `site/docs/fleet/sessions.md`, `doc/fleet/orchestration.md` (what exists: the pool by copies and claims, where it differs from the server that picks).
 
 ## How it is verified
@@ -184,8 +201,9 @@ Each phase ships alone, in this order.
 - [ ] Node tests (`FleetNodeApiTests`, `NodeAutomationTests`): a third prompt answers `queued` with its position and is sent when a run ends; a queued prompt survives a restart of the node and is sent once; a run of an automation reads `queued`, then runs.
 - [ ] `ProviderRequestGate` tests: order, cancellation, a limit changed while requests wait, the gate kept across `RegisterOrReplace`; a turn executor test that the gate is held for the stream and released on failure.
 - [ ] Model server tests (`FleetNodeModelServersTests`): two machines and a local session on a one-slot model are served one at a time in order; a relayed request whose connection closes frees its place.
-- [ ] Pool tests (`DesktopServerAutomationPlacementTests`, `NodeServerAutomationTests`, `AutomationServerTests`): two members and one due time give one run; a member without the label does not claim; a member that cannot reach the server does not run; a member that loses its label gets a removal.
-- [ ] Frontend tests for the queued row and notice, the load in **Run on**, **Requests at once**, and the label target of the editor.
+- [ ] Pool tests (`DesktopServerAutomationPlacementTests`, `NodeServerAutomationTests`, `AutomationServerTests`): two members and one due time give one run; a member without the tag does not claim; a member that cannot reach the server does not run; a member that loses its tag gets a removal.
+- [ ] `altanode tags add gpu` and `altanode labels add gpu` write the same file; `alta fleet machine list --tag gpu` and `--label gpu` give the same machines, with `tags` and `labels` in each record.
+- [ ] Frontend tests for the queued row and notice, the load in **Run on**, **Requests at once**, and the tag target of the editor.
 - [ ] In the developer instance with a node on the same computer (`altanode --data-root`), limit 1: start two sessions on it, see the second queued with its place, then start when the first ends. Screenshots in both themes.
 - [ ] `dotnet test -c <Configuration>`, `npm test` and `lunet build` pass.
 
@@ -200,8 +218,10 @@ Each phase ships alone, in this order.
 | Dispatch in a pool | Every member holds a copy and claims each run at the server | The server cannot read a sealed automation, so it cannot evaluate triggers; the claim already exists |
 | A pool without a server | Not offered | Paired machines have no arbiter: two would run the same event |
 | Server away | Members of a pool do not run | Agents change things: at most once comes before availability |
-| Labels are not signed | Accepted | Only machines the person already gives automations to get a copy, and the labels are in the signed version each machine checks |
-| Label matching | All of them | What `runs-on` does; environments keep their any-of rule |
+| Tags are not signed | Accepted | Only machines the person already gives automations to get a copy, and the tags are in the signed version each machine checks |
+| Tag matching | All of them | What `runs-on` does; environments keep their any-of rule |
+| The word for what a machine carries | **Tags**, in place of labels | Labels already group projects in CodeAlta Desktop; a pool chosen by labels would read as a pool of projects |
+| Names already shipped (`altanode labels`, `--label`, `labels` in records, files and signed documents) | Kept as aliases, or unchanged where stored or signed | Machine labels shipped in 4.0; scripts, older machines and signatures keep working |
 | Model servers | Limit from the slots, gate on the host (phase 3 stays in the plan) | `llama-server` already queues safely; what is missing is the order across machines and the place in the queue |
 | Work a person starts at the computer itself | Counts against the limit of that machine, and is never queued | The capacity is the machine's, and a person at the keyboard does not wait behind unattended work |
 | Sharing a provider that is not a model server (a vLLM gateway) through its machine | Left out; a later plan | A feature of its own size. Until then each machine holds its own limit for such a gateway |
@@ -210,7 +230,7 @@ Each phase ships alone, in this order.
 
 - **Two full machines whose sessions wait for each other's children.** Each parent holds a seat while its child is queued on the other machine. Rare; the queue shows it and **Start now** ends it.
 - **A turn that is the whole agent loop.** If `ExecuteTurnAsync` covers several requests for some provider, its gate would be held between them; step 8 checks it before wrapping.
-- **Older nodes.** A node that does not know labels refuses the pooled version rather than run it alone; it shows as a member that refused, with the reason.
+- **Older nodes.** A node that does not know tags refuses the pooled version rather than run it alone; it shows as a member that refused, with the reason.
 - **Polling by every member.** N machines look at the same repository every five minutes. Fine for a handful; a server that polls once is the answer for more, and is not part of this.
 
 ## Out of scope
