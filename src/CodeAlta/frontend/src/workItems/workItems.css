@@ -104,8 +104,11 @@
 .work-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .work-row[data-selected] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .work-row-glyph { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; color: var(--accent); background: color-mix(in srgb, currentColor 15%, transparent); }
-.work-row-glyph[data-tone="danger"] { color: var(--red); }
-.work-row-glyph[data-tone="warning"] { color: var(--yellow); }
+.work-row-glyph[data-tone="danger"], .work-row-id[data-tone="danger"] { color: var(--red); }
+.work-row-glyph[data-tone="warning"], .work-row-id[data-tone="warning"] { color: var(--yellow); }
+/* The short id sits under the icon, in its color: the ids line up in one column and the title keeps its width. */
+.work-row-badge { display: grid; justify-items: center; gap: 4px; }
+.work-row-id { color: var(--accent); font: 600 10.5px/1 var(--code-font); }
 .work-row[data-kind="plan"] .work-row-glyph { color: #f0a03e; }
 .work-row-text { display: grid; gap: 1px; min-width: 0; }
 .work-row-text strong { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -124,6 +127,11 @@
 .work-detail-card > header { display: grid; gap: 8px; padding: 14px 4px 12px 20px; }
 .work-detail-kind { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .work-detail-kind .bp6-tag { text-transform: none; letter-spacing: 0; }
+.work-detail-id { display: inline-flex; align-items: center; gap: 5px; margin-inline-start: auto; padding: 2px 7px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: transparent;
+  font-size: 11.5px; letter-spacing: 0; text-transform: none; cursor: pointer; }
+.work-detail-id code { font: 12px/1.2 var(--code-font); color: var(--text); }
+.work-detail-id:hover, .work-detail-id:focus-visible { border-color: var(--accent); color: var(--text); }
+.work-detail-id[data-copied] { color: var(--green); }
 .work-detail-card h3 { font-size: 18px; font-weight: 650; line-height: 1.3; color: var(--text); overflow-wrap: anywhere; }
 .work-detail-status { font-size: 12px; line-height: 1.5; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .work-detail-card > header .work-runner-link { justify-self: start; }
@@ -157,7 +165,18 @@
 .work-badge.work-badge > .work-badge-pulse { display: inline-block; width: 6px; height: 6px; margin-right: 1px; border-radius: 50%; background: var(--green); animation: work-pulse 1.4s ease-in-out infinite; }
 @keyframes work-pulse { 50% { opacity: .35; transform: scale(.7); } }
 @media (prefers-reduced-motion: reduce) { .work-badge.work-badge > .work-badge-pulse { animation: none; } }
-.session-work-mark { display: inline-flex; align-items: center; margin-left: 4px; color: var(--work-tone); flex: none; }
+/* The mark of a session row that carries out work items is a button of its own: it is lit, not the row under it. */
+.session-work-mark-host, .session-work-mark-host > .bp6-popover-target { display: inline-flex; flex: none; min-width: 0; }
+.session-work-mark-host { margin-left: 2px; }
+.session-work-mark { display: inline-flex; align-items: center; gap: 3px; padding: 2px 3px; margin-block: -2px; border-radius: 4px; color: var(--work-tone); cursor: pointer; }
+.session-work-mark:hover, .session-work-mark[data-open] { background: var(--panel-3); }
+.session-work-id { padding: 0; background: none; color: inherit; font: 10.5px/1 var(--code-font); }
+.session-work-count { font-size: 10.5px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1; }
+.ide-shell .session-row:has(.session-work-mark:hover):not(:has(> button[aria-pressed="true"])),
+.session-row > button:first-child:not([aria-pressed="true"]):has(.session-work-mark:hover) { background: transparent; }
+/* The short id where the row has room for it; a narrow row keeps the glyph, and the card says the id. */
+.session-row > button:first-child { container: session-row / inline-size; }
+@container session-row (max-width: 300px) { .session-work-id { display: none; } }
 
 /* The settings page. */
 .work-settings-group { display: grid; gap: 4px; max-width: 760px; margin-bottom: 22px; }

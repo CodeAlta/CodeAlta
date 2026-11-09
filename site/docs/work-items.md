@@ -36,6 +36,14 @@ You decide on each card:
 - When you ask the proposing session to do the task itself, its card says **Task in progress**: **OK** puts it away, and it goes away by itself once the task is done.
 - Agents propose a task only for something concrete they verified, and never start it themselves. A session has at most five proposals waiting.
 
+## Short ids
+
+Each task has a short id of four characters, such as `p53b`, which agents use to name it.
+
+- In the Work items tab, the short id is under the icon of each task, in the color of its kind. Select a task and click its short id to copy it. Type a short id in the search box to find its task.
+- In a conversation, a short id written in code (`p53b`) is a chip with the icon of a task, in the color of its kind. Point at it, or reach it with `Tab`, to read the task's kind, status, title and summary. Click it, or press `Enter`, to open the task in the Work items tab. A task that is done or dismissed is struck through.
+- In your prompts, name a task by its short id: `Do the task p53b.`
+
 ## Plans
 
 A plan is a document you review before the work starts. In [Plan mode](prompts.md) the agent researches, writes the plan and asks for your [review](reviews.md): you comment on its blocks, then approve it or ask for changes. A plan that is not done can also be reviewed from its details in the Work items tab.
@@ -53,7 +61,7 @@ Open it with **Work items** in the title bar (in its **…** menu when the windo
 - Select an item to read it, start it, mark it done, open its file, or remove it.
 - Start several items at once: a spinner marks each while its worktree is made. A ready session opens if you still read its item; otherwise a notification offers it with **Show**.
 
-In the Explorer, a project shows how many work items wait for you, and a dot while a session works on one.
+In the Explorer, a project shows how many work items wait for you, and a dot while a session works on one. A session that works on a task or a plan shows a mark: the task's short id when the Explorer is wide enough, or how many items it works on. Point at the mark to read them, and click it to open them in the Work items tab.
 
 ## Files
 
@@ -65,7 +73,7 @@ Each work item is a Markdown file of its project, which you can read, edit and c
 | Task | `.alta/tasks/yyyy-mm-dd-name-xxxx.md` | `pending`, `later` |
 | Plan | `.alta/plans/yyyy-mm-dd-name.md` | `draft`, `approved`, `in-progress`, `done`, `blocked` |
 
-The name of a task ends with four random characters, so that two branches of a project never create the same file.
+The name of a task ends with four random characters, its [short id](#short-ids), so that two branches of a project never create the same file.
 
 ```markdown
 ---
@@ -90,6 +98,10 @@ Agents use the same work items with `alta task` and `alta plan`, also in CodeAlt
 
 ```text
 Show me the open tasks of this project and do the one about the model list.
+```
+
+```text
+Do the task p53b.
 ```
 
 ```text

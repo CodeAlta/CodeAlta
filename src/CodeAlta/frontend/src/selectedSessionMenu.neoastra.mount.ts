@@ -50,7 +50,7 @@ export const workItems = {
     ? await baseWorkItems.list() as WorkItemsListResponse
     : { status: "ok", settings: null, projects: (request.projectIds ?? []).map(projectId => ({ projectId, plans: [], truncated: false, tasks: [{
       id: "todo", kind: "task", title: "A task to do", summary: null, category: "gap", status: "pending", statusText: null, created: "2026-10-15",
-      file: ".alta/tasks/todo.md", proposedBy: null, runner: null, acknowledged: false, runsWith: null }] })) },
+      file: ".alta/tasks/todo.md", proposedBy: null, runner: null, acknowledged: false, runsWith: null, shortId: null }] })) },
   watch: async (_request: unknown, options: { signal: AbortSignal }) => (async function* () {
     if (!options.signal.aborted) await new Promise<void>(resolve => options.signal.addEventListener("abort", () => resolve(), { once: true }));
   })(),

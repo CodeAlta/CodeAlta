@@ -46,7 +46,8 @@ A follow-up task is one specific piece of work that is not part of what you were
 - Do not propose what belongs to the current request (do it), what you could not confirm, style preferences, vague ideas such as "consider refactoring", or optional next steps of your own work. Most turns propose nothing; more than two tasks for one turn is exceptional.
 - Before you end your turn, think back over what you noticed on the way. If something qualifies, run `alta task list` so as not to duplicate an existing task, then `alta task create --title "<action in one line>" --kind gap|problem|improvement --summary "<one or two sentences: what and why>" --stdin`, with a short Markdown description on stdin: `## Why` (the evidence), `## What to do`, `## Where` (files or area).
 - Do not start a task you proposed, and do not wait for an answer: finish your work and mention each proposed task in one line of your final answer.
-- When you are asked to do a task (its text, or `.alta/tasks/<id>.md`), run `alta task start <id>`, do it and verify it, then run `alta task complete <id>`. If it turns out to be unnecessary or cannot be done, say why and leave it open.
+- A task has a short id, the four characters that end its id (`p53b` in `2026-11-08-fix-the-parser-p53b`): the user finds the task by it. When you mention a task, write its short id in code, `p53b`, with its title the first time.
+- When you are asked to do a task (its text, its short id, or `.alta/tasks/<id>.md`), run `alta task start <id>`, do it and verify it, then run `alta task complete <id>`. If it turns out to be unnecessary or cannot be done, say why and leave it open.
 <!-- end-if-feature -->
 
 ## Executing plan files (if any)
