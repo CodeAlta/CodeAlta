@@ -97,7 +97,7 @@ public sealed class ModelServersParsingTests
             new GpuInfo("gpu0", "amd", "AMD Radeon RX 7600 XT", 16L << 30, false, "gfx1102", "1002:7480"),
             new GpuInfo("gpu1", "nvidia", "NVIDIA GeForce RTX 4070", 12L << 30, false, "sm_89", "10de:2786"),
             new GpuInfo("gpu2", "amd", "AMD Radeon(TM) Graphics", 512L << 20, true, null, "1002:13c0"),
-        ], new MachineLibraries("13.0", "6.2", @"C:\Program Files\AMD\ROCm\6.2", true, true, null), []);
+        ], new MachineLibraries("13.0", "7.1", @"C:\Program Files\AMD\ROCm\7.1", true, true, null), []);
         var candidates = BuildSelector.Candidates(windows, release);
         var cuda = candidates.Single(static c => c.Backend == "cuda");
         Assert.AreEqual(("fits", "llama-b12110-bin-win-cuda-13.4-x64.zip"), (cuda.Verdict, cuda.Asset));
@@ -112,6 +112,12 @@ public sealed class ModelServersParsingTests
         var rocm = BuildSelector.Candidates(noHipSdk, release).Single(static c => c.Backend == "rocm");
         Assert.AreEqual("libraryMissing", rocm.Verdict);
         StringAssert.Contains(rocm.Message, "HIP SDK");
+        // HIP SDK 6.2: its hipblas.dll loads beside the HIP 7 runtime of the archive and fails at the first product.
+        var hipSdk6 = windows with { Libraries = windows.Libraries with { RocmVersion = "6.2" } };
+        var old = BuildSelector.Candidates(hipSdk6, release).Single(static c => c.Backend == "rocm");
+        Assert.AreEqual("libraryMissing", old.Verdict);
+        StringAssert.Contains(old.Message, "HIP SDK 6.2");
+        CollectionAssert.AreEqual(new[] { "cuda", "vulkan" }, BuildSelector.Recommended(hipSdk6, BuildSelector.Candidates(hipSdk6, release)).ToArray(), "Vulkan for the AMD GPU instead");
     }
 
     [TestMethod]
@@ -176,7 +182,9 @@ public sealed class ModelServersParsingTests
         StringAssert.Contains(rocm.Message, "Lemonade");
         CollectionAssert.AreEqual(new[] { "llama-b1371-windows-rocm-gfx110X-x64.zip" }, BuildSelector.AssetsFor(lemonade, "windows", "x64", "rocm", rocm).Select(static a => a.Name).ToArray());
 
-        var withSdk = noHipSdk with { Libraries = noHipSdk.Libraries with { HipBlas = true, RocmVersion = "6.4" } };
+        var withSdk = noHipSdk with { Libraries = noHipSdk.Libraries with { HipBlas = true, RocmVersion = "7.1" } };
+        Assert.AreEqual("llama-b1371-windows-rocm-gfx110X-x64.zip", BuildSelector.Candidates(withSdk with { Libraries = withSdk.Libraries with { RocmVersion = "6.2" } }, release, lemonade)
+            .Single(static c => c.Backend == "rocm").Asset, "beside the HIP SDK 6.2, whose hipBLAS the official build cannot use");
         Assert.AreEqual("llama-b12110-bin-win-rocm-10.0-x64.zip", BuildSelector.Candidates(withSdk, release, lemonade).Single(static c => c.Backend == "rocm").Asset,
             "an official build that runs stays the choice");
         var jammy = new HardwareInventory("linux", "x64", null, 64L << 30, [new GpuInfo("gpu0", "amd", "AMD Radeon AI PRO R9700", 32L << 30, false, "gfx1201", null)],

@@ -94,8 +94,13 @@ public static class BuildSelector
                 result.Add(new("rocm", rocm, "systemTooOld", $"The ROCm build needs glibc 2.38; this system has {hardware.Libraries.Glibc}.", 0, Ids(supported)));
             else if (!hardware.Libraries.HipBlas)
                 result.Add(new("rocm", rocm, "libraryMissing", hardware.Os == "windows"
-                    ? "The ROCm build needs hipblas.dll of the AMD HIP SDK: install the HIP SDK."
+                    ? "The ROCm build needs hipblas.dll of the AMD HIP SDK 7: install the HIP SDK."
                     : "The ROCm build needs libhipblas.so.3 of ROCm.", 0, Ids(supported)));
+            // The Windows archive brings the HIP 7 runtime but not hipBLAS: the hipBLAS of an older HIP SDK loads beside it
+            // and fails at the first matrix product (hipblasGemmEx), after the GPU was listed.
+            else if (hardware.Os == "windows" && ParseVersion(hardware.Libraries.RocmVersion) is { Major: < 7 })
+                result.Add(new("rocm", rocm, "libraryMissing", $"The ROCm build runs HIP 7 and needs hipblas.dll of the AMD HIP SDK 7; this computer has the HIP SDK {hardware.Libraries.RocmVersion}.",
+                    0, Ids(supported)));
             else
                 result.Add(new("rocm", rocm, "fits", $"ROCm {hardware.Libraries.RocmVersion} on {Names(supported)}.", 90, Ids(supported)));
 
