@@ -41,6 +41,7 @@ You decide on each card:
 Each task has a short id of four characters, such as `p53b`, which agents use to name it.
 
 - In the Work items tab, the short id is under the icon of each task, in the color of its kind. Select a task and click its short id to copy it. Type a short id in the search box to find its task.
+- On the card of a task a session proposes, the short id follows the date.
 - In a conversation, a short id written in code (`p53b`) is a chip with the icon of a task, in the color of its kind. Point at it, or reach it with `Tab`, to read the task's kind, status, title and summary. Click it, or press `Enter`, to open the task in the Work items tab. A task that is done or dismissed is struck through.
 - In your prompts, name a task by its short id: `Do the task p53b.`
 

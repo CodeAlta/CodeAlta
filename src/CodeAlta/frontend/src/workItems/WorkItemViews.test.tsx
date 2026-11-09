@@ -48,6 +48,14 @@ test("a session shows one proposal at a time, with how many there are and every 
   assert.equal(render(createElement(WorkItemCards, { hub: hub(state()), dockPreference: createDockPreference(), items: cards, preferredStart: "worktree", busy: new Set<string>(), hidden: true, onStart: never, onOpenList: never })), "");
 });
 
+test("a card shows the short id of its task after the date, in the color of its category", () => {
+  const card = (shortId: string | null) => render(createElement(WorkItemCards, { hub: hub(state()), dockPreference: createDockPreference(),
+    items: workItems([{ projectId: "p", truncated: false, plans: [], tasks: [row("named", "task", "pending", { shortId })] }], new Set(["s1"])),
+    preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never }));
+  assert.match(card("ewfm"), /<span class="work-date">2026-10-07<code class="work-tag-id" data-tone="danger">ewfm<\/code><\/span>/);
+  assert.equal(card(null).includes("work-tag-id"), false, "a task without a short id shows none");
+});
+
 test("a task the session started itself says so, with nothing left to decide but putting its card away", () => {
   const started = workItems([{ projectId: "p", truncated: false, plans: [], tasks: [row("mine", "task", "pending", { runner: "s1" })] }], new Set(["s1"]));
   const html = render(createElement(WorkItemCards, { hub: hub(state()), dockPreference: createDockPreference(), items: started, preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never }));

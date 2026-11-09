@@ -6,7 +6,7 @@ import { AppIcon, type IconName } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { MarkdownContent } from "../MarkdownContent";
 import { useShellLanguage } from "../shellLanguage";
-import { startChoices, startDetail, startIcon, startLabel, taskCategoryIcon, taskCategoryLabel, taskCategoryTone, workItemKey, workKindIcon,
+import { startChoices, startDetail, startIcon, startLabel, taskCategoryIcon, taskCategoryLabel, taskCategoryTone, workItemKey, workItemTone, workKindIcon,
   type WorkItem, type WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
 import { notesSurface, useWorkCardsPlacement } from "./useWorkCardsPlacement";
@@ -58,12 +58,14 @@ export function WorkItemText({ hub, item }: { hub: Pick<WorkItemsHub, "read">; i
 }
 
 /** The tags that say what an item is: why a task exists, and where it comes from. */
-export function WorkItemTags({ item, projectName }: { item: WorkItem; projectName?: string | null }) {
+export function WorkItemTags({ item, projectName, shortId }: { item: WorkItem; projectName?: string | null; /** Shows the short id after the date. */ shortId?: boolean }) {
   const { t } = useShellLanguage();
   return <span className="work-tags">
     {item.kind === "task" && <Tag minimal round intent={taskCategoryTone(item.category)} icon={<AppIcon name={taskCategoryIcon(item.category)} size={12} />}>{t(taskCategoryLabel(item.category))}</Tag>}
     {projectName && <Tag minimal round icon={<AppIcon name="folder" size={12} />}>{projectName}</Tag>}
-    {item.created && <span className="work-date">{item.created}</span>}
+    {/* The short id is in the line of the date, so that their texts share a baseline. */}
+    {(item.created || shortId && item.shortId) && <span className="work-date">{item.created}
+      {shortId && item.shortId && <code className="work-tag-id" data-tone={workItemTone(item)}>{item.shortId}</code>}</span>}
   </span>;
 }
 
@@ -214,7 +216,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
             <Button variant="minimal" size="small" icon={<AppIcon name="minus" size={14} />} aria-label={t("Put away")} title={t("Put the proposals away")} onClick={() => setCollapsed(true)} />
           </header>
           <h3 id={titleId}>{item.title}</h3>
-          <WorkItemTags item={item} />
+          <WorkItemTags item={item} shortId />
           {item.summary && <p className="work-card-summary">{item.summary}</p>}
           <button type="button" className="work-card-more" onClick={() => setDetail(true)}>{t(plan ? "Read the plan" : "Details")}<AppIcon name="chevronRight" size={13} /></button>
           {running ? <p className="work-card-running" role="status"><ActivitySpinner size={13} />{t("This session is working on this task.")}</p>
@@ -228,7 +230,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
       <div className="work-window">
         <div className="work-window-meta">
           <span className="work-card-kind"><AppIcon name={workKindIcon(item.kind)} size={14} />{t(plan ? "Plan ready" : running ? "Task in progress" : "Proposed task")}</span>
-          <WorkItemTags item={item} />
+          <WorkItemTags item={item} shortId />
           <code title={item.file}>{item.file}</code>
         </div>
         <div className="work-window-text">{item.summary && <p className="work-window-summary">{item.summary}</p>}<WorkItemText hub={hub} item={item} /></div>
