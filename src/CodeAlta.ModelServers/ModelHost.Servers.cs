@@ -161,14 +161,18 @@ public sealed partial class ModelHost
         if (Find(id) is not { } supervisor) return json;
         // By the name the router lists each model with.
         var contexts = supervisor.Status.Models.Where(static m => m.Context is > 0).ToDictionary(m => supervisor.RouterName(m.Model), static m => m.Context!.Value, StringComparer.Ordinal);
-        if (contexts.Count == 0) return json;
+        var names = supervisor.Definition.Models.ToDictionary(m => supervisor.RouterName(m.Model), static m => CodeAlta.ModelServers.Store.GgufNames.DisplayName(m.Model), StringComparer.Ordinal);
         try
         {
             var root = System.Text.Json.Nodes.JsonNode.Parse(json);
             if (root?["data"] is not System.Text.Json.Nodes.JsonArray data) return json;
             foreach (var entry in data.OfType<System.Text.Json.Nodes.JsonObject>())
             {
-                if (entry["id"]?.GetValue<string>() is { } model && contexts.TryGetValue(model, out var context) && entry["meta"] is null) entry["context_length"] = context;
+                if (entry["id"]?.GetValue<string>() is not { } model) continue;
+                if (contexts.TryGetValue(model, out var context) && entry["meta"] is null) entry["context_length"] = context;
+                // The name people read in the composer: a server of one model lists the path of its file as its id.
+                var known = names.TryGetValue(model, out var name) ? name : supervisor.Definition.Models.Count == 1 ? names.Values.First() : null;
+                if (known is not null && entry["name"] is null) entry["name"] = known;
             }
 
             return System.Text.Encoding.UTF8.GetBytes(root.ToJsonString());

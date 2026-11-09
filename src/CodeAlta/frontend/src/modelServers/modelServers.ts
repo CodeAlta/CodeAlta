@@ -187,6 +187,29 @@ export function devicesOf(status: Pick<ModelHostStatus, "builds">, backend: stri
   return status.builds.find(build => build.current && build.backend === backend)?.devices ?? [];
 }
 
+/**
+ * Updates the machines one after the other: each update is waited for (its servers idle, the switch, the test), and a
+ * machine whose update failed or went back to its previous build stops the others. Says which machine stopped them, or
+ * null when all updated.
+ */
+export async function updateInTurn(machines: readonly string[], start: (machine: string) => Promise<HostTask | null>,
+  readTask: (machine: string, task: string) => Promise<HostTask | null>, pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))): Promise<string | null> {
+  for (const machine of machines) {
+    const started = await start(machine);
+    if (!started) return machine;
+    let task: HostTask = started;
+    // An update waits for the servers to be idle, an hour at most, then switches and tests them.
+    for (let waited = 0; !task.endedAt && waited < 75 * 60_000; waited += 3000) {
+      await pause(3000);
+      task = await readTask(machine, started.id) ?? task;
+    }
+
+    if (!task.endedAt || task.state !== "done" || /rolled back|went back|failed/iu.test(task.message ?? "")) return machine;
+  }
+
+  return null;
+}
+
 /** The tasks of a machine that run now. */
 export function runningTasks(status: Pick<ModelHostStatus, "tasks">): HostTask[] {
   return status.tasks.filter(task => task.state === "running" || task.state === "waiting");

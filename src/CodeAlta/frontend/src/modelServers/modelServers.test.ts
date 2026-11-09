@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activityOf, defaultBackend, formatBytes, gpuSummary, modelName, modelRows, parseModelReference, serverRows, serverStateOf, timeLeft, updateAvailable,
+import { updateInTurn, activityOf, defaultBackend, formatBytes, gpuSummary, modelName, modelRows, parseModelReference, serverRows, serverStateOf, timeLeft, updateAvailable,
   type MachineStatus } from "./modelServers";
-import type { InstalledBuild, ModelHostStatus, ServerView } from "./types";
+import type { HostTask, InstalledBuild, ModelHostStatus, ServerView } from "./types";
 
 const build = (backend: string, number: number, current = true): InstalledBuild => ({ tag: `b${number}`, build: number, backend, folder: "", sizeBytes: 1, installedAt: "",
   devices: [], current, previous: false, bad: false, source: "ggml-org" });
@@ -75,4 +75,17 @@ test("A ready server that loads a model says it loads, and its activity adds its
   assert.equal(serverStateOf(server("a", "m:Q", "ready", "loading")), "loading");
   assert.equal(serverStateOf(server("a", "m:Q", "failed")), "failed");
   assert.deepEqual(activityOf(server("a", "m:Q")), { busy: 1, total: 4, tokensPerSecond: 42 });
+});
+test("Updating machines in turn waits for each, and the first that fails stops the others", async () => {
+  const task = (id: string, state: HostTask["state"], ended: boolean, message?: string): HostTask => ({ id, kind: "update", title: "Update llama.cpp", state, done: 0, total: 0,
+    startedAt: "", endedAt: ended ? "x" : undefined, message });
+  const started: string[] = [];
+  const outcomes: Record<string, HostTask> = { a: task("ta", "done", true, "rocm: b1 → b2."), b: task("tb", "failed", true, "rocm: b2 rolled back to b1."), c: task("tc", "done", true) };
+  const reads: Record<string, number> = {};
+  const stoppedAt = await updateInTurn(["a", "b", "c"], async machine => { started.push(machine); return task(outcomes[machine].id, "running", false); },
+    async machine => (reads[machine] = (reads[machine] ?? 0) + 1) < 2 ? null : outcomes[machine], async () => {});
+  assert.equal(stoppedAt, "b");
+  assert.deepEqual(started, ["a", "b"], "the machine after the one that failed is not updated");
+  assert.equal(await updateInTurn(["a", "c"], async machine => task(outcomes[machine].id, "running", false), async machine => outcomes[machine], async () => {}), null);
+  assert.equal(await updateInTurn(["a"], async () => null, async () => null, async () => {}), "a", "an update that did not start stops them");
 });

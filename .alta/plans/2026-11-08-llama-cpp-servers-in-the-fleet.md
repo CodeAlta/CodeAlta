@@ -1,6 +1,6 @@
 ---
 title: llama.cpp model servers on the machines of the fleet
-status: approved
+status: in-progress
 created: 2026-11-08
 summary: CodeAlta installs and updates the right llama.cpp build on any machine of the fleet, downloads Hugging Face models with real progress and shows what they take on disk, runs one or several model servers per machine, and makes each one a provider that sessions use at once. Agents do all of it through `alta llama`.
 ---
@@ -560,7 +560,7 @@ Server definitions are in the state root, so a developer instance (`--dev`) has 
 
 Spikes first: their answers change the code.
 
-- [ ] 0.1 **Router spike** on this computer, with the CUDA and ROCm builds of the current stable release, and on pc-ai, with ROCm and two GPUs. Use a preset that names models by path, an empty `LLAMA_CACHE`, `--offline` and `--api-key-file`. Record:
+- [x] 0.1 **Router spike** on this computer, with the CUDA and ROCm builds of the current stable release, and on pc-ai, with ROCm and two GPUs. Use a preset that names models by path, an empty `LLAMA_CACHE`, `--offline` and `--api-key-file`. Record:
   - whether `/models` lists only the preset's models;
   - whether model processes get or need the key;
   - whether stopping the router (a job object on Windows, a process group on Linux) ends its model processes;
@@ -569,33 +569,33 @@ Spikes first: their answers change the code.
   - whether `APPDATA` or `XDG_CONFIG_HOME` keep a user `config.ini` out.
 
   Write the findings into this plan.
-- [ ] 0.2 **Store spike.** Check that files CodeAlta places in the hub layout are found by `llama-server -hf <repo>:<tag> --offline`: as links, and as copies on Windows without the symbolic-link right. Also check paths over 260 characters on Windows.
-- [ ] 0.3 **Detection spike** on this computer: the DXGI adapters, and the CUDA driver version from a child process. Find the gfx of the RX 7600 XT on Windows, from a PCI id table or from the log of the candidate build.
+- [x] 0.2 **Store spike.** Check that files CodeAlta places in the hub layout are found by `llama-server -hf <repo>:<tag> --offline`: as links, and as copies on Windows without the symbolic-link right. Also check paths over 260 characters on Windows.
+- [x] 0.3 **Detection spike** on this computer: the DXGI adapters, and the CUDA driver version from a child process. Find the gfx of the RX 7600 XT on Windows, from a PCI id table or from the log of the candidate build.
 
 This computer:
 
-- [ ] 1. Create `src/CodeAlta.ModelServers`, in `CodeAlta.slnx`, with a guardrail test: no host and no window. Its `Hardware/` reads the inventory on Windows, Linux and macOS; what is not known stays unknown. Tests use recorded DXGI lists and sysfs trees, pc-ai's included.
-- [ ] 2. `LlamaCpp/Releases`:
+- [x] 1. Create `src/CodeAlta.ModelServers`, in `CodeAlta.slnx`, with a guardrail test: no host and no window. Its `Hardware/` reads the inventory on Windows, Linux and macOS; what is not known stays unknown. Tests use recorded DXGI lists and sysfs trees, pc-ai's included.
+- [x] 2. `LlamaCpp/Releases`:
   - the release list: stable through `nightly-tag.txt`, every build, complete archives only, conditional requests;
   - the selection rules per system and GPU family, with their verdicts.
 
   Tests use recorded GitHub answers.
-- [ ] 3. `LlamaCpp/Builds`:
+- [x] 3. `LlamaCpp/Builds`:
   - download, and check the SHA-256 digest;
   - unpack whole, with the CUDA runtime merged in;
   - probe with `--version` and `--list-devices`, in a child process with a time limit;
   - keep `builds/state.json` per backend, and the previous build.
 
   Tests use a fake release and a fake `llama-server`.
-- [ ] 4. `Store/` reads the hub layout: blobs counted once, links or copies, unfinished downloads, revisions. It gives sizes and removes under `.locks`, keeping shared parts. Tests use synthetic trees.
-- [ ] 5. `HuggingFace/`: refs, the paginated tree, model info, the README, the rate-limit headers, and gated and missing repositories (401 with `X-Error-Code`). Tests use recorded answers.
-- [ ] 6. `Downloads/`, over `PinnedDownloader` with its new free-space check, parallel ranges with a journal, manual redirect, and handling of 403 and 429:
+- [x] 4. `Store/` reads the hub layout: blobs counted once, links or copies, unfinished downloads, revisions. It gives sizes and removes under `.locks`, keeping shared parts. Tests use synthetic trees.
+- [x] 5. `HuggingFace/`: refs, the paginated tree, model info, the README, the rate-limit headers, and gated and missing repositories (401 with `X-Error-Code`). Tests use recorded answers.
+- [x] 6. `Downloads/`, over `PinnedDownloader` with its new free-space check, parallel ranges with a journal, manual redirect, and handling of 403 and 429:
   - jobs kept in `~/.alta/llama/downloads.json`, two at a time;
   - pause, resume, cancel;
   - events.
 
   Tests run against a loopback fake of the Hub and its CDN.
-- [ ] 7. `Servers/`:
+- [x] 7. `Servers/`:
   - `server.toml`;
   - the preset and arguments for the running build, with the refused options;
   - ports and the key file;
@@ -606,7 +606,7 @@ This computer:
   - **Import a command line**.
 
   Tests use a fake `llama-server`: a test executable that answers like the router, as `CodeAlta.Tests.TinyMcpServer` does for MCP.
-- [ ] 8. The model host of the desktop (`src/CodeAlta/Desktop/ModelServers`):
+- [x] 8. The model host of the desktop (`src/CodeAlta/Desktop/ModelServers`):
   - its composition;
   - the RPC service of the page, with `demo-api.ts` and the fixture exports;
   - the toasts;
@@ -626,7 +626,7 @@ This computer:
   - the download toast.
 
   Unit and browser tests.
-- [ ] 11. `alta llama` for this computer: machine, build, model, download and server commands, with what each declares, their refusals and their receipts. LiveTool tests.
+- [x] 11. `alta llama` for this computer: machine, build, model, download and server commands, with what each declares, their refusals and their receipts. LiveTool tests.
 - [ ] 12. Docs:
   - `site/docs/fleet/model-servers.md`, listed in `menu.yml`;
   - the llama.cpp section of `site/docs/model-providers/setup.md`;
@@ -636,7 +636,7 @@ This computer:
 
 Every machine:
 
-- [ ] 13. The node API: `FleetNodeService.ModelServers.cs`, its contracts and `IFleetNodeModelServers`. It has `control.llama.*` (**View** to read, **Manage** to change), the watch with `llama.changed`, and `FleetNodeInfo.ModelServers`. Tests run over the in-memory transport.
+- [x] 13. The node API: `FleetNodeService.ModelServers.cs`, its contracts and `IFleetNodeModelServers`. It has `control.llama.*` (**View** to read, **Manage** to change), the watch with `llama.changed`, and `FleetNodeInfo.ModelServers`. Tests run over the in-memory transport.
 - [ ] 14. `altanode`, in `NodeModelServers.cs`:
   - the model host of the node;
   - servers kept through a version switch;
@@ -648,7 +648,7 @@ Every machine:
   - **The `models` permission:** its default at pairing, the switch of the page, `altanode permissions --allow models`.
 
   Tests cover streaming, cancellation, refusal and bounds.
-- [ ] 16. Providers across machines:
+- [x] 16. Providers across machines:
   - the resolver goes through the fleet client;
   - **Use in sessions on** writes providers on other machines, with `control.providers.set`, which gains `server`;
   - a machine that is offline makes its providers unavailable, with why.
@@ -660,8 +660,8 @@ Every machine:
   - actions on several selected rows.
 
   Browser tests.
-- [ ] 18. `alta llama --machine`, and the built-in skill `codealta-model-servers`.
-- [ ] 19. Docs for machines.
+- [x] 18. `alta llama --machine`, and the built-in skill `codealta-model-servers`.
+- [x] 19. Docs for machines.
 
 Updates:
 
@@ -693,6 +693,14 @@ Discover:
   - `alta llama hub`.
 
   Browser tests, docs and pictures.
+
+### Progress and deviations (2026-11-09)
+
+- The settings of a machine (update policy, models folder, downloads at once) are in `~/.alta/llama/settings.json`, not `[llama]` in `config.toml`: the node and the desktop share them per machine, and the file is the model host's own. A server is `server.json` in its folder, not `server.toml`.
+- The node API is in `FleetNodeService.ModelServers.cs` over `ModelHost` directly (no `IFleetNodeModelServers`); it adds the event `llama.ended` so that the end of a download or an install on a machine reaches the computer that asked. `alta llama` on a node is `LocalAltaModelServers` in `CodeAlta.LiveTool`.
+- Done beyond the checked steps: 9 (friendly names come from the model host's `/v1/models`), 10 (unit tests; no browser test yet), 14 in part (servers kept through a version switch; `altanode status` says the servers instead of a separate `altanode llama status`), 15 (tests of permissions, refused paths and servers that do not run; no streaming test over the channel), 17 in part (the three tables for every machine, and a **Model servers** section on the page of a machine), 20 and 21 (policy, planned update kept by the machine, Update now one machine after the other stopping at the first failure, history, back to the previous build), 22 (Discover models with search, filters, cards, the card, the quantization table with the fit, Download and Serve; `alta llama hub`).
+- Not done: the machine kept awake while a server works; the Fleet overview tile; **Copy to…** and actions on several selected rows; one build chosen for all machines; Lemonade's ROCm builds (the setting exists, nothing reads it); the header of a GGUF read over ranges and `llama fit-params` (the fit is an estimate from the size); browser tests of the page.
+- Verified live on 2026-11-09: CUDA, ROCm and Vulkan installed and tested on this computer; ROCm on pc-ai and Metal on the Mac; a session of this computer on each server (pc-ai and the Mac through the fleet); an agent with `alta llama` only; an update of pc-ai from b12110 to b12193 with its test.
 
 ## How it is verified
 

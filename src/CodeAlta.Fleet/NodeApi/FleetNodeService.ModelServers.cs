@@ -216,7 +216,10 @@ public sealed partial class FleetNodeService
             if (body.Length > MaxLlamaBodyBytes) throw new FleetException(FleetErrorCodes.InvalidParams, null, "The body of the request is too large for the channel.");
         }
 
-        var (address, key) = ModelServersHost.Endpoint(server.Definition.Id)!.Value;
+        if (server.Status.State is "stopped" or "waiting" or "failed")
+            throw new FleetException(FleetNodeErrorCodes.ProvidersUnavailable, FleetErrorHints.Retry, $"{server.Definition.Name} does not run: {server.Status.Reason ?? server.Status.State}.");
+        var (address, key) = ModelServersHost.Endpoint(server.Definition.Id)
+            ?? throw new FleetException(FleetNodeErrorCodes.ProvidersUnavailable, FleetErrorHints.Retry, $"{server.Definition.Name} does not run: {server.Status.Reason ?? server.Status.State}.");
         var http = _llamaHttp ??= new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = Timeout.InfiniteTimeSpan };
         var request = new HttpRequestMessage(new HttpMethod(parameters.Method), address + path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);

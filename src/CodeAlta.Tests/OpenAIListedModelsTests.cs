@@ -88,7 +88,7 @@ public sealed class OpenAIListedModelsTests
               ],
               "object": "list",
               "data": [
-                { "id": "qwen-vision", "aliases": ["qwen-vision"], "object": "model", "created": 1793273553, "owned_by": "llamacpp", "meta": { "n_ctx": 217088, "n_ctx_train": 262144 } },
+                { "id": "qwen-vision", "name": "Qwen Vision · Q4_K_M", "aliases": ["qwen-vision"], "object": "model", "created": 1793273553, "owned_by": "llamacpp", "meta": { "n_ctx": 217088, "n_ctx_train": 262144 } },
                 { "id": "qwen-text", "aliases": ["qwen-text"], "object": "model", "created": 1793273553, "owned_by": "llamacpp" }
               ]
             }
@@ -114,7 +114,9 @@ public sealed class OpenAIListedModelsTests
         var vision = models.Single(static model => model.Id == "qwen-vision");
         Assert.AreEqual(217_088L, vision.Capabilities!["contextWindow"], "The context the server was started with, not the one the model was trained with.");
         Assert.AreEqual(true, AgentImageInputCapability.Read(vision));
+        Assert.AreEqual("Qwen Vision · Q4_K_M", vision.DisplayName, "the name a server CodeAlta runs gives the model");
         var text = models.Single(static model => model.Id == "qwen-text");
+        Assert.AreEqual("qwen-text", text.DisplayName, "a server that names nothing shows the id");
         Assert.AreEqual(false, AgentImageInputCapability.Read(text), "A model the server lists without multimodal reads no image.");
         Assert.IsFalse(text.Capabilities!.ContainsKey("contextWindow"));
         Assert.IsNull(text.SupportedReasoningEfforts, "The reasoning of the model stays the user's choice.");

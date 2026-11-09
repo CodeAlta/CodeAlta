@@ -10,6 +10,7 @@ import { DataTable, type DataColumn } from "../fleet/console/DataTable";
 import { FilterBar, type FilterFacet } from "../fleet/console/FilterBar";
 import { facetCounts, filterRows, type Facet, type TableView } from "../fleet/console/tableRows";
 import { modelServersApi, ModelServersError, type ModelServersApi } from "./api";
+import { updateInTurn } from "./modelServers";
 import { activityOf, backendName, currentBuilds, formatBytes, formatSpeed, gpuSummary, isActive, loadingProgress, modelName, modelRows, progressOf, runningTasks,
   serverRows, serverStateOf, stateIntent, timeLeft, updateAvailable, type MachineStatus, type ModelRow, type ServerRow } from "./modelServers";
 import type { ModelHostAction, ModelHostActionResult, ModelHostStatus, ServerDefinition } from "./types";
@@ -137,6 +138,19 @@ export function ModelServersSettings({ epoch, api: given, onDiscover }: { epoch:
   }, [api]);
 
   const managed = machines.filter(entry => entry.machine.manages && entry.status);
+  // Update all now: one machine after the other, the first that fails stopping the others.
+  const [updating, setUpdating] = useState(false);
+  const updateAll = async () => {
+    if (!api) return;
+    setUpdating(true);
+    const names = new Map(managed.map(entry => [entry.machine.id, entry.machine.name]));
+    const stoppedAt = await updateInTurn(managed.map(entry => entry.machine.id),
+      async machine => (await run(machine, { action: "updateNow" }, "The update started."))?.task ?? null,
+      async (machine, task) => (await api.status(machine).catch(() => null))?.tasks.find(item => item.id === task) ?? null);
+    setUpdating(false);
+    setNotice(stoppedAt === null ? { key: "All the machines are updated.", intent: "success" }
+      : { key: "The update stopped at {name}: the machines after it were not updated.", intent: "warning", values: { name: names.get(stoppedAt) ?? stoppedAt } });
+  };
   const view = views[tab];
   const setView = (part: Partial<TableView>) => setViews(current => ({ ...current, [tab]: { ...current[tab], ...part } }));
   const reachable = machines.filter(entry => entry.status);
@@ -168,8 +182,8 @@ export function ModelServersSettings({ epoch, api: given, onDiscover }: { epoch:
       {tab === "servers" && <Button size="small" variant="minimal" icon={<AppIcon name="code" size={13} />} text={t("Import a command line…")} disabled={managed.length === 0 || busy}
         onClick={() => setDialog({ kind: "import", machine: null })} />}
       {tab === "builds" && reachable.length > 1 && <>
-        <Button size="small" variant="minimal" icon={<AppIcon name="refresh" size={13} />} text={t("Update all now")} disabled={busy || managed.length === 0}
-          onClick={() => void updateInTurn(managed.map(entry => entry.machine.id), run)} />
+        <Button size="small" variant="minimal" icon={updating ? <ActivitySpinner size={13} /> : <AppIcon name="refresh" size={13} />} text={t("Update all now")} disabled={busy || updating || managed.length === 0}
+          onClick={() => void updateAll()} />
         <Button size="small" variant="minimal" icon={<AppIcon name="timer" size={13} />} text={t("Update all at…")} disabled={busy || managed.length === 0}
           onClick={() => setDialog({ kind: "updateAt", machines: managed.map(entry => entry.machine.id) })} />
         <Button size="small" variant="minimal" icon={<AppIcon name="settings" size={13} />} text={t("Policy of all…")} disabled={busy || managed.length === 0}
@@ -186,13 +200,7 @@ export function ModelServersSettings({ epoch, api: given, onDiscover }: { epoch:
   </SettingsPage>;
 }
 
-/** Updates the machines one after the other: a machine whose test fails stops the others. */
-export async function updateInTurn(machines: readonly string[], run: RunAction): Promise<void> {
-  for (const machine of machines) {
-    const result = await run(machine, { action: "updateNow" }, "The update started.");
-    if (!result) return;
-  }
-}
+
 
 function State({ state, progress }: { state: string; progress?: number | null }) {
   const { t } = useShellLanguage();

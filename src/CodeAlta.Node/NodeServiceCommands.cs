@@ -214,6 +214,16 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
                     await output.WriteLineAsync($"Sessions at work: {status.SessionsAtWork}.").ConfigureAwait(false);
                     if (status.Sandbox is { } sandbox) await output.WriteLineAsync(SandboxLine(sandbox)).ConfigureAwait(false);
                     reached = true;
+                    // Its llama.cpp servers: a node that runs none (offline) answers that it has none.
+                    try
+                    {
+                        var models = await client.GetModelServersAsync(timeout.Token).ConfigureAwait(false);
+                        foreach (var line in ModelServersLines(models)) await output.WriteLineAsync(line).ConfigureAwait(false);
+                    }
+                    catch (Fleet.Protocol.FleetException)
+                    {
+                        await output.WriteLineAsync("Model servers: none (the node runs offline).").ConfigureAwait(false);
+                    }
                 }
             }
             catch (Exception exception) when (exception is not OperationCanceledException || !Stop.IsCancellationRequested)
@@ -276,6 +286,23 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
         }
 
         return control.Status.IsHeld ? NodeExitCodes.Success : NodeExitCodes.Failure;
+    }
+
+    // The llama.cpp servers of the node, for its owner on the machine: the builds, then a line per server.
+    internal static IEnumerable<string> ModelServersLines(ModelServers.ModelHostStatus status)
+    {
+        var builds = string.Join(", ", status.Builds.Where(static build => build.Current).Select(static build => $"{build.Tag} ({build.Backend})"));
+        yield return $"Model servers: {status.Servers.Count}; llama.cpp {(builds.Length > 0 ? builds : "not installed")}"
+            + (status.Latest is { } latest && status.Builds.Any(build => build.Current && build.Build < latest.Build) ? $", {latest.Tag} available." : ".");
+        foreach (var server in status.Servers)
+        {
+            var loaded = server.Status.Models.Where(static model => model.State == "loaded").Select(static model => model.Model).ToList();
+            yield return $"  {server.Definition.Name} ({server.Definition.Id}): {server.Status.State}"
+                + (server.Status.Address is { } address ? $" at {address}" : "")
+                + $", {server.Definition.Models.Count} model{(server.Definition.Models.Count == 1 ? "" : "s")}"
+                + (loaded.Count > 0 ? $", loaded: {string.Join(", ", loaded)}" : "")
+                + (server.Status.Reason is { } reason && server.Status.State is "failed" or "waiting" ? $" ({reason})" : "") + ".";
+        }
     }
 
     // The manager and the plan of the service the options name, or the exit code of what was reported instead.

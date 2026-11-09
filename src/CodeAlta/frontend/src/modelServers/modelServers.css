@@ -52,6 +52,13 @@
 .model-servers-disk > .bp6-popover-target, .model-servers-disk > span > .bp6-button { justify-self: start; }
 .model-servers-cleanup ul { max-height: 180px; margin: 0; padding-left: 18px; overflow: auto; }
 
+/* The section of the page of a machine. */
+.machine-model-servers-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.machine-model-servers-list > li { display: flex; align-items: center; gap: 10px; }
+.machine-model-servers-list > li > svg { flex: none; color: var(--fleet-blue); }
+.machine-model-servers-list .machine-project-main { flex: 1; min-width: 0; }
+.machine-model-servers > .bp6-button { justify-self: start; }
+
 /* The dialogs. */
 .model-server-dialog { width: min(720px, calc(100vw - 40px)); }
 .model-download-dialog, .model-import-dialog { width: min(600px, calc(100vw - 40px)); }

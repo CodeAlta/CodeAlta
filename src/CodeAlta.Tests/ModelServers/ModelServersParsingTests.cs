@@ -152,6 +152,14 @@ public sealed class ModelServersParsingTests
     }
 
     [TestMethod]
+    public void DisplayName_ReadsAsPeopleDo()
+    {
+        Assert.AreEqual("Qwen3.8 27B · UD-Q4_K_XL", GgufNames.DisplayName("unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL"));
+        Assert.AreEqual("SmolLM2 135M Instruct · Q4_K_M", GgufNames.DisplayName("bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M"));
+        Assert.AreEqual("model", GgufNames.DisplayName("org/model"));
+    }
+
+    [TestMethod]
     public void HubSearch_KeepsWhatLlamaServerServes()
     {
         HubModel Of(string? pipeline) => new("a/b", "a", 1, 1, null, pipeline, [], false, null);

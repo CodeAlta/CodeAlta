@@ -93,7 +93,7 @@ An agent removes a model or a server, or changes the update policy, only when yo
 
 ## Machines without CodeAlta Desktop
 
-A machine that runs [CodeAlta Node](machines.md) runs its model servers too: they keep running while the node updates, and its sessions manage them with `alta llama`. Manage it from CodeAlta Desktop on a computer paired with it.
+A machine that runs [CodeAlta Node](machines.md) runs its model servers too: they keep running while the node updates, and its sessions manage them with `alta llama`. Manage it from CodeAlta Desktop on a computer paired with it; on the machine, `altanode status` says its builds of llama.cpp and what each server runs.
 
 ## Where things are
 

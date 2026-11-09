@@ -27,6 +27,25 @@ public sealed record QuantFiles(string Tag, IReadOnlyList<HubFile> Files, long M
 /// </summary>
 public static partial class GgufNames
 {
+    /// <summary>The name of a model as people read it: <c>Qwen3.8 27B · UD-Q4_K_XL</c> for <c>unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL</c>.</summary>
+    /// <param name="id">The model, <c>org/repo:TAG</c>.</param>
+    /// <returns>Its name.</returns>
+    public static string DisplayName(string id)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        var colon = id.LastIndexOf(':');
+        var repo = colon > 0 ? id[..colon] : id;
+        var tag = colon > 0 ? id[(colon + 1)..] : "";
+        var name = repo[(repo.LastIndexOf('/') + 1)..];
+        foreach (var suffix in new[] { "-GGUF", "_GGUF", ".GGUF", "GGUF" })
+        {
+            if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) { name = name[..^suffix.Length]; break; }
+        }
+
+        name = name.Replace('-', ' ').Trim();
+        return tag.Length > 0 ? $"{name} · {tag}" : name;
+    }
+
     /// <summary>The parts of a GGUF file name.</summary>
     /// <param name="Prefix">The name without its extension and shard suffix.</param>
     /// <param name="Tag">Its tag in upper case, or empty.</param>

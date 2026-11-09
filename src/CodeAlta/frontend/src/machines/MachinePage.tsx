@@ -10,6 +10,7 @@ import type { MessageKey } from "../localization";
 import { machineIntent, machineState, machineStateLabel } from "./machines";
 import { parseLabels } from "../fleet/fleetSecrets";
 import { MachineProviders } from "./MachineProviders";
+import { MachineModelServers } from "../modelServers/MachineModelServers";
 import { MachineSignIns } from "./MachineSignIns";
 import { formatSize } from "../search/SearchSettings";
 import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, isMachineLabel, managementProblem, orderedDevices, permissionLabel, permissionsEditable, projectSource,
@@ -102,6 +103,8 @@ export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch:
     {view?.status === "ok" && <MachineProviders epoch={epoch} machine={machine} api={api} />}
     {view?.status === "ok" && <MachineSignIns epoch={epoch} machine={machine} api={api} />}
     {view?.status === "not_manager" && <ProvidersSection view={view} machine={machine} />}
+    {/* Its llama.cpp servers, for a computer that may view the machine: Settings > Fleet > Model servers changes them. */}
+    {view && <MachineModelServers epoch={epoch} machine={machine} />}
     {view?.status === "ok" && <>
       <SecretsSection epoch={epoch} machine={machine} api={api} />
       {view.service && <ServiceSection machine={machine} service={view.service} />}

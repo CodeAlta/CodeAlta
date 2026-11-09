@@ -73,7 +73,9 @@ internal static class LlamaCppModelCatalog
                 capabilities["supportsImageInput"] = inputs.EnumerateArray().Any(static input => input.ValueKind == JsonValueKind.String && input.ValueEquals("image"));
             }
 
-            models.Add(new AgentModelInfo(modelId, DisplayName: modelId, Provider: providerKey, Capabilities: capabilities));
+            // A server CodeAlta runs names each model as people read it; another one gives its id only.
+            var displayName = entry.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String && name.GetString() is { Length: > 0 } named ? named : modelId;
+            models.Add(new AgentModelInfo(modelId, DisplayName: displayName, Provider: providerKey, Capabilities: capabilities));
         }
 
         return models;
