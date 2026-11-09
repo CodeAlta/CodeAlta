@@ -298,6 +298,46 @@ internal sealed partial class GlobalConfigService
     }
 
     /// <summary>
+    /// Reads whether the window lists the Claude Code conversations started in VS Code or a terminal
+    /// (<c>[sessions] claude_code_conversations</c>); <c>no_provider</c> when no enabled provider shares its conversations,
+    /// where the choice would change nothing.
+    /// </summary>
+    [NeoRpcMethod("claudeCodeConversationSettings")]
+    public GlobalConfigClaudeCodeConversationSettingsResponse ClaudeCodeConversationSettings(GlobalConfigSessionTitlesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return new("unavailable", true);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", true);
+        lock (_gate)
+            return new(SharesConversations() ? "ok" : "no_provider", _store.LoadGlobalClaudeCodeConversations());
+    }
+
+    /// <summary>Saves whether the window lists the Claude Code conversations started in VS Code or a terminal.</summary>
+    [NeoRpcMethod("saveClaudeCodeConversationSettings")]
+    public GlobalConfigClaudeCodeConversationSettingsResponse SaveClaudeCodeConversationSettings(GlobalConfigSaveClaudeCodeConversationSettingsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return new("unavailable", true);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", true);
+        lock (_gate)
+        {
+            try
+            {
+                _store.SaveGlobalClaudeCodeConversations(request.Enabled);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or FormatException)
+            {
+                return new("write_failed", _store.LoadGlobalClaudeCodeConversations());
+            }
+
+            return new("ok", _store.LoadGlobalClaudeCodeConversations());
+        }
+    }
+
+    // Whether an enabled provider shares its conversations with other programs (Claude Code): only those are listed.
+    private bool SharesConversations() => _registry?.ListProviders().Any(static provider => provider.SharesConversations) == true;
+
+    /// <summary>
     /// Reads the mode of Code Mode of every session (<c>[code_mode] mode</c>, <c>on</c> when the file sets none), the
     /// modes, and the providers and models that choose a mode of their own.
     /// </summary>
@@ -1182,6 +1222,14 @@ internal sealed record GlobalConfigSavePromptSuggestionSettingsRequest(string? E
 /// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c> or <c>write_failed</c>.</param>
 /// <param name="Enabled">Whether the model suggests the next prompt at the end of a turn.</param>
 internal sealed record GlobalConfigPromptSuggestionSettingsResponse(string Status, bool Enabled);
+
+/// <param name="ExpectedEpoch">The host epoch the page was loaded with.</param>
+/// <param name="Enabled">Whether the window lists the Claude Code conversations started in VS Code or a terminal.</param>
+internal sealed record GlobalConfigSaveClaudeCodeConversationSettingsRequest(string? ExpectedEpoch, bool Enabled);
+
+/// <param name="Status"><c>ok</c>, <c>no_provider</c> (no provider shares its conversations), <c>unavailable</c>, <c>stale_epoch</c> or <c>write_failed</c>.</param>
+/// <param name="Enabled">Whether the window lists the Claude Code conversations started in VS Code or a terminal.</param>
+internal sealed record GlobalConfigClaudeCodeConversationSettingsResponse(string Status, bool Enabled);
 
 /// <param name="ExpectedEpoch">The host epoch the page was loaded with.</param>
 /// <param name="Mode">One of the modes of Code Mode: <c>off</c>, <c>on</c> or <c>only</c>.</param>

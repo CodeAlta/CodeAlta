@@ -997,6 +997,8 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(GlobalConfigAttributionSettingsResponse))]
 [JsonSerializable(typeof(GlobalConfigSavePromptSuggestionSettingsRequest))]
 [JsonSerializable(typeof(GlobalConfigPromptSuggestionSettingsResponse))]
+[JsonSerializable(typeof(GlobalConfigSaveClaudeCodeConversationSettingsRequest))]
+[JsonSerializable(typeof(GlobalConfigClaudeCodeConversationSettingsResponse))]
 [JsonSerializable(typeof(GlobalConfigSaveCodeModeSettingsRequest))]
 [JsonSerializable(typeof(GlobalConfigCodeModeSettingsResponse))]
 [JsonSerializable(typeof(GlobalConfigCodeModeProviderRequest))]

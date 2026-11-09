@@ -989,6 +989,36 @@ type = "fake-agent"
     }
 
     [TestMethod]
+    public async Task ClaudeCodeConversations_AreListedByDefault_TheChoiceIsSaved_AndOnlyOfferedWithAProviderThatSharesThem()
+    {
+        await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");
+        // Without a provider that shares its conversations, the choice would change nothing: the page does not offer it.
+        Assert.AreEqual(new GlobalConfigClaudeCodeConversationSettingsResponse("no_provider", true), fixture.Service.ClaudeCodeConversationSettings(new(Epoch)));
+        fixture.Registry.RegisterOrReplace(new ModelProviderDescriptor(new("claude-fixture"), "Claude Code", "claude-code") { SharesConversations = true },
+            static () => throw new InvalidOperationException("Not started."));
+        Assert.AreEqual(new GlobalConfigClaudeCodeConversationSettingsResponse("ok", true), fixture.Service.ClaudeCodeConversationSettings(new(Epoch)));
+
+        Assert.AreEqual(new GlobalConfigClaudeCodeConversationSettingsResponse("ok", false), fixture.Service.SaveClaudeCodeConversationSettings(new(Epoch, false)));
+        Assert.IsFalse(fixture.Store.LoadGlobalClaudeCodeConversations());
+        Assert.AreEqual(new GlobalConfigPromptSuggestionSettingsResponse("ok", false), fixture.Service.SavePromptSuggestionSettings(new(Epoch, false)));
+        var text = File.ReadAllText(fixture.ConfigPath);
+        StringAssert.Contains(text, "claude_code_conversations = false");
+        StringAssert.Contains(text, "prompt_suggestions = false", "The settings of the sessions share their table.");
+        StringAssert.Contains(text, "sk-kept", "The other settings stay.");
+
+        // The default is the absence of the setting.
+        Assert.AreEqual(new GlobalConfigClaudeCodeConversationSettingsResponse("ok", true), fixture.Service.SaveClaudeCodeConversationSettings(new(Epoch, true)));
+        Assert.AreEqual("ok", fixture.Service.SavePromptSuggestionSettings(new(Epoch, true)).Status);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("[sessions]", StringComparison.Ordinal));
+
+        Assert.AreEqual("stale_epoch", fixture.Service.ClaudeCodeConversationSettings(new("another")).Status);
+        Assert.AreEqual("stale_epoch", fixture.Service.SaveClaudeCodeConversationSettings(new("another", false)).Status);
+        Assert.AreEqual("unavailable", new GlobalConfigService().ClaudeCodeConversationSettings(new(Epoch)).Status);
+        Assert.AreEqual("unavailable", new GlobalConfigService().SaveClaudeCodeConversationSettings(new(Epoch, false)).Status);
+        Assert.IsTrue(fixture.Store.LoadGlobalClaudeCodeConversations(), "A refused save changes nothing.");
+    }
+
+    [TestMethod]
     public async Task Attribution_SavesWhatTheRequestGives_KeepsTheRest_AndSaysWhyATextIsRefused()
     {
         await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");

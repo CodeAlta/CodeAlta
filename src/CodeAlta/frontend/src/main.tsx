@@ -4202,6 +4202,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // the session that continues it), or opens it in VS Code or the built-in terminal, in the folder of the project. The
   // group is closed until it is opened, and stays as it was left, project by project.
   const claudeCodeConfigured = owned && hasClaudeCodeProvider(providerLogos.values());
+  // Counts the saves of the choice of Settings → Sessions to list these: the groups and the search read them again, and
+  // the host answers that there is nothing to list while it is off.
+  const [claudeCodeChoice, setClaudeCodeChoice] = useState(0);
   // The space a Claude Code session is listed, shown and imported in: the one the window shows, as for a new session.
   const claudeCodeSpace = spacesState.available ? spaceId : null;
   // The group of a project, or the one of the conversations of no project (scope null), which follows the projects:
@@ -4216,7 +4219,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         providerId });
     const treeKey = project?.id ?? unplacedClaudeCodeKey;
     return <ClaudeCodeSessionsGroup project={listed} spaceId={claudeCodeSpace} epoch={status?.hostEpoch ?? null} api={claudeCodeSessions}
-      refresh={snapshot.sessions.length} indent={sessionRowIndent(0)} onOpen={(id, _existing, title, cliSessionId) => void showImportedSession(id, title, cliSessionId)}
+      refresh={`${snapshot.sessions.length}:${claudeCodeChoice}`} indent={sessionRowIndent(0)} onOpen={(id, _existing, title, cliSessionId) => void showImportedSession(id, title, cliSessionId)}
       onPreview={(session, providerId) => setFileTabs(state => openClaudeCodeTab(state, claudeCodeTab(listed, session, providerId)))} previewing={previewing}
       expanded={isClaudeCodeOpen(projectTree, treeKey)} onExpandedChange={open => setProjectTree(current => setClaudeCodeOpen(current, treeKey, open))}
       write={navigator.clipboard ? text => navigator.clipboard.writeText(text) : undefined}
@@ -4246,7 +4249,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     let current = true;
     void readClaudeCodeConversations(claudeCodeSessions, status?.hostEpoch, claudeCodeSpace).then(found => { if (current) { setSearchedClaudeCode(found); setClaudeCodeSearched(true); } });
     return () => { current = false; };
-  }, [lookingThrough, claudeCodeConfigured, status?.hostEpoch, snapshot?.sessions.length, claudeCodeSpace]);
+  }, [lookingThrough, claudeCodeConfigured, status?.hostEpoch, snapshot?.sessions.length, claudeCodeSpace, claudeCodeChoice]);
   // A Claude Code conversation dropped on a project, or chosen for one in its menu, is imported there, and the session
   // that continues it is opened. One import at a time.
   const [continuingClaudeCode, setContinuingClaudeCode] = useState<ClaudeCodeConversationDrag | null>(null);
@@ -6529,7 +6532,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined}
         onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "sessions" ? <SessionSettings epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
-        tabs={{ single: singleTab, setSingle: setSingleTab }} />
+        tabs={{ single: singleTab, setSingle: setSingleTab }} onClaudeCodeConversationsSaved={() => setClaudeCodeChoice(value => value + 1)} />
       : settingsSection === "worktrees" ? <WorktreeSettings epoch={owned ? status!.hostEpoch : null}
         pick={owned ? initial => pickFolder(desktopShell.pickFolder, t("Folder for worktrees"), initial) : undefined}
         onOpenFile={owned ? closeSettings : undefined} />

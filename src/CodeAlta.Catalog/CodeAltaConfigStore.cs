@@ -1415,6 +1415,40 @@ public sealed partial class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Reads whether the window lists the Claude Code conversations started in VS Code or a terminal that no session
+    /// continues, from the user's configuration file (<c>[sessions] claude_code_conversations</c>).
+    /// </summary>
+    /// <returns>The choice; true when the file says nothing or cannot be read.</returns>
+    public bool LoadGlobalClaudeCodeConversations()
+    {
+        try
+        {
+            return ReadSharedGlobalDocument().Sessions?.ClaudeCodeConversations != false;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Persists whether the window lists the Claude Code conversations started in VS Code or a terminal that no session
+    /// continues. The default (true) is not written.
+    /// </summary>
+    /// <param name="enabled">The choice.</param>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
+    public void SaveGlobalClaudeCodeConversations(bool enabled)
+    {
+        ThrowIfReadOnly();
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        var document = LoadDocument(_options.ConfigPath);
+        NormalizeDocument(document);
+        document.Sessions ??= new CodeAltaSessionSettingsDocument();
+        document.Sessions.ClaudeCodeConversations = enabled ? null : false;
+        Save(_options.ConfigPath, document);
+    }
+
+    /// <summary>
     /// Reads whether the user reviews the changes of every session before an agent commits them, from the user's
     /// configuration file (<c>[review] before_commit</c>).
     /// </summary>
@@ -2237,7 +2271,9 @@ public sealed partial class CodeAltaConfigStore
                 : null;
             // The default is to suggest the next prompt: the absence of the setting.
             if (sessions.PromptSuggestions is not false) sessions.PromptSuggestions = null;
-            if (sessions is { Title: null, PromptSuggestions: null })
+            // The default is to list the Claude Code conversations: the absence of the setting.
+            if (sessions.ClaudeCodeConversations is not false) sessions.ClaudeCodeConversations = null;
+            if (sessions is { Title: null, PromptSuggestions: null, ClaudeCodeConversations: null })
             {
                 document.Sessions = null;
             }

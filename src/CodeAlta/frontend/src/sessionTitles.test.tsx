@@ -37,6 +37,14 @@ test("the settings of the sessions are read before they are shown", () => {
   assert.equal(html.includes("settings-prompt-suggestions"), false);
 });
 
+test("the card of the Claude Code conversations is named and explained in every language", () => {
+  for (const key of ["Claude Code", "Claude Code conversations from VS Code and the terminal",
+    "List the Claude Code conversations that no session continues, under the projects and in the search. Turn it off once you imported what you need."] as const) {
+    assert.ok(key in messages, key);
+    for (const locale of locales) assert.ok(translate(locale, key).trim(), `${locale}: ${key}`);
+  }
+});
+
 test("the card of the prompt suggestions is named and explained in every language", () => {
   for (const key of ["Prompt suggestions", "Suggest the next prompt", "After a turn, the model suggests what you may write next, in the empty prompt: Tab or → takes it."] as const) {
     assert.ok(key in messages, key);

@@ -93,6 +93,7 @@ internal static class DesktopSettingBindings
         Add("sessions.title", () => SettingValues.Of(CodeAlta.Agent.AgentSessionTitles.NameOf(config.LoadGlobalSessionTitleMode())),
             value => CodeAlta.Agent.AgentSessionTitles.ParseMode(value.GetString()) is { } mode ? Do(() => config.SaveGlobalSessionTitleMode(mode)) : "Unknown title mode.");
         Bool("sessions.prompt_suggestions", config.LoadGlobalPromptSuggestions, config.SaveGlobalPromptSuggestions);
+        Bool("sessions.claude_code_conversations", config.LoadGlobalClaudeCodeConversations, config.SaveGlobalClaudeCodeConversations);
         Bool("review.before_commit", config.LoadGlobalReviewBeforeCommit, config.SaveGlobalReviewBeforeCommit);
         Bool("commits.co_author", config.LoadGlobalCommitCoAuthor, config.SaveGlobalCommitCoAuthor);
         // The texts are checked by the store, as on the page: an empty one is the text of CodeAlta.

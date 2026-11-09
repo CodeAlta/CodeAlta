@@ -76,6 +76,8 @@ test("a listing asks for a page of the exact project and keeps only a reply abou
   assert.deepEqual(await listClaudeCodeSessions(ok.value, epoch, project), { kind: "listed", sessions: [session], total: 3, providerId: "claude-code" });
   assert.deepEqual(ok.requests, [{ expectedHostEpoch: epoch, projectId: "p1", projectPath: "C:\\dev\\p1", offset: 0, count: 20, spaceId: null }], "the first 20 at first");
   assert.deepEqual(await listClaudeCodeSessions(api(async () => listed({ status: "no_provider", sessions: [], total: 0 })).value, epoch, project), { kind: "none" });
+  // Turned off in Settings → Sessions: nothing to list, and the group hides, as without a provider.
+  assert.deepEqual(await listClaudeCodeSessions(api(async () => listed({ status: "off", sessions: [], total: 0 })).value, epoch, project), { kind: "none" });
   for (const reply of [{ projectPath: "C:\\dev\\other" }, { hostEpoch: "other" }, { total: 0 }, { offset: 20 }, { sessions: page(0, 21), total: 40 }])
     assert.deepEqual(await listClaudeCodeSessions(api(async () => listed(reply)).value, epoch, project), { kind: "error", code: "invalid_reply" }, JSON.stringify(reply).slice(0, 40));
   assert.deepEqual(await listClaudeCodeSessions(api(async () => listed({ status: "stale_epoch" })).value, epoch, project), { kind: "error", code: "stale_epoch" });

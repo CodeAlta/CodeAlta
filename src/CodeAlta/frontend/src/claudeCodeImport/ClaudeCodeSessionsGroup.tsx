@@ -54,8 +54,8 @@ export function ClaudeCodeSessionsGroup({ project, spaceId = null, epoch, api, r
   /** The epoch of the host the window knows; null while it knows none. */
   epoch: string | null;
   api: ClaudeCodeSessionsApi;
-  /** Changes when the sessions of the window changed: the group reads its sessions again. */
-  refresh?: number;
+  /** Changes when the sessions of the window, or the choice to list these, changed: the group reads its sessions again. */
+  refresh?: number | string;
   /** How far the rows are pushed in, as the sessions of the list are. */
   indent?: number;
   /** The session that continues an imported one is to be opened: just imported, or one that continued it already. */

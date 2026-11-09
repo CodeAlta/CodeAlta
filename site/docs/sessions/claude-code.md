@@ -38,6 +38,8 @@ The folder a conversation started in decides where it is listed:
 - The menu of a row (right-click, `Shift+F10` or `…`) has **Open preview**, **Import**, **Import into project…**, **Open in VS Code**, **Copy resume command** and **Run in terminal** (not for a conversation of no project). Nothing in it deletes a conversation.
 - `Ctrl+P` finds these conversations by title, project or folder, and **Filter sessions** at the top of the Explorer narrows the groups.
 
+Once you imported what you need, turn off **Claude Code conversations from VS Code and the terminal** in Settings → **Sessions**, or set `claude_code_conversations = false` under `[sessions]` in `~/.alta/config.toml`. The groups and the search then leave these conversations out; the sessions you imported still open in VS Code and take the turns made there. Turn it on again to import more.
+
 ## Preview a conversation
 
 Click a row to preview the conversation in a tab with an italic title. Like a [tab you only look at](../workspace/readme.md#tabs), the next preview takes its place, and it is not reopened at the next start.
