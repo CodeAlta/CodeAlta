@@ -287,14 +287,18 @@ public sealed class SessionRuntimeMoveTests
     {
         var runs = 0;
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var follower = new MovedProjectFolders(async () =>
         {
             Interlocked.Increment(ref runs);
+            entered.TrySetResult();
             await gate.Task;
             return new OwnedSessionMoveResult("ok", [], []);
         });
 
         follower.Follow();
+        // Requested once the pass reads the sessions: a request made before it starts is that very pass.
+        await entered.Task.WaitAsync(TestDeadlines.Hang);
         follower.Follow();
         follower.Found(["a|/old"]);
         gate.SetResult();
