@@ -80,6 +80,13 @@ internal static class CodexCliHomeConfig
         builder.AppendLine("include_permissions_instructions = false");
         builder.AppendLine("include_apps_instructions = false");
         builder.AppendLine("include_collaboration_mode_instructions = false");
+        if (OperatingSystem.IsWindows())
+        {
+            // PowerShell runs with -NoProfile, as the shell of CodeAlta: a login shell loads the profile of the user,
+            // which a sandbox may deny (one in OneDrive), printing an error before the output of every command.
+            builder.AppendLine("allow_login_shell = false");
+        }
+
         builder.AppendLine("check_for_update_on_startup = false");
         builder.AppendLine("analytics = { enabled = false }");
         builder.AppendLine("feedback = { enabled = false }");

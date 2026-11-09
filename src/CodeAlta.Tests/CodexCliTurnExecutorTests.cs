@@ -52,6 +52,8 @@ public sealed class CodexCliTurnExecutorTests
         StringAssert.Contains(config, "sandbox_mode = \"danger-full-access\"");
         StringAssert.Contains(config, "multi_agent = false");
         Assert.IsFalse(config.Contains("image_generation", StringComparison.Ordinal), "Codex generates images, as it does by default.");
+        // PowerShell without the profile of the user, as the shell of CodeAlta; a login shell elsewhere, for its PATH.
+        Assert.AreEqual(OperatingSystem.IsWindows(), config.Contains("allow_login_shell = false", StringComparison.Ordinal));
         Assert.AreEqual(fixture.Home, server.Connections.Single().Request.Home);
     }
 
