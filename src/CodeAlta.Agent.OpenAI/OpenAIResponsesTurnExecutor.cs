@@ -146,7 +146,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
                              turnState,
                              requestContext));
                     var fullOptions = await CreateRequestPayloadAsync(request, requestContext, cancellationToken).ConfigureAwait(false);
-                    if (attempt == 1 && provider.CodexSubscription?.ServiceTier == "priority" && fullOptions.ServiceTier is null)
+                    // A session that chose its fast mode is not told about the one of the provider.
+                    if (attempt == 1 && request.FastMode is null && provider.CodexSubscription?.ServiceTier == "priority" && fullOptions.ServiceTier is null)
                     {
                         var message = $"Codex provider '{provider.ProviderKey}' requested fast routing, but model '{request.ModelId}' does not advertise priority in service_tiers (or discovery metadata is unavailable); using standard routing.";
                         Logger.Warn($"{message}");
@@ -1405,6 +1406,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             Error = sourceResponse?.Error,
             Usage = sourceResponse?.Usage,
             IncompleteStatusDetails = sourceResponse?.IncompleteStatusDetails,
+            ServiceTier = sourceResponse?.ServiceTier,
         };
 
         foreach (var item in streamedOutputItems.OrderBy(static pair => pair.Key).Select(static pair => pair.Value))
@@ -1516,6 +1518,13 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     IsOfficialOpenAIResponsesEndpoint(provider)));
         }
 
+        // The fast mode the session chose, on the OpenAI API: priority, or default to run at standard speed also in a project
+        // whose default tier is fast. A session that chose nothing sends no tier: the project's default applies.
+        if (request.FastMode is { } fastMode && IsOfficialOpenAIResponsesEndpoint(provider))
+        {
+            options.ServiceTier = new ResponseServiceTier(fastMode ? "priority" : "default");
+        }
+
         var modelRequest = OpenAIModelRequestOverrides.Find(provider.ModelRequestOverrides, request.ModelId);
         OpenAIExtraBodyPatchHelper.Apply(
             ref options.Patch,
@@ -1583,7 +1592,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         textOptions.Patch.Set("$.verbosity"u8, verbosity);
     }
 
-    private static bool IsOfficialOpenAIResponsesEndpoint(OpenAIProviderOptions provider)
+    internal static bool IsOfficialOpenAIResponsesEndpoint(OpenAIProviderOptions provider)
         => provider.CodexSubscription is null &&
            !provider.IsAzureOpenAI &&
            (provider.BaseUri is null ||
@@ -1605,8 +1614,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
         // Regular Codex prompts allow multiple tool calls regardless of legacy model metadata.
         // The Responses Lite builder below retains its protocol-specific false override.
         options.ParallelToolCallsEnabled = true;
+        // The fast mode the session chose, else the service_tier of the provider, for a model that advertises priority.
         // Explicit nullable null avoids the SDK's implicit string-to-tier conversion.
-        options.ServiceTier = codexOptions.ServiceTier == "priority" && modelCapabilities.SupportsPriorityServiceTier
+        options.ServiceTier = (request.FastMode ?? codexOptions.ServiceTier == "priority") && modelCapabilities.SupportsPriorityServiceTier
             ? new ResponseServiceTier("priority")
             : (ResponseServiceTier?)null;
         options.ToolChoice ??= ResponseToolChoice.CreateAutoChoice();
@@ -2177,6 +2187,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 reasoningTokens: response.Usage.OutputTokenDetails?.ReasoningTokenCount,
                 updatedAt: response.CreatedAt == default ? DateTimeOffset.UtcNow : response.CreatedAt,
                 cacheWriteTokens: cacheWriteTokens is > 0 ? cacheWriteTokens : null);
+        // The tier that ran the request, which may not be the one asked: priority (named fast by later models) is the fast mode.
+        if (operationUsage?.LastOperation is { } operation && response.ServiceTier?.ToString() is { Length: > 0 } tier)
+        {
+            operationUsage = operationUsage with { LastOperation = operation with { FastMode = tier is "priority" or "fast" } };
+        }
         // A request that read or wrote the cache keeps it for the lifetime of the provider from its start (the time the
         // response was created): a read refreshes it too.
         if (operationUsage is not null && promptCacheLifetime is { } lifetime && (cachedTokens is > 0 || cacheWriteTokens is > 0))

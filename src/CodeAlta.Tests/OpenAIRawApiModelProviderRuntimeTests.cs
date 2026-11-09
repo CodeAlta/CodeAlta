@@ -2709,6 +2709,113 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    [DataRow(null, null, "default", false)]
+    [DataRow(true, "priority", "priority", true)]
+    [DataRow(false, "default", "default", false)]
+    // A project whose default tier is fast runs a session that chose nothing fast: the response says it.
+    [DataRow(null, null, "priority", true)]
+    public async Task OpenAIResponsesTurnExecutor_SendsTheFastModeOfTheSession_AndReportsTheTierThatRan(
+        bool? fastMode, string? sent, string served, bool reported)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient([[CreateCompletedUpdateServedBy(served)]]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions { ProviderKey = "openai", ResponsesClientFactory = _ => responsesClient });
+
+        var response = await executor.ExecuteTurnAsync(CreateTurnRequest() with { FastMode = fastMode }, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var payload = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        Assert.AreEqual(sent is not null, payload.RootElement.TryGetProperty("service_tier", out var tier));
+        if (sent is not null)
+        {
+            Assert.AreEqual(sent, tier.GetString());
+        }
+
+        Assert.AreEqual(reported, response.Usage?.LastOperation?.FastMode);
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_SendsNoFastModeToAnotherEndpoint()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient([[CreateTextOnlyAssistantResponseUpdate("response-gateway", "gpt-test", "Answer.")]]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "gateway",
+            BaseUri = new Uri("https://gateway.example/v1"),
+            ResponsesClientFactory = _ => responsesClient,
+        });
+
+        _ = await executor.ExecuteTurnAsync(CreateTurnRequest() with { FastMode = true }, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var payload = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        Assert.IsFalse(payload.RootElement.TryGetProperty("service_tier", out _));
+    }
+
+    [TestMethod]
+    public async Task ListModels_GivesTheModelsOfTheOpenAIResponsesApi_AFastModeOff()
+    {
+        IReadOnlyList<AgentModelInfo> listed = [new("gpt-test")];
+        var responses = CreateTurnRequest().Provider;
+        async Task<bool?> FastModeAsync(Uri? baseUri, ModelProviderRuntimeDescriptor descriptor)
+            => (await OpenAIProviderSdkFactory.ListModelsAsync(
+                new OpenAIProviderOptions { ProviderKey = "openai", BaseUri = baseUri, ModelListAsync = _ => Task.FromResult(listed) },
+                descriptor,
+                CancellationToken.None).ConfigureAwait(false)).Single().FastMode;
+
+        Assert.IsFalse(await FastModeAsync(null, responses).ConfigureAwait(false));
+        Assert.IsNull(await FastModeAsync(new Uri("https://gateway.example/v1"), responses).ConfigureAwait(false));
+        Assert.IsNull(await FastModeAsync(null, responses with { TransportKind = AgentTransportKind.OpenAIChatCompletions }).ConfigureAwait(false),
+            "The Chat Completions requests of CodeAlta send no tier.");
+    }
+
+    [TestMethod]
+    [DataRow(null, true, true, false)]
+    [DataRow("priority", false, false, false)]
+    [DataRow("priority", null, true, false)]
+    [DataRow(null, null, false, false)]
+    public async Task OpenAIResponsesTurnExecutor_CodexSendsTheFastModeOfTheSession_OverTheServiceTierOfTheProvider(
+        string? configured, bool? fastMode, bool sendsPriority, bool warns)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient([[CreateTextOnlyAssistantResponseUpdate("response-codex-fast", "gpt-5.4", "Answer.")]]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions { ResponseTransport = "http", ServiceTier = configured },
+        });
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelId = "gpt-5.4",
+            ModelInfo = new AgentModelInfo("gpt-5.4", Capabilities: new Dictionary<string, object?> { ["source"] = "codex-endpoint", ["serviceTiers"] = new[] { "priority" } }),
+            FastMode = fastMode,
+        };
+        var updates = new List<AgentTurnSessionUpdate>();
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask, (update, _) =>
+        {
+            updates.Add(update);
+            return ValueTask.CompletedTask;
+        }).ConfigureAwait(false);
+
+        using var payload = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        Assert.AreEqual(sendsPriority, payload.RootElement.TryGetProperty("service_tier", out var tier));
+        if (sendsPriority)
+        {
+            Assert.AreEqual("priority", tier.GetString());
+        }
+
+        Assert.AreEqual(warns, updates.Any(static update => update.Kind == AgentSessionUpdateKind.Warning), "A session that turned fast mode off is not warned about it.");
+    }
+
+    // A completed response with its usage, served by a tier.
+    private static StreamingResponseUpdate CreateCompletedUpdateServedBy(string tier)
+        => DeserializeStreamingResponseUpdate(
+            $$"""
+            {"type":"response.completed","sequence_number":1,"response":{"id":"response-fast","object":"response","created_at":{{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}},
+              "model":"gpt-test","status":"completed","service_tier":"{{tier}}",
+              "output":[{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","logprobs":[],"text":"Answer.","annotations":[]}]}],
+              "usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15} } }
+            """);
+
+    [TestMethod]
     [DataRow(null, "[\"priority\"]", false, false)]
     [DataRow("default", "[\"priority\"]", false, false)]
     [DataRow("priority", "[\"priority\"]", true, false)]
