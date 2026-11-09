@@ -65,7 +65,10 @@ test("the saved sessions show the archived sessions of their scope under Archive
     await evaluate(`${archivedButton}.click()`);
     assert.equal(await wait(`${archivedButton}.getAttribute('aria-pressed')==='true' && ${titles}.length===2`), true);
     assert.deepEqual(await evaluate(titles), ["Plan the release", "Fix the parser"]);
-    assert.equal(await evaluate(`${dialog}.querySelector('button[data-column="updated"]').textContent`), "Archived");
+    // The column sorted by says how it is sorted to a screen reader: the header cells of the table have no role that could.
+    assert.equal(await evaluate(`${dialog}.querySelector('button[data-column="updated"]').firstChild.textContent`), "Archived");
+    assert.equal(await evaluate(`${dialog}.querySelector('button[data-column="updated"] .sr-only').textContent`), "sorted descending");
+    assert.equal(await evaluate(`!!${dialog}.querySelector('button[data-column="title"] .sr-only')`), false);
     assert.equal(await evaluate(`${dialog}.querySelector('.session-browser-results').getAttribute('aria-label')`), "Archived sessions");
     assert.equal(await evaluate(`${dialog}.querySelector('.session-browser-results time').getAttribute('datetime')`), "2026-10-15T08:00:00.000Z");
     assert.equal(await evaluate(`!!${footerButton("Open")}`), false, "An archived session is restored, not opened.");

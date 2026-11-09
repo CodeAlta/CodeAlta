@@ -4699,7 +4699,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // together. The answer is why it was not deleted, or null.
   async function deleteArchivedSession(row: WorkspaceSession, remember: boolean): Promise<string | null> {
     const capability = mutation?.capability;
-    if (sessionArchivePending.current || deletingPending.current || !owned || !capability?.canMutate() || !row.workspacePath) return t(sessionDeletionMessage("busy") as MessageKey);
+    // The locks of a deletion from the Explorer: a deletion or a rename whose outcome is not known blocks this one too.
+    if (sessionArchivePending.current || deletingPending.current || renamingPending.current || !owned || !capability?.canMutate() || !row.workspacePath
+      || deleteLocked || renameLocked || !!uncertainDelete.current || !!uncertainRename.current) return t(sessionDeletionMessage("busy") as MessageKey);
     if (remember) setConfirm("sessionDelete", false);
     if (knownChildren(row.id)) { setDialog(null); showSessionChildren(row, true); return null; }
     const project = row.scopeKind === "project" ? catalog.current?.projects.find(value => value.id === row.projectId && value.path === row.workspacePath) : undefined;
@@ -4710,6 +4712,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     try {
       const result = await deleteSession(status?.hostEpoch, target, row.id, row.title, capability);
       if (!creationAlive.current) return null;
+      // Not known whether it went: every deletion stays locked, as after one from the Explorer.
+      if (result.kind !== "deleted" && result.code === "delete_unconfirmed") { uncertainDelete.current = { target, id: row.id }; setDeleteLocked(true); }
       if (result.kind === "deleted" || result.code === "delete_unconfirmed") {
         await refreshProjects(creationRefresh.current.signal);
         // The browser goes on with the list as it is now.

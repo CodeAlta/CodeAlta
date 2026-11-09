@@ -32,6 +32,8 @@ export const sessionArchiveMessages = {
   "Restore and open": ["Restaurar y abrir", "Restaurer et ouvrir", "Wiederherstellen und öffnen", "復元して開く", "还原并打开"],
   // The saved sessions, several checked at once.
   "Select every session shown": ["Seleccionar todas las sesiones mostradas", "Sélectionner toutes les sessions affichées", "Alle angezeigten Sitzungen auswählen", "表示中のすべてのセッションを選択", "选择显示的所有会话"],
+  "sorted ascending": ["orden ascendente", "tri croissant", "aufsteigend sortiert", "昇順で並べ替え済み", "已升序排序"],
+  "sorted descending": ["orden descendente", "tri décroissant", "absteigend sortiert", "降順で並べ替え済み", "已降序排序"],
   "Select {title}": ["Seleccionar {title}", "Sélectionner {title}", "{title} auswählen", "{title} を選択", "选择 {title}"],
   "Archive {count}": ["Archivar {count}", "Archiver {count}", "{count} archivieren", "{count} 件をアーカイブ", "归档 {count} 个"],
   "Restore {count}": ["Restaurar {count}", "Restaurer {count}", "{count} wiederherstellen", "{count} 件を復元", "还原 {count} 个"],

@@ -9,11 +9,11 @@ import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { ProviderIcon } from "./ProviderIcon";
 import type { SessionTab } from "./sessionTabs";
-import { browseSessions } from "./sessionBrowser";
+import { browseSessions, browseTree } from "./sessionBrowser";
 import type { RuntimeObservationControls } from "./RuntimeObservation";
 import { sessionRunning } from "./runtimeObservations";
 import { tabKey } from "./sessionTabs";
-import { checkedRange, sessionDeletionPlan, sessionTreeRows, treeCheckState, withChecked, withCheckedTree } from "./sessionBrowserSelection";
+import { checkableChecked, checkedRange, sessionDeletionPlan, treeCheckState, withChecked, withCheckedTree } from "./sessionBrowserSelection";
 import { sessionTime } from "./sessionTime";
 import { plainTitle } from "./sessionTitle";
 import { useShellLanguage } from "./shellLanguage";
@@ -113,9 +113,6 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   const archive = showArchived && archived ? archived : null;
   const archivedSnapshot = archived ? { ...snapshot, sessions: archived.sessions } : null;
   const source = archive && archivedSnapshot ? archivedSnapshot : snapshot;
-  const page = browseSessions(source, scope, query);
-  // All the sessions of the scope: a search shows what it finds with the sessions they come from and the ones below them.
-  const scoped = query.trim() ? browseSessions(source, scope, "") : page;
   const archivedHere = archivedSnapshot ? browseSessions(archivedSnapshot, scope, "").matched : 0;
   const time = (row: WorkspaceSession) => archive ? row.archivedAt ?? row.updatedAt : row.updatedAt;
   const order = (a: WorkspaceSession, b: WorkspaceSession) => {
@@ -126,12 +123,10 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
     return sort.descending ? -value : value;
   };
   // The sessions as a tree, each under the one it comes from, sorted within each level; with a search, the sessions
-  // shown with a match are not matches themselves.
-  const scopeSessions = scoped.rows.map(item => item.row);
-  const items = new Map(scoped.rows.map(item => [item.row.id, item]));
-  const matched = query.trim() ? new Set(page.rows.map(item => item.row.id)) : null;
-  const rows = sessionTreeRows(scopeSessions, matched, order)
-    .flatMap(node => { const item = items.get(node.session.id); return item ? [{ ...item, depth: node.depth, match: node.match }] : []; });
+  // shown with a match are not matches themselves. A check acts on the rows shown only: nothing is checked unseen.
+  const page = browseTree(source, scope, query, order);
+  const rows = page.rows;
+  const scopeSessions = rows.map(item => item.row);
   const selected = Math.max(0, rows.findIndex(item => tabKey(item.tab) === selectedKey));
   function setSelected(index: number) { setSelectedKey(rows[index] ? tabKey(rows[index].tab) : null); }
   // A session at work, or one whose identity is not sure, is not checked.
@@ -142,20 +137,22 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   const shownCheckable = rows.filter(checkable).map(item => item.row.id);
   // The box of the header checks the matches shown, and with them the sessions below them.
   const shownMatches = rows.filter(item => item.match && checkable(item)).map(item => item.row.id);
-  const notCheckable = new Set(scoped.rows.filter(item => !checkable(item)).map(item => item.row.id));
+  const notCheckable = new Set(rows.filter(item => !checkable(item)).map(item => item.row.id));
+  // What is checked, as it can be acted on now: a session that started to work since it was checked is not.
+  const shownChecked = checkableChecked(checked, scopeSessions, id => !notCheckable.has(id));
   // A session is checked with the sessions below it, those that can be.
   const checkTree = (current: ReadonlySet<string>, ids: readonly string[], value: boolean) =>
-    withCheckedTree(current, scopeSessions, ids, value, id => !notCheckable.has(id));
+    withCheckedTree(checkableChecked(current, scopeSessions, id => !notCheckable.has(id)), scopeSessions, ids, value, id => !notCheckable.has(id));
   // The checked sessions of the scope and the view, also those the search hides now.
   const inScope = (row: WorkspaceSession) => scope === null ? row.scopeKind === "global" && row.projectId === null : row.scopeKind === "project" && row.projectId === scope;
-  const checkedRows = (archive ? archive.sessions : snapshot.sessions).filter(row => checked.has(row.id) && inScope(row));
+  const checkedRows = (archive ? archive.sessions : snapshot.sessions).filter(row => shownChecked.has(row.id) && inScope(row));
   const plan = checking && deletingChecked ? sessionDeletionPlan(checkedRows, checking.catalog) : null;
   const foundWorktrees = plan && checking ? deletedSessionsWorktrees(checking.catalog, plan.order) : [];
   const worktrees = checkedWorktrees ?? foundWorktrees;
   // The sessions below the kept ones that the table can check: Select their child sessions checks them.
   const missingShown = plan ? plan.missing.filter(row => inScope(row) && rows.some(item => item.row.id === row.id && checkable(item))) : [];
   function check(id: string, event: MouseEvent) {
-    const value = treeCheckState(checked, scopeSessions.filter(row => !notCheckable.has(row.id)), id) !== "checked";
+    const value = treeCheckState(shownChecked, scopeSessions.filter(row => !notCheckable.has(row.id)), id) !== "checked";
     const ids = event.shiftKey ? checkedRange(shownCheckable, anchor.current, id) : [id];
     anchor.current = id;
     setChecked(current => checkTree(current, ids, value));
@@ -271,7 +268,7 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
         onClick={() => { setShowArchived(value => !value); setSelectedKey(null); setDeleting(null); clearChecked(); }}>
         {t("Archived")}{archivedHere > 0 && <span className="session-browser-count">{archivedHere}</span>}</Button>}
       <span className="settings-editor-spacer" />
-      <span className="bp6-text-muted" role="status">{t("{shown} of {matching} sessions", { shown: rows.filter(item => item.match).length, matching: page.matched })}{page.hidden > 0 && <>{" · "}{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}</>}</span>
+      <span className="bp6-text-muted" role="status">{t("{shown} of {matching} sessions", { shown: page.shownMatches, matching: page.matched })}{page.hidden > 0 && <>{" · "}{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}</>}</span>
     </div>
     {(stale || refused) && <p role="alert">{t("Catalog, host or selection changed, or identity is ambiguous. Close and reopen the browser; nothing was opened.")}</p>}
     <div ref={results} id="session-browser-results" className="session-browser-results" role="region" aria-label={t(archive ? "Archived sessions" : "Saved sessions")}>
@@ -283,22 +280,23 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
         selectedRegionTransform={region => region.rows ? Regions.row(region.rows[0]) : region} selectedRegions={[Regions.row(selected)]}
         onSelection={regions => { const index = regions[0]?.rows?.[0]; if (index !== undefined && rows[index]) setSelected(index); }}
         // What the cells show, as values that stay the same while it does: a new list of the same rows draws nothing again.
-        cellRendererDependencies={[rows.map(item => `${tabKey(item.tab)}:${item.depth}:${item.match}`).join("\n"), [...checked].join("\n"), selected, stale, observed, !!archive, locale, sort.column, sort.descending]}>
+        cellRendererDependencies={[rows.map(item => [tabKey(item.tab), item.depth, item.match, item.valid, checkable(item), item.row.title, item.row.fullTitle,
+          item.row.providerKey, time(item.row), item.row.messageCount].join("\u0000")).join("\n"), [...shownChecked].join("\n"), selected, stale, observed, !!archive, locale, sort.column, sort.descending]}>
         {[...(checking ? [<Column key="check" columnHeaderCellRenderer={() => <ColumnHeaderCell className="session-browser-check" nameRenderer={() =>
           <input type="checkbox" aria-label={t("Select every session shown")} disabled={shownCheckable.length === 0}
-            checked={shownMatches.length > 0 && shownMatches.every(id => checked.has(id))}
-            ref={element => { if (element) element.indeterminate = shownCheckable.some(id => checked.has(id)) && !shownMatches.every(id => checked.has(id)); }}
-            onChange={() => { const all = shownMatches.every(id => checked.has(id)); anchor.current = null; setChecked(current => checkTree(current, shownMatches, !all)); }} />} />}
+            checked={shownMatches.length > 0 && shownMatches.every(id => shownChecked.has(id))}
+            ref={element => { if (element) element.indeterminate = shownCheckable.some(id => shownChecked.has(id)) && !shownMatches.every(id => shownChecked.has(id)); }}
+            onChange={() => { const all = shownMatches.every(id => shownChecked.has(id)); anchor.current = null; setChecked(current => checkTree(current, shownMatches, !all)); }} />} />}
           cellRenderer={index => <Cell interactive className={cellClass(index, "session-browser-check")}>
             <input type="checkbox" aria-label={t("Select {title}", { title: titleOf(rows[index].row) })}
-              checked={checked.has(rows[index].row.id)} disabled={!checkable(rows[index])}
-              ref={element => { if (element) element.indeterminate = !checked.has(rows[index].row.id) && treeCheckState(checked, scopeSessions, rows[index].row.id) === "partial"; }}
+              checked={shownChecked.has(rows[index].row.id)} disabled={!checkable(rows[index])}
+              ref={element => { if (element) element.indeterminate = !shownChecked.has(rows[index].row.id) && treeCheckState(shownChecked, scopeSessions, rows[index].row.id) === "partial"; }}
               onClick={event => check(rows[index].row.id, event)} onChange={() => { }} /></Cell>} />] : []),
           ...(archive ? archivedColumns : columns).map(([column, label]) => <Column key={column} columnHeaderCellRenderer={() => <ColumnHeaderCell
             nameRenderer={() => <button type="button" className="session-browser-sort" data-column={column}
-              aria-sort={sort.column === column ? sort.descending ? "descending" : "ascending" : "none"}
               onClick={() => setSort(current => ({ column, descending: current.column === column ? !current.descending : column === "updated" || column === "messages" }))}>
-              {t(label)}{sort.column === column && <AppIcon name="chevronDown" size={12} className={sort.descending ? undefined : "sort-ascending"} />}</button>} />}
+              {t(label)}{sort.column === column && <><AppIcon name="chevronDown" size={12} className={sort.descending ? undefined : "sort-ascending"} />
+                <span className="sr-only">{t(sort.descending ? "sorted descending" : "sorted ascending")}</span></>}</button>} />}
             cellRenderer={index => <Cell className={cellClass(index, `session-browser-${column}`)} tooltip={column === "title" ? `${rows[index].row.fullTitle || rows[index].row.title}\n${rows[index].row.id}` : undefined}>
               <div className="session-browser-cell" onDoubleClick={() => activate(index)}>{cellContent(index, column)}</div></Cell>} />)]}
       </Table2>}

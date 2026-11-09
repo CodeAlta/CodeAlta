@@ -112,6 +112,19 @@ export function withCheckedTree(checked: ReadonlySet<string>, sessions: readonly
   return next;
 }
 
+/**
+ * The checked sessions as they can be acted on: without the sessions of `sessions` that cannot be checked (any more: one
+ * that started to work), and without those of `sessions` that are no longer checked whole. Other checked sessions stay.
+ */
+export function checkableChecked(checked: ReadonlySet<string>, sessions: readonly WorkspaceSession[], canCheck: (id: string) => boolean): ReadonlySet<string> {
+  const next = new Set(checked);
+  for (const session of sessions) if (!canCheck(session.id)) next.delete(session.id);
+  // The deepest first, so that a session is looked at after the ones below it.
+  const deepestFirst = sessionTreeRows(sessions, null, () => 0).map(row => row.session).reverse();
+  for (const session of deepestFirst) if (next.has(session.id) && !descendants(sessions, session.id).every(child => next.has(child.id))) next.delete(session.id);
+  return next;
+}
+
 /** Whether a session is checked with all the sessions below it, partly (it or some of them), or not at all. */
 export function treeCheckState(checked: ReadonlySet<string>, sessions: readonly WorkspaceSession[], id: string): "checked" | "partial" | "none" {
   const below = descendants(sessions, id).map(session => session.id);

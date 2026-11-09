@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSession } from "#neoastra";
-import { checkedRange, sessionDeletionPlan, sessionTreeRows, treeCheckState, withChecked, withCheckedTree } from "./sessionBrowserSelection";
+import { checkableChecked, checkedRange, sessionDeletionPlan, sessionTreeRows, treeCheckState, withChecked, withCheckedTree } from "./sessionBrowserSelection";
 
 const session = (id: string, parentSessionId: string | null = null, changes: Partial<WorkspaceSession> = {}): WorkspaceSession => ({
   id, title: id, fullTitle: id, fullTitleTruncated: false, workspacePath: "/p1", providerKey: "codex", updatedAt: "2026-11-09T10:00:00Z",
@@ -89,4 +89,14 @@ test("checking a session checks the sessions below it; unchecking one unchecks t
   const atWork = withCheckedTree(new Set(), sessions, ["p"], true, id => id !== "g");
   assert.deepEqual([...atWork].sort(), ["c2"]);
   assert.equal(treeCheckState(atWork, sessions, "p"), "partial");
+});
+
+test("checked sessions that started to work, and the ones above them, are not acted on", () => {
+  const sessions = [session("p"), session("c1", "p"), session("g", "c1"), session("c2", "p")];
+  const all = new Set(["p", "c1", "g", "c2", "elsewhere"]);
+  assert.deepEqual([...checkableChecked(all, sessions, () => true)].sort(), ["c1", "c2", "elsewhere", "g", "p"]);
+  // g started to work: it, c1 and p above it are no longer checked whole; c2 and a session not shown stay.
+  assert.deepEqual([...checkableChecked(all, sessions, id => id !== "g")].sort(), ["c2", "elsewhere"]);
+  // A parent checked without one of its children is not acted on either.
+  assert.deepEqual([...checkableChecked(new Set(["p", "c1", "g"]), sessions, () => true)].sort(), ["c1", "g"]);
 });
