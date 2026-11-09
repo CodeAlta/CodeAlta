@@ -5,7 +5,7 @@ import { carriedBy, createdDay, filterWorkItems, readingOrder, sessionCards, sor
   workStatusLabel } from "./workItems";
 
 const row = (id: string, kind: "task" | "plan", status: string, more: Partial<WorkItemRow> = {}): WorkItemRow => ({ id, kind, title: `Title of ${id}`, summary: null,
-  category: kind === "task" ? "gap" : null, status, statusText: null, created: "2026-10-07", file: `.alta/${kind}s/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, shortId: null, ...more });
+  category: kind === "task" ? "gap" : null, status, statusText: null, created: "2026-10-07", file: `.alta/${kind}s/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, shortId: null, updated: null, ...more });
 const project = (projectId: string, tasks: WorkItemRow[], plans: WorkItemRow[] = []): WorkItemsProject => ({ projectId, tasks, plans, truncated: false });
 const sessions = new Set(["s1", "s2"]);
 

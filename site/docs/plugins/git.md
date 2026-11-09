@@ -32,6 +32,7 @@ Type `#` in the prompt to search the issues of the project's repository, most re
 - Closed issues are listed too; **Include closed** (`Ctrl+I`) hides them.
 - In CodeAlta Desktop the picker also lists pull requests and merge requests, with their own icon.
 - On Azure DevOps it lists the work items of the project that owns the repository, of any type, matched by title.
+- In CodeAlta Desktop the same list also has the tasks, plans and sessions of the project: see [Insert a reference](../workspace/prompt.md#insert-a-reference).
 
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-github-issue-picker.gif" alt="CodeAlta issue prompt picker dialog" loading="lazy">

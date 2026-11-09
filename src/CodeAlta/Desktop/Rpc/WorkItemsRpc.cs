@@ -244,11 +244,18 @@ internal sealed class WorkItemsService
 
     private static WorkItemRow Row(WorkTask task, WorkItemLink? link)
         => new(task.Id, WorkItemKinds.Task, task.Title, task.Summary, task.Kind, WorkItemFiles.NameOf(task.Status), null, task.Created,
-            WorkItemFiles.TasksFolder + "/" + task.Id + ".md", link?.ProposedBy, link?.Runner, link?.Acknowledged ?? false, RunsWith(link), task.ShortId);
+            WorkItemFiles.TasksFolder + "/" + task.Id + ".md", link?.ProposedBy, link?.Runner, link?.Acknowledged ?? false, RunsWith(link), task.ShortId, Updated(task.Path));
 
     private static WorkItemRow Row(WorkPlan plan, WorkItemLink? link)
         => new(plan.Id, WorkItemKinds.Plan, plan.Title, plan.Summary, null, WorkItemFiles.NameOf(plan.Status), plan.StatusText, plan.Created,
-            WorkItemFiles.PlansFolder + "/" + plan.Id + ".md", link?.ProposedBy, link?.Runner, link?.Acknowledged ?? false, RunsWith(link));
+            WorkItemFiles.PlansFolder + "/" + plan.Id + ".md", link?.ProposedBy, link?.Runner, link?.Acknowledged ?? false, RunsWith(link), Updated: Updated(plan.Path));
+
+    // When the file of an item was last written; null when it cannot be read.
+    private static DateTimeOffset? Updated(string path)
+    {
+        try { return File.Exists(path) ? new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero) : null; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return null; }
+    }
 
     private static WorkItemRunsWith? RunsWith(WorkItemLink? link)
         => link?.RunsWith is { } selection ? new(selection.ProviderKey, selection.ModelId, selection.ReasoningEffort) : null;
@@ -278,8 +285,9 @@ internal sealed record WorkItemsProject(string ProjectId, IReadOnlyList<WorkItem
 /// <param name="Acknowledged">The user put the card of the item away.</param>
 /// <param name="RunsWith">What the session that proposed the item ran with, which a session started for it takes; null when it is not known.</param>
 /// <param name="ShortId">The short id of a task, which agents name it by; null for a plan and for a task written before ids had one.</param>
+/// <param name="Updated">When the file of the item was last written; null when it is not known.</param>
 internal sealed record WorkItemRow(string Id, string Kind, string Title, string? Summary, string? Category, string Status, string? StatusText, string? Created,
-    string File, string? ProposedBy, string? Runner, bool Acknowledged, WorkItemRunsWith? RunsWith = null, string? ShortId = null);
+    string File, string? ProposedBy, string? Runner, bool Acknowledged, WorkItemRunsWith? RunsWith = null, string? ShortId = null, DateTimeOffset? Updated = null);
 
 /// <param name="ProviderId">The key of the model provider.</param>
 /// <param name="ModelId">The model; null leaves it to the provider.</param>

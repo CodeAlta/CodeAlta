@@ -20,10 +20,10 @@ The prompt is where you write to a session; the timeline above it shows what the
 | `F10` | Clear the queue |
 | `Alt+=` (`Ctrl+Alt+=` on macOS) | Write or edit an [equation](#equations) (CodeAlta Desktop) |
 
-An empty prompt names the keys that are its own: `?` opens the help and `/` the commands, and at the start of a word `@` inserts a link to a file of the project and `#` a link to an issue.
+An empty prompt names the keys that are its own: `?` opens the help and `/` the commands, and at the start of a word `@` inserts a link to a file of the project and `#` an issue, a task, a plan or a session (see [Insert a reference](#insert-a-reference)).
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-prompt-hints.webp" alt="An empty prompt of CodeAlta Desktop: Ask CodeAlta to work on this project, then Type ? for help, / for commands, @ to insert a link to a project file, # to insert a link to an issue" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-prompt-hints.webp" alt="An empty prompt of CodeAlta Desktop: Ask CodeAlta to work on this project, then Type ? for help, / for commands, @ to insert a link to a project file, # to insert an issue, a task, a plan or a session" loading="lazy">
   <figcaption class="small text-secondary mt-2">An empty prompt says what ?, /, @ and # do.</figcaption>
 </figure>
 
@@ -129,10 +129,29 @@ Type `@` in the prompt to search the files and folders of the project. An accept
 @"src/path with spaces/file.cs":10-40
 ```
 
-`Esc` closes the picker for that `@`; put the caret right after it and press `Ctrl+Space` to open it again. The `#` issue picker works the same way. `Ctrl+E` or `/edit` opens the same picker to edit a file in the [code editor](code.md#code-editor).
+`Esc` closes the picker for that `@`; put the caret right after it and press `Ctrl+Space` to open it again. The `#` picker works the same way. `Ctrl+E` or `/edit` opens the same picker to edit a file in the [code editor](code.md#code-editor).
 
 > [!NOTE]
 > Attach only what the task needs: focused context is easier to review and compacts less often.
+
+### Insert a reference
+
+In CodeAlta Desktop, type `#` at the start of a word to name something of the project. One list mixes the [issues](../plugins/git.md#issue-picker) of its repository, its [tasks and plans](../work-items.md), and its sessions, the most recently changed first. Type a number, a [short id](../work-items.md#short-ids) or words to filter, then press `Enter` or click to insert:
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-reference-picker.webp" alt="The Insert a reference window over a markdig session: a search field, the Issues, Tasks, Plans and Sessions toggles with their counts and keys, and a list mixing pull requests, issues, a task and sessions, the most recent first" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The <code>#</code> picker of a markdig session, with the sessions shown too (<code>Ctrl+4</code>).</figcaption>
+</figure>
+
+
+| Kind | Inserted as | In a message |
+| --- | --- | --- |
+| Issue or pull request | `[#18](https://github.com/org/repo/issues/18)` | a link to its page |
+| Task | `` `p53b` `` (its short id) | a [chip](../work-items.md#short-ids) that shows and opens the task |
+| Plan | `[Release plan](.alta/plans/2026-10-01-release.md)` | a link to its file |
+| Session | `[Review the parser](session:<id>)` | a [chip](../sessions/readme.md#links-in-messages) that opens the session |
+
+The buttons above the list show or hide each kind: **Issues** (`Ctrl+1`), **Tasks** (`Ctrl+2`), **Plans** (`Ctrl+3`) and **Sessions** (`Ctrl+4`; `Cmd` on macOS). The sessions are hidden at first. With `Shift`, or `Alt`+click, a kind is shown alone. What you choose stays for the next `#` of that prompt. **Include closed** (`Ctrl+I`) shows or hides closed issues, done tasks and plans.
 
 ## Equations
 

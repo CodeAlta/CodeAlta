@@ -53,7 +53,7 @@ export function reviewItems(projects: readonly ReviewsOverviewProject[], t: (key
     const summary = [where ? `${t("Worktree")} ${where}` : t("Project folder"), entry.fileMissing ? t("File deleted") : null, reviewCountsText(entry, t)].filter(Boolean).join(" · ");
     return {
       id: reviewItemId(entry), kind: "review" as const, title: reviewTitle(entry, t), summary, category: null, status: reviewStage(entry), statusText: null,
-      created: entry.updatedAt, file: entry.path ?? "", proposedBy: null, runner: entry.request?.sessionId ?? null, acknowledged: false, runsWith: null, shortId: null,
+      created: entry.updatedAt, file: entry.path ?? "", proposedBy: null, runner: entry.request?.sessionId ?? null, acknowledged: false, runsWith: null, shortId: null, updated: entry.updatedAt,
       projectId: project.projectId, stage: reviewStage(entry), review: entry,
     };
   }));

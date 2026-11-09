@@ -17,7 +17,7 @@ import { attachmentBytes, linkAttachment } from "./promptImages";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
-import { IssuePicker } from "./IssuePicker";
+import { ReferencePicker } from "./ReferencePicker";
 import { promptKeysHint } from "./promptKeys";
 import { MicButton } from "./speech/MicButton";
 import { DraftUsage } from "./promptSurface/PromptSurfaceParts";
@@ -129,7 +129,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
         }
       }, placeholder: placeholder ?? (localDraft ? `${t("Ask CodeAlta to work on this project…")}\n${t(promptKeysHint)}` : t("Ask CodeAlta to work on this project…")) }}>
         {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
-        {localDraft && !expanded && <IssuePicker edit={edit} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
+        {localDraft && !expanded && <ReferencePicker edit={edit} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
         <p id={`catalog-draft-status-${sessionId}`} className="sr-only">{reason ?? t("Sending requires the desktop app.")}</p>
         {localDraft && <MicButton owner={`draft:${sessionId}`} input={promptInput} disabled={expanded || localDraft.busy} visible={active}
           id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} onSend={() => { if (!localDraft.disabled) localDraft.submit(); }} />}

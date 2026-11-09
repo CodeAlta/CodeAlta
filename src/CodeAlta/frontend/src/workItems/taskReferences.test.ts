@@ -5,7 +5,7 @@ import { closedTask, findTaskReference, taskReferenceIndex } from "./taskReferen
 import { filterWorkItems, workItems } from "./workItems";
 
 const row = (id: string, more: Partial<WorkItemRow> = {}): WorkItemRow => ({ id, kind: "task", title: `Title of ${id}`, summary: null, category: "gap", status: "pending",
-  statusText: null, created: "2026-11-08", file: `.alta/tasks/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, shortId: id.slice(-4), ...more });
+  statusText: null, created: "2026-11-08", file: `.alta/tasks/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, shortId: id.slice(-4), updated: null, ...more });
 
 test("a text names a task of its project by its short id or its id, written alone", () => {
   const items = workItems([

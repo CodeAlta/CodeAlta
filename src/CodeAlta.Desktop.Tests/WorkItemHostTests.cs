@@ -54,6 +54,9 @@ public sealed class WorkItemHostTests
         Assert.AreEqual((id, "task", "Report why a probe failed", "The page says nothing.", "gap", "pending", "session-of-the-user"),
             (row.Id, row.Kind, row.Title, row.Summary, row.Category, row.Status, row.ProposedBy));
         Assert.IsFalse(row.Acknowledged);
+        // When its file was last written: the `#` picker of a prompt lists the most recent first.
+        var written = File.GetLastWriteTimeUtc(Path.Combine(fixture.Project.ProjectPath, row.File));
+        Assert.AreEqual(new DateTimeOffset(written, TimeSpan.Zero), row.Updated);
         Assert.AreEqual(("delete", "worktree", true), (listed.Settings!.CompletedTasks, listed.Settings.Start, listed.Settings.Propose));
 
         var text = await fixture.Rpc.ReadAsync(new(Epoch, fixture.Project.Id, "task", id), default);

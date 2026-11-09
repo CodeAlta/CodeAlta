@@ -14,7 +14,7 @@ import type { ToolOutputs } from "./toolOutput";
 import type { DisplayState } from "./sessionDisplay";
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
 import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectReferencePicker";
-import { IssuePicker } from "./IssuePicker";
+import { ReferencePicker } from "./ReferencePicker";
 import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
 import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, sandboxSettings as sandboxSessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionSteerRequest, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse, type SessionOptionsChoice } from "#neoastra";
@@ -1616,7 +1616,7 @@ ${value}` : value);
       <ActiveProviderStatus epoch={epoch} onOpen={() => onOpenCatalog?.("providers")} onState={setProviderState} providers={activeChoices?.spaceProviders ?? null} />
     </> }}>
       {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
-      {!pending && !expanded && !invalidEpoch && <IssuePicker edit={editText} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
+      {!pending && !expanded && !invalidEpoch && <ReferencePicker edit={editText} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
       {!pending && !expanded && !invalidEpoch && <PluginPromptPickers edit={editText} input={promptInput} sessionId={sessionId} />}
       <span className="sr-only">{t("Enter to send or enqueue while busy · Shift+Enter for a new line · {shortcut} to send now (steer)", { shortcut: navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter" })}</span>
       {(composerBusy || availableAbortRun || pendingAbortRun) && <Button intent="danger" icon={<AppIcon name="stop" size={16} fill="currentColor" />} onClick={abortRun}

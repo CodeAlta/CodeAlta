@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
 
-test("issues checked in the picker opened by the attach menu are attached, and # still inserts a link", { skip: !browserExecutable, timeout: 60_000 }, async () => {
+test("issues checked in the picker opened by the attach menu are attached, and # inserts issues, tasks, plans and sessions", { skip: !browserExecutable, timeout: 60_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-issue-picker-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -99,21 +99,51 @@ test("issues checked in the picker opened by the attach menu are attached, and #
     await new Promise(resolve => setTimeout(resolve, 400));
     assert.equal(await evaluate(`!!${dialog}`), false, "the picker stays closed after it is shown again");
 
-    // # in the prompt opens it to insert a link, as before.
+    // # in the prompt opens it to insert: the issues, the tasks and the plans, the most recent first; the sessions are a key away.
+    const kinds = "Array.from(document.querySelectorAll('.reference-item'), row => row.getAttribute('data-kind')).join(',')";
+    const pressed = "Array.from(document.querySelectorAll('.reference-kind[aria-pressed=\"true\"]'), button => button.getAttribute('data-kind')).join(',')";
+    const reopen = async (text: string) => {
+      await evaluate("{ const area = document.querySelector('#prompt'); area.focus(); area.setSelectionRange(area.value.length, area.value.length); }");
+      await command("Input.insertText", { text });
+    };
     await evaluate("document.querySelector('#prompt').focus()");
     await command("Input.insertText", { text: "fix #" });
-    assert.equal(await until(`${dialog} && document.querySelectorAll('.issue-row').length === 3`), true, "# opens the picker");
-    // Inserting picks one issue: no box, no button, Enter or a click inserts it at once.
+    assert.equal(await until(`${dialog} && document.querySelectorAll('.reference-item').length === 5`), true, "# opens the picker");
+    assert.equal(await evaluate(kinds), "task,issue,issue,issue,plan", "mixed, the most recent first");
+    assert.equal(await evaluate(pressed), "issue,task,plan", "the sessions are not shown at first");
+    // Inserting picks one row: no box, no button, Enter or a click inserts it at once. A task is named by its short id, in code.
     assert.equal(await evaluate("document.querySelectorAll('.issue-check, .reference-actions').length"), 0, "no box and no button to insert");
     await key("Enter", "Enter", 13);
     assert.equal(await until(`!${dialog}`), true);
-    assert.equal(await evaluate(prompt), "fix [#1](https://github.com/owner/repo/issues/1)");
-    await evaluate("{ const area = document.querySelector('#prompt'); area.focus(); area.setSelectionRange(area.value.length, area.value.length); }");
-    await command("Input.insertText", { text: " and #" });
-    assert.equal(await until(`${dialog} && document.querySelectorAll('.issue-row').length === 3`), true, "# opens the picker again");
-    await evaluate("document.querySelectorAll('.issue-row .issue-title')[1].click()");
+    assert.equal(await evaluate(prompt), "fix `p53b`");
+
+    // Ctrl+4 shows the sessions too: the newest comes first, and is inserted as a link to the session.
+    await reopen(" and #");
+    assert.equal(await until(`${dialog} && document.querySelectorAll('.reference-item').length === 5`), true, "# opens the picker again");
+    await key("4", "Digit4", 52, 2);
+    assert.equal(await until(`document.querySelectorAll('.reference-item').length === 6`), true, "Ctrl+4 shows the sessions");
+    assert.equal(await evaluate(pressed), "issue,task,plan,session");
+    await key("Enter", "Enter", 13);
+    assert.equal(await until(`!${dialog}`), true);
+    assert.equal(await evaluate(prompt), "fix `p53b` and [Parser review](session:s-run)");
+
+    // Ctrl+Shift+1 shows the issues alone, and they stay so for the next #; a click on an issue inserts a link to it.
+    await reopen(" #");
+    assert.equal(await until(`${dialog} && document.querySelectorAll('.reference-item').length === 6`), true, "the kinds stay as they were left");
+    await key("!", "Digit1", 49, 2 | 8);
+    assert.equal(await until(`${kinds} === 'issue,issue,issue'`), true, "Ctrl+Shift+1 shows the issues alone");
+    await evaluate("document.querySelectorAll('.reference-item .issue-title')[1].click()");
     assert.equal(await until(`!${dialog}`), true, "a click on an issue inserts it");
-    assert.equal(await evaluate(prompt), "fix [#1](https://github.com/owner/repo/issues/1) and [#2](https://github.com/owner/repo/issues/2)");
+    assert.equal(await evaluate(prompt), "fix `p53b` and [Parser review](session:s-run) [#2](https://github.com/owner/repo/issues/2)");
+
+    // A toggle shows the plans alone with Alt+click; a plan is a link to its file, its title escaped.
+    await reopen(" #");
+    assert.equal(await until(`${dialog} && ${kinds} === 'issue,issue,issue'`), true);
+    await evaluate("document.querySelector('.reference-kind[data-kind=\"plan\"]').dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }))");
+    assert.equal(await until(`${kinds} === 'plan'`), true, "Alt+click shows the plans alone");
+    await key("Enter", "Enter", 13);
+    assert.equal(await until(`!${dialog}`), true);
+    assert.equal(await evaluate(prompt), "fix `p53b` and [Parser review](session:s-run) [#2](https://github.com/owner/repo/issues/2) [Release \\[plan\\]](.alta/plans/2026-10-01-release.md)");
     assert.equal(await evaluate(attached), "1,2", "nothing more is attached");
     await command("Browser.close").catch(() => { });
   } finally {

@@ -8,7 +8,7 @@ import { workItems } from "./workItems";
 // A message of a session of project p1 that names a task that is done, one that waits, one that does not exist, and a task in a
 // code block and in a link, which stay what they are. The tasks opened are a list; a task can be removed.
 const row = (id: string, status: string, title: string, summary: string | null): WorkItemRow => ({ id, kind: "task", title, summary, category: "problem", status, statusText: null,
-  created: "2026-11-08", file: `.alta/tasks/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, shortId: id.slice(-4) });
+  created: "2026-11-08", file: `.alta/tasks/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, shortId: id.slice(-4), updated: null });
 const source = "Closed: `p53b`. Still open: `q9rh`. Unknown: `zzzz`.\n\n```\np53b\n```\n\nIn a link: [`q9rh`](https://remote.invalid/q9rh)";
 const state = { opened: [] as string[], remove: (_id: string) => { } };
 Object.assign(window, { taskFixture: state });

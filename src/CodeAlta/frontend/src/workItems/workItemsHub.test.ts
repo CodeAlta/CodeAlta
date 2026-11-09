@@ -7,7 +7,7 @@ import { defaultWorkSettings, workItems, type WorkItem } from "./workItems";
 import { createWorkItemsHub, readingBatches, type WorkItemsApi } from "./workItemsHub";
 
 const row = (id: string, more: Partial<WorkItemRow> = {}): WorkItemRow => ({ id, kind: "task", title: id, summary: null, category: "gap", status: "pending", statusText: null,
-  created: null, file: `.alta/tasks/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, shortId: null, ...more });
+  created: null, file: `.alta/tasks/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, shortId: null, updated: null, ...more });
 const settled = () => new Promise<void>(resolve => setImmediate(resolve));
 
 /** A host whose projects each have what the test says, and that records what it is asked. */

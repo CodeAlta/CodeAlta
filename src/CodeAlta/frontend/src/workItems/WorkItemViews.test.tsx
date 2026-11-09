@@ -17,7 +17,7 @@ const never = () => assert.fail("rendering must not act");
 const render = (element: ReactElement, locale: (typeof locales)[number] = "en") =>
   renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } }, element));
 const row = (id: string, kind: "task" | "plan", status: string, more: Partial<WorkItemRow> = {}): WorkItemRow => ({ id, kind, title: `Title of ${id}`, summary: `Summary of ${id}`,
-  category: kind === "task" ? "problem" : null, status, statusText: null, created: "2026-10-07", file: `.alta/${kind}s/${id}.md`, proposedBy: "s1", runner: null, acknowledged: false, runsWith: null, shortId: null, ...more });
+  category: kind === "task" ? "problem" : null, status, statusText: null, created: "2026-10-07", file: `.alta/${kind}s/${id}.md`, proposedBy: "s1", runner: null, acknowledged: false, runsWith: null, shortId: null, updated: null, ...more });
 const state = (more: Partial<WorkItemsState> = {}): WorkItemsState => ({ loaded: true, complete: true, available: true, settings: defaultWorkSettings,
   projects: [{ projectId: "p", truncated: false, tasks: [row("task", "task", "pending"), row("running", "task", "pending", { runner: "s2" }), row("parked", "task", "later")],
     plans: [row("plan", "plan", "approved")] }], ...more });
