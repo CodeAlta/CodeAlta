@@ -223,6 +223,13 @@ public sealed class CodeAltaSessionSettingsDocument
     /// </summary>
     [JsonPropertyName("prompt_suggestions")]
     public bool? PromptSuggestions { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the window lists the Claude Code conversations started in VS Code or a terminal that no
+    /// session continues, to import them; true when absent.
+    /// </summary>
+    [JsonPropertyName("claude_code_conversations")]
+    public bool? ClaudeCodeConversations { get; set; }
 }
 
 /// <summary>Represents the choices for the reviews of the user.</summary>

@@ -90,6 +90,7 @@ internal sealed partial class WorkspaceService
         _readHistorySource = (revision, start, end, offset, token) => hosts.Resolve(revision.SessionId).ReadHistorySourceAsync(revision, start, end, offset, token);
         _sessionProviders = host.ModelProviderRegistry;
         _defaultProvider = new(host.CatalogOptions);
+        ListsClaudeCodeConversations = new CodeAltaConfigStore(host.CatalogOptions).LoadGlobalClaudeCodeConversations;
         // A new session is created on the host of this process, the only one the page creates sessions on for now.
         _createSession = (project, provider, title, space, mode, options) => local.CreateSessionAsync(project, provider, title, null, space, mode, options);
         _sessionSpaces = host.SpaceCatalog;

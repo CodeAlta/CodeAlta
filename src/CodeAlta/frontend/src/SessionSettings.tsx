@@ -15,6 +15,7 @@ const AttributionMarkdown = lazy(() => import("./AttributionMarkdown").then(modu
 
 /**
  * Settings page for the sessions: how a session nobody named is titled, whether the model suggests the next prompt,
+ * whether the Explorer lists the Claude Code conversations started elsewhere (where a provider shares them),
  * whether the user reviews the changes of the sessions before an agent commits them, whether agents name CodeAlta as
  * a co-author of their commits and say that what they write elsewhere comes from CodeAlta (with the texts the user
  * writes for both), and whether the sessions share a single tab. The title, the suggestion, the review and the
@@ -22,10 +23,13 @@ const AttributionMarkdown = lazy(() => import("./AttributionMarkdown").then(modu
  * prompt (the review at once for its commits), unless it has a choice of its own. The single tab is a preference of
  * the window, which keeps it.
  */
-export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesApi, tabs }: {
+export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesApi, tabs, onClaudeCodeConversationsSaved }: {
   epoch: string | null;
   api?: Pick<typeof globalConfig, "sessionTitles" | "saveSessionTitles" | "reviewSettings" | "saveReviewSettings" | "attributionSettings" | "saveAttributionSettings"
-    | "promptSuggestionSettings" | "savePromptSuggestionSettings">;
+    | "promptSuggestionSettings" | "savePromptSuggestionSettings">
+    & Partial<Pick<typeof globalConfig, "claudeCodeConversationSettings" | "saveClaudeCodeConversationSettings">>;
+  /** Called once the choice to list the Claude Code conversations was saved: the Explorer reads them again, or hides them. */
+  onClaudeCodeConversationsSaved?: () => void;
   /** Whether the sessions share a single tab, and what changes it; absent where the window has no tabs to set. */
   tabs?: { single: boolean; setSingle: (value: boolean) => void };
   /** Called once the code editor was asked to show the configuration file: the window leaves Settings. */
@@ -37,11 +41,14 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
   const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor(async options => {
     // The choices are in the configuration file of the user; the suggestion, the review and the attribution ones are
     // null where the host has none.
-    const [titles, suggestions, review, attribution] = await Promise.all([api.sessionTitles({ expectedEpoch: epoch }, options),
+    const [titles, suggestions, review, attribution, claudeCode] = await Promise.all([api.sessionTitles({ expectedEpoch: epoch }, options),
       api.promptSuggestionSettings({ expectedEpoch: epoch }, options).catch(() => null),
       api.reviewSettings({ expectedEpoch: epoch }, options).catch(() => null),
-      api.attributionSettings({ expectedEpoch: epoch }, options).catch(() => null)]);
+      api.attributionSettings({ expectedEpoch: epoch }, options).catch(() => null),
+      // Null, and no card, where no provider shares its conversations (no_provider): the choice would change nothing.
+      api.claudeCodeConversationSettings?.({ expectedEpoch: epoch }, options).catch(() => null) ?? null]);
     return { ...titles, promptSuggestions: suggestions?.status === "ok" ? suggestions.enabled : null,
+      claudeCodeConversations: claudeCode?.status === "ok" ? claudeCode.enabled : null,
       beforeCommit: review?.status === "ok" ? review.beforeCommit : null, attribution: attribution?.status === "ok" ? attribution : null };
   }, `${epoch}`);
   // The choice is kept in the configuration file of the user: the page says where that file is.
@@ -102,6 +109,20 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
         <Field setting="sessions.single_tab" label={t("Single tab for sessions")} htmlFor="settings-single-session-tab"
           notice={<p className="settings-field-help">{t("A session you open takes the place of the one shown.")}</p>}>
           <Switch id="settings-single-session-tab" className="settings-checkbox" checked={tabs.single} onChange={event => tabs.setSingle(event.currentTarget.checked)} />
+        </Field>
+      </Card>}
+      {listing && listing.claudeCodeConversations !== null && api.saveClaudeCodeConversationSettings
+        && <Card className="appearance-settings" aria-labelledby="settings-session-claude-code-title">
+        <h2 id="settings-session-claude-code-title">{t("Claude Code")}</h2>
+        <Field setting="sessions.claude_code_conversations" label={t("Claude Code conversations from VS Code and the terminal")} htmlFor="settings-claude-code-conversations"
+          notice={<p className="settings-field-help">{t("List the Claude Code conversations that no session continues, under the projects and in the search. Turn it off once you imported what you need.")}</p>}>
+          <Switch id="settings-claude-code-conversations" className="settings-checkbox" checked={listing.claudeCodeConversations} disabled={busy}
+            onChange={event => {
+              const enabled = event.currentTarget.checked;
+              const save = api.saveClaudeCodeConversationSettings!;
+              void mutate(() => save({ expectedEpoch: epoch, enabled }, { timeoutMilliseconds: 30_000 }), "Saved.")
+                .then(saved => { if (saved) onClaudeCodeConversationsSaved?.(); });
+            }} />
         </Field>
       </Card>}
       {/* The two lines of CodeAlta come last, together, under why they matter. */}

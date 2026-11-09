@@ -133,7 +133,8 @@ export async function listClaudeCodeSessions(api: ClaudeCodeSessionsApi, epoch: 
   let reply: WorkspaceClaudeCodeSessionsResponse;
   try { reply = await api.list({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, offset, count, spaceId: scope?.spaceId ?? null }); }
   catch { return { kind: "error", code: "read_failed" }; }
-  if (reply.status === "no_provider") return { kind: "none" };
+  // Without a provider that shares its conversations, or with the listing turned off in Settings, there is nothing to list.
+  if (reply.status === "no_provider" || reply.status === "off") return { kind: "none" };
   if (reply.status !== "ok") return { kind: "error", code: reply.status };
   if (reply.hostEpoch !== epoch || !sameProject(reply, scope) || reply.offset !== offset || !Array.isArray(reply.sessions) || reply.sessions.length > count
     || !Number.isInteger(reply.total) || reply.total < offset + reply.sessions.length) return { kind: "error", code: "invalid_reply" };

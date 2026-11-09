@@ -52,7 +52,10 @@ internal static class CodeAltaConfigDocumentCopy
                         : null,
                 }
                 : null,
-            Sessions = document.Sessions is { } sessions ? new CodeAltaSessionSettingsDocument { Title = sessions.Title, PromptSuggestions = sessions.PromptSuggestions } : null,
+            Sessions = document.Sessions is { } sessions ? new CodeAltaSessionSettingsDocument
+            {
+                Title = sessions.Title, PromptSuggestions = sessions.PromptSuggestions, ClaudeCodeConversations = sessions.ClaudeCodeConversations,
+            } : null,
             Review = document.Review is { } review ? new CodeAltaReviewSettingsDocument { BeforeCommit = review.BeforeCommit } : null,
             Commits = document.Commits is { } commits ? new CodeAltaCommitSettingsDocument { CoAuthor = commits.CoAuthor, CoAuthorTrailer = commits.CoAuthorTrailer } : null,
             ExternalWriting = document.ExternalWriting is { } external

@@ -115,6 +115,15 @@ public sealed class WorkspaceClaudeCodeSessionsTests
             var none = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, Epoch, without, list, static (_, _, _, _) => throw new InvalidOperationException(),
                 static (_, _, _, _) => throw new InvalidOperationException(), static _ => throw new InvalidOperationException("Nothing is opened."));
             Assert.AreEqual(("no_provider", 0), ((await none.ClaudeCodeSessionsAsync(Request(), CancellationToken.None)).Status, asked.Count - 1));
+
+            // Turned off in Settings, neither the listing nor the search reads anything.
+            var off = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, Epoch, host.ModelProviderRegistry, list,
+                static (_, _, _, _) => throw new InvalidOperationException("No import."), static (_, _, _, _) => throw new InvalidOperationException(),
+                static _ => throw new InvalidOperationException("Nothing is opened."), null,
+                listAllExternalConversations: (_, _, _) => throw new InvalidOperationException("Nothing is searched."))
+            { ListsClaudeCodeConversations = static () => false };
+            Assert.AreEqual(("off", 0), ((await off.ClaudeCodeSessionsAsync(Request(), CancellationToken.None)).Status, asked.Count - 1));
+            Assert.AreEqual(("off", 0), ((await off.ClaudeCodeConversationsAsync(new(Epoch), CancellationToken.None)).Status, searched.Count - 1));
             await service.CloseSessionsAsync();
             await service.CloseImportsAsync();
         }

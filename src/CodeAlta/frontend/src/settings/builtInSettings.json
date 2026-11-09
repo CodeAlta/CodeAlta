@@ -219,6 +219,10 @@
     { "id": "sessions.single_tab", "page": "sessions", "section": "Session tabs", "label": "Single tab for sessions",
       "help": "A session you open takes the place of the one shown.", "keywords": ["tabs", "one tab"],
       "kind": "boolean", "default": false, "owner": "window", "agents": "readWrite" },
+    { "id": "sessions.claude_code_conversations", "page": "sessions", "section": "Claude Code", "label": "Claude Code conversations from VS Code and the terminal",
+      "help": "List the Claude Code conversations that no session continues, under the projects and in the search. Turn it off once you imported what you need.",
+      "keywords": ["import", "claude code", "vs code", "from claude code", "explorer"],
+      "kind": "boolean", "default": true, "owner": "host", "agents": "readWrite" },
 
     { "id": "worktrees.location", "page": "worktrees", "section": "Worktrees", "label": "New worktrees go", "keywords": ["git worktree", "folder"],
       "kind": "choice", "choices": [{ "value": "global", "label": "In your CodeAlta folder" }, { "value": "project", "label": "Inside each project" }, { "value": "custom", "label": "In a folder you choose" }],

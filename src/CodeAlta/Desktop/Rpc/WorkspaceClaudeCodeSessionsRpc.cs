@@ -26,6 +26,12 @@ internal sealed partial class WorkspaceService
     private readonly Func<ModelProviderDescriptor, int, CancellationToken, Task<ExternalConversationListing>>? _listAllExternalConversations;
     private Task<WorkspaceImportClaudeCodeSessionResponse>? _claudeImportWork;
 
+    /// <summary>
+    /// Gets whether the conversations are listed (<c>[sessions] claude_code_conversations</c>): off, the listing and the
+    /// search answer <c>off</c> and read nothing. A conversation already shown can still be previewed and imported.
+    /// </summary>
+    internal Func<bool> ListsClaudeCodeConversations { get; init; } = static () => true;
+
     internal WorkspaceService(OwnedSessionWorkspace reads, ProjectCatalog catalog, string epoch, ModelProviderRegistry providers,
         Func<ProjectDescriptor?, ModelProviderDescriptor, int, int, CancellationToken, Task<ExternalConversationListing>> listExternalConversations,
         Func<ProjectDescriptor, ModelProviderDescriptor, string, string?, Task<ExternalConversationImportResult>> importExternalConversation,
@@ -63,7 +69,7 @@ internal sealed partial class WorkspaceService
     /// <param name="request">The expected host epoch and the space the window shows.</param>
     /// <param name="cancellationToken">Stops the listing.</param>
     /// <returns>
-    /// <c>ok</c> with the sessions; <c>no_provider</c> when no enabled provider of the space shares its conversations; or a refusal:
+    /// <c>ok</c> with the sessions; <c>no_provider</c> when no enabled provider of the space shares its conversations; <c>off</c> when the user turned the listing off; or a refusal:
     /// <c>unconfigured</c>, <c>invalid_scope</c>, <c>stale_epoch</c>, <c>read_failed</c>.
     /// </returns>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
@@ -75,6 +81,7 @@ internal sealed partial class WorkspaceService
         if (_listAllExternalConversations is null || _sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
         if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidSpace(request.SpaceId)) return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
+        if (!ListsClaudeCodeConversations()) return Reply("off");
         if (ClaudeCodeProviderOf(null, request.SpaceId) is not { } provider) return Reply("no_provider");
         try
         {
@@ -106,7 +113,7 @@ internal sealed partial class WorkspaceService
     /// <param name="request">The exact project (none for the sessions of no project), the page and the expected host epoch.</param>
     /// <param name="cancellationToken">Stops the listing.</param>
     /// <returns>
-    /// <c>ok</c> with the sessions; <c>no_provider</c> when no enabled provider of the space shares its conversations (Claude Code);
+    /// <c>ok</c> with the sessions; <c>no_provider</c> when no enabled provider of the space shares its conversations (Claude Code); <c>off</c> when the user turned the listing off;
     /// or a refusal: <c>unconfigured</c>, <c>invalid_scope</c>, <c>stale_epoch</c>, <c>project_missing</c>, <c>read_failed</c>.
     /// </returns>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
@@ -120,6 +127,7 @@ internal sealed partial class WorkspaceService
             || request.Offset is < 0 or > ClaudeCodeSessionsMaxOffset || request.Count is < 1 or > ClaudeCodeSessionsLimit || !ValidSpace(request.SpaceId))
             return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
+        if (!ListsClaudeCodeConversations()) return Reply("off");
         var project = request.ProjectId is null ? null : await ExactProjectAsync(request.ProjectId, request.ProjectPath!).ConfigureAwait(false);
         if (request.ProjectId is not null && project is null) return Reply("project_missing");
         if (ClaudeCodeProviderOf(project?.ProjectPath, request.SpaceId) is not { } provider) return Reply("no_provider");

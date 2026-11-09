@@ -3,6 +3,14 @@ export const claudeCodeImportMessages = {
   // The group at the end of the sessions of a project: the Claude Code sessions started in VS Code or a terminal.
   "From Claude Code ({count})": ["De Claude Code ({count})", "Depuis Claude Code ({count})", "Aus Claude Code ({count})", "Claude Code から ({count})", "来自 Claude Code ({count})"],
   "Claude Code sessions started in VS Code or a terminal in this project": ["Sesiones de Claude Code iniciadas en VS Code o en un terminal en este proyecto", "Sessions Claude Code démarrées dans VS Code ou dans un terminal dans ce projet", "In VS Code oder einem Terminal gestartete Claude-Code-Sitzungen in diesem Projekt", "このプロジェクトで VS Code またはターミナルから開始された Claude Code のセッション", "在此项目中于 VS Code 或终端启动的 Claude Code 会话"],
+  // The switch of Settings → Sessions that lists them, or not.
+  "Claude Code conversations from VS Code and the terminal": ["Conversaciones de Claude Code de VS Code y el terminal", "Conversations Claude Code de VS Code et du terminal", "Claude-Code-Unterhaltungen aus VS Code und dem Terminal", "VS Code とターミナルの Claude Code の会話", "来自 VS Code 和终端的 Claude Code 对话"],
+  "List the Claude Code conversations that no session continues, under the projects and in the search. Turn it off once you imported what you need.": [
+    "Muestra las conversaciones de Claude Code que ninguna sesión continúa, bajo los proyectos y en la búsqueda. Desactívalo cuando hayas importado lo que necesitas.",
+    "Liste les conversations Claude Code qu’aucune session ne poursuit, sous les projets et dans la recherche. Désactivez-le une fois importé ce dont vous avez besoin.",
+    "Listet die Claude-Code-Unterhaltungen, die keine Sitzung fortsetzt, unter den Projekten und in der Suche. Schalten Sie es aus, sobald Sie importiert haben, was Sie brauchen.",
+    "どのセッションも続けていない Claude Code の会話を、プロジェクトの下と検索に表示します。必要なものを取り込んだらオフにしてください。",
+    "在项目下和搜索中列出没有会话继续的 Claude Code 对话。导入所需内容后即可关闭。"],
   // The group of the sessions of no project, after the projects.
   "From Claude Code, no project ({count})": ["De Claude Code, sin proyecto ({count})", "Depuis Claude Code, sans projet ({count})", "Aus Claude Code, ohne Projekt ({count})", "Claude Code から、プロジェクトなし ({count})", "来自 Claude Code，无项目 ({count})"],
   "Claude Code sessions started in VS Code or a terminal in a folder of no project": ["Sesiones de Claude Code iniciadas en VS Code o en un terminal en una carpeta que no es de ningún proyecto", "Sessions Claude Code démarrées dans VS Code ou dans un terminal dans un dossier d’aucun projet", "In VS Code oder einem Terminal gestartete Claude-Code-Sitzungen in einem Ordner ohne Projekt", "どのプロジェクトにも属さないフォルダーで VS Code またはターミナルから開始された Claude Code のセッション", "在不属于任何项目的文件夹中于 VS Code 或终端启动的 Claude Code 会话"],
