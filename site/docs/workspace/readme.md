@@ -94,7 +94,7 @@ Type `/` and the name of a [skill](settings.md#skills-management) in the empty p
 
 In CodeAlta Desktop, `Ctrl+Alt+B`, or **Browse saved sessions** in the menu of a project, opens the session browser: a searchable table of all the sessions of a project or of the global scope, with their provider, last update and message count. **Archived** shows the [archived sessions](../sessions/readme.md#archive-a-session) instead: **Restore** (or `Enter`, or a double-click) restores and opens one, **Info…** shows what is recorded of it, and **Delete** deletes it.
 
-Child sessions are listed under the session they come from. Typing a few words shows the sessions they find with the ones they belong to, grayed: the sessions above them and below them.
+Child sessions are listed under the session they come from. Typing a few words shows the sessions they find, each with the whole tree it belongs to, grayed: what a check of its top session would check too.
 
 To clean up a project, check the sessions in the first column: checking a session checks its child sessions too, and Shift-click checks the rows down to the one clicked before. The box of the header checks every session the search finds. Sort by **Updated** to put the oldest together. Then:
 

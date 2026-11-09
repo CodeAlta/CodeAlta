@@ -47,7 +47,7 @@ test("checked sessions are deleted the deepest first, and one with a session bel
   assert.deepEqual(sessionDeletionPlan([], catalog), { order: [], kept: [], missing: [] });
 });
 
-test("the sessions of a scope are a tree, sorted within each level; a search shows its matches with what they belong to", () => {
+test("the sessions of a scope are a tree, sorted within each level; a search shows each match with its whole tree", () => {
   // b ─ b1 ─ b11; b ─ b2; a; c, whose parent is in another scope
   const sessions = [session("a"), session("b"), session("b1", "b"), session("b11", "b1"), session("b2", "b"), session("c", "elsewhere")];
   const byName = (x: WorkspaceSession, y: WorkspaceSession) => x.id.localeCompare(y.id);
@@ -55,8 +55,9 @@ test("the sessions of a scope are a tree, sorted within each level; a search sho
   assert.deepEqual(shown(null), ["a", "b", "-b1", "--b11", "-b2", "c"]);
   // Each level in the order given: the children too.
   assert.deepEqual(shown(null, (x, y) => -byName(x, y)), ["c", "b", "-b2", "-b1", "--b11", "a"]);
-  // b1 matches: b above it and b11 below it are shown, not as matches; b2, a sibling, is not shown.
-  assert.deepEqual(shown(new Set(["b1"])), ["b?", "-b1", "--b11?"]);
+  // b1 matches: its whole tree is shown, b above it, b11 below it and b2 beside it, which checking b would check too.
+  assert.deepEqual(shown(new Set(["b1"])), ["b?", "-b1", "--b11?", "-b2?"]);
+  assert.deepEqual(shown(new Set(["b11", "a"])), ["a", "b?", "-b1?", "--b11", "-b2?"]);
   // b matches too: shown as a match, with all that is below it.
   assert.deepEqual(shown(new Set(["b", "b11"])), ["b", "-b1?", "--b11", "-b2?"]);
   assert.deepEqual(shown(new Set()), []);

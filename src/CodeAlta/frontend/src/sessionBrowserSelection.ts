@@ -28,7 +28,8 @@ export type SessionTreeRow = Readonly<{ session: WorkspaceSession; depth: number
 /**
  * The sessions of a scope as a tree: each session under the one it comes from, the sessions of a level in the order
  * `compare` gives. A session whose parent is not in the scope is at the top. With a search, `matched` are the sessions
- * it found: each is shown with the sessions above it and below it, which are not matches themselves.
+ * it found: each is shown with the whole tree it belongs to, from the session at its top down, since checking a session
+ * checks all that is below it. The sessions shown with a match are not matches themselves.
  */
 export function sessionTreeRows(sessions: readonly WorkspaceSession[], matched: ReadonlySet<string> | null,
   compare: (a: WorkspaceSession, b: WorkspaceSession) => number): readonly SessionTreeRow[] {
@@ -47,11 +48,17 @@ export function sessionTreeRows(sessions: readonly WorkspaceSession[], matched: 
   if (matched) {
     shown = new Set<string>();
     for (const id of matched) {
-      if (!byId.has(id)) continue;
-      // The sessions above it, then the ones below it.
-      for (let at: string | null = id; at !== null && byId.has(at) && !shown.has(at); at = byId.get(at)!.parentSessionId) shown.add(at);
-      shown.add(id);
-      for (let level = [id]; level.length > 0;) {
+      if (!byId.has(id) || shown.has(id)) continue;
+      // The session at the top of its tree, then all that is below it.
+      let top = id;
+      for (const seen = new Set([id]); ;) {
+        const parent = byId.get(top)!.parentSessionId;
+        if (parent === null || !byId.has(parent) || seen.has(parent)) break;
+        seen.add(parent);
+        top = parent;
+      }
+      shown.add(top);
+      for (let level = [top]; level.length > 0;) {
         level = level.flatMap(parent => (children.get(parent) ?? []).map(child => child.id)).filter(child => !shown!.has(child));
         for (const child of level) shown.add(child);
       }
