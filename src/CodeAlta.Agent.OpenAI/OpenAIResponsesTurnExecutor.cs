@@ -474,7 +474,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     {
                         AssistantMessage = assistantMessage,
                         AssistantPartContentIds = assistantPartContentIds,
-                        Usage = CreateUsage(request, completedResponse, codexMetadata, provider.PromptCacheLifetime, readsServiceTier: provider.CodexSubscription is null),
+                        Usage = CreateUsage(request, completedResponse, codexMetadata, provider.PromptCacheLifetime, readsServiceTier: IsOfficialOpenAIResponsesEndpoint(provider)),
                         UsageIsIncremental = attemptState.SentContinuation,
                         ProviderSessionId = string.IsNullOrWhiteSpace(completedResponse.Id) ? null : completedResponse.Id,
                         ProviderState = CreateProviderState(completedResponse, codexMetadata),
@@ -1518,18 +1518,20 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     IsOfficialOpenAIResponsesEndpoint(provider)));
         }
 
-        // The fast mode the session chose, on the OpenAI API: priority, or default to run at standard speed also in a project
-        // whose default tier is fast. A session that chose nothing sends no tier: the project's default applies.
-        if (request.FastMode is { } fastMode && IsOfficialOpenAIResponsesEndpoint(provider))
-        {
-            options.ServiceTier = new ResponseServiceTier(fastMode ? "priority" : "default");
-        }
-
         var modelRequest = OpenAIModelRequestOverrides.Find(provider.ModelRequestOverrides, request.ModelId);
         OpenAIExtraBodyPatchHelper.Apply(
             ref options.Patch,
             OpenAIModelRequestOverrides.MergeExtraBody(provider.ExtraBody, modelRequest));
         provider.ResponsesRequestCustomizer?.Invoke(new OpenAIResponsesRequestCustomizationContext(request, options));
+
+        // A session's explicit speed wins over provider and model defaults, including their raw JSON patches.
+        // With no choice, leave those defaults alone; otherwise off also overrides a project's priority default.
+        if (request.FastMode is { } fastMode && IsOfficialOpenAIResponsesEndpoint(provider))
+        {
+            var tier = fastMode ? "priority" : "default";
+            options.ServiceTier = new ResponseServiceTier(tier);
+            options.Patch.Set("$.service_tier"u8, tier);
+        }
 
         if (provider.CodexSubscription is not null)
         {
@@ -1619,6 +1621,12 @@ internal sealed class OpenAIResponsesTurnExecutor(
         options.ServiceTier = (request.FastMode ?? codexOptions.ServiceTier == "priority") && modelCapabilities.SupportsPriorityServiceTier
             ? new ResponseServiceTier("priority")
             : (ResponseServiceTier?)null;
+        if (request.FastMode is not null || !modelCapabilities.SupportsPriorityServiceTier)
+        {
+            // Raw defaults must not undo an explicit choice, nor bypass discovery for an unchosen session.
+            if (options.ServiceTier is { } tier) options.Patch.Set("$.service_tier"u8, tier.ToString());
+            else options.Patch.Remove("$.service_tier"u8);
+        }
         options.ToolChoice ??= ResponseToolChoice.CreateAutoChoice();
 
         if (codexOptions.IncludeEncryptedReasoning &&

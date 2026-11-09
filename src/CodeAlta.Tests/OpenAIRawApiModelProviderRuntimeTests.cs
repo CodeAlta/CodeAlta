@@ -12,6 +12,7 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Hosting;
 using CodeAlta.Agent;
+using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.OpenAI;
@@ -2733,9 +2734,41 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
-    public async Task OpenAIResponsesTurnExecutor_SendsNoFastModeToAnotherEndpoint()
+    [DataRow(null, false, "priority")]
+    [DataRow(true, false, "priority")]
+    [DataRow(false, false, "default")]
+    [DataRow(null, true, "priority")]
+    [DataRow(true, true, "priority")]
+    [DataRow(false, true, "default")]
+    public async Task OpenAIResponsesTurnExecutor_TheSessionFastModeOverridesConfiguredExtraBody(
+        bool? fastMode, bool modelOverride, string expectedTier)
     {
-        var responsesClient = new RecordingOpenAIResponseClient([[CreateTextOnlyAssistantResponseUpdate("response-gateway", "gpt-test", "Answer.")]]);
+        var extraBody = new Dictionary<string, object?> { ["service_tier"] = fastMode == true ? "default" : "priority" };
+        var responsesClient = new RecordingOpenAIResponseClient([[CreateCompletedUpdateServedBy(expectedTier)]]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+            ExtraBody = modelOverride ? null : extraBody,
+            ModelRequestOverrides = modelOverride
+                ? new Dictionary<string, AgentModelRequestOverride> { ["gpt-test"] = new() { ExtraBody = extraBody } }
+                : null,
+        });
+
+        _ = await executor.ExecuteTurnAsync(CreateTurnRequest() with { FastMode = fastMode }, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var payload = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        Assert.AreEqual(expectedTier, payload.RootElement.GetProperty("service_tier").GetString(),
+            "A session's explicit speed must win over provider and model defaults, including raw JSON patches.");
+    }
+
+    [TestMethod]
+    [DataRow(null)]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task OpenAIResponsesTurnExecutor_SendsAndReportsNoFastModeForAnotherEndpoint(bool? fastMode)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient([[CreateCompletedUpdateServedBy("priority")]]);
         var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
         {
             ProviderKey = "gateway",
@@ -2743,16 +2776,19 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             ResponsesClientFactory = _ => responsesClient,
         });
 
-        _ = await executor.ExecuteTurnAsync(CreateTurnRequest() with { FastMode = true }, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+        var response = await executor.ExecuteTurnAsync(CreateTurnRequest() with { FastMode = fastMode }, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
         using var payload = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
         Assert.IsFalse(payload.RootElement.TryGetProperty("service_tier", out _));
+        Assert.IsNull(response.Usage?.LastOperation?.FastMode, "Only the official OpenAI API reports fast mode from service_tier.");
     }
 
     [TestMethod]
-    public async Task ListModels_GivesTheModelsOfTheOpenAIResponsesApi_AFastModeOff()
+    [DataRow("gpt-test", false)]
+    [DataRow("ft:gpt-4.1:organization:custom:id", null)]
+    public async Task ListModels_GivesOnlyBaseModelsOfTheOpenAIResponsesApi_AFastMode(string modelId, bool? expectedFastMode)
     {
-        IReadOnlyList<AgentModelInfo> listed = [new("gpt-test")];
+        IReadOnlyList<AgentModelInfo> listed = [new(modelId)];
         var responses = CreateTurnRequest().Provider;
         async Task<bool?> FastModeAsync(Uri? baseUri, ModelProviderRuntimeDescriptor descriptor)
             => (await OpenAIProviderSdkFactory.ListModelsAsync(
@@ -2760,7 +2796,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 descriptor,
                 CancellationToken.None).ConfigureAwait(false)).Single().FastMode;
 
-        Assert.IsFalse(await FastModeAsync(null, responses).ConfigureAwait(false));
+        Assert.AreEqual(expectedFastMode, await FastModeAsync(null, responses).ConfigureAwait(false),
+            "OpenAI fast mode does not support fine-tuned models.");
         Assert.IsNull(await FastModeAsync(new Uri("https://gateway.example/v1"), responses).ConfigureAwait(false));
         Assert.IsNull(await FastModeAsync(null, responses with { TransportKind = AgentTransportKind.OpenAIChatCompletions }).ConfigureAwait(false),
             "The Chat Completions requests of CodeAlta send no tier.");
@@ -2830,6 +2867,39 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
 
         Assert.IsNotNull(response.Usage?.LastOperation);
         Assert.IsNull(response.Usage.LastOperation.FastMode);
+    }
+
+    [TestMethod]
+    [DataRow(null, true, "priority", "priority")]
+    [DataRow(null, false, "priority", null)]
+    [DataRow(true, true, "default", "priority")]
+    [DataRow(false, true, "priority", null)]
+    [DataRow(true, false, "priority", null)]
+    public async Task OpenAIResponsesTurnExecutor_CodexSessionFastModeOverridesConfiguredExtraBody(
+        bool? fastMode, bool supportsPriority, string configuredTier, string? expectedTier)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient([[CreateCompletedUpdateServedBy("default")]]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            ExtraBody = new Dictionary<string, object?> { ["service_tier"] = configuredTier },
+            CodexSubscription = new OpenAICodexSubscriptionOptions { ResponseTransport = "http", ServiceTier = "priority" },
+        });
+        var request = CreateCodexTurnRequest() with
+        {
+            ModelInfo = new AgentModelInfo("gpt-test", Capabilities: new Dictionary<string, object?>
+            {
+                ["serviceTiers"] = supportsPriority ? new[] { "priority" } : Array.Empty<string>(),
+            }),
+            FastMode = fastMode,
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        using var payload = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
+        Assert.AreEqual(expectedTier is not null, payload.RootElement.TryGetProperty("service_tier", out var tier));
+        if (expectedTier is not null) Assert.AreEqual(expectedTier, tier.GetString());
     }
 
     // A completed response with its usage, served by a tier.

@@ -124,8 +124,8 @@ internal static class OpenAIProviderSdkFactory
     }
 
     // The fast mode of the models (AgentModelInfo.FastMode). With Codex, the models whose discovery lists priority, on
-    // when the service_tier of the provider asks for it. On the Responses API of OpenAI, every model, off: a request
-    // without a tier runs at the default tier of the project, which the response names.
+    // when the service_tier of the provider asks for it. On the Responses API of OpenAI, base models, off: a request
+    // without a tier runs at the default tier of the project, which the response names. Fine-tuned models have no fast mode.
     private static IReadOnlyList<AgentModelInfo> WithFastMode(OpenAIProviderOptions provider, ModelProviderRuntimeDescriptor providerDescriptor, IReadOnlyList<AgentModelInfo> models)
     {
         if (provider.CodexSubscription is { } codex)
@@ -135,7 +135,7 @@ internal static class OpenAIProviderSdkFactory
         }
 
         return providerDescriptor.TransportKind == AgentTransportKind.OpenAIResponses && OpenAIResponsesTurnExecutor.IsOfficialOpenAIResponsesEndpoint(provider)
-            ? [.. models.Select(static model => model with { FastMode = false })]
+            ? [.. models.Select(static model => model with { FastMode = model.Id.StartsWith("ft:", StringComparison.Ordinal) ? null : false })]
             : models;
     }
 
