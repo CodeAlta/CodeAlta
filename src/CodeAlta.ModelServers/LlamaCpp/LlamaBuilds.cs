@@ -225,7 +225,13 @@ public sealed partial class LlamaBuilds
         lock (_gate)
         {
             var state = ReadState();
-            if (state.Current.GetValueOrDefault(backend) is { } current && current != tag) state.Previous[backend] = current;
+            // A build that failed its test is no way back: a rollback leaves none rather than offer it.
+            if (state.Current.GetValueOrDefault(backend) is { } current && current != tag)
+            {
+                if (state.Bad.Contains(current + "/" + backend)) state.Previous.Remove(backend);
+                else state.Previous[backend] = current;
+            }
+
             state.Current[backend] = tag;
             if (state.Previous.GetValueOrDefault(backend) == tag) state.Previous.Remove(backend);
             WriteState(state);

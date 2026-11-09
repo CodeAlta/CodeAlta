@@ -74,6 +74,24 @@ public sealed class ModelHostKeepAwakeTests
     }
 
     [TestMethod]
+    public void ARollback_LeavesNoWayBackToTheBuildThatFailed()
+    {
+        using var temp = TestTempDirectory.Create();
+        using var http = new HttpClient();
+        var builds = new CodeAlta.ModelServers.LlamaCpp.LlamaBuilds(Path.Combine(temp.Path, "builds"), http);
+        builds.MakeCurrent("rocm", "b12110");
+        builds.MakeCurrent("rocm", "b12193");
+        Assert.AreEqual("b12110", builds.Read().Previous["rocm"], "an update keeps the build it leaves as the way back");
+        builds.MakeCurrent("rocm", "b8200");
+        builds.MarkBad("rocm", "b8200");
+        builds.MakeCurrent("rocm", "b12193");
+        var state = builds.Read();
+        Assert.AreEqual("b12193", state.Current["rocm"]);
+        Assert.IsFalse(state.Previous.ContainsKey("rocm"), "the build that failed its test is not offered back");
+        Assert.IsTrue(builds.IsBad("rocm", "b8200"));
+    }
+
+    [TestMethod]
     public async Task APolicyThatAllowsLemonade_ReadsItsNewestBuildAtOnce()
     {
         using var temp = TestTempDirectory.Create();
