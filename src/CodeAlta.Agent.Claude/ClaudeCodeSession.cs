@@ -768,8 +768,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     }
 
     // Puts the running CLI in the fast mode the session chose, from its next turn, without starting it again: the flag
-    // settings of a process are its own, never saved as the user's. A session that chose none leaves the CLI as the
-    // user's settings put it. A CLI that refuses runs at its own speed, and the turn says so.
+    // settings of a process are its own, never saved as the user's, and they are the opt-in a CLI driven by an SDK waits
+    // for (sdk_opt_in_required). A session that chose none leaves the CLI as it started. A CLI that refuses runs at its
+    // own speed, and the turn says so.
     private async Task SwitchFastModeAsync(ClaudeCodeConnection connection, bool? fastMode, Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate, CancellationToken cancellationToken)
     {
         bool? current;
@@ -999,7 +1000,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 
         ReadRemoteControlAvailability(initialized);
 
-        // The fast mode the user's settings start the process in; an older CLI does not say it.
+        // The fast mode the process starts in, off until the session opts in; an older CLI does not say it.
         if (initialized.ValueKind == JsonValueKind.Object && initialized.TryGetProperty("fast_mode_state", out _))
         {
             lock (_gate)
