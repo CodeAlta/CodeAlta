@@ -52,7 +52,7 @@ test("a card shows the short id of its task after the date, in the color of its 
   const card = (shortId: string | null) => render(createElement(WorkItemCards, { hub: hub(state()), dockPreference: createDockPreference(),
     items: workItems([{ projectId: "p", truncated: false, plans: [], tasks: [row("named", "task", "pending", { shortId })] }], new Set(["s1"])),
     preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never }));
-  assert.match(card("ewfm"), /<span class="work-date">2026-10-07<\/span><code class="work-tag-id" data-tone="danger">ewfm<\/code>/);
+  assert.match(card("ewfm"), /<span class="work-date">2026-10-07<code class="work-tag-id" data-tone="danger">ewfm<\/code><\/span>/);
   assert.equal(card(null).includes("work-tag-id"), false, "a task without a short id shows none");
 });
 

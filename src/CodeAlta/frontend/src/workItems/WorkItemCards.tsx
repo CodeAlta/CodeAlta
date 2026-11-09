@@ -63,8 +63,9 @@ export function WorkItemTags({ item, projectName, shortId }: { item: WorkItem; p
   return <span className="work-tags">
     {item.kind === "task" && <Tag minimal round intent={taskCategoryTone(item.category)} icon={<AppIcon name={taskCategoryIcon(item.category)} size={12} />}>{t(taskCategoryLabel(item.category))}</Tag>}
     {projectName && <Tag minimal round icon={<AppIcon name="folder" size={12} />}>{projectName}</Tag>}
-    {item.created && <span className="work-date">{item.created}</span>}
-    {shortId && item.shortId && <code className="work-tag-id" data-tone={workItemTone(item)}>{item.shortId}</code>}
+    {/* The short id is in the line of the date, so that their texts share a baseline. */}
+    {(item.created || shortId && item.shortId) && <span className="work-date">{item.created}
+      {shortId && item.shortId && <code className="work-tag-id" data-tone={workItemTone(item)}>{item.shortId}</code>}</span>}
   </span>;
 }
 
