@@ -656,7 +656,15 @@ public sealed partial class ModelHost : IAsyncDisposable
     private async Task BackgroundAsync(CancellationToken cancellationToken)
     {
         var lastUnmanaged = DateTimeOffset.MinValue;
-        await CheckLatestAsync(force: false, cancellationToken).ConfigureAwait(false);
+        // GitHub that does not answer now is read again in two minutes: the loop goes on (updates, keep-awake, servers found).
+        try
+        {
+            await CheckLatestAsync(force: false, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is ModelHostException or IOException or HttpRequestException && !cancellationToken.IsCancellationRequested)
+        {
+        }
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -867,8 +875,9 @@ public sealed partial class ModelHost : IAsyncDisposable
         await _disposed.CancelAsync().ConfigureAwait(false);
         if (_background is not null)
         {
+            // A loop that failed must not keep the servers of a desktop running once it quits: the close goes on.
             try { await _background.ConfigureAwait(false); }
-            catch (OperationCanceledException) { }
+            catch (Exception exception) when (exception is not OutOfMemoryException) { }
         }
 
         await _downloads.DisposeAsync().ConfigureAwait(false);

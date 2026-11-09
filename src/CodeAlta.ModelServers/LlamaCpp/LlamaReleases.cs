@@ -48,7 +48,16 @@ public sealed partial class LlamaReleases
         if (pointer.ValueKind != JsonValueKind.Object)
             throw new ModelHostException("not_found", $"The release {version} of llama.cpp names no build.");
         var address = pointer.GetProperty("browser_download_url").GetString()!;
-        var tag = (await _http.GetStringAsync(address, cancellationToken).ConfigureAwait(false)).Trim();
+        string tag;
+        try
+        {
+            tag = (await _http.GetStringAsync(address, cancellationToken).ConfigureAwait(false)).Trim();
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new ModelHostException("network", $"GitHub did not give the build of {version}: {exception.Message}");
+        }
+
         if (!BuildTagPattern().IsMatch(tag)) throw new ModelHostException("not_found", $"The release {version} names '{tag}', which is not a build.");
         return await GetBuildAsync(tag, cancellationToken).ConfigureAwait(false) with { Version = version };
     }

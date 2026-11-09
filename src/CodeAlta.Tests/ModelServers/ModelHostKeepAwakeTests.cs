@@ -74,6 +74,25 @@ public sealed class ModelHostKeepAwakeTests
     }
 
     [TestMethod]
+    public async Task GitHubFailingAtTheStart_LeavesTheHostRunning_AndItsCloseWhole()
+    {
+        using var temp = TestTempDirectory.Create();
+        var asked = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var host = new ModelHost(new ModelHostOptions
+        {
+            SharedRoot = Path.Combine(temp.Path, "shared"), InstanceRoot = Path.Combine(temp.Path, "instance"),
+            // The versioned release is there, but its nightly-tag.txt answers 504, as GitHub did on 2026-11-09.
+            NetworkHandler = new RecordingHandler(asked, gatewayTimeout: "/nightly-tag.txt"),
+        });
+        Assert.IsNull(await host.CheckLatestAsync(force: true, CancellationToken.None), "a build GitHub could not give is no build, not a failure");
+        await host.StartAsync(CancellationToken.None);
+        for (var i = 0; i < 200 && !asked.Contains("/nightly-tag.txt"); i++) await Task.Delay(25);
+        await Task.Delay(200);
+        // The loop of the host is alive (its updates, its keep-awake) and its close goes through to the end: its servers stop.
+        await host.DisposeAsync();
+    }
+
+    [TestMethod]
     public void ARollback_LeavesNoWayBackToTheBuildThatFailed()
     {
         using var temp = TestTempDirectory.Create();
@@ -107,12 +126,13 @@ public sealed class ModelHostKeepAwakeTests
     }
 
     // Answers the GitHub API: a stable release that names b12110, that build, and Lemonade's newest; records what is asked.
-    private sealed class RecordingHandler(System.Collections.Concurrent.ConcurrentQueue<string> asked) : HttpMessageHandler
+    private sealed class RecordingHandler(System.Collections.Concurrent.ConcurrentQueue<string> asked, string? gatewayTimeout = null) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri!.AbsolutePath;
             asked.Enqueue(path);
+            if (path == gatewayTimeout) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.GatewayTimeout));
             var json = path switch
             {
                 "/repos/ggml-org/llama.cpp/releases/latest" => """{ "tag_name": "v0.9.0", "assets": [ { "name": "nightly-tag.txt", "browser_download_url": "https://github.example/nightly-tag.txt", "size": 7 } ] }""",
