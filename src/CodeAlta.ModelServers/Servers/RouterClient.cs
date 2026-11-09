@@ -157,23 +157,25 @@ public sealed partial class RouterClient
     /// <returns>Its tokens per second, or null.</returns>
     public async Task<double?> TokensPerSecondAsync(string? model, int? port, CancellationToken cancellationToken)
     {
-        if (port is { } direct && await MetricsAsync("/metrics", direct, cancellationToken).ConfigureAwait(false) is { } speed) return speed;
-        return await MetricsAsync(WithModel("/metrics", model), null, cancellationToken).ConfigureAwait(false);
+        // A process that answers is the answer, also with no speed yet (0 while it has generated nothing): only one that does
+        // not answer sends the request through the router.
+        if (port is { } direct && await MetricsAsync("/metrics", direct, cancellationToken).ConfigureAwait(false) is (true, var speed)) return speed;
+        return (await MetricsAsync(WithModel("/metrics", model), null, cancellationToken).ConfigureAwait(false)).Speed;
     }
 
-    private async Task<double?> MetricsAsync(string path, int? port, CancellationToken cancellationToken)
+    private async Task<(bool Answered, double? Speed)> MetricsAsync(string path, int? port, CancellationToken cancellationToken)
     {
         try
         {
             using var response = await SendAsync(HttpMethod.Get, path, null, TimeSpan.FromSeconds(5), cancellationToken, port).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode) return null;
+            if (!response.IsSuccessStatusCode) return (false, null);
             var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             var match = MetricPattern().Match(text);
-            return match.Success && double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && value > 0 ? value : null;
+            return (true, match.Success && double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && value > 0 ? value : null);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            return null;
+            return (false, null);
         }
     }
 

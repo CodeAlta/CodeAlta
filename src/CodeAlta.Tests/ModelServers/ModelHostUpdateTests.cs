@@ -141,12 +141,13 @@ public sealed class ModelHostUpdateTests
     public async Task TheReadsOfTheStatus_AskTheProcessOfTheModel_AndWriteNothingToTheLogOfTheRouter()
     {
         await using var machine = FakeMachine.Create();
-        machine.GitHub.Publish("b12000", new FakeBehaviour());
+        // A model that has generated nothing yet says a speed of 0, as llama-server does: its process answered all the same.
+        machine.GitHub.Publish("b12000", new FakeBehaviour { TokensPerSecond = 0 });
         await using var host = machine.CreateHost();
         await machine.PrepareAsync(host, "b12000");
         // The requests and the speed of the loaded model come from its process: read twice, every six seconds.
-        await machine.WaitForAsync(host, () => host.ListServers().Single().Status.Models.FirstOrDefault(static model => model.State == "loaded") is { TotalSlots: 2, TokensPerSecond: > 0.0 } model
-            ? model : null, "the slots and the speed of the loaded model");
+        await machine.WaitForAsync(host, () => host.ListServers().Single().Status.Models.FirstOrDefault(static model => model.State == "loaded") is { TotalSlots: 2 } model
+            ? model : null, "the slots of the loaded model");
         await Task.Delay(TimeSpan.FromSeconds(7));
         var log = machine.ServerLog(host.ListServers().Single().Definition.Id);
         StringAssert.Contains(log, "server is listening", "the log of the router");
@@ -191,6 +192,8 @@ public sealed class ModelHostUpdateTests
 
         public string? ExitAtOnce { get; init; }
 
+        public double TokensPerSecond { get; init; } = 50;
+
         public string ToJson(int build) => new JsonObject
         {
             ["build"] = build,
@@ -198,6 +201,7 @@ public sealed class ModelHostUpdateTests
             ["devices"] = new JsonArray(new JsonObject { ["name"] = "CPU0", ["description"] = "Fake processor", ["totalMiB"] = 16384, ["freeMiB"] = 12000 }),
             ["chat"] = Chat,
             ["exitAtOnce"] = ExitAtOnce,
+            ["tokensPerSecond"] = TokensPerSecond,
             // A fake that a dead test left behind ends by itself.
             ["lifetimeSeconds"] = 180,
         }.ToJsonString();
