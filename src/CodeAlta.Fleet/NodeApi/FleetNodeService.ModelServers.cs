@@ -135,6 +135,14 @@ public sealed partial class FleetNodeService
     ];
 
     private readonly ConcurrentDictionary<(FleetConnection, string), CancellationTokenSource> _llamaRequests = new();
+    // The requests cancelled before the node knew them (the cancel came first): one that comes then does not start. Bounded.
+    private readonly ConcurrentDictionary<(FleetConnection, string), DateTimeOffset> _llamaCancelledEarly = new();
+    private const int MaxLlamaCancelledEarly = 1024;
+
+    // The most inference requests of one channel under way at once. A request that waits for a slot of its model holds a handler
+    // of the channel meanwhile, and a channel serves a bounded number of them (FleetConnectionOptions.MaxConcurrentIncomingRequests):
+    // beyond this, the caller retries later rather than leave the channel no handler for its other calls.
+    internal const int MaxLlamaRequestsPerChannel = 32;
     private readonly ConcurrentDictionary<FleetConnection, LlamaWatch> _llamaWatches = new();
     private HttpClient? _llamaHttp;
 
@@ -239,6 +247,13 @@ public sealed partial class FleetNodeService
         }
 
         var connection = call.Caller.Connection;
+        if (_llamaRequests.Keys.Count(key => ReferenceEquals(key.Item1, connection)) >= MaxLlamaRequestsPerChannel)
+        {
+            request.Dispose();
+            throw new FleetException(FleetErrorCodes.ServerBusy, FleetErrorHints.Retry,
+                $"{server.Definition.Name} already has {MaxLlamaRequestsPerChannel} requests of this computer under way or waiting: try again in a moment.");
+        }
+
         var stop = new CancellationTokenSource();
         if (!_llamaRequests.TryAdd((connection, parameters.RequestId), stop))
         {
@@ -246,6 +261,9 @@ public sealed partial class FleetNodeService
             request.Dispose();
             throw new FleetException(FleetErrorCodes.InvalidParams, null, "A request with this id is under way.");
         }
+
+        // Its caller stopped it before it got here: it does not start.
+        if (_llamaCancelledEarly.TryRemove((connection, parameters.RequestId), out _)) stop.Cancel();
 
         // The channel that asked closes: the request stops, and the server is not left generating for nobody.
         _ = connection.Completion.ContinueWith(_ =>
@@ -356,6 +374,19 @@ public sealed partial class FleetNodeService
         {
             try { stop.Cancel(); }
             catch (ObjectDisposedException) { }
+        }
+        else if (parameters.RequestId is { Length: > 0 and <= 64 } early)
+        {
+            // The request may still be on its way: kept a moment, so that it does not start when it comes.
+            var now = _options.TimeProvider.GetUtcNow();
+            if (_llamaCancelledEarly.Count >= MaxLlamaCancelledEarly)
+            {
+                foreach (var old in _llamaCancelledEarly.Where(entry => now - entry.Value > TimeSpan.FromMinutes(1)).Select(static entry => entry.Key).ToArray())
+                    _llamaCancelledEarly.TryRemove(old, out _);
+                if (_llamaCancelledEarly.Count >= MaxLlamaCancelledEarly) _llamaCancelledEarly.Clear();
+            }
+
+            _llamaCancelledEarly[(call.Caller.Connection, early)] = now;
         }
 
         return Task.FromResult(new FleetEmpty());

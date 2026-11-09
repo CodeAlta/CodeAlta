@@ -227,7 +227,9 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   const title = item.category === "file" ? t("Modified files") : item.category === "image" ? t("Image read") : item.category === "user" ? userTitle(item, t) : item.category === "plan" ? t("Plan")
     : item.category === "assistant" ? t("Assistant") : item.category === "notes" ? t("Notes") : item.category === "error" ? t("Error")
     : item.category === "reasoning" ? t(item.title === "Reasoning summary" ? "Reasoning summary" : "Reasoning")
-    : prompt ? t(prompt.changed ? "System prompt changed" : "System prompt recorded") : item.title;
+    : prompt ? t(prompt.changed ? "System prompt changed" : "System prompt recorded")
+    // The notice of a request that waits for a free request of its provider, or a free slot of its model server.
+    : item.title === "Waiting for a free slot" || item.title === "Waiting for a free request" ? t(item.title) : item.title;
   // The agent prompt by its name, then the size of the prompt.
   const promptFacts = prompt ? [prompt.name, prompt.tokens > 0 ? t("{count} tokens", { count: promptTokens(prompt.tokens) }) : null].filter(Boolean).join(" · ") : null;
   const copyLabel = copyState === "copied" ? t("Copied") : copyState === "failed" ? t("Copy failed") : t("Copy {title} as Markdown", { title });

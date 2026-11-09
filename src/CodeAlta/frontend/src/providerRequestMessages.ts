@@ -9,6 +9,9 @@ export const providerRequestMessages = {
     "このプロバイダーが同時に受けるリクエストの上限です。それを超えるセッションは順番を待ちます。",
     "此提供商同时接收的最多请求数；超出的会话按顺序等待。",
   ],
+  // The notice of a session whose request waits, in its timeline.
+  "Waiting for a free request": ["Esperando una solicitud libre", "En attente d’une requête libre", "Wartet auf eine freie Anfrage", "空きリクエストを待機中", "正在等待空闲请求"],
+  "Waiting for a free slot": ["Esperando un hueco libre", "En attente d’un emplacement libre", "Wartet auf einen freien Slot", "空きスロットを待機中", "正在等待空闲槽位"],
   "Requests at once is a whole number greater than zero.": [
     "Solicitudes a la vez es un número entero mayor que cero.",
     "Requêtes simultanées est un nombre entier supérieur à zéro.",

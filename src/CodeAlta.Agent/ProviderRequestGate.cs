@@ -267,22 +267,37 @@ public sealed class ProviderRequestGate
     }
 
     // A waiter that failed while it waited (its callback threw) leaves the queue, or gives back the slot it was given meanwhile.
+    // Decided under one lock: an admission that came meanwhile is given back, never left to nobody.
     private void Abandon(Waiter waiter)
     {
-        bool admitted;
+        List<TaskCompletionSource>? changed = null;
+        bool release;
         lock (_sync)
         {
-            admitted = waiter.Node is null && !waiter.Cancelled;
+            if (waiter.Node is { } node)
+            {
+                changed = TakeChangedLocked(node.Next);
+                _waiters.Remove(node);
+                waiter.Node = null;
+                release = false;
+            }
+            else
+            {
+                // Admitted, unless cancelled before: its slot is given back once.
+                release = !waiter.Cancelled;
+            }
+
+            waiter.Cancelled = true;
         }
 
-        if (admitted)
+        if (release)
         {
             Release();
+            return;
         }
-        else
-        {
-            Cancel(waiter, CancellationToken.None);
-        }
+
+        waiter.Admitted.TrySetCanceled();
+        new Signals(null, changed).Raise();
     }
 
     private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);

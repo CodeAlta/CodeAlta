@@ -488,16 +488,21 @@ function LimitsSection({ epoch, machine, api }: { epoch: string; machine: Machin
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem>(null);
   const [generation, setGeneration] = useState(0);
+  // The limit is read when the section opens and after a change, never when the load moves: a value being typed stays.
   useEffect(() => {
     const abort = new AbortController();
-    const options = { signal: abort.signal, timeoutMilliseconds: 30_000 };
-    api.limits({ expectedEpoch: epoch, machineId: machine.id }, options).then(value => {
+    api.limits({ expectedEpoch: epoch, machineId: machine.id }, { signal: abort.signal, timeoutMilliseconds: 30_000 }).then(value => {
       if (abort.signal.aborted) return;
       const failed = managementProblem(value.status);
       if (failed) setProblem({ key: failed, detail: value.message });
       else { setSaved(value.sessions); setTyped(value.sessions == null ? "" : String(value.sessions)); }
     }, () => { if (!abort.signal.aborted) setProblem({ key: "The machine does not answer: it is offline." }); });
-    api.seats({ expectedEpoch: epoch, machineId: machine.id }, options).then(value => {
+    return () => abort.abort();
+  }, [api, epoch, machine.id, generation]);
+  // The queue, read again whenever the load of the machine moves.
+  useEffect(() => {
+    const abort = new AbortController();
+    api.seats({ expectedEpoch: epoch, machineId: machine.id }, { signal: abort.signal, timeoutMilliseconds: 30_000 }).then(value => {
       if (!abort.signal.aborted && value.status === "ok") setSeats(value);
     }, () => { });
     return () => abort.abort();

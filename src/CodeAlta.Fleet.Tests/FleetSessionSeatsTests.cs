@@ -166,6 +166,21 @@ public sealed class FleetSessionSeatsTests
     }
 
     [TestMethod]
+    public async Task ARequestCancelledBeforeItIsAsked_LeavesNothingInTheQueue()
+    {
+        var (seats, busy) = Create(1);
+        await using var _ = seats;
+        busy.Add("working");
+        await seats.EvaluateAsync(TestContext.CancellationToken);
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => seats.RequestAsync(Run("gone"), cancelled.Token));
+
+        Assert.IsEmpty(seats.Snapshot().Queue);
+    }
+
+    [TestMethod]
     public async Task Disposing_CancelsTheRunsThatWait()
     {
         var (seats, busy) = Create(1);

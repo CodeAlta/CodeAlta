@@ -104,10 +104,10 @@ public sealed class FleetSessionSeats : IAsyncDisposable
     public TimeSpan Poll { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
-    /// Gets or sets how long a run admitted keeps its seat before its tree is seen at work: one that never starts gives it back
-    /// then, rather than hold it forever.
+    /// Gets or sets how long a run admitted keeps its seat before its tree is seen at work, when nothing gives it back sooner (its
+    /// run started, or it was refused): one that never starts gives it back then, rather than hold it forever.
     /// </summary>
-    public TimeSpan ReservationTimeout { get; set; } = TimeSpan.FromMinutes(2);
+    public TimeSpan ReservationTimeout { get; set; } = TimeSpan.FromMinutes(10);
 
     /// <summary>Raised, on any thread, when the queue or the number of seats taken changed.</summary>
     public event Action? Changed;
@@ -124,6 +124,7 @@ public sealed class FleetSessionSeats : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Id);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.RootId);
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        cancellationToken.ThrowIfCancellationRequested();
         Waiter waiter;
         lock (_gate)
         {
@@ -135,7 +136,17 @@ public sealed class FleetSessionSeats : IAsyncDisposable
             waiter.Node = _queue.AddLast(waiter);
         }
 
-        await EvaluateAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EvaluateAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Not asked after all: it leaves the queue, or gives back the seat it was given meanwhile.
+            if (!Cancel(request.Id)) Release(request.Id);
+            throw;
+        }
+
         lock (_gate)
         {
             var position = waiter.Node is null ? 0 : Position(waiter);

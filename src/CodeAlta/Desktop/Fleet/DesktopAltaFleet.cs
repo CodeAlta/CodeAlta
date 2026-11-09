@@ -364,11 +364,13 @@ internal sealed partial class DesktopAltaFleet(DesktopFleet fleet, string machin
             Os = info?.Os ?? inventory?.Os,
             Version = info?.Version ?? inventory?.AppVersion?.Split('+')[0],
             Capabilities = [.. inventory?.Capabilities ?? []],
-            Labels = [.. inventory?.Labels ?? []],
+            // The tags the machine says itself first: one reached directly publishes none to a server.
+            Labels = [.. info?.Tags ?? inventory?.Labels ?? []],
             Providers = providers,
             Permissions = permissions,
             Sessions = listing.Sessions.Count,
-            Working = listing.ListedAt is not null ? listing.Sessions.Count(static session => session.State == "working") : presence?.ActiveSessions,
+            // The seats it says are taken (a session and its sub-sessions count once, as its limit does), else its sessions at work.
+            Working = listing.Load?.Working ?? (listing.ListedAt is not null ? listing.Sessions.Count(static session => session.State == "working") : presence?.ActiveSessions),
             // The seats of the machine: what it said with its list of sessions, else what it told its server.
             Queued = listing.Load?.Queued ?? presence?.QueuedSessions,
             SessionLimit = listing.Load is { } load ? load.Limit : presence?.SessionLimit,

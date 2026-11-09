@@ -190,7 +190,7 @@ Tags were named labels before CodeAlta 4.2: `altanode labels` and `--label` stil
 A machine that serves a few sessions well can say so: beyond its limit, the work of other machines waits for its turn instead of slowing every session down. On its page in CodeAlta Desktop, under **Limits**, type the number in **Sessions at work at once**, or leave it empty for no limit. On the machine itself, `altanode limits sessions 3` sets it, `altanode limits sessions off` removes it, and `altanode limits` shows it.
 
 - A session and its sub-sessions count once, and a session that waits for you (a question, a command to allow) holds no seat.
-- What waits is a prompt sent from another computer, a session an agent of another machine starts, a prompt queued for such a session, and a run of an automation. They start first in, first out, also after the machine restarts.
+- What waits is a prompt sent from another computer, a session an agent of another machine starts, a prompt queued for such a session, and a run of an automation. They start first in, first out. A prompt that waits still waits after the machine restarts; a run of an automation that waits is interrupted by the restart.
 - The work started on the machine itself is counted, and never waits.
 - **Limits** lists what waits: **Start now** starts one at once, past the limit, and **Take out of the queue** drops it.
 

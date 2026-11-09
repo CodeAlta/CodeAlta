@@ -64,6 +64,31 @@ public sealed class ModelServerSlotsTests
     }
 
     [TestMethod]
+    public async Task AWaitWhoseCallbackFails_GivesBackTheSlotItWasGivenMeanwhile()
+    {
+        var token = TestContext.CancellationToken;
+        var gate = new ModelSlotGate();
+        gate.SetLimit(1);
+        var held = await gate.AcquireAsync(null, token);
+        var reported = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Its callback is still at work when the slot comes, then throws a cancellation (its caller went).
+        var failing = gate.AcquireAsync(async (_, _) =>
+        {
+            reported.TrySetResult();
+            await release.Task;
+            throw new OperationCanceledException();
+        }, token).AsTask();
+        await reported.Task.WaitAsync(TimeSpan.FromSeconds(10), token);
+        held.Dispose();
+        release.SetResult();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => failing);
+
+        Assert.AreEqual((0, 0), (gate.ActiveCount, gate.WaitingCount), "the slot it was given is not lost");
+        (await gate.AcquireAsync(null, token).AsTask().WaitAsync(TimeSpan.FromSeconds(10), token)).Dispose();
+    }
+
+    [TestMethod]
     public async Task TheHost_SizesTheSlotsOfAModelBySettings_AndListsTheRequestsThatWait()
     {
         var token = TestContext.CancellationToken;

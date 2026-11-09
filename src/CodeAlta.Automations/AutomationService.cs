@@ -535,7 +535,8 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// <returns>The run as it is now; null for a run that is not known.</returns>
     internal AutomationRun? MarkQueued(string runId, string message)
     {
-        var queued = _state.Update(runId, current => current.Status == AutomationRun.Running && current.SessionId is null
+        // A run its owner continued past a budget (held) may then wait for a seat.
+        var queued = _state.Update(runId, current => current.Status is AutomationRun.Running or AutomationRun.Held && current.SessionId is null
             ? current with { Status = AutomationRun.Queued, Message = message } : current);
         Changed?.Invoke();
         return queued;

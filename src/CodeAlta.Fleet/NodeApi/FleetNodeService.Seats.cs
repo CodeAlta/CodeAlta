@@ -123,12 +123,24 @@ public sealed partial class FleetNodeService
         if (_seatHolds.ContainsKey(id)) return QueuedResult(Seats.Snapshot().Queue.FirstOrDefault(item => item.Id == id)?.Position ?? 1);
         var root = await RootOfAsync(session.SessionId, CancellationToken.None).ConfigureAwait(false);
         var ticket = await Seats.RequestAsync(new FleetSeatRequest(id, root, session.SessionId, title ?? session.Title, kind), CancellationToken.None).ConfigureAwait(false);
-        if (ticket.IsAdmitted) return SeatedSend(held);
+        if (ticket.IsAdmitted)
+        {
+            // A stop of the kill switch reaches it here too: a send taken again after a restart was not checked before.
+            if (Policy?.Halt is { } halt)
+            {
+                Seats.Release(id);
+                HeldSends.Remove(id);
+                throw new FleetException(FleetNodeErrorCodes.FleetStopped, null, halt.Describe(_options.Name));
+            }
+
+            return SeatedSend(held);
+        }
         if (!_seatHolds.TryAdd(id, 0)) return QueuedResult(ticket.Position);
         try
         {
             // Kept before the answer says it waits: a send accepted is never lost with the process.
-            HeldSends.Add(held with { Reason = FleetHeldSend.QueueReason });
+            // Its place among the sends kept is when it joined the queue, not when a budget first held it: a restart keeps the order.
+            HeldSends.Add(held with { Reason = FleetHeldSend.QueueReason, HeldAt = held.IsQueued ? held.HeldAt : _options.TimeProvider.GetUtcNow() });
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException
             or CodeAlta.Catalog.Secrets.SecretStoreUnavailableException or FleetHeldSendsFullException)
@@ -142,6 +154,23 @@ public sealed partial class FleetNodeService
         LogInfo($"The prompt of the session {session.SessionId} waits for a seat of the machine (place {ticket.Position}).");
         _ = SendOnceSeatedAsync(id, session.SessionId, ticket.Admitted, held);
         return QueuedResult(ticket.Position);
+    }
+
+    // A send that found its session at work, and that no caller waits for: queued in the session, to start after its turn.
+    private async Task<FleetCommandResult> QueueInSessionAsync(FleetHeldSend held)
+    {
+        try
+        {
+            if (await _host.RuntimeService.TryGetRecoverableSessionAsync(held.SessionId).ConfigureAwait(false) is not { } session)
+                return new FleetCommandResult("unknown_target", Code: "unknown_target");
+            await _host.RuntimeService.QueuePromptAsync(session, held.Text, "queue", null, CancellationToken.None).ConfigureAwait(false);
+            return new FleetCommandResult(FleetSeatStatuses.Queued, Code: "queued_in_session");
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or IOException or UnauthorizedAccessException)
+        {
+            LogWarn($"The prompt of the session {held.SessionId} found it at work and could not be queued in it: {exception.Message}");
+            return new FleetCommandResult("busy", Code: "busy");
+        }
     }
 
     private static FleetCommandResult QueuedResult(int position)
@@ -196,6 +225,9 @@ public sealed partial class FleetNodeService
 
             // Forgotten once its run started (SendHeld), not before: a process that ends meanwhile takes it again.
             var result = SeatedSend(held);
+            // Its session works meanwhile (another prompt of its tree took the seat first): nobody waits for this answer, so the
+            // prompt goes into the queue of the session, as the caller does with a busy answer.
+            if (result.Status == "busy") result = await QueueInSessionAsync(held).ConfigureAwait(false);
             LogInfo($"The prompt of the session {sessionId} was sent once it had a seat ({result.Status}).");
         }
         catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or IOException)
@@ -253,7 +285,7 @@ public sealed partial class FleetNodeService
     private void RegisterSeats(FleetNodeCaller caller, Access view, Access drive)
     {
         On(caller, FleetNodeMethods.SeatsList, view, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetSeatsSnapshot,
-            (_, _, cancellationToken) => ReadSeatsAsync(cancellationToken), optionalParams: true);
+            async (call, _, cancellationToken) => VisibleSeats(call.Device, await ReadSeatsAsync(cancellationToken).ConfigureAwait(false)), optionalParams: true);
         On(caller, FleetNodeMethods.SeatsCancel, drive, FleetNodeJsonContext.Default.FleetSeatRef, FleetNodeJsonContext.Default.FleetSeatResult,
             (call, parameters, _) => Task.FromResult(CancelSeat(call, parameters)));
     }
@@ -297,10 +329,21 @@ public sealed partial class FleetNodeService
         return new FleetSeatResult("ok");
     }
 
+    // What a device sees of the queue: all of it for the owner's devices; for a person who reaches only their own sessions here
+    // (a member of a team), their own runs only, the place of each in the whole queue kept.
+    private FleetSeatsSnapshot VisibleSeats(Identity.TrustedDevice? device, FleetSeatsSnapshot seats)
+        => device is not { OwnSessionsOnly: true } ? seats
+            : seats with { Queue = [.. seats.Queue.Where(item => item.SessionId is { } session && Principals.Owns(session, device.PersonId, device.OrganizationId))] };
+
     private FleetSeatResult CancelSeat(FleetNodeCall call, FleetSeatRef parameters)
     {
         if (string.IsNullOrWhiteSpace(parameters.Id)) throw new FleetException(FleetErrorCodes.InvalidParams, null, "The request names the run that waits.");
+        // A person who reaches only their own sessions here takes only their own runs out: the others are not shown to exist.
+        if (call.Device is { OwnSessionsOnly: true } && !VisibleSeats(call.Device, Seats.Snapshot()).Queue.Any(item => item.Id == parameters.Id))
+            return new FleetSeatResult("not_found");
         if (!Seats.Cancel(parameters.Id)) return new FleetSeatResult("not_found");
+        // A send taken out is forgotten before the answer says so: a restart right after does not send it.
+        if (_seatHolds.ContainsKey(parameters.Id)) HeldSends.Remove(parameters.Id);
         LogInfo($"The run {parameters.Id} was taken out of the queue of the machine ({(call.Caller.IsOwner ? "the owner" : call.Caller.DeviceId)}).");
         return new FleetSeatResult("ok");
     }

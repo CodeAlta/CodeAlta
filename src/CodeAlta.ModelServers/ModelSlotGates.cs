@@ -125,7 +125,21 @@ public sealed class ModelSlotGate
         }
 
         Told();
-        using var registration = cancellationToken.Register(() => Leave(waiter));
+        try
+        {
+            using var registration = cancellationToken.Register(() => Leave(waiter));
+            return await WaitAsync(waiter, onPlaceChanged, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Cancelled, or its callback failed: it leaves the queue, or gives back the slot it was given meanwhile.
+            Abandon(waiter);
+            throw;
+        }
+    }
+
+    private async ValueTask<IDisposable> WaitAsync(Waiter waiter, Func<int, CancellationToken, ValueTask>? onPlaceChanged, CancellationToken cancellationToken)
+    {
         var reported = -1;
         while (true)
         {
@@ -175,11 +189,26 @@ public sealed class ModelSlotGate
             if (waiter.Node is null) return;
             _waiters.Remove(waiter.Node);
             waiter.Node = null;
+            waiter.Gone = true;
             signals = [waiter.SwapChanged(), .. _waiters.Select(static other => other.SwapChanged())];
         }
 
         waiter.Admitted.TrySetCanceled();
         Raise(signals);
+    }
+
+    // Decided under one lock: a waiter still queued leaves; one admitted meanwhile gives its slot back, once.
+    private void Abandon(Waiter waiter)
+    {
+        bool release;
+        lock (_gate)
+        {
+            release = waiter.Node is null && !waiter.Gone;
+            waiter.Gone = true;
+        }
+
+        if (release) Release();
+        else Leave(waiter);
     }
 
     private void Release()
@@ -235,6 +264,9 @@ public sealed class ModelSlotGate
 
         // Its place in the queue; null once admitted or gone. Under the lock of the gate.
         public LinkedListNode<Waiter>? Node { get; set; }
+
+        // Whether it left without a slot, or gave back the one it was given. Under the lock of the gate.
+        public bool Gone { get; set; }
 
         public TaskCompletionSource SwapChanged()
         {

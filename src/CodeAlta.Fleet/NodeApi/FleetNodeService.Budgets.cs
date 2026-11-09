@@ -81,6 +81,8 @@ public sealed partial class FleetNodeService
         }
 
         HeldSends.Remove(holdId);
+        // Its run started (or ended): the tree of its session holds the seat from now on, read at work; the reservation goes.
+        Seats.Release(holdId);
     }
 
     // Whether the journal of a session holds the prompt of a send already (its run started before the node stopped): true when
@@ -182,6 +184,8 @@ public sealed partial class FleetNodeService
                     continue;
                 }
 
+                // A send a budget holds waits for what admits it to its budgets: a host without them keeps it held, never sends it.
+                if (!held.IsQueued && _options.AdmitBudget is null) continue;
                 // Its run started before the node stopped, which had not forgotten it yet: it is not sent twice.
                 switch (await PromptJournaledAsync(held.SessionId, held.RunId).ConfigureAwait(false))
                 {
@@ -198,6 +202,8 @@ public sealed partial class FleetNodeService
                 // One that waited for a seat was admitted by its budgets already: it asks its seat again, and only that.
                 var result = held.IsQueued ? await WithinSeatAsync(session, held.Title, held, "send").ConfigureAwait(false)
                     : await WithinBudgetAsync(session, held.Title, held).ConfigureAwait(false);
+                // Nobody waits for this answer: a session at work takes the prompt into its queue rather than lose it.
+                if (result.Status == "busy") result = await QueueInSessionAsync(held).ConfigureAwait(false);
                 LogInfo($"The held prompt {held.HoldId} of the session {held.SessionId} was taken again after a restart ({result.Status}).");
             }
             catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException or UnauthorizedAccessException

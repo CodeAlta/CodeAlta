@@ -135,6 +135,12 @@ public sealed partial class FleetNodeClient
                 new FleetRequestOptions { Timeout = ModelServerRequestTimeout }, cancellationToken).ConfigureAwait(false);
             answer = Read(result, FleetModelServersJsonContext.Default.FleetLlamaHttpResponse);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Stopped before its answer started (it may wait there for a slot): the node is told, or it would still send it later.
+            await CancelModelServerRequestAsync(id).ConfigureAwait(false);
+            throw;
+        }
         catch
         {
             _llamaAnswers.TryRemove(id, out _);
