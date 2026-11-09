@@ -7,7 +7,7 @@ import { defaultWorkSettings, workItems, type WorkItem } from "./workItems";
 import { createWorkItemsHub, readingBatches, type WorkItemsApi } from "./workItemsHub";
 
 const row = (id: string, more: Partial<WorkItemRow> = {}): WorkItemRow => ({ id, kind: "task", title: id, summary: null, category: "gap", status: "pending", statusText: null,
-  created: null, file: `.alta/tasks/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, shortId: null, updated: null, ...more });
+  created: null, file: `.alta/tasks/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, tags: null, shortId: null, updated: null, ...more });
 const settled = () => new Promise<void>(resolve => setImmediate(resolve));
 
 /** A host whose projects each have what the test says, and that records what it is asked. */
@@ -24,7 +24,7 @@ function host(found: Record<string, WorkItemRow[]>) {
       asked.push(request.projectIds ?? null);
       if (hold) await new Promise<void>(resolve => pending.push(resolve));
       const projects: WorkItemsProject[] = (request.projectIds ?? Object.keys(found)).filter(id => found[id]?.length)
-        .map(id => ({ projectId: id, tasks: found[id], plans: [], truncated: false }));
+        .map(id => ({ projectId: id, tasks: found[id], plans: [], truncated: false, tags: null, declinedTags: null }));
       return { status: request.expectedEpoch === "epoch" ? "ok" : "stale_epoch", projects, settings } satisfies WorkItemsListResponse;
     },
     async read() { return { status: "ok", markdown: "Text.", truncated: false }; },
@@ -36,6 +36,10 @@ function host(found: Record<string, WorkItemRow[]>) {
       return request.action === "start_here" ? { status: "ok", sessionId: request.sessionId, message: null, reason: null, prompt: "Do it.", agentPromptId: request.kind === "plan" ? "default" : null }
         : request.action === "start_worktree" ? { status: "refused", sessionId: null, message: "git said no", reason: "worktree_not_repository", prompt: null, agentPromptId: null }
         : { status: "ok", sessionId: request.action === "start_session" ? "new" : null, message: null, reason: null, prompt: null, agentPromptId: null };
+    },
+    async tag(request) {
+      acted.push(`tag:${request.action}:${request.name}:${request.value ?? ""}`);
+      return { status: request.action === "rename" ? "exists" : "ok", sessionId: null, message: null, reason: null, prompt: null, agentPromptId: null };
     },
     async saveSettings(request) { settings = request.settings!; return { status: "ok", settings }; },
     async watch(_request, options) {
@@ -117,6 +121,13 @@ test("a change reads its project at once and says how it ended", async () => {
   assert.deepEqual(hub.getSnapshot().projects, [], "a project that has nothing left is not listed");
 
   assert.deepEqual(await hub.read({ projectId: "a", kind: "task", id: "one" }), { markdown: "Text.", truncated: false });
+  // The tags of a task are sent whole, separated by commas; a change of the tags of a project says how it ended.
+  assert.equal((await hub.tagTask({ projectId: "a", kind: "task", id: "one" }, ["mobile", "ci"])).ok, true);
+  assert.equal(server.acted.at(-1), "tags:one:");
+  assert.equal(await hub.tag("a", "set", "mobile", "The phone app."), "ok");
+  assert.equal(server.acted.at(-1), "tag:set:mobile:The phone app.");
+  assert.equal(await hub.tag("a", "rename", "mobile", "ci"), "exists");
+  assert.deepEqual(server.asked.at(-1), ["a"], "a change of the tags reads its project again");
   assert.equal(await hub.saveSettings({ ...defaultWorkSettings, start: "here" }), true);
   assert.equal(hub.getSnapshot().settings.start, "here");
 });

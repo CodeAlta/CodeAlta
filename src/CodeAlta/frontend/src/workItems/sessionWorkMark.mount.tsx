@@ -9,8 +9,8 @@ import { carriedBy, workItems } from "./workItems";
 // in a narrow row, a task. The rows selected and the items opened are lists.
 const row = (id: string, kind: string, status: string, title: string, runner: string): WorkItemRow => ({ id, kind, title, summary: kind === "task" ? `Why ${title}.` : null,
   category: kind === "task" ? "gap" : null, status, statusText: null, created: "2026-11-09", file: `.alta/${kind}s/${id}.md`, proposedBy: null, runner, acknowledged: false,
-  runsWith: null, shortId: kind === "task" ? id.slice(-4) : null, updated: null });
-const items = workItems([{ projectId: "p1", truncated: false, plans: [row("2026-11-09-move-sessions-between-projects", "plan", "approved", "Move sessions between projects", "s2")],
+  runsWith: null, tags: null, shortId: kind === "task" ? id.slice(-4) : null, updated: null });
+const items = workItems([{ projectId: "p1", truncated: false, tags: null, declinedTags: null, plans: [row("2026-11-09-move-sessions-between-projects", "plan", "approved", "Move sessions between projects", "s2")],
   tasks: [row("2026-11-09-scan-the-devices-q9rh", "task", "pending", "Scan the devices in the background", "s1"),
     row("2026-11-09-report-the-provider-error-k2mz", "task", "pending", "Report the provider error", "s2"),
     row("2026-11-09-fix-the-parser-p53b", "task", "pending", "Fix the parser", "s3")] }], new Set(["s1", "s2", "s3"]));

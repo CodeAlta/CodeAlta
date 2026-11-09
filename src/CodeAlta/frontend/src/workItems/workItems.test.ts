@@ -1,13 +1,39 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkItemRow, WorkItemsProject } from "#neoastra";
-import { carriedBy, createdDay, filterWorkItems, readingOrder, sessionCards, sortWorkItems, stageCounts, startChoices, workCounts, workDateGroup, workItemKey, workItems, workStage,
-  workStatusLabel } from "./workItems";
+import { carriedBy, createdDay, filterWorkItems, readingOrder, sessionCards, shownTags, sortWorkItems, stageCounts, startChoices, tagColor, tagNameOf, workCounts, workDateGroup,
+  workItemKey, workItems, workStage, workStatusLabel } from "./workItems";
 
 const row = (id: string, kind: "task" | "plan", status: string, more: Partial<WorkItemRow> = {}): WorkItemRow => ({ id, kind, title: `Title of ${id}`, summary: null,
-  category: kind === "task" ? "gap" : null, status, statusText: null, created: "2026-10-07", file: `.alta/${kind}s/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, shortId: null, updated: null, ...more });
-const project = (projectId: string, tasks: WorkItemRow[], plans: WorkItemRow[] = []): WorkItemsProject => ({ projectId, tasks, plans, truncated: false });
+  category: kind === "task" ? "gap" : null, status, statusText: null, created: "2026-10-07", file: `.alta/${kind}s/${id}.md`, proposedBy: null, runner: null, acknowledged: false, runsWith: null, tags: null, shortId: null, updated: null, ...more });
+const project = (projectId: string, tasks: WorkItemRow[], plans: WorkItemRow[] = []): WorkItemsProject => ({ projectId, tasks, plans, truncated: false, tags: null, declinedTags: null });
 const sessions = new Set(["s1", "s2"]);
+
+test("the list keeps the tasks that have one of the chosen tags, and the tags typed after #", () => {
+  const items = workItems([project("p", [row("mobile", "task", "pending", { tags: ["mobile"] }), row("both", "task", "pending", { tags: ["mobile", "ci"] }),
+    row("none", "task", "pending")])], sessions);
+  const ids = (tags: readonly string[], query = "") => filterWorkItems(items, { projectId: null, kind: "all", stage: "todo", query, tags: new Set(tags) }).map(item => item.id);
+  assert.deepEqual(ids([]), ["mobile", "both", "none"]);
+  assert.deepEqual(ids(["ci", "web"]), ["both"], "any of the chosen tags");
+  assert.deepEqual(ids([], "#mobile"), ["mobile", "both"]);
+  assert.deepEqual(ids([], "#mobile #ci"), ["both"], "every typed tag");
+  assert.deepEqual(ids([], "#mobile both"), ["both"], "with words of the title");
+});
+
+test("the tags shown are those of one project, or of all of them by name", () => {
+  const tag = (name: string, openTasks: number, description: string | null = null, listed = true) => ({ name, description, openTasks, listed });
+  const projects = [{ ...project("a", []), tags: [tag("mobile", 2, "The phone app."), tag("ci", 1)] }, { ...project("b", []), tags: [tag("mobile", 3, null, false)] }];
+  assert.deepEqual(shownTags(projects, "b"), [tag("mobile", 3, null, false)]);
+  assert.deepEqual(shownTags(projects, null), [tag("mobile", 5, "The phone app."), tag("ci", 1)]);
+  assert.deepEqual(shownTags([project("c", [])], null), [], "a project without tags has none");
+});
+
+test("a tag name is typed in any case, with or without #, and its color comes from it", () => {
+  assert.equal(tagNameOf(" #Flaky-Tests "), "flaky-tests");
+  for (const wrong of ["", "two words", "-ci", "ci-", "a--b", "café", "x".repeat(33)]) assert.equal(tagNameOf(wrong), null, wrong);
+  assert.equal(tagColor("mobile"), tagColor("mobile"));
+  assert.match(tagColor("mobile"), /^var\(--chart-\d+\)$/);
+});
 
 test("an item is where its file and its session put it", () => {
   assert.equal(workStage(row("a", "task", "pending"), sessions), "todo");

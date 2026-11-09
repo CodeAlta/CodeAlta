@@ -12,9 +12,21 @@ public sealed partial class WorkItemService
     public WorkTags ListTags(ProjectDescriptor project)
     {
         ArgumentNullException.ThrowIfNull(project);
+        return ListTags(project, ListTasks(project));
+    }
+
+    /// <summary>Lists the tags of a project from its tasks already read: those of its tags file, then those only found on the tasks.</summary>
+    /// <param name="project">The project.</param>
+    /// <param name="tasks">Its tasks, as <see cref="ListTasks"/> gave them.</param>
+    /// <returns>The tags, with how many open tasks have each, and the names the user declined.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public WorkTags ListTags(ProjectDescriptor project, IReadOnlyList<WorkTask> tasks)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(tasks);
         var file = ReadTags(project);
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var task in ListTasks(project))
+        foreach (var task in tasks)
         {
             foreach (var tag in task.Tags)
             {

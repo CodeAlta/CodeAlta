@@ -960,6 +960,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(WorkItemReadResponse))]
 [JsonSerializable(typeof(WorkItemActionRequest))]
 [JsonSerializable(typeof(WorkItemActionResponse))]
+[JsonSerializable(typeof(WorkItemTagRequest))]
 [JsonSerializable(typeof(WorkItemsSettingsRequest))]
 [JsonSerializable(typeof(WorkItemsSettingsResponse))]
 [JsonSerializable(typeof(WorkItemsEvent))]

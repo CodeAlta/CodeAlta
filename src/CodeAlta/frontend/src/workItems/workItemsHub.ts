@@ -4,7 +4,7 @@ import { storedSessionOptions } from "../sessionSettings/sessionOptions";
 import type { SessionStartRequest } from "../sessionSettings/sessionSettings";
 import { defaultWorkSettings, type WorkKind } from "./workItems";
 
-export type WorkItemsApi = Pick<typeof workItems, "list" | "read" | "act" | "saveSettings" | "watch">;
+export type WorkItemsApi = Pick<typeof workItems, "list" | "read" | "act" | "tag" | "saveSettings" | "watch">;
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
 
 /**
@@ -16,6 +16,8 @@ export type WorkItemsState = Readonly<{ loaded: boolean; complete: boolean; avai
 export type WorkItemOutcome = Readonly<{ ok: boolean; status: string; message: string | null; reason: string | null; sessionId: string | null;
   prompt: string | null; agentPromptId: string | null }>;
 export type WorkItemTarget = Readonly<{ projectId: string; kind: string; id: string }>;
+/** A change of the tags of a project: see the `tag` method of the host. */
+export type WorkTagAction = "set" | "rename" | "delete" | "decline" | "forget";
 
 const empty: WorkItemsState = { loaded: false, complete: false, available: false, projects: [], settings: defaultWorkSettings };
 const failed: WorkItemOutcome = { ok: false, status: "failed", message: null, reason: null, sessionId: null, prompt: null, agentPromptId: null };
@@ -175,6 +177,22 @@ export function createWorkItemsHub(api: WorkItemsApi, timers: Timers = { set: (r
       } catch { return null; }
     },
     act,
+    /** Gives a task these tags, in its file. */
+    tagTask: (target: WorkItemTarget, tags: readonly string[]) => act(target, "tags", { value: tags.join(",") }),
+    /**
+     * Changes the tags of a project: `set` adds a tag or describes it (`value`), `rename` names it `value`, `delete`
+     * removes it from the project and its tasks, `decline` and `forget` keep or forget a name agents may not propose.
+     * Resolves with the host's status: `ok`, `exists`, `not_found`, `write_failed`...
+     */
+    async tag(projectId: string, action: WorkTagAction, name: string, value: string | null = null): Promise<string> {
+      const host = epoch;
+      if (!host) return "failed";
+      try {
+        const reply = await api.tag({ expectedEpoch: host, projectId, action, name, value }, { timeoutMilliseconds: 30_000 });
+        await readProject(projectId);
+        return reply.status;
+      } catch { return "failed"; }
+    },
     async saveSettings(settings: WorkItemsSettings): Promise<boolean> {
       const host = epoch;
       if (!host) return false;

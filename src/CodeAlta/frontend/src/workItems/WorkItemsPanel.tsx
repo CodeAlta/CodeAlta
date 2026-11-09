@@ -10,7 +10,9 @@ import { AppIcon } from "../AppIcon";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 import { WorkItemTags, WorkItemText, WorkStartButtons } from "./WorkItemCards";
-import { createdDay, filterWorkItems, sortWorkItems, stageCounts, taskCategoryIcon, workDateGroup, workFilterLabel, workFilters, workItemKey, workItems,
+import { TagChips, TagFilter, TaskTagField } from "./WorkItemTagViews";
+import type { WorkItemTagRow } from "#neoastra";
+import { createdDay, filterWorkItems, shownTags, sortWorkItems, stageCounts, taskCategoryIcon, workDateGroup, workFilterLabel, workFilters, workItemKey, workItems,
   workItemTone, workKindIcon, workStatusLabel, workStatusTone, type WorkFilter, type WorkGrouping, type WorkItem, type WorkKind, type WorkOrder, type WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
 import { PlanReview } from "./PlanReview";
@@ -60,6 +62,8 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   const [kind, setKind] = useState<WorkKind | "all">("all");
   const [stage, setStage] = useState<WorkFilter>("todo");
   const [query, setQuery] = useState("");
+  // The tags a task of the list must have one of; none chosen shows every task.
+  const [tagFilter, setTagFilter] = useState<ReadonlySet<string>>(() => new Set());
   // How the list is read: newest or oldest first, by day or by project; kept for the next time.
   const [view, setView] = useState(readWorkView);
   const changeView = (change: Partial<WorkView>) => setView(current => { const next = { ...current, ...change }; writeWorkView(next); return next; });
@@ -81,15 +85,16 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   // A project that has nothing is not one to choose: the list would be empty.
   const scoped = scope !== null && all.some(item => item.projectId === scope) ? scope : null;
   const counts = stageCounts(all, scoped, kind);
-  const shown = useMemo(() => sortWorkItems(filterWorkItems(all, { projectId: scoped, kind, stage, query }), view.order), [all, scoped, kind, stage, query, view.order]);
+  const tags = useMemo(() => shownTags(state.projects, scoped), [state.projects, scoped]);
+  const shown = useMemo(() => sortWorkItems(filterWorkItems(all, { projectId: scoped, kind, stage, query, tags: tagFilter }), view.order), [all, scoped, kind, stage, query, tagFilter, view.order]);
   const current = shown.find(item => workItemKey(item) === selected) ?? shown[0] ?? null;
   useEffect(() => { if (visible) void hub.refresh(); }, [hub, visible]);
   useEffect(() => {
     if (!focus || !state.loaded) return;
     setScope(focus.projectId);
     const item = focus.key ? all.find(candidate => workItemKey(candidate) === focus.key) : null;
-    if (item) { setStage(item.stage); setKind("all"); setQuery(""); setSelected(focus.key!); }
-    else if (focus.kind) { setKind(focus.kind); setStage("todo"); setQuery(""); }
+    if (item) { setStage(item.stage); setKind("all"); setQuery(""); setTagFilter(new Set()); setSelected(focus.key!); }
+    else if (focus.kind) { setKind(focus.kind); setStage("todo"); setQuery(""); setTagFilter(new Set()); }
     onFocused?.();
   }, [focus, state.loaded]);
 
@@ -142,6 +147,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
           </HTMLSelect>
           <InputGroup size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={query} placeholder={t("Search work items")}
             aria-label={t("Search work items")} onChange={event => setQuery(event.target.value)} />
+          <TagFilter tags={tags} chosen={tagFilter} onChange={setTagFilter} />
           <span className="work-view" role="group" aria-label={t("Order")}>
             <Button size="small" variant="minimal" className="work-order" icon={<AppIcon name={view.order === "newest" ? "arrowDown" : "arrowUp"} size={14} />}
               title={t(view.order === "newest" ? "Oldest first" : "Newest first")} aria-pressed={view.order === "oldest"}
@@ -174,6 +180,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                     <small>{item.summary ?? item.statusText ?? item.file}</small></span>
                   <span className="work-row-meta">
                     {busy.has(key) && <span className="work-row-starting"><ActivitySpinner size={11} /></span>}
+                    <TagChips tags={item.tags} />
                     {scoped === null && !byProject && <span className="work-row-project" title={projectById.get(item.projectId)?.name}>{projectById.get(item.projectId)?.name}</span>}
                     {day && <time className="work-row-date" dateTime={item.created ?? undefined} title={t("Created {date}", { date: longFormat.format(day) })}>
                       {(day.getFullYear() === new Date().getFullYear() ? dayFormat : yearFormat).format(day)}</time>}
@@ -191,7 +198,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                 reviewSessions={reviewSessions(sessions, current.projectId, current.review.checkout, current.runner)} fallback={<p className="work-empty">{t("The file cannot be read.")}</p>}
                 reload={reload} onForget={() => overview.refresh()} />
               : current ? <WorkItemDetail key={workItemKey(current)} hub={hub} item={current} busy={busy.has(workItemKey(current))} projectName={projectById.get(current.projectId)?.name ?? null}
-                providers={providers} sessionSettings={sessionSettings}
+                providers={providers} sessionSettings={sessionSettings} tags={shownTags(state.projects, current.projectId)}
                 runner={current.runner ? sessionById.get(current.runner) ?? null : null} runnerWorking={!!current.runner && runningSessions.has(current.runner)}
                 preferredStart={state.settings.start} onStart={(way, request) => start(current, way, request)} onAct={(action, value) => act(current, action, value)}
                 onRemove={() => setRemoving(current)} onOpenSession={() => current.runner && onOpenSession(current.runner, current.projectId)}
@@ -355,8 +362,10 @@ function ShortIdCopy({ shortId }: { shortId: string }) {
 }
 
 function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, providers, sessionSettings, onStart, onAct, onRemove, onOpenSession, onOpenFile,
-  epoch, reload, reviewSessions: reviewTo, onOpenReviewSession }: {
+  epoch, reload, reviewSessions: reviewTo, onOpenReviewSession, tags }: {
   hub: WorkItemsHub; item: WorkItem; busy: boolean; projectName: string | null; reload: number;
+  /** The tags of the project of the item. */
+  tags: readonly WorkItemTagRow[];
   /** The host's epoch: a plan that is not done takes comments; null shows it without. */
   epoch: string | null; reviewSessions: ReturnType<typeof reviewSessions>; onOpenReviewSession: (sessionId: string) => void;
   runner: WorkspaceSession | null; runnerWorking: boolean; preferredStart: string;
@@ -380,6 +389,7 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
         {item.shortId && <ShortIdCopy shortId={item.shortId} />}</div>
       <h3>{item.title}</h3>
       <WorkItemTags item={item} projectName={projectName} />
+      {task && <TaskTagField hub={hub} item={item} tags={tags} disabled={busy} />}
       {item.statusText && <p className="work-detail-status">{item.statusText}</p>}
       {runner && <button type="button" className="work-runner work-runner-link" title={t("Open the session that does it")} onClick={onOpenSession}>
         {runnerWorking ? <ActivitySpinner size={12} /> : <AppIcon name="chat" size={12} />}<span>{runner.title}</span><AppIcon name="chevronRight" size={12} /></button>}

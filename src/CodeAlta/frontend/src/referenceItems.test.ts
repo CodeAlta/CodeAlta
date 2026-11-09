@@ -6,7 +6,7 @@ import type { WorkItem } from "./workItems/workItems";
 
 const work = (id: string, kind: string, more: Partial<WorkItem> = {}): WorkItem => ({ id, kind, title: `Title of ${id}`, summary: null, category: "gap",
   status: "pending", statusText: null, created: "2026-11-01", file: `.alta/${kind}s/${id}.md`, proposedBy: null, runner: null, acknowledged: false,
-  runsWith: null, shortId: kind === "task" ? id.slice(-4) : null, updated: null, projectId: "p1", stage: "todo", ...more });
+  runsWith: null, tags: null, shortId: kind === "task" ? id.slice(-4) : null, updated: null, projectId: "p1", stage: "todo", ...more });
 const issue = (number: number, updatedAt: string, open = true) => issueReference({ kind: "issue", number, title: `Issue ${number}`, state: open ? "Open" : "Closed",
   open, url: `https://github.com/o/r/issues/${number}`, updatedAt } as never)!;
 
