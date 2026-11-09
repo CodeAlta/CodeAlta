@@ -35,6 +35,22 @@ public sealed class MxcSandboxBackend : ISandboxBackend
     private async Task<ISandboxProcess> StartCoreAsync(SandboxPolicy policy, string commandLine, string? proxyEndpoint, CancellationToken cancellationToken)
     {
         MxcRequests.Prepare(policy);
+        // Held before the container starts, until it ends: the sandbox never finds them free.
+        var holds = ProtectedEntryHolds.Take(policy);
+        try
+        {
+            return await SpawnAsync(policy, commandLine, proxyEndpoint, holds, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            holds.Dispose();
+            throw;
+        }
+    }
+
+    private async Task<ISandboxProcess> SpawnAsync(SandboxPolicy policy, string commandLine, string? proxyEndpoint, ProtectedEntryHolds holds,
+        CancellationToken cancellationToken)
+    {
         var request = MxcRequests.Create(policy, commandLine, proxyEndpoint, _listsVolumeRoots.Value);
         if (OperatingSystem.IsWindows())
         {
@@ -59,7 +75,7 @@ public sealed class MxcSandboxBackend : ISandboxBackend
             var process = OperatingSystem.IsLinux()
                 ? await _linuxSpawner.RunAsync(() => MxcContainer.Spawn(request), static late => late.Dispose(), cancellationToken).ConfigureAwait(false)
                 : await MxcContainer.SpawnAsync(request, cancellationToken: cancellationToken).ConfigureAwait(false);
-            return new MxcSandboxProcess(process);
+            return new MxcSandboxProcess(process, holds);
         }
         catch (MxcException exception)
         {

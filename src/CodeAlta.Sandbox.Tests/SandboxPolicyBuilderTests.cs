@@ -145,6 +145,34 @@ public sealed class SandboxPolicyBuilderTests
     }
 
     [TestMethod]
+    public void TheEntriesHeld_AreTheProtectedEntriesThatExist_AndTheFoldersBetweenThemAndTheirWritableFolder()
+    {
+        // A folder above a protected entry is moved away with it, changed there and brought back: it is held as the entry is.
+        using var temp = TempTreeWithGit(out var project);
+        var hooks = Path.Combine(project, ".git", "hooks");
+        Directory.CreateDirectory(hooks);
+        File.WriteAllText(Path.Combine(project, ".git", "config"), "[core]\n");
+        Directory.CreateDirectory(Path.Combine(project, ".alta"));
+        File.WriteAllText(Path.Combine(project, ".alta", "config.toml"), "");
+
+        var held = Mxc.ProtectedEntryHolds.PathsOf(Build(temp, SandboxProfiles.Resolve("strict", []), project)).ToList();
+
+        foreach (var expected in new[] { Path.Combine(project, ".git"), hooks, Path.Combine(project, ".git", "config"), Path.Combine(project, ".alta"), Path.Combine(project, ".alta", "config.toml") })
+            CollectionAssert.Contains(held, expected, expected);
+        CollectionAssert.DoesNotContain(held, Path.Combine(project, ".alta", "mcp.json"), "a missing entry is denied, and its folder is held");
+        CollectionAssert.DoesNotContain(held, project, "the writable folder itself is not moved: its parent is read-only");
+        Assert.IsTrue(held.IndexOf(Path.Combine(project, ".git")) < held.IndexOf(Path.Combine(project, ".git", "config")), "a folder before what it holds");
+    }
+
+    private static TempTree TempTreeWithGit(out string project)
+    {
+        var temp = new TempTree();
+        project = temp.Folder("project");
+        Directory.CreateDirectory(Path.Combine(project, ".git"));
+        return temp;
+    }
+
+    [TestMethod]
     [DataRow("[extensions]\n\tworktreeConfig = true", true)]
     [DataRow("[EXTENSIONS]\r\n\tWORKTREECONFIG = Yes\r\n", true)]
     [DataRow("[extensions]\n\tworktreeConfig", true)]

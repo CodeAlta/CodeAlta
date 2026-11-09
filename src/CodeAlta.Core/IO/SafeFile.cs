@@ -9,7 +9,9 @@ namespace CodeAlta.Core.IO;
 /// </summary>
 /// <remarks>
 /// The folder of the file must exist. Nothing here orders two writers: a read-modify-write store takes a lock first, a
-/// <see cref="FilePathLocks"/> within a process and a <see cref="LockFile"/> across processes.
+/// <see cref="FilePathLocks"/> within a process and a <see cref="LockFile"/> across processes. On Windows, a file that
+/// stays held beyond the retries without its deletion shared, but with its writes shared (a protected file of a running
+/// sandbox), is written in place: a reader may then find it half written, for a moment.
 /// </remarks>
 public static class SafeFile
 {
@@ -48,12 +50,38 @@ public static class SafeFile
                 stream.Write(bytes);
             }
 
-            if (withoutGap) StagedFileReplacement.MoveOverWithoutGap(staged, path);
-            else StagedFileReplacement.MoveOver(staged, path);
+            try
+            {
+                if (withoutGap) StagedFileReplacement.MoveOverWithoutGap(staged, path);
+                else StagedFileReplacement.MoveOver(staged, path);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                if (!TryWriteInPlace(path, bytes)) throw;
+            }
         }
         finally
         {
             TryDelete(staged);
+        }
+    }
+
+    // A file held open without its deletion shared, but its writes shared, is never replaced while it is held: a protected
+    // file of a running sandbox, which keeps the sandbox from replacing it, is one. It is written in place instead, which
+    // its holder lets through: a reader may then find it half written, for a moment.
+    private static bool TryWriteInPlace(string path, ReadOnlySpan<byte> bytes)
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete, 1);
+            stream.Write(bytes);
+            stream.SetLength(bytes.Length);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 
@@ -99,7 +127,14 @@ public static class SafeFile
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            await StagedFileReplacement.MoveOverAsync(staged, path).ConfigureAwait(false);
+            try
+            {
+                await StagedFileReplacement.MoveOverAsync(staged, path).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                if (!TryWriteInPlace(path, bytes.Span)) throw;
+            }
         }
         finally
         {

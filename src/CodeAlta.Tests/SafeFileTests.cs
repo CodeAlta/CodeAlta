@@ -136,4 +136,47 @@ public sealed class SafeFileTests
         Assert.AreEqual("after", File.ReadAllText(path));
         Assert.AreEqual(1, Directory.GetFiles(temp.Path).Length, "No staged file is left behind.");
     }
+
+    [TestMethod]
+    public async Task AFileHeldWithoutSharingItsDeletionButSharingItsWrites_IsWrittenInPlace()
+    {
+        // As a sandbox holds a protected file while its container runs: nothing replaces it, but it shares its writes.
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Elsewhere an open file never refuses a rename.");
+        using var temp = TestTempDirectory.Create();
+        var path = Path.Combine(temp.Path, "config.toml");
+        File.WriteAllText(path, "a longer content than the next one");
+
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Write))
+        {
+            await Task.Run(() => SafeFile.WriteAllText(path, "after")).WaitAsync(Hang);
+            Assert.AreEqual("after", ReadShared(path));
+            await SafeFile.WriteAllTextAsync(path, "after again", CancellationToken.None).AsTask().WaitAsync(Hang);
+            Assert.AreEqual("after again", ReadShared(path));
+        }
+
+        Assert.AreEqual(1, Directory.GetFiles(temp.Path).Length, "No staged file is left behind.");
+    }
+
+    [TestMethod]
+    public async Task AFileHeldWithoutSharingItsWrites_IsNotWrittenInPlace()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Elsewhere an open file never refuses a rename.");
+        using var temp = TestTempDirectory.Create();
+        var path = Path.Combine(temp.Path, "config.toml");
+        File.WriteAllText(path, "before");
+
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Task.Run(() => SafeFile.WriteAllText(path, "after")).WaitAsync(Hang));
+        }
+
+        Assert.AreEqual("before", File.ReadAllText(path));
+    }
+
+    private static string ReadShared(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        return reader.ReadToEnd();
+    }
 }

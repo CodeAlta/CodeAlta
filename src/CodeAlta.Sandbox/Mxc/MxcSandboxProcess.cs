@@ -2,15 +2,17 @@ using Microsoft.Mxc.Sdk.V1;
 
 namespace CodeAlta.Sandbox.Mxc;
 
-/// <summary>A program of an mxc container.</summary>
+/// <summary>A program of an mxc container, with the protected entries held until the container ends.</summary>
 internal sealed class MxcSandboxProcess : ISandboxProcess
 {
     private readonly MxcProcess _process;
+    private readonly ProtectedEntryHolds _holds;
     private int _disposed;
 
-    public MxcSandboxProcess(MxcProcess process)
+    public MxcSandboxProcess(MxcProcess process, ProtectedEntryHolds holds)
     {
         _process = process;
+        _holds = holds;
         Id = (int)process.Id;
         StandardInput = process.StandardInput ?? Stream.Null;
         StandardOutput = process.StandardOutput ?? Stream.Null;
@@ -64,6 +66,8 @@ internal sealed class MxcSandboxProcess : ISandboxProcess
         }
 
         _process.Dispose();
+        // Released with the container, whose programs end with it: never while one of them could still replace an entry.
+        _holds.Dispose();
         return ValueTask.CompletedTask;
     }
 }

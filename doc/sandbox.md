@@ -73,6 +73,13 @@ Bubblewrap on Linux. Invariants:
   the developer folder whose `xcrun` shims `/usr/bin/git` and `python3` load, and the Mach services of the names of
   users and of the check of certificates (.NET's TLS). mxc's `keychainAccess` is never set: the keychains stay out of
   reach. MSBuild and Roslyn put their pipes in `/tmp`, which the sandbox does not write, so a build needs one node.
+- **Protected entries are held on Windows.** A read-only grant stops a write to an entry, not a rename in its writable
+  folder that replaces it, nor the move of a folder above it, which takes the entry out of its path or brings in one
+  that is denied while missing. `ProtectedEntryHolds` holds open, without sharing their deletion, each protected entry
+  that exists and each folder between it and its writable folder, from before the container starts until it ends:
+  Windows then refuses to delete, rename or replace them, whatever the permissions. The user's programs cannot replace
+  them either in that time (git cannot write `.git/config`); `SafeFile` writes such a file in place, which the hold
+  shares. On macOS and Linux nothing is held: what refuses such a rename there is the container.
 - **No telemetry.** No request enables it.
 - **The UI stays enabled** (a disabled one stops tools at start); the clipboard stays closed.
 
