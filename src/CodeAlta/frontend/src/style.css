@@ -2187,6 +2187,9 @@ dialog.session-browser > .app-window > .app-window-body { gap: 10px; padding: 12
 .session-browser-results th > button { display: flex; align-items: center; gap: 4px; width: 100%; padding: 6px 10px; border: 0; color: var(--muted); background: transparent; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; cursor: pointer; }
 .session-browser-results th > button:hover { color: var(--text); }
 .session-browser-results .sort-ascending { transform: rotate(180deg); }
+.session-browser-results [data-column="check"] { width: 34px; padding-inline: 10px 0; text-align: center; }
+.session-browser-results [data-column="check"] input { margin: 0; vertical-align: middle; cursor: pointer; }
+.session-browser-results [data-column="check"] input:disabled { cursor: default; }
 .session-browser-results [data-column="provider"] { width: 150px; }
 .session-browser-results [data-column="updated"] { width: 130px; }
 .session-browser-results [data-column="messages"] { width: 96px; text-align: right; }
@@ -2734,7 +2737,9 @@ dialog.diagram-viewer-dialog:has(> .app-window) > .app-window > .app-window-body
 .confirm-form .bp6-checkbox { margin: 2px 0 0; }
 .confirm-form .confirm-choices { margin: 0; font-size: 12px; }
 .confirm-form .confirm-choices .bp6-radio { margin: 2px 0; }
-.confirm-form .confirm-worktree { display: grid; gap: 4px; }
+.confirm-form .confirm-worktree, .confirm-form .confirm-kept { display: grid; gap: 4px; justify-items: start; }
+/* The worktrees of sessions about to be deleted, in the question of their deletion. */
+.confirm-form .deleted-worktrees { margin: 0; padding-inline-start: 18px; max-height: 120px; overflow-y: auto; overflow-wrap: anywhere; }
 
 /* The developer instance says so beside its name, so two CodeAlta windows are told apart. */
 .window-brand-tag { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--yellow) 60%, transparent); border-radius: 999px; color: var(--yellow); font-size: 10px; font-weight: 600; letter-spacing: .06em; line-height: 16px; text-transform: uppercase; }

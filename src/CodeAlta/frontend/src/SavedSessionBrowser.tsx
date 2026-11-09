@@ -1,6 +1,6 @@
 import { AppWindowSurface } from "./AppWindow";
 import { Button, HTMLSelect, InputGroup, PortalProvider } from "@blueprintjs/core";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import type { WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { ConfirmPopover } from "./ConfirmPopover";
 import { ActivitySpinner } from "./ActivitySpinner";
@@ -13,10 +13,13 @@ import { sessionRunning } from "./runtimeObservations";
 import { tabKey } from "./sessionTabs";
 import { batchDeleteCandidate } from "./sessionBatchDeletion";
 import { SessionBatchDeletePanel, type BatchDeleteControls } from "./SessionBatchDeletePanel";
+import { checkedRange, sessionDeletionPlan, withChecked } from "./sessionBrowserSelection";
 import { sessionTime } from "./sessionTime";
 import { plainTitle } from "./sessionTitle";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
+import { DeletedWorktreesChoice } from "./worktrees/DeletedWorktreesChoice";
+import { deletedSessionsWorktrees, type DeletedWorktree } from "./worktrees/worktrees";
 
 const noSubscribe = () => () => {};
 const noSnapshot = () => null;
@@ -42,18 +45,41 @@ export type ArchivedSessionControls = Readonly<{
   remove: (session: WorkspaceSession, remember: boolean) => Promise<string | null>;
 }>;
 
+/** What the browser does with the sessions checked in it, several at once. */
+export type CheckedSessionControls = Readonly<{
+  /** Every session of the catalog, archived ones included: the sessions below the checked ones, and who works in their worktrees. */
+  catalog: readonly WorkspaceSession[];
+  /** An archive, a restore or a deletion is under way. */
+  busy: boolean;
+  /** Archives the sessions, each alone; the answer is the ones archived. */
+  archive: (sessions: readonly WorkspaceSession[]) => Promise<readonly string[]>;
+  /** Takes the sessions out of the archive; the answer is the ones restored. */
+  restore: (sessions: readonly WorkspaceSession[]) => Promise<readonly string[]>;
+  /**
+   * Deletes the sessions in their order, then removes the worktrees given that only deleted sessions worked in. The
+   * answer is the ones deleted, and why the others were not.
+   */
+  remove: (sessions: readonly WorkspaceSession[], worktrees: readonly DeletedWorktree[]) => Promise<Readonly<{ deleted: readonly string[]; error: string | null }>>;
+  /** Asks the host who works in the worktrees: it knows of sessions the window does not list. */
+  checkWorktrees?: (worktrees: readonly DeletedWorktree[], deleted: readonly string[]) => Promise<readonly DeletedWorktree[]>;
+  /** The name of a project, for worktrees of several projects. */
+  projectName: (projectId: string) => string;
+}>;
+
 /**
  * The saved sessions of a project (or the global ones) as a sortable table: title, provider, last update and
  * message count. Typing filters by title or id, the arrows move the selection and Enter opens it. **Archived** shows
- * the archived sessions instead, where Enter restores the selected one.
+ * the archived sessions instead, where Enter restores the selected one. Sessions checked in the first column are
+ * archived, restored or deleted together; a session at work is not checked.
  */
-export function SessionBrowser({ snapshot, projectId, stale, open, close, observations, batch, archived }: {
+export function SessionBrowser({ snapshot, projectId, stale, open, close, observations, batch, archived, checking }: {
   snapshot: WorkspaceSnapshot; projectId: string | null; stale: boolean;
   open: (tab: SessionTab) => boolean; close: () => void;
   observations?: RuntimeObservationControls;
   recentCount?: number; activeSessionId?: string | null;
   batch?: BatchDeleteControls;
   archived?: ArchivedSessionControls;
+  checking?: CheckedSessionControls;
 }) {
   const { t, locale } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -69,6 +95,15 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   const [now] = useState(Date.now);
   const [showArchived, setShowArchived] = useState(false);
   const [deleting, setDeleting] = useState<Readonly<{ id: string; error: string | null }> | null>(null);
+  // The sessions checked, by id: they stay checked while the search or the order change, not when the scope or the view do.
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  const anchor = useRef<string | null>(null);
+  // The question of the deletion of the checked sessions, with the worktrees as the host checked them.
+  const [deletingChecked, setDeletingChecked] = useState<Readonly<{ error: string | null }> | null>(null);
+  const [removingWorktrees, setRemovingWorktrees] = useState(false);
+  const [checkedWorktrees, setCheckedWorktrees] = useState<readonly DeletedWorktree[] | null>(null);
+  const [checkingWorktrees, setCheckingWorktrees] = useState(false);
+  const worktreeChecks = useRef(0);
   const archive = showArchived && archived ? archived : null;
   const archivedSnapshot = archived ? { ...snapshot, sessions: archived.sessions } : null;
   const page = browseSessions(archive && archivedSnapshot ? archivedSnapshot : snapshot, scope, query);
@@ -84,6 +119,53 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   const rows = [...page.rows].sort(order);
   const selected = Math.max(0, rows.findIndex(item => tabKey(item.tab) === selectedKey));
   function setSelected(index: number) { setSelectedKey(rows[index] ? tabKey(rows[index].tab) : null); }
+  // A session at work, or one whose identity is not sure, is not checked.
+  const runningIn = (tab: SessionTab) => !archive && !stale && !!observations?.enabled && !!observed && observations.canObserve(tab) && sessionRunning(observed, tab);
+  const checkable = (item: typeof rows[number]) => !stale && item.valid && !runningIn(item.tab);
+  const shownCheckable = rows.filter(checkable).map(item => item.row.id);
+  // The checked sessions of the scope and the view, also those the search hides now.
+  const inScope = (row: WorkspaceSession) => scope === null ? row.scopeKind === "global" && row.projectId === null : row.scopeKind === "project" && row.projectId === scope;
+  const checkedRows = (archive ? archive.sessions : snapshot.sessions).filter(row => checked.has(row.id) && inScope(row));
+  const plan = checking && deletingChecked ? sessionDeletionPlan(checkedRows, checking.catalog) : null;
+  const foundWorktrees = plan && checking ? deletedSessionsWorktrees(checking.catalog, plan.order) : [];
+  const worktrees = checkedWorktrees ?? foundWorktrees;
+  // The sessions below the kept ones that the table can check: Select their child sessions checks them.
+  const missingShown = plan ? plan.missing.filter(row => inScope(row) && rows.some(item => item.row.id === row.id && checkable(item))) : [];
+  function check(id: string, event: MouseEvent) {
+    const value = !checked.has(id);
+    const ids = event.shiftKey ? checkedRange(shownCheckable, anchor.current, id) : [id];
+    anchor.current = id;
+    setChecked(current => withChecked(current, ids, value));
+  }
+  function clearChecked() { setChecked(new Set()); anchor.current = null; setDeletingChecked(null); }
+  // `sessions` are the checked ones, also those checked in the same click.
+  async function askDeleteChecked(sessions = checkedRows) {
+    if (!checking || checking.busy || sessions.length === 0) return;
+    setRemovingWorktrees(false);
+    setCheckedWorktrees(null);
+    setDeletingChecked({ error: null });
+    const order = sessionDeletionPlan(sessions, checking.catalog).order;
+    const found = deletedSessionsWorktrees(checking.catalog, order);
+    if (!checking.checkWorktrees || found.length === 0) return;
+    const sequence = ++worktreeChecks.current;
+    setCheckingWorktrees(true);
+    const result = await checking.checkWorktrees(found, order.map(row => row.id)).catch(() => null);
+    if (sequence !== worktreeChecks.current) return;
+    setCheckingWorktrees(false);
+    if (result) setCheckedWorktrees(result);
+  }
+  async function deleteChecked() {
+    if (!checking || !plan || checking.busy) return;
+    if (plan.order.length === 0) { setDeletingChecked(null); return; }
+    const result = await checking.remove(plan.order, removingWorktrees ? worktrees.filter(worktree => !worktree.shared) : []);
+    setChecked(current => withChecked(current, result.deleted, false));
+    setDeletingChecked(result.error ? { error: result.error } : null);
+  }
+  async function archiveChecked() {
+    if (!checking || checking.busy || checkedRows.length === 0) return;
+    const done = await (archive ? checking.restore(checkedRows) : checking.archive(checkedRows));
+    setChecked(current => withChecked(current, done, false));
+  }
   const project = snapshot.projects.filter(row => row.id === projectId);
   const scopeName = scope === null ? t("Chats") : project.length === 1 ? project[0].name : t("ambiguous or missing");
   useEffect(() => { const element = dialog.current!; element.showModal(); search.current?.focus(); return () => element.close(); }, []);
@@ -127,13 +209,13 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
         onChange={event => change(() => { setQuery(event.target.value); setSelectedKey(null); })} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="session-browser-results"
         aria-activedescendant={rows[selected] ? `session-browser-row-${selected}` : undefined} />
       <HTMLSelect aria-label={t("Session browser scope")} value={scope === null ? "global" : "project"}
-        onChange={event => change(() => { setScope(event.target.value === "global" ? null : projectId); setSelectedKey(null); })}>
+        onChange={event => change(() => { setScope(event.target.value === "global" ? null : projectId); setSelectedKey(null); clearChecked(); })}>
         {projectId !== null && <option value="project">{project.length === 1 ? project[0].name : t("ambiguous or missing")}{project[0]?.archived ? t(" (archived, read-only)") : ""}</option>}
         <option value="global">{t("Chats")}</option>
       </HTMLSelect>
       {archived && <Button className="session-browser-archived" size="small" variant={showArchived ? "solid" : "outlined"} active={showArchived}
         aria-pressed={showArchived} icon={<AppIcon name="archive" size={14} className="bp6-icon" />}
-        onClick={() => change(() => { setShowArchived(value => !value); setSelectedKey(null); setDeleting(null); })}>
+        onClick={() => change(() => { setShowArchived(value => !value); setSelectedKey(null); setDeleting(null); clearChecked(); })}>
         {t("Archived")}{archivedHere > 0 && <span className="session-browser-count">{archivedHere}</span>}</Button>}
       <span className="settings-editor-spacer" />
       <span className="bp6-text-muted" role="status">{t("{shown} of {matching} sessions", { shown: rows.length, matching: page.matched })}{page.hidden > 0 && <>{" · "}{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}</>}</span>
@@ -141,17 +223,25 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
     {(stale || refused) && <p role="alert">{t("Catalog, host or selection changed, or identity is ambiguous. Close and reopen the browser; nothing was opened.")}</p>}
     <div className="session-browser-results">
       <table id="session-browser-results" aria-label={t(archive ? "Archived sessions" : "Saved sessions")}>
-        <thead><tr>{(archive ? archivedColumns : columns).map(([column, label]) => <th key={column} scope="col" data-column={column}
+        <thead><tr>{checking && <th scope="col" data-column="check">
+          <input type="checkbox" aria-label={t("Select every session shown")} disabled={shownCheckable.length === 0}
+            checked={shownCheckable.length > 0 && shownCheckable.every(id => checked.has(id))}
+            ref={element => { if (element) element.indeterminate = shownCheckable.some(id => checked.has(id)) && !shownCheckable.every(id => checked.has(id)); }}
+            onChange={() => { const all = shownCheckable.every(id => checked.has(id)); anchor.current = null; setChecked(current => withChecked(current, shownCheckable, !all)); }} /></th>}
+          {(archive ? archivedColumns : columns).map(([column, label]) => <th key={column} scope="col" data-column={column}
           aria-sort={sort.column === column ? sort.descending ? "descending" : "ascending" : "none"}>
           <button type="button" onClick={() => change(() => setSort(current => ({ column, descending: current.column === column ? !current.descending : column === "updated" || column === "messages" })))}>
             {t(label)}{sort.column === column && <AppIcon name="chevronDown" size={12} className={sort.descending ? undefined : "sort-ascending"} />}</button></th>)}</tr></thead>
         <tbody>{rows.map(({ row, valid, tab }, index) => {
           // A time after the browser opened (an archive since) is said as now, not as to come.
           const shownTime = sessionTime(time(row), locale, Math.max(now, Date.parse(time(row)) || 0));
-          const running = !archive && !stale && !!observations?.enabled && !!observed && observations.canObserve(tab) && sessionRunning(observed, tab);
+          const running = runningIn(tab);
           return <tr id={`session-browser-row-${index}`} key={valid ? tabKey(tab) : `${tabKey(tab)}:${index}`} aria-selected={index === selected}
             aria-disabled={stale || !valid || undefined} title={`${row.fullTitle || row.title}\n${row.id}`}
             onClick={() => setSelected(index)} onDoubleClick={() => activate(index)}>
+            {checking && <td data-column="check" onDoubleClick={event => event.stopPropagation()}>
+              <input type="checkbox" aria-label={t("Select {title}", { title: plainTitle(row.fullTitle || row.title) || t("Untitled session") })}
+                checked={checked.has(row.id)} disabled={!checkable(rows[index])} onClick={event => check(row.id, event)} onChange={() => { }} /></td>}
             <td data-column="title"><span>{running ? <ActivitySpinner size={12} label={t("Running")} /> : <AppIcon name={archive ? "archive" : "assistant"} size={13} />}
               <strong>{plainTitle(row.fullTitle || row.title) || t("Untitled session")}</strong>
               {!valid && <small>{t("Ambiguous or unverified identity — unavailable")}</small>}</span></td>
@@ -163,7 +253,33 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
       </table>
       {!rows.length && <p className="bp6-text-muted">{t(archive && !query.trim() ? "No archived sessions in this scope." : "No matching saved sessions in the loaded scope.")}</p>}
     </div>
-    {archive ? <footer className="session-browser-footer archived-footer">
+    {checking && checkedRows.length > 0 ? <footer className="session-browser-footer checked-footer">
+      <span className="bp6-text-muted" role="status">{t("{count} selected", { count: checkedRows.length })}</span>
+      <Button size="small" variant="minimal" text={t("Clear selection")} onClick={clearChecked} />
+      <span className="settings-editor-spacer" />
+      <Button size="small" variant="outlined" icon={archive ? undefined : <AppIcon name="archive" size={14} className="bp6-icon" />} disabled={stale || checking.busy}
+        text={archive ? t("Restore {count}", { count: checkedRows.length }) : t("Archive {count}", { count: checkedRows.length })} onClick={() => void archiveChecked()} />
+      <span className="session-browser-delete">
+        <Button size="small" variant="outlined" intent="danger" icon={<AppIcon name="trash" size={14} className="bp6-icon" />} disabled={stale || checking.busy}
+          text={t("Delete {count}…", { count: checkedRows.length })} onClick={() => void askDeleteChecked()} />
+        {deletingChecked && plan && layer && <PortalProvider portalContainer={layer}><ConfirmPopover always placement="top-end" intent="danger" busy={checking.busy} error={deletingChecked.error}
+          title={plan.order.length === 0 ? t("Nothing can be deleted.") : plan.order.length === 1 ? t("Delete this session?") : t("Delete {count} sessions?", { count: plan.order.length })}
+          subject={plan.order.length === 0 ? "" : plan.order.length === 1 ? plainTitle(plan.order[0].title)
+            : t("{title} and {count} more", { title: plainTitle(plan.order[plan.order.length - 1].title), count: plan.order.length - 1 })}
+          detail={plan.order.length === 1 ? t("Its history is deleted and cannot be restored. The files of the project are kept.")
+            : t("Their history is deleted and cannot be restored. The files of the projects are kept.")}
+          confirmLabel={t("Delete")} onConfirm={() => void deleteChecked()} onCancel={() => { worktreeChecks.current++; setCheckingWorktrees(false); setDeletingChecked(null); }}>
+          {plan.kept.length > 0 && <div className="confirm-kept">
+            <p>{plan.kept.length === 1 ? t("One of them has child sessions you did not select: it is kept.")
+              : t("{count} of them have child sessions you did not select: they are kept.", { count: plan.kept.length })}</p>
+            {missingShown.length > 0 && <Button size="small" variant="minimal" text={t("Select their child sessions")}
+              onClick={() => { setChecked(current => withChecked(current, missingShown.map(row => row.id), true)); void askDeleteChecked([...checkedRows, ...missingShown]); }} />}
+          </div>}
+          <DeletedWorktreesChoice worktrees={worktrees} checking={checkingWorktrees} removing={removingWorktrees} setRemoving={setRemovingWorktrees}
+            busy={checking.busy} projectName={checking.projectName} />
+        </ConfirmPopover></PortalProvider>}
+      </span>
+    </footer> : archive ? <footer className="session-browser-footer archived-footer">
       <span className="bp6-text-muted">{t("Enter or double-click restores the selected session.")}</span>
       <Button size="small" variant="minimal" text={t("Info…")} disabled={!selectedRow} onClick={() => { if (selectedRow) archive.info(selectedRow); }} />
       <span className="session-browser-delete">

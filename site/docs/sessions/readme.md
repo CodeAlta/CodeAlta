@@ -171,7 +171,7 @@ Archive a session you are done with for now but may come back to. In CodeAlta De
 - Only an idle session can be archived, with idle sessions below it: none may run, wait for an answer or have queued prompts.
 - Find archived sessions with **Archived** in the session browser (`Ctrl+Alt+B`), or in the search (`Ctrl+P`), where they come last.
 - **Restore**, in the session browser or in the message shown just after archiving, puts the session back where it was, with the sessions archived below it.
-- In the session browser, **Info…** shows what is recorded of an archived session, and **Delete** deletes it.
+- In the session browser, **Info…** shows what is recorded of an archived session, and **Delete** deletes it. Check several sessions to archive, restore or delete them together (see [Session browser](../workspace/readme.md#session-browser)).
 - A prompt sent to an archived session by an agent, a reminder or an automation restores it first, with a message **Restored to run …**.
 - Statistics keep counting archived sessions.
 

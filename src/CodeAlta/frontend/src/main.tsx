@@ -65,7 +65,7 @@ import { SessionTabStrip } from "./SessionTabStrip";
 import { ActivityRail } from "./ActivityRail";
 import { activeDockNodeId, createSessionTabModel, cycleDockTab, draftNodeId, sessionDraftNodeId, sessionNodeId, sessionTabPresentation } from "./sessionTabLayout";
 import { createReferencePopupLifetime } from "./referencePopup";
-import { SessionBrowser, type ArchivedSessionControls } from "./SavedSessionBrowser";
+import { SessionBrowser, type ArchivedSessionControls, type CheckedSessionControls } from "./SavedSessionBrowser";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget } from "./projectDeletion";
@@ -4744,6 +4744,96 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (creationAlive.current) setSessionArchiveBusy(false);
     }
   }
+  // The browser of the saved sessions goes on with the list as it is after a change it made.
+  function refreshBrowserCapture() {
+    if (creationAlive.current && currentSnapshot.current)
+      setBrowserCapture(value => value && { ...value, snapshot: currentSnapshot.current!, revision: browserRevision.current });
+  }
+  // One message for what a change of several sessions did: how many changed, and why the first one left was left.
+  function checkedSessionsOutcome(done: number, left: number, reason: string | null, doneMessage: string) {
+    if (done > 0) showToast({ message: doneMessage, intent: "success", icon: "tick", timeout: 6000 });
+    if (left > 0) showToast({ message: left === 1 ? t("One session was left as it was: {reason}", { reason: reason ?? "" })
+      : t("{count} sessions were left as they were: {reason}", { count: left, reason: reason ?? "" }), intent: "warning", icon: "warning-sign", timeout: 10000 });
+  }
+  // Archives or restores the sessions checked in the browser of the saved sessions, one after the other, each alone: a
+  // restore brings back the sessions archived below it, as Restore does. The answer is the sessions changed.
+  async function setCheckedSessionsArchived(rows: readonly WorkspaceSession[], archive: boolean): Promise<readonly string[]> {
+    const epoch = status?.hostEpoch;
+    if (sessionArchivePending.current || deletingPending.current || !owned || !mutation?.capability.canMutate() || !epoch) return [];
+    sessionArchivePending.current = true;
+    setSessionArchiveBusy(true);
+    const done: string[] = [];
+    let reason: string | null = null;
+    try {
+      for (const row of rows) {
+        const result = await setSessionArchived(archive ? workspace.archiveSession : workspace.restoreSession, epoch, row.id, !archive);
+        if (!creationAlive.current) return done;
+        if (result.kind === "done") done.push(row.id);
+        else reason ??= t(sessionArchiveMessage(result.code));
+      }
+      const fresh = await refreshProjects(creationRefresh.current.signal);
+      if (!creationAlive.current) return done;
+      // The selected session left the list: its scope shows the next one.
+      if (archive && fresh?.configured && selectedSessionId.current && done.includes(selectedSessionId.current))
+        setSessionId(sessionsForProject(fresh, selectedScope.current)[0]?.id ?? null);
+      refreshBrowserCapture();
+      checkedSessionsOutcome(done.length, rows.length - done.length, reason,
+        archive ? done.length === 1 ? t("Archived.") : t("Archived {count} sessions.", { count: done.length })
+          : done.length === 1 ? t("Restored.") : t("Restored {count} sessions.", { count: done.length }));
+      return done;
+    } finally {
+      sessionArchivePending.current = false;
+      if (creationAlive.current) setSessionArchiveBusy(false);
+    }
+  }
+  // Deletes the sessions checked in the browser of the saved sessions in the order given, the deepest first, then the
+  // worktrees its question asked to remove that only deleted sessions worked in. The deletion stops at the first
+  // session whose deletion is not confirmed: nothing is retried.
+  async function deleteCheckedSessions(rows: readonly WorkspaceSession[], worktrees: readonly DeletedWorktree[]): Promise<Readonly<{ deleted: readonly string[]; error: string | null }>> {
+    const capability = mutation?.capability;
+    const epoch = status?.hostEpoch;
+    if (sessionArchivePending.current || deletingPending.current || batchDeletion.locked() || !owned || !capability?.canMutate() || !epoch)
+      return { deleted: [], error: t(sessionDeletionMessage("busy") as MessageKey) };
+    sessionArchivePending.current = true;
+    deletingPending.current = true;
+    setSessionArchiveBusy(true);
+    const deleted: string[] = [];
+    let reason: string | null = null;
+    try {
+      for (const row of rows) {
+        const project = row.scopeKind === "project" ? catalog.current?.projects.find(value => value.id === row.projectId && value.path === row.workspacePath) : undefined;
+        if (!row.workspacePath || row.scopeKind === "project" && (!project || project.archived)) { reason ??= t(sessionDeletionMessage("scope_missing") as MessageKey); continue; }
+        const target: RenameTarget = project ? { scope: "project", projectId: project.id, projectPath: project.path } : { scope: "global", projectPath: row.workspacePath };
+        const result = await deleteSession(epoch, target, row.id, row.title, capability);
+        if (!creationAlive.current) return { deleted, error: null };
+        if (result.kind === "deleted") { deleted.push(row.id); continue; }
+        reason ??= t(sessionDeletionMessage(result.code) as MessageKey);
+        if (result.code === "delete_unconfirmed") break;
+      }
+      const fresh = await refreshProjects(creationRefresh.current.signal);
+      if (!creationAlive.current) return { deleted, error: null };
+      // The selected session is gone: its scope shows the next one.
+      if (fresh?.configured && selectedSessionId.current && deleted.includes(selectedSessionId.current))
+        setSessionId(sessionsForProject(fresh, selectedScope.current)[0]?.id ?? null);
+      refreshBrowserCapture();
+      if (deleted.length > 0) showToast({ message: deleted.length === 1 ? t("Session deleted.") : t("Deleted {count} sessions.", { count: deleted.length }),
+        intent: "success", icon: "tick", timeout: 6000 });
+      const left = worktreesLeft(worktrees, deleted);
+      if (left.length > 0) void removeDeletedWorktrees(epoch, left);
+      return { deleted, error: deleted.length === rows.length ? null : reason };
+    } finally {
+      sessionArchivePending.current = false;
+      deletingPending.current = false;
+      if (creationAlive.current) setSessionArchiveBusy(false);
+    }
+  }
+  function checkedSessionControls(): CheckedSessionControls | undefined {
+    if (!owned || !mutation?.capability.canMutate()) return undefined;
+    return { catalog: catalog.current?.sessions ?? [], busy: sessionArchiveBusy,
+      archive: rows => setCheckedSessionsArchived(rows, true), restore: rows => setCheckedSessionsArchived(rows, false),
+      remove: deleteCheckedSessions, checkWorktrees: checkDeletedWorktrees,
+      projectName: id => catalog.current?.projects.find(project => project.id === id)?.name ?? t("Project") };
+  }
   function archivedSessionControls(): ArchivedSessionControls | undefined {
     if (!owned || !mutation?.capability.canMutate()) return undefined;
     return { sessions: shownArchived, busy: sessionArchiveBusy, deleteAsks: confirms.sessionDelete,
@@ -6635,7 +6725,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       onSave={() => void saveAndCloseFile(fileClosing.tab)} onDiscard={() => closeFile(fileClosing.tab, true)}
       onCancel={() => { cancelSaveFollowUp(); setFileClosing(null); }} />}
     {dialog === "sessions" && browserCapture && <SessionBrowser snapshot={browserCapture.snapshot} projectId={browserCapture.projectId} observations={runtimeObservationControls()} recentCount={recentSessionCount} activeSessionId={sessionId} batch={batchDeleteControls()}
-      archived={archivedSessionControls()}
+      archived={archivedSessionControls()} checking={checkedSessionControls()}
       stale={browserCapture.revision !== browserRevision.current || browserCapture.hostReady !== (mutation?.capability.canMutate() ?? false) || view !== "workspace" || settingsOpen}
       close={() => setDialog(null)} open={tab => {
         if (view !== "workspace" || settingsVisible.current || browserCapture.hostReady !== (mutation?.capability.canMutate() ?? false)

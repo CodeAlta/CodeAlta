@@ -1,4 +1,4 @@
-import { Button, Callout, Checkbox, Tag } from "@blueprintjs/core";
+import { Button, Callout, Tag } from "@blueprintjs/core";
 import { useEffect, useRef, useState } from "react";
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -10,6 +10,7 @@ import { plainTitle } from "../sessionTitle";
 import { useShellLanguage } from "../shellLanguage";
 import { SpaceIcon } from "../spaces/SpaceViews";
 import { sessionHome, type Space } from "../spaces/spaces";
+import { DeletedWorktreesChoice } from "../worktrees/DeletedWorktreesChoice";
 import { deletedSessionsWorktrees, type DeletedWorktree } from "../worktrees/worktrees";
 import { sessionsAtWork, sessionTreeMessage, treeDeletable, treeSessions, type SessionChildren, type SessionChildrenRead, type SessionTreeDeletion } from "./sessionChildren";
 
@@ -103,9 +104,6 @@ export function SessionChildrenDialog({ title, deleting, read, projects, session
   const deletable = !!tree && canDelete && treeDeletable(tree) && !busy && !loading;
   const found = tree ? deletedSessionsWorktrees(sessions, treeSessions(tree, sessions)) : [];
   const worktrees = checked ?? found;
-  const removable = worktrees.filter(worktree => !worktree.shared).length;
-  // Worktrees of several projects can have the same name: each says its project.
-  const severalProjects = new Set(worktrees.map(worktree => worktree.projectId)).size > 1;
   const projectName = (id: string) => projects.find(project => project.id === id)?.name ?? t("Project");
   function where(session: WorkspaceSession) {
     const project = session.scopeKind === "project" ? projects.find(value => value.id === session.projectId) : undefined;
@@ -161,20 +159,8 @@ export function SessionChildrenDialog({ title, deleting, read, projects, session
           detail={tree.total === 1 ? t("This session and the session below it are deleted with their history. Projects and their files are kept.")
             : t("This session and the {count} sessions below it are deleted with their history. Projects and their files are kept.", { count: tree.total })}
           onConfirm={() => void remove()} onCancel={() => { checks.current++; setChecking(false); setConfirming(false); }}>
-          {worktrees.length > 0 && <div className="confirm-worktree">
-            {worktrees.length === 1
-              ? <p>{t("These sessions work in the worktree {name}, in {path}. It is kept, with its branch.", { name: worktrees[0].name, path: worktrees[0].path })}
-                {worktrees[0].shared && <> {t("Other sessions work in this worktree: it stays.")}</>}</p>
-              : <><p>{t("These sessions work in {count} worktrees. They are kept, with their branches:", { count: worktrees.length })}</p>
-                <ul className="session-children-worktrees">{worktrees.map(worktree => <li key={worktree.path} title={worktree.path}>
-                  {worktree.name}{severalProjects && <span className="muted-text"> · {projectName(worktree.projectId)}</span>}{worktree.shared && <span className="muted-text"> · {t("Other sessions work in it: it stays.")}</span>}</li>)}</ul></>}
-            {checking && <p className="muted-text" role="status">{t("Checking which sessions still work in them…")}</p>}
-            {removable > 0 && <Checkbox checked={removingWorktrees} disabled={busy || checking}
-              label={removable === 1 ? t("Also remove the worktree") : t("Also remove the {count} worktrees", { count: removable })}
-              onChange={event => setRemovingWorktrees(event.currentTarget.checked)} />}
-            {removingWorktrees && removable > 0 && !checking && <p className="muted-text">
-              {t("A worktree that holds changes that are not committed is kept, and its branch is deleted only when its commits are all in another branch.")}</p>}
-          </div>}
+          <DeletedWorktreesChoice worktrees={worktrees} checking={checking} removing={removingWorktrees} setRemoving={setRemovingWorktrees}
+            busy={busy} projectName={projectName} />
         </ConfirmPopover>}
       </span>}
     </footer>

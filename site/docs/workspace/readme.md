@@ -92,7 +92,13 @@ Type `/` and the name of a [skill](settings.md#skills-management) in the empty p
 
 ### Session browser
 
-In CodeAlta Desktop, `Ctrl+Alt+B` opens the session browser: a searchable table of the sessions of a project or of the global scope, with their provider, last update and message count. **Archived** shows the [archived sessions](../sessions/readme.md#archive-a-session) instead: **Restore** (or `Enter`, or a double-click) restores and opens one, **Info…** shows what is recorded of it, and **Delete** deletes it.
+In CodeAlta Desktop, `Ctrl+Alt+B`, or **Browse saved sessions** in the menu of a project, opens the session browser: a searchable table of all the sessions of a project or of the global scope, with their provider, last update and message count. **Archived** shows the [archived sessions](../sessions/readme.md#archive-a-session) instead: **Restore** (or `Enter`, or a double-click) restores and opens one, **Info…** shows what is recorded of it, and **Delete** deletes it.
+
+To clean up a project, check the sessions in the first column: Shift-click checks the rows down to the one clicked before, and the box of the header checks every session shown. Sort by **Updated** to put the oldest together, or type a few words to check only the sessions they find. Then:
+
+- **Archive N** archives them at once; under **Archived**, **Restore N** brings them back.
+- **Delete N…** asks once for all of them. A session with child sessions that are not checked is kept: **Select their child sessions** checks them too. The question also names their [worktrees](../worktrees.md), which it can remove with them.
+- A session at work cannot be checked.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-session-browser.webp" alt="CodeAlta Desktop session browser listing saved sessions of a project, with its Archived button" loading="lazy">
