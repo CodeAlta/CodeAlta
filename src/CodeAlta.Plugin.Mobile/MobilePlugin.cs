@@ -357,6 +357,7 @@ public sealed class MobilePlugin : PluginBase
     // does at once is shown, and its outcome comes with the changes it reports.
     private async Task<MobileStatus> ActAsync(string action, CancellationToken cancellationToken)
     {
+        MobileStatus answer;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -374,6 +375,9 @@ public sealed class MobilePlugin : PluginBase
 
             if (status is not null) SetProvider(status);
             else Logger.Warn($"Mobile: the network {_network?.Id ?? _settings.Mode} knows no action {action}.");
+            // Taken under the gate: the work the action started (a sign-in that ends at once) may report its outcome as soon as
+            // the gate is released, and that outcome comes to the tab with the changes, not as the answer of the action.
+            answer = Status();
         }
         finally
         {
@@ -381,7 +385,7 @@ public sealed class MobilePlugin : PluginBase
         }
 
         await ChangedAsync().ConfigureAwait(false);
-        return Status();
+        return answer;
     }
 
     // A new pairing token, and no phone signed in: every phone has to scan the new code. The streams of the phones end, and they
