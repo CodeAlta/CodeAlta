@@ -102,15 +102,15 @@ test("all six shell dictionaries are complete immutable plain-text messages with
   assert.equal(translate("unknown", "Settings"), "Settings");
 });
 
-test("management labels translate without translating confirmation bytes", () => {
+test("management labels translate in every locale", () => {
   for (const locale of locales) {
-    for (const key of ["Keep draft", "Batch session deletion", "Select visible eligible", "Confirm exact batch deletion", "Stop after pending original", "uncertain"] as const) {
+    for (const key of ["Keep draft", "Select every session shown", "Select their child sessions", "Nothing can be deleted.", "uncertain"] as const) {
       if (locale !== "en") assert.notEqual(translate(locale, key), key, `${locale}: ${key}`);
       else assert.equal(translate(locale, key), key);
     }
     for (const count of [1, 3, 32]) {
-      const confirmation = `DELETE ${count}`;
-      assert.ok(translate(locale, "Type {confirmation} to permanently delete exactly these reviewed session histories", { confirmation }).includes(confirmation));
+      assert.ok(translate(locale, "Delete {count}…", { count }).includes(String(count)));
+      assert.ok(translate(locale, "Archive {count}", { count }).includes(String(count)));
     }
   }
 });

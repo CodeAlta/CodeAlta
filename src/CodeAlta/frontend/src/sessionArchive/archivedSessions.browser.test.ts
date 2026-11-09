@@ -16,6 +16,7 @@ test("the saved sessions show the archived sessions of their scope under Archive
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./archivedSessions.mount.tsx", import.meta.url))], outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife" });
     await writeFile(join(root, "style.css"), await readFile(new URL("../../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8")
+      + await readFile(new URL("../../node_modules/@blueprintjs/table/lib/css/table.css", import.meta.url), "utf8")
       + await readFile(new URL("../style.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body class="bp6-dark"><div id="root"></div><script src="fixture.js"></script></body></html>');
@@ -45,7 +46,7 @@ test("the saved sessions show the archived sessions of their scope under Archive
     const wait = (expression: string, milliseconds = 8_000) => evaluate<boolean>(
       `new Promise(resolve=>{const end=Date.now()+${milliseconds};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`);
     const dialog = "document.querySelector('dialog.session-browser[open]')";
-    const titles = `[...${dialog}.querySelectorAll('tbody td[data-column="title"] strong')].map(cell=>cell.textContent)`;
+    const titles = `[...${dialog}.querySelectorAll('.session-browser-name')].map(cell=>cell.textContent)`;
     const archivedButton = `${dialog}.querySelector('.session-browser-archived')`;
     const footerButton = (text: string) => `[...${dialog}.querySelectorAll('.session-browser-footer button')].find(button=>button.textContent===${JSON.stringify(text)})`;
     const confirm = "document.querySelector('.confirm-form')";
@@ -64,9 +65,12 @@ test("the saved sessions show the archived sessions of their scope under Archive
     await evaluate(`${archivedButton}.click()`);
     assert.equal(await wait(`${archivedButton}.getAttribute('aria-pressed')==='true' && ${titles}.length===2`), true);
     assert.deepEqual(await evaluate(titles), ["Plan the release", "Fix the parser"]);
-    assert.equal(await evaluate(`${dialog}.querySelector('th[data-column="updated"]').textContent`), "Archived");
-    assert.equal(await evaluate(`${dialog}.querySelector('table').getAttribute('aria-label')`), "Archived sessions");
-    assert.equal(await evaluate(`${dialog}.querySelector('tbody time').getAttribute('datetime')`), "2026-10-15T08:00:00.000Z");
+    // The column sorted by says how it is sorted to a screen reader: the header cells of the table have no role that could.
+    assert.equal(await evaluate(`${dialog}.querySelector('button[data-column="updated"]').firstChild.textContent`), "Archived");
+    assert.equal(await evaluate(`${dialog}.querySelector('button[data-column="updated"] .sr-only').textContent`), "sorted descending");
+    assert.equal(await evaluate(`!!${dialog}.querySelector('button[data-column="title"] .sr-only')`), false);
+    assert.equal(await evaluate(`${dialog}.querySelector('.session-browser-results').getAttribute('aria-label')`), "Archived sessions");
+    assert.equal(await evaluate(`${dialog}.querySelector('.session-browser-results time').getAttribute('datetime')`), "2026-10-15T08:00:00.000Z");
     assert.equal(await evaluate(`!!${footerButton("Open")}`), false, "An archived session is restored, not opened.");
     assert.equal(await evaluate(`[...${dialog}.querySelectorAll('.app-window-body, .session-browser-results, .session-browser-footer, .session-browser-toolbar')].every(part=>part.scrollWidth<=part.clientWidth+1)`), true,
       await evaluate<string>(`JSON.stringify([...${dialog}.querySelectorAll('.app-window-body, .session-browser-results, .session-browser-footer, .session-browser-toolbar')].map(part=>[part.className, part.scrollWidth, part.clientWidth, [...part.children].map(child=>child.className+':'+Math.round(child.getBoundingClientRect().width)).join(',')]))`));

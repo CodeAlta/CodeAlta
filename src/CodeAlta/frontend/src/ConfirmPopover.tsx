@@ -60,7 +60,7 @@ export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = 
   const question = <div ref={form} className="confirm-form" role="alertdialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-detail`}
     onKeyDown={event => { if (event.key === "Escape" && !busy) { event.preventDefault(); event.stopPropagation(); cancel(); } }}>
     <strong id={`${id}-title`}>{title}</strong>
-    <span className="confirm-subject" title={subject}>{subject}</span>
+    {subject && <span className="confirm-subject" title={subject}>{subject}</span>}
     <p id={`${id}-detail`}>{detail}</p>
     {children}
     {error && <p role="alert" className="confirm-error">{error}</p>}

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { browseSessions, browserActivation } from "./sessionBrowser";
+import { browseSessions, browserActivation, browseTree } from "./sessionBrowser";
 
 const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
   projects: [{ id: "p", name: "Project", path: "/p", archived: false }], sessions: ["one", "two", "global"].map(id => ({ id,
@@ -16,6 +16,19 @@ test("saved browsing filters title/ID in scope without selection and reports bou
   assert.equal(browseSessions(snapshot, "p", "global").rows.length, 0);
   const many = { ...snapshot, sessionsTruncated: true, sessions: Array.from({ length: 205 }, (_, i) => ({ ...snapshot.sessions[0], id: `s${i}` })) };
   assert.deepEqual([browseSessions(many, "p", "").rows.length, browseSessions(many, "p", "").hidden, browseSessions(many, "p", "").incomplete], [200, 5, true]);
+});
+
+test("the tree of a search finds a match beyond the first 200 sessions, and counts the matches it shows", () => {
+  const byId = (x: { id: string }, y: { id: string }) => x.id.localeCompare(y.id, undefined, { numeric: true });
+  const many = { ...snapshot, sessions: [...Array.from({ length: 250 }, (_, i) => ({ ...snapshot.sessions[0], id: `s${i}`, fullTitle: `Saved s${i}` })),
+    { ...snapshot.sessions[0], id: "kid", fullTitle: "The kid", parentSessionId: "s230" }] };
+  const found = browseTree(many, "p", "the kid", byId);
+  assert.deepEqual(found.rows.map(item => [item.row.id, item.depth, item.match]), [["s230", 0, false], ["kid", 1, true]]);
+  assert.deepEqual([found.matched, found.shownMatches, found.hidden], [1, 1, 0]);
+  const all = browseTree(many, "p", "", byId);
+  assert.deepEqual([all.rows.length, all.matched, all.shownMatches, all.hidden], [200, 251, 200, 51]);
+  assert.equal(all.rows.find(item => item.row.id === "kid"), undefined, "s230 and its child are past the first 200 rows");
+  assert.equal(browseTree(many, null, "global", byId).rows.length, 0);
 });
 
 test("activation requires current exact unique identity and revision; archives remain browsable", () => {

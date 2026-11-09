@@ -22,12 +22,6 @@
 .runtime-observation { display: block; font-size: .75rem; line-height: 1.5; font-weight: normal; overflow-wrap: anywhere; }
 .observed-activity, .unknown-activity { display: block; overflow-wrap: anywhere; }
 .unknown-activity { border-top: 1px dashed var(--muted); padding-top: .25rem; color: var(--muted); }
-.session-batch-delete { border: 1px solid var(--muted); padding: .5rem; overflow-wrap: anywhere; }
-.session-batch-delete fieldset { max-height: 12rem; overflow: auto; min-width: 0; }
-.session-browser .session-batch-delete label { display: block; }
-.session-batch-delete input[type="checkbox"] { width: auto; margin-right: .5rem; }
-.session-batch-report { max-height: 24rem; overflow: auto; }
-.session-batch-report input { max-width: 100%; }
 .runtime-observation-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; max-width: 100%; }
 /* Stable line boxes prevent CJK fallback metrics shifting the retained timeline. */
 .runtime-observation-controls button { line-height: 1.5; }
@@ -443,7 +437,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .composer { flex: 0 0 auto; position: relative; margin: 10px 4px 0; border: 1px solid var(--line-strong); border-radius: 14px; background: color-mix(in srgb, var(--panel-2) 96%, transparent); box-shadow: var(--shadow); overflow: hidden; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 65%, var(--line)); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }
 .session-browser { width: min(720px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow: auto; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
-.session-browser [role="alert"] { color: var(--red); }
+.session-browser p[role="alert"] { color: var(--red); }
 .reference-presentation { font-size: .8rem; min-width: 0; }
 .reference-presentation p { margin: .3rem 0; }
 .reference-presentation pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 10rem; overflow: auto; margin: .3rem 0; }
@@ -2181,25 +2175,31 @@ dialog .copy-value, .copy-value { display: grid; place-items: center; width: 26p
 dialog.session-browser > .app-window > .app-window-body { gap: 10px; padding: 12px 14px 14px; }
 .session-browser-toolbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; font-size: 12px; }
 .session-browser-filter.bp6-input-group { flex: 1 1 260px; max-width: 420px; }
-.session-browser-results { flex: 1 1 0; min-height: 120px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
-.session-browser-results table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12.5px; }
-.session-browser-results th { position: sticky; top: 0; z-index: 1; padding: 0; text-align: left; background: var(--panel-2); border-bottom: 1px solid var(--line); }
-.session-browser-results th > button { display: flex; align-items: center; gap: 4px; width: 100%; padding: 6px 10px; border: 0; color: var(--muted); background: transparent; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; cursor: pointer; }
-.session-browser-results th > button:hover { color: var(--text); }
-.session-browser-results .sort-ascending { transform: rotate(180deg); }
-.session-browser-results [data-column="provider"] { width: 150px; }
-.session-browser-results [data-column="updated"] { width: 130px; }
-.session-browser-results [data-column="messages"] { width: 96px; text-align: right; }
-.session-browser-results th[data-column="messages"] > button { justify-content: flex-end; }
-.session-browser-results td { padding: 6px 10px; border-bottom: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-.session-browser-results td[data-column="title"] { color: var(--text); }
-.session-browser-results td[data-column="title"] > span { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.session-browser-results td[data-column="title"] strong { overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-.session-browser-results td[data-column="title"] small { flex: none; color: var(--red); }
-.session-browser-results tbody tr { cursor: default; }
-.session-browser-results tbody tr:hover { background: var(--panel-2); }
-.session-browser-results tbody tr[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 2px 0 var(--accent); }
-.session-browser-results tbody tr[aria-disabled="true"] { opacity: .55; }
+.session-browser-results { flex: 1 1 0; min-height: 120px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+/* The sessions as a Blueprint table: the colors of the window, one line a session, the time and the count on the right. */
+.session-browser-results .bp6-table-container, .session-browser-results .bp6-table-quadrant { box-shadow: none; background: var(--bg); }
+.session-browser-results .bp6-table-cell { font-size: 12.5px; line-height: 30px; color: var(--muted); background: var(--bg); box-shadow: inset 0 -1px 0 var(--line); }
+.session-browser-results .bp6-table-cell.session-browser-title { color: var(--text); }
+.session-browser-results .bp6-table-cell.session-browser-selected { background: var(--accent-soft); }
+.session-browser-results .bp6-table-cell.session-browser-selected.session-browser-check { box-shadow: inset 2px 0 var(--accent), inset 0 -1px 0 var(--line); }
+.session-browser-results .bp6-table-cell.session-browser-unavailable { opacity: .55; }
+/* Shown with a match of the search, the sessions it comes from and the ones below it, not matches themselves. */
+.session-browser-results .bp6-table-cell.session-browser-context:not(.session-browser-check) { opacity: .5; }
+.session-browser-child { flex: none; color: var(--muted); }
+.session-browser-results .bp6-table-cell.session-browser-messages { text-align: right; }
+.session-browser-results .bp6-table-selection-region { border: 0; background: transparent; }
+.session-browser-results .bp6-table-column-headers .bp6-table-header { background: var(--panel-2); box-shadow: inset 0 -1px 0 var(--line); }
+.session-browser-cell { height: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
+.session-browser-title-cell { display: flex; align-items: center; gap: 7px; min-width: 0; height: 100%; }
+.session-browser-title-cell strong { overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.session-browser-title-cell small { flex: none; color: var(--red); }
+.session-browser-sort { display: flex; align-items: center; gap: 4px; width: 100%; padding: 0; border: 0; color: var(--muted); background: transparent; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; cursor: pointer; }
+.session-browser-sort:hover { color: var(--text); }
+.session-browser-sort[data-column="messages"] { justify-content: flex-end; }
+.session-browser-sort .sort-ascending { transform: rotate(180deg); }
+.session-browser-results .session-browser-check { text-align: center; }
+.session-browser-results .session-browser-check input { margin: 0; vertical-align: middle; cursor: pointer; }
+.session-browser-results .session-browser-check input:disabled { cursor: default; }
 .session-browser-results > p { margin: 0; padding: 14px; }
 .session-browser-footer { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
 /* The footer spans the body of the window, whose padding is 14 px. */
@@ -2210,8 +2210,6 @@ dialog.session-browser > .app-window > .app-window-body > footer { margin-inline
 .session-browser-delete { position: relative; display: inline-flex; }
 .session-browser-archived .session-browser-count { margin-left: 6px; min-width: 16px; padding: 0 5px; border-radius: 999px; color: var(--muted);
   background: color-mix(in srgb, var(--text) 9%, transparent); font-size: 10.5px; font-variant-numeric: tabular-nums; line-height: 16px; text-align: center; }
-dialog.session-browser .session-batch-delete { flex: none; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
-dialog.session-browser .session-batch-delete summary { cursor: pointer; color: var(--muted); }
 
 /* The working folder, its git branch and the lines changed, in the form of a new session. */
 .project-context { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--muted); font-size: 12px; white-space: nowrap; }
@@ -2734,7 +2732,9 @@ dialog.diagram-viewer-dialog:has(> .app-window) > .app-window > .app-window-body
 .confirm-form .bp6-checkbox { margin: 2px 0 0; }
 .confirm-form .confirm-choices { margin: 0; font-size: 12px; }
 .confirm-form .confirm-choices .bp6-radio { margin: 2px 0; }
-.confirm-form .confirm-worktree { display: grid; gap: 4px; }
+.confirm-form .confirm-worktree, .confirm-form .confirm-kept { display: grid; gap: 4px; justify-items: start; }
+/* The worktrees of sessions about to be deleted, in the question of their deletion. */
+.confirm-form .deleted-worktrees { margin: 0; padding-inline-start: 18px; max-height: 120px; overflow-y: auto; overflow-wrap: anywhere; }
 
 /* The developer instance says so beside its name, so two CodeAlta windows are told apart. */
 .window-brand-tag { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--yellow) 60%, transparent); border-radius: 999px; color: var(--yellow); font-size: 10px; font-weight: 600; letter-spacing: .06em; line-height: 16px; text-transform: uppercase; }
