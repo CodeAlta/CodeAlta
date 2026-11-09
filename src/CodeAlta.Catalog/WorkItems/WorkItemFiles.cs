@@ -30,6 +30,12 @@ public static partial class WorkItemFiles
     private const int MaximumTaskFile = 256 * 1024;
     private const int MaximumSlug = 60;
 
+    /// <summary>The number of characters of the short id that ends the id of a task.</summary>
+    public const int ShortIdLength = 4;
+
+    // The characters of a short id read well in a file name: no vowel (no word by accident), no 0/1 beside o/l.
+    internal const string ShortIdAlphabet = "23456789bcdfghjkmnpqrstvwxz";
+
     /// <summary>The kinds a task can have, the default one last.</summary>
     public static IReadOnlyList<string> TaskKinds { get; } = ["gap", "problem", "improvement"];
 
@@ -103,6 +109,43 @@ public static partial class WorkItemFiles
         }
 
         return true;
+    }
+
+    /// <summary>Whether a text is written as a short id: <see cref="ShortIdLength"/> characters of the ones a short id is made of.</summary>
+    /// <param name="text">The text.</param>
+    /// <returns>True for a text such as <c>p53b</c>.</returns>
+    public static bool IsShortId(ReadOnlySpan<char> text)
+    {
+        if (text.Length != ShortIdLength)
+        {
+            return false;
+        }
+
+        foreach (var character in text)
+        {
+            if (!ShortIdAlphabet.Contains(character, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Gets the short id of a task: the characters that end its id after its last <c>-</c>, which a task gets when it is
+    /// written, such as <c>p53b</c> in <c>2026-11-08-fix-the-parser-p53b</c>.
+    /// </summary>
+    /// <param name="id">The id of the task.</param>
+    /// <returns>The short id; null when the id does not end with one (a task written before ids had them).</returns>
+    public static string? ShortIdOf(string? id)
+    {
+        if (id is null || id.Length <= ShortIdLength || id[^(ShortIdLength + 1)] != '-')
+        {
+            return null;
+        }
+
+        return IsShortId(id.AsSpan(id.Length - ShortIdLength)) ? id[^ShortIdLength..] : null;
     }
 
     /// <summary>Names a new file after the day and a title, as plans are: <c>yyyy-MM-dd-the-title</c>.</summary>

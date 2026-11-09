@@ -78,6 +78,16 @@ public sealed class WorkItemHostTests
         var shown = await fixture.One("alta.task", ["task", "show", first + ".md"]);
         Assert.AreEqual("Body one.", Text(shown, "markdown"));
 
+        // Each task is listed with its short id, which the commands take in place of its id.
+        var shortId = first[^4..];
+        Assert.AreEqual(shortId, Text(Of(listed, "alta.task").Single(record => Text(record, "id") == first), "shortId"));
+        Assert.AreEqual(first, Text(await fixture.One("alta.task", ["task", "show", shortId]), "id"));
+        File.Copy(Path.Combine(fixture.Project.ProjectPath, ".alta", "tasks", first + ".md"), Path.Combine(fixture.Project.ProjectPath, ".alta", "tasks", "2026-01-01-twin-" + shortId + ".md"));
+        var (ambiguous, _, why) = await fixture.Run(["task", "start", shortId]);
+        Assert.AreEqual(AltaExitCodes.Usage, ambiguous, "A short id that two tasks share names neither.");
+        StringAssert.Contains(why, "2026-01-01-twin-" + shortId);
+        File.Delete(Path.Combine(fixture.Project.ProjectPath, ".alta", "tasks", "2026-01-01-twin-" + shortId + ".md"));
+
         Assert.AreEqual("in-progress", Text(await fixture.One("alta.task.changed", ["task", "start", first]), "status"));
         Assert.AreEqual("session-of-the-user", fixture.Items.GetLink(fixture.Project.Id, "task", first)!.Runner);
         Assert.AreEqual("in-progress", Text(await fixture.One("alta.task", ["task", "show", first]), "status"));

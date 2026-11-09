@@ -121,11 +121,35 @@ public sealed class WorkItemService
             : null;
     }
 
-    // Four characters that read well in a file name: no vowel (no word by accident), no 0/1 beside o/l.
-    private const string SuffixAlphabet = "23456789bcdfghjkmnpqrstvwxz";
+    /// <summary>
+    /// Finds the tasks a reference names: the task of that id, else the tasks whose short id it is. Two checkouts of a
+    /// project can each write a task with the same short id, which then names both.
+    /// </summary>
+    /// <param name="project">The project.</param>
+    /// <param name="reference">The id of a task, or its short id (<see cref="WorkItemFiles.ShortIdOf"/>).</param>
+    /// <returns>The tasks it names: none, one, or several when a short id is shared.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public IReadOnlyList<WorkTask> FindTasks(ProjectDescriptor project, string reference)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(reference);
+        if (GetTask(project, reference) is { } task)
+        {
+            return [task];
+        }
+
+        var shortId = reference.Trim().ToLowerInvariant();
+        return WorkItemFiles.IsShortId(shortId) ? [.. ListTasks(project).Where(candidate => candidate.ShortId == shortId)] : [];
+    }
 
     private static string ShortSuffix()
-        => string.Create(4, 0, static (span, _) => { foreach (ref var character in span) character = SuffixAlphabet[Random.Shared.Next(SuffixAlphabet.Length)]; });
+        => string.Create(WorkItemFiles.ShortIdLength, 0, static (span, _) =>
+        {
+            foreach (ref var character in span)
+            {
+                character = WorkItemFiles.ShortIdAlphabet[Random.Shared.Next(WorkItemFiles.ShortIdAlphabet.Length)];
+            }
+        });
 
     /// <summary>Writes a new task in the project.</summary>
     /// <param name="project">The project.</param>

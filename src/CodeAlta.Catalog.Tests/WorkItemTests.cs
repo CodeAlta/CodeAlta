@@ -105,6 +105,42 @@ public sealed class WorkItemTests
     }
 
     [TestMethod]
+    public void ShortId_IsTheRandomEndOfTheId()
+    {
+        Assert.AreEqual("p53b", WorkItemFiles.ShortIdOf("2026-11-08-fix-the-parser-p53b"));
+        Assert.AreEqual("2x9z", WorkItemFiles.ShortIdOf("a-2x9z"));
+        // An id written before ids had a random end has none: a last word is not one, even of four letters.
+        foreach (var id in new[] { "2026-10-26-leak", "2026-10-26-html", "2026-10-26-sync", "2026-10-26-p53b2", "2026-10-26-P53B", "p53b", "", null })
+        {
+            Assert.IsNull(WorkItemFiles.ShortIdOf(id), id);
+        }
+
+        Assert.IsTrue(WorkItemFiles.IsShortId("mwf9"));
+        foreach (var text in new[] { "mwf", "mwf9x", "MWF9", "a2b3", "mw 9", "mw-9" }) Assert.IsFalse(WorkItemFiles.IsShortId(text), text);
+    }
+
+    [TestMethod]
+    public async Task Tasks_AreFoundByTheirIdOrTheirShortId()
+    {
+        using var root = new TempRoot();
+        var (items, project) = await root.CreateAsync();
+        var task = items.CreateTask(project, new WorkTaskDraft("Report why a probe failed", "gap", null, "Body."), null).Task!;
+        var shortId = task.ShortId!;
+        Assert.AreEqual(task.Id[^4..], shortId, "Every new task has a short id.");
+
+        Assert.AreEqual(task.Id, items.FindTasks(project, task.Id).Single().Id);
+        Assert.AreEqual(task.Id, items.FindTasks(project, shortId).Single().Id);
+        Assert.AreEqual(task.Id, items.FindTasks(project, " " + shortId.ToUpperInvariant() + " ").Single().Id, "What a person types is taken as it is meant.");
+        Assert.IsEmpty(items.FindTasks(project, shortId == "2222" ? "3333" : "2222"));
+        Assert.IsEmpty(items.FindTasks(project, "../" + task.Id));
+
+        // Two checkouts that each wrote a task with the same short id: it names both, and the full ids stay apart.
+        File.Copy(task.Path, Path.Combine(Path.GetDirectoryName(task.Path)!, "2026-10-01-another-task-" + shortId + ".md"));
+        Assert.HasCount(2, items.FindTasks(project, shortId));
+        Assert.AreEqual(task.Id, items.FindTasks(project, task.Id).Single().Id);
+    }
+
+    [TestMethod]
     public async Task Tasks_AreCreatedListedAndClosed_AsTheSettingsSay()
     {
         using var root = new TempRoot();

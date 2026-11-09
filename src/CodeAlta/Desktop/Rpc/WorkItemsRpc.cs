@@ -244,7 +244,7 @@ internal sealed class WorkItemsService
 
     private static WorkItemRow Row(WorkTask task, WorkItemLink? link)
         => new(task.Id, WorkItemKinds.Task, task.Title, task.Summary, task.Kind, WorkItemFiles.NameOf(task.Status), null, task.Created,
-            WorkItemFiles.TasksFolder + "/" + task.Id + ".md", link?.ProposedBy, link?.Runner, link?.Acknowledged ?? false, RunsWith(link));
+            WorkItemFiles.TasksFolder + "/" + task.Id + ".md", link?.ProposedBy, link?.Runner, link?.Acknowledged ?? false, RunsWith(link), task.ShortId);
 
     private static WorkItemRow Row(WorkPlan plan, WorkItemLink? link)
         => new(plan.Id, WorkItemKinds.Plan, plan.Title, plan.Summary, null, WorkItemFiles.NameOf(plan.Status), plan.StatusText, plan.Created,
@@ -277,8 +277,9 @@ internal sealed record WorkItemsProject(string ProjectId, IReadOnlyList<WorkItem
 /// <param name="Runner">The session that carries the item out.</param>
 /// <param name="Acknowledged">The user put the card of the item away.</param>
 /// <param name="RunsWith">What the session that proposed the item ran with, which a session started for it takes; null when it is not known.</param>
+/// <param name="ShortId">The short id of a task, which agents name it by; null for a plan and for a task written before ids had one.</param>
 internal sealed record WorkItemRow(string Id, string Kind, string Title, string? Summary, string? Category, string Status, string? StatusText, string? Created,
-    string File, string? ProposedBy, string? Runner, bool Acknowledged, WorkItemRunsWith? RunsWith = null);
+    string File, string? ProposedBy, string? Runner, bool Acknowledged, WorkItemRunsWith? RunsWith = null, string? ShortId = null);
 
 /// <param name="ProviderId">The key of the model provider.</param>
 /// <param name="ModelId">The model; null leaves it to the provider.</param>

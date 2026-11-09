@@ -46,6 +46,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             "Propose a task only for something concrete that you verified and that is outside the current request. What belongs to the current request is done, not proposed. Look at `alta task list` first: do not propose what is already there. A session has at most a few open proposals.",
             "A task is not a plan: a plan (`alta plan`) describes how a larger piece of work will be done, for review before it starts.",
             "The commands use the project of the calling session; `--project` names another one. A completed or dismissed task is deleted, or kept when the user chose so in the settings.",
+            "A task has a short id: the four characters that end its id, such as `p53b` in `2026-11-08-fix-the-parser-p53b`. The commands take it as well as the id, and the user finds the task by it in the list of tasks and in the conversation. When you mention a task to the user, write its short id in code: `p53b`.",
             "Examples: `alta task list`; `alta task create --title \"Make the locator test pass on Windows\" --kind problem --summary \"...\" --stdin`; `alta task complete <task-id>`.");
         return group;
     }
@@ -55,7 +56,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? project = null;
         string? status = null;
         var all = false;
-        var command = Leaf("list", "List the tasks of a project: id, title, kind, status, and the session that does it.");
+        var command = Leaf("list", "List the tasks of a project: id, short id, title, kind, status, and the session that does it.");
         command.Add("project=", "Project id, slug or path. Defaults to the project of the calling session, then to the cwd.", value => project = value);
         command.Add("all", "The tasks of every project.", value => all = value is not null);
         command.Add("status=", "`open` (default: pending, later and in progress), `pending`, `later`, `in-progress`, `done`, `dismissed` or `all`.", value => status = value);
@@ -68,7 +69,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? id = null;
         string? project = null;
         var command = Leaf("show", "Show one task with its description.");
-        command.Add("<task-id>", "Task id from `alta task list`.", value => id = value);
+        command.Add("<task-id>", "Task id or short id from `alta task list`.", value => id = value);
         command.Add("project=", "Project id, slug or path. Defaults to the project of the calling session.", value => project = value);
         command.Add(async (_, _) => await HandleWorkItemShowAsync(context, WorkItemKinds.Task, project, id).ConfigureAwait(false));
         return command;
@@ -97,7 +98,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? id = null;
         string? project = null;
         var command = Leaf(name, description);
-        command.Add("<task-id>", "Task id from `alta task list`.", value => id = value);
+        command.Add("<task-id>", "Task id or short id from `alta task list`.", value => id = value);
         command.Add("project=", "Project id, slug or path. Defaults to the project of the calling session.", value => project = value);
         command.Add(async (_, _) => await HandleTaskChangeAsync(context, name, project, id).ConfigureAwait(false));
         return command;
@@ -306,9 +307,9 @@ internal sealed partial class BuiltInAltaCommandContributor
         itemId = StripExtension(itemId);
         if (kind == WorkItemKinds.Task)
         {
-            if (items.GetTask(project, itemId) is not { } task)
+            if (FindTask(context, items, project, itemId, command, out var notFound) is not { } task)
             {
-                return WorkItemNotFound(context, kind, itemId);
+                return notFound;
             }
 
             AltaJsonlWriter.WriteRecord(context.Stdout, TaskRecord(context, project, task, items.GetLink(project.Id, kind, task.Id), task.Body));
@@ -401,7 +402,9 @@ internal sealed partial class BuiltInAltaCommandContributor
         AltaJsonlWriter.WriteRecord(context.Stdout, TaskRecord(context, project, task, items.GetLink(project.Id, WorkItemKinds.Task, task.Id), markdown: null) with
         {
             type = "alta.task.created",
-            nextStep = "The user now sees this task and decides what to do with it. Do not start it yourself; finish your current work and mention the task in one line of your answer.",
+            nextStep = task.ShortId is { } shortId
+                ? $"The user now sees this task and decides what to do with it. Do not start it yourself; finish your current work and mention the task in one line of your answer, by its short id in code (`{shortId}`) and its title."
+                : "The user now sees this task and decides what to do with it. Do not start it yourself; finish your current work and mention the task in one line of your answer.",
         });
         return AltaExitCodes.Success;
     }
@@ -431,11 +434,12 @@ internal sealed partial class BuiltInAltaCommandContributor
             return exitCode;
         }
 
-        taskId = StripExtension(taskId);
-        if (items.GetTask(project, taskId) is not { } task)
+        if (FindTask(context, items, project, StripExtension(taskId), command, out var notFound) is not { } task)
         {
-            return WorkItemNotFound(context, WorkItemKinds.Task, taskId);
+            return notFound;
         }
+
+        taskId = task.Id;
 
         var done = action switch
         {
@@ -604,6 +608,22 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
+    // The task a reference names: by its id, or by its short id when one task has it.
+    private static WorkTask? FindTask(AltaCommandContext context, WorkItemService items, ProjectDescriptor project, string reference, string command, out int exitCode)
+    {
+        var found = items.FindTasks(project, reference);
+        if (found.Count == 1)
+        {
+            exitCode = AltaExitCodes.Success;
+            return found[0];
+        }
+
+        exitCode = found.Count == 0
+            ? WorkItemNotFound(context, WorkItemKinds.Task, reference)
+            : UsageError(context, "usage.ambiguousTask", $"The short id '{reference}' names several tasks: {string.Join(", ", found.Select(static task => task.Id))}. Use the full id.", command);
+        return null;
+    }
+
     private static int WorkItemNotFound(AltaCommandContext context, string kind, string id)
         => NotFound(context, $"{kind}.notFound", $"The project has no {kind} '{id}'. List them with `alta {kind} list`.");
 
@@ -614,15 +634,15 @@ internal sealed partial class BuiltInAltaCommandContributor
         => task.Status == WorkTaskStatus.Pending && link?.Runner is not null ? "in-progress" : WorkItemFiles.NameOf(task.Status);
 
     private static WorkItemRecord TaskRecord(AltaCommandContext context, ProjectDescriptor project, WorkTask task, WorkItemLink? link, string? markdown)
-        => new("alta.task", 1, context.CorrelationId, task.Id, project.Id, project.Slug, task.Title, task.Kind, TaskStatusName(task, link), null, task.Summary, task.Created,
+        => new("alta.task", 1, context.CorrelationId, task.Id, task.ShortId, project.Id, project.Slug, task.Title, task.Kind, TaskStatusName(task, link), null, task.Summary, task.Created,
             WorkItemFiles.TasksFolder + "/" + task.Id + ".md", link?.ProposedBy, link?.Runner, markdown, null, null);
 
     private static WorkItemRecord PlanRecord(AltaCommandContext context, ProjectDescriptor project, WorkPlan plan, WorkItemLink? link, string? markdown, bool truncated)
-        => new("alta.plan", 1, context.CorrelationId, plan.Id, project.Id, project.Slug, plan.Title, null, WorkItemFiles.NameOf(plan.Status), plan.StatusText, plan.Summary, plan.Created,
+        => new("alta.plan", 1, context.CorrelationId, plan.Id, null, project.Id, project.Slug, plan.Title, null, WorkItemFiles.NameOf(plan.Status), plan.StatusText, plan.Summary, plan.Created,
             WorkItemFiles.PlansFolder + "/" + plan.Id + ".md", link?.ProposedBy, link?.Runner, markdown, truncated ? true : null, null);
 
 #pragma warning disable IDE1006, SA1300 // The names are those of the JSONL record.
-    private sealed record WorkItemRecord(string type, int version, string correlationId, string id, string projectId, string project, string title, string? kind,
+    private sealed record WorkItemRecord(string type, int version, string correlationId, string id, string? shortId, string projectId, string project, string title, string? kind,
         string status, string? statusText, string? summary, string? created, string file, string? proposedBy, string? sessionId, string? markdown, bool? truncated, string? nextStep);
 #pragma warning restore IDE1006, SA1300
 

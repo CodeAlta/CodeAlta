@@ -46,7 +46,11 @@ public enum WorkPlanStatus
 /// <param name="Created">The day the task was written, as <c>yyyy-MM-dd</c>; null when the file does not say.</param>
 /// <param name="Path">The full path of the file.</param>
 /// <param name="Body">The Markdown under the front matter.</param>
-public sealed record WorkTask(string Id, string Title, string? Summary, string Kind, WorkTaskStatus Status, string? Created, string Path, string Body);
+public sealed record WorkTask(string Id, string Title, string? Summary, string Kind, WorkTaskStatus Status, string? Created, string Path, string Body)
+{
+    /// <summary>Gets the short id of the task: the characters that end its id; null for a task written before ids had them.</summary>
+    public string? ShortId => WorkItemFiles.ShortIdOf(Id);
+}
 
 /// <summary>What a new task is made of.</summary>
 /// <param name="Title">What the task is, in a line.</param>

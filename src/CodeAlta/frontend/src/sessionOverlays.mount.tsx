@@ -34,7 +34,7 @@ const task = (id: string, title: string) => ({
   id, kind: "task" as const, status: "pending", title,
   summary: "A proposal should stay beside the notes without hiding the checklist or its controls.",
   category: "problem", statusText: null, created: "2026-10-10", file: `.alta/tasks/${id}.md`,
-  proposedBy: "fixture", runner: null, acknowledged: false, runsWith: null,
+  proposedBy: "fixture", runner: null, acknowledged: false, runsWith: null, shortId: null,
 });
 const items = workItems([{ projectId: "fixture", truncated: false, plans: [],
   tasks: [task("proposal", "Keep the session overlays readable"), task("later", "A proposal that arrives later")] }], new Set());

@@ -168,7 +168,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                   data-selected={current !== null && workItemKey(current) === key || undefined} onClick={() => setSelected(key)}>
                   <span className="work-row-glyph" data-tone={item.kind === "task" ? taskCategoryTone(item.category) : item.kind === "review" ? "warning" : "primary"}>
                     <AppIcon name={item.kind === "task" ? taskCategoryIcon(item.category) : workKindIcon(item.kind)} size={16} /></span>
-                  <span className="work-row-text"><strong>{item.title}</strong>
+                  <span className="work-row-text"><span className="work-row-title"><strong>{item.title}</strong>{item.shortId && <code className="work-row-id">{item.shortId}</code>}</span>
                     <small>{item.summary ?? item.statusText ?? item.file}</small></span>
                   <span className="work-row-meta">
                     {busy.has(key) && <span className="work-row-starting"><ActivitySpinner size={11} /></span>}
@@ -342,6 +342,16 @@ function ReviewItemDetail({ item, epoch, projectName, requester, onOpenSession, 
   </section>;
 }
 
+// The short id of a task, which agents name it by: a click copies it, and says so for a moment.
+function ShortIdCopy({ shortId }: { shortId: string }) {
+  const { t } = useShellLanguage();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => { if (!copied) return; const timer = setTimeout(() => setCopied(false), 1400); return () => clearTimeout(timer); }, [copied]);
+  return <button type="button" className="work-detail-id" data-copied={copied || undefined} title={t("Copy the short id")} aria-label={t("Copy the short id {id}", { id: shortId })}
+    onClick={() => void navigator.clipboard?.writeText(shortId).then(() => setCopied(true), () => { /* The clipboard is unavailable: nothing was copied. */ })}>
+    <code>{shortId}</code><AppIcon name={copied ? "check" : "copy"} size={12} /></button>;
+}
+
 function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, providers, sessionSettings, onStart, onAct, onRemove, onOpenSession, onOpenFile,
   epoch, reload, reviewSessions: reviewTo, onOpenReviewSession }: {
   hub: WorkItemsHub; item: WorkItem; busy: boolean; projectName: string | null; reload: number;
@@ -364,7 +374,8 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
   return <section className="work-detail-card" aria-label={item.title}>
     <header>
       <div className="work-detail-kind"><AppIcon name={workKindIcon(item.kind)} size={14} />{t(task ? "Task" : "Plan")}
-        <Tag minimal round intent={workStatusTone(item)}>{t(workStatusLabel(item))}</Tag>{busy && <ActivitySpinner size={13} />}</div>
+        <Tag minimal round intent={workStatusTone(item)}>{t(workStatusLabel(item))}</Tag>{busy && <ActivitySpinner size={13} />}
+        {item.shortId && <ShortIdCopy shortId={item.shortId} />}</div>
       <h3>{item.title}</h3>
       <WorkItemTags item={item} projectName={projectName} />
       {item.statusText && <p className="work-detail-status">{item.statusText}</p>}
