@@ -57,7 +57,10 @@ A server of several models runs `llama-server` in router mode: a preset names ea
 router loads them on demand within `--models-max` and frees the least used. A server of one model runs it directly. Every
 server listens on loopback with a key of its own; its cache folder is its own and empty, and it runs `--offline`, so
 llama.cpp never downloads anything by itself. The model host starts processes detached from its own pipes, writes the
-log to a file, follows them every two seconds, restarts a failed one with a growing delay, and says why from its log.
+log to a file, follows them every two seconds, restarts a failed one with a growing delay, and says why from its log. It
+reads the requests and the speed of a model of a router from the process of that model, on the port the router gives in
+`/models`: the router writes a line for each request it passes on and keeps its log open (it cannot be rotated while it
+runs), so its log holds what the sessions asked, not the reads of the host.
 
 A server can outlive its host (CodeAlta Node always, CodeAlta Desktop when asked): the host records what it started and
 takes it back at its next start, by process id and start time. While a server answers or loads a model, or a download
