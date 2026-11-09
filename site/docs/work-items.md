@@ -61,7 +61,7 @@ Open it with **Work items** in the title bar (in its **…** menu when the windo
 - Select an item to read it, start it, mark it done, open its file, or remove it.
 - Start several items at once: a spinner marks each while its worktree is made. A ready session opens if you still read its item; otherwise a notification offers it with **Show**.
 
-In the Explorer, a project shows how many work items wait for you, and a dot while a session works on one.
+In the Explorer, a project shows how many work items wait for you, and a dot while a session works on one. A session that works on a task or a plan shows a mark: the task's short id when the Explorer is wide enough, or how many items it works on. Point at the mark to read them, and click it to open them in the Work items tab.
 
 ## Files
 

@@ -224,6 +224,7 @@ import type { SessionStartRequest } from "./sessionSettings/sessionSettings";
 import { sessionSettingsApi } from "./sessionSettings/sessionSettingsApi";
 import { startWorkItem, type WorkStartSession } from "./workItems/startWorkItem";
 import { carriedBy, readingOrder, sessionCards, workCounts, workItemKey, workItems, type WorkItem, type WorkStart } from "./workItems/workItems";
+import { SessionWorkMark } from "./workItems/SessionWorkMark";
 import { findTaskReference, taskReferenceIndex, TaskReferencesContext, type TaskReferences } from "./workItems/taskReferences";
 import { TerminalList } from "./terminal/TerminalList";
 import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type TerminalLook } from "./terminal/terminalLook";
@@ -4170,8 +4171,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       <ElsewhereBadge kind={elsewhereSessions.get(session.id)?.kind ?? null} />
       {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId: scope, sessionId: session.id, path: session.workspacePath }} />}
       <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
-      {carriedBy(work, session.id).length > 0 && <span className="session-work-mark" role="img" aria-label={t("Carries out a work item")}
-        title={carriedBy(work, session.id).map(item => item.title).join("\n")}><AppIcon name="task" size={12} /></span>}
+      <SessionWorkMark items={carriedBy(work, session.id)} onOpen={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} />
       <SessionBookmarkMark hub={bookmarkHost.hub} sessionId={session.id} />
       <WorktreeBadge session={session} />
       <CloudMark session={session} />
@@ -6023,7 +6023,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           <SpaceActivityBar spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} calls={calls}
             onShow={id => { if (showSpace(id)) focusPromptSoon(); }} onOpen={(id, session) => void openSpaceSession(id, session)}
             fleet={owned ? fleetBar(snapshot?.projects ?? [], () => navigate("fleet")) : null} />
-          <OverflowTip within={projectRail} target=".session-row > button:first-child" label=".session-title" />
+          <OverflowTip within={projectRail} target=".session-row > button:first-child" label=".session-title" quiet=".session-work-mark-host" />
         </SessionFamilyContext.Provider></aside>; }}
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
             onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth(defaultIdeWidth)} />}

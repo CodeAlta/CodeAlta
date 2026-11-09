@@ -2675,6 +2675,7 @@ export const messages = dictionary({
   "Copy the short id {id}": ["Copiar el id corto {id}", "Copier l’id court {id}", "Kurz-ID {id} kopieren", "短い ID {id} をコピー", "复制短 ID {id}"],
   "Task {id}: {title}": ["Tarea {id}: {title}", "Tâche {id} : {title}", "Aufgabe {id}: {title}", "タスク {id}: {title}", "任务 {id}：{title}"],
   "Click to open it in Work items": ["Haz clic para abrirla en Elementos de trabajo", "Cliquez pour l’ouvrir dans Éléments de travail", "Klicken, um sie in Arbeitselementen zu öffnen", "クリックして作業項目で開く", "点击在工作项中打开"],
+  "Click to choose one to open in Work items": ["Haz clic para elegir uno y abrirlo en Elementos de trabajo", "Cliquez pour en choisir un à ouvrir dans Éléments de travail", "Klicken, um eines auszuwählen und in Arbeitselementen zu öffnen", "クリックして作業項目で開くものを選ぶ", "点击选择一项在工作项中打开"],
   "Back to To do": ["Volver a Por hacer", "Remettre dans À faire", "Zurück zu Zu erledigen", "「未着手」に戻す", "移回待办"],
   "No session does it any more.": ["Ninguna sesión lo hace ya.", "Aucune session ne s’en charge plus.", "Keine Sitzung erledigt es mehr.", "どのセッションも担当しなくなります。", "不再由任何会话处理。"],
   "Mark done": ["Marcar como hecho", "Marquer comme terminé", "Als erledigt markieren", "完了にする", "标记为完成"],

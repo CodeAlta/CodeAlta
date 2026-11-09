@@ -21,12 +21,14 @@ export function overflowTipText(target: HTMLElement, label: HTMLElement): string
  * a long list costs nothing more. The tip is drawn in a portal, over the panel that clips the label, and in the
  * window (a dialog) that holds the container; it is not read by a screen reader, which reads the label whole.
  */
-export function OverflowTip({ within, target, label }: {
+export function OverflowTip({ within, target, label, quiet }: {
   within: RefObject<HTMLElement | null>;
   /** The elements that have a tip: the one the pointer rests on, or the one that has the keyboard. */
   target: string;
   /** The element of a target whose text can be cut. */
   label: string;
+  /** The parts of a target over which the pointer shows no tip: they show a card of their own. */
+  quiet?: string;
 }) {
   const [tip, setTip] = useState<Tip | null>(null);
   const shownFor = useRef<HTMLElement | null>(null);
@@ -70,7 +72,8 @@ export function OverflowTip({ within, target, label }: {
     };
     const targetOf = (node: EventTarget | null) => node instanceof Element ? node.closest<HTMLElement>(target) : null;
     const over = (event: PointerEvent) => {
-      const element = targetOf(event.target);
+      // A part of a target with a card of its own puts the tip away, as leaving the target does.
+      const element = quiet && event.target instanceof Element && event.target.closest(quiet) ? null : targetOf(event.target);
       if (element === shownFor.current && element) return;
       clearTimeout(timer);
       if (!element || !container.contains(element)) { if (shownFor.current && !keyed(shownFor.current)) hide(); return; }
@@ -122,7 +125,7 @@ export function OverflowTip({ within, target, label }: {
       window.removeEventListener("resize", hide);
       hide();
     };
-  }, [within, target, label]);
+  }, [within, target, label, quiet]);
   return tip && <Portal className="overflow-tip-portal">
     <div className="overflow-tip" aria-hidden="true" style={{ left: tip.left, top: tip.top ?? undefined, bottom: tip.bottom ?? undefined, maxWidth: tip.maxWidth }}>{tip.text}</div>
   </Portal>;

@@ -32,7 +32,7 @@ test("a code span that names a task of the project is a chip that describes the 
 
     // The keyboard reaches a chip, which shows its card and opens with Enter.
     await page.evaluate(`${chip("p53b")}.focus()`);
-    await page.until(`${card}?.textContent.includes('Fix the parser') && ${card}.hasAttribute('data-closed')`, "the card of the focused chip");
+    await page.until(`${card}?.textContent.includes('Fix the parser') && !!${card}.querySelector('.task-reference-card-item[data-closed]')`, "the card of the focused chip");
     await page.key("Enter", 13, "\r");
     await page.until(`taskFixture.opened.length === 2`, "the task opened by Enter");
     assert.equal(await page.evaluate(`taskFixture.opened[1]`), "2026-11-08-fix-the-parser-p53b");

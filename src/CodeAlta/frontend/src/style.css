@@ -358,9 +358,12 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .task-reference-card-glyph { display: inline-flex; color: var(--accent); }
 .task-reference-card-glyph[data-tone="danger"] { color: var(--red); }
 .task-reference-card-glyph[data-tone="warning"] { color: var(--yellow); }
+.task-reference-card-item { display: grid; gap: 5px; }
+.task-reference-card-item + .task-reference-card-item { padding-top: 7px; margin-top: 2px; border-top: 1px solid var(--line); }
 .task-reference-card strong { font-weight: 600; overflow-wrap: anywhere; }
-.task-reference-card[data-closed] strong { text-decoration: line-through; color: var(--muted); }
+.task-reference-card-item[data-closed] strong { text-decoration: line-through; color: var(--muted); }
 .task-reference-card p { margin: 0; color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.task-reference-card-item + .task-reference-card-item p, .task-reference-card-item:has(+ .task-reference-card-item) p { -webkit-line-clamp: 2; }
 .task-reference-card small { color: var(--muted); font-size: 11px; }
 .markdown-content pre { margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); font-family: var(--code-font); font-size: 12px; white-space: pre; }
 .markdown-content pre code { padding: 0; border: 0; color: inherit; background: transparent; font-size: inherit; }
