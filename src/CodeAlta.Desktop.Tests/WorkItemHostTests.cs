@@ -126,6 +126,66 @@ public sealed class WorkItemHostTests
     }
 
     [TestMethod]
+    public async Task TagProposals_WaitForTheUser_WhoAppliesOrDismissesThem()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var (items, project) = (fixture.Items, fixture.Project);
+        var ids = new List<string>();
+        foreach (var title in new[] { "One", "Two", "Three", "Four" })
+        {
+            ids.Add(Text(await fixture.One("alta.task.created", ["task", "create", "--title", title, "--content", "Body."]), "id")!);
+        }
+
+        var shortIds = ids.Select(static id => id[^4..]).ToArray();
+        Assert.AreEqual(WorkTagChange.Done, items.SetTag(project, "mobile", "The phone app."));
+        Assert.IsTrue(items.SetTaskTags(project, ids[3], ["mobile"]));
+
+        // A session found the tasks a tag fits: the ones that have it already are left out, and nothing is tagged yet.
+        var found = await fixture.One("alta.tag.matches", ["tag", "matches", "mobile", "--stdin"], $"{shortIds[0]} the phone app\n- {shortIds[1]}: its server\n{shortIds[3]} already");
+        Assert.AreEqual($"[\"{ids[0]}\",\"{ids[1]}\"]", Text(found, "tasks"));
+        Assert.AreEqual(0, items.GetTask(project, ids[0])!.Tags.Count);
+        Assert.AreEqual(AltaExitCodes.NotFound, (await fixture.Run(["tag", "matches", "desktop", "--task", shortIds[0]])).Code, "only an existing tag");
+        Assert.AreEqual(AltaExitCodes.NotFound, (await fixture.Run(["tag", "matches", "mobile", "--task", "zzzz"])).Code, "only open tasks");
+
+        // The page lists the proposal and applies it to the tasks the user kept.
+        var listed = (await fixture.Rpc.ListAsync(new(Epoch, [project.Id]), default)).Projects.Single().TagProposals!.Single();
+        Assert.AreEqual(("mobile", false, "the phone app"), (listed.Name, listed.NewTag, listed.Tasks[0].Reason));
+        Assert.AreEqual("ok", (await fixture.Rpc.TagAsync(new(Epoch, project.Id, "apply", "mobile", null, [ids[1]]), default)).Status);
+        CollectionAssert.AreEqual(new[] { "mobile" }, items.GetTask(project, ids[1])!.Tags.ToArray());
+        Assert.AreEqual(0, items.GetTask(project, ids[0])!.Tags.Count, "a task the user unticked is not tagged");
+        Assert.AreEqual(0, items.ListTagProposals(project.Id).Count);
+
+        // A new tag needs three open tasks, and is not a tag before the user creates it.
+        Assert.AreEqual(AltaExitCodes.Usage, (await fixture.Run(["tag", "propose", "--name", "parser", "--description", "The parser.", "--task", shortIds[0], "--task", shortIds[1]])).Code);
+        Assert.AreEqual(AltaExitCodes.Usage, (await fixture.Run(["tag", "propose", "--name", "mobile", "--description", "Again.", "--task", shortIds[0]])).Code, "an existing tag is given, not proposed");
+        var proposed = await fixture.One("alta.tag.proposed", ["tag", "propose", "--name", "parser", "--description", "The parser of the files.", "--task", shortIds[0], "--task", shortIds[1], "--task", shortIds[2]]);
+        Assert.AreEqual("parser", Text(proposed, "name"));
+        Assert.IsTrue(items.ListTags(project).Tags.All(static tag => tag.Name != "parser"));
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, (await fixture.Run(["tag", "propose", "--name", "lexer", "--description", "The lexer.", "--task", shortIds[0], "--task", shortIds[1], "--task", shortIds[2]])).Code,
+            "one new tag of a session waits at a time");
+
+        // Applied: the tag is created with the description the user left, and given to the tasks kept.
+        Assert.AreEqual("ok", (await fixture.Rpc.TagAsync(new(Epoch, project.Id, "apply", "parser", "Parsing files.", [ids[0], ids[2]]), default)).Status);
+        Assert.AreEqual("Parsing files.", items.ListTags(project).Tags.Single(static tag => tag.Name == "parser").Description);
+        CollectionAssert.AreEqual(new[] { "parser" }, items.GetTask(project, ids[2])!.Tags.ToArray());
+
+        // Dismissed: a new tag is declined, and no agent proposes it again.
+        await fixture.One("alta.tag.proposed", ["tag", "propose", "--name", "lexer", "--description", "The lexer.", "--task", shortIds[0], "--task", shortIds[1], "--task", shortIds[2]]);
+        Assert.AreEqual("ok", (await fixture.Rpc.TagAsync(new(Epoch, project.Id, "dismiss", "lexer"), default)).Status);
+        CollectionAssert.Contains(items.ListTags(project).Declined.ToArray(), "lexer");
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, (await fixture.Run(["tag", "propose", "--name", "lexer", "--description", "The lexer.", "--task", shortIds[0], "--task", shortIds[1], "--task", shortIds[2]])).Code);
+
+        // Finding the tasks of a tag starts a session with what the tag is for.
+        var find = await fixture.Rpc.TagAsync(new(Epoch, project.Id, "find", "mobile"), default);
+        Assert.AreEqual(("ok", "finder-session"), (find.Status, find.SessionId));
+        Assert.AreEqual(("mobile", "The phone app."), fixture.Runner.Finds.Single());
+        Assert.AreEqual("not_found", (await fixture.Rpc.TagAsync(new(Epoch, project.Id, "find", "desktop"), default)).Status);
+        StringAssert.Contains(WorkItemPrompts.ForTagMatches("mobile", "The phone app."), "alta tag matches mobile --stdin");
+        // Without a description the session goes by the name, and finds nothing when the name is not clear.
+        StringAssert.Contains(WorkItemPrompts.ForTagMatches("v2", null), "go by its name. When the name does not say clearly what the tag covers, say so and run nothing.");
+    }
+
+    [TestMethod]
     public async Task TaskCommands_ListStartCompleteAndSetAside()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -391,6 +451,14 @@ public sealed class WorkItemHostTests
         internal List<SessionStartSettings?> Settings { get; } = [];
 
         internal (string Message, string Reason)? Problem { get; set; }
+
+        internal List<(string Name, string? Description)> Finds { get; } = [];
+
+        public Task<WorkItemStartResult> FindTagTasksAsync(ProjectDescriptor project, string name, string? description)
+        {
+            Finds.Add((name, description));
+            return Task.FromResult(new WorkItemStartResult("finder-session", null));
+        }
 
         public Task<WorkItemStartResult> StartAsync(ProjectDescriptor project, string kind, string id, bool worktree, string? likeSessionId, WorkItemSelection? asked,
             SessionStartSettings? settings)

@@ -17,7 +17,7 @@ export type WorkItemOutcome = Readonly<{ ok: boolean; status: string; message: s
   prompt: string | null; agentPromptId: string | null }>;
 export type WorkItemTarget = Readonly<{ projectId: string; kind: string; id: string }>;
 /** A change of the tags of a project: see the `tag` method of the host. */
-export type WorkTagAction = "set" | "rename" | "delete" | "decline" | "forget";
+export type WorkTagAction = "set" | "rename" | "delete" | "decline" | "forget" | "apply" | "dismiss";
 
 const empty: WorkItemsState = { loaded: false, complete: false, available: false, projects: [], settings: defaultWorkSettings };
 const failed: WorkItemOutcome = { ok: false, status: "failed", message: null, reason: null, sessionId: null, prompt: null, agentPromptId: null };
@@ -184,14 +184,23 @@ export function createWorkItemsHub(api: WorkItemsApi, timers: Timers = { set: (r
      * removes it from the project and its tasks, `decline` and `forget` keep or forget a name agents may not propose.
      * Resolves with the host's status: `ok`, `exists`, `not_found`, `write_failed`...
      */
-    async tag(projectId: string, action: WorkTagAction, name: string, value: string | null = null): Promise<string> {
+    async tag(projectId: string, action: WorkTagAction, name: string, value: string | null = null, tasks: readonly string[] | null = null): Promise<string> {
       const host = epoch;
       if (!host) return "failed";
       try {
-        const reply = await api.tag({ expectedEpoch: host, projectId, action, name, value }, { timeoutMilliseconds: 30_000 });
+        const reply = await api.tag({ expectedEpoch: host, projectId, action, name, value, tasks: tasks ? [...tasks] : null }, { timeoutMilliseconds: 30_000 });
         await readProject(projectId);
         return reply.status;
       } catch { return "failed"; }
+    },
+    /** Starts a session that finds the open tasks a tag fits: it proposes them, and the user applies the ones they keep. */
+    async findTagTasks(projectId: string, name: string): Promise<WorkItemOutcome> {
+      const host = epoch;
+      if (!host) return failed;
+      try {
+        const reply = await api.tag({ expectedEpoch: host, projectId, action: "find", name, value: null, tasks: null }, { timeoutMilliseconds: 600_000 });
+        return { ...failed, ok: reply.status === "ok", status: reply.status, message: reply.message ?? null, reason: reply.reason ?? null, sessionId: reply.sessionId ?? null };
+      } catch { return failed; }
     },
     async saveSettings(settings: WorkItemsSettings): Promise<boolean> {
       const host = epoch;

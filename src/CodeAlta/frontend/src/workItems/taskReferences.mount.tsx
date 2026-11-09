@@ -18,7 +18,7 @@ function Message() {
     row("2026-11-08-report-the-provider-error-q9rh", "pending", "Report the provider error", "The model list shows nothing when a provider fails.")]);
   state.remove = id => setRows(current => current.filter(item => item.id !== id));
   const references = useMemo<TaskReferences>(() => {
-    const index = taskReferenceIndex(workItems([{ projectId: "p1", tasks: rows, plans: [], truncated: false, tags: null, declinedTags: null }], new Set()));
+    const index = taskReferenceIndex(workItems([{ projectId: "p1", tasks: rows, plans: [], truncated: false, tags: null, declinedTags: null, tagProposals: null }], new Set()));
     return { find: (scope, text) => findTaskReference(index, scope?.sessionId === "s1" ? "p1" : null, text), open: item => { state.opened.push(item.id); } };
   }, [rows]);
   return <div style={{ width: 640, padding: 24 }}><TaskReferencesContext.Provider value={references}>

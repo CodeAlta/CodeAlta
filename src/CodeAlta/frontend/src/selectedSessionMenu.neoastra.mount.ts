@@ -48,7 +48,7 @@ export const workItems = {
   ...baseWorkItems,
   list: async (request: WorkItemsRequest): Promise<WorkItemsListResponse> => localStorage.getItem("settingsFixtureWorkTodo") !== "true"
     ? await baseWorkItems.list() as WorkItemsListResponse
-    : { status: "ok", settings: null, projects: (request.projectIds ?? []).map(projectId => ({ projectId, plans: [], truncated: false, tags: null, declinedTags: null, tasks: [{
+    : { status: "ok", settings: null, projects: (request.projectIds ?? []).map(projectId => ({ projectId, plans: [], truncated: false, tags: null, declinedTags: null, tagProposals: null, tasks: [{
       id: "todo", kind: "task", title: "A task to do", summary: null, category: "gap", status: "pending", statusText: null, created: "2026-10-15",
       file: ".alta/tasks/todo.md", proposedBy: null, runner: null, acknowledged: false, runsWith: null, tags: null, shortId: null, updated: null }] })) },
   watch: async (_request: unknown, options: { signal: AbortSignal }) => (async function* () {

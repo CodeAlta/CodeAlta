@@ -9,8 +9,8 @@ const row = (id: string, more: Partial<WorkItemRow> = {}): WorkItemRow => ({ id,
 
 test("a text names a task of its project by its short id or its id, written alone", () => {
   const items = workItems([
-    { projectId: "p1", tasks: [row("2026-11-08-fix-the-parser-p53b"), row("2026-10-26-leak", { shortId: null })], plans: [row("2026-11-01-plan-x2b4", { kind: "plan", shortId: null })], truncated: false, tags: null, declinedTags: null },
-    { projectId: "p2", tasks: [row("2026-11-08-other-q9rh")], plans: [], truncated: false, tags: null, declinedTags: null },
+    { projectId: "p1", tasks: [row("2026-11-08-fix-the-parser-p53b"), row("2026-10-26-leak", { shortId: null })], plans: [row("2026-11-01-plan-x2b4", { kind: "plan", shortId: null })], truncated: false, tags: null, declinedTags: null, tagProposals: null },
+    { projectId: "p2", tasks: [row("2026-11-08-other-q9rh")], plans: [], truncated: false, tags: null, declinedTags: null, tagProposals: null },
   ], new Set());
   const index = taskReferenceIndex(items);
 
@@ -27,7 +27,7 @@ test("a text names a task of its project by its short id or its id, written alon
 });
 
 test("a short id two tasks share names neither, and their ids still do", () => {
-  const index = taskReferenceIndex(workItems([{ projectId: "p1", tasks: [row("2026-11-08-one-mwf9"), row("2026-11-09-two-mwf9")], plans: [], truncated: false, tags: null, declinedTags: null }], new Set()));
+  const index = taskReferenceIndex(workItems([{ projectId: "p1", tasks: [row("2026-11-08-one-mwf9"), row("2026-11-09-two-mwf9")], plans: [], truncated: false, tags: null, declinedTags: null, tagProposals: null }], new Set()));
 
   assert.equal(findTaskReference(index, "p1", "mwf9"), null);
   assert.equal(findTaskReference(index, "p1", "2026-11-09-two-mwf9")?.title, "Title of 2026-11-09-two-mwf9");
@@ -37,6 +37,6 @@ test("a task that is done or dismissed is closed, and the list finds a task by i
   assert.equal(closedTask({ status: "done" }), true);
   assert.equal(closedTask({ status: "dismissed" }), true);
   assert.equal(closedTask({ status: "later" }), false);
-  const items = workItems([{ projectId: "p1", tasks: [row("2026-11-08-fix-the-parser-p53b"), row("2026-11-08-other-q9rh")], plans: [], truncated: false, tags: null, declinedTags: null }], new Set());
+  const items = workItems([{ projectId: "p1", tasks: [row("2026-11-08-fix-the-parser-p53b"), row("2026-11-08-other-q9rh")], plans: [], truncated: false, tags: null, declinedTags: null, tagProposals: null }], new Set());
   assert.deepEqual(filterWorkItems(items, { projectId: null, kind: "all", stage: "todo", query: "p53b" }).map(item => item.id), ["2026-11-08-fix-the-parser-p53b"]);
 });

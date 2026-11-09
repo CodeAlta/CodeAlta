@@ -88,7 +88,9 @@ internal sealed class WorkItemsService
                 [.. plans.Take(MaximumRows).Select(plan => Row(plan, links.GetValueOrDefault((project.Id, WorkItemKinds.Plan, plan.Id))))],
                 tasks.Count > MaximumRows || plans.Count > MaximumRows,
                 [.. tags.Tags.Select(static tag => new WorkItemTagRow(tag.Name, tag.Description, tag.OpenTasks, tag.Listed))],
-                tags.Declined));
+                tags.Declined,
+                [.. _items.ListTagProposals(project.Id).Select(static proposal => new WorkItemTagProposalRow(proposal.Name, proposal.Description, proposal.NewTag, proposal.SessionId,
+                    [.. proposal.Tasks.Select(static match => new WorkItemTagMatchRow(match.TaskId, match.Reason))]))]));
         }
 
         return new("ok", rows, Settings(_items.Settings));
@@ -185,7 +187,9 @@ internal sealed class WorkItemsService
     /// <remarks>
     /// <c>set</c> adds a tag or changes its description (<see cref="WorkItemTagRequest.Value"/>); <c>rename</c> gives it
     /// the name in <see cref="WorkItemTagRequest.Value"/>; <c>delete</c> removes it; <c>decline</c> records that the user
-    /// turned down a name an agent proposed, and <c>forget</c> forgets it.
+    /// turned down a name an agent proposed, and <c>forget</c> forgets it. <c>find</c> starts a session that finds the open
+    /// tasks the tag fits, which it proposes; <c>apply</c> applies a proposal to <see cref="WorkItemTagRequest.Tasks"/> (with the
+    /// description of a new tag in <see cref="WorkItemTagRequest.Value"/>); <c>dismiss</c> dismisses it, and declines a new tag.
     /// </remarks>
     [NeoRpcMethod("tag")]
     public async Task<WorkItemActionResponse> TagAsync(WorkItemTagRequest request, CancellationToken cancellationToken)
@@ -193,10 +197,22 @@ internal sealed class WorkItemsService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
         if (!Identifier(request.ProjectId) || !WorkItemFiles.IsTagName(request.Name) || request.Value is { Length: > WorkItemFiles.MaximumTagDescription }
-            || request.Action is "rename" && !WorkItemFiles.IsTagName(request.Value)) return new("invalid_request");
+            || request.Action is "rename" && !WorkItemFiles.IsTagName(request.Value)
+            || request.Tasks is { } named && (named.Count > MaximumRows || named.Any(static id => !WorkItemFiles.IsValidId(id)))) return new("invalid_request");
         if (await ProjectAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found");
+        if (request.Action == "find")
+        {
+            var tag = _items!.ListTags(project).Tags.FirstOrDefault(tag => tag.Name == request.Name);
+            if (tag is null) return new("not_found");
+            var started = await _runner!.FindTagTasksAsync(project, tag.Name, tag.Description).ConfigureAwait(false);
+            return started.Problem is null ? new("ok") { SessionId = started.SessionId }
+                : new("refused") { SessionId = started.SessionId, Message = started.Problem, Reason = started.Reason };
+        }
+
         WorkTagChange? change = request.Action switch
         {
+            "apply" => _items!.ApplyTagProposal(project, request.Name, request.Tasks ?? [], request.Value),
+            "dismiss" => _items!.DismissTagProposal(project, request.Name),
             "set" => _items!.SetTag(project, request.Name, request.Value),
             "rename" => _items!.RenameTag(project, request.Name, request.Value!),
             "delete" => _items!.DeleteTag(project, request.Name),
@@ -319,18 +335,31 @@ internal sealed record WorkItemsListResponse(string Status, IReadOnlyList<WorkIt
 /// <param name="Truncated">The project has more tasks or plans than the answer holds.</param>
 /// <param name="Tags">The tags of the tasks of the project: those of its tags file, then those only found on its tasks.</param>
 /// <param name="DeclinedTags">The names the user declined when an agent proposed them.</param>
+/// <param name="TagProposals">The tag proposals of the project that wait for the user.</param>
 internal sealed record WorkItemsProject(string ProjectId, IReadOnlyList<WorkItemRow> Tasks, IReadOnlyList<WorkItemRow> Plans, bool Truncated,
-    IReadOnlyList<WorkItemTagRow>? Tags = null, IReadOnlyList<string>? DeclinedTags = null);
+    IReadOnlyList<WorkItemTagRow>? Tags = null, IReadOnlyList<string>? DeclinedTags = null, IReadOnlyList<WorkItemTagProposalRow>? TagProposals = null);
+
+/// <param name="Name">The name of the tag.</param>
+/// <param name="Description">What a new tag is for; null for an existing one.</param>
+/// <param name="NewTag">Whether the tag does not exist yet.</param>
+/// <param name="SessionId">The session that proposed it, whose card shows a new tag; null when it is not known.</param>
+/// <param name="Tasks">The tasks the tag would be given to.</param>
+internal sealed record WorkItemTagProposalRow(string Name, string? Description, bool NewTag, string? SessionId, IReadOnlyList<WorkItemTagMatchRow> Tasks);
+
+/// <param name="Id">The id of the task.</param>
+/// <param name="Reason">Why the tag fits it; null when the agent did not say.</param>
+internal sealed record WorkItemTagMatchRow(string Id, string? Reason);
 
 /// <param name="Description">What the tag is for, in a line; null when it has none.</param>
 /// <param name="OpenTasks">How many tasks that are not closed have the tag.</param>
 /// <param name="Listed">Whether the tags file of the project lists the tag.</param>
 internal sealed record WorkItemTagRow(string Name, string? Description, int OpenTasks, bool Listed);
 
-/// <param name="Action"><c>set</c>, <c>rename</c>, <c>delete</c>, <c>decline</c> or <c>forget</c>: see <see cref="WorkItemsService.TagAsync"/>.</param>
+/// <param name="Action"><c>set</c>, <c>rename</c>, <c>delete</c>, <c>decline</c>, <c>forget</c>, <c>find</c>, <c>apply</c> or <c>dismiss</c>: see <see cref="WorkItemsService.TagAsync"/>.</param>
 /// <param name="Name">The name of the tag.</param>
-/// <param name="Value">The description for <c>set</c> (null or empty for none), the new name for <c>rename</c>.</param>
-internal sealed record WorkItemTagRequest(string? ExpectedEpoch, string ProjectId, string Action, string Name, string? Value = null);
+/// <param name="Value">The description for <c>set</c> and for <c>apply</c> of a new tag (null or empty for none), the new name for <c>rename</c>.</param>
+/// <param name="Tasks">The tasks a proposal is applied to, by id, for <c>apply</c>.</param>
+internal sealed record WorkItemTagRequest(string? ExpectedEpoch, string ProjectId, string Action, string Name, string? Value = null, IReadOnlyList<string>? Tasks = null);
 
 /// <param name="Kind"><c>task</c> or <c>plan</c>.</param>
 /// <param name="Category">Why a task exists: <c>gap</c>, <c>problem</c> or <c>improvement</c>; null for a plan.</param>

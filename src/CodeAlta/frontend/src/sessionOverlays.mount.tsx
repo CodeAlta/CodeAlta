@@ -36,7 +36,7 @@ const task = (id: string, title: string) => ({
   category: "problem", statusText: null, created: "2026-10-10", file: `.alta/tasks/${id}.md`,
   proposedBy: "fixture", runner: null, acknowledged: false, runsWith: null, tags: null, shortId: null, updated: null,
 });
-const items = workItems([{ projectId: "fixture", truncated: false, tags: null, declinedTags: null, plans: [],
+const items = workItems([{ projectId: "fixture", truncated: false, tags: null, declinedTags: null, tagProposals: null, plans: [],
   tasks: [task("proposal", "Keep the session overlays readable"), task("later", "A proposal that arrives later")] }], new Set());
 const busy = new Set<string>();
 const entry: HistoryEntry = { offset: "1", eventType: "contentCompleted", kind: "User", phase: null,

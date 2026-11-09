@@ -56,6 +56,28 @@ public static class WorkItemPrompts
             """.ReplaceLineEndings("\n");
     }
 
+    /// <summary>Writes the prompt that asks a session to find the open tasks a new tag of the user fits.</summary>
+    /// <param name="name">The name of the tag.</param>
+    /// <param name="description">What the tag is for; null when the user did not say.</param>
+    /// <returns>The prompt: read, change nothing, and answer with <c>alta tag matches</c>.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is blank.</exception>
+    public static string ForTagMatches(string name, string? description)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var what = string.IsNullOrWhiteSpace(description) ? "The user gave it no description: go by its name. When the name does not say clearly what the tag covers, say so and run nothing." : $"It is for: {description.ReplaceLineEndings(" ").Trim()}";
+        return $"""
+            The user just created the tag `{name}` for the tasks of this project. {what}
+
+            Find the open tasks it fits. Read `alta task list` (its titles and summaries), and `alta task show <id>` for a task whose title and summary are not enough. Read nothing else and change nothing: no file, no task, no tag.
+
+            Then give the user what you found, in one command, with one task a line on stdin: its short id, then in a few words why the tag fits it.
+
+            alta tag matches {name} --stdin
+
+            Name only the tasks the tag clearly fits. When none does, say so and run nothing. The user reviews the list and tags the ones they keep.
+            """.ReplaceLineEndings("\n");
+    }
+
     /// <summary>Names the session that carries an item out.</summary>
     /// <param name="title">The title of the task or the plan.</param>
     /// <returns>The title, cut to what the name of a session takes.</returns>

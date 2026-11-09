@@ -24,6 +24,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         Mutating("task remove"),
         Mutating("task tag"),
         Read("tag list"),
+        Mutating("tag matches"),
+        Mutating("tag propose"),
         Read("plan list"),
         Read("plan show"),
         Mutating("plan status"),

@@ -24,7 +24,7 @@ function host(found: Record<string, WorkItemRow[]>) {
       asked.push(request.projectIds ?? null);
       if (hold) await new Promise<void>(resolve => pending.push(resolve));
       const projects: WorkItemsProject[] = (request.projectIds ?? Object.keys(found)).filter(id => found[id]?.length)
-        .map(id => ({ projectId: id, tasks: found[id], plans: [], truncated: false, tags: null, declinedTags: null }));
+        .map(id => ({ projectId: id, tasks: found[id], plans: [], truncated: false, tags: null, declinedTags: null, tagProposals: null }));
       return { status: request.expectedEpoch === "epoch" ? "ok" : "stale_epoch", projects, settings } satisfies WorkItemsListResponse;
     },
     async read() { return { status: "ok", markdown: "Text.", truncated: false }; },

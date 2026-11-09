@@ -10,7 +10,7 @@ import { AppIcon } from "../AppIcon";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 import { WorkItemTags, WorkItemText, WorkStartButtons } from "./WorkItemCards";
-import { TagChips, TagFilter, TagManagerDialog, TaskTagField } from "./WorkItemTagViews";
+import { TagChips, TagFilter, TagManagerDialog, TagProposalBanners, TagProposalDialog, TaskTagField, type ShownTagProposal } from "./WorkItemTagViews";
 import type { WorkItemTagRow } from "#neoastra";
 import { createdDay, filterWorkItems, shownTags, sortWorkItems, stageCounts, taskCategoryIcon, workDateGroup, workFilterLabel, workFilters, workItemKey, workItems,
   workItemTone, workKindIcon, workStatusLabel, workStatusTone, type WorkFilter, type WorkGrouping, type WorkItem, type WorkKind, type WorkOrder, type WorkStart } from "./workItems";
@@ -65,6 +65,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   // The tags a task of the list must have one of; none chosen shows every task.
   const [tagFilter, setTagFilter] = useState<ReadonlySet<string>>(() => new Set());
   const [managingTags, setManagingTags] = useState(false);
+  const [reviewing, setReviewing] = useState<ShownTagProposal | null>(null);
   // How the list is read: newest or oldest first, by day or by project; kept for the next time.
   const [view, setView] = useState(readWorkView);
   const changeView = (change: Partial<WorkView>) => setView(current => { const next = { ...current, ...change }; writeWorkView(next); return next; });
@@ -87,6 +88,11 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   const scoped = scope !== null && all.some(item => item.projectId === scope) ? scope : null;
   const counts = stageCounts(all, scoped, kind);
   const tags = useMemo(() => shownTags(state.projects, scoped), [state.projects, scoped]);
+  // The tag proposals of the projects shown, each with the open tasks it still names.
+  const proposals = useMemo(() => state.projects.filter(project => scoped === null || project.projectId === scoped).flatMap(project => (project.tagProposals ?? []).map(proposal => ({
+    projectId: project.projectId, projectName: scoped === null ? projectById.get(project.projectId)?.name ?? null : null, proposal,
+    tasks: proposal.tasks.map(match => all.find(item => item.projectId === project.projectId && item.kind === "task" && item.id === match.id)).filter((item): item is WorkItem => !!item) })))
+    .filter(shown => shown.tasks.length > 0), [state.projects, scoped, projectById, all]);
   const shown = useMemo(() => sortWorkItems(filterWorkItems(all, { projectId: scoped, kind, stage, query, tags: tagFilter }), view.order), [all, scoped, kind, stage, query, tagFilter, view.order]);
   const current = shown.find(item => workItemKey(item) === selected) ?? shown[0] ?? null;
   useEffect(() => { if (visible) void hub.refresh(); }, [hub, visible]);
@@ -158,6 +164,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
               options={[{ value: "date", label: t("Group by date") }, { value: "project", label: t("Group by project") }]} />}
           </span>
         </div>
+        <TagProposalBanners proposals={proposals} onReview={setReviewing} onDismiss={shown => void hub.tag(shown.projectId, "dismiss", shown.proposal.name)} />
         <Tabs id="work-stages" className="work-stages" selectedTabId={stage} onChange={next => setStage(next as WorkFilter)}>
           {workFilters.map(filter => <Tab key={filter} id={filter} disabled={false} title={<>{t(workFilterLabel(filter))}<span className="work-count" data-zero={counts[filter] === 0 || undefined}>{counts[filter]}</span></>} />)}
         </Tabs>
@@ -208,6 +215,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
           </aside>
         </div>
       </>}
+    {reviewing && <TagProposalDialog hub={hub} shown={reviewing} onClose={() => setReviewing(null)} />}
     {managingTags && <TagManagerDialog hub={hub} projectId={scoped} onClose={() => setManagingTags(false)}
       projects={withItems.map(project => { const known = state.projects.find(candidate => candidate.projectId === project.id);
         return { id: project.id, name: project.name, tags: known?.tags ?? [], declined: known?.declinedTags ?? [] }; })} />}

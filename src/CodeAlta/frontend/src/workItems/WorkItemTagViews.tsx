@@ -1,7 +1,7 @@
 // The tags the user organizes tasks with: their chips, the filter of the list, the field of a task, and the dialog of a new tag.
 import { useState, type CSSProperties, type KeyboardEvent } from "react";
-import { Alert, Button, Dialog, DialogBody, DialogFooter, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, PopoverNext } from "@blueprintjs/core";
-import type { WorkItemTagRow } from "#neoastra";
+import { Alert, Button, Callout, Checkbox, Dialog, DialogBody, DialogFooter, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, PopoverNext } from "@blueprintjs/core";
+import type { WorkItemTagProposalRow, WorkItemTagRow } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
 import { tagColor, tagNameOf, type WorkItem } from "./workItems";
@@ -101,6 +101,8 @@ export function NewTagDialog({ hub, projectId, name: initialName, description: i
   const { t } = useShellLanguage();
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
+  // A session reads the open tasks and proposes the ones the tag fits; nothing is tagged before the user applies them.
+  const [find, setFind] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const valid = tagNameOf(name);
@@ -110,6 +112,7 @@ export function NewTagDialog({ hub, projectId, name: initialName, description: i
     const result = await hub.tag(projectId, "set", valid, description.trim() || null);
     setSaving(false);
     if (result !== "ok") { setStatus(result); return; }
+    if (find) void hub.findTagTasks(projectId, valid);
     onCreated?.(valid);
     onClose();
   };
@@ -124,6 +127,8 @@ export function NewTagDialog({ hub, projectId, name: initialName, description: i
         <InputGroup id="work-tag-description" value={description} maxLength={maximumTagDescription}
           onChange={event => setDescription(event.target.value)} onKeyDown={event => { if (event.key === "Enter") void create(); }} />
       </FormGroup>
+      <Checkbox checked={find} label={t("Find the tasks it fits")} onChange={event => setFind(event.currentTarget.checked)} />
+      <p className="work-tag-hint">{t("A session reads the open tasks of the project and proposes the ones the tag fits. You choose which get it.")}</p>
       {status && <p className="work-tag-failed" role="alert">{t("The change was not made.")}</p>}
     </DialogBody>
     <DialogFooter actions={<>
@@ -215,5 +220,67 @@ export function TagManagerDialog({ hub, projects, projectId: initialProject, onC
         : "Delete the tag {name}? It is removed from the {count} tasks that have it.", { name: deleting.name, count: deleting.openTasks })}</p>
     </Alert>
     {creating && project && <NewTagDialog hub={hub} projectId={project.id} name="" onClose={() => setCreating(false)} />}
+  </Dialog>;
+}
+
+/** A tag proposal of a project as the list shows it, with the tasks it names. */
+export type ShownTagProposal = Readonly<{ projectId: string; projectName: string | null; proposal: WorkItemTagProposalRow; tasks: readonly WorkItem[] }>;
+
+/** The tag proposals that wait, above the list: the tasks a tag fits, or a new tag an agent proposes. */
+export function TagProposalBanners({ proposals, onReview, onDismiss }: { proposals: readonly ShownTagProposal[]; onReview: (proposal: ShownTagProposal) => void;
+  onDismiss: (proposal: ShownTagProposal) => void }) {
+  const { t } = useShellLanguage();
+  if (!proposals.length) return null;
+  return <div className="work-tag-proposals">{proposals.map(shown => {
+    const { proposal } = shown;
+    const count = shown.tasks.length;
+    return <Callout key={`${shown.projectId}\n${proposal.name}`} compact intent="primary" icon={<AppIcon name="tag" size={15} />} className="work-tag-proposal">
+      <span className="work-tag-proposal-text">{proposal.newTag
+        ? t(count === 1 ? "An agent proposes the tag {name}, for one open task." : "An agent proposes the tag {name}, for {count} open tasks.", { name: proposal.name, count })
+        : t(count === 1 ? "One task fits the tag {name}." : "{count} tasks fit the tag {name}.", { name: proposal.name, count })}
+        {shown.projectName && <small>{shown.projectName}</small>}</span>
+      <Button size="small" intent="primary" onClick={() => onReview(shown)}>{t("Review")}</Button>
+      <Button size="small" variant="minimal" title={t(proposal.newTag ? "No agent proposes this tag again." : "Tag none of these tasks.")} onClick={() => onDismiss(shown)}>{t("Dismiss")}</Button>
+    </Callout>;
+  })}</div>;
+}
+
+/**
+ * Reviews a tag proposal: the tasks it names, ticked, each with why; a new tag with what it would be for. **Apply** tags
+ * the ticked tasks (and creates a new tag); **Dismiss** tags none, and declines a new tag.
+ */
+export function TagProposalDialog({ hub, shown, onClose }: { hub: WorkItemsHub; shown: ShownTagProposal; onClose: () => void }) {
+  const { t } = useShellLanguage();
+  const { proposal } = shown;
+  const [kept, setKept] = useState<ReadonlySet<string>>(() => new Set(shown.tasks.map(task => task.id)));
+  const [description, setDescription] = useState(proposal.description ?? "");
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const reasons = new Map(proposal.tasks.map(match => [match.id, match.reason]));
+  const decide = async (action: "apply" | "dismiss") => {
+    setSaving(true);
+    const result = await hub.tag(shown.projectId, action, proposal.name, action === "apply" && proposal.newTag ? description.trim() || null : null, action === "apply" ? [...kept] : null);
+    setSaving(false);
+    if (result === "ok") onClose(); else setFailed(true);
+  };
+  const toggle = (id: string) => setKept(current => { const next = new Set(current); if (!next.delete(id)) next.add(id); return next; });
+  return <Dialog isOpen className="work-tag-dialog work-tag-review" title={t(proposal.newTag ? "A new tag" : "Tasks for a tag")} onClose={onClose}>
+    <DialogBody>
+      <p className="work-tag-review-head"><TagChip name={proposal.name} />{proposal.newTag ? t("An agent proposes this tag. It is created only if you apply it.") : t("A session found these open tasks for the tag. Untick the ones it does not fit.")}</p>
+      {proposal.newTag && <FormGroup label={t("What it is for")} labelFor="work-tag-review-description">
+        <InputGroup id="work-tag-review-description" value={description} maxLength={maximumTagDescription} onChange={event => setDescription(event.target.value)} />
+      </FormGroup>}
+      <ul className="work-tag-review-tasks">{shown.tasks.map(task => <li key={task.id}>
+        <Checkbox checked={kept.has(task.id)} onChange={() => toggle(task.id)} labelElement={<span className="work-tag-review-task">
+          {task.shortId && <code className="work-tag-id">{task.shortId}</code>}<strong>{task.title}</strong>
+          {reasons.get(task.id) && <small>{reasons.get(task.id)}</small>}</span>} />
+      </li>)}</ul>
+      {failed && <p className="work-tag-failed" role="alert">{t("The change was not made.")}</p>}
+    </DialogBody>
+    <DialogFooter actions={<>
+      <Button disabled={saving} onClick={() => void decide("dismiss")}>{t("Dismiss")}</Button>
+      <Button intent="primary" disabled={saving || kept.size === 0} loading={saving} onClick={() => void decide("apply")}>
+        {t(kept.size === 1 ? "Tag one task" : "Tag {count} tasks", { count: kept.size })}</Button>
+    </>} />
   </Dialog>;
 }

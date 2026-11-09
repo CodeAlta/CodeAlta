@@ -235,3 +235,18 @@
 .work-tag-declined h4 { flex-basis: 100%; margin: 0; font-size: 12px; }
 .work-tag-declined p { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
 .work-tag-declined-name { display: inline-flex; align-items: center; gap: 2px; padding-left: 8px; border: 1px solid var(--line); border-radius: 999px; }
+
+/* The tag proposals that wait, above the list, and the review of one. */
+.work-tag-hint { margin: -4px 0 0 26px; font-size: 12px; color: var(--muted); }
+.work-tag-proposals { display: grid; gap: 6px; margin-top: 12px; }
+.work-tag-proposal.bp6-callout { display: flex; align-items: center; gap: 8px; }
+.work-tag-proposal-text { display: grid; flex: 1; min-width: 0; font-size: 13px; }
+.work-tag-proposal-text small { color: var(--muted); }
+.work-tag-review-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 13px; }
+.work-tag-review-tasks { display: grid; gap: 4px; max-height: 50vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.work-tag-review-tasks .bp6-checkbox { display: flex; gap: 2px; margin: 0; padding: 6px 8px 6px 34px; border-radius: 8px; }
+.work-tag-review-tasks .bp6-checkbox:hover { background: var(--panel-2); }
+.work-tag-review-task { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; align-items: baseline; min-width: 0; }
+.work-tag-review-task strong { font-size: 13px; font-weight: 600; }
+.work-tag-review-task small { grid-column: 2; font-size: 12px; color: var(--muted); }
+.work-tag-review .work-tag-id { margin: 0; }

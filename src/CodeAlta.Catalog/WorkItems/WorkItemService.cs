@@ -39,6 +39,7 @@ public sealed partial class WorkItemService
 
     private readonly CodeAltaConfigStore _config;
     private readonly WorkItemLinkStore _links;
+    private readonly WorkTagProposalStore _tagProposals;
     private readonly TimeProvider _time;
 
     /// <summary>Creates the service.</summary>
@@ -52,6 +53,7 @@ public sealed partial class WorkItemService
         ArgumentNullException.ThrowIfNull(config);
         _config = config;
         _links = new WorkItemLinkStore(stateRoot);
+        _tagProposals = new WorkTagProposalStore(stateRoot);
         _time = time ?? TimeProvider.System;
     }
 
