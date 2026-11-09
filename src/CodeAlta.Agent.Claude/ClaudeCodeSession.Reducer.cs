@@ -437,6 +437,14 @@ internal sealed partial class ClaudeCodeSession
         bool stopped;
         lock (_gate)
         {
+            // The CLI can change its setting during a turn. Its reported state, not the last accepted flag request,
+            // decides whether the next turn needs to reapply our choice; cooldown still means fast mode is enabled.
+            _cliFastMode = ClaudeCodeJson.GetString(result, "fast_mode_state") switch
+            {
+                "on" or "cooldown" => true,
+                "off" => false,
+                _ => _cliFastMode,
+            };
             stopped = _stoppedByDecision;
             _stoppedByDecision = false;
         }

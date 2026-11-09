@@ -49,6 +49,9 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     /// </summary>
     public string? FastModeState { get; set; }
 
+    /// <summary>Gets or sets the fast-mode state reported by each result, when the CLI changed it while running.</summary>
+    public string? ResultFastModeState { get; set; }
+
     /// <summary>Gets or sets a value indicating whether the CLI refuses <c>apply_flag_settings</c>, as an older one does.</summary>
     public bool RefuseFlagSettings { get; set; }
 
@@ -636,6 +639,11 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         if (_cli.CredentialExpiresAt is { } expiresAt)
         {
             result["credential_expires_at"] = expiresAt;
+        }
+
+        if (_cli.ResultFastModeState is { } fastModeState)
+        {
+            result["fast_mode_state"] = fastModeState;
         }
 
         Emit(result);

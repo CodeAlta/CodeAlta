@@ -385,6 +385,30 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    [DataRow("off", "off", true, 2)]
+    [DataRow("off", "cooldown", true, 1)]
+    [DataRow("on", "on", false, 2)]
+    [DataRow("on", "off", false, 1)]
+    [DataRow("off", "on", null, 0)]
+    public async Task FastMode_FollowsTheCliStateReportedAfterATurn(
+        string initialState, string resultState, bool? choice, int applies)
+    {
+        var cli = new ClaudeCodeFakeCli { FastModeState = initialState, ResultFastModeState = resultState };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var conversation = new List<AgentConversationMessage> { User("one") };
+        var previous = await ExecuteAsync(executor, CreateRequest(conversation) with { FastMode = choice });
+        var process = cli.Last;
+
+        conversation.AddRange([previous.AssistantMessage, User("two")]);
+        await ExecuteAsync(executor, CreateRequest(conversation, previous) with { FastMode = choice });
+
+        Assert.AreSame(process, cli.Last);
+        Assert.AreEqual(applies, process.FastModeRequests.Count,
+            "Reapply a choice the CLI changed itself; cooldown is still on, and an unchosen session sends nothing.");
+        Assert.IsTrue(process.FastModeRequests.All(value => value == choice));
+    }
+
+    [TestMethod]
     [DataRow("fast", true)]
     [DataRow("standard", false)]
     [DataRow(null, null)]
