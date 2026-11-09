@@ -43,6 +43,8 @@ export const sessionOperations = { reviewBeforeCommit: async () => ({ status: "u
     if (!fixture) return { status: "unavailable" };
     fixture.calls.push(options);
     fixture.options = options;
+    // As on the host, a speed reported before a new choice says nothing of its next turn.
+    (window as Window & { fixtureReportedFastMode?: boolean | null }).fixtureReportedFastMode = null;
     return { status: "ok", epoch: expectedEpoch, sessionId, options };
   },
   providerChoices: async ({ expectedEpoch, sessionId }: { expectedEpoch: string; sessionId: string }) => ({ status: "ok", epoch: expectedEpoch, sessionId,

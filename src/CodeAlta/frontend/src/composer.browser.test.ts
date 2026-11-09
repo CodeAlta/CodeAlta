@@ -261,11 +261,38 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       assert.equal(await evaluate(`!!(document.querySelector('#composer-private-fixture-session').compareDocumentPosition(${fastMode}) & Node.DOCUMENT_POSITION_FOLLOWING)`), true);
       assert.equal(await evaluate(`${fastMode}.checked`), false);
       assert.equal(await evaluate(`!!${lightning}`), false);
+      // Until the session chooses, its switch and chip follow the speed reported by the provider.
+      await evaluate("window.fixtureReportedFastMode = true");
+      assert.equal(await wait(`${fastMode}.checked && !!${lightning}`), true);
+      assert.equal(await evaluate("fixtureSessionOptions.calls.length"), 0, "observing fast mode does not choose it");
+      await evaluate("window.fixtureReportedFastMode = false");
+      assert.equal(await wait(`!${fastMode}.checked && !${lightning}`), true);
       await evaluate(`${fastMode}.click()`);
       assert.equal(await wait(`fixtureSessionOptions.calls.length===1 && ${fastMode}.checked && !!${lightning}`), true);
       assert.equal(await evaluate("JSON.stringify(fixtureSessionOptions.calls[0])"), JSON.stringify({ subSessions: true, fastMode: true }));
       assert.equal(await evaluate(`${name}.firstChild === ${lightning} && ${name}.textContent`), "⚡️Fixture model");
       assert.equal(await evaluate("document.querySelector('.composer-selection').title.split('\\n').includes('Fast mode: On')"), true);
+      assert.equal(await evaluate(`${lightning}.hasAttribute('data-standard')`), false, "a new choice clears the previous reported speed");
+
+      await evaluate("window.fixtureReportedFastMode = false");
+      assert.equal(await wait(`${lightning}?.hasAttribute('data-standard') && ${chip}.title.includes('The last turn ran at standard speed.')`), true);
+      const dimmedOpacity = await evaluate(`Number(getComputedStyle(${lightning}).opacity)`);
+      assert.ok(dimmedOpacity < 1, "the standard-speed fallback visibly dims the lightning");
+      // Production CSS keeps the switch and lightning visible in both themes, at presentation and narrow sizes.
+      for (const theme of ["dark", "light"]) for (const [width, height] of [[1600, 1000], [900, 650]]) {
+        await command("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+        await evaluate(`document.documentElement.dataset.theme = '${theme}'; document.documentElement.classList.toggle('bp6-dark', '${theme}' === 'dark');
+          ${fastMode}.scrollIntoView({ block: 'nearest' })`);
+        assert.equal(await wait(`(() => {
+          const form = document.querySelector('.composer-selection-form'), toggle = ${fastMode}.closest('label').getBoundingClientRect();
+          const bolt = ${lightning}.getBoundingClientRect(), label = ${name}.getBoundingClientRect();
+          return form.scrollWidth <= form.clientWidth && toggle.left >= 0 && toggle.right <= innerWidth
+            && toggle.top >= 0 && toggle.bottom <= innerHeight && bolt.width > 0 && bolt.right <= label.right + 1;
+        })()`), true, `${theme} at ${width}×${height} has no horizontal overflow or clipped control`);
+        assert.equal(await evaluate(`Number(getComputedStyle(${lightning}).opacity)`), dimmedOpacity);
+      }
+      await command("Emulation.setDeviceMetricsOverride", { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
+      await evaluate("document.documentElement.dataset.theme = 'dark'; document.documentElement.classList.add('bp6-dark')");
       await evaluate(`${fastMode}.click()`);
       assert.equal(await wait(`fixtureSessionOptions.calls.length===2 && !${fastMode}.checked && !${lightning}`), true);
       assert.equal(await evaluate("JSON.stringify(fixtureSessionOptions.calls[1])"), JSON.stringify({ subSessions: true, fastMode: false }), "off is a choice too");

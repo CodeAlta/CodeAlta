@@ -27,7 +27,10 @@ public sealed class ModelCatalogRpcTests
     }
 
     [TestMethod]
-    public async Task ExplicitProviderReadProjectsOnlyReportedModelsAndKnownMetadata()
+    [DataRow(null)]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task ExplicitProviderReadProjectsOnlyReportedModelsAndKnownMetadata(bool? fastMode)
     {
         await using var registry = new ModelProviderRegistry();
         var id = new ModelProviderId("literal-provider");
@@ -37,7 +40,7 @@ public sealed class ModelCatalogRpcTests
             Capabilities: new Dictionary<string, object?> { ["contextWindow"] = 128_000L, ["inputTokenLimit"] = JsonDocument.Parse("64000").RootElement.Clone(),
                 ["outputTokenLimit"] = -1, ["supportsToolCall"] = true, ["supportsStructuredOutput"] = false,
                 ["inputModalities"] = new[] { "text", "image" },
-                [AgentReasoningEffortCapability.CompleteListKey] = JsonDocument.Parse("true").RootElement.Clone() });
+                [AgentReasoningEffortCapability.CompleteListKey] = JsonDocument.Parse("true").RootElement.Clone() }) { FastMode = fastMode };
         var probes = 0;
         registry.RegisterOrReplace(descriptor, () => new LiteralRuntime(descriptor, () => { probes++; return [model]; }));
         var service = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), "epoch-1");
@@ -71,6 +74,7 @@ public sealed class ModelCatalogRpcTests
         Assert.AreEqual("Medium", actual.DefaultEffort);
         // The provider says these efforts are all the model has: the page shows no other one as possible.
         Assert.AreEqual(true, actual.EffortsComplete);
+        Assert.AreEqual(fastMode, actual.FastMode, "New-chat choices preserve both fast-mode support and its provider default.");
         Assert.IsNull(actual.Deprecated, "A model with no status is not marked.");
     }
 

@@ -189,6 +189,58 @@ public sealed class SessionOptionsRuntimeTests
         }
     }
 
+    [TestMethod]
+    [DataRow(null)]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task FastMode_IsKeptWhenASessionIsForkedAndMoved(bool? fastMode)
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider(fastMode: false);
+        string forkId;
+        await using (var host = await CreateHostAsync(temp, provider))
+        {
+            var sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, null)).SessionId;
+            Assert.AreEqual("ok", (await host.Commands.SetSessionOptionsAsync(sessionId, new AgentSessionOptions { FastMode = fastMode })).Status);
+            await SendAsync(host, sessionId, "First.");
+
+            var fork = await host.RuntimeService.ForkSessionAsync(new SessionForkRequest { SessionId = sessionId });
+            Assert.AreEqual("ok", fork.Status);
+            forkId = fork.Session!.SessionId;
+            Assert.AreEqual(fastMode, AgentSessionOptions.Of(fork.Session.Options).FastMode);
+            await SendAsync(host, forkId, "Fork.");
+            Assert.AreEqual(fastMode, provider.FastModes[^1]);
+
+            var target = await host.ProjectCatalog.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(temp.Root, "target")).FullName);
+            var moved = await host.Commands.MoveSessionAsync(forkId, host.CurrentProject.Id, temp.ProjectRoot, target.Id, target.ProjectPath);
+            Assert.AreEqual("ok", moved.Status, string.Join(" ", moved.Warnings));
+            Assert.AreEqual(fastMode, (await host.RuntimeService.GetSessionOptionsAsync(forkId)).FastMode);
+            await SendAsync(host, forkId, "Moved.");
+            Assert.AreEqual(fastMode, provider.FastModes[^1]);
+        }
+
+        await using (var host = await CreateHostAsync(temp, provider))
+        {
+            Assert.AreEqual(fastMode, (await host.RuntimeService.GetSessionOptionsAsync(forkId)).FastMode);
+            await SendAsync(host, forkId, "Resumed.");
+            Assert.AreEqual(fastMode, provider.FastModes[^1]);
+        }
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void FastMode_JsonRoundTrip_PreservesAnExplicitChoice(bool fastMode)
+    {
+        var options = new AgentSessionOptions { FastMode = fastMode };
+        var json = System.Text.Json.JsonSerializer.Serialize(options);
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        Assert.AreEqual(fastMode, document.RootElement.GetProperty("fast_mode").GetBoolean());
+        Assert.AreEqual(options, System.Text.Json.JsonSerializer.Deserialize<AgentSessionOptions>(json));
+        Assert.IsNull(System.Text.Json.JsonSerializer.Deserialize<AgentSessionOptions>("{}")!.FastMode,
+            "Sessions recorded before fast mode must keep following their provider.");
+    }
+
     private static void AssertWithoutSubAgents(string instructions)
     {
         StringAssert.Contains(instructions, "## Working loop");
