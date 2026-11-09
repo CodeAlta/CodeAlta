@@ -56,6 +56,35 @@ public sealed class CodexCliTurnExecutorTests
     }
 
     [TestMethod]
+    public void TheHome_HasItsProtectedFolders_SoThatASandboxMakesThemReadOnlyInsteadOfDenyingThem()
+    {
+        // A sandbox denies a protected entry that is missing, and Codex does not open a thread when it cannot read the
+        // `rules` folder of its home (Access is denied), while a missing one is no rules (#387).
+        var home = Directory.CreateTempSubdirectory("codealta-codex-home-").FullName;
+        try
+        {
+            CodexCliHomeConfig.Write(home);
+
+            foreach (var folder in (string[])["rules", "skills", "plugins", "prompts"])
+            {
+                Assert.IsTrue(Directory.Exists(Path.Combine(home, folder)), folder);
+                CollectionAssert.Contains(CodexCliHomeConfig.ProtectedEntries.ToList(), folder);
+                Assert.IsFalse(Directory.EnumerateFileSystemEntries(Path.Combine(home, folder)).Any(), $"{folder} stays empty");
+            }
+
+            // A protected file is not made: an empty hooks.json or AGENTS.md would be read as one the user wrote.
+            foreach (var file in (string[])["AGENTS.md", "AGENTS.override.md", ".env", "hooks.json"])
+            {
+                Assert.IsFalse(Path.Exists(Path.Combine(home, file)), file);
+            }
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task AGeneratedImage_IsTheImageOfTheResultOfItsCall()
     {
         var saved = string.Empty;

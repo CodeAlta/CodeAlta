@@ -24,10 +24,15 @@ internal static class CodexCliHomeConfig
     public static IReadOnlyList<string> ProtectedEntries { get; } =
         [FileName, "AGENTS.md", "AGENTS.override.md", ".env", "rules", "hooks.json", "skills", "plugins", "prompts"];
 
+    // The folders of the protected entries, which Write creates empty: a sandbox makes an entry that exists read-only
+    // and denies one that is missing, and Codex reads a folder it is denied as an error, where a missing one is empty
+    // (a thread does not start when it cannot read `rules`). The files are not made: an empty one is not a missing one.
+    private static readonly string[] ProtectedFolders = ["rules", "skills", "plugins", "prompts"];
+
     /// <summary>Gets the content of the file.</summary>
     public static string Content { get; } = CreateContent();
 
-    /// <summary>Writes the file in a home, when its content differs, and creates the home.</summary>
+    /// <summary>Writes the file in a home, when its content differs, and creates the home and its protected folders.</summary>
     /// <param name="home">The <c>CODEX_HOME</c> of the provider.</param>
     /// <exception cref="IOException">The file could not be written.</exception>
     /// <exception cref="UnauthorizedAccessException">The folder cannot be written.</exception>
@@ -35,6 +40,11 @@ internal static class CodexCliHomeConfig
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(home);
         Directory.CreateDirectory(home);
+        foreach (var folder in ProtectedFolders)
+        {
+            Directory.CreateDirectory(Path.Combine(home, folder));
+        }
+
         var path = Path.Combine(home, FileName);
         try
         {
