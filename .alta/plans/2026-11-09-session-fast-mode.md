@@ -126,7 +126,7 @@ flowchart LR
   - `changedSessionOptions` counts a choice that differs from the model's default.
 
   Add the ⚡ and the tooltip line in `ComposerSelection.tsx` from a `fastMode` of the summary built in `OwnedSessionPanel.tsx` and `main.tsx`, with the same rule, and their translations in `messages.ts`. Tests: `sessionOptions.test.tsx`, and a scenario in `composer.browser.test.ts` covering the switch position, the ⚡ before the name and its removal, and a reported speed turning the ⚡ on for a session that did not choose.
-- [ ] 7. **User guide.** In `site/docs/workspace/prompt.md`, under More options, say:
+- [x] 7. **User guide.** In `site/docs/workspace/prompt.md`, under More options, say:
   - what the switch does, and for which providers;
   - that until it is used it follows the provider: your Claude Code setting, Codex's `service_tier`, and for the OpenAI API the project's default tier, shown after the first response;
   - that turning it on mid-conversation reads the conversation again at the fast price.

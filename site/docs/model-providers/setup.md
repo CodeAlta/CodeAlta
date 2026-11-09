@@ -147,6 +147,7 @@ service_tier = "priority" # "fast" is an alias
 - CodeAlta asks for the priority tier only when the selected model offers it; otherwise it uses standard routing and shows a warning.
 - It applies to every session of the provider, its sub-agents and compactions, and may use more of your plan.
 - `service_tier = "default"`, or no setting, returns to standard routing.
+- A session turns it on or off for itself with **Fast mode**, under **More options** of the [Agent chip](../workspace/prompt.md#agent-and-model).
 
 ### Codex reasoning
 
