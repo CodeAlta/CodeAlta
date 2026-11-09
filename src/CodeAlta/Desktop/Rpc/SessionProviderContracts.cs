@@ -55,21 +55,26 @@ internal sealed record SessionReviewBeforeCommitResult(string Status, string? Ep
 /// <param name="SubSessions">Whether the session can start sessions of its own (sub-agents).</param>
 /// <param name="ContextSize">The size of context of the session, in input tokens; null for the default.</param>
 /// <param name="Private">Whether the session is Private: never published to a CodeAlta Server; null or false for the default.</param>
+/// <param name="FastMode">The fast mode the session chose; null when it follows its provider.</param>
 internal sealed record SessionOptionsChoice(bool SubSessions,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ContextSize = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Private = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Private = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? FastMode = null)
 {
     /// <summary>The options of a session, or of what records none.</summary>
     public static SessionOptionsChoice Of(CodeAlta.Agent.AgentSessionOptions? options)
     {
         var of = CodeAlta.Agent.AgentSessionOptions.Of(options);
-        return new(of.SubSessions, ContextSizeContract.Of(of.ContextSize), of.Private ? true : null);
+        return new(of.SubSessions, ContextSizeContract.Of(of.ContextSize), of.Private ? true : null, of.FastMode);
     }
 
     /// <summary>What a choice records: null for the defaults.</summary>
     public static CodeAlta.Agent.AgentSessionOptions? Record(SessionOptionsChoice? choice)
         => choice is null ? null : CodeAlta.Agent.AgentSessionOptions.Stored(new CodeAlta.Agent.AgentSessionOptions
-            { SubSessions = choice.SubSessions, ContextSize = choice.ContextSize is > 0 ? choice.ContextSize : null, Private = choice.Private == true });
+        {
+            SubSessions = choice.SubSessions, ContextSize = choice.ContextSize is > 0 ? choice.ContextSize : null, Private = choice.Private == true,
+            FastMode = choice.FastMode,
+        });
 }
 
 /// <summary>A size of context as the page reads it: a number of tokens, null for none or for one it cannot hold.</summary>

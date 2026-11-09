@@ -260,6 +260,7 @@ internal sealed class SessionOperationsService
                                 Toggle = option.IsToggle ? true : null,
                             })],
                         ContextSizes = ContextSizeContract.Of(m.ContextSizes), ContextSize = ContextSizeContract.Of(m.ContextSize),
+                        FastMode = m.FastMode,
                     }).ToArray())
             {
                 PermissionModes = choices.PermissionModes.Select(mode => new SessionPermissionModeChoice(mode)).ToArray(),
@@ -923,6 +924,9 @@ internal sealed record SessionModelChoice(string Id, string Name, IReadOnlyList<
     // The size of a session that chose none: the one of its provider when the model has it, else its own.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? ContextSize { get; init; }
+    // Whether a session that chose nothing runs the model in fast mode; absent for a model without one.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? FastMode { get; init; }
 }
 internal sealed record SessionModelOption(string Id, string Name, IReadOnlyList<SessionModelOptionValue> Values, string Value)
 {
