@@ -74,7 +74,8 @@ export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequ
     const request: WorkspaceCreateSessionRequest = Object.freeze({ expectedHostEpoch: epoch, scope: frozen.scope,
       projectId: frozen.scope === "project" ? frozen.projectId : null,
       projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId, worktree, baseBranch: base, spaceId, requestId, permissionMode,
-      preparedWorktreeId, options: options ? { subSessions: options.subSessions, ...(options.contextSize ? { contextSize: options.contextSize } : {}) } : null });
+      preparedWorktreeId, options: options ? { subSessions: options.subSessions, ...(options.contextSize ? { contextSize: options.contextSize } : {}),
+        ...(options.fastMode != null ? { fastMode: options.fastMode } : {}) } : null });
     try {
       let response: WorkspaceCreateSessionResponse;
       try { response = await invoke(request, { timeoutMilliseconds: creationTimeoutMilliseconds }); }

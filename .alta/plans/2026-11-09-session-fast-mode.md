@@ -120,7 +120,7 @@ flowchart LR
   Tests in `OpenAIRawApiModelProviderRuntimeTests` and `OpenAICodexSubscriptionPipelineTests`:
   - `openai-responses`: switch not used sends no `service_tier`; off sends `default`; on sends `priority`; a response with `priority` reports fast.
   - `codex`: on; off over a `priority` config; not used with a `priority` config; a model without `priority`.
-- [ ] 6. **Popup and chip.** Add `fastMode: Zap` to `AppIcon.tsx`. Add the switch under Private in `SessionOptionsFields.tsx`, showing the choice, else the reported speed from the runtime state, else the model's default. Extend `sessionOptions.ts`:
+- [x] 6. **Popup and chip.** Add `fastMode: Zap` to `AppIcon.tsx`. Add the switch under Private in `SessionOptionsFields.tsx`, showing the choice, else the reported speed from the runtime state, else the model's default. Extend `sessionOptions.ts`:
   - the model type takes `fastMode`;
   - `storedSessionOptions` keeps `fastMode` once the switch is used;
   - `changedSessionOptions` counts a choice that differs from the model's default.

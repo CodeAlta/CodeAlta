@@ -59,11 +59,15 @@ test("exact selected project and global requests produce switchable persisted ca
   // So does a session created with a size of context.
   const sizedResult = await create(epoch, project, null, capability, null, null, null, "request-4", null, null, { subSessions: true, contextSize: 872_000 });
   assert.equal(sizedResult.kind, "created");
+  // And one created with its fast mode, chosen off as well as on.
+  const fastResult = await create(epoch, project, null, capability, null, null, null, "request-5", null, null, { subSessions: true, fastMode: false });
+  assert.equal(fastResult.kind, "created");
   assert.deepEqual(calls, [
     { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-1", permissionMode: null, preparedWorktreeId: null, options: null },
     { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: "business", requestId: "request-2", permissionMode: null, preparedWorktreeId: null, options: null },
     { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-3", permissionMode: null, preparedWorktreeId: null, options: { subSessions: false } },
     { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-4", permissionMode: null, preparedWorktreeId: null, options: { subSessions: true, contextSize: 872_000 } },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-5", permissionMode: null, preparedWorktreeId: null, options: { subSessions: true, fastMode: false } },
   ]);
   if (projectResult.kind !== "created" || globalResult.kind !== "created") throw new Error("Expected created results");
   const snapshot: WorkspaceSnapshot = { ...empty,

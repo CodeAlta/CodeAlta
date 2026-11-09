@@ -3,7 +3,7 @@ import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ShellLanguageContext } from "../shellLanguage";
 import { SessionOptionsFields } from "./SessionOptionsFields";
-import { changedSessionOptions, defaultSessionOptions, sessionContextSize, sessionOptionsOf, storedSessionOptions } from "./sessionOptions";
+import { changedSessionOptions, defaultSessionOptions, sessionContextSize, sessionFastMode, sessionOptionsOf, storedSessionOptions } from "./sessionOptions";
 
 const render = (node: React.ReactNode, locale = "en") => renderToStaticMarkup(<ShellLanguageContext.Provider value={{ locale: locale as "en", choice: locale as "en", setLanguage: () => {} }}>
   {node}</ShellLanguageContext.Provider>);
@@ -45,6 +45,43 @@ test("the size of context is offered where the model has several: Default with i
   assert.match(html, /Context size/);
   assert.match(html, /<option value="">272k · Default<\/option><option value="272000">272k<\/option><option value="1000000" selected="">1M<\/option>/);
   assert.match(html, /The conversation is compacted before it exceeds this size\./);
+});
+
+test("a session runs in the fast mode it chose, else in the one its provider reported, else in the one of its model", () => {
+  const off = { fastMode: false }, on = { fastMode: true };
+  assert.equal(sessionFastMode(null, { subSessions: true, fastMode: true }), null, "no model");
+  assert.equal(sessionFastMode({ fastMode: null }, { subSessions: true, fastMode: true }), null, "a model without fast mode");
+  assert.equal(sessionFastMode(off, null), false);
+  assert.equal(sessionFastMode(on, null), true, "a provider that runs it fast (Codex's service_tier)");
+  assert.equal(sessionFastMode(off, null, true), true, "an OpenAI project whose default tier is fast");
+  assert.equal(sessionFastMode(off, { subSessions: true, fastMode: true }, false), true);
+  assert.equal(sessionFastMode(on, { subSessions: true, fastMode: false }, true), false, "the choice wins");
+});
+
+test("a fast mode is recorded once chosen, on or off, and counts as changed where it differs from the one of the model", () => {
+  assert.deepEqual(storedSessionOptions({ subSessions: true, fastMode: false }), { subSessions: true, fastMode: false });
+  assert.deepEqual(storedSessionOptions({ subSessions: true, fastMode: true, private: true }), { subSessions: true, private: true, fastMode: true });
+  assert.equal(storedSessionOptions({ subSessions: true, fastMode: null }), null);
+  assert.equal(changedSessionOptions({ subSessions: true, fastMode: true }, { fastMode: false }), 1);
+  assert.equal(changedSessionOptions({ subSessions: true, fastMode: false }, { fastMode: false }), 0, "the default of the model");
+  assert.equal(changedSessionOptions({ subSessions: true, fastMode: false }, { fastMode: true }), 1);
+  assert.equal(changedSessionOptions({ subSessions: true, fastMode: true }, { fastMode: null }), 0, "a model without fast mode");
+  assert.equal(changedSessionOptions({ subSessions: true, fastMode: true }), 0, "a form without a model");
+});
+
+test("the switch of fast mode follows Private, where the model has a fast mode", () => {
+  assert.doesNotMatch(render(<SessionOptionsFields id="s" value={null} onChange={() => {}} />), /Fast mode/, "a form without a model");
+  assert.doesNotMatch(render(<SessionOptionsFields id="s" value={null} context={{ fastMode: null }} onChange={() => {}} />), /Fast mode/);
+
+  const off = render(<SessionOptionsFields id="s" value={null} context={{ fastMode: false }} onChange={() => {}} />);
+  assert.match(off, /composer-private-s[\s\S]*composer-fast-mode-s/, "under Private");
+  assert.doesNotMatch(off, /id="composer-fast-mode-s"[^>]*checked=""/);
+  assert.match(off, /Standard speed and price\./);
+
+  const reported = render(<SessionOptionsFields id="s" value={null} context={{ fastMode: false }} reportedFastMode onChange={() => {}} />);
+  assert.match(reported, /id="composer-fast-mode-s"[^>]*checked=""/, "what the provider reported");
+  assert.match(reported, /Faster output, at a higher price per token\./);
+  assert.match(render(<SessionOptionsFields id="s" value={null} context={{ fastMode: true }} onChange={() => {}} />, "fr"), /Mode rapide/);
 });
 
 test("the switch of sub-sessions says in one line what it does", () => {

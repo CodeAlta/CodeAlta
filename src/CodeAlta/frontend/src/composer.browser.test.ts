@@ -111,7 +111,7 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       ${permission ? "window.fixturePermission={effort:'max',mode:null,status:'ok',calls:[]};" : ""}
       ${outside ? "window.fixtureOutsideSpace=true;" : ""}
       ${removed ? "window.fixtureRemoved={replacement:'fixture-provider',switched:[]};" : ""}
-      ${options ? "window.fixtureModelOptions={context:'300k',fast:'false',calls:[]};" : ""}` });
+      ${options ? "window.fixtureModelOptions={context:'300k',fast:'false',calls:[]};window.fixtureSessionOptions={options:{subSessions:true},calls:[]};" : ""}` });
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
@@ -248,6 +248,28 @@ for (const { name, mac, permission, outside, removed, options, compaction = fals
       await evaluate(`${fast}.click()`);
       assert.equal(await wait(`fixtureModelOptions.calls.length===2 && ${fast}.checked`), true);
       assert.deepEqual(JSON.parse(await evaluate("JSON.stringify(fixtureModelOptions.calls)")), ["fixture-model:context=1m", "fixture-model:fast=true"]);
+
+      // The fast mode of the session is under More options, after Private. On, a colored lightning comes right before the
+      // name of the model on the chip, and its tooltip says it; off, it is gone.
+      const more = "document.querySelector('.composer-selection-more-button')";
+      const fastMode = "document.querySelector('#composer-fast-mode-fixture-session')";
+      const name = "document.querySelector('.composer-selection .composer-selection-model-name')";
+      const lightning = `${name}?.querySelector('.composer-selection-fast')`;
+      assert.equal(await wait(`!!${more}`), true, "the options of the session are known");
+      await evaluate(`${more}.click()`);
+      assert.equal(await wait(`!!${fastMode}`), true, "the model of the session has a fast mode");
+      assert.equal(await evaluate(`!!(document.querySelector('#composer-private-fixture-session').compareDocumentPosition(${fastMode}) & Node.DOCUMENT_POSITION_FOLLOWING)`), true);
+      assert.equal(await evaluate(`${fastMode}.checked`), false);
+      assert.equal(await evaluate(`!!${lightning}`), false);
+      await evaluate(`${fastMode}.click()`);
+      assert.equal(await wait(`fixtureSessionOptions.calls.length===1 && ${fastMode}.checked && !!${lightning}`), true);
+      assert.equal(await evaluate("JSON.stringify(fixtureSessionOptions.calls[0])"), JSON.stringify({ subSessions: true, fastMode: true }));
+      assert.equal(await evaluate(`${name}.firstChild === ${lightning} && ${name}.textContent`), "⚡️Fixture model");
+      assert.equal(await evaluate("document.querySelector('.composer-selection').title.split('\\n').includes('Fast mode: On')"), true);
+      await evaluate(`${fastMode}.click()`);
+      assert.equal(await wait(`fixtureSessionOptions.calls.length===2 && !${fastMode}.checked && !${lightning}`), true);
+      assert.equal(await evaluate("JSON.stringify(fixtureSessionOptions.calls[1])"), JSON.stringify({ subSessions: true, fastMode: false }), "off is a choice too");
+
       // The options are the model's, kept by the host: a Send names none of them, nor any other choice.
       await evaluate(`${chip}.click()`);
       assert.equal(await wait("!document.querySelector('.composer-selection-popover')"), true);
