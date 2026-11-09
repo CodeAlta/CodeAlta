@@ -63,6 +63,15 @@ test("the model servers act on several rows at once, copy a server to another ma
     assert.deepEqual((await calls(page)).filter(call => call.action === "updateNow").map(call => [call.machine, call.build]), [["local", "b12110"], ["pcai", "b12110"]]);
     await page.until(`document.body.textContent.includes('All the machines are updated.')`, "the notice");
 
+    // The machines checked update in the order of the table, sorted by machine: pc-ai first, though the page lists this computer first.
+    await page.until(`document.querySelector('table[aria-label="llama.cpp"] tbody tr[data-row-key]')?.getAttribute('data-row-key') === 'pcai'`, "pc-ai first");
+    await page.evaluate(`[...document.querySelectorAll('table[aria-label="llama.cpp"] input[aria-label^="Select"]')].forEach(input => input.click())`);
+    await page.clickText(".model-servers-selection .bp6-button", "Update now…");
+    await page.until(`document.querySelector('.bp6-dialog .muted-text')?.textContent === 'pc-ai, this-pc'`, "the machines in the order of the table");
+    await page.clickText(".bp6-dialog-footer .bp6-button", "Update");
+    await page.until(`window.modelServersFixture.calls.filter(call => call.includes('"updateNow"')).length === 4`, "both again");
+    assert.deepEqual((await calls(page)).filter(call => call.action === "updateNow").slice(2).map(call => call.machine), ["pcai", "local"]);
+
     // The policy offers Lemonade's ROCm builds.
     await page.clickText(".bp6-tab-list .bp6-button", "Policy of all…");
     await page.until(`document.querySelector('.bp6-dialog')?.textContent.includes("Use Lemonade's ROCm builds")`, "the policy dialog");

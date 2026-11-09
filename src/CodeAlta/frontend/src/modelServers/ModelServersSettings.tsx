@@ -8,7 +8,7 @@ import type { MessageKey } from "../localization";
 import type { SettingsNotice } from "../settingsEditing";
 import { DataTable, type DataColumn } from "../fleet/console/DataTable";
 import { FilterBar, type FilterFacet } from "../fleet/console/FilterBar";
-import { facetCounts, filterRows, type Facet, type TableView } from "../fleet/console/tableRows";
+import { facetCounts, filterRows, sortRows, type Facet, type TableView } from "../fleet/console/tableRows";
 import { modelServersApi, ModelServersError, type ModelServersApi } from "./api";
 import { updateInTurn } from "./modelServers";
 import { activityOf, backendName, currentBuilds, formatBytes, formatSpeed, gpuSummary, isActive, loadingProgress, modelName, modelRows, progressOf, runningTasks,
@@ -206,7 +206,8 @@ export function ModelServersSettings({ epoch, api: given, onDiscover }: { epoch:
     {dialog?.kind === "import" && <ImportDialog machines={machines} machine={dialog.machine} run={run} onImported={(machine, server) => setDialog({ kind: "server", machine, server })}
       onClose={() => setDialog(null)} />}
     {dialog?.kind === "policy" && <PolicyDialog machines={machines.filter(entry => dialog.machines.includes(entry.machine.id))} run={run} onClose={() => setDialog(null)} />}
-    {dialog?.kind === "update" && <UpdateDialog machines={machines.filter(entry => dialog.machines.includes(entry.machine.id))} mode={dialog.mode} run={run} onNow={updateNow}
+    {/* In the order the machines were given, the order of the table: Update now updates them one after the other in it. */}
+    {dialog?.kind === "update" && <UpdateDialog machines={inOrder(machines, dialog.machines)} mode={dialog.mode} run={run} onNow={updateNow}
       onClose={() => setDialog(null)} />}
     {dialog?.kind === "copy" && <CopyServerDialog machines={machines} from={dialog.machine} server={dialog.server} run={run} onClose={() => setDialog(null)} />}
     {dialog?.kind === "downloadTo" && <DownloadToDialog machines={machines} models={dialog.models} run={run} onClose={() => setDialog(null)} />}
@@ -315,6 +316,11 @@ function ServersTab({ machines, view, onView, busy, run, read, onUse, onEdit, on
       details={row => <ServerDetails row={row} busy={busy} run={run} read={read} onUse={() => void onUse(row.machine.id, row.server.definition)} onEdit={() => onEdit(row.machine.id, row.server.definition)}
         onCopy={() => onCopy(row.machine.id, row.server.definition)} />} />
   </section>;
+}
+
+/** The machines named, in the order they are named. */
+function inOrder(machines: readonly MachineStatus[], ids: readonly string[]): MachineStatus[] {
+  return ids.flatMap(id => machines.filter(entry => entry.machine.id === id));
 }
 
 /** The column of the boxes that check rows, for the actions on several rows at once; a row that may not be changed has none. */
@@ -594,8 +600,7 @@ function BuildsTab({ machines, view, onView, busy, run, onPolicy, onUpdate, chec
   const time = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }), [locale]);
   const rows = useMemo<BuildRow[]>(() => machines.map(entry => ({ key: entry.machine.id, entry, status: entry.status! })), [machines]);
   const shown = useMemo(() => filterRows(rows, [], {}, view.query, row => [row.entry.machine.name, gpuSummary(row.status.hardware, true), currentBuilds(row.status.builds)].join(" ")), [rows, view]);
-  const picked = shown.filter(row => checked.includes(row.key));
-  const ids = picked.map(row => row.entry.machine.id);
+  const checkedRows = shown.filter(row => checked.includes(row.key));
   const columns: DataColumn<BuildRow>[] = [
     pickColumn<BuildRow>(row => row.key, checked, onCheck, row => t("Select {name}", { name: row.entry.machine.name }), row => row.entry.machine.manages),
     { id: "machine", label: "Machine", width: "10rem", sort: row => row.entry.machine.name, cell: row => <strong>{row.entry.machine.name}</strong> },
@@ -615,6 +620,10 @@ function BuildsTab({ machines, view, onView, busy, run, onPolicy, onUpdate, chec
       ? <Tag minimal intent={row.status.history[0].result === "updated" ? "success" : "danger"}>{t(row.status.history[0].result === "updated" ? "Updated" : row.status.history[0].result === "rolledBack" ? "Rolled back" : "Failed")}</Tag>
       : <span className="muted-text">—</span> },
   ];
+  // In the order the table shows them: Update now updates them one after the other in it.
+  const sortColumn = columns.find(column => column.id === view.sort?.column);
+  const picked = sortRows(checkedRows, sortColumn?.sort ?? null, view.sort?.direction ?? "asc", locale);
+  const ids = picked.map(row => row.entry.machine.id);
   return <section className="fleet-table-section" aria-label="llama.cpp">
     <FilterBar label={t("Filter the machines")} query={view.query} onQuery={query => onView({ query })} facets={[]} values={{}} onValues={() => undefined}
       shown={shown.length} total={rows.length} />

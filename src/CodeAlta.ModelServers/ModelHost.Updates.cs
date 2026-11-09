@@ -161,7 +161,17 @@ public sealed partial class ModelHost
                 var previousSpeeds = servers.SelectMany(static s => s.Status.Models.Where(static m => m.TokensPerSecond is > 0).Select(m => (Key: s.Definition.Id + "/" + m.Model, Speed: m.TokensPerSecond!.Value)))
                     .ToDictionary(static entry => entry.Key, static entry => entry.Speed, StringComparer.Ordinal);
                 Builds.MakeCurrent(backend, source.Tag);
-                var (passed, reason) = await SwitchAndTestAsync(servers, previousSpeeds, cancellationToken).ConfigureAwait(false);
+                bool passed;
+                string? reason;
+                try
+                {
+                    (passed, reason) = await SwitchAndTestAsync(servers, previousSpeeds, cancellationToken).ConfigureAwait(false);
+                }
+                catch (ModelHostException exception)
+                {
+                    // A server that does not even start on the new build (too old for router mode, a library missing) failed its test.
+                    (passed, reason) = (false, exception.Message);
+                }
                 if (passed)
                 {
                     Record(new UpdateRecord(_options.Time.GetUtcNow(), backend, current?.Tag, source.Tag, "updated", reason));
