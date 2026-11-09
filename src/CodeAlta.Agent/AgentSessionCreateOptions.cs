@@ -141,6 +141,12 @@ public class AgentSessionCreateOptions
     public long? DefaultContextSize { get; init; }
 
     /// <summary>
+    /// Gets or initializes the fast mode the session chose (<see cref="AgentSessionOptions.FastMode"/>): sent with its turns
+    /// when its model has one (<see cref="AgentModelInfo.FastMode"/>). Null follows the provider.
+    /// </summary>
+    public bool? FastMode { get; init; }
+
+    /// <summary>
     /// Gets or initializes whether nobody reads the summaries of the reasoning of the session (a headless run): its
     /// requests ask for none (<see cref="Runtime.AgentTurnRequest.OmitReasoningSummaries"/>). Default false.
     /// </summary>

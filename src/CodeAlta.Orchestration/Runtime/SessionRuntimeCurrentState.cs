@@ -89,6 +89,12 @@ public sealed record SessionRuntimeCurrentEntry(long AttachmentGeneration, bool 
     /// started since.
     /// </summary>
     public string? PromptSuggestion { get; init; }
+
+    /// <summary>
+    /// Whether the provider reported that the last request of the attachment ran in fast mode
+    /// (<see cref="CodeAlta.Agent.AgentOperationUsageSnapshot.FastMode"/>); null until a response of the attachment says it.
+    /// </summary>
+    public bool? ReportedFastMode { get; init; }
 }
 
 /// <summary>A background task of a session, as the runtime last heard of it.</summary>

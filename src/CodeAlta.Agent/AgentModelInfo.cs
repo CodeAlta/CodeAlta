@@ -40,6 +40,15 @@ public sealed record AgentModelInfo(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<long>? ContextSizes { get; init; }
 
+    /// <summary>
+    /// Gets whether the model has a fast mode with its provider (faster output, at a higher price per token), and whether
+    /// it runs fast before a response says otherwise: null for a model without one; else <see langword="true"/> when the
+    /// provider runs it fast for a session that chose nothing (the saved setting of Claude Code, the <c>service_tier</c> of
+    /// Codex), <see langword="false"/> when not. A session chooses with <see cref="AgentSessionOptions.FastMode"/>.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? FastMode { get; init; }
+
     /// <summary>Gets the size of context of the model, in input tokens: the input it takes at most, null when it is not known.</summary>
     /// <returns>The size, or null.</returns>
     public long? GetContextSize() => AgentTokenBudgetResolver.Resolve(this, AgentCompactionSettings.Default).InputContextLimit;

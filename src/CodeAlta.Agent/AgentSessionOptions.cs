@@ -39,6 +39,14 @@ public sealed record AgentSessionOptions
     [JsonPropertyName("private")]
     public bool Private { get; init; }
 
+    /// <summary>
+    /// Gets whether the session runs its model in fast mode, where its provider has one for the model
+    /// (<see cref="AgentModelInfo.FastMode"/>): faster output, at a higher price per token. Null, the default, follows the
+    /// provider; a value is the choice of the session, sent with each of its turns.
+    /// </summary>
+    [JsonPropertyName("fast_mode")]
+    public bool? FastMode { get; init; }
+
     /// <summary>Gets whether every option is at its default.</summary>
     [JsonIgnore]
     public bool IsDefault => Equals(Default);

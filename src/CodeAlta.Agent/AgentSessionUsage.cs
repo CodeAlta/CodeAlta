@@ -95,6 +95,10 @@ public sealed record AgentWindowUsageSnapshot(
 /// <param name="ReasoningEffort">The reasoning-effort setting used for the operation when reported.</param>
 /// <param name="Label">The UI label describing the operation snapshot.</param>
 /// <param name="CostUnit">The unit of <paramref name="Cost"/> when the provider names one, such as <c>AI credits</c>.</param>
+/// <param name="FastMode">
+/// Whether the provider reports the operation ran in fast mode (<see cref="AgentModelInfo.FastMode"/>), as the
+/// <c>service_tier</c> of an OpenAI response says; null when it does not say.
+/// </param>
 public sealed record AgentOperationUsageSnapshot(
     string? Model = null,
     long? InputTokens = null,
@@ -109,7 +113,8 @@ public sealed record AgentOperationUsageSnapshot(
     string? ParentToolCallId = null,
     string? ReasoningEffort = null,
     string? Label = null,
-    string? CostUnit = null);
+    string? CostUnit = null,
+    bool? FastMode = null);
 
 /// <summary>
 /// The input tokens of one operation, split by what the provider bills apart: the parts add up to the total.

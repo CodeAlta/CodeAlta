@@ -27,6 +27,9 @@ public sealed class SessionOptionsRuntimeTests
         Assert.IsNull(AgentSessionOptions.Stored(new AgentSessionOptions()));
         Assert.AreSame(Off, AgentSessionOptions.Stored(Off));
         Assert.IsTrue(AgentSessionOptions.Of(null).SubSessions);
+        // A fast mode chosen off is a choice: it is recorded, unlike a session that chose nothing.
+        Assert.IsNotNull(AgentSessionOptions.Stored(new AgentSessionOptions { FastMode = false }));
+        Assert.IsNull(AgentSessionOptions.Default.FastMode);
     }
 
     [TestMethod]
@@ -143,6 +146,47 @@ public sealed class SessionOptionsRuntimeTests
         }
     }
 
+    [TestMethod]
+    public async Task TheFastModeOfASession_IsSentOnceChosen_AndIsKeptAfterARestart()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider(fastMode: false) { ReportedFastMode = true };
+        string sessionId;
+        await using (var host = await CreateHostAsync(temp, provider))
+        {
+            sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, null)).SessionId;
+            await SendAsync(host, sessionId, "First.");
+            Assert.IsNull(provider.FastModes[^1], "a session that chose nothing sends nothing: the provider does as it does");
+            Assert.IsTrue((await host.RuntimeService.GetCurrentStateAsync(sessionId)).Entry?.ReportedFastMode, "the speed the response reported");
+
+            Assert.AreEqual("ok", (await host.Commands.SetSessionOptionsAsync(sessionId, new AgentSessionOptions { FastMode = false })).Status);
+            await SendAsync(host, sessionId, "Second.");
+            Assert.IsFalse(provider.FastModes[^1], "off is sent: the provider runs its standard speed");
+
+            Assert.AreEqual("ok", (await host.Commands.SetSessionOptionsAsync(sessionId, new AgentSessionOptions { FastMode = true })).Status);
+            await SendAsync(host, sessionId, "Third.");
+            Assert.IsTrue(provider.FastModes[^1]);
+        }
+
+        await using (var host = await CreateHostAsync(temp, provider))
+        {
+            Assert.IsTrue((await host.RuntimeService.GetSessionOptionsAsync(sessionId)).FastMode);
+            await SendAsync(host, sessionId, "Fourth.");
+            Assert.IsTrue(provider.FastModes[^1]);
+        }
+
+        // A model without fast mode is sent nothing, whatever the session chose.
+        var without = new RecordingProvider();
+        using var other = TempDirectory.Create();
+        await using (var host = await CreateHostAsync(other, without))
+        {
+            var session = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, without.Descriptor, null, null, null, null, null, null, null,
+                new AgentSessionOptions { FastMode = true })).SessionId;
+            await SendAsync(host, session, "First.");
+            Assert.IsNull(without.FastModes[^1]);
+        }
+    }
+
     private static void AssertWithoutSubAgents(string instructions)
     {
         StringAssert.Contains(instructions, "## Working loop");
@@ -178,15 +222,21 @@ public sealed class SessionOptionsRuntimeTests
             },
             CancellationToken.None);
 
-    private sealed class RecordingProvider(long? defaultContextSize = null) : IAgentModelProviderRuntime, IModelProviderTurnExecutor, IModelProviderModelCatalog
+    private sealed class RecordingProvider(long? defaultContextSize = null, bool? fastMode = null) : IAgentModelProviderRuntime, IModelProviderTurnExecutor, IModelProviderModelCatalog
     {
-        private static readonly AgentModelInfo Model = new("fake-model", DisplayName: "Fake Model",
-            Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal) { ["inputTokenLimit"] = 100_000L }) { ContextSizes = [100_000, 400_000] };
+        private readonly AgentModelInfo _model = new("fake-model", DisplayName: "Fake Model",
+            Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal) { ["inputTokenLimit"] = 100_000L }) { ContextSizes = [100_000, 400_000], FastMode = fastMode };
 
         public List<string?> Instructions { get; } = [];
 
         /// <summary>The size of context of the model of each turn.</summary>
         public List<long?> ContextSizes { get; } = [];
+
+        /// <summary>The fast mode of each turn.</summary>
+        public List<bool?> FastModes { get; } = [];
+
+        /// <summary>The fast mode each response reports, or null for none.</summary>
+        public bool? ReportedFastMode { get; init; }
 
         public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("fake-options"), "Fake Options")
             { DefaultModelId = "fake-model", DefaultContextSize = defaultContextSize };
@@ -211,12 +261,12 @@ public sealed class SessionOptionsRuntimeTests
             {
                 ProviderId = Descriptor.ProviderId,
                 Availability = ModelProviderAvailability.Ready,
-                Models = [Model],
+                Models = [_model],
                 SelectedModelId = "fake-model",
             });
 
         public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(ModelProviderRuntimeDescriptor provider, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<AgentModelInfo>>([Model]);
+            => Task.FromResult<IReadOnlyList<AgentModelInfo>>([_model]);
 
         public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
         {
@@ -224,11 +274,17 @@ public sealed class SessionOptionsRuntimeTests
             {
                 Instructions.Add(request.SystemMessage + "\n" + request.DeveloperInstructions + "\n" + request.SessionInstructions);
                 ContextSizes.Add(request.ModelInfo?.GetContextSize());
+                FastModes.Add(request.FastMode);
             }
 
             return Task.FromResult(new AgentTurnResponse
             {
                 AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]),
+                Usage = ReportedFastMode is null ? null : new AgentSessionUsage(
+                    LastOperation: new AgentOperationUsageSnapshot(Model: "fake-model", InputTokens: 10, OutputTokens: 2, FastMode: ReportedFastMode),
+                    Scope: AgentUsageScope.LastOperation,
+                    Source: AgentUsageSource.ProviderUsage,
+                    UpdatedAt: DateTimeOffset.UtcNow),
             });
         }
 
