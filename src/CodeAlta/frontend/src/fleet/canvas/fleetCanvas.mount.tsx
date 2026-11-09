@@ -13,9 +13,9 @@ const directory: FleetDirectoryResult = {
   status: "paired", linkId: null, url: null, organization: null, connection: null,
   machines: [
     { id: "mini-id", name: "Mac mini", kind: "node", os: "macos", version: "4.0.1", online: true, presence: "online", activeSessions: 1, isThisComputer: false,
-      isPaired: true, providers: ["Codex"], sessions: 2, isReachable: true, labels: [] },
+      isPaired: true, providers: ["Codex"], sessions: 2, isReachable: true, labels: [], queued: null, sessionLimit: null },
     { id: "box-id", name: "build box", kind: "node", os: null, version: null, online: false, presence: "offline", activeSessions: 0, isThisComputer: false,
-      isPaired: true, providers: [], sessions: 0, isReachable: true, labels: [] },
+      isPaired: true, providers: [], sessions: 0, isReachable: true, labels: [], queued: null, sessionLimit: null },
   ],
   sessions: [
     { id: "s-works", machineId: "mini-id", state: "running", providerType: "codex", model: "gpt-6", createdAt: "2026-11-03T08:00:00Z", updatedAt: "2026-11-03T09:30:00Z",

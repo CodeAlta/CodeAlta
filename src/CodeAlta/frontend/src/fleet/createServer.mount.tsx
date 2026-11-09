@@ -44,7 +44,7 @@ const api: CreateServerApi = {
 const machinesApi: CreateServerMachinesApi = {
   list: async () => ({ status: "ok", hostEpoch: epoch, machines: [{ id: "mac", name: "mac-mini", state: "online", os: "macos", version: "4.0.0", address: "mac:2585",
     fingerprint: "ABCD EFGH", words: "a b c d e f", sessions: 0, lastSeen: null, problem: null, permissions: ["view", "drive", "start", "manage"], pairedAt: "2026-11-01T00:00:00Z",
-    paired: true, channel: "direct" }] }),
+    paired: true, channel: "direct", tags: [], working: null, queued: null, sessionLimit: null }] }),
   joinServer: async request => { calls.push(JSON.stringify({ join: request.machineId, link: request.linkId })); return { status: "ok", name: "mac-mini", words: "maple orbit tiger cloud amber stone", message: null }; },
 };
 // Set by the test once another computer approved the one that joins.

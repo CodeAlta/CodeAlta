@@ -14,15 +14,16 @@ The fleet is this computer and the machines it reaches: paired machines, and the
 1. `alta fleet machine list --ready` lists the machines that take a new session from this computer now. Each record has:
    - `readiness`: `ready`, `not_allowed` (this computer may not start sessions there), `no_provider`, `updating`, or `offline`, `connecting`, `unauthorized`;
    - `working`: how many of its sessions work now, its load;
+   - `sessionLimit` and `queued`: how many sessions its owner lets work there at once (absent for no limit), and how many runs wait for their turn there;
    - `os`, `capabilities` (`sandbox`, `moves`), `tags` (given by its owner, such as `gpu`; `labels` repeats them under their former name), `providers`, `permissions`.
-2. Choose by what the task needs first, then by load: the system (`os` is `macos` for an iOS build), a tag (`--tag gpu`), a capability (`--capability sandbox`), a provider (`--provider <name>`); among those, the lowest `working`, and `channel` `direct` before `relayed`. Prefer this computer when nothing requires another machine.
+2. Choose by what the task needs first, then by load: the system (`os` is `macos` for an iOS build), a tag (`--tag gpu`), a capability (`--capability sandbox`), a provider (`--provider <name>`); among those, a machine with a free seat (`working` under `sessionLimit`, nothing `queued`), then the shortest queue, then the lowest `working`, and `channel` `direct` before `relayed`. A full machine is still `ready`: it takes the work and queues it. Prefer this computer when nothing requires another machine.
 3. `alta fleet machine show <machine>` asks the machine for its projects and its ready providers: the project `id` and the provider `key` are what a session there names. A project whose `repository` is the one you work in is the same repository there.
 
 A machine that is not ready is not chosen. Say why to the user when no machine fits: its owner gives a permission, configures a provider, or brings it online.
 
 ## Start and steer work elsewhere
 
-- `alta session create --machine <machine> --project <project-id> --stdin` starts a session there, the prompt on stdin. It is your child: its final answer comes back to you, so do not poll it. Without `--project`, the machine takes its project of the same repository as yours. Name a model with `--model-ref <provider>:<model>`; the model tiers of this computer mean nothing there.
+- `alta session create --machine <machine> --project <project-id> --stdin` starts a session there, the prompt on stdin. It is your child: its final answer comes back to you, so do not poll it. Without `--project`, the machine takes its project of the same repository as yours. Name a model with `--model-ref <provider>:<model>`; the model tiers of this computer mean nothing there. On a full machine the record says `queued` with `queuePosition`: the prompt waits there for its turn and is sent then, and the answer still comes back to you.
 - `alta session send <session-id> --stdin` prompts it again; `alta session report <session-id>` reads where it stands and its answer.
 - `alta fleet machine sessions <machine>` lists the sessions of a machine; `yours` marks your children.
 

@@ -141,6 +141,12 @@ public sealed record RemoteChildResult(string Status, string? Code, string? Mess
 
     /// <summary>Gets whether its first prompt was handed over.</summary>
     public bool PromptSent { get; init; }
+
+    /// <summary>
+    /// Gets the place of its first prompt in the queue of the machine (1 for the next one) when the machine runs as many sessions
+    /// as its owner lets it: handed over, sent once its turn comes. Null when it was sent at once, or not sent.
+    /// </summary>
+    public int? QueuedPosition { get; init; }
 }
 
 /// <summary>The answer of a session of another machine a script waits for.</summary>

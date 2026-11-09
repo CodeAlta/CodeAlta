@@ -490,7 +490,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         IReadOnlyList<SpaceDescriptor>? spaces = null;
         foreach (var run in Engine.Runs(null, 500))
         {
-            if (run.Status is not (AutomationRun.Running or AutomationRun.Waiting or AutomationRun.Held) || run.SessionId is not { } sessionId) continue;
+            if (run.Status is not (AutomationRun.Running or AutomationRun.Waiting or AutomationRun.Held or AutomationRun.Queued) || run.SessionId is not { } sessionId) continue;
             if (Engine.Snapshot.Find(run.AutomationId) is not { } entry) continue;
             // The space of the run, as its runner chose it: the one of its project, the default one otherwise.
             spaces ??= await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
@@ -534,7 +534,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         var stopped = new List<string>();
         foreach (var run in Engine.Runs(null, 500))
         {
-            if (run.Status is not (AutomationRun.Running or AutomationRun.Waiting or AutomationRun.Held) || run.SessionId is not { } sessionId) continue;
+            if (run.Status is not (AutomationRun.Running or AutomationRun.Waiting or AutomationRun.Held or AutomationRun.Queued) || run.SessionId is not { } sessionId) continue;
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
@@ -598,6 +598,42 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         var run = new Fleet.NodeApi.FleetNodeBudgetRun(runId, entry.Definition.Name, spaceId, project);
         return (await admit(run, () => Held(runId), cancellationToken).ConfigureAwait(false)).Problem;
     }
+
+    /// <summary>Gets or sets the seats of the machine its runs take (<see cref="Fleet.NodeApi.FleetSessionSeats"/>); null for no limit.</summary>
+    internal Fleet.NodeApi.FleetSessionSeats? Seats { get; set; }
+
+    internal const string QueuedMessage = "As many sessions work on the machine as its owner lets work at once: the run waits for its turn.";
+
+    /// <inheritdoc />
+    public async Task<string?> AdmitSeatAsync(AutomationEntry entry, string runId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (Seats is not { } seats) return null;
+        // The run takes the seat under its own id until its session exists and holds it (BindSeat).
+        var ticket = await seats.RequestAsync(new Fleet.NodeApi.FleetSeatRequest(runId, runId, null, entry.Definition.Name, "automation"), cancellationToken).ConfigureAwait(false);
+        if (ticket.IsAdmitted) return null;
+        // A run that waits for its turn says so: in its runs, and to a caller of Run now that waits for its answer.
+        Engine.MarkQueued(runId, QueuedMessage);
+        if (_holdWaiters.TryGetValue(runId, out var waiter)) waiter.TrySetResult();
+        using var registration = cancellationToken.Register(() => seats.Cancel(runId));
+        try
+        {
+            await ticket.Admitted.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return "The run was taken out of the queue of the machine.";
+        }
+
+        return null;
+    }
+
+    /// <inheritdoc />
+    public void BindSeat(string runId, string sessionId) => Seats?.Bind(runId, sessionId);
+
+    /// <inheritdoc />
+    public void ReleaseSeat(string runId) => Seats?.Release(runId);
 
     private void Held(string runId)
     {
@@ -902,7 +938,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         {
             var running = Engine.RunAsync(id, runId, dryRun, Engine.Stopping);
             if (await Task.WhenAny(running, held.Task).WaitAsync(cancellationToken).ConfigureAwait(false) != running
-                && Engine.Runs(id, MaximumRuns).FirstOrDefault(candidate => candidate.Id == runId) is { Status: AutomationRun.Held } waiting)
+                && Engine.Runs(id, MaximumRuns).FirstOrDefault(candidate => candidate.Id == runId) is { Status: AutomationRun.Held or AutomationRun.Queued } waiting)
             {
                 _ = running.ContinueWith(static task => _ = task.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
                 return waiting;

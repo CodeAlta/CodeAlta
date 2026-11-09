@@ -22,4 +22,10 @@ public sealed partial class FleetConnectorOptions
     /// the server turns those that last into notifications for its owner. Null reports nothing (a desktop).
     /// </summary>
     public Func<IReadOnlyList<Protocol.Api.FleetHealthProblem>>? Health { get; init; }
+
+    /// <summary>
+    /// Gets what reads the seats of the machine its presence reports (<see cref="NodeApi.FleetMachineLoad"/>): the runs that wait
+    /// and its limit. Null reports neither (a desktop that runs no node).
+    /// </summary>
+    public Func<NodeApi.FleetMachineLoad?>? Load { get; init; }
 }

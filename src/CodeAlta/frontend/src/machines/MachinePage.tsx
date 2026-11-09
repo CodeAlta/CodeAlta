@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { Button, Callout, HTMLSelect, InputGroup, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { machines, type MachinePeopleView, type MachineAgentsView, type MachineSandboxView, type MachineServiceView, type MachineSessionDefaultsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type SecretsList } from "#neoastra";
+import { machines, type MachinePeopleView, type MachineAgentsView, type MachineSandboxView, type MachineServiceView, type MachineSessionDefaultsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type MachineSeatsView, type SecretsList } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { SecretsBody, type SecretsActions } from "../secrets/SecretsSettings";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -13,13 +13,14 @@ import { MachineProviders } from "./MachineProviders";
 import { MachineModelServers } from "../modelServers/MachineModelServers";
 import { MachineSignIns } from "./MachineSignIns";
 import { formatSize } from "../search/SearchSettings";
+import { loadParts, maxSessionLimit, parseSessionLimit } from "./seats";
 import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, isMachineLabel, managementProblem, orderedDevices, permissionLabel, permissionsEditable, projectSource,
   updateSummary, type DevicePermission } from "./machineManagement";
 
 /** The calls of the page of a machine. */
 export type MachinePageApi = Pick<typeof machines, "management" | "setDevicePermission" | "revokeDevice" | "addProject" | "cloneProject" | "removeProject"
   | "readLog" | "updateMachine" | "secrets" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable"
-  | "sessionDefaults" | "setSessionPermissionMode" | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "people" | "setMachinePerson" | "labels" | "setLabels" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait"
+  | "sessionDefaults" | "setSessionPermissionMode" | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "people" | "setMachinePerson" | "labels" | "setLabels" | "limits" | "setLimits" | "seats" | "startSeat" | "cancelSeat" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait"
   | "signIns" | "signInStart" | "signInWait" | "signInCode" | "signInCancel" | "signOut">;
 
 type Problem = { key: MessageKey; detail?: string | null } | null;
@@ -93,6 +94,7 @@ export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch:
       <AgentsSection epoch={epoch} machine={machine} api={api} />
       <PeopleSection epoch={epoch} machine={machine} api={api} />
       <LabelsSection epoch={epoch} machine={machine} api={api} />
+      <LimitsSection epoch={epoch} machine={machine} api={api} />
       <ProjectsSection view={view} busy={busy} machine={machine}
         onAdd={(kind, value, done) => void change(() => kind === "clone"
           ? api.cloneProject({ expectedEpoch: epoch, machineId: machine.id, value }, { timeoutMilliseconds: 15 * 60_000 })
@@ -470,6 +472,76 @@ function LabelsSection({ epoch, machine, api }: { epoch: string; machine: Machin
           onChange={event => setTyped(event.target.value)} />
         <Button type="submit" size="small" text={t("Add")} disabled={busy || !valid} />
       </form>
+    </div>}
+  </section>;
+}
+
+/**
+ * The limits of the machine, as `altanode limits` sets them there: how many sessions work at once, saved when the field is left
+ * or Enter is pressed; and the runs that wait for their turn, which a computer that manages the machine starts now or takes out.
+ */
+function LimitsSection({ epoch, machine, api }: { epoch: string; machine: MachineView; api: MachinePageApi }) {
+  const { t } = useShellLanguage();
+  const [typed, setTyped] = useState<string | null>(null);
+  const [saved, setSaved] = useState<number | null | undefined>(undefined);
+  const [seats, setSeats] = useState<MachineSeatsView | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<Problem>(null);
+  const [generation, setGeneration] = useState(0);
+  useEffect(() => {
+    const abort = new AbortController();
+    const options = { signal: abort.signal, timeoutMilliseconds: 30_000 };
+    api.limits({ expectedEpoch: epoch, machineId: machine.id }, options).then(value => {
+      if (abort.signal.aborted) return;
+      const failed = managementProblem(value.status);
+      if (failed) setProblem({ key: failed, detail: value.message });
+      else { setSaved(value.sessions); setTyped(value.sessions == null ? "" : String(value.sessions)); }
+    }, () => { if (!abort.signal.aborted) setProblem({ key: "The machine does not answer: it is offline." }); });
+    api.seats({ expectedEpoch: epoch, machineId: machine.id }, options).then(value => {
+      if (!abort.signal.aborted && value.status === "ok") setSeats(value);
+    }, () => { });
+    return () => abort.abort();
+  }, [api, epoch, machine.id, generation, machine.queued, machine.working]);
+  const run = async (call: () => Promise<{ status: string; message?: string | null }>) => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const result = await call();
+      const failed = managementProblem(result.status);
+      if (failed && result.status !== "not_found") setProblem({ key: failed, detail: result.message });
+    } catch {
+      setProblem({ key: "The machine does not answer: it is offline." });
+    } finally {
+      setBusy(false);
+      setGeneration(value => value + 1);
+    }
+  };
+  const parsed = typed == null ? undefined : parseSessionLimit(typed);
+  const commit = () => {
+    if (parsed === undefined || parsed === "invalid" || parsed === saved || busy) return;
+    void run(() => api.setLimits({ expectedEpoch: epoch, machineId: machine.id, sessions: parsed }));
+  };
+  const load = seats ? loadParts({ working: seats.working, queued: seats.queue.length, sessionLimit: seats.limit }) : null;
+  return <section className="machine-section machine-limits" aria-label={t("Limits")}>
+    <h2>{t("Limits")}</h2>
+    <p className="muted-text">{t("{name} runs at most this many sessions at once, a session and its sub-sessions counting once. The work of other machines beyond it waits for its turn; the work started on {name} itself never waits.", { name: machine.name })}</p>
+    {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    {typed != null && <label className="machine-limits-row">
+      <span>{t("Sessions at work at once")}</span>
+      <InputGroup small className="machine-limits-input" value={typed} placeholder={t("No limit")} disabled={busy} inputMode="numeric"
+        intent={parsed === "invalid" ? "danger" : "none"} aria-label={t("Sessions at work at once")} title={t("A number from 1 to {max}, or empty for no limit.", { max: maxSessionLimit })}
+        onChange={event => setTyped(event.target.value)} onBlur={commit} onKeyDown={event => { if (event.key === "Enter") commit(); }} />
+      {load && <span className="muted-text machine-limits-load">{load.map(part => t(part.key, part.vars)).join(", ")}</span>}
+    </label>}
+    {seats && seats.queue.length > 0 && <div className="machine-seats" role="list" aria-label={t("Queue")}>
+      {seats.queue.map(item => <div key={item.id} className="machine-seat" role="listitem">
+        <span className="machine-seat-position">{item.position}</span>
+        <span className="machine-seat-title">{item.title ?? t(item.kind === "automation" ? "An automation" : "A prompt")}</span>
+        <Button size="small" variant="minimal" text={t("Start now")} disabled={busy}
+          onClick={() => void run(() => api.startSeat({ expectedEpoch: epoch, machineId: machine.id, id: item.id }))} />
+        <Button size="small" variant="minimal" text={t("Take out of the queue")} disabled={busy}
+          onClick={() => void run(() => api.cancelSeat({ expectedEpoch: epoch, machineId: machine.id, id: item.id }))} />
+      </div>)}
     </div>}
   </section>;
 }

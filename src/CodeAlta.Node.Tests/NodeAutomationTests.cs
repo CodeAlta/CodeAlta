@@ -123,6 +123,39 @@ public sealed class NodeAutomationTests
     }
 
     [TestMethod]
+    public async Task RunByHand_OnAFullMachine_IsAnsweredAsQueued_ThenRunsOnceASeatIsFree()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var provider = new ScriptedNodeProvider();
+        await using var fixture = await AutomationFixture.StartAsync(root, provider, new NodeClock { Now = Noon }, token);
+        // One session works on a machine that runs one at once: the run waits for its turn.
+        var busy = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "working-elsewhere" };
+        var gate = new Lock();
+        await using var seats = new CodeAlta.Fleet.NodeApi.FleetSessionSeats(() => 1, _ =>
+        {
+            lock (gate) return Task.FromResult<IReadOnlyCollection<string>>([.. busy]);
+        }) { Poll = TimeSpan.FromMilliseconds(50) };
+        fixture.Node.Automations!.Seats = seats;
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Queued", "Say hello."), 1), cancellationToken: token);
+
+        var run = await client.RunAutomationAsync(Id, cancellationToken: token).WaitAsync(TimeSpan.FromSeconds(20), token);
+        Assert.AreEqual(AutomationRun.Queued, run.Status, run.Message);
+        StringAssert.Contains(run.Message, "waits for its turn");
+        Assert.AreEqual(run.Id, seats.Snapshot().Queue.Single().Id);
+
+        // The session at work ends: the run takes the seat and starts its session.
+        lock (gate) busy.Clear();
+        seats.Poke();
+        var completed = await WaitForAsync(async () => (await client.ListAutomationRunsAsync(Id, cancellationToken: token)).Runs
+            .FirstOrDefault(candidate => candidate.Id == run.Id && candidate.Status == AutomationRun.Completed), token);
+        Assert.IsNotNull(completed.SessionId);
+        StringAssert.Contains(provider.LastUserText, "Say hello.");
+    }
+
+    [TestMethod]
     public async Task Node_RefusesARun_ItsPolicy_TheCredentialKind_OrTheAssigningDevice_DoNotAllow()
     {
         var token = TestContext.CancellationToken;

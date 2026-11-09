@@ -13,6 +13,7 @@ import { speechMessages } from "./speech/messages";
 import { modelTierMessages } from "./modelTierMessages";
 import { adaptiveMessages } from "./adaptiveMessages";
 import { sandboxMessages } from "./sandbox/messages";
+import { seatMessages } from "./machines/seatMessages";
 import { promptProvenanceMessages } from "./promptProvenance";
 import { codeModeSettingsMessages } from "./codeModeSettingsMessages";
 import { scriptCardMessages } from "./scriptCard/messages";
@@ -3008,6 +3009,7 @@ export const messages = dictionary({
   ...modelTierMessages,
   ...adaptiveMessages,
   ...sandboxMessages,
+  ...seatMessages,
   ...promptProvenanceMessages,
   ...codeModeSettingsMessages,
   ...scriptCardMessages,

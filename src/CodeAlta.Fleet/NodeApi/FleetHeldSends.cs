@@ -22,6 +22,21 @@ internal sealed record FleetHeldSend(string RunId, string SessionId, string Text
     /// <summary>Gets the run the budgets admit when it is not the retry key: the session, for the first prompt of a new session.</summary>
     public string? BudgetRunId { get; init; }
 
+    /// <summary>
+    /// Gets why it waits: null for a budget that holds it until its owner continues it (its session waits for a person), or
+    /// <see cref="QueueReason"/> for a seat of the machine (its session waits for its turn, for nobody).
+    /// </summary>
+    [JsonPropertyName("reason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Reason { get; init; }
+
+    /// <summary>The reason of a send that waits for a seat of the machine (<see cref="FleetSessionSeats"/>).</summary>
+    public const string QueueReason = "queue";
+
+    /// <summary>Gets whether it waits for a seat of the machine, not for a person.</summary>
+    [JsonIgnore]
+    public bool IsQueued => Reason == QueueReason;
+
     /// <summary>Gets the run the hold is bound to, asked again with the same nonce after a restart.</summary>
     [JsonIgnore]
     public string HoldId => BudgetRunId ?? RunId;
@@ -71,7 +86,10 @@ internal sealed class FleetHeldSends
         }
     }
 
-    /// <summary>Gets the sessions whose send waits, those of the sends this machine cannot open now included.</summary>
+    /// <summary>
+    /// Gets the sessions whose send waits for a person (a budget holds it), those of the sends this machine cannot open now
+    /// included; a send that waits for a seat of the machine waits for nobody, and is not counted.
+    /// </summary>
     public IReadOnlyCollection<string> SessionIds
     {
         get
@@ -80,7 +98,7 @@ internal sealed class FleetHeldSends
             {
                 // Those of an earlier file not protected yet too: held all the same.
                 var opened = Load();
-                return [.. _written.Values.Concat(opened.Values).Select(static send => send.SessionId).Distinct(StringComparer.OrdinalIgnoreCase)];
+                return [.. _written.Values.Concat(opened.Values).Where(static send => !send.IsQueued).Select(static send => send.SessionId).Distinct(StringComparer.OrdinalIgnoreCase)];
             }
         }
     }

@@ -12,7 +12,7 @@ import { ThisComputerBody } from "./ThisComputer";
 const never = () => assert.fail("rendering must not act");
 const machine = (change: Partial<MachineView> = {}): MachineView => ({ id: "m1", name: "mac-mini", state: "online", os: "macos", version: "4.0.0",
   address: "mac-mini:2585", fingerprint: "ABCD EFGH", words: "apple river stone cloud amber tiger", sessions: 2, lastSeen: null, problem: null,
-  permissions: ["view", "drive"], pairedAt: "2026-11-03T00:00:00Z", paired: true, channel: null, ...change });
+  permissions: ["view", "drive"], pairedAt: "2026-11-03T00:00:00Z", paired: true, channel: null, tags: [], working: null, queued: null, sessionLimit: null, ...change });
 const shell = (element: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } }, element));
 const time = new Intl.DateTimeFormat("en", { dateStyle: "medium" });
 const details = (value: MachineView) => shell(createElement(MachineDetails, { machine: value, busy: false, time, onOpen: never, onForget: never }));

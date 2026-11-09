@@ -36,7 +36,7 @@ function RunMark({ status }: { status: string }) {
   const tone = runTone(status);
   const label = t(runStatusLabel(status));
   return <span className="automation-run-mark" data-tone={tone} role="img" aria-label={label} title={label}>
-    {tone === "running" ? <ActivitySpinner size={12} /> : <AppIcon name={tone === "ok" ? "check" : tone === "failed" ? "error" : tone === "held" ? "usage" : "minus"} size={13} />}</span>;
+    {tone === "running" ? <ActivitySpinner size={12} /> : <AppIcon name={tone === "ok" ? "check" : tone === "failed" ? "error" : tone === "held" ? (status === "queued" ? "timer" : "usage") : "minus"} size={13} />}</span>;
 }
 
 /** The runs of the next day on one line: a mark for each time a schedule is due, the nearest at the left. */

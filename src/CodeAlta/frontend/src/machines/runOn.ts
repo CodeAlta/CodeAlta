@@ -1,9 +1,10 @@
 import type { MachineNewSessionChoices, MachineNewSessionResult, MachineView } from "#neoastra";
 import type { MessageKey } from "../localization";
 import { machineState, orderedMachines } from "./machines";
+import type { MachineLoad } from "./seats";
 
-/** Where the Run on chip of a new session can start it: this computer (`id` null) or a paired machine. */
-export type RunOnTarget = Readonly<{ id: string | null; name: string }>;
+/** Where the Run on chip of a new session can start it: this computer (`id` null) or a paired machine, with its load when it says it. */
+export type RunOnTarget = Readonly<{ id: string | null; name: string; load?: MachineLoad }>;
 
 /** Whether this device may start sessions on a machine (the permission it was given when it paired). */
 export const canStartOn = (machine: Pick<MachineView, "permissions">): boolean => machine.permissions.includes("start");
@@ -15,7 +16,8 @@ export const canStartOn = (machine: Pick<MachineView, "permissions">): boolean =
  */
 export function runOnTargets(machines: readonly MachineView[], thisMachine: string): RunOnTarget[] {
   return [{ id: null, name: thisMachine },
-    ...orderedMachines(machines).filter(machine => machineState(machine) === "online" && canStartOn(machine)).map(machine => ({ id: machine.id, name: machine.name }))];
+    ...orderedMachines(machines).filter(machine => machineState(machine) === "online" && canStartOn(machine)).map(machine => ({ id: machine.id, name: machine.name,
+      load: { working: machine.working, queued: machine.queued, sessionLimit: machine.sessionLimit } }))];
 }
 
 /**
@@ -66,10 +68,11 @@ export function remoteStartBlocker(choices: Pick<MachineNewSessionChoices, "stat
 
 /**
  * What became of the first prompt of a session started on a machine: sent; held by a reached budget of the machine, which
- * sends it once its owner continues it anyway; or not sent, the prompt keeping its text here.
+ * sends it once its owner continues it anyway; queued, the machine running as many sessions as its owner lets it, sent once
+ * its turn comes; or not sent, the prompt keeping its text here.
  */
-export function remoteStartPrompt(status: MachineNewSessionResult["status"] | null | undefined): "sent" | "held" | "not_sent" {
-  return status === "ok" ? "sent" : status === "held" ? "held" : "not_sent";
+export function remoteStartPrompt(status: MachineNewSessionResult["status"] | null | undefined): "sent" | "held" | "queued" | "not_sent" {
+  return status === "ok" ? "sent" : status === "held" ? "held" : status === "queued" ? "queued" : "not_sent";
 }
 
 /** Why a new session on a machine was refused, or its choices could not be read, in words. */

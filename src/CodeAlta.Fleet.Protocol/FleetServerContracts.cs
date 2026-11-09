@@ -129,7 +129,14 @@ public sealed record FleetPublicationCursors(long Facts, long Inventory, long St
 /// The problems of the machine now (<see cref="Api.FleetHealthKinds"/>): an empty list says it has none; null says nothing, for a
 /// device that does not report its health.
 /// </param>
-public sealed record FleetPresenceUpdate(string State, int? ActiveSessions = null, FleetUpdateReport? Update = null, IReadOnlyList<Api.FleetHealthProblem>? Health = null);
+public sealed record FleetPresenceUpdate(string State, int? ActiveSessions = null, FleetUpdateReport? Update = null, IReadOnlyList<Api.FleetHealthProblem>? Health = null)
+{
+    /// <summary>Gets how many runs wait for a seat of the machine; null for a device that does not say (a desktop, an older node).</summary>
+    public int? QueuedSessions { get; init; }
+
+    /// <summary>Gets how many trees of sessions work at once on the machine; null for no limit, or a device that does not say.</summary>
+    public int? SessionLimit { get; init; }
+}
 
 /// <summary>A device online, with its state.</summary>
 /// <param name="DeviceId">The device.</param>
@@ -138,7 +145,14 @@ public sealed record FleetPresenceUpdate(string State, int? ActiveSessions = nul
 /// <param name="ActiveSessions">How many sessions it runs, when it said so.</param>
 /// <param name="Since">When it connected, or went offline.</param>
 /// <param name="Update">Where it stands in the update campaign it was last asked, when it said so.</param>
-public sealed record FleetPresence(string DeviceId, bool Online, string? State, int? ActiveSessions, DateTimeOffset Since, FleetUpdateReport? Update = null);
+public sealed record FleetPresence(string DeviceId, bool Online, string? State, int? ActiveSessions, DateTimeOffset Since, FleetUpdateReport? Update = null)
+{
+    /// <summary>Gets how many runs wait for a seat of the machine, when it said so (<see cref="FleetPresenceUpdate.QueuedSessions"/>).</summary>
+    public int? QueuedSessions { get; init; }
+
+    /// <summary>Gets how many trees of sessions work at once on the machine, when it has a limit and said so.</summary>
+    public int? SessionLimit { get; init; }
+}
 
 /// <summary>The snapshot of a machine (<c>doc/fleet/server.md</c>, machines): what it is and can do, never its content.</summary>
 /// <param name="Name">The name of the machine.</param>

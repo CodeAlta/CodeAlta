@@ -38,11 +38,17 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
     /// </summary>
     internal const string Held = "held";
 
+    /// <summary>
+    /// The run waits for a seat of the machine: as many sessions work there as its owner lets work at once. It goes on as
+    /// <see cref="Running"/> once its turn comes, or fails once taken out of the queue.
+    /// </summary>
+    internal const string Queued = "queued";
+
     /// <summary>The most calls a try records.</summary>
     internal const int MaximumCalls = 50;
 
     /// <summary>Whether the run is in progress: working, waiting for a person, or held by a budget.</summary>
-    internal bool InProgress => Status is Running or Waiting or Held;
+    internal bool InProgress => Status is Running or Waiting or Held or Queued;
 
     /// <summary>The name of the automation when it ran: a run outlives a rename, and its automation.</summary>
     public string? Name { get; init; }

@@ -5,7 +5,7 @@ import { canStartOn, newSessionProblem, noRemoteSelection, remoteSelection, remo
 
 const machine = (change: Partial<MachineView> = {}): MachineView => ({ id: "m1", name: "mac-mini", state: "online", os: "macos", version: "4.0.0",
   address: "mac-mini:2585", fingerprint: "ABCD EFGH", words: "apple river stone cloud amber tiger", sessions: 2, lastSeen: null, problem: null,
-  permissions: ["view", "drive", "start"], pairedAt: "2026-11-03T00:00:00Z", paired: true, channel: null, ...change });
+  permissions: ["view", "drive", "start"], pairedAt: "2026-11-03T00:00:00Z", paired: true, channel: null, tags: [], working: null, queued: null, sessionLimit: null, ...change });
 
 const choices = (change: Partial<MachineNewSessionChoices> = {}): MachineNewSessionChoices => ({
   status: "ok", machineName: "mac-mini", message: null, suggestedProjectId: "p-alta",
@@ -19,7 +19,10 @@ const choices = (change: Partial<MachineNewSessionChoices> = {}): MachineNewSess
 test("Run on offers this machine, then the online machines that let this computer start sessions", () => {
   const targets = runOnTargets([machine({ id: "b", name: "zeta" }), machine({ id: "a", name: "alpha" }), machine({ id: "off", state: "offline" }),
     machine({ id: "view", permissions: ["view", "drive"] }), machine({ id: "wait", state: "connecting" })], "This machine");
-  assert.deepEqual(targets, [{ id: null, name: "This machine" }, { id: "a", name: "alpha" }, { id: "b", name: "zeta" }]);
+  const idle = { working: null, queued: null, sessionLimit: null };
+  assert.deepEqual(targets, [{ id: null, name: "This machine" }, { id: "a", name: "alpha", load: idle }, { id: "b", name: "zeta", load: idle }]);
+  // A machine that says its load gives it to the chip: 3 of 3 at work, 2 queued.
+  assert.deepEqual(runOnTargets([machine({ id: "full", working: 3, queued: 2, sessionLimit: 3 })], "This machine")[1].load, { working: 3, queued: 2, sessionLimit: 3 });
   assert.deepEqual(runOnTargets([], "This machine"), [{ id: null, name: "This machine" }], "Without a machine that can take it, the chip is not shown.");
   assert.equal(canStartOn(machine({ permissions: ["view"] })), false);
 });
@@ -80,6 +83,7 @@ test("Why a start on a machine failed, in words", () => {
 test("A first prompt that a budget of the machine holds is not one that was not sent: it waits for Continue anyway", () => {
   assert.equal(remoteStartPrompt("ok"), "sent");
   assert.equal(remoteStartPrompt("held"), "held");
+  assert.equal(remoteStartPrompt("queued"), "queued");
   assert.equal(remoteStartPrompt("budget_reached"), "not_sent");
   assert.equal(remoteStartPrompt(null), "not_sent");
 });

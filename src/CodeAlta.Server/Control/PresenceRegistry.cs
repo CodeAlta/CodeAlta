@@ -10,6 +10,8 @@ public sealed class ControlSession
     private readonly Lock _gate = new();
     private string? _state;
     private int? _activeSessions;
+    private int? _queuedSessions;
+    private int? _sessionLimit;
     private FleetUpdateReport? _update;
 
     /// <summary>Initializes a new instance of the <see cref="ControlSession"/> class.</summary>
@@ -63,7 +65,7 @@ public sealed class ControlSession
     /// <returns>Its presence, online.</returns>
     public FleetPresence GetPresence()
     {
-        lock (_gate) return new FleetPresence(Device.Id, true, _state, _activeSessions, ConnectedAt, _update);
+        lock (_gate) return new FleetPresence(Device.Id, true, _state, _activeSessions, ConnectedAt, _update) { QueuedSessions = _queuedSessions, SessionLimit = _sessionLimit };
     }
 
     /// <summary>Keeps the state the device sent with its heartbeat.</summary>
@@ -75,9 +77,13 @@ public sealed class ControlSession
         lock (_gate)
         {
             var report = update.Update ?? _update;
-            if (_state == update.State && _activeSessions == update.ActiveSessions && Equals(_update, report)) return false;
+            if (_state == update.State && _activeSessions == update.ActiveSessions && _queuedSessions == update.QueuedSessions && _sessionLimit == update.SessionLimit
+                && Equals(_update, report))
+                return false;
             _state = update.State;
             _activeSessions = update.ActiveSessions;
+            _queuedSessions = update.QueuedSessions;
+            _sessionLimit = update.SessionLimit;
             _update = report;
             return true;
         }

@@ -206,12 +206,15 @@ export function describeTriggers(triggers: readonly AutomationTriggerItem[], t: 
 export type RunTone = "running" | "ok" | "failed" | "held" | "muted";
 /** How the status of a run is shown. */
 export function runTone(status: string): RunTone {
-  return status === "running" || status === "waiting" ? "running" : status === "completed" ? "ok" : status === "failed" ? "failed" : status === "held" ? "held" : "muted";
+  return status === "running" || status === "waiting" ? "running" : status === "completed" ? "ok" : status === "failed" ? "failed"
+    : status === "held" || status === "queued" ? "held" : "muted";
 }
 const statusLabels: Readonly<Record<string, MessageKey>> = {
   running: "Running", waiting: "Waits for you", completed: "Completed", failed: "Failed", cancelled: "Cancelled", interrupted: "Interrupted", skipped: "Skipped",
   // A budget of its machine is reached: the run goes on once its owner continues it anyway.
   held: "Waits for Continue anyway",
+  // Its machine runs as many sessions as its owner lets it: the run starts once its turn comes.
+  queued: "Waits for its turn",
 };
 export const runStatusLabel = (status: string): MessageKey => statusLabels[status] ?? "Unknown";
 /** What started a run, in words: a run by hand, or the kind of its trigger. */

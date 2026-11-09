@@ -13,6 +13,7 @@ import { providerHasRemoteControl } from "../remoteControl";
 import { openElsewhereEntries } from "../claudeCodeOpen/openElsewhereEntries";
 import { useShellLanguage } from "../shellLanguage";
 import { sessionRowProviderName } from "../machines/machineProviderNames";
+import { queuedLabel } from "../machines/seats";
 import { sessionEntries, type SessionListEntry } from "./sessionTree";
 import type { SessionRowDrag } from "./sessionDrag";
 import { SessionLinkRow, SessionOriginLine } from "./sessionFamily";
@@ -64,15 +65,18 @@ export function SessionRowTitle({ session, depth, diagnostic, subAgents, twist, 
 }
 
 /** The machine a session runs on, after its title: its name, or the name of its project there under the row of its machine. */
-export function MachineChip({ session }: { session: Pick<WorkspaceSession, "machineId" | "machineName" | "remoteProject" | "remoteState" | "projectId"> }) {
+export function MachineChip({ session }: { session: Pick<WorkspaceSession, "machineId" | "machineName" | "remoteProject" | "remoteState" | "remoteQueuedPosition" | "projectId"> }) {
   const { t } = useShellLanguage();
   const name = session.machineName ?? session.machineId ?? "";
   // Under the row of its machine, the chip names its project there, which the machine does not share with this computer.
   const grouped = session.projectId?.startsWith("machine:") ?? false;
   const label = grouped ? session.remoteProject : name;
-  if (!label) return null;
-  return <span className="session-machine-chip" data-state={session.remoteState ?? undefined} title={t("Runs on {name}", { name })}>
-    {!grouped && <AppIcon name="remote" size={10} />}<span>{label}</span></span>;
+  // A run that waits for a seat of the machine says so, with its place: Queued on dgx-spark (2 before it).
+  const queued = session.remoteQueuedPosition != null ? queuedLabel(name, session.remoteQueuedPosition) : null;
+  if (!label && !queued) return null;
+  return <span className="session-machine-chip" data-state={queued ? "queued" : session.remoteState ?? undefined}
+    title={queued ? t(queued.key, queued.vars) : t("Runs on {name}", { name })}>
+    {!grouped && <AppIcon name={queued ? "timer" : "remote"} size={10} />}<span>{queued ? t(queued.key, queued.vars) : label}</span></span>;
 }
 
 /** What follows the listed sub-agents of a session when it has more, or lists more than at first. */

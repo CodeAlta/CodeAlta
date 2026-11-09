@@ -10,7 +10,7 @@ import { FleetDirectoryView, type FleetCanvasActions } from "./FleetCanvas";
 const never = () => assert.fail("rendering must not act");
 const actions: FleetCanvasActions = { openSession: never, openMachine: never, openSettings: never, runCommand: never };
 const machine = (id: string, look: Partial<FleetMachineView> = {}): FleetMachineView => ({ id, name: id, kind: "node", os: "macos", version: "4.0.1", online: true,
-  presence: "online", activeSessions: 0, isThisComputer: false, isPaired: true, providers: [], sessions: 0, isReachable: true, labels: [], ...look });
+  presence: "online", activeSessions: 0, isThisComputer: false, isPaired: true, providers: [], sessions: 0, isReachable: true, labels: [], queued: null, sessionLimit: null, ...look });
 const session = (id: string, machineId: string, state: string, look: Partial<FleetSessionView> = {}): FleetSessionView => ({ id, machineId, state,
   providerType: "codex", model: "gpt-6", createdAt: "2026-11-03T08:00:00Z", updatedAt: "2026-11-03T09:00:00Z", turns: 0, tokens: 0, canOpen: true, title: null, ...look });
 const directory = (look: Partial<FleetDirectoryResult>): FleetDirectoryResult => ({ status: "ok", linkId: null, url: null, organization: null, connection: null,

@@ -176,7 +176,14 @@ public sealed partial class SessionRuntimeService
     /// ends the jobs), taken without waiting for any session.
     /// </summary>
     /// <returns>How many sessions would lose work if the host exited now.</returns>
-    public int CountSessionsAtWork()
+    public int CountSessionsAtWork() => ListSessionsAtWork().Count;
+
+    /// <summary>
+    /// Lists the sessions that are at work right now, as <see cref="CountSessionsAtWork"/> counts them: a run in flight, a
+    /// background job or a script that runs. Read without waiting for any session, for the seats of a machine of the fleet.
+    /// </summary>
+    /// <returns>The ids of the sessions.</returns>
+    public IReadOnlyCollection<string> ListSessionsAtWork()
     {
         var working = new HashSet<string>(Jobs.ListSessionsWithRunningJobs(), StringComparer.OrdinalIgnoreCase);
         if (ScriptRuns is { } scripts) working.UnionWith(scripts.ListSessionsWithRunningScripts());
@@ -185,7 +192,7 @@ public sealed partial class SessionRuntimeService
             if (!entry.IsTerminated && entry.HasActiveRun) working.Add(entry.SessionId);
         }
 
-        return working.Count;
+        return working;
     }
 
     private async Task<bool> StopJobAsync(string sessionId, string jobId, CancellationToken cancellationToken)

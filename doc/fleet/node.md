@@ -212,8 +212,15 @@ tags, its local policy).
 
 ## Limits and good citizenship
 
-- At most N sessions at work at a time (set per node), the others queued, as a machine shared by a family or a team
-  needs.
+- At most N trees of sessions at work at a time (`fleet/limits.json`, `control.limits.*`), the others queued, as a machine
+  shared by a family or a team needs. The node enforces it alone, in memory (`FleetSessionSeats`): a session and its
+  sub-sessions hold one seat, so a parent never waits for a seat its child needs, and a session that waits for a person
+  holds none. The work of other machines asks a seat after its budgets, at the places that already admit it (a send of
+  the node API, a queued prompt of the work of the fleet, the run of an automation), and waits first in first out; a
+  send that waits is kept with the held sends (`reason: queue`) and taken again after a restart. The work started on the
+  machine itself is counted and never waits. Nothing is shared with another machine: a node that stops takes its runs,
+  and so its seats, with it. The load (seats taken, queued, limit) travels with `node.info`, `sessions.list` and the
+  presence of the node.
 - Background work runs at a lower priority than the person using the machine.
 - A node shared by several people (a team build Mac) runs their sessions in the sandbox, under the team's
   credentials, until per-person credentials on shared machines exist (milestone 5,

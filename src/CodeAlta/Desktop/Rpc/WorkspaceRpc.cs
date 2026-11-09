@@ -382,6 +382,10 @@ internal sealed record WorkspaceSession(string Id, string Title, string? Workspa
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RemoteState { get; init; }
 
+    // The place of its run in the queue of the seats of that machine (1 for the next one); null when it waits for none.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RemoteQueuedPosition { get; init; }
+
     // The name of its project on that machine.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RemoteProject { get; init; }

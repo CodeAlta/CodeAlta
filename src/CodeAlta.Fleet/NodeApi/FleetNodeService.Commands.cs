@@ -234,7 +234,8 @@ public sealed partial class FleetNodeService
             {
                 var attributed = await AgentPromptAsync(call, parameters.Agent, Protocol.FleetAgentRequestKinds.Send, session.SessionId, text, parameters.Selection,
                     CancellationToken.None).ConfigureAwait(false);
-                return Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, attributed), CancellationToken.None));
+                // A seat of the machine first, as any work of another machine: it may wait for its turn.
+                return await WithinSeatAsync(session, null, HeldSendOf(retryKey, session.SessionId, attributed, null, null), "agent").ConfigureAwait(false);
             }).ConfigureAwait(false);
         }
 

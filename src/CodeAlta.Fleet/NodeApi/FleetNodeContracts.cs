@@ -189,6 +189,21 @@ public static class FleetNodeMethods
     /// <summary>The owner's local control, or a device that manages the node: sets the labels of the machine.</summary>
     public const string ControlLabelsSet = "control.labels.set";
 
+    /// <summary>The owner's local control, or a device that manages the node: the limits of the machine (sessions at work at once).</summary>
+    public const string ControlLimitsGet = "control.limits.get";
+
+    /// <summary>The owner's local control, or a device that manages the node: sets the limits of the machine.</summary>
+    public const string ControlLimitsSet = "control.limits.set";
+
+    /// <summary>The seats of the machine: its limit of sessions at work, the seats taken, and the runs that wait for one.</summary>
+    public const string SeatsList = "seats.list";
+
+    /// <summary>The owner's local control, or a device that manages the node: starts a run that waits for a seat now, past the limit.</summary>
+    public const string SeatsStart = "seats.start";
+
+    /// <summary>Takes a run that waits for a seat out of the queue: it does not start.</summary>
+    public const string SeatsCancel = "seats.cancel";
+
     /// <summary>
     /// The owner's local control, or a device that manages the node: the people of the organization this personal machine lets
     /// in, and the people who asked to start sessions on it (<c>doc/fleet/access-control.md</c>, what the node decides).
@@ -412,7 +427,19 @@ public sealed record FleetNodeInfo(string Name, string DeviceId, string Os, stri
 
     /// <summary>Gets the versions of the node and where its self-update stands; null for a node that does not say (an older one).</summary>
     public Protocol.FleetUpdateStatus? Update { get; init; }
+
+    /// <summary>Gets the load of the machine: the seats taken, the runs that wait, its limit; null for a node that does not say (an older one).</summary>
+    public FleetMachineLoad? Load { get; init; }
+
+    /// <summary>Gets the tags its owner gives the machine (<c>gpu</c>, <c>prod</c>); null for a node that does not say (an older one).</summary>
+    public IReadOnlyList<string>? Tags { get; init; }
 }
+
+/// <summary>The load of a machine (<see cref="FleetSessionSeats"/>).</summary>
+/// <param name="Working">The trees of sessions at work, and the runs admitted that did not start yet.</param>
+/// <param name="Queued">The runs that wait for a seat.</param>
+/// <param name="Limit">How many trees of sessions work at once; null for no limit.</param>
+public sealed record FleetMachineLoad(int Working, int Queued, int? Limit);
 
 /// <summary>Something the node could not describe in <c>node.info</c>, which its owner can fix.</summary>
 /// <param name="Code">What it is: <see cref="FleetNodeDiagnostic.UnreadableProject"/>.</param>
@@ -450,12 +477,19 @@ public sealed record FleetSessionSummary(string Id, string Title, string? Projec
 
     /// <summary>Gets the name of that machine; null otherwise.</summary>
     public string? ParentMachineName { get; init; }
+
+    /// <summary>Gets the place of its run in the queue of the seats of the machine (1 for the next one); null when it waits for none.</summary>
+    public int? QueuedPosition { get; init; }
 }
 
 /// <summary>The result of <c>sessions.list</c>.</summary>
 /// <param name="Sessions">The sessions, the latest activity first.</param>
 /// <param name="HasMore">Whether sessions were left out by the limit.</param>
-public sealed record FleetSessionListResult(IReadOnlyList<FleetSessionSummary> Sessions, bool HasMore);
+public sealed record FleetSessionListResult(IReadOnlyList<FleetSessionSummary> Sessions, bool HasMore)
+{
+    /// <summary>Gets the load of the machine when the list was read; null for a node that does not say (an older one).</summary>
+    public FleetMachineLoad? Load { get; init; }
+}
 
 /// <summary>The parameters of a call about one session.</summary>
 /// <param name="SessionId">The session.</param>
@@ -693,7 +727,18 @@ public sealed record FleetAbortParams(string SessionId, Guid? OperationId = null
 /// <param name="Outcome">How the command settled when it already did (<c>Completed</c>, <c>Cancelled</c>, <c>Failed</c>); null while it runs.</param>
 /// <param name="RunId">The run the command started or acted on, once known.</param>
 /// <param name="Code">The code of its outcome.</param>
-public sealed record FleetCommandResult(string Status, Guid? OperationId = null, string? Outcome = null, string? RunId = null, string? Code = null);
+public sealed record FleetCommandResult(string Status, Guid? OperationId = null, string? Outcome = null, string? RunId = null, string? Code = null)
+{
+    /// <summary>Gets the place of a send that waits for a seat of the machine (<see cref="FleetSeatStatuses.Queued"/>): 1 for the next one; null otherwise.</summary>
+    public int? Position { get; init; }
+}
+
+/// <summary>The status of a send that waits for a seat of the machine.</summary>
+public static class FleetSeatStatuses
+{
+    /// <summary>The machine runs as many sessions as its owner lets it: the send waits for its turn, and is sent then.</summary>
+    public const string Queued = "queued";
+}
 
 /// <summary>The result of <c>sessions.queue</c>.</summary>
 /// <param name="Status"><c>queued</c> (a retry of the same key gets the first result).</param>
@@ -967,6 +1012,18 @@ public sealed record FleetSessionDefaultsInfo(string PermissionMode);
 /// <param name="Labels">The labels, such as <c>gpu</c> or <c>prod</c>.</param>
 public sealed record FleetMachineLabelsInfo(IReadOnlyList<string> Labels);
 
+/// <summary>The limits the owner gives a machine (<c>control.limits.get</c>, <c>control.limits.set</c>).</summary>
+/// <param name="Sessions">How many sessions work there at once, a session and its sub-sessions counting once; null for no limit.</param>
+public sealed record FleetMachineLimitsInfo(int? Sessions);
+
+/// <summary>The parameters of <c>seats.start</c> and <c>seats.cancel</c>.</summary>
+/// <param name="Id">The run that waits (<see cref="FleetSeatQueueItem.Id"/>).</param>
+public sealed record FleetSeatRef(string Id);
+
+/// <summary>The result of <c>seats.start</c> and <c>seats.cancel</c>.</summary>
+/// <param name="Status"><c>ok</c>, or <c>not_found</c> when the run no longer waits.</param>
+public sealed record FleetSeatResult(string Status);
+
 /// <summary>The parameters of <c>agents.deliveries.take</c>.</summary>
 /// <param name="Limit">The most deliveries to take; null for 50.</param>
 public sealed record FleetAgentDeliveryTakeParams(int? Limit = null);
@@ -1086,6 +1143,10 @@ public sealed record FleetAgentDeliveryAckParams(IReadOnlyList<string> Ids);
 [JsonSerializable(typeof(FleetNodePeopleInfo))]
 [JsonSerializable(typeof(FleetNodePeopleChange))]
 [JsonSerializable(typeof(FleetMachineLabelsInfo))]
+[JsonSerializable(typeof(FleetMachineLimitsInfo))]
+[JsonSerializable(typeof(FleetSeatsSnapshot))]
+[JsonSerializable(typeof(FleetSeatRef))]
+[JsonSerializable(typeof(FleetSeatResult))]
 [JsonSerializable(typeof(FleetSessionDefaultsInfo))]
 [JsonSerializable(typeof(FleetAgentDeliveryTakeParams))]
 [JsonSerializable(typeof(FleetAgentDeliveryList))]

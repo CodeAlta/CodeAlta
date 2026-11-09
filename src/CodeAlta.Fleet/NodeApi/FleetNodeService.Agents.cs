@@ -207,7 +207,8 @@ public sealed partial class FleetNodeService
         if (parameters.Prompt is { } prompt)
         {
             var selection = Selection(parameters.Selection, provider.ProviderId.Value, session.AgentPromptId);
-            send = Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, prompt) { Selection = selection }));
+            // The first run asks a seat of the machine: it may wait for its turn there, the creation does not.
+            send = await WithinSeatAsync(session, parameters.Title, HeldSendOf(retryKey, session.SessionId, prompt, parameters.Title, selection), "agent").ConfigureAwait(false);
         }
 
         return new FleetCreateSessionResult(session.SessionId, provider.ProviderId.Value, send) { PermissionMode = permissionMode, Sandbox = sandbox };

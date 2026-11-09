@@ -227,6 +227,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
     private int _started;
     private TimeSpan _heartbeat = TimeSpan.FromMilliseconds(FleetConnectionPolicy.DefaultHeartbeatMilliseconds);
     private int _activeSessions;
+    private int _queuedSessions;
     // When the metadata key was last read, in UTC ticks; 0 to read it at the next publication.
     private long _keysReadAt;
     // Completed once a read of the keys ends, then replaced: what RefreshKeysAsync waits for.
@@ -585,7 +586,8 @@ public sealed partial class FleetConnector : IAsyncDisposable
                     var active = await PublishAsync(connection, stop).ConfigureAwait(false);
                     lastRead = _options.TimeProvider.GetUtcNow();
                     dirty = false;
-                    if (now - lastPresence >= _heartbeat || active != _activeSessions)
+                    // A queue that grew or shrank is told at once, as the sessions at work are.
+                    if (now - lastPresence >= _heartbeat || active != _activeSessions || (_options.Load?.Invoke()?.Queued ?? 0) != _queuedSessions)
                     {
                         await SendPresenceAsync(connection, active, stop).ConfigureAwait(false);
                         lastPresence = now;
@@ -962,9 +964,13 @@ public sealed partial class FleetConnector : IAsyncDisposable
     private async Task SendPresenceAsync(FleetConnection connection, int active, CancellationToken stop)
     {
         _activeSessions = active;
+        var load = _options.Load?.Invoke();
+        _queuedSessions = load?.Queued ?? 0;
         await connection.SendRequestAsync(FleetServerMethods.PresenceUpdate,
-            JsonSerializer.SerializeToElement(new FleetPresenceUpdate(active > 0 ? "busy" : "active", active, _options.UpdateReport?.Invoke(), ReadHealth()),
-                FleetServerJsonContext.Default.FleetPresenceUpdate),
+            JsonSerializer.SerializeToElement(new FleetPresenceUpdate(active > 0 ? "busy" : "active", active, _options.UpdateReport?.Invoke(), ReadHealth())
+            {
+                QueuedSessions = load?.Queued, SessionLimit = load?.Limit,
+            }, FleetServerJsonContext.Default.FleetPresenceUpdate),
             null, stop).ConfigureAwait(false);
     }
 

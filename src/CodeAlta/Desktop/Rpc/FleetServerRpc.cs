@@ -511,7 +511,10 @@ internal sealed partial class FleetServerService
             var inventory = machine?.Inventory;
             return new FleetMachineView(id, inventory?.Name ?? id, machine?.Kind ?? FleetDeviceKinds.Node, inventory?.Os, inventory?.AppVersion,
                 presence?.Online ?? false, presence?.State, presence?.ActiveSessions, self, !self && isPaired(id), [.. inventory?.Providers ?? []],
-                directory.Sessions.Values.Count(session => session.MachineId == id), !self && isReachable(id), [.. inventory?.Labels ?? []]);
+                directory.Sessions.Values.Count(session => session.MachineId == id), !self && isReachable(id), [.. inventory?.Labels ?? []])
+            {
+                Queued = presence?.QueuedSessions, SessionLimit = presence?.SessionLimit,
+            };
         }).OrderBy(static machine => machine.IsThisComputer ? 0 : machine.Online ? 1 : 2).ThenBy(static machine => machine.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
         var openable = machines.Where(static machine => machine.IsThisComputer || machine.IsReachable).Select(static machine => machine.Id).ToHashSet(StringComparer.Ordinal);
         // Titles travel sealed with the metadata key of their space: opened here, in the host, never by the server.
@@ -878,7 +881,14 @@ internal sealed record FleetPairedMachine(string Id, string Name, RemoteMachineS
 /// <param name="IsReachable">Whether this computer reaches it, paired or through the relay of the server: its sessions open here.</param>
 /// <param name="Labels">The labels its owner gave it, as it publishes them to the server; none for a machine reached directly only.</param>
 internal sealed record FleetMachineView(string Id, string Name, string Kind, string? Os, string? Version, bool Online, string? Presence, int? ActiveSessions,
-    bool IsThisComputer, bool IsPaired, string[] Providers, int Sessions, bool IsReachable, string[] Labels);
+    bool IsThisComputer, bool IsPaired, string[] Providers, int Sessions, bool IsReachable, string[] Labels)
+{
+    /// <summary>Gets how many runs wait for a seat on it, as its presence says; null when it does not say.</summary>
+    public int? Queued { get; init; }
+
+    /// <summary>Gets how many sessions work at once on it, as its presence says; null for no limit or when it does not say.</summary>
+    public int? SessionLimit { get; init; }
+}
 
 /// <summary>A published session of the directory: its facts, and its title once opened on this computer.</summary>
 /// <param name="Id">The session.</param>

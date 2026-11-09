@@ -5,6 +5,7 @@ import { AppIcon } from "../AppIcon";
 import { ProviderIcon } from "../ProviderIcon";
 import { useShellLanguage } from "../shellLanguage";
 import type { RemoteSelection, RunOnTarget } from "./runOn";
+import { loadParts } from "./seats";
 
 type MachinesApi = Pick<typeof machines, "list" | "watch" | "newSessionChoices">;
 
@@ -67,6 +68,7 @@ export function RunOnChip({ targets, value, locked = false, disabled = false, on
   if (locked) return chip;
   const menu = <Menu aria-label={t("Run on")}>
     {targets.map(target => <MenuItem key={target.id ?? ""} text={target.name} active={target.id === value}
+      label={target.load ? loadParts(target.load)?.map(part => t(part.key, part.vars)).join(", ") : undefined}
       icon={<AppIcon name={target.id ? "remote" : "computer"} size={14} />} onClick={() => onChange(target.id)} />)}
   </Menu>;
   return <PopoverNext content={menu} placement="top-start" disabled={disabled}>{chip}</PopoverNext>;

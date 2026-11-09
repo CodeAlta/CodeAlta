@@ -185,6 +185,8 @@ internal sealed class NodeFleet : IAsyncDisposable
                 automations.DeviceId = identity.DeviceId;
                 // A run that is not positively its owner's work is recorded as such before its session attaches: none of the owner's values.
                 automations.RecordNotOwnerWork = service.RecordUnattendedWork;
+                // A run takes a seat of the machine after its budgets, and may wait for its turn.
+                automations.Seats = service.Seats;
             }
             string? file = null;
             // Without a listener the node API still serves the channels its servers relay.
@@ -420,6 +422,8 @@ internal sealed class NodeServers : IAsyncDisposable
             AccessRead = linkId => _ = RefreshProvidersAsync(providers, connections, linkId),
             // The problems of the machine travel with its heartbeat; the server tells its owner of those that last.
             Health = health.Read,
+            // The seats of the machine: the runs that wait and its limit travel with its presence.
+            Load = service is null ? null : service.ReadLoad,
         });
         // The people the signed access document of an organization grants the content of a session of this machine read it here.
         if (service is not null)

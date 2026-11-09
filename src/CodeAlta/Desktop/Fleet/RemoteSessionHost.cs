@@ -48,6 +48,9 @@ internal sealed record RemoteListing(FleetNodeInfo? Info, IReadOnlyList<FleetSes
 {
     /// <summary>The listing of a machine never reached.</summary>
     public static readonly RemoteListing Empty = new(null, [], null);
+
+    /// <summary>Gets the load of the machine when it was read (its seats taken, the runs that wait, its limit); null for a machine that does not say.</summary>
+    public FleetMachineLoad? Load { get; init; }
 }
 
 /// <summary>
@@ -220,7 +223,7 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
                 client = await _connect(token).ConfigureAwait(false);
                 var info = await client.GetInfoAsync(token).ConfigureAwait(false);
                 var sessions = await client.ListSessionsAsync(new FleetSessionListParams(_options.ListLimit), token).ConfigureAwait(false);
-                SetListing(new RemoteListing(info, sessions.Sessions, _time.GetUtcNow()));
+                SetListing(new RemoteListing(info, sessions.Sessions, _time.GetUtcNow()) { Load = sessions.Load ?? info.Load });
                 Publish(RemoteMachineState.Online, null, client);
                 backoff = _options.MinimumBackoff;
                 await FollowAsync(client, info, token).ConfigureAwait(false);
@@ -280,7 +283,7 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
             var sessions = await client.ListSessionsAsync(new FleetSessionListParams(_options.ListLimit), token).ConfigureAwait(false);
             // The machine as it was read last: ReadInfoAsync may have read it again since the connection.
             var read = Volatile.Read(ref _readInfo);
-            SetListing(new RemoteListing(read is not null && read.Client == client ? read.Info : info, sessions.Sessions, _time.GetUtcNow()));
+            SetListing(new RemoteListing(read is not null && read.Client == client ? read.Info : info, sessions.Sessions, _time.GetUtcNow()) { Load = sessions.Load });
         }
     }
 
@@ -317,6 +320,7 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
     private static bool SameList(RemoteListing previous, RemoteListing next)
         => previous.Info?.Name == next.Info?.Name
             && (previous.Info?.Permissions ?? []).SequenceEqual(next.Info?.Permissions ?? [], StringComparer.Ordinal)
+            && previous.Load == next.Load
             && previous.Sessions.Count == next.Sessions.Count
             && previous.Sessions.Zip(next.Sessions).All(static pair => pair.First == pair.Second);
 

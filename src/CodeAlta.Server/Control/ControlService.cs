@@ -219,7 +219,8 @@ public sealed class ControlService
         void On(string method, FleetRequestHandler handler) => connection.RegisterRequestHandler(method, Traced(session, handler));
         On(FleetServerMethods.PresenceUpdate, Handler(FleetServerJsonContext.Default.FleetPresenceUpdate, async (update, token) =>
         {
-            if (update is null || string.IsNullOrEmpty(update.State) || update.State.Length > MaxStateLength || update.ActiveSessions < 0)
+            if (update is null || string.IsNullOrEmpty(update.State) || update.State.Length > MaxStateLength || update.ActiveSessions < 0
+                || update.QueuedSessions < 0 || update.SessionLimit < 1)
             {
                 throw CoordinatorException.BadRequest(CoordinatorErrorCodes.PublicationInvalid, $"presence.update needs a state of at most {MaxStateLength} characters.");
             }

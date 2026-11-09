@@ -463,6 +463,8 @@ internal sealed class DesktopNode : IAsyncDisposable
             Policy = Policy,
         };
         Volatile.Write(ref _service, service);
+        // The prompts of other computers that waited for a seat of this one when it closed wait again, in their order.
+        service.ResumeHeldSends();
         return service;
     }
 

@@ -135,7 +135,7 @@ public sealed partial class FleetNodeService
     /// </summary>
     public void ResumeHeldSends()
     {
-        if (_options.AdmitBudget is null || Interlocked.Exchange(ref _resumed, 1) != 0 || Volatile.Read(ref _disposed) != 0) return;
+        if (Interlocked.Exchange(ref _resumed, 1) != 0 || Volatile.Read(ref _disposed) != 0) return;
         _ = Task.Run(ResumeHeldSendsAsync);
     }
 
@@ -195,7 +195,9 @@ public sealed partial class FleetNodeService
                         continue;
                 }
 
-                var result = await WithinBudgetAsync(session, held.Title, held).ConfigureAwait(false);
+                // One that waited for a seat was admitted by its budgets already: it asks its seat again, and only that.
+                var result = held.IsQueued ? await WithinSeatAsync(session, held.Title, held, "send").ConfigureAwait(false)
+                    : await WithinBudgetAsync(session, held.Title, held).ConfigureAwait(false);
                 LogInfo($"The held prompt {held.HoldId} of the session {held.SessionId} was taken again after a restart ({result.Status}).");
             }
             catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException or UnauthorizedAccessException
@@ -213,8 +215,9 @@ public sealed partial class FleetNodeService
     private async Task<FleetCommandResult> WithinBudgetAsync(SessionViewDescriptor session, string? title, FleetHeldSend held)
     {
         var runId = held.HoldId;
-        Func<FleetCommandResult> send = () => SendHeld(held);
-        if (_options.AdmitBudget is not { } admit || _budgetAdmitted.ContainsKey(runId)) return send();
+        // Once the budgets admit it, it asks a seat of the machine: it may wait for its turn there (FleetNodeService.Seats.cs).
+        Func<Task<FleetCommandResult>> send = () => WithinSeatAsync(session, title, held, "send");
+        if (_options.AdmitBudget is not { } admit || _budgetAdmitted.ContainsKey(runId)) return await send().ConfigureAwait(false);
         if (_budgetHolds.ContainsKey(runId)) return new FleetCommandResult(FleetBudgetCommandStatuses.Held, Code: FleetBudgetCommandStatuses.Held);
         var project = session.ProjectRef is { Length: > 0 } projectId ? await _host.ProjectCatalog.GetByIdAsync(projectId).ConfigureAwait(false) : null;
         var waits = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -237,7 +240,7 @@ public sealed partial class FleetNodeService
             if (Policy?.Halt is not null) HeldSends.Remove(runId);
             RequireNotHalted();
             // Forgotten once its run started (SendHeld), not before: a process that ends meanwhile takes it again.
-            return Admitted(runId, send);
+            return await AdmittedAsync(runId, send).ConfigureAwait(false);
         }
 
         if (!_budgetHolds.TryAdd(runId, 0)) return new FleetCommandResult(FleetBudgetCommandStatuses.Held, Code: FleetBudgetCommandStatuses.Held);
@@ -265,7 +268,7 @@ public sealed partial class FleetNodeService
         return new FleetCommandResult(FleetBudgetCommandStatuses.Held, Code: FleetBudgetCommandStatuses.Held);
     }
 
-    private async Task SendOnceAdmittedAsync(string runId, string sessionId, Task<Server.FleetBudgetAdmission> admission, Func<FleetCommandResult> send)
+    private async Task SendOnceAdmittedAsync(string runId, string sessionId, Task<Server.FleetBudgetAdmission> admission, Func<Task<FleetCommandResult>> send)
     {
         try
         {
@@ -289,7 +292,7 @@ public sealed partial class FleetNodeService
 
             // Forgotten once its run started (SendHeld), not before: a process that ends meanwhile takes it again, and finds
             // its prompt in the journal when its run had started.
-            var result = Admitted(runId, send);
+            var result = await AdmittedAsync(runId, send).ConfigureAwait(false);
             LogInfo($"The prompt of the session {sessionId} was sent once its budget let it ({result.Status}).");
         }
         catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or IOException or OperationCanceledException)
@@ -309,8 +312,15 @@ public sealed partial class FleetNodeService
     // needs no admission: it goes into the turn that runs, which its own send or queued prompt was admitted for.
     private async Task<string?> AdmitQueuedAsync(CodeAlta.Orchestration.Runtime.QueuedRunAdmission queued, CancellationToken cancellationToken)
     {
-        if (_options.AdmitBudget is not { } admit) return null;
         var session = await _host.RuntimeService.TryGetRecoverableSessionAsync(queued.SessionId, cancellationToken).ConfigureAwait(false);
+        // Once its budgets admit it, the queued prompt of the work of the fleet asks a seat of the machine, and may wait for it.
+        return await AdmitQueuedToBudgetAsync(queued, session, cancellationToken).ConfigureAwait(false)
+            ?? await WithinSeatQueuedAsync(queued, session?.Title, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<string?> AdmitQueuedToBudgetAsync(CodeAlta.Orchestration.Runtime.QueuedRunAdmission queued, SessionViewDescriptor? session, CancellationToken cancellationToken)
+    {
+        if (_options.AdmitBudget is not { } admit) return null;
         var project = session?.ProjectRef is { Length: > 0 } projectId ? await _host.ProjectCatalog.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false) : null;
         var run = new FleetNodeBudgetRun(queued.QueueItemId, session?.Title, session?.SpaceId, project)
         {
@@ -324,7 +334,7 @@ public sealed partial class FleetNodeService
         return problem;
     }
 
-    private FleetCommandResult Admitted(string runId, Func<FleetCommandResult> send)
+    private Task<FleetCommandResult> AdmittedAsync(string runId, Func<Task<FleetCommandResult>> send)
     {
         // Bounded: the runtime keeps its own receipts for retries; this only spares them a second admission.
         if (_budgetAdmitted.Count >= MaxBudgetAdmitted) _budgetAdmitted.Clear();

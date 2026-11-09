@@ -44,7 +44,22 @@ public sealed partial class FleetNodeService
             Providers = await ReadyProvidersAsync(call.Device, cancellationToken).ConfigureAwait(false),
             Diagnostics = diagnostics,
             Update = _options.UpdateStatus?.Invoke(),
+            Load = await ReadLoadAsync(cancellationToken).ConfigureAwait(false),
+            Tags = ReadTags(),
         };
+    }
+
+    // The tags of the machine as its file says them; none when the file does not read.
+    private IReadOnlyList<string> ReadTags()
+    {
+        try
+        {
+            return Server.FleetMachineLabels.Read(_host.CatalogOptions.FleetRoot);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+        {
+            return [];
+        }
     }
 
     // Each unreadable file once while it stays as it is: node.info is called again and again by the devices that watch the node.
@@ -155,6 +170,14 @@ public sealed partial class FleetNodeService
         var atWork = await _host.Commands.ReadSessionsAtWorkAsync([.. page.Select(static item => item.Session.SessionId)]).ConfigureAwait(false);
         // A question, a command or a file change to allow, a conversation held elsewhere: the session waits for a person.
         var waiting = new HashSet<string>(await _host.ListSessionsWaitingForPersonAsync().ConfigureAwait(false), StringComparer.OrdinalIgnoreCase);
+        // The place of the first run of each session that waits for a seat of the machine, and the load, decided now.
+        var seats = await ReadSeatsAsync(cancellationToken).ConfigureAwait(false);
+        var queued = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in seats.Queue)
+        {
+            if (item.SessionId is { } queuedSession) queued.TryAdd(queuedSession, item.Position);
+        }
+
         return new FleetSessionListResult([.. page.Select(item => new FleetSessionSummary(item.Session.SessionId, item.Title, item.ProjectId, item.SpaceId,
             item.Session.ParentSessionId ?? item.Session.ViewState?.ParentSessionId, item.Session.ViewState?.ProviderKey ?? item.Session.ProviderKey,
             item.Session.ViewState?.ModelId ?? item.Session.ModelId, item.Session.CreatedAt, item.Session.UpdatedAt,
@@ -163,8 +186,12 @@ public sealed partial class FleetNodeService
                 // A session an agent of another machine started names that machine: its parent is there.
                 ParentMachineId = _agents.Find(item.Session.SessionId)?.ParentDeviceId,
                 ParentMachineName = _agents.Find(item.Session.SessionId)?.ParentMachineName,
+                QueuedPosition = queued.TryGetValue(item.Session.SessionId, out var position) ? position : null,
             })],
-            listed.Count > limit);
+            listed.Count > limit)
+        {
+            Load = new FleetMachineLoad(seats.Working, seats.Queue.Count, seats.Limit),
+        };
     }
 
     private static (SessionViewKind? Kind, ProjectDescriptor? Project, string? Space) Scope(AgentSessionMetadata session, OwnedWorkspaceSnapshot snapshot)

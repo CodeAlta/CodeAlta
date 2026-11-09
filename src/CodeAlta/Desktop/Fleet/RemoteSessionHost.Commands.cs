@@ -177,6 +177,8 @@ internal sealed partial class RemoteSessionHost
         AgentRunId? run = result.RunId is { Length: > 0 } id ? new AgentRunId(id) : null;
         // A prompt held by a budget of the machine is sent once its owner continues it anyway: not a failure of the send.
         if (result.Status == FleetBudgetCommandStatuses.Held) return new OwnedSessionCommandResult(OwnedSessionCommandOutcome.Completed, run, FleetBudgetCommandStatuses.Held);
+        // A prompt that waits for a seat of the machine is sent once its turn comes: not a failure either.
+        if (result.Status == FleetSeatStatuses.Queued) return new OwnedSessionCommandResult(OwnedSessionCommandOutcome.Completed, run, FleetSeatStatuses.Queued);
         if (result.Status is not ("accepted" or "replay")) return new OwnedSessionCommandResult(OwnedSessionCommandOutcome.Failed, run, result.Code ?? result.Status);
         return result.Outcome switch
         {

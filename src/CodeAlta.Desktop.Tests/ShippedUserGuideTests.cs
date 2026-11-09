@@ -122,8 +122,9 @@ public sealed partial class ShippedUserGuideTests
                     if (line.StartsWith('|')) tableRows++;
                 }
 
-                // A link to a page names it from the folder of the guide, and the page ships.
-                foreach (Match link in PageLink().Matches(markdown))
+                // A link to a page names it from the folder of the guide, and the page ships. A link written in code (an example
+                // of what the prompt inserts) is no link of the page.
+                foreach (Match link in PageLink().Matches(Regex.Replace(markdown, "`[^`\n]*`", string.Empty)))
                 {
                     links++;
                     Assert.AreEqual(link.Groups[1].Value, documentation.ResolvePage(link.Groups[1].Value), $"{info.Path}: {link.Value}");

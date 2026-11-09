@@ -177,3 +177,18 @@
 .move-machine-preview .bp6-callout code { margin-left: 4px; }
 .move-machine-preview .bp6-callout ul { margin: 4px 0 0; padding-left: 18px; }
 .move-machine-progress { display: grid; gap: 8px; margin-top: 8px; }
+/* A remote session whose run waits for a seat of its machine: its chip names its place, in the tone of a warning. */
+.session-machine-chip[data-state="queued"] { max-width: 60%; color: var(--bp-intent-warning-text); background: color-mix(in srgb, var(--bp-intent-warning-rest) 14%, transparent); }
+/* Above the prompt of such a session: its place, Start now and Take out of the queue. */
+.queued-session-notice { display: flex; align-items: center; gap: 8px; margin: 4px 12px; padding: 6px 10px; border-radius: 6px;
+  background: color-mix(in srgb, var(--bp-intent-warning-rest) 10%, transparent); }
+.queued-session-notice .queued-session-text { flex: 1 1 auto; min-width: 0; }
+.queued-session-problem { color: var(--bp-intent-danger-text); }
+/* The limits of a machine on its page: the field of the sessions at work at once, its load, then the runs that wait. */
+.machine-limits-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.machine-limits-input { width: 9em; }
+.machine-seats { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+.machine-seat { display: flex; align-items: center; gap: 8px; }
+.machine-seat-position { min-width: 1.5em; text-align: right; color: var(--muted); }
+.machine-seat-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-machine-load { display: block; font-size: 11px; }

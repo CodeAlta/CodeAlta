@@ -179,7 +179,8 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
                 ProviderKey = created.ProviderKey,
                 PermissionMode = created.PermissionMode,
                 Sandbox = created.Sandbox,
-                PromptSent = created.Send is { Status: "accepted" or "replay" },
+                PromptSent = created.Send is { Status: "accepted" or "replay" or CodeAlta.Fleet.NodeApi.FleetSeatStatuses.Queued },
+                QueuedPosition = created.Send is { Status: CodeAlta.Fleet.NodeApi.FleetSeatStatuses.Queued } queued ? queued.Position ?? 1 : null,
             };
         }
         catch (FleetException exception)

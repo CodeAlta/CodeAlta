@@ -184,12 +184,10 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         // What the sessions agents of other machines started here say to their parents waits in the outbox of the node.
         _agents = new FleetAgentSessions(options.Host.CatalogOptions.FleetRoot, options.TimeProvider);
         options.Host.RuntimeService.RemoteParents = _agents;
-        // A queued prompt starts its turn later: the budgets of the machine admit it then, as a send.
-        if (options.AdmitBudget is not null)
-        {
-            _queuedRunGate = AdmitQueuedAsync;
-            options.Host.RuntimeService.QueuedRunGate = _queuedRunGate;
-        }
+        Seats = CreateSeats();
+        // A queued prompt starts its turn later: the budgets and the seats of the machine admit it then, as a send.
+        _queuedRunGate = AdmitQueuedAsync;
+        options.Host.RuntimeService.QueuedRunGate = _queuedRunGate;
 
         // A session another person started here (a member of a team) resolves none of the owner's secrets.
         // A session another person started here (a member of a team), or a run nobody attends that is not the owner's (an automation
@@ -203,13 +201,10 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         // A personal plan serves its owner's own work only: at every attachment of a session of another person, of their sub-sessions too.
         if (options.IsPersonalProvider is not null) options.Host.RuntimeService.AddProviderGate(CheckOthersWorkProviderAsync);
         _worktreeCleanup.Start();
-        if (options.AdmitBudget is not null)
-        {
-            // A session whose send a budget holds waits for a person (it does not move); the sends held when the node stopped are
-            // taken again once the host wired its budgets and policies (ResumeHeldSends), not here.
-            _heldSessions = () => HeldSends.SessionIds;
-            options.Host.HeldSends = _heldSessions;
-        }
+        // A session whose send a budget holds waits for a person (it does not move); the sends held when the node stopped are
+        // taken again once the host wired its budgets and policies (ResumeHeldSends), not here. One that waits for a seat waits for nobody.
+        _heldSessions = () => HeldSends.SessionIds;
+        options.Host.HeldSends = _heldSessions;
 
         RestoreAgentRestrictions();
     }
@@ -393,6 +388,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         if (_heldSessions is not null && ReferenceEquals(_host.HeldSends, _heldSessions)) _host.HeldSends = null;
         _host.RuntimeService.SessionDeleted -= ForgetPrincipalOfDeleted;
         await _worktreeCleanup.DisposeAsync().ConfigureAwait(false);
+        await Seats.DisposeAsync().ConfigureAwait(false);
         foreach (var caller in _callers.Values)
         {
             try { await caller.Connection.CloseAsync("node_stopping").ConfigureAwait(false); }
@@ -436,6 +432,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             RegisterAgentPolicy(caller, Access.Owner);
             RegisterSessionDefaults(caller, Access.Owner);
             RegisterLabels(caller, Access.Owner);
+            RegisterLimits(caller, Access.Owner);
+            RegisterSeats(caller, Access.Owner, Access.Owner);
             RegisterPeople(caller, Access.Owner);
             RegisterModelServers(caller, owner: true);
             // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
@@ -485,6 +483,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             ListMovesAsync, optionalParams: true);
         RegisterAutomations(caller);
         RegisterAgents(caller);
+        RegisterSeats(caller, Access.View, Access.Drive);
         RegisterManagement(caller);
     }
 
@@ -516,6 +515,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         RegisterAgentPolicy(caller, Access.Manage);
         RegisterSessionDefaults(caller, Access.Manage);
         RegisterLabels(caller, Access.Manage);
+        RegisterLimits(caller, Access.Manage);
         // Who the machine lets in is its owner's: a device paired to manage it, never one trusted through the organization alone.
         RegisterPeople(caller, Access.ManagePaired);
         RegisterModelServers(caller, owner: false);

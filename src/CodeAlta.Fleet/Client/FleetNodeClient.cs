@@ -508,6 +508,44 @@ public sealed partial class FleetNodeClient : IAsyncDisposable
             FleetNodeJsonContext.Default.FleetMachineLabelsInfo, null, cancellationToken);
     }
 
+    /// <summary>The owner's local control, or a device that manages the node: the limits of the machine.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>How many sessions work there at once.</returns>
+    public Task<FleetMachineLimitsInfo> GetLimitsAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlLimitsGet, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMachineLimitsInfo,
+            null, cancellationToken);
+
+    /// <summary>The owner's local control, or a device that manages the node: sets how many sessions work there at once.</summary>
+    /// <param name="sessions">The limit; null for none.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The limits as the node keeps them.</returns>
+    public Task<FleetMachineLimitsInfo> SetLimitsAsync(int? sessions, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlLimitsSet, new FleetMachineLimitsInfo(sessions), FleetNodeJsonContext.Default.FleetMachineLimitsInfo,
+            FleetNodeJsonContext.Default.FleetMachineLimitsInfo, null, cancellationToken);
+
+    /// <summary>The seats of the machine: its limit, the seats taken and the runs that wait for one.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The seats.</returns>
+    public Task<FleetSeatsSnapshot> ListSeatsAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.SeatsList, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetSeatsSnapshot,
+            null, cancellationToken);
+
+    /// <summary>The owner's local control, or a device that manages the node: starts a run that waits for a seat now, past the limit.</summary>
+    /// <param name="id">The run (<see cref="FleetSeatQueueItem.Id"/>).</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns><c>ok</c>, or <c>not_found</c> when it no longer waits.</returns>
+    public Task<FleetSeatResult> StartSeatAsync(string id, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.SeatsStart, new FleetSeatRef(id), FleetNodeJsonContext.Default.FleetSeatRef, FleetNodeJsonContext.Default.FleetSeatResult,
+            null, cancellationToken);
+
+    /// <summary>Takes a run that waits for a seat out of the queue: it does not start.</summary>
+    /// <param name="id">The run (<see cref="FleetSeatQueueItem.Id"/>).</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns><c>ok</c>, or <c>not_found</c> when it no longer waits.</returns>
+    public Task<FleetSeatResult> CancelSeatAsync(string id, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.SeatsCancel, new FleetSeatRef(id), FleetNodeJsonContext.Default.FleetSeatRef, FleetNodeJsonContext.Default.FleetSeatResult,
+            null, cancellationToken);
+
     /// <summary>Queues a prompt for after the running turn of a session.</summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="text">The prompt.</param>

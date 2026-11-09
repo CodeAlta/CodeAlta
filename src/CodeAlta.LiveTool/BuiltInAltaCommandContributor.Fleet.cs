@@ -109,7 +109,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add(async (_, _) => await WithFleetFloorAsync(context, () => ValueTask.FromResult(HandleFleetMachineList(context, online, ready, tags, capabilities, provider))).ConfigureAwait(false));
         AddHelpText(
             command,
-            "`readiness` says whether a machine takes a session now: `ready`, `not_allowed` (this computer may not start sessions there), `no_provider`, `updating`, or its state when it is not online. `working` is how many of its sessions work now, its load.",
+            "`readiness` says whether a machine takes a session now: `ready`, `not_allowed` (this computer may not start sessions there), `no_provider`, `updating`, or its state when it is not online. `working` is how many of its sessions work now, its load; `sessionLimit` how many its owner lets work at once (absent for no limit), and `queued` how many runs wait there for their turn: a full machine is still `ready`, and queues the work.",
             "`tags` say what its owner gives it to do, such as `gpu`; `labels` repeats them under their former name. `capabilities` come from what the machine publishes to a server: empty for a machine reached directly only.",
             "Examples: `alta fleet machine list`; `alta fleet machine list --ready --tag gpu`; `alta fleet machine list --capability sandbox`.");
         return command;
@@ -811,6 +811,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         permissions = machine.Permissions,
         sessions = machine.Sessions,
         working = machine.Working,
+        queued = machine.Queued,
+        sessionLimit = machine.SessionLimit,
         paired = machine.Paired,
         channel = machine.Channel,
         lastSeen = machine.LastSeen,

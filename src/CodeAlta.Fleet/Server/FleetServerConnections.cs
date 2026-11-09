@@ -105,6 +105,9 @@ public sealed class FleetServerConnectionsOptions
 
     /// <summary>Gets what reads the problems of the machine its heartbeats report; null reports nothing.</summary>
     public Func<IReadOnlyList<Protocol.Api.FleetHealthProblem>>? Health { get; init; }
+
+    /// <summary>Gets what reads the seats of the machine that its presence reports (<see cref="FleetConnectorOptions.Load"/>); null for none.</summary>
+    public Func<NodeApi.FleetMachineLoad?>? Load { get; init; }
 }
 
 /// <summary>What a node does with the automations its servers give it.</summary>
@@ -439,6 +442,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
             SecretsChanged = _options.SecretsChanged is { } changed ? () => changed(link.Id) : null,
             BudgetsChanged = _options.BudgetsChanged is { } budgets ? () => budgets(link.Id) : null,
             Health = _options.Health,
+            Load = _options.Load,
         };
         if (_options.Configure is { } configure) options = configure(options);
         var connector = new FleetConnector(options);

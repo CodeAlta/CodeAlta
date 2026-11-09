@@ -78,6 +78,7 @@ internal sealed partial class WorkspaceService
                     MachineName = machineName,
                     MachineChannel = channel,
                     RemoteState = session.State,
+                    RemoteQueuedPosition = session.QueuedPosition,
                     RemoteProject = remoteProject is null ? null : Bounded(remoteProject.Name),
                     MachineProviderName = (session.ProviderKey is { } key ? providers.FirstOrDefault(provider => string.Equals(provider.Key, key, StringComparison.Ordinal))
                         : providers.FirstOrDefault(static provider => provider.IsDefault)) is { } named ? Bounded(named.Name) : null,

@@ -11,7 +11,7 @@ document.documentElement.classList.add("bp6-dark");
 const calls: string[] = [];
 const machine = (id: string, name: string, permissions: string[]): MachineView => ({ id, name, state: "online", os: "linux", version: "4.0.0", address: `${name}:2585`,
   fingerprint: "ABCD EFGH", words: "apple river stone cloud amber tiger", sessions: 1, lastSeen: null, problem: null, permissions, pairedAt: "2026-11-01T00:00:00Z",
-  paired: true, channel: "direct" });
+  paired: true, channel: "direct", tags: [], working: null, queued: null, sessionLimit: null });
 let devices: MachineDeviceView[] = [
   { id: "me", name: "desktop", fingerprint: "HS62 JUOJ W5CV", permissions: ["view", "drive", "start", "manage"], pairedAt: "2026-11-01T00:00:00Z", revokedAt: null,
     channels: 1, isThisComputer: true },
@@ -39,6 +39,12 @@ const view = (id: string): MachineManagement => id === "managed"
   : { status: "not_manager", message: null, version: null, sessionsAtWork: 0, updating: false, update: null, devices: [], projects: [], problems: [], providers: [], thisDevice: "me", worktrees: null, sandbox: null, service: null };
 const api: MachinePageApi = {
   management: async request => view(request.machineId),
+  limits: async () => ({ status: "ok", message: null, sessions: 3 }),
+  setLimits: async request => { calls.push(JSON.stringify({ limits: request.sessions })); return { status: "ok", message: null }; },
+  seats: async () => ({ status: "ok", message: null, limit: 3, working: 3, queue: [
+    { id: "run-1", sessionId: "s9", title: "Nightly report", kind: "automation", position: 1, queuedAt: "2026-11-09T10:00:00Z" }] }),
+  startSeat: async request => { calls.push(JSON.stringify({ startSeat: request.id })); return { status: "ok", message: null }; },
+  cancelSeat: async request => { calls.push(JSON.stringify({ cancelSeat: request.id })); return { status: "ok", message: null }; },
   setDevicePermission: async request => {
     calls.push(JSON.stringify({ permission: [request.deviceId, request.permission, request.allowed] }));
     devices = devices.map(device => device.id !== request.deviceId ? device

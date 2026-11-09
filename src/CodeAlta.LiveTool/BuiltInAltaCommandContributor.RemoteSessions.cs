@@ -164,7 +164,11 @@ internal sealed partial class BuiltInAltaCommandContributor
             permissionMode = result.PermissionMode,
             sandbox = result.Sandbox,
             promptSent = result.PromptSent,
-            note = result.PromptSent ? NotificationFollowUpGuidance
+            queued = result.QueuedPosition is not null,
+            queuePosition = result.QueuedPosition,
+            note = result.QueuedPosition is { } place
+                ? $"{result.MachineName} runs as many sessions as its owner lets it: the prompt waits for its turn ({place - 1} before it) and is sent then. " + NotificationFollowUpGuidance
+                : result.PromptSent ? NotificationFollowUpGuidance
                 : "The session waits for its first prompt: `alta session send <session-id> --stdin` sends it there.",
         });
         return AltaExitCodes.Success;

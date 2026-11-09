@@ -310,6 +310,7 @@ import { FleetStopIndicator } from "./fleet/policies/FleetStopIndicator";
 import { FleetApprovals, showHeldStartToast } from "./fleet/FleetApprovals";
 import { fleetCanvasOf } from "./fleet/approvals";
 import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
+import { QueuedSessionNotice } from "./machines/QueuedSessionNotice";
 import { newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, remoteStartPrompt, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
 import { MoveToMachineDialog } from "./machines/MoveToMachineDialog";
 import { createSpacesHub, type SpacesRequestKind } from "./spaces/spacesHub";
@@ -5177,6 +5178,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!sent) showToast({ message: say("The session was started on {name}, but its prompt was not sent. The prompt keeps its text.", { name: machineName }), intent: "warning", icon: "warning-sign", timeout: 8000 });
     if (promptState === "held") showHeldStartToast({ epoch, runId: result.sessionId, say,
       message: say("The session was started on {name}. Its prompt waits for a reached budget of the machine: it is sent once you continue it anyway.", { name: machineName }) });
+    // The machine runs as many sessions as its owner lets it: the prompt waits there for its turn, and its row says its place.
+    if (promptState === "queued") showToast({ message: say("The session started on {machine}: its prompt waits for its turn there.", { machine: machineName }),
+      intent: "primary", icon: "time", timeout: 8000 });
     const fresh = await refreshProjects(creationRefresh.current.signal);
     const row = fresh?.sessions.find(session => session.id === result.sessionId);
     if (!creationAlive.current) return;
@@ -7391,6 +7395,8 @@ function SessionWorkspace({ sideQuestions, canAdmit, remoteControlRequest = null
         {messageNotice && <p role="status" className="sr-only">{timelineNotice(languageLocale, messageNotice)}</p>}
         {/* Another Claude process that holds the conversation of the session, once the banner over the prompt is collapsed. */}
         <ConversationElsewhereLine elsewhere={elsewhere} shown={!elsewhere.covers} />
+        {/* A session of another machine whose run waits for a seat there: its place, Start now and Take out of the queue. */}
+        {session.machineId && <QueuedSessionNotice session={session} epoch={status?.hostEpoch} />}
         <div className="composer-resize-bar" ref={composer.barRef} hidden={askMode !== "none"}>
           <ComposerSplitter {...composer.splitter} />
         </div>

@@ -23,7 +23,7 @@ const machine = (name: string, state: string, os: string | null, version: string
   id: `m${++serial}`, name, state, os, version, address: `${name}.corp.example:2585`, fingerprint: "K3QF 8WZD", words: "harbor maple quartz ember tiger lotus", sessions,
   lastSeen: state === "online" ? ago(0.02) : ago(30 + serial * 3), problem: state === "offline" ? "No address of the machine answered." : state === "unauthorized" ? "The machine refused this computer: its owner revoked it." : null,
   permissions: ["view", "drive", "start", ...(serial % 3 === 0 ? [] : ["manage"])], pairedAt: new Date(now - (40 - serial) * day).toISOString(), paired: serial % 4 !== 0,
-  channel: state === "online" ? serial % 5 === 0 ? "relayed" : "direct" : null, ...more,
+  channel: state === "online" ? serial % 5 === 0 ? "relayed" : "direct" : null, tags: [], working: null, queued: null, sessionLimit: null, ...more,
 });
 const fleet: MachineView[] = [
   machine("build-01", "online", "Ubuntu 24.04", "4.1.0", 6), machine("build-02", "online", "Ubuntu 24.04", "4.1.0", 4), machine("build-03", "online", "Ubuntu 24.04", "4.1.0", 5),

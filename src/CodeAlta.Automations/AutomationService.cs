@@ -527,6 +527,21 @@ internal sealed partial class AutomationService : IAsyncDisposable
     internal CancellationToken Stopping => _stop.Token;
 
     /// <summary>
+    /// Says that a run in progress waits for a seat of the machine (<see cref="AutomationRun.Queued"/>): it goes on as running
+    /// once its session starts.
+    /// </summary>
+    /// <param name="runId">The run.</param>
+    /// <param name="message">What it waits for, in words.</param>
+    /// <returns>The run as it is now; null for a run that is not known.</returns>
+    internal AutomationRun? MarkQueued(string runId, string message)
+    {
+        var queued = _state.Update(runId, current => current.Status == AutomationRun.Running && current.SessionId is null
+            ? current with { Status = AutomationRun.Queued, Message = message } : current);
+        Changed?.Invoke();
+        return queued;
+    }
+
+    /// <summary>
     /// Says that a run in progress waits for its owner to continue it anyway (<see cref="AutomationRun.Held"/>): it goes on
     /// as running once its session starts.
     /// </summary>
@@ -822,8 +837,8 @@ internal sealed partial class AutomationService : IAsyncDisposable
 
         if (start.Completion is null)
             return End(run.Id, entry.Id, new(AutomationRun.Failed, start.Problem ?? "The run did not start."), start.SessionId);
-        // A run that waited for its owner goes on as running.
-        var started = _state.Update(run.Id, current => current.Status == AutomationRun.Held
+        // A run that waited for its owner, or for a seat, goes on as running.
+        var started = _state.Update(run.Id, current => current.Status is AutomationRun.Held or AutomationRun.Queued
                 ? current with { SessionId = start.SessionId, Status = AutomationRun.Running, Message = null }
                 : current with { SessionId = start.SessionId }) ?? run with { SessionId = start.SessionId };
         if (start.Guard is { } guard) Follow(entry, run.Id, guard);

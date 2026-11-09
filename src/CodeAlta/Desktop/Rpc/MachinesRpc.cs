@@ -227,7 +227,7 @@ internal sealed partial class MachinesService
                 string.IsNullOrWhiteSpace(request.Prompt) ? null : request.Prompt, selection), key, cancellationToken).ConfigureAwait(false);
             // The page opens the session from its next list: the machine is asked for it until it lists it.
             await host.WaitListedAsync(created.SessionId, ListedWait, cancellationToken).ConfigureAwait(false);
-            return new(created.Send is { Status: not ("accepted" or "replay") } send ? send.Status : "ok", created.SessionId, null);
+            return new(created.Send is { Status: not ("accepted" or "replay") } send ? send.Status : "ok", created.SessionId, null) { Position = created.Send?.Position };
         }
         catch (ObjectDisposedException) { return new(RemoteSessionHost.Describe(host.State), null, null); }
         catch (FleetException exception) { return new(exception.Error.Code, null, exception.Error.Message); }
@@ -362,7 +362,13 @@ internal sealed partial class MachinesService
             host.LastSeen?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), host.State == RemoteMachineState.Online ? null : host.Problem,
             // What the machine says this device may do, once it said it: a machine reached through a server only grants what its node decides.
             [.. listing.Info?.Permissions ?? machine.Permissions], machine.PairedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), host.IsPaired,
-            host.ChannelPath switch { CodeAlta.Fleet.Server.FleetChannelPath.Relayed => "relayed", CodeAlta.Fleet.Server.FleetChannelPath.Direct => "direct", _ => null });
+            host.ChannelPath switch { CodeAlta.Fleet.Server.FleetChannelPath.Relayed => "relayed", CodeAlta.Fleet.Server.FleetChannelPath.Direct => "direct", _ => null })
+        {
+            Tags = [.. listing.Info?.Tags ?? []],
+            Working = listing.Load?.Working,
+            Queued = listing.Load?.Queued,
+            SessionLimit = listing.Load?.Limit,
+        };
     }
 }
 
@@ -387,7 +393,20 @@ internal sealed record MachinesRequest(string ExpectedEpoch);
 /// <param name="Paired">Whether this device paired with it; false for a machine of an organization reached through the relay of its server.</param>
 /// <param name="Channel">Where its channel goes while it is online: <c>direct</c> or <c>relayed</c>; null otherwise.</param>
 internal sealed record MachineView(string Id, string Name, string State, string? Os, string? Version, string? Address, string Fingerprint, string Words,
-    int Sessions, string? LastSeen, string? Problem, string[] Permissions, string PairedAt, bool Paired, string? Channel);
+    int Sessions, string? LastSeen, string? Problem, string[] Permissions, string PairedAt, bool Paired, string? Channel)
+{
+    /// <summary>Gets the tags its owner gives it, once it said them; empty for an older machine.</summary>
+    public string[] Tags { get; init; } = [];
+
+    /// <summary>Gets the seats taken on it (the trees of sessions at work), when it said so; null for an older machine.</summary>
+    public int? Working { get; init; }
+
+    /// <summary>Gets how many runs wait for a seat on it, when it said so.</summary>
+    public int? Queued { get; init; }
+
+    /// <summary>Gets how many sessions work at once on it; null for no limit, or an older machine.</summary>
+    public int? SessionLimit { get; init; }
+}
 
 /// <summary>The paired machines.</summary>
 /// <param name="Status"><c>ok</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
@@ -506,10 +525,17 @@ internal sealed record MachineNewSessionChoices(string Status, string? MachineNa
 }
 
 /// <summary>The outcome of a new session on a machine.</summary>
-/// <param name="Status"><c>ok</c>, the code of what the machine refused, the state of a machine that is not online, or <c>not_found</c>.</param>
+/// <param name="Status">
+/// <c>ok</c>, <c>held</c> (a budget holds its prompt), <c>queued</c> (its prompt waits for a seat of the machine), the code of what
+/// the machine refused, the state of a machine that is not online, or <c>not_found</c>.
+/// </param>
 /// <param name="SessionId">The new session.</param>
 /// <param name="Message">What the machine said of a refusal.</param>
-internal sealed record MachineNewSessionResult(string Status, string? SessionId, string? Message);
+internal sealed record MachineNewSessionResult(string Status, string? SessionId, string? Message)
+{
+    /// <summary>Gets the place of its prompt in the queue of the machine, for <c>queued</c>: 1 for the next one.</summary>
+    public int? Position { get; init; }
+}
 
 /// <summary>Whether this computer receives sessions moved from its machines.</summary>
 /// <param name="Status"><c>ok</c>, <c>write_failed</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>

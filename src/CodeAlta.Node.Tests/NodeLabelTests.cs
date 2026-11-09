@@ -71,6 +71,31 @@ public sealed class NodeLabelTests
     }
 
     [TestMethod]
+    public async Task TheOwner_SetsAndRemovesTheLimitOfSessionsAtWork_WithAltanode()
+    {
+        using var root = new NodeTestRoot();
+        async Task<(int Code, string Output, string Error)> RunAsync(params string[] words)
+        {
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+            var code = await new NodeApplication(output, error) { InitializeLogging = false, ServiceEnvironment = static () => null }
+                .RunAsync(["limits", .. words, "--data-root", root.DataRoot]);
+            return (code, output.ToString().Trim(), error.ToString());
+        }
+
+        Assert.AreEqual((NodeExitCodes.Success, "Sessions at work at once: no limit."), (await RunAsync()) is var none ? (none.Code, none.Output) : default);
+        StringAssert.StartsWith((await RunAsync("sessions", "3")).Output, "Sessions at work at once: 3;");
+        var profile = root.Profile();
+        var fleetRoot = new CodeAlta.Catalog.CatalogOptions { GlobalRoot = profile.GlobalRoot, StateRoot = profile.StateRoot }.FleetRoot;
+        Assert.AreEqual(3, CodeAlta.Fleet.Server.FleetMachineLimits.ReadSessions(fleetRoot), "the node reads the file before each decision");
+        foreach (var wrong in new[] { "0", "257", "many" })
+            Assert.AreEqual(NodeExitCodes.InvalidUsage, (await RunAsync("sessions", wrong)).Code, wrong);
+        Assert.AreEqual(NodeExitCodes.InvalidUsage, (await RunAsync("seats")).Code);
+        Assert.AreEqual("Sessions at work at once: no limit.", (await RunAsync("sessions", "off")).Output);
+        Assert.IsNull(CodeAlta.Fleet.Server.FleetMachineLimits.ReadSessions(fleetRoot));
+    }
+
+    [TestMethod]
     public async Task TheServerSeesTheLabels_AndAnEnvironmentRunsOnlyOnALabeledMachine()
     {
         var token = TestContext.CancellationToken;

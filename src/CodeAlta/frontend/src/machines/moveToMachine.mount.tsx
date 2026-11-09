@@ -10,7 +10,7 @@ document.documentElement.classList.add("bp6-dark");
 
 const calls: string[] = [];
 const machine = (id: string, name: string): MachineView => ({ id, name, state: "online", os: "linux", version: "4.0.0", address: null, fingerprint: "ab cd",
-  words: "a b c d e f", sessions: 0, lastSeen: null, problem: null, permissions: ["start", "move"], pairedAt: "2026-11-01T00:00:00Z", paired: true, channel: "direct" });
+  words: "a b c d e f", sessions: 0, lastSeen: null, problem: null, permissions: ["start", "move"], pairedAt: "2026-11-01T00:00:00Z", paired: true, channel: "direct", tags: [], working: null, queued: null, sessionLimit: null });
 const preview = (target: string | null): MachineMovePreview => ({ status: "ok", message: null, busy: null, jobs: [], secrets: [], unpushedCommits: 0, dirty: false,
   branch: "main", repositoryKey: "github.com/xoofx/markdig", targetStatus: "accepted", targetCode: null, targetMessage: null, projectName: "markdig",
   projectPath: `/home/me/${target ?? "here"}/markdig`, canClone: false, targetWarnings: [], receiveMoves: true, machineName: "desktop" });

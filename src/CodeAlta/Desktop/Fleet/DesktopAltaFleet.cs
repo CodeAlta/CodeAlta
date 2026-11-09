@@ -369,6 +369,9 @@ internal sealed partial class DesktopAltaFleet(DesktopFleet fleet, string machin
             Permissions = permissions,
             Sessions = listing.Sessions.Count,
             Working = listing.ListedAt is not null ? listing.Sessions.Count(static session => session.State == "working") : presence?.ActiveSessions,
+            // The seats of the machine: what it said with its list of sessions, else what it told its server.
+            Queued = listing.Load?.Queued ?? presence?.QueuedSessions,
+            SessionLimit = listing.Load is { } load ? load.Limit : presence?.SessionLimit,
             Paired = host.IsPaired,
             Channel = host.ChannelPath switch { FleetChannelPath.Relayed => "relayed", FleetChannelPath.Direct => "direct", _ => null },
             LastSeen = host.LastSeen,

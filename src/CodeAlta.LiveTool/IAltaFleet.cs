@@ -164,6 +164,12 @@ public sealed record AltaFleetMachine(string Id, string Name, string State, stri
     /// <summary>Gets how many of them work now (its load); null when unknown.</summary>
     public int? Working { get; init; }
 
+    /// <summary>Gets how many runs wait for a seat of the machine; null when unknown.</summary>
+    public int? Queued { get; init; }
+
+    /// <summary>Gets how many sessions work at once on it, a session and its sub-sessions counting once; null for no limit or unknown.</summary>
+    public int? SessionLimit { get; init; }
+
     /// <summary>Gets whether this computer paired with it; false for a machine reached through a server only.</summary>
     public bool Paired { get; init; }
 

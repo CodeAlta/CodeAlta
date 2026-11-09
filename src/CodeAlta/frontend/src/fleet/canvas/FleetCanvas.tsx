@@ -5,6 +5,7 @@ import { AppIcon } from "../../AppIcon";
 import { ActivitySpinner } from "../../ActivitySpinner";
 import { useShellLanguage } from "../../shellLanguage";
 import { watchIndex } from "../../search/canvas/canvasWatch";
+import { loadParts } from "../../machines/seats";
 import { fleetGroups, fleetSummary, serverConnection, serverConnectionIntent, serverConnectionLabel, sessionModel, sessionState, sessionStateLabel } from "../fleetServer";
 
 /** What the Fleet canvas asks of the host. Each may throw when the host is gone; the canvas then keeps what it shows. */
@@ -124,6 +125,9 @@ function MachineCard({ machine, sessions, time, onOpen, onOpenMachine }: {
           {machine.labels.map(label => <Tag key={label} minimal>{label}</Tag>)}</div>}
       </div>
       <span className="muted-text fleet-machine-count">{working > 0 ? `${count} · ${working} ${t("at work")}` : count}</span>
+      {/* The seats of a machine with a limit, or with runs that wait: 3 of 3 at work, 2 queued. */}
+      {(machine.sessionLimit != null || (machine.queued ?? 0) > 0) && <span className="muted-text fleet-machine-load">
+        {loadParts({ working: machine.activeSessions ?? working, queued: machine.queued, sessionLimit: machine.sessionLimit })?.map(part => t(part.key, part.vars)).join(", ")}</span>}
     </div>
     {sessions.length > 0 && <div className="fleet-sessions-list"><table className="fleet-sessions">
       <tbody>

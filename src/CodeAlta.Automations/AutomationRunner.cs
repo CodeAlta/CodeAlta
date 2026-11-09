@@ -123,6 +123,29 @@ internal interface IAutomationRunGate
         => Task.FromResult<string?>(null);
 
     /// <summary>
+    /// Admits a run to a seat of the machine (<c>doc/fleet/node.md</c>, limits): at once when one is free, else once its turn
+    /// comes, first in first out. Asked after the budgets, so a run that waits for Continue anyway holds no seat.
+    /// </summary>
+    /// <param name="entry">The automation.</param>
+    /// <param name="runId">The run, which takes the seat until its session holds it.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <returns>Why the run may not start; null when it may.</returns>
+    Task<string?> AdmitSeatAsync(AutomationEntry entry, string runId, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
+
+    /// <summary>Says that the session of a run that took a seat exists: it holds the seat from now on.</summary>
+    /// <param name="runId">The run.</param>
+    /// <param name="sessionId">Its session.</param>
+    void BindSeat(string runId, string sessionId)
+    {
+    }
+
+    /// <summary>Gives back the seat of a run that will not start after all.</summary>
+    /// <param name="runId">The run.</param>
+    void ReleaseSeat(string runId)
+    {
+    }
+
+    /// <summary>
     /// Gets what the work in the space of a run must keep to besides its provider and model (the signed policy of the
     /// organization it is linked to, on a machine of a fleet): the permission mode, the sandbox and the tools off its session
     /// runs with, whatever its definition asks, or why it may not run at all.
@@ -424,6 +447,8 @@ internal sealed class AutomationRunner : IAutomationRunner
         // An automation that runs a script has no prompt of its own: what started it may still say something.
         if (entry.Definition.Script is null) ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         string? sessionId = null;
+        // Whether the run holds a seat of the machine that no session holds yet.
+        var seated = false;
         try
         {
             ProjectDescriptor? project = null;
@@ -524,9 +549,13 @@ internal sealed class AutomationRunner : IAutomationRunner
             if (permissionMode is { } mode && !_host.Commands.GetNewSessionPermissionModes(provider.ProviderId.Value).Modes.Contains(mode, StringComparer.Ordinal))
                 return Refuse($"The provider '{provider.ProviderId.Value}' does not offer the permission mode '{mode}'.");
 
+            // A seat of the machine, last of what may wait: a run refused for another reason takes none. It is given back when
+            // no session comes of it.
+            if (_gate is not null && await _gate.AdmitSeatAsync(entry, runId, cancellationToken).ConfigureAwait(false) is { } noSeat) return Refuse(noSeat);
+            seated = _gate is not null;
             cancellationToken.ThrowIfCancellationRequested();
-            // What the host requires is checked again after the admissions that may wait (an approval, a budget): a stop of the
-            // kill switch that came meanwhile reaches the run before anything is created.
+            // What the host requires is checked again after the admissions that may wait (an approval, a budget, a seat): a stop of
+            // the kill switch that came meanwhile reaches the run before anything is created.
             if (_gate?.Check(entry, provider) is { } stopped) return Refuse(stopped);
             // The host keeps a bounded number of pending commands: a prompt that would be refused starts no session.
             if (!_host.Commands.HasCapacity) return Refuse(NoCapacity);
@@ -566,6 +595,9 @@ internal sealed class AutomationRunner : IAutomationRunner
             }
 
             sessionId = session.SessionId;
+            // The session holds the seat of the run from now on: its tree at work.
+            if (seated) _gate?.BindSeat(runId, sessionId);
+            seated = false;
             // Whose work it is is known before the session attaches: a run that is not its owner's resolves none of the owner's values.
             try
             {
@@ -630,6 +662,11 @@ internal sealed class AutomationRunner : IAutomationRunner
             or UnauthorizedAccessException or ObjectDisposedException or NotSupportedException)
         {
             return new(sessionId, FirstLine(exception.Message), null);
+        }
+        finally
+        {
+            // A seat taken for a run of which no session came is given back at once, for the next one.
+            if (seated) _gate?.ReleaseSeat(runId);
         }
 
         static AutomationStart Refuse(string problem) => new(null, problem, null);

@@ -105,6 +105,9 @@ internal sealed record NodeCommandHandlers(
     /// <summary>Gets what lists and changes the labels of the machine; null for none.</summary>
     public Func<NodeLabelCommandOptions, ValueTask<int>>? Labels { get; init; }
 
+    /// <summary>Gets what shows and changes the limits of the machine; null for none.</summary>
+    public Func<NodeLimitCommandOptions, ValueTask<int>>? Limits { get; init; }
+
     /// <summary>Gets what tells the model servers of the running node; null for none.</summary>
     public Func<NodeLlamaCommandOptions, ValueTask<int>>? Llama { get; init; }
 
@@ -510,6 +513,29 @@ internal static class NodeCommandLine
             return command;
         }
 
+        var limits = new NodeLimitCommandOptions();
+        var limitsCommand = new Command("limits", "Show and change how many sessions work at once on this machine")
+        {
+            new CommandUsage("Usage: {NAME} [options]"),
+            new CommandUsage("       {NAME} sessions <number>|off [options]"),
+            _,
+            "How many sessions work at once on this machine, a session and its",
+            "sub-sessions counting once. The work of other machines beyond it waits",
+            "for its turn, first in first out; the work started here never waits.",
+            "CodeAlta Desktop changes it on the page of the machine.",
+            "  sessions 3    at most three sessions work at once",
+            "  sessions off  no limit",
+            _,
+            "Options:",
+        };
+        AddProfile(limitsCommand, limits.Profile);
+        limitsCommand.Add("<>", "The limit and its value");
+        limitsCommand.Add((_, words) =>
+        {
+            limits.Words.AddRange(words);
+            return handlers.Limits?.Invoke(limits) ?? handlers.NotImplemented("limits");
+        });
+
         var llama = new NodeLlamaCommandOptions();
         var llamaCommand = new Command("llama", "Tell the llama.cpp builds, models and servers of the running node")
         {
@@ -682,6 +708,7 @@ internal static class NodeCommandLine
             secretsCommand,
             tagsCommand,
             labelsCommand,
+            limitsCommand,
             llamaCommand,
             permissionModeCommand,
             agentsCommand,
