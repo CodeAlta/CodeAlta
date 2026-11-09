@@ -61,7 +61,7 @@ test("the card of a task says the new tag its session proposed with it", () => {
   const projects = [{ projectId: "p", truncated: false, plans: [], tasks: [row("lead", "task", "pending"), row("other", "task", "pending")], tags: null, declinedTags: null, tagProposals: [proposal] }];
   const card = (id: string) => render(createElement(WorkItemCards, { hub: hub(state({ projects })), dockPreference: createDockPreference(),
     items: workItems(projects, new Set(["s1"])).filter(item => item.id === id), preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never }));
-  assert.match(card("lead"), /<p class="work-card-tag-suggestion">.*Suggested tag<span class="work-tag"[^>]* title="The parser of the files.">parser<\/span><small>for 3 open tasks<\/small>.*Review/s);
+  assert.match(card("lead"), /<p class="work-card-tag-suggestion">.*Suggested tag<span class="work-tag"[^>]* title="The parser of the files.">parser<\/span><small>3 tasks<\/small>.*Review/s);
   assert.equal(card("other").includes("work-card-tag-suggestion"), false, "only the tasks the proposal names");
 });
 

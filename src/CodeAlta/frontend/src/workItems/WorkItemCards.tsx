@@ -232,7 +232,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
           <WorkItemTags item={item} shortId tags />
           {item.summary && <p className="work-card-summary">{item.summary}</p>}
           {suggestion && <p className="work-card-tag-suggestion"><AppIcon name="tag" size={13} />{t("Suggested tag")}<TagChip name={suggestion.name} title={suggestion.description} />
-            <small>{t(suggestion.tasks.length === 1 ? "for one open task" : "for {count} open tasks", { count: suggestion.tasks.length })}</small>
+            <small>{t(suggestion.tasks.length === 1 ? "1 task" : "{count} tasks", { count: suggestion.tasks.length })}</small>
             <Button size="small" variant="minimal" onClick={review}>{t("Review")}</Button></p>}
           <button type="button" className="work-card-more" onClick={() => setDetail(true)}>{t(plan ? "Read the plan" : "Details")}<AppIcon name="chevronRight" size={13} /></button>
           {running ? <p className="work-card-running" role="status"><ActivitySpinner size={13} />{t("This session is working on this task.")}</p>

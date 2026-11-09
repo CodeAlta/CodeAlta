@@ -45,6 +45,16 @@ Each task has a short id of four characters, such as `p53b`, which agents use to
 - In a conversation, a short id written in code (`p53b`) is a chip with the icon of a task, in the color of its kind. Point at it, or reach it with `Tab`, to read the task's kind, status, title and summary. Click it, or press `Enter`, to open the task in the Work items tab. A task that is done or dismissed is struck through.
 - In your prompts, name a task by its short id: `Do the task p53b.`
 
+## Tags
+
+Tags are yours, to organize tasks that pile up: `mobile`, `flaky-tests`, `windows`. Each has a name and one line that says what it is for.
+
+- **Give a task a tag** in its details: **Add tag** offers the tags of its project, found by a part of their name or description, or **New tag** for a name it does not have. The **×** of a tag removes it.
+- **Find tasks by tag** with the **Tags** menu beside the search box: the list keeps the tasks that have one of the tags you tick. Typing `#mobile` in the search box does the same.
+- **Manage tags** from the **Tags** menu: edit the name and the description of a tag, delete it (from its tasks too), describe a tag that was only written on tasks, and forget a name you declined.
+- **A new tag finds its tasks.** With **Find the tasks it fits** ticked, a session reads the open tasks of the project and proposes the ones the tag fits. They wait above the list: **Review** shows them, with why each fits; untick the wrong ones and apply.
+- **Agents use your tags.** An agent that creates a task gives it the tags whose description fits it, or whose name clearly does for a tag without a description, and never creates one. When several open tasks share a topic no tag covers, it may propose a new tag: its card says **Suggested tag**, and the proposal waits in the Work items tab. **Dismiss** it, and no agent proposes that name again.
+
 ## Plans
 
 A plan is a document you review before the work starts. In [Plan mode](prompts.md) the agent researches, writes the plan and asks for your [review](reviews.md): you comment on its blocks, then approve it or ask for changes. A plan that is not done can also be reviewed from its details in the Work items tab.
@@ -57,7 +67,7 @@ Open it with **Work items** in the title bar (in its **…** menu when the windo
 
 - **Inbox** holds what waits for your decision: the tasks proposed to you, and the plans and reviews that wait for you. **Backlog** holds the tasks you keep for later. **In progress** and **Closed** hold what is being done and what is done.
 - **Runs with** is the [Agent chip](workspace/prompt.md#agent-and-model) of the new session. With **Use the defaults** on, it runs with the provider, model and reasoning effort of the session that proposed the item, else the [default provider](model-providers/readme.md) and its model. Turn it off to choose them, the agent prompt, the permission mode, review before commit and the sandbox, before you start. **More options** turns [sub-sessions](sessions/delegation.md#sessions-without-sub-sessions) off for the new session.
-- Filter by tasks, plans or [reviews](reviews.md#all-your-reviews), by project, or by text. **All projects** are those of the [space](spaces.md) the window shows.
+- Filter by tasks, plans or [reviews](reviews.md#all-your-reviews), by project, by [tag](#tags), or by text. **All projects** are those of the [space](spaces.md) the window shows.
 - Items are listed under the day they were created (**Today**, **Yesterday**, **This week**, **Last week**, then each month), each with its date. **Newest first** turns to **Oldest first**, and with **All projects**, **Group by project** lists them under their projects instead. The tab remembers your choice.
 - Select an item to read it, start it, mark it done, open its file, or remove it.
 - Start several items at once: a spinner marks each while its worktree is made. A ready session opens if you still read its item; otherwise a notification offers it with **Show**.
@@ -71,7 +81,7 @@ Each work item is a Markdown file of its project, which you can read, edit and c
 {.table}
 | Kind | File | Status |
 |---|---|---|
-| Task | `.alta/tasks/yyyy-mm-dd-name-xxxx.md` | `pending`, `later` |
+| Task | `.alta/tasks/yyyy-mm-dd-name-xxxx.md` | `pending` (Inbox), `later` (Backlog) |
 | Plan | `.alta/plans/yyyy-mm-dd-name.md` | `draft`, `approved`, `in-progress`, `done`, `blocked` |
 
 The name of a task ends with four random characters, its [short id](#short-ids), so that two branches of a project never create the same file.
@@ -83,6 +93,7 @@ kind: gap
 status: pending
 created: 2026-10-07
 summary: "The Models page shows nothing for a provider that failed. It should say why."
+tags: [models]
 ---
 
 ## Why
@@ -91,11 +102,20 @@ summary: "The Models page shows nothing for a provider that failed. It should sa
 
 Plans written before plans had this header are listed too, from their title and their `- Status:` line.
 
+The tags of a project and what they are for are in `.alta/tags.yaml`, which you can edit and commit too:
+
+```yaml
+tags:
+  models: "The model providers and the lists of their models."
+  flaky-tests: "A test that fails at random, or only on some machines."
+declined: [ci-noise]
+```
+
 A completed or dismissed task is deleted, and a completed plan is kept. **Settings > Work items** changes both, turns task proposals off, hides the cards, and chooses which way of starting comes first.
 
 ## From an agent
 
-Agents use the same work items with `alta task` and `alta plan`, also in CodeAlta TUI, which has no cards and no tab:
+Agents use the same work items with `alta task`, `alta tag` and `alta plan`, also in CodeAlta TUI, which has no cards and no tab:
 
 ```text
 Show me the open tasks of this project and do the one about the model list.
@@ -107,4 +127,8 @@ Do the task p53b.
 
 ```text
 Mark the plan 2026-10-07-task-cards as done.
+```
+
+```text
+Tag p53b and 7c9w with mobile.
 ```
