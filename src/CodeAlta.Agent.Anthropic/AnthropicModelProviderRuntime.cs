@@ -418,6 +418,12 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             (options.AdditionalProperties ??= [])[AnthropicAdaptiveThinkingChatClient.AdaptiveThinkingKey] = true;
         }
 
+        // The fast mode the session chose; standard speed is what a request without one runs at.
+        if (request.FastMode == true)
+        {
+            (options.AdditionalProperties ??= [])[AnthropicAdaptiveThinkingChatClient.FastModeKey] = true;
+        }
+
         if (options.MaxOutputTokens is not null)
         {
             return;
@@ -536,19 +542,26 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
     // What models.dev and the user say of the models, and the sizes of context a session can use them with: each price
     // models.dev gives a model past a size of prompt and, on the Claude API, the standard window of a model that accepts
     // more, as Claude Code offers it (ClaudeCodeModelCatalog). A smaller size is the input a session keeps to: it
-    // compacts before it, and the requests do not change.
+    // compacts before it, and the requests do not change. On the Claude API, the models that run in fast mode have it,
+    // off until a session asks for it.
     internal static IReadOnlyList<AgentModelInfo> EnrichModels(
         AnthropicProviderOptions provider,
         ModelProviderRuntimeDescriptor providerDescriptor,
         IReadOnlyList<AgentModelInfo> models)
-        => AgentModelMetadataEnricher.EnrichModels(
+    {
+        var claudeApi = IsClaudeApi(provider.BaseUri ?? providerDescriptor.BaseUri);
+        var enriched = AgentModelMetadataEnricher.EnrichModels(
             models,
             provider.ModelCatalog,
             provider.ModelsDevProviderId,
             provider.ModelOverrides,
             provider.ModelsIncludeRegex,
             contextPriceTiers: true,
-            contextSizes: IsClaudeApi(provider.BaseUri ?? providerDescriptor.BaseUri) ? [StandardContextSize] : null);
+            contextSizes: claudeApi ? [StandardContextSize] : null);
+        return claudeApi
+            ? [.. enriched.Select(static model => AnthropicAdaptiveThinkingChatClient.TakesFastMode(model.Id) ? model with { FastMode = false } : model)]
+            : enriched;
+    }
 
     private static AnthropicClient CreateSdkClient(
         AnthropicProviderOptions provider,
