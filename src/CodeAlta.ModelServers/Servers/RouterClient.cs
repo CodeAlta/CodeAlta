@@ -74,11 +74,12 @@ public sealed partial class RouterClient
 
     /// <summary>Reads the models of a router and where each stands.</summary>
     /// <param name="cancellationToken">Ends the call.</param>
-    /// <returns>Each model with its state, progress and trained context.</returns>
-    public async Task<IReadOnlyList<(string Model, string State, double? Progress, int? TrainedContext, bool Vision, bool Failed, string? Path)>> ModelsAsync(CancellationToken cancellationToken)
+    /// <returns>Each model with its state, progress, trained context, file and the port of its process on loopback.</returns>
+    public async Task<IReadOnlyList<(string Model, string State, double? Progress, int? TrainedContext, bool Vision, bool Failed, string? Path, int? Port)>> ModelsAsync(
+        CancellationToken cancellationToken)
     {
         using var document = await GetJsonAsync("/models", cancellationToken).ConfigureAwait(false);
-        var result = new List<(string, string, double?, int?, bool, bool, string?)>();
+        var result = new List<(string, string, double?, int?, bool, bool, string?, int?)>();
         if (document is null || !document.RootElement.TryGetProperty("data", out var data)) return result;
         foreach (var model in data.EnumerateArray())
         {
@@ -87,14 +88,19 @@ public sealed partial class RouterClient
             double? progress = null;
             var failed = false;
             string? path = null;
+            int? port = null;
             if (model.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.Object)
             {
-                // The file the router runs the model from: what names it when the router renamed its section.
+                // The file the router runs the model from (what names it when the router renamed its section), and the port
+                // of its process on loopback.
                 if (status.TryGetProperty("args", out var args) && args.ValueKind == JsonValueKind.Array)
                 {
                     var words = args.EnumerateArray().Select(static word => word.GetString()).ToList();
                     var at = words.IndexOf("--model");
                     if (at >= 0 && at + 1 < words.Count) path = words[at + 1];
+                    var portAt = words.IndexOf("--port");
+                    if (portAt >= 0 && portAt + 1 < words.Count && int.TryParse(words[portAt + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var given) && given is > 0 and < 65536)
+                        port = given;
                 }
 
                 state = status.TryGetProperty("value", out var value) ? value.GetString() ?? state : state;
@@ -106,7 +112,7 @@ public sealed partial class RouterClient
             int? context = model.TryGetProperty("context_length", out var length) && length.TryGetInt32(out var tokens) ? tokens : null;
             var vision = model.TryGetProperty("architecture", out var architecture) && architecture.TryGetProperty("input_modalities", out var inputs)
                 && inputs.EnumerateArray().Any(static input => input.GetString() == "image");
-            result.Add((id, failed ? "failed" : state, progress, context, vision, failed, path));
+            result.Add((id, failed ? "failed" : state, progress, context, vision, failed, path, port));
         }
 
         return result;
@@ -116,9 +122,21 @@ public sealed partial class RouterClient
     /// <param name="model">The model, or null for a one-model server.</param>
     /// <param name="cancellationToken">Ends the call.</param>
     /// <returns>The busy and total slots, and the context of a slot.</returns>
-    public async Task<(int Busy, int Total, int? Context)> SlotsAsync(string? model, CancellationToken cancellationToken)
+    public Task<(int Busy, int Total, int? Context)> SlotsAsync(string? model, CancellationToken cancellationToken) => SlotsAsync(model, null, cancellationToken);
+
+    /// <summary>
+    /// Reads the requests of a model of a router from its process, on the port the router gave it: the router writes a line
+    /// to its log for each request it passes on, and these reads come every few seconds. Through the router when the process
+    /// does not answer.
+    /// </summary>
+    /// <param name="model">The model.</param>
+    /// <param name="port">The port of its process on loopback, or null to ask the router.</param>
+    /// <param name="cancellationToken">Ends the call.</param>
+    /// <returns>The busy and total slots, and the context of a slot.</returns>
+    public async Task<(int Busy, int Total, int? Context)> SlotsAsync(string? model, int? port, CancellationToken cancellationToken)
     {
-        using var document = await GetJsonAsync(WithModel("/slots", model), cancellationToken).ConfigureAwait(false);
+        using var document = (port is { } direct ? await GetJsonAsync("/slots", cancellationToken, direct).ConfigureAwait(false) : null)
+            ?? await GetJsonAsync(WithModel("/slots", model), cancellationToken).ConfigureAwait(false);
         if (document is null || document.RootElement.ValueKind != JsonValueKind.Array) return (0, 0, null);
         var slots = document.RootElement.EnumerateArray().ToList();
         var busy = slots.Count(static slot => slot.TryGetProperty("is_processing", out var p) && p.ValueKind == JsonValueKind.True);
@@ -130,11 +148,24 @@ public sealed partial class RouterClient
     /// <param name="model">The model, or null for a one-model server.</param>
     /// <param name="cancellationToken">Ends the call.</param>
     /// <returns>Its tokens per second, or null.</returns>
-    public async Task<double?> TokensPerSecondAsync(string? model, CancellationToken cancellationToken)
+    public Task<double?> TokensPerSecondAsync(string? model, CancellationToken cancellationToken) => TokensPerSecondAsync(model, null, cancellationToken);
+
+    /// <summary>Reads the speed of a model of a router from its process, on its port (see <see cref="SlotsAsync(string?, int?, CancellationToken)"/>).</summary>
+    /// <param name="model">The model.</param>
+    /// <param name="port">The port of its process on loopback, or null to ask the router.</param>
+    /// <param name="cancellationToken">Ends the call.</param>
+    /// <returns>Its tokens per second, or null.</returns>
+    public async Task<double?> TokensPerSecondAsync(string? model, int? port, CancellationToken cancellationToken)
+    {
+        if (port is { } direct && await MetricsAsync("/metrics", direct, cancellationToken).ConfigureAwait(false) is { } speed) return speed;
+        return await MetricsAsync(WithModel("/metrics", model), null, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<double?> MetricsAsync(string path, int? port, CancellationToken cancellationToken)
     {
         try
         {
-            using var response = await SendAsync(HttpMethod.Get, WithModel("/metrics", model), null, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+            using var response = await SendAsync(HttpMethod.Get, path, null, TimeSpan.FromSeconds(5), cancellationToken, port).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode) return null;
             var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             var match = MetricPattern().Match(text);
@@ -239,11 +270,11 @@ public sealed partial class RouterClient
         }
     }
 
-    private async Task<JsonDocument?> GetJsonAsync(string path, CancellationToken cancellationToken)
+    private async Task<JsonDocument?> GetJsonAsync(string path, CancellationToken cancellationToken, int? port = null)
     {
         try
         {
-            using var response = await SendAsync(HttpMethod.Get, path, null, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+            using var response = await SendAsync(HttpMethod.Get, path, null, TimeSpan.FromSeconds(5), cancellationToken, port).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode) return null;
             return JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
         }
@@ -253,9 +284,10 @@ public sealed partial class RouterClient
         }
     }
 
-    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, string? body, TimeSpan timeout, CancellationToken cancellationToken)
+    // A port names a model process of the router on loopback; none, the server itself.
+    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, string? body, TimeSpan timeout, CancellationToken cancellationToken, int? port = null)
     {
-        using var request = new HttpRequestMessage(method, _base + path);
+        using var request = new HttpRequestMessage(method, (port is { } direct ? "http://127.0.0.1:" + direct.ToString(CultureInfo.InvariantCulture) : _base) + path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _key);
         if (body is not null) request.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

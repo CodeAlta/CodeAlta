@@ -137,6 +137,22 @@ public sealed class ModelHostUpdateTests
         await machine.WaitReadyAsync(second, "b12100");
     }
 
+    [TestMethod]
+    public async Task TheReadsOfTheStatus_AskTheProcessOfTheModel_AndWriteNothingToTheLogOfTheRouter()
+    {
+        await using var machine = FakeMachine.Create();
+        machine.GitHub.Publish("b12000", new FakeBehaviour());
+        await using var host = machine.CreateHost();
+        await machine.PrepareAsync(host, "b12000");
+        // The requests and the speed of the loaded model come from its process: read twice, every six seconds.
+        await machine.WaitForAsync(host, () => host.ListServers().Single().Status.Models.FirstOrDefault(static model => model.State == "loaded") is { TotalSlots: 2, TokensPerSecond: > 0.0 } model
+            ? model : null, "the slots and the speed of the loaded model");
+        await Task.Delay(TimeSpan.FromSeconds(7));
+        var log = machine.ServerLog(host.ListServers().Single().Definition.Id);
+        StringAssert.Contains(log, "server is listening", "the log of the router");
+        Assert.IsFalse(log.Contains("proxying request", StringComparison.Ordinal), "a server that runs for weeks writes no line to its log every few seconds:\n" + log);
+    }
+
     private static UpdateRecord LastRecord(ModelHost host, HostTask ended)
     {
         var record = host.GetStatus().History.FirstOrDefault();
@@ -265,6 +281,14 @@ public sealed class ModelHostUpdateTests
             => WaitForAsync(host, () => host.ListServers().Single().Status is { State: "ready" } status && status.BuildTag == build
                 && status.Models.Any(static model => model.Model == Alpha && model.State == "loaded") && status.Models.Any(static model => model.Model == Beta) ? status : null,
                 $"the router runs {build}");
+
+        /// <summary>The whole log a server wrote, as the file holds it.</summary>
+        public string ServerLog(string id)
+        {
+            using var stream = new FileStream(Path.Combine(InstanceRoot, "servers", id, "logs", "server.log"), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd();
+        }
 
         public Task<HostTask> WaitTaskAsync(ModelHost host, string id)
             => WaitForAsync(host, () => host.GetStatus().Tasks.Single(task => task.Id == id) is { EndedAt: not null } task ? task : null, $"the task {id} ended");

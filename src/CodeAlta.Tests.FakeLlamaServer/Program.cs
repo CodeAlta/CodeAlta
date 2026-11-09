@@ -53,7 +53,12 @@ var models = FakeModels.From(options);
 
 var builder = WebApplication.CreateSlimBuilder();
 builder.Logging.ClearProviders();
-builder.WebHost.UseKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, port));
+// A router runs each model in a process of its own, on a port of loopback it chooses: the fake has one more port for them.
+builder.WebHost.UseKestrel(kestrel =>
+{
+    kestrel.Listen(IPAddress.Loopback, port);
+    if (models.Router) kestrel.Listen(IPAddress.Loopback, 0);
+});
 var app = builder.Build();
 app.Run(context => FakeEndpoints.HandleAsync(context, settings, models, key, log));
 
@@ -74,6 +79,7 @@ catch (IOException exception)
     return 1;
 }
 
+models.ProcessPort = app.Urls.Select(static url => new Uri(url).Port).FirstOrDefault(other => other != port);
 log.Write($"main: server is listening on http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}");
 await app.WaitForShutdownAsync();
 return 0;
@@ -186,6 +192,9 @@ namespace CodeAlta.Tests.FakeLlamaServer
 
         public bool Router { get; private init; }
 
+        /// <summary>Gets or sets the port of the processes of the models of a router; 0 before it listens.</summary>
+        public int ProcessPort { get; set; }
+
         public static FakeModels From(FakeArguments options)
         {
             if (options.Value("models-preset") is { } preset)
@@ -257,20 +266,24 @@ namespace CodeAlta.Tests.FakeLlamaServer
         {
             var request = context.Request;
             var path = request.Path.Value ?? "/";
-            log.Write($"srv  log_server_r: request: {request.Method} {path}{request.QueryString}");
+            // A process of a model, as a router starts it: no key (the router passes none), and no line in the log for a request.
+            var process = models.Router && models.ProcessPort > 0 && context.Connection.LocalPort == models.ProcessPort;
+            // At its usual verbosity, the router writes a line for each request it passes on to the process of a model, and
+            // none for its own requests (/health, /models).
+            var model = request.Query["model"].FirstOrDefault();
+            if (models.Router && !process && model is not null) log.Write($"srv  proxy_reques: proxying request to model {model} on port {models.ProcessPort.ToString(CultureInfo.InvariantCulture)}");
             if (path == "/health")
             {
                 await WriteAsync(context, 200, "{\"status\":\"ok\"}");
                 return;
             }
 
-            if (key is not null && request.Headers.Authorization.ToString() != "Bearer " + key)
+            if (key is not null && !process && request.Headers.Authorization.ToString() != "Bearer " + key)
             {
                 await WriteAsync(context, 401, "{\"error\":{\"code\":401,\"message\":\"Invalid API Key\",\"type\":\"authentication_error\"}}");
                 return;
             }
 
-            var model = request.Query["model"].FirstOrDefault();
             switch (request.Method, path)
             {
                 case ("GET", "/v1/models"):
@@ -283,14 +296,14 @@ namespace CodeAlta.Tests.FakeLlamaServer
                 case ("GET", "/models"):
                     await WriteAsync(context, 200, new JsonObject
                     {
-                        ["data"] = new JsonArray([.. models.List().Select(static entry => (JsonNode)new JsonObject
+                        ["data"] = new JsonArray([.. models.List().Select(entry => (JsonNode)new JsonObject
                         {
                             ["id"] = entry.Name,
                             ["object"] = "model",
                             ["status"] = new JsonObject
                             {
                                 ["value"] = entry.Loaded ? "loaded" : "unloaded",
-                                ["args"] = new JsonArray("llama-server", "--model", entry.Path, "--port", "0"),
+                                ["args"] = new JsonArray("llama-server", "--model", entry.Path, "--port", (entry.Loaded ? models.ProcessPort : 0).ToString(CultureInfo.InvariantCulture)),
                             },
                         })]),
                     }.ToJsonString());
@@ -312,7 +325,7 @@ namespace CodeAlta.Tests.FakeLlamaServer
                     await WriteAsync(context, 200, "[{\"id\":0,\"n_ctx\":4096,\"is_processing\":false},{\"id\":1,\"n_ctx\":4096,\"is_processing\":false}]");
                     return;
                 case ("GET", "/metrics"):
-                    if (models.Router && !models.IsLoaded(model))
+                    if (models.Router && !process && !models.IsLoaded(model))
                     {
                         await WriteAsync(context, 400, "{\"error\":{\"code\":400,\"message\":\"model is not loaded\",\"type\":\"invalid_request_error\"}}");
                         return;
@@ -342,8 +355,9 @@ namespace CodeAlta.Tests.FakeLlamaServer
                     return;
                 }
 
-                // A router loads the model a request names.
+                // A router loads the model a request names, and passes the request on to its process.
                 models.SetLoaded(name, true);
+                log.Write($"srv  proxy_reques: proxying request to model {name} on port {models.ProcessPort.ToString(CultureInfo.InvariantCulture)}");
             }
 
             if (settings.Chat == "error")

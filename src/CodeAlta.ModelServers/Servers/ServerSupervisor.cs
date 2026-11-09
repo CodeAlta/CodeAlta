@@ -527,9 +527,10 @@ public sealed partial class ServerSupervisor : IAsyncDisposable
                 int? context = Context(model.Model);
                 if (entry.State == "loaded" && readDetails)
                 {
-                    (busy, total, var slotContext) = await client.SlotsAsync(entry.Model, cancellationToken).ConfigureAwait(false);
+                    // From the model process itself: through the router, each read would write a line to the log, for as long as the server runs.
+                    (busy, total, var slotContext) = await client.SlotsAsync(entry.Model, entry.Port, cancellationToken).ConfigureAwait(false);
                     if (slotContext is { } n) context = Remember(model.Model, n);
-                    if (await client.TokensPerSecondAsync(entry.Model, cancellationToken).ConfigureAwait(false) is { } speed) lock (_gate) _speeds[model.Model] = speed;
+                    if (await client.TokensPerSecondAsync(entry.Model, entry.Port, cancellationToken).ConfigureAwait(false) is { } speed) lock (_gate) _speeds[model.Model] = speed;
                 }
                 else if (entry.State != "loaded")
                 {
