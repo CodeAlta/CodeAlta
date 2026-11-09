@@ -68,7 +68,7 @@ test("a card and a row show the tags of their task, and its detail lets the user
     tags: [{ name: "mobile", description: "The phone app.", openTasks: 1, listed: true }], declinedTags: null }] })), projects: [project], sessions, runningSessions: new Set<string>(),
     projectId: "p", visible: true, onActivate: never, onStart: never, onOpenSession: never, onOpenFile: never, onOpenSettings: never }));
   assert.match(tab, /aria-label="Filter by tag"/, "the list can be filtered by the tags of the project");
-  assert.match(tab, /class="work-row-meta"><span class="work-tag-chips">/, "a row shows its tags");
+  assert.match(tab, /<span class="work-row-sub"><span class="work-tag-chips">/, "a row shows its tags under its title");
   assert.match(tab, /<div class="work-task-tags" role="group" aria-label="Tags"><span class="work-tag"[^>]* title="The phone app.">mobile<button type="button" class="work-tag-remove" aria-label="Remove the tag mobile"/,
     "the detail shows each tag with what it is for, and a way to remove it");
   assert.match(tab, />Add tag<\/span>/);

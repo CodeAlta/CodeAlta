@@ -10,7 +10,7 @@ import { AppIcon } from "../AppIcon";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 import { WorkItemTags, WorkItemText, WorkStartButtons } from "./WorkItemCards";
-import { TagChips, TagFilter, TaskTagField } from "./WorkItemTagViews";
+import { TagChips, TagFilter, TagManagerDialog, TaskTagField } from "./WorkItemTagViews";
 import type { WorkItemTagRow } from "#neoastra";
 import { createdDay, filterWorkItems, shownTags, sortWorkItems, stageCounts, taskCategoryIcon, workDateGroup, workFilterLabel, workFilters, workItemKey, workItems,
   workItemTone, workKindIcon, workStatusLabel, workStatusTone, type WorkFilter, type WorkGrouping, type WorkItem, type WorkKind, type WorkOrder, type WorkStart } from "./workItems";
@@ -64,6 +64,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   const [query, setQuery] = useState("");
   // The tags a task of the list must have one of; none chosen shows every task.
   const [tagFilter, setTagFilter] = useState<ReadonlySet<string>>(() => new Set());
+  const [managingTags, setManagingTags] = useState(false);
   // How the list is read: newest or oldest first, by day or by project; kept for the next time.
   const [view, setView] = useState(readWorkView);
   const changeView = (change: Partial<WorkView>) => setView(current => { const next = { ...current, ...change }; writeWorkView(next); return next; });
@@ -147,7 +148,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
           </HTMLSelect>
           <InputGroup size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={query} placeholder={t("Search work items")}
             aria-label={t("Search work items")} onChange={event => setQuery(event.target.value)} />
-          <TagFilter tags={tags} chosen={tagFilter} onChange={setTagFilter} />
+          <TagFilter tags={tags} chosen={tagFilter} onChange={setTagFilter} onManage={() => setManagingTags(true)} />
           <span className="work-view" role="group" aria-label={t("Order")}>
             <Button size="small" variant="minimal" className="work-order" icon={<AppIcon name={view.order === "newest" ? "arrowDown" : "arrowUp"} size={14} />}
               title={t(view.order === "newest" ? "Oldest first" : "Newest first")} aria-pressed={view.order === "oldest"}
@@ -177,10 +178,9 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                     <AppIcon name={item.kind === "task" ? taskCategoryIcon(item.category) : workKindIcon(item.kind)} size={16} /></span>
                     {item.shortId && <code className="work-row-id" data-tone={tone}>{item.shortId}</code>}</span>
                   <span className="work-row-text"><strong>{item.title}</strong>
-                    <small>{item.summary ?? item.statusText ?? item.file}</small></span>
+                    <span className="work-row-sub"><TagChips tags={item.tags} /><small>{item.summary ?? item.statusText ?? item.file}</small></span></span>
                   <span className="work-row-meta">
                     {busy.has(key) && <span className="work-row-starting"><ActivitySpinner size={11} /></span>}
-                    <TagChips tags={item.tags} />
                     {scoped === null && !byProject && <span className="work-row-project" title={projectById.get(item.projectId)?.name}>{projectById.get(item.projectId)?.name}</span>}
                     {day && <time className="work-row-date" dateTime={item.created ?? undefined} title={t("Created {date}", { date: longFormat.format(day) })}>
                       {(day.getFullYear() === new Date().getFullYear() ? dayFormat : yearFormat).format(day)}</time>}
@@ -208,6 +208,9 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
           </aside>
         </div>
       </>}
+    {managingTags && <TagManagerDialog hub={hub} projectId={scoped} onClose={() => setManagingTags(false)}
+      projects={withItems.map(project => { const known = state.projects.find(candidate => candidate.projectId === project.id);
+        return { id: project.id, name: project.name, tags: known?.tags ?? [], declined: known?.declinedTags ?? [] }; })} />}
     <Alert isOpen={!!removing} intent="danger" icon={null} cancelButtonText={t("Cancel")} confirmButtonText={t("Remove")} canEscapeKeyCancel canOutsideClickCancel
       onCancel={() => setRemoving(null)} onConfirm={() => { const item = removing; setRemoving(null); if (item) act(item, "remove"); }}>
       <p>{removing && t(removing.kind === "plan" ? "Remove the plan \"{title}\"? Its file is deleted." : "Remove the task \"{title}\"? Its file is deleted.", { title: removing.title })}</p>

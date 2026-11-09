@@ -1,11 +1,11 @@
 // The tags the user organizes tasks with: their chips, the filter of the list, the field of a task, and the dialog of a new tag.
-import { useState, type CSSProperties } from "react";
-import { Button, Dialog, DialogBody, DialogFooter, FormGroup, InputGroup, Menu, MenuDivider, MenuItem, PopoverNext } from "@blueprintjs/core";
+import { useState, type CSSProperties, type KeyboardEvent } from "react";
+import { Alert, Button, Dialog, DialogBody, DialogFooter, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, PopoverNext } from "@blueprintjs/core";
 import type { WorkItemTagRow } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
 import { tagColor, tagNameOf, type WorkItem } from "./workItems";
-import type { WorkItemsHub } from "./workItemsHub";
+import type { WorkItemsHub, WorkTagAction } from "./workItemsHub";
 
 /** The most tags a task has. */
 export const maximumTaskTags = 10;
@@ -31,15 +31,17 @@ export function TagChips({ tags, max = 3 }: { tags: readonly string[] | null | u
 }
 
 /** The Tags filter of the list: the tasks that have any of the chosen tags. */
-export function TagFilter({ tags, chosen, onChange }: { tags: readonly WorkItemTagRow[]; chosen: ReadonlySet<string>; onChange: (chosen: ReadonlySet<string>) => void }) {
+export function TagFilter({ tags, chosen, onChange, onManage }: { tags: readonly WorkItemTagRow[]; chosen: ReadonlySet<string>; onChange: (chosen: ReadonlySet<string>) => void;
+  /** Opens the tag manager. */ onManage: () => void }) {
   const { t } = useShellLanguage();
-  if (tags.length === 0 && chosen.size === 0) return null;
   const toggle = (name: string) => { const next = new Set(chosen); if (!next.delete(name)) next.add(name); onChange(next); };
   return <PopoverNext placement="bottom-start" content={<Menu className="work-tag-menu" aria-label={t("Tags")}>
     {tags.map(tag => <MenuItem key={tag.name} roleStructure="listoption" selected={chosen.has(tag.name)} shouldDismissPopover={false}
       text={<span className="work-tag-option"><TagChip name={tag.name} />{tag.description && <small>{tag.description}</small>}</span>}
       label={String(tag.openTasks)} onClick={() => toggle(tag.name)} />)}
     {chosen.size > 0 && <><MenuDivider /><MenuItem icon={<AppIcon name="close" size={14} />} text={t("Show every tag")} onClick={() => onChange(new Set())} /></>}
+    {tags.length > 0 && <MenuDivider />}
+    <MenuItem icon={<AppIcon name="settings" size={14} />} text={t("Manage tags…")} onClick={onManage} />
   </Menu>}>
     <Button size="small" variant={chosen.size ? "outlined" : "minimal"} className="work-tag-filter" icon={<AppIcon name="tag" size={14} />}
       endIcon={<AppIcon name="chevronDown" size={12} />} aria-label={t("Filter by tag")} title={t("Show the tasks that have one of the chosen tags")}>
@@ -74,7 +76,8 @@ export function TaskTagField({ hub, item, tags, disabled }: { hub: WorkItemsHub;
         onKeyDown={event => {
           if (event.key !== "Enter") return;
           event.preventDefault();
-          if (offered[0] && (!fresh || offered[0].name === name)) add(offered[0].name);
+          // The first tag that matches; a new one only when none does.
+          if (offered[0]) add(offered[0].name);
           else if (fresh) { setOpen(false); setCreating(name); }
         }} />
       <Menu aria-label={t("Tags of the project")}>
@@ -127,5 +130,90 @@ export function NewTagDialog({ hub, projectId, name: initialName, description: i
       <Button onClick={onClose}>{t("Cancel")}</Button>
       <Button intent="primary" disabled={!valid || saving} loading={saving} onClick={() => void create()}>{t("Create tag")}</Button>
     </>} />
+  </Dialog>;
+}
+
+type TagEdit = Readonly<{ name: string; newName: string; description: string; was: string }>;
+
+/**
+ * The tags of one project, to look after: each with what it is for and how many open tasks have it, described,
+ * renamed or deleted (on its tasks too); the tags only found on tasks, to describe; the names agents may not
+ * propose again, to forget.
+ */
+export function TagManagerDialog({ hub, projects, projectId: initialProject, onClose }: {
+  hub: WorkItemsHub; projects: readonly Readonly<{ id: string; name: string; tags: readonly WorkItemTagRow[]; declined: readonly string[] }>[]; projectId: string | null; onClose: () => void;
+}) {
+  const { t } = useShellLanguage();
+  const [projectId, setProjectId] = useState(initialProject ?? projects[0]?.id ?? null);
+  const [edit, setEdit] = useState<TagEdit | null>(null);
+  const [deleting, setDeleting] = useState<WorkItemTagRow | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const project = projects.find(candidate => candidate.id === projectId) ?? projects[0] ?? null;
+  const change = async (action: WorkTagAction, name: string, value: string | null = null) => {
+    if (!project) return false;
+    setSaving(true); setStatus(null);
+    const result = await hub.tag(project.id, action, name, value);
+    setSaving(false);
+    if (result !== "ok") setStatus(result);
+    return result === "ok";
+  };
+  // A rename first, on the tasks too, then the description under the new name.
+  const finish = async () => {
+    const name = edit && tagNameOf(edit.newName);
+    if (!edit || !name) return;
+    if (name !== edit.name && !await change("rename", edit.name, name)) return;
+    const description = edit.description.trim();
+    if ((description !== edit.was || !project?.tags.find(tag => tag.name === edit.name)?.listed) && !await change("set", name, description || null)) return;
+    setEdit(null);
+  };
+  const keys = (event: KeyboardEvent) => { if (event.key === "Enter") void finish(); else if (event.key === "Escape") { event.stopPropagation(); setEdit(null); } };
+  const editor = (tag: WorkItemTagRow) => edit?.name === tag.name && <span className="work-tag-edit">
+    <InputGroup size="small" autoFocus value={edit.newName} maxLength={33} aria-label={t("Name")} intent={tagNameOf(edit.newName) ? "none" : "danger"}
+      onChange={event => setEdit({ ...edit, newName: event.target.value })} onKeyDown={keys} />
+    <InputGroup size="small" value={edit.description} maxLength={maximumTagDescription} aria-label={t("What it is for")} placeholder={t("What it is for")}
+      onChange={event => setEdit({ ...edit, description: event.target.value })} onKeyDown={keys} />
+    <Button size="small" intent="primary" disabled={saving || !tagNameOf(edit.newName)} onClick={() => void finish()}>{t("Save")}</Button>
+    <Button size="small" variant="minimal" onClick={() => setEdit(null)}>{t("Cancel")}</Button>
+  </span>;
+  return <Dialog isOpen className="work-tag-manager" title={t("Tags")} onClose={onClose}>
+    <DialogBody>
+      {projects.length > 1 && <HTMLSelect aria-label={t("Project")} value={project?.id ?? ""} onChange={event => { setProjectId(event.target.value); setEdit(null); }}>
+        {projects.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
+      </HTMLSelect>}
+      <p className="work-tag-manager-intro">{t("Tags are yours: agents give a new task the tags that fit it, and never create one.")}</p>
+      {!project?.tags.length && <p className="work-empty">{t("This project has no tags yet.")}</p>}
+      <ul className="work-tag-list">
+        {project?.tags.map(tag => <li key={tag.name} data-listed={tag.listed || undefined}>
+          <TagChip name={tag.name} />
+          {editor(tag) || <>
+            <span className="work-tag-description">{tag.description ?? <em>{t(tag.listed ? "No description" : "Only on tasks: describe it so that agents use it")}</em>}</span>
+            <span className="work-tag-count" title={t("Open tasks")}>{tag.openTasks}</span>
+            <span className="work-tag-actions">
+              <Button size="small" variant="minimal" icon={<AppIcon name="edit" size={13} />} aria-label={t("Edit the tag {name}", { name: tag.name })} title={t("Edit")}
+                onClick={() => setEdit({ name: tag.name, newName: tag.name, description: tag.description ?? "", was: tag.description ?? "" })} />
+              <Button size="small" variant="minimal" intent="danger" icon={<AppIcon name="trash" size={13} />} aria-label={t("Delete the tag {name}", { name: tag.name })} title={t("Delete")} onClick={() => setDeleting(tag)} />
+            </span>
+          </>}
+        </li>)}
+      </ul>
+      {!!project?.declined.length && <section className="work-tag-declined">
+        <h4>{t("Declined proposals")}</h4>
+        <p>{t("Names you turned down when an agent proposed them: no agent proposes them again.")}</p>
+        {project.declined.map(name => <span key={name} className="work-tag-declined-name"><code>{name}</code>
+          <Button size="small" variant="minimal" disabled={saving} onClick={() => void change("forget", name)}>{t("Forget")}</Button></span>)}
+      </section>}
+      {status && <p className="work-tag-failed" role="alert">{t(status === "exists" ? "Another tag has this name." : "The change was not made.")}</p>}
+    </DialogBody>
+    <DialogFooter actions={<Button onClick={onClose}>{t("Close")}</Button>}>
+      <Button icon={<AppIcon name="plus" size={14} />} disabled={!project} onClick={() => setCreating(true)}>{t("New tag")}</Button>
+    </DialogFooter>
+    <Alert isOpen={!!deleting} intent="danger" icon={null} cancelButtonText={t("Cancel")} confirmButtonText={t("Delete")} canEscapeKeyCancel canOutsideClickCancel
+      onCancel={() => setDeleting(null)} onConfirm={() => { const tag = deleting!; setDeleting(null); void change("delete", tag.name); }}>
+      <p>{deleting && t(deleting.openTasks === 0 ? "Delete the tag {name}? No open task has it." : deleting.openTasks === 1 ? "Delete the tag {name}? It is removed from the task that has it."
+        : "Delete the tag {name}? It is removed from the {count} tasks that have it.", { name: deleting.name, count: deleting.openTasks })}</p>
+    </Alert>
+    {creating && project && <NewTagDialog hub={hub} projectId={project.id} name="" onClose={() => setCreating(false)} />}
   </Dialog>;
 }

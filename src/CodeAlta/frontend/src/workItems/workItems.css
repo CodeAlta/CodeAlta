@@ -88,7 +88,7 @@
 .work-hero { display: grid; justify-items: center; gap: 10px; margin-top: 48px; padding: 36px 24px; border: 1px dashed var(--line-strong); border-radius: 16px; text-align: center; }
 .work-hero h3 { font-size: 17px; font-weight: 650; color: var(--text); }
 .work-hero p { max-width: 62ch; color: var(--muted); font-size: 13px; line-height: 1.55; }
-.work-toolbar { display: grid; grid-template-columns: auto auto minmax(140px, 260px) auto; justify-content: start; align-items: center; gap: 10px; margin-top: 18px; }
+.work-toolbar { display: grid; grid-template-columns: auto auto minmax(140px, 260px) auto auto; justify-content: start; align-items: center; gap: 10px; margin-top: 18px; }
 /* The order of the list and what groups it, after the search. */
 .work-view { display: inline-flex; align-items: center; gap: 4px; }
 .work-view .bp6-html-select.work-grouping select { min-width: 0; max-width: none; }
@@ -202,7 +202,10 @@
 .work-tag-remove { display: inline-grid; place-items: center; padding: 0; border: 0; color: inherit; background: none; opacity: .65; cursor: pointer; }
 .work-tag-remove:hover, .work-tag-remove:focus-visible { opacity: 1; }
 .work-tag-chips { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
-.work-row-meta .work-tag-chips { max-width: 190px; }
+/* The tags of a row lead the line under its title, which keeps its width. */
+.work-row-sub { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.work-row-sub .work-tag-chips { flex: none; max-width: 70%; }
+.work-row-sub small { min-width: 0; }
 .work-tag-more { font-size: 11px; color: var(--muted); }
 .work-task-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .work-tag-add { min-height: 20px; font-size: 12px; color: var(--muted); }
@@ -215,3 +218,20 @@
 .work-tag-filter .bp6-button-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work-tag-failed { font-size: 12px; color: var(--red); }
 .work-tag-dialog { width: min(440px, calc(100vw - 40px)); }
+.work-tag-manager { width: min(620px, calc(100vw - 40px)); }
+.work-tag-manager .bp6-dialog-body { display: grid; gap: 10px; max-height: min(70vh, 640px); overflow-y: auto; }
+.work-tag-manager-intro { margin: 0; font-size: 12.5px; color: var(--muted); }
+/* One grid for the list: the descriptions start at the same place whatever the length of the names. */
+.work-tag-list { display: grid; grid-template-columns: max-content minmax(0, 1fr) auto auto; column-gap: 10px; row-gap: 2px; margin: 0; padding: 0; list-style: none; }
+.work-tag-list > li { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; min-height: 34px; padding: 4px 6px; border-radius: 8px; }
+.work-tag-list > li:hover { background: var(--panel-2); }
+.work-tag-list > li > .work-tag { justify-self: start; }
+.work-tag-description { min-width: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-tag-description em { color: var(--muted); }
+.work-tag-count { min-width: 22px; font-size: 12px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.work-tag-actions { display: inline-flex; gap: 2px; }
+.work-tag-edit { grid-column: 2 / -1; display: grid; grid-template-columns: minmax(90px, 1fr) minmax(0, 2fr) auto auto; align-items: center; gap: 6px; }
+.work-tag-declined { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.work-tag-declined h4 { flex-basis: 100%; margin: 0; font-size: 12px; }
+.work-tag-declined p { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
+.work-tag-declined-name { display: inline-flex; align-items: center; gap: 2px; padding-left: 8px; border: 1px solid var(--line); border-radius: 999px; }
