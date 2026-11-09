@@ -14,8 +14,9 @@ namespace CodeAlta.Sandbox.Mxc;
 /// delete, rename or replace what a process holds open without sharing its deletion, whatever its permissions: each
 /// protected entry that exists and each folder between it and the writable folder that holds it are held that way, read
 /// and write shared. The programs of the user cannot replace them either until the container ends; CodeAlta's own writes
-/// go in place (<c>SafeFile</c>). On macOS and Linux nothing is held: Seatbelt (by path) and Bubblewrap (by mount) refuse
-/// the replacement, not the move of a folder above the entry, which mxc cannot express there.
+/// go in place (<c>SafeFile</c>). On macOS and Linux nothing is held: Bubblewrap mounts the entries and the folders above
+/// them (<see cref="FoldersAbove"/>, in <c>MxcRequests.Create</c>), and a mount point does not move; Seatbelt refuses the
+/// replacement by path, not the move of a folder above the entry, which mxc cannot express there.
 /// </remarks>
 internal sealed partial class ProtectedEntryHolds : IDisposable
 {
@@ -66,7 +67,15 @@ internal sealed partial class ProtectedEntryHolds : IDisposable
     /// Gets the paths a policy holds: each folder between a writable folder and a protected entry inside it, then the
     /// entry, when they exist. An entry outside every writable folder cannot be replaced by the sandbox.
     /// </summary>
-    internal static IReadOnlyList<string> PathsOf(SandboxPolicy policy)
+    internal static IReadOnlyList<string> PathsOf(SandboxPolicy policy) => Paths(policy, withEntries: true);
+
+    /// <summary>
+    /// Gets the folders between a writable folder and a protected entry inside it that exist, each before the folders it
+    /// holds: moved away, one takes its entries out of their paths, and a new folder could be put in its place.
+    /// </summary>
+    internal static IReadOnlyList<string> FoldersAbove(SandboxPolicy policy) => Paths(policy, withEntries: false);
+
+    private static IReadOnlyList<string> Paths(SandboxPolicy policy, bool withEntries)
     {
         var comparer = SandboxPolicyBuilder.PathComparer;
         var paths = new List<string>();
@@ -82,7 +91,7 @@ internal sealed partial class ProtectedEntryHolds : IDisposable
 
             folders.Reverse();
             paths.AddRange(folders);
-            if (File.Exists(entry) || Directory.Exists(entry)) paths.Add(entry);
+            if (withEntries && (File.Exists(entry) || Directory.Exists(entry))) paths.Add(entry);
         }
 
         return [.. paths.Distinct(comparer)];

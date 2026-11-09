@@ -79,8 +79,9 @@ public sealed class MxcContainerTests
     {
         // A read-only grant stops a write to the file, not a rename in its writable folder that replaces it, nor the move of
         // a folder above it: what the sandbox puts there (core.fsmonitor) would run later outside the sandbox. Windows
-        // holds the entries open. Seatbelt (by path) and Bubblewrap (by mount) refuse the replacement by themselves, but not
-        // yet the move of a folder above the entry, which mxc cannot express there: only the replacement is tried elsewhere.
+        // holds the entries open, and Linux mounts them and the folders above them. Seatbelt refuses the replacement by
+        // path, but not yet the move of a folder above the entry, which mxc cannot express there: only the replacement is
+        // tried on macOS.
         var backend = new MxcSandboxBackend();
         if (backend.GetAvailability() is { IsAvailable: false } availability) Assert.Inconclusive(availability.Reason ?? "No sandbox on this computer.");
         using var temp = new TempTree();
@@ -123,13 +124,31 @@ public sealed class MxcContainerTests
         }
         else
         {
-            File.WriteAllLines(Path.Combine(project, "attempts.sh"),
+            List<string> lines =
             [
                 $"'{git}' config core.fsmonitor evil",
                 "echo evil > config.new",
                 "mv -f config.new .git/config",
                 "rm -f .alta/config.toml",
-            ]);
+            ];
+            if (MovesAreRefused)
+            {
+                lines.AddRange(
+                [
+                    "mv .git moved",
+                    "printf '[core]\\n\\tfsmonitor = evil\\n' > moved/config",
+                    "mv moved .git",
+                    // A new folder in the place of the one moved away, from a copy: its configuration is an ordinary file.
+                    "mkdir .git && cp -a moved/. .git/",
+                    "printf '[core]\\n\\tfsmonitor = evil\\n' >> .git/config",
+                    "mv .alta moved-alta",
+                    "mkdir .alta && echo evil > .alta/mcp.json",
+                    "echo evil > moved-alta/mcp.json",
+                    "mv moved-alta .alta",
+                ]);
+            }
+
+            File.WriteAllLines(Path.Combine(project, "attempts.sh"), lines);
             commandLine = "/bin/sh attempts.sh";
         }
 
@@ -146,7 +165,7 @@ public sealed class MxcContainerTests
         var report = string.Join("\n", outputs);
         Assert.AreEqual(originalGitConfig, File.ReadAllText(gitConfig), report);
         Assert.AreEqual("original", File.ReadAllText(altaConfig), report);
-        if (OperatingSystem.IsWindows())
+        if (MovesAreRefused)
         {
             Assert.IsFalse(File.Exists(Path.Combine(project, ".alta", "mcp.json")), "a denied entry is not made by moving its folder away and back\n" + report);
             Assert.IsFalse(Directory.Exists(Path.Combine(project, "moved")) || Directory.Exists(Path.Combine(project, "moved-alta")), report);
@@ -157,6 +176,9 @@ public sealed class MxcContainerTests
         File.Move(Path.Combine(project, ".alta", "config.new"), altaConfig, overwrite: true);
         Assert.AreEqual("changed", File.ReadAllText(altaConfig));
     }
+
+    // The systems where the folders above a protected entry cannot move: held open on Windows, mounted on Linux.
+    private static bool MovesAreRefused => OperatingSystem.IsWindows() || OperatingSystem.IsLinux();
 
     private static string? FindGit(SandboxHost host)
     {

@@ -32,6 +32,14 @@ internal static class MxcRequests
             else if (Reachable(path)) filesystem.DeniedPaths.Add(path);
         }
 
+        // Bubblewrap mounts each grant, and a mount point is neither moved nor removed: each folder above a protected
+        // entry is mounted on itself, so that the sandbox cannot take the entry out of its path, nor put a new folder
+        // in its place (Windows holds them open, see ProtectedEntryHolds).
+        if (OperatingSystem.IsLinux())
+        {
+            foreach (var folder in ProtectedEntryHolds.FoldersAbove(policy)) filesystem.ReadwritePaths.Add(folder);
+        }
+
         ProcessContainerFilesystemPolicy? containerFilesystem = null;
         if (OperatingSystem.IsWindows())
         {

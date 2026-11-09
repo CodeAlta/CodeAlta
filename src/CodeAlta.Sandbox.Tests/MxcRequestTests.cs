@@ -24,6 +24,22 @@ public sealed class MxcRequestTests
     }
 
     [TestMethod]
+    public void OnLinux_TheFoldersAboveAProtectedEntry_AreMountedOnThemselves()
+    {
+        // A mount point is neither moved nor removed: the sandbox cannot take .git/config out of its path with .git.
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        var git = temp.Folder("project/.git");
+        File.WriteAllText(Path.Combine(git, "config"), "[core]\n");
+
+        var request = MxcRequests.Create(Policy(temp, project, SandboxNetwork.Off), "sh", null);
+
+        Assert.AreEqual(OperatingSystem.IsLinux(), request.Filesystem!.ReadwritePaths.Contains(git));
+        CollectionAssert.DoesNotContain(request.Filesystem.ReadwritePaths, Path.Combine(git, "config"), "the entry itself stays read-only");
+        CollectionAssert.Contains(request.Filesystem.ReadonlyPaths, Path.Combine(git, "config"));
+    }
+
+    [TestMethod]
     public void AnEmptyFileOfThePolicy_IsMadeBeforeTheStart_AndIsReadOnlyRatherThanDenied()
     {
         using var temp = new TempTree();
