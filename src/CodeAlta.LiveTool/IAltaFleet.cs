@@ -55,6 +55,17 @@ public interface IAltaFleet
     /// <returns><c>ok</c>, <c>not_found</c>, <c>machine_not_found</c>, <c>not_allowed</c> (a paired machine does not let this computer automate, or a machine reached through a server is not one of the person's own) or <c>refused</c>.</returns>
     Task<AltaFleetChange> PlaceAutomationAsync(string automationId, string? machine, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Makes an automation run on the machines that have all of some tags (a pool): every machine of its server with the tags
+    /// holds a copy, and each run is claimed at the server by one of them.
+    /// </summary>
+    /// <param name="automationId">The automation.</param>
+    /// <param name="tags">The tags.</param>
+    /// <param name="cancellationToken">Stops before the configuration is written.</param>
+    /// <returns><c>ok</c>, <c>not_found</c>, <c>invalid</c> (a tag does not read), <c>unavailable</c> or <c>refused</c>.</returns>
+    Task<AltaFleetChange> PlaceAutomationOnTagsAsync(string automationId, IReadOnlyList<string> tags, CancellationToken cancellationToken)
+        => Task.FromResult(new AltaFleetChange("unavailable", "This computer places no automation on the machines with some tags."));
+
     /// <summary>Reads the sums of the statistics of the person's machines from a server.</summary>
     /// <param name="query">The period, the time zone and the groups.</param>
     /// <param name="cancellationToken">Stops waiting for the server.</param>
@@ -304,12 +315,25 @@ public sealed record AltaFleetMoveStatus(string Status, string? Message, string 
 /// <param name="Message">Why its copy is pending, waiting or failed.</param>
 public sealed record AltaFleetAutomationPlacement(string Id, string Name, bool Enabled, string? MachineId, string? Machine, string State, string? Message)
 {
+    /// <summary>Gets the tags of the machines it runs on, for an automation of a pool; null otherwise.</summary>
+    public IReadOnlyList<string>? Tags { get; init; }
+
+    /// <summary>Gets where its copy stands on each machine of its pool; null for an automation that is not of a pool.</summary>
+    public IReadOnlyList<AltaFleetAutomationMember>? Members { get; init; }
+
     /// <summary>Gets when the machine last took its copy.</summary>
     public DateTimeOffset? CopiedAt { get; init; }
 
     /// <summary>Gets when a schedule of it is next due where it runs.</summary>
     public DateTimeOffset? NextRunAt { get; init; }
 }
+
+/// <summary>A machine of the pool of an automation, and where its copy stands there.</summary>
+/// <param name="MachineId">The machine.</param>
+/// <param name="Machine">Its name.</param>
+/// <param name="State"><c>copied</c>, <c>pending</c>, <c>waiting</c> or <c>failed</c>.</param>
+/// <param name="Message">Why it is pending, waiting or failed.</param>
+public sealed record AltaFleetAutomationMember(string MachineId, string? Machine, string State, string? Message);
 
 /// <summary>What a change of the fleet gave.</summary>
 /// <param name="Status"><c>ok</c>, or the code of the refusal.</param>

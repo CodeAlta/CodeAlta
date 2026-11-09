@@ -21,7 +21,14 @@ namespace CodeAlta.Desktop.Fleet;
 /// </param>
 /// <param name="Message">Why it is pending, waiting or failed; null when copied.</param>
 /// <param name="CopiedAt">When the machine last took it.</param>
-internal sealed record AutomationPlacementStatus(string MachineId, string? MachineName, string State, string? Message, DateTimeOffset? CopiedAt);
+internal sealed record AutomationPlacementStatus(string MachineId, string? MachineName, string State, string? Message, DateTimeOffset? CopiedAt)
+{
+    /// <summary>
+    /// Gets where it stands on each machine of its pool, for an automation that runs on the machines with some tags; null for
+    /// one placed on a machine. <see cref="MachineId"/> is then empty and the state sums them up.
+    /// </summary>
+    public IReadOnlyList<AutomationPlacementStatus>? Members { get; init; }
+}
 
 /// <summary>
 /// Places the automations of the user that run on a paired machine (<see cref="AutomationDefinition.RunsOn"/>): copies each
@@ -38,7 +45,7 @@ internal sealed record AutomationPlacementStatus(string MachineId, string? Machi
 /// unless a person starts it anyway. A removal that cannot be written leaves the placement as it was; a record of the
 /// removals that cannot be read gives nothing enabled to a new place until it reads.
 /// </remarks>
-internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncDisposable
+internal sealed partial class DesktopAutomationPlacement : IAutomationPlacement, IAsyncDisposable
 {
     /// <summary>The name of the record of what was copied where, in the fleet folder of the state root.</summary>
     public const string FileName = "placed-automations.json";
@@ -157,6 +164,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     internal AutomationPlacementStatus? Status(AutomationEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
+        if (entry.Definition.RunsOnTags is not null) return PoolStatus(entry);
         if (entry.Definition.RunsOn is not { } machine) return WaitsHere(entry.Id) is { } why ? new(_deviceId(), null, "waiting", why, null) : null;
         lock (_gate)
         {
@@ -211,6 +219,8 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             // Back here, and not yet recorded to be taken away there: the next look records it.
             if (_placed.TryGetValue(id, out var record))
                 return $"It waits until {NameOf(id, record.MachineId)} takes away its copy, so that both machines never run it: its triggers start it here once that machine answers.";
+            if (Pool.Keys.Any(key => key.Id == id))
+                return "It waits until the machines of its pool take away their copies, so that two machines never run it: its triggers start it here once they answer.";
             var before = _removals.Values.Where(removal => removal.AutomationId == id && !removal.Forced).ToArray();
             if (before.Length > 0)
             {
@@ -241,6 +251,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         var trigger = dryRun ? FleetAutomationRunRequest.TryAction : "manual";
         AutomationRun Failed(string message) => new(Guid.CreateVersion7().ToString("N"), entry.Id, now, trigger)
             { Name = entry.Definition.Name, Status = AutomationRun.Failed, Message = message, EndedAt = now };
+        if (entry.Definition.RunsOnTags is not null) return await RunInPoolAsync(entry, dryRun, Failed, cancellationToken).ConfigureAwait(false);
         if (entry.Definition.RunsOn is not { } machineId) return Failed("It runs on this computer.");
         if (_machines(machineId) is not { IsPaired: true } && ServerRoute?.Invoke(machineId) is { } route)
         {
@@ -308,6 +319,8 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
                 changed = true;
             }
 
+            // The automations that run on the machines with some tags: each member of the pool is given its copy.
+            changed |= await SyncPoolsAsync([.. snapshot.Entries.Where(static entry => entry.Definition.RunsOnTags is not null)], cancellationToken).ConfigureAwait(false);
             changed |= await RemovePendingAsync(placed, cancellationToken).ConfigureAwait(false);
 
             foreach (var entry in placed.Values)
@@ -508,7 +521,10 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     internal Task<AutomationTakeOverOutcome> TakeOverAsync(AutomationEntry entry, string runId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        return entry.Definition.RunsOn is not { } machineId ? Task.FromResult(new AutomationTakeOverOutcome("It runs on this computer.", false)) : TakeOverAsync(entry.Id, machineId, runId, cancellationToken);
+        // A run of a pool is taken over on the machine that runs it.
+        var machine = entry.Definition.RunsOnTags is not null ? Runs(entry.Id).FirstOrDefault(run => run.Id == runId)?.MachineId : entry.Definition.RunsOn;
+        return machine is not { } machineId ? Task.FromResult(new AutomationTakeOverOutcome(entry.Definition.IsPlaced ? "No machine of its pool reported this run." : "It runs on this computer.", false))
+            : TakeOverAsync(entry.Id, machineId, runId, cancellationToken);
     }
 
     /// <summary>
@@ -550,20 +566,24 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     // Asks the machine, through its server, to run the automation now, with a request this computer signs; the run is the
     // machine's, read with the others. A change not given yet goes first.
     private async Task<AutomationRun> RunThroughServerAsync(AutomationEntry entry, string machineId, DesktopServerAutomationRoute route, Func<string, AutomationRun> failed,
-        bool dryRun, CancellationToken cancellationToken)
+        bool dryRun, CancellationToken cancellationToken, bool pooled = false)
     {
         if (SignRun is not { } sign) return failed($"{route.MachineName} is reached through a server: it runs this automation by its triggers.");
-        await _work.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        // A member of a pool runs the copy it holds, which the placement gives it as it changes.
+        if (!pooled)
         {
-            await CopyThroughServerAsync(entry, machineId, route, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _work.Release();
-        }
+            await _work.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await CopyThroughServerAsync(entry, machineId, route, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _work.Release();
+            }
 
-        if (Status(entry) is { State: "failed" or "waiting" } status) return failed(status.Message ?? "It could not be given to the machine.");
+            if (Status(entry) is { State: "failed" or "waiting" } status) return failed(status.Message ?? "It could not be given to the machine.");
+        }
         var runId = Guid.CreateVersion7().ToString("N");
         var now = DateTimeOffset.UtcNow;
         try
@@ -1144,7 +1164,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     // What the machine runs: the definition without where it runs here, its project found there by its repository, and
     // disabled while the automations here are paused.
     private AutomationDefinition Copy(AutomationEntry entry)
-        => entry.Definition with { RunsOn = null, PublishTo = null, Project = null, Enabled = entry.Definition.Enabled && !(PausesPlaced && _automations.Paused) };
+        => entry.Definition with { RunsOn = null, RunsOnTags = null, PublishTo = null, Project = null, Enabled = entry.Definition.Enabled && !(PausesPlaced && _automations.Paused) };
 
     /// <summary>The kinds of the triggers of an automation, the facts a version says in clear.</summary>
     internal static IReadOnlyList<string> TriggerKinds(AutomationDefinition definition)
@@ -1328,4 +1348,5 @@ internal sealed record PendingAutomationRemoval(string AutomationId, string Mach
 [JsonSerializable(typeof(Dictionary<string, PlacedAutomation>))]
 [JsonSerializable(typeof(Dictionary<string, long>))]
 [JsonSerializable(typeof(List<PendingAutomationRemoval>))]
+[JsonSerializable(typeof(List<PooledCopy>))]
 internal sealed partial class PlacedAutomationJsonContext : JsonSerializerContext;

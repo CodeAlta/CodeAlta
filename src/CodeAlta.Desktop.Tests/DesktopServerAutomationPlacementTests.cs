@@ -413,6 +413,109 @@ public sealed class DesktopServerAutomationPlacementTests
         }
     }
 
+    [TestMethod]
+    public async Task RunsOnTags_GivesEveryMachineWithTheTagsItsCopy_AndTakesItAwayFromOneThatLosesATag()
+    {
+        var token = TestContext.CancellationToken;
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-desktop-server-pool-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+            {
+                DataRoot = Path.Combine(root, "server"), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+            }, token);
+            var address = server.Addresses.First(static uri => uri.Scheme == "http");
+            var desktopFleetRoot = Path.Combine(root, "desktop-fleet");
+            using var desktopKey = DeviceIdentity.LoadOrCreate(desktopFleetRoot);
+            using var desktop = new FleetServerClient(address, desktopKey);
+            var setup = await desktop.SetUpAsync(server.SetupCode!.Code, "Alex", "Desktop", "Home", token);
+            using var miniKey = DeviceIdentity.LoadOrCreate(Path.Combine(root, "mini-fleet"));
+            using var boxKey = DeviceIdentity.LoadOrCreate(Path.Combine(root, "box-fleet"));
+            foreach (var (key, name) in new[] { (miniKey, "mini"), (boxKey, "box") })
+            {
+                using (var enrolling = new FleetServerClient(address, key))
+                    await enrolling.EnrollAsync((await desktop.CreateEnrollmentTokenAsync(null, name, token)).Token, name, FleetDeviceKinds.Node, token);
+                await desktop.ApproveAsync(key.DeviceId, FleetDeviceKinds.Node, token);
+            }
+
+            var registry = new SessionHostRegistry(new SessionHostRegistryTests.RecordingSessionHost(null));
+            await using var fleet = new DesktopFleet(desktopFleetRoot, registry.TakeMembership(), "desktop");
+            var global = Path.Combine(root, "desktop-config.toml");
+            File.WriteAllText(global, $$"""
+                [automations.{{Id}}]
+                name = "Nightly on the GPUs"
+                runs_on = { tags = ["gpu"] }
+                max_runs = 2
+                prompt = "Summarize the day."
+                triggers = [{ type = "daily", at = ["23:00"] }]
+                """);
+            var runner = new FakeAutomationRunner();
+            await using var automations = new AutomationService(global, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]),
+                new AutomationStateStore(Path.Combine(root, "desktop-state", "automations.json"), false), runner, TimeProvider.System, TimeZoneInfo.Utc);
+            await automations.RefreshAsync();
+            CollectionAssert.AreEqual(new[] { "gpu" }, automations.Snapshot.Find(Id)!.Definition.RunsOnTags!.ToArray());
+
+            // The machines of the server and their tags, as its directory lists them.
+            var tags = new Dictionary<string, IReadOnlyList<string>> { [miniKey.DeviceId] = ["gpu"], [boxKey.DeviceId] = ["GPU", "linux"] };
+            var names = new Dictionary<string, string> { [miniKey.DeviceId] = "mini", [boxKey.DeviceId] = "box" };
+            DesktopPoolDirectory Listed() => new([.. tags.Select(pair => new DesktopPoolMachine(pair.Key, names[pair.Key], "link-1", pair.Value) { Online = true, Working = 0 })],
+                new HashSet<string>(StringComparer.Ordinal) { "link-1" });
+            DesktopServerAutomationRoute? Route(string machineId) => names.TryGetValue(machineId, out var name)
+                ? new DesktopServerAutomationRoute("link-1", setup.Organization.Id, name, new FleetOrganizationDevices(address, desktopKey), desktopKey, new FleetServerClient(address, desktopKey))
+                : null;
+            await using var placement = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId, fleet.SignAutomation)
+            {
+                ServerRoute = Route, PoolMachines = Listed, RunsReadInterval = TimeSpan.Zero,
+            };
+            automations.Placement = placement;
+
+            // Every machine with the tag gets its copy, signed and sealed for it, of the format of a pool, with the tags.
+            await placement.SyncAsync(token);
+            var held = (await desktop.ListAutomationsAsync(token)).Automations.Where(static item => item.Id == Id).ToArray();
+            CollectionAssert.AreEquivalent(new[] { miniKey.DeviceId, boxKey.DeviceId }, held.Select(static item => item.MachineId).ToArray());
+            foreach (var item in held)
+            {
+                Assert.IsTrue(FleetAutomationVersionDocuments.TryParse(item.Version.Payload, out var version));
+                Assert.AreEqual((FleetAutomationVersion.PoolVersion, false), (version.Version, version.Removed));
+                CollectionAssert.AreEqual(new[] { "gpu" }, version.Tags!.ToArray());
+            }
+
+            var status = placement.Status(automations.Snapshot.Find(Id)!)!;
+            Assert.AreEqual(2, status.Members!.Count);
+            Assert.AreEqual(string.Empty, status.MachineId);
+            Assert.AreEqual(0, runner.Starts.Count, "nothing of it runs here");
+            Assert.IsNull(automations.NextDue(Id), "its schedule fires on its machines");
+            // The machines that match more tags: those that have them all.
+            CollectionAssert.AreEqual(new[] { boxKey.DeviceId }, (await placement.PoolMembersAsync(["gpu", "linux"], null, token)).Members.Select(static member => member.Id).ToArray());
+            StringAssert.Contains((await placement.PoolMembersAsync(["tpu"], null, token)).Problem, "tpu");
+
+            // The mini loses its tag: its copy is taken away there with a signed removal; the box keeps its own.
+            tags[miniKey.DeviceId] = [];
+            await placement.SyncAsync(token);
+            await placement.SyncAsync(token);
+            var after = (await desktop.ListAutomationsAsync(token)).Automations.Where(static item => item.Id == Id).ToArray();
+            Assert.IsTrue(after.Single(item => item.MachineId == miniKey.DeviceId).Removed, "a member that loses its tag gets a removal");
+            Assert.IsFalse(after.Single(item => item.MachineId == boxKey.DeviceId).Removed);
+            Assert.AreEqual(boxKey.DeviceId, placement.Status(automations.Snapshot.Find(Id)!)!.Members!.Single().MachineId);
+
+            // alta lists the members, and places on tags only what a pool takes.
+            var alta = new DesktopAltaFleet(fleet, "desktop-pc", "4.0.0") { Automations = automations, Placement = placement, ServerRoute = Route };
+            var listed = alta.ListAutomationPlacements().Single();
+            Assert.AreEqual(("gpu", boxKey.DeviceId), (listed.Tags!.Single(), listed.Members!.Single().MachineId));
+            Assert.AreEqual("invalid", (await alta.PlaceAutomationOnTagsAsync(Id, ["two words"], token)).Status);
+            Assert.AreEqual("ok", (await alta.PlaceAutomationOnTagsAsync(Id, ["gpu", "linux"], token)).Status);
+            CollectionAssert.AreEqual(new[] { "gpu", "linux" }, automations.Snapshot.Find(Id)!.Definition.RunsOnTags!.ToArray());
+            Assert.AreEqual(2, automations.Snapshot.Find(Id)!.Definition.MaxRuns, "the rest of the automation stays");
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
     private static Task WaitForAsync(Func<bool> condition, string what, CancellationToken cancellationToken)
         => WaitForAsync(() => Task.FromResult(condition()), what, cancellationToken);
 

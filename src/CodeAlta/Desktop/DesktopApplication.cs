@@ -963,6 +963,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 placement = new Fleet.DesktopAutomationPlacement(automations, fleet.Find, host.CatalogOptions.FleetRoot, () => placedFleet.DeviceId, placedFleet.SignAutomation)
                 {
                     ServerRoute = placedServers is null ? null : placedServers.AutomationRoute,
+                    // An automation that runs on the machines with some tags is given to every node of its server that has them.
+                    PoolMachines = placedServers is null ? null : placedServers.PoolMachines,
                     SignRun = placedFleet.SignAutomationRun,
                     // Pausing every automation pauses those on machines too; a developer instance starts paused and leaves them.
                     PausesPlaced = !options.Developer,

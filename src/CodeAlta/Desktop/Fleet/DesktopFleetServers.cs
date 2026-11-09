@@ -149,6 +149,34 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     }
 
     /// <summary>
+    /// Lists the nodes of the servers this computer is connected to, with their tags and their load, from which the members of
+    /// a pool are chosen (<see cref="DesktopAutomationPlacement"/>), and the servers online: a machine leaves a pool only as a
+    /// server online says, never because its server is away.
+    /// </summary>
+    /// <returns>The nodes and the links of the servers online.</returns>
+    public DesktopPoolDirectory PoolMachines()
+    {
+        var machines = new List<DesktopPoolMachine>();
+        var online = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var connection in Connections)
+        {
+            if (connection.Connector is not { State: FleetConnectorState.Online } connector) continue;
+            online.Add(connection.Link.Id);
+            foreach (var machine in connector.Directory.Machines.Values)
+            {
+                if (machine.Kind != FleetDeviceKinds.Node || machines.Any(known => known.Id == machine.DeviceId)) continue;
+                var presence = connector.Directory.Presence.GetValueOrDefault(machine.DeviceId);
+                machines.Add(new DesktopPoolMachine(machine.DeviceId, machine.Inventory.Name, connection.Link.Id, [.. machine.Inventory.Labels ?? []])
+                {
+                    Online = connector.Directory.IsOnline(machine.DeviceId), Working = presence?.ActiveSessions, Queued = presence?.QueuedSessions, SessionLimit = presence?.SessionLimit,
+                });
+            }
+        }
+
+        return new DesktopPoolDirectory(machines, online);
+    }
+
+    /// <summary>
     /// Finds the way to give automations to a machine through a server that lists it: a connection online to a server
     /// of an organization this computer belongs to; the caller disposes it.
     /// </summary>

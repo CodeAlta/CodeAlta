@@ -75,6 +75,23 @@ internal sealed class AutomationsService
         }
     }
 
+    /// <summary>The tags the machines of the servers of this computer have, and the machines that have all the tags asked now: the members of a pool.</summary>
+    [NeoRpcMethod("poolMachines")]
+    public async Task<AutomationPoolResponse> PoolMachinesAsync(AutomationPoolRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, [], [], null);
+        var tags = (request.Tags ?? []).Select(static tag => tag?.Trim() ?? string.Empty).Where(static tag => tag.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (tags.Length > AutomationDefinition.MaximumTags || !tags.All(AutomationDefinition.IsTag) || request.PublishTo is { Length: > 140 }) return new("invalid_request", [], [], null);
+        if (_placement is null) return new("ok", [], [], null);
+        var known = (_placement.PoolMachines?.Invoke()?.Machines ?? []).SelectMany(static machine => machine.Tags)
+            .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (tags.Length == 0) return new("ok", known, [], null);
+        var resolved = await _placement.PoolMembersAsync(tags, Blank(request.PublishTo), cancellationToken).ConfigureAwait(false);
+        return new("ok", known, [.. resolved.Members.Select(static member => new AutomationPoolMachineItem(member.Id, member.Name, member.Online, member.Working, member.Queued, member.SessionLimit))],
+            resolved.Problem);
+    }
+
     /// <summary>
     /// Gets what lists the automations of the teams this person maintains, and of the organization they answer for, that
     /// another person gave their machines and this computer does not hold; null where no server is linked.
@@ -282,7 +299,7 @@ internal sealed class AutomationsService
         if (!AutomationDefinition.IsId(request.Id)) return new("invalid_request", null);
         var run = await _automations!.RunAsync(request.Id, cancellationToken).ConfigureAwait(false);
         return run is null ? new("not_found", null)
-            : new("ok", Run(run) with { MachineId = _automations.Snapshot.Find(request.Id)?.Definition.RunsOn });
+            : new("ok", Run(run) with { MachineId = run.MachineId ?? _automations.Snapshot.Find(request.Id)?.Definition.RunsOn });
     }
 
     /// <summary>The runs of one automation, or of all, newest first.</summary>
@@ -294,8 +311,8 @@ internal sealed class AutomationsService
         if (request.Id is { } id && !AutomationDefinition.IsId(id)) return new("invalid_request", []);
         var limit = Math.Clamp(request.Limit ?? MaximumRuns, 1, MaximumRuns);
         // The runs of an automation placed on a machine are those the machine reports.
-        if (request.Id is { } placed && _automations!.Snapshot.Find(placed) is { Definition.RunsOn: { } machine } && _placement is not null)
-            return new("ok", [.. _placement.Runs(placed).Take(limit).Select(run => Run(run) with { MachineId = machine })]);
+        if (request.Id is { } placed && _automations!.Snapshot.Find(placed) is { Definition.IsPlaced: true } entry && _placement is not null)
+            return new("ok", [.. _placement.Runs(placed).Take(limit).Select(run => Run(run) with { MachineId = run.MachineId ?? entry.Definition.RunsOn })]);
         return new("ok", [.. _automations!.Runs(request.Id, limit).Select(Run)]);
     }
 
@@ -478,14 +495,14 @@ internal sealed class AutomationsService
             AutomationRunItem? lastRun;
             AutomationPlacementItem? placed = null;
             var running = _automations.IsRunning(entry.Id);
-            if (definition.RunsOn is { } machine && _placement is not null)
+            if (definition.IsPlaced && _placement is not null)
             {
-                // It runs on its machine: what is known of it is what that machine reports.
+                // It runs on its machine, or the machines of its pool: what is known of it is what they report, each run naming its machine.
                 var runs = _placement.Runs(entry.Id);
-                remoteRuns.AddRange(runs.Take(RecentRuns).Select(run => Run(run) with { MachineId = machine }));
-                lastRun = runs.Count > 0 ? Run(runs[0]) with { MachineId = machine } : null;
-                running = runs.Count > 0 && runs[0].Status == AutomationRun.Running;
-                placed = _placement.Status(entry) is { } status ? new AutomationPlacementItem(status.MachineId, status.MachineName, status.State, status.Message, status.CopiedAt) : null;
+                remoteRuns.AddRange(runs.Take(RecentRuns).Select(run => Run(run) with { MachineId = run.MachineId ?? definition.RunsOn }));
+                lastRun = runs.Count > 0 ? Run(runs[0]) with { MachineId = runs[0].MachineId ?? definition.RunsOn } : null;
+                running = runs.Any(static run => run.Status == AutomationRun.Running);
+                placed = _placement.Status(entry) is { } status ? AutomationPlacementItem.Of(status) : null;
             }
             else
             {
@@ -500,7 +517,7 @@ internal sealed class AutomationsService
                 entry.ProjectPath ?? definition.Project, entry.Source.ProjectId, entry.Source.FilePath, definition.Model.Provider, definition.Model.Model,
                 definition.Model.Effort?.ToString(), definition.Agent, definition.PermissionMode, definition.ReviewBeforeCommit, definition.Sandbox, definition.CatchUp, [.. definition.Triggers.Select(Trigger)], entry.Problem,
                 // A placed automation is next due when its machine says.
-                definition.RunsOn is not null && _placement is not null ? _placement.NextDue(entry.Id) : _automations.NextDue(entry.Id), running, lastRun,
+                definition.IsPlaced && _placement is not null ? _placement.NextDue(entry.Id) : _automations.NextDue(entry.Id), running, lastRun,
                 _automations.Repository(entry.Id), definition.Enabled ? _automations.WatchProblem(entry.Id) : null, _automations.IsAllowed(entry))
             {
                 Script = definition.Script,
@@ -509,6 +526,8 @@ internal sealed class AutomationsService
                 ScriptAccess = definition.ScriptAccess,
                 Options = SessionOptionsChoice.Of(definition.SessionOptions),
                 RunsOn = definition.RunsOn,
+                RunsOnTags = definition.RunsOnTags,
+                MaxRuns = definition.MaxRuns,
                 PublishTo = definition.PublishTo,
                 Placement = placed,
                 Autonomy = Autonomy(definition.Autonomy),
@@ -653,7 +672,9 @@ internal sealed class AutomationsService
             ReviewBeforeCommit = input.ReviewBeforeCommit,
             Sandbox = Blank(input.Sandbox),
             RunsOn = Blank(input.RunsOn),
-            PublishTo = Blank(input.RunsOn) is null ? null : Blank(input.PublishTo),
+            RunsOnTags = input.RunsOnTags is { Count: > 0 } tags ? [.. tags.Select(static tag => tag?.Trim() ?? string.Empty)] : null,
+            MaxRuns = input.MaxRuns,
+            PublishTo = Blank(input.RunsOn) is null && input.RunsOnTags is not { Count: > 0 } ? null : Blank(input.PublishTo),
             SessionOptions = SessionOptionsChoice.Record(input.Options),
             Autonomy = input.Autonomy is { } autonomy ? new AutomationAutonomy
             {
@@ -887,6 +908,12 @@ internal sealed record AutomationItem(string Id, string Name, bool Enabled, stri
     /// <summary>The paired machine it runs on (its device id); null when it runs on this computer.</summary>
     public string? RunsOn { get; init; }
 
+    /// <summary>The tags of the machines it runs on (a pool); null when it runs on this computer or on one machine.</summary>
+    public IReadOnlyList<string>? RunsOnTags { get; init; }
+
+    /// <summary>How many of its runs work at once on a machine; null for one.</summary>
+    public int? MaxRuns { get; init; }
+
     /// <summary>Whom it is published to on the server of its machine: <c>team:&lt;id&gt;</c>, <c>organization</c>, or null for the person's own.</summary>
     public string? PublishTo { get; init; }
 
@@ -947,7 +974,50 @@ internal sealed record AutomationToolPreconditionItem(string Tool, IReadOnlyList
 /// </param>
 /// <param name="Message">Why it is pending or failed.</param>
 /// <param name="CopiedAt">When the machine last took it.</param>
-internal sealed record AutomationPlacementItem(string MachineId, string? MachineName, string State, string? Message, DateTimeOffset? CopiedAt);
+internal sealed record AutomationPlacementItem(string MachineId, string? MachineName, string State, string? Message, DateTimeOffset? CopiedAt)
+{
+    /// <summary>Gets where it stands on each machine of its pool, for an automation that runs on the machines with some tags; null otherwise.</summary>
+    public IReadOnlyList<AutomationPoolMemberItem>? Members { get; init; }
+
+    /// <summary>Reads where an automation stands, with the machines of its pool.</summary>
+    internal static AutomationPlacementItem Of(CodeAlta.Desktop.Fleet.AutomationPlacementStatus status)
+        => new(status.MachineId, status.MachineName, status.State, status.Message, status.CopiedAt)
+        {
+            Members = status.Members is { } members
+                ? [.. members.Select(static member => new AutomationPoolMemberItem(member.MachineId, member.MachineName, member.State, member.Message, member.CopiedAt))]
+                : null,
+        };
+}
+
+/// <summary>Where an automation that runs on the machines with some tags stands on one of them.</summary>
+/// <param name="MachineId">The machine.</param>
+/// <param name="MachineName">Its name.</param>
+/// <param name="State"><c>copied</c>, <c>pending</c>, <c>waiting</c> or <c>failed</c>.</param>
+/// <param name="Message">Why it is pending, waiting or failed.</param>
+/// <param name="CopiedAt">When the machine last took it.</param>
+internal sealed record AutomationPoolMemberItem(string MachineId, string? MachineName, string State, string? Message, DateTimeOffset? CopiedAt);
+
+/// <summary>Asks the tags the machines have and the machines that have some tags now.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="Tags">The tags; none for the tags only.</param>
+/// <param name="PublishTo">The scope it is published to; null for the person's own machines.</param>
+internal sealed record AutomationPoolRequest(string? ExpectedEpoch, IReadOnlyList<string>? Tags, string? PublishTo);
+
+/// <summary>A machine of a pool, as the editor shows it.</summary>
+/// <param name="Id">Its device.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="Online">Whether it is connected to its server.</param>
+/// <param name="Working">How many sessions work on it; null when unknown.</param>
+/// <param name="Queued">How many runs wait for a seat; null when unknown.</param>
+/// <param name="SessionLimit">How many sessions work at once there; null for no limit.</param>
+internal sealed record AutomationPoolMachineItem(string Id, string Name, bool Online, int? Working, int? Queued, int? SessionLimit);
+
+/// <summary>The tags of the machines of the servers of this computer, and the machines that have the tags asked.</summary>
+/// <param name="Status"><c>ok</c>, or why not.</param>
+/// <param name="Tags">The tags machines have, sorted.</param>
+/// <param name="Members">The machines of the person that have all the tags asked.</param>
+/// <param name="Problem">Why no machine runs it; null when some do.</param>
+internal sealed record AutomationPoolResponse(string Status, IReadOnlyList<string> Tags, IReadOnlyList<AutomationPoolMachineItem> Members, string? Problem);
 
 /// <summary>Asks whom an automation that runs on a machine may be published to.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
@@ -1107,6 +1177,12 @@ internal sealed record AutomationInput(string? Id, string Name, bool Enabled, st
 
     /// <summary>The paired machine it runs on (its device id); null to run it on this computer. Only for an automation of the user.</summary>
     public string? RunsOn { get; init; }
+
+    /// <summary>The tags of the machines it runs on, in place of <see cref="RunsOn"/>; null for none. Only for an automation of the user.</summary>
+    public IReadOnlyList<string>? RunsOnTags { get; init; }
+
+    /// <summary>How many of its runs work at once on a machine; null for one.</summary>
+    public int? MaxRuns { get; init; }
 
     /// <summary>Whom it is published to on the server of its machine: <c>team:&lt;id&gt;</c>, <c>organization</c>, or null for the person's own.</summary>
     public string? PublishTo { get; init; }

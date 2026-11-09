@@ -34,9 +34,10 @@ A machine that is not ready is not chosen. Say why to the user when no machine f
 
 ## Automations on machines
 
-- `alta fleet automation list` says where each automation runs, and where its copy stands on its machine.
-- `alta fleet automation place <automation-id> --machine <machine>` makes a disabled automation run on that machine; `--here` brings it back. A person enables it.
-- `alta fleet automation run <automation-id>` runs it now where it runs; `alta fleet automation runs <automation-id>` reads its runs, those its machine reported included.
+- `alta fleet automation list` says where each automation runs, and where its copy stands on its machine; one that runs on the machines with some tags has `tags` and `members`, each machine of its pool with where its copy stands.
+- `alta fleet automation place <automation-id> --machine <machine>` makes a disabled automation run on that machine; `--tag gpu --tag linux` on every machine of the user's server that has all these tags (a pool); `--here` brings it back. A person enables it.
+- A pool needs a CodeAlta Server: each machine of the pool fires the triggers and claims each due time or event there, and one runs it. It takes schedules, cron, issues, pull requests and Jira; a command, Slack or a hook of a server keep an automation on one machine. A machine that loses a tag, or cannot reach the server, runs nothing of it.
+- `alta fleet automation run <automation-id>` runs it now where it runs (for a pool, on the member with the most free seats); `alta fleet automation runs <automation-id>` reads its runs, those its machines reported included, each with its `machineId`.
 
 ## Events of other tools
 

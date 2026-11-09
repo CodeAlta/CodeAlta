@@ -78,7 +78,7 @@ internal sealed class DesktopAutomationHandover : IDesktopAutomationHandover
         var repository = entry.ProjectPath is { } folder ? await _repositoryOf(folder, cancellationToken).ConfigureAwait(false) : null;
         if (entry.ProjectPath is not null && repository is null) return null;
         // Where it runs and the folder of its project are this computer's: the new owner places it on machines of their own.
-        return new FleetAutomationContent(AutomationConfig.Write(string.Empty, entry.Definition with { RunsOn = null, PublishTo = null, Project = null }), repository);
+        return new FleetAutomationContent(AutomationConfig.Write(string.Empty, entry.Definition with { RunsOn = null, RunsOnTags = null, PublishTo = null, Project = null }), repository);
     }
 
     /// <summary>Gets what records the automations given through a server, which an automation taken to be changed here is recorded in; null for none.</summary>
@@ -90,7 +90,7 @@ internal sealed class DesktopAutomationHandover : IDesktopAutomationHandover
         ArgumentNullException.ThrowIfNull(content);
         var (definition, problem) = await ReadHereAsync(content, cancellationToken).ConfigureAwait(false);
         if (definition is null) return problem;
-        return await _automations.SaveAsync(definition with { RunsOn = null, PublishTo = null }, null, cancellationToken).ConfigureAwait(false);
+        return await _automations.SaveAsync(definition with { RunsOn = null, RunsOnTags = null, PublishTo = null }, null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -105,7 +105,7 @@ internal sealed class DesktopAutomationHandover : IDesktopAutomationHandover
         ArgumentException.ThrowIfNullOrEmpty(linkId);
         var (read, problem) = await ReadHereAsync(content, cancellationToken).ConfigureAwait(false);
         if (read is null) return problem;
-        var definition = read with { RunsOn = machineId, PublishTo = scope };
+        var definition = read with { RunsOn = machineId, RunsOnTags = null, PublishTo = scope };
         Task<string?> Save() => _automations.SaveAsync(definition, null, cancellationToken);
         // Recorded as given at the version its machine holds: opening it gives the machine nothing; saving a change gives it the next version.
         return Placement is { } placement

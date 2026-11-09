@@ -167,13 +167,17 @@ internal sealed partial class DesktopAltaFleet(DesktopFleet fleet, string machin
         if (Automations is not { } automations) return [];
         return [.. automations.Snapshot.Entries.Select(entry =>
         {
-            if (entry.Definition.RunsOn is null || Placement is not { } placement)
+            if (!entry.Definition.IsPlaced || Placement is not { } placement)
                 return new AltaFleetAutomationPlacement(entry.Id, entry.Definition.Name, entry.Definition.Enabled, null, null, "here", null) { NextRunAt = automations.NextDue(entry.Id) };
             var status = placement.Status(entry)!;
-            return new AltaFleetAutomationPlacement(entry.Id, entry.Definition.Name, entry.Definition.Enabled, status.MachineId, status.MachineName, status.State, status.Message)
+            return new AltaFleetAutomationPlacement(entry.Id, entry.Definition.Name, entry.Definition.Enabled, status.MachineId.Length == 0 ? null : status.MachineId, status.MachineName,
+                status.State, status.Message)
             {
                 CopiedAt = status.CopiedAt,
                 NextRunAt = placement.NextDue(entry.Id),
+                // A pool: the tags of its machines, and where its copy stands on each.
+                Tags = entry.Definition.RunsOnTags,
+                Members = status.Members?.Select(static member => new AltaFleetAutomationMember(member.MachineId, member.MachineName, member.State, member.Message)).ToArray(),
             };
         })];
     }
@@ -183,10 +187,10 @@ internal sealed partial class DesktopAltaFleet(DesktopFleet fleet, string machin
     {
         if (Placement is not { } placement || Automations is not { } automations) return [];
         var ids = automationId is not null ? [automationId]
-            : automations.Snapshot.Entries.Where(static entry => entry.Definition.RunsOn is not null).Select(static entry => entry.Id).ToArray();
+            : automations.Snapshot.Entries.Where(static entry => entry.Definition.IsPlaced).Select(static entry => entry.Id).ToArray();
         return [.. ids.SelectMany(placement.Runs).OrderByDescending(static run => run.StartedAt).Take(Math.Max(1, limit))
-            .Select(static run => new AltaAutomationRun(run.Id, run.AutomationId, run.Name, run.SessionId, run.ProjectId, run.StartedAt, run.EndedAt, run.Trigger,
-                run.Detail, run.Status, run.Message))];
+            .Select(run => new AltaAutomationRun(run.Id, run.AutomationId, run.Name, run.SessionId, run.ProjectId, run.StartedAt, run.EndedAt, run.Trigger,
+                run.Detail, run.Status, run.Message) { MachineId = run.MachineId ?? automations.Snapshot.Find(run.AutomationId)?.Definition.RunsOn })];
     }
 
     /// <inheritdoc />
@@ -219,9 +223,28 @@ internal sealed partial class DesktopAltaFleet(DesktopFleet fleet, string machin
             }
         }
 
-        if (string.Equals(entry.Definition.RunsOn, runsOn, StringComparison.Ordinal)) return new("ok");
-        var refused = await automations.SaveAsync(entry.Definition with { RunsOn = runsOn }, null, cancellationToken).ConfigureAwait(false);
+        if (string.Equals(entry.Definition.RunsOn, runsOn, StringComparison.Ordinal) && entry.Definition.RunsOnTags is null) return new("ok");
+        var refused = await automations.SaveAsync(entry.Definition with { RunsOn = runsOn, RunsOnTags = null, PublishTo = runsOn is null ? null : entry.Definition.PublishTo }, null,
+            cancellationToken).ConfigureAwait(false);
         Placement.Poke();
+        return refused is null ? new("ok") : new("refused", refused);
+    }
+
+    /// <inheritdoc />
+    public async Task<AltaFleetChange> PlaceAutomationOnTagsAsync(string automationId, IReadOnlyList<string> tags, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(tags);
+        if (Automations is not { } automations || Placement is not { } placement) return new("unavailable", "This computer places no automation on a machine.");
+        if (automations.Snapshot.Find(automationId) is not { } entry) return new("not_found");
+        if (!entry.Source.IsGlobal || entry.Source.IsAssigned)
+            return new("refused", "Only an automation of the configuration of the user runs on other machines: this one is kept with its project, or another device assigned it here.");
+        if (tags.Count is 0 or > AutomationDefinition.MaximumTags || !tags.All(AutomationDefinition.IsTag))
+            return new("invalid", $"A tag is letters, digits, -, _, . and :, at most {AutomationDefinition.MaximumTagLength}; a pool names 1 to {AutomationDefinition.MaximumTags} tags.");
+        if (entry.Definition.Triggers.FirstOrDefault(static trigger => !AutomationPools.Takes(trigger)) is { } kept)
+            return new("refused", $"A pool of machines does not take its trigger '{kept.KindName}': {AutomationPools.Why(kept)}");
+        if (entry.Definition.RunsOnTags is { } held && held.SequenceEqual(tags, StringComparer.OrdinalIgnoreCase)) return new("ok");
+        var refused = await automations.SaveAsync(entry.Definition with { RunsOn = null, RunsOnTags = [.. tags] }, null, cancellationToken).ConfigureAwait(false);
+        placement.Poke();
         return refused is null ? new("ok") : new("refused", refused);
     }
 

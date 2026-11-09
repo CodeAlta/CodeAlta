@@ -40,7 +40,7 @@ internal static class AutomationTakeOvers
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
         var entry = automationId is not null ? automations.Snapshot.Find(automationId) : Find(automations, placement, runId);
         if (entry is null) return ("not_found", null, null);
-        if (entry.Definition.RunsOn is not null)
+        if (entry.Definition.IsPlaced)
         {
             if (placement is null) return ("refused", "Its machine is reached from no fleet here.", null);
             return (await placement.TakeOverAsync(entry, runId, cancellationToken).ConfigureAwait(false)).Status();
@@ -58,6 +58,6 @@ internal static class AutomationTakeOvers
     {
         if (automations.Runs(null, RunsLookedAt).FirstOrDefault(run => run.Id == runId) is { } local) return automations.Snapshot.Find(local.AutomationId);
         if (placement is null) return null;
-        return automations.Snapshot.Entries.FirstOrDefault(entry => entry.Definition.RunsOn is not null && placement.Runs(entry.Id).Any(run => run.Id == runId));
+        return automations.Snapshot.Entries.FirstOrDefault(entry => entry.Definition.IsPlaced && placement.Runs(entry.Id).Any(run => run.Id == runId));
     }
 }

@@ -738,6 +738,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         startedAt = run.StartedAt,
         endedAt = run.EndedAt,
         message = run.Message,
+        machineId = run.MachineId,
     };
 
     private sealed class AutomationCreateOptions

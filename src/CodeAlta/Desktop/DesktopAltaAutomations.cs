@@ -53,10 +53,10 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
             waiting.Add(new AltaWaitingRun(run.Id, run.AutomationId, run.Name, null, null, run.SessionId, run.StartedAt));
         if (placement is not null)
         {
-            foreach (var entry in automations.Snapshot.Entries.Where(static entry => entry.Definition.RunsOn is not null))
+            foreach (var entry in automations.Snapshot.Entries.Where(static entry => entry.Definition.IsPlaced))
             {
                 foreach (var run in placement.Runs(entry.Id).Where(static run => run.Status == AutomationRun.Waiting))
-                    waiting.Add(new AltaWaitingRun(run.Id, entry.Id, entry.Definition.Name, entry.Definition.RunsOn, null, run.SessionId, run.StartedAt));
+                    waiting.Add(new AltaWaitingRun(run.Id, entry.Id, entry.Definition.Name, run.MachineId ?? entry.Definition.RunsOn, null, run.SessionId, run.StartedAt));
             }
         }
 

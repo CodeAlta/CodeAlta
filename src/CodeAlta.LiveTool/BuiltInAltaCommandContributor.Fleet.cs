@@ -194,7 +194,8 @@ internal sealed partial class BuiltInAltaCommandContributor
     {
         var command = Leaf("list", "List the automations with where each runs: this computer, or a machine and where its copy stands there.");
         command.Add(async (_, _) => await WithFleetFloorAsync(context, () => ValueTask.FromResult(HandleFleetAutomationList(context))).ConfigureAwait(false));
-        AddHelpText(command, "`state` is `here`, `copied` (the machine runs it), `pending` (it is copied once the machine answers), `waiting` (it is copied once the machine it left took its copy away; the user may start it anyway in the Automations tab) or `failed` (`message` says why).");
+        AddHelpText(command, "`state` is `here`, `copied` (the machine runs it), `pending` (it is copied once the machine answers), `waiting` (it is copied once the machine it left took its copy away; the user may start it anyway in the Automations tab) or `failed` (`message` says why).",
+            "An automation that runs on the machines with some tags has `tags`, and `members`: each machine of its pool with where its copy stands there.");
         return command;
     }
 
@@ -203,15 +204,18 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? id = null;
         string? machine = null;
         var here = false;
-        var command = Leaf("place", "Make a disabled automation run on a machine, or on this computer again. A person enables it.");
+        var tags = new List<string>();
+        var command = Leaf("place", "Make a disabled automation run on a machine, on the machines with some tags, or on this computer again. A person enables it.");
         command.Add("<automation-id>", "Automation id from `alta fleet automation list`.", value => id = value);
         command.Add("machine=", "The machine it runs on: its name or its id.", value => machine = value);
+        command.Add("tag=", "Run it on the machines of its server that have this tag; repeat it: they must have them all.", value => { if (value is not null) tags.Add(value); });
         command.Add("here", "Run it on this computer again.", value => here = value is not null);
-        command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleFleetAutomationPlaceAsync(context, id, machine, here).ConfigureAwait(false)).ConfigureAwait(false));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleFleetAutomationPlaceAsync(context, id, machine, tags, here).ConfigureAwait(false)).ConfigureAwait(false));
         AddHelpText(
             command,
             "The automation runs there by its triggers while this computer is closed. What would run unattended is enabled by a person: an agent places a disabled automation only (`fleet.needsPerson` otherwise). A paired machine must let this computer automate; a machine reached through a server must be one of the user's own.",
-            "Examples: `alta fleet automation place <automation-id> --machine build-box`; `alta fleet automation place <automation-id> --here`.");
+            "With --tag, every machine of the user's server that has all the tags gets a copy, and each due time or event runs on one of them: the server grants each run to one machine. A pool takes schedules, cron, issues, pull requests and Jira triggers; a machine that cannot reach the server runs nothing.",
+            "Examples: `alta fleet automation place <automation-id> --machine build-box`; `alta fleet automation place <automation-id> --tag gpu --tag linux`; `alta fleet automation place <automation-id> --here`.");
         return command;
     }
 
@@ -552,10 +556,12 @@ internal sealed partial class BuiltInAltaCommandContributor
                 enabled = automation.Enabled,
                 machineId = automation.MachineId,
                 machine = automation.Machine,
+                tags = automation.Tags,
                 state = automation.State,
                 message = automation.Message,
                 copiedAt = automation.CopiedAt,
                 nextRunAt = automation.NextRunAt,
+                members = automation.Members?.Select(static member => new { machineId = member.MachineId, machine = member.Machine, state = member.State, message = member.Message }).ToArray(),
             });
         }
 
@@ -563,7 +569,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
-    private static async ValueTask<int> HandleFleetAutomationPlaceAsync(AltaCommandContext context, string? id, string? machine, bool here)
+    private static async ValueTask<int> HandleFleetAutomationPlaceAsync(AltaCommandContext context, string? id, string? machine, IReadOnlyList<string> tags, bool here)
     {
         const string CommandPath = "alta fleet automation place";
         if (await RefuseSettingsChangeAsync(context, "place an automation, whose sessions have the tools of their own space and agent prompt").ConfigureAwait(false) is { } settingsRefused)
@@ -571,7 +577,9 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (!context.TryGetRequired<IAltaFleet>(nameof(IAltaFleet), out var fleet)) return AltaExitCodes.ServiceUnavailable;
         if (NormalizeOptionalText(id) is not { } reference) return UsageError(context, "usage.missingAutomation", "An automation id is required.", CommandPath);
         var target = NormalizeOptionalText(machine);
-        if ((target is null && !here) || (target is not null && here)) return UsageError(context, "usage.missingMachine", "Name the machine with --machine <name>, or bring it back with --here.", CommandPath);
+        var pool = tags.Select(static tag => tag.Trim()).Where(static tag => tag.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if ((target is null ? 0 : 1) + (pool.Length == 0 ? 0 : 1) + (here ? 1 : 0) != 1)
+            return UsageError(context, "usage.missingMachine", "Name the machine with --machine <name>, the tags of its machines with --tag <tag>, or bring it back with --here.", CommandPath);
         if (context.Services.Get<IAltaAutomations>() is { } automations && IsStartedByAutomation(context, automations)) return AutomationSessionDenied(context);
         var placements = fleet.ListAutomationPlacements();
         var automation = placements.FirstOrDefault(value => string.Equals(value.Id, reference, StringComparison.OrdinalIgnoreCase))
@@ -584,7 +592,9 @@ internal sealed partial class BuiltInAltaCommandContributor
                 $"Automation '{automation.Name}' is enabled: where it runs unattended is chosen by a person, in the Automations tab. Disable it first with `alta automation disable {automation.Id}` and place it then; a person enables it again.");
         }
 
-        var change = await fleet.PlaceAutomationAsync(automation.Id, target, context.CancellationToken).ConfigureAwait(false);
+        var change = pool.Length > 0
+            ? await fleet.PlaceAutomationOnTagsAsync(automation.Id, pool, context.CancellationToken).ConfigureAwait(false)
+            : await fleet.PlaceAutomationAsync(automation.Id, target, context.CancellationToken).ConfigureAwait(false);
         if (change.Status != "ok") return FleetFailure(context, change.Status, change.Message, target);
         AltaJsonlWriter.WriteRecord(context.Stdout, new
         {
@@ -594,7 +604,8 @@ internal sealed partial class BuiltInAltaCommandContributor
             id = automation.Id,
             name = automation.Name,
             machine = target,
-            here = target is null,
+            tags = pool.Length > 0 ? pool : null,
+            here,
             enabled = automation.Enabled,
             note = automation.Enabled ? null : "It stays disabled: a person enables it in the Automations tab. `alta fleet automation list` says when the machine has its copy.",
         });

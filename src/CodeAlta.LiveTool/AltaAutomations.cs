@@ -155,7 +155,11 @@ public sealed record AltaAutomationAutonomy(IReadOnlyList<string> AllowedTools, 
 /// <param name="Status"><c>running</c>, <c>waiting</c> (for the approval of a person), <c>completed</c>, <c>failed</c>, <c>cancelled</c>, <c>interrupted</c> or <c>skipped</c>.</param>
 /// <param name="Message">Why the run failed or was skipped.</param>
 public sealed record AltaAutomationRun(string Id, string AutomationId, string? Name, string? SessionId, string? ProjectId, DateTimeOffset StartedAt,
-    DateTimeOffset? EndedAt, string Trigger, string? Detail, string Status, string? Message);
+    DateTimeOffset? EndedAt, string Trigger, string? Detail, string Status, string? Message)
+{
+    /// <summary>Gets the machine the run worked on, for a run of an automation placed on a machine or a pool; null for one of this computer.</summary>
+    public string? MachineId { get; init; }
+}
 
 /// <summary>A new automation.</summary>
 /// <param name="Name">Its name.</param>
