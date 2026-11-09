@@ -87,7 +87,7 @@ never by the server.
   for 30 days (256 values at most), and each process masks every value it read or gave (from the moment it gives it, before
   the session takes it) for as long as it runs, since a run that took it may still print it.
 - **Environments protect themselves**: an environment can require the approval of named people or teams before a run
-  that uses it starts, limit it to machines with labels, to automations, or to branches. Its rules are signed by a
+  that uses it starts, limit it to machines with tags, to automations, or to branches. Its rules are signed by a
   controller device of its person, so that a server cannot drop one. The approval is a person's device signature, as
   for every remote action, bound to the environment and the version of its rules, the machine, the run and a nonce the
   machine chose, valid for a while; the machine verifies it against its anchored device list and takes it once. The

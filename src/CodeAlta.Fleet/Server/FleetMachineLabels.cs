@@ -39,11 +39,11 @@ public static class FleetMachineLabels
         foreach (var label in labels)
         {
             var trimmed = label?.Trim();
-            if (!IsLabel(trimmed)) throw new ArgumentException($"'{label}' is not a label: letters, digits, -, _, . and :, at most {MaxLength}.", nameof(labels));
+            if (!IsLabel(trimmed)) throw new ArgumentException($"'{label}' is not a tag: letters, digits, -, _, . and :, at most {MaxLength}.", nameof(labels));
             if (!kept.Contains(trimmed, StringComparer.OrdinalIgnoreCase)) kept.Add(trimmed);
         }
 
-        if (kept.Count > MaxLabels) throw new ArgumentException($"A machine has at most {MaxLabels} labels.", nameof(labels));
+        if (kept.Count > MaxLabels) throw new ArgumentException($"A machine has at most {MaxLabels} tags.", nameof(labels));
         return kept;
     }
 

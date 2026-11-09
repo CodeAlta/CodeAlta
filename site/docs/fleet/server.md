@@ -133,7 +133,7 @@ A computer of yours that runs CodeAlta Desktop and is connected to the server ca
 The **Fleet** button of the title bar opens the **Fleet** canvas (`/fleet`): the machines of the server and their sessions, with their titles, as they change; without a server, the machines paired with this computer. Its **Settings** button opens **Settings** > **Fleet** > **Server**. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. The name of a machine this computer reaches opens its page. `altanode status` says whether the node is connected to its server.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-fleet-canvas.webp" alt="The Fleet canvas: the server CodeAlta online, the machines online, at work and waiting, and a card per machine (this computer, Build box with its labels gpu and always-on, Workstation) with their sessions" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-fleet-canvas.webp" alt="The Fleet canvas: the server CodeAlta online, the machines online, at work and waiting, and a card per machine (this computer, Build box with its tags gpu and always-on, Workstation) with their sessions" loading="lazy">
   <figcaption class="small text-secondary mt-2">The Fleet canvas shows your machines and their sessions.</figcaption>
 </figure>
 

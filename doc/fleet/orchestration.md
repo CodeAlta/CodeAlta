@@ -43,7 +43,7 @@ and an owner; a project automation stays in its repository, where code review co
 | Triggers | Schedules, Git and tracker events, events of other tools, fleet events, by hand ([triggers](#triggers)) |
 | Action | A prompt, or a workflow script (a pinned, approved version) with its arguments. This is content: sealed for the owner's devices and the machines that may run it in personal scope and Private spaces; readable by the scope's members in a Managed space |
 | Runs with | Agent prompt, provider or tier, model, effort, permission mode, sandbox, sub-sessions, as today, plus the credential rule ([below](#credentials-of-unattended-runs)) |
-| Placement | **Runs on**: a machine, labels (`macos`, `infra-prod`), a team pool, with preferences ([placement](#placement-and-dispatch)) |
+| Placement | **Runs on**: a machine, tags (`macos`, `infra-prod`), a team pool, with preferences ([placement](#placement-and-dispatch)) |
 | Autonomy | What its runs may do without a person, and where approvals go ([autonomy](#autonomy-and-approvals)) |
 | Concurrency | Maximum runs at once; when one is due while another runs: skip, queue or replace |
 | Limits | Budget per run and per period, maximum duration |
@@ -192,7 +192,7 @@ editor says why another one is refused:
 
 ## Workflows across machines
 
-- A workflow script places its sub-agents: `agent(prompt, { machine: "any", labels: ["macos"] })` starts the child on a
+- A workflow script places its sub-agents: `agent(prompt, { machine: "any", tags: ["macos"] })` starts the child on a
   machine that matches, through the server, with the parent's restrictions; `parallel()` fans out across machines.
 - The workflow's run stays owned by the session that runs the script, on its machine; children elsewhere report back
   through deliveries, which wait while the parent's machine is offline.
@@ -215,7 +215,7 @@ trigger behind every autonomous action.
 | --- | --- | --- |
 | Scope, owner | Team automation of the release team | Organization automation, owned by the SRE team |
 | Trigger | Jira version released (plugin source on the machine), or a schedule | incident.io incident declared (webhook at the server), or a message in the incident's Slack channel (Socket Mode on the machine) |
-| Runs on | Any team machine with the repositories | A machine labeled `infra-prod`, inside the infrastructure |
+| Runs on | Any team machine with the repositories | A machine tagged `infra-prod`, inside the infrastructure |
 | Credentials | The team's API key provider; the machine's Jira and Git access | The organization's gateway key; read-only Grafana and Kubernetes access plus a narrow write role |
 | Autonomy | Read only; publishing waits for an approval by the release manager | Read only, plus three remediation tools (restart a pod, roll back a deployment, scale up) allowed when the diagnosis is confident; anything else asks the on-call person |
 | Outputs | A draft pull request or page; a card in the channel | The diagnosis with its evidence and confidence in the incident timeline and Slack thread; what it did, if anything |

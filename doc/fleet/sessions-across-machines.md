@@ -58,8 +58,8 @@ lost acknowledgement or a restart is acknowledged again, not delivered. The rule
   and both machines.
 
 **Placement.** "Any machine that can" picks among the online nodes of the fleet that have the project (or may clone
-it), have a ready provider for the selection, can hold the sandbox, and match the labels asked (`macos`, `xcode`,
-`always-on`, `gpu`...), preferring the least busy. Labels are set by node owners; some are measured (OS, tools found).
+it), have a ready provider for the selection, can hold the sandbox, and match the tags asked (`macos`, `xcode`,
+`always-on`, `gpu`...), preferring the least busy. Tags are set by node owners; some are measured (OS, tools found).
 
 ## Projects across machines
 

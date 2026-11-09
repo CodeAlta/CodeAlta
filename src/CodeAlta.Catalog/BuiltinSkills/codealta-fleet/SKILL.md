@@ -1,6 +1,6 @@
 ---
 name: codealta-fleet
-description: Use this skill to work with the CodeAlta fleet - the machines this computer is paired with or reaches through a CodeAlta Server - to pick a machine for a task (capabilities, labels, readiness, load), start or steer a session on another machine, move a session, place or run an automation on a machine, read the statistics, updates, health and devices of the fleet, read people and access (roles, teams, grants, owners) to propose a change for a person to apply, read the signed policy of the organization and its kill switch, and read and check the audit log.
+description: Use this skill to work with the CodeAlta fleet - the machines this computer is paired with or reaches through a CodeAlta Server - to pick a machine for a task (capabilities, tags, readiness, load), start or steer a session on another machine, move a session, place or run an automation on a machine, read the statistics, updates, health and devices of the fleet, read people and access (roles, teams, grants, owners) to propose a change for a person to apply, read the signed policy of the organization and its kill switch, and read and check the audit log.
 ---
 
 # The CodeAlta fleet
@@ -14,8 +14,8 @@ The fleet is this computer and the machines it reaches: paired machines, and the
 1. `alta fleet machine list --ready` lists the machines that take a new session from this computer now. Each record has:
    - `readiness`: `ready`, `not_allowed` (this computer may not start sessions there), `no_provider`, `updating`, or `offline`, `connecting`, `unauthorized`;
    - `working`: how many of its sessions work now, its load;
-   - `os`, `capabilities` (`sandbox`, `moves`), `labels` (given by its owner, such as `gpu`), `providers`, `permissions`.
-2. Choose by what the task needs first, then by load: the system (`os` is `macos` for an iOS build), a label (`--label gpu`), a capability (`--capability sandbox`), a provider (`--provider <name>`); among those, the lowest `working`, and `channel` `direct` before `relayed`. Prefer this computer when nothing requires another machine.
+   - `os`, `capabilities` (`sandbox`, `moves`), `tags` (given by its owner, such as `gpu`; `labels` repeats them under their former name), `providers`, `permissions`.
+2. Choose by what the task needs first, then by load: the system (`os` is `macos` for an iOS build), a tag (`--tag gpu`), a capability (`--capability sandbox`), a provider (`--provider <name>`); among those, the lowest `working`, and `channel` `direct` before `relayed`. Prefer this computer when nothing requires another machine.
 3. `alta fleet machine show <machine>` asks the machine for its projects and its ready providers: the project `id` and the provider `key` are what a session there names. A project whose `repository` is the one you work in is the same repository there.
 
 A machine that is not ready is not chosen. Say why to the user when no machine fits: its owner gives a permission, configures a provider, or brings it online.

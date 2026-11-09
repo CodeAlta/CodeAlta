@@ -421,8 +421,9 @@ function AgentsSection({ epoch, machine, api }: { epoch: string; machine: Machin
 }
 
 /**
- * The labels of the machine, as `altanode labels` sets them there: it publishes them to its servers, and an environment of
- * the fleet runs only on the machines with one of its labels. Added from the field, removed from their tag.
+ * The tags of the machine, as `altanode tags` sets them there: it publishes them to its servers, an environment of the fleet
+ * runs only on the machines with one of its tags, and an automation that runs on tags on the machines with all of them. Added
+ * from the field, removed from their chip. The node API still names them labels, their name before 4.2.
  */
 function LabelsSection({ epoch, machine, api }: { epoch: string; machine: MachineView; api: MachinePageApi }) {
   const { t } = useShellLanguage();
@@ -456,16 +457,16 @@ function LabelsSection({ epoch, machine, api }: { epoch: string; machine: Machin
   };
   const added = parseLabels(typed);
   const valid = added.length > 0 && added.every(isMachineLabel);
-  return <section className="machine-section machine-labels" aria-label={t("Labels")}>
-    <h2>{t("Labels")}</h2>
-    <p className="muted-text">{t("{name} publishes its labels to its servers; an environment runs only on the machines with one of its labels.", { name: machine.name })}</p>
+  return <section className="machine-section machine-labels" aria-label={t("Machine tags")}>
+    <h2>{t("Machine tags")}</h2>
+    <p className="muted-text">{t("{name} publishes its tags to its servers. An environment runs only on the machines with one of its tags; an automation that runs on tags, on the machines with all of them.", { name: machine.name })}</p>
     {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
     {labels && <div className="machine-labels-row">
-      {labels.length === 0 && <span className="muted-text">{t("No label.")}</span>}
+      {labels.length === 0 && <span className="muted-text">{t("No tag.")}</span>}
       {labels.map(label => <Tag key={label} minimal onRemove={busy ? undefined : () => void save(labels.filter(other => other !== label))}
         aria-label={label}>{label}</Tag>)}
       <form className="machine-labels-add" onSubmit={event => { event.preventDefault(); if (valid && !busy) void save([...labels, ...added]); }}>
-        <InputGroup small value={typed} placeholder="gpu, prod" disabled={busy} intent={typed.trim() && !valid ? "danger" : "none"} aria-label={t("New labels")}
+        <InputGroup small value={typed} placeholder="gpu, prod" disabled={busy} intent={typed.trim() && !valid ? "danger" : "none"} aria-label={t("New tags")}
           onChange={event => setTyped(event.target.value)} />
         <Button type="submit" size="small" text={t("Add")} disabled={busy || !valid} />
       </form>

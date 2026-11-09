@@ -126,7 +126,7 @@ Ask an agent of CodeAlta Desktop to work with your machines: "run the iOS tests 
 
 | The agent | With |
 | --- | --- |
-| Lists the machines with their state, version, labels, readiness and load, and picks one | `alta fleet machine list`, `alta fleet machine show <machine>` |
+| Lists the machines with their state, version, tags, readiness and load, and picks one | `alta fleet machine list`, `alta fleet machine show <machine>` |
 | Starts a session on a machine and gets its answer back | `alta session create --machine <machine>` |
 | Lists the sessions of a machine | `alta fleet machine sessions <machine>` |
 | Sees what a move would meet, and moves a session | `alta fleet move status`, `alta fleet move start` |

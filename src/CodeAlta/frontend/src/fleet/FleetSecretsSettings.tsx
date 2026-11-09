@@ -257,7 +257,7 @@ function EnvironmentRow({ environment, busy, remove }: { environment: FleetEnvir
     <span className="fleet-secret-tags">
       {environment.approverNames.length > 0 ? <Tag minimal intent="warning">{t("Approved by {names}", { names: environment.approverNames.join(", ") })}</Tag>
         : <Tag minimal>{t("No approval")}</Tag>}
-      {environment.labels.length > 0 && <Tag minimal>{t("On machines labeled {labels}", { labels: environment.labels.join(", ") })}</Tag>}
+      {environment.labels.length > 0 && <Tag minimal>{t("On machines tagged {tags}", { tags: environment.labels.join(", ") })}</Tag>}
       {environment.automations.length > 0 && <Tag minimal>{t("{count} automations", { count: String(environment.automations.length) })}</Tag>}
       {!environment.verified && <Tag minimal intent="danger">{t("Its rules do not verify")}</Tag>}
     </span>
@@ -274,7 +274,7 @@ function EnvironmentRow({ environment, busy, remove }: { environment: FleetEnvir
   </li>;
 }
 
-/** The form that adds an environment: its name, the people who approve its runs, the labels of its machines. */
+/** The form that adds an environment: its name, the people who approve its runs, the tags of its machines. */
 function NewEnvironmentForm({ overview, busy, onSave }: { overview: FleetSecretsOverview; busy: boolean; onSave: (name: string, approvers: string[], labels: string[]) => Promise<boolean> }) {
   const { t } = useShellLanguage();
   const [name, setName] = useState("");
@@ -290,7 +290,7 @@ function NewEnvironmentForm({ overview, busy, onSave }: { overview: FleetSecrets
     <div className="fleet-secret-new-row">
       <InputGroup small value={name} placeholder="production" disabled={busy} intent={trimmed && !isEnvironmentName(trimmed) || taken ? "danger" : "none"}
         aria-label={t("Name of the environment")} onChange={event => setName(event.target.value)} />
-      <InputGroup small value={labels} placeholder={t("Labels of its machines")} disabled={busy} aria-label={t("Labels of its machines")}
+      <InputGroup small value={labels} placeholder={t("Tags of its machines")} disabled={busy} aria-label={t("Tags of its machines")}
         onChange={event => setLabels(event.target.value)} />
       <Button type="submit" size="small" text={t("Add")} disabled={!ready} />
     </div>

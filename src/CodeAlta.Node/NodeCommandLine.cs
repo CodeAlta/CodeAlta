@@ -478,30 +478,37 @@ internal static class NodeCommandLine
             return handlers.Secrets?.Invoke(secrets) ?? handlers.NotImplemented("secrets");
         });
 
-        var labels = new NodeLabelCommandOptions();
-        var labelsCommand = new Command("labels", "List and change the labels of this machine")
+        var tags = new NodeLabelCommandOptions();
+        var tagsCommand = TagsCommand("tags", hidden: false);
+        // The name of 4.0 and 4.1, kept for the scripts that use it, and not listed.
+        var labelsCommand = TagsCommand("labels", hidden: true);
+
+        Command TagsCommand(string name, bool hidden)
         {
-            new CommandUsage("Usage: {NAME} [list] [options]"),
-            new CommandUsage("       {NAME} add|remove <label>... [options]"),
-            new CommandUsage("       {NAME} set [<label>...] [options]"),
-            _,
-            "The labels of this machine, such as gpu or prod: it publishes them to its",
-            "servers, and an environment of the fleet runs only on the machines with",
-            "one of its labels. CodeAlta Desktop changes them on the page of the machine.",
-            "  list    the labels",
-            "  add     adds labels",
-            "  remove  removes labels",
-            "  set     replaces the labels; set alone removes them all",
-            _,
-            "Options:",
-        };
-        AddProfile(labelsCommand, labels.Profile);
-        labelsCommand.Add("<>", "The command and its labels");
-        labelsCommand.Add((_, words) =>
-        {
-            labels.Words.AddRange(words);
-            return handlers.Labels?.Invoke(labels) ?? handlers.NotImplemented("labels");
-        });
+            var command = new Command(name, "List and change the tags of this machine") { Hidden = hidden };
+            command.Add(new CommandUsage("Usage: {NAME} [list] [options]"));
+            command.Add(new CommandUsage("       {NAME} add|remove <tag>... [options]"));
+            command.Add(new CommandUsage("       {NAME} set [<tag>...] [options]"));
+            command.Add(_);
+            command.Add("The tags of this machine, such as gpu or prod: it publishes them to its");
+            command.Add("servers, an environment of the fleet runs only on the machines with one");
+            command.Add("of its tags, and an automation that runs on tags runs on the machines with");
+            command.Add("all of them. CodeAlta Desktop changes them on the page of the machine.");
+            command.Add("  list    the tags");
+            command.Add("  add     adds tags");
+            command.Add("  remove  removes tags");
+            command.Add("  set     replaces the tags; set alone removes them all");
+            command.Add(_);
+            command.Add("Options:");
+            AddProfile(command, tags.Profile);
+            command.Add("<>", "The command and its tags");
+            command.Add((_, words) =>
+            {
+                tags.Words.AddRange(words);
+                return handlers.Labels?.Invoke(tags) ?? handlers.NotImplemented(name);
+            });
+            return command;
+        }
 
         var llama = new NodeLlamaCommandOptions();
         var llamaCommand = new Command("llama", "Tell the llama.cpp builds, models and servers of the running node")
@@ -673,6 +680,7 @@ internal static class NodeCommandLine
             projectsCommand,
             automationsCommand,
             secretsCommand,
+            tagsCommand,
             labelsCommand,
             llamaCommand,
             permissionModeCommand,

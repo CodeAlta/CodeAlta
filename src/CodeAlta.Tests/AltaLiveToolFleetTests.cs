@@ -25,9 +25,14 @@ public sealed partial class AltaLiveToolTests
         Assert.AreEqual(("ready", 1, "macos"), (machines[1].GetProperty("readiness").GetString(), machines[1].GetProperty("working").GetInt32(), machines[1].GetProperty("os").GetString()));
         Assert.AreEqual(3, Records(list, "alta.fleet.machine.summary").Single().GetProperty("count").GetInt32());
 
-        // What a task needs: ready, a label, a capability, a provider.
-        var ready = await dispatcher.InvokeAsync(["fleet", "machine", "list", "--ready", "--label", "GPU", "--capability", "sandbox"], caller: FleetAgent);
+        // What a task needs: ready, a tag, a capability, a provider.
+        var ready = await dispatcher.InvokeAsync(["fleet", "machine", "list", "--ready", "--tag", "GPU", "--capability", "sandbox"], caller: FleetAgent);
         CollectionAssert.AreEqual(new[] { "mac-mini" }, Records(ready, "alta.fleet.machine").Select(static line => line.GetProperty("name").GetString()).ToArray());
+        var tagged = Records(ready, "alta.fleet.machine").Single();
+        Assert.AreEqual(("gpu", "gpu"), (tagged.GetProperty("tags")[0].GetString(), tagged.GetProperty("labels")[0].GetString()), "the tags, and under their former name");
+        // --label, the former name of --tag, still works.
+        var former = await dispatcher.InvokeAsync(["fleet", "machine", "list", "--ready", "--label", "GPU", "--capability", "sandbox"], caller: FleetAgent);
+        CollectionAssert.AreEqual(new[] { "mac-mini" }, Records(former, "alta.fleet.machine").Select(static line => line.GetProperty("name").GetString()).ToArray());
         var online = await dispatcher.InvokeAsync(["fleet", "machine", "list", "--online", "--provider", "codex"], caller: FleetAgent);
         CollectionAssert.AreEqual(new[] { "mac-mini" }, Records(online, "alta.fleet.machine").Select(static line => line.GetProperty("name").GetString()).ToArray());
 

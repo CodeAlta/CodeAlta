@@ -55,7 +55,7 @@ test("linked to a server, the canvas shows the server's machines; one this compu
 
 test("a machine shows the labels it publishes", () => {
   const html = render(directory({ status: "ok", machines: [machine("gpu-id", { name: "gpu box", labels: ["gpu", "prod"] }), machine("plain-id", { name: "plain" })] }));
-  assert.match(html, /<div class="fleet-machine-labels" aria-label="Labels"><span class="bp6-tag[^"]*"><span class="bp6-text-overflow-ellipsis bp6-fill">gpu<\/span><\/span>/u);
+  assert.match(html, /<div class="fleet-machine-labels" aria-label="Machine tags"><span class="bp6-tag[^"]*"><span class="bp6-text-overflow-ellipsis bp6-fill">gpu<\/span><\/span>/u);
   assert.equal(html.match(/fleet-machine-labels/gu)?.length, 1, "a machine without a label shows none");
 });
 

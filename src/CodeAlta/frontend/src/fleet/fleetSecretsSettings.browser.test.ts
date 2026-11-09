@@ -74,7 +74,7 @@ test("a run that waits for an environment is approved in a popover, and the page
     await page.until(`document.querySelector('.fleet-approval-row')`, "the run that waits");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-approval-row .secret-reference').textContent`), "Deploy the API");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-environment-row .bp6-tag')].map(tag => tag.textContent)`),
-      ["Approved by Alex", "On machines labeled prod"]);
+      ["Approved by Alex", "On machines tagged prod"]);
     await page.clickText(".fleet-approval-row .bp6-button", "Approve…");
     await page.until(`document.querySelector('.fleet-server-confirm')`, "the confirmation");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-server-confirm p').textContent`), "Approve this run of production on Mac mini?");

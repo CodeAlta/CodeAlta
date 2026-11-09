@@ -42,27 +42,32 @@ public sealed class NodeLabelTests
     }
 
     [TestMethod]
-    public async Task TheOwner_ListsAddsRemovesAndSetsTheLabels_WithAltanode()
+    public async Task TheOwner_ListsAddsRemovesAndSetsTheTags_WithAltanode()
     {
         using var root = new NodeTestRoot();
-        async Task<(int Code, string Output, string Error)> RunAsync(params string[] words)
+        async Task<(int Code, string Output, string Error)> RunNamedAsync(string name, params string[] words)
         {
             using var output = new StringWriter();
             using var error = new StringWriter();
             var code = await new NodeApplication(output, error) { InitializeLogging = false, ServiceEnvironment = static () => null }
-                .RunAsync(["labels", .. words, "--data-root", root.DataRoot]);
+                .RunAsync([name, .. words, "--data-root", root.DataRoot]);
             return (code, output.ToString().Trim(), error.ToString());
         }
 
-        Assert.AreEqual((NodeExitCodes.Success, "This machine has no label."), (await RunAsync()) is var empty ? (empty.Code, empty.Output) : default);
+        Task<(int Code, string Output, string Error)> RunAsync(params string[] words) => RunNamedAsync("tags", words);
+
+        Assert.AreEqual((NodeExitCodes.Success, "This machine has no tag."), (await RunAsync()) is var empty ? (empty.Code, empty.Output) : default);
         Assert.AreEqual((NodeExitCodes.Success, $"gpu{Environment.NewLine}prod"), (await RunAsync("add", "gpu", "prod")) is var added ? (added.Code, added.Output) : default);
         Assert.AreEqual($"prod", (await RunAsync("remove", "GPU")).Output);
         Assert.AreEqual($"eu{Environment.NewLine}always-on", (await RunAsync("set", "eu", "always-on")).Output);
         var refused = await RunAsync("add", "two words");
         Assert.AreEqual(NodeExitCodes.InvalidUsage, refused.Code);
-        StringAssert.Contains(refused.Error, "is not a label");
+        StringAssert.Contains(refused.Error, "is not a tag");
         Assert.AreEqual(NodeExitCodes.InvalidUsage, (await RunAsync("rename", "x")).Code);
-        Assert.AreEqual("This machine has no label.", (await RunAsync("set")).Output, "set alone removes them all");
+        Assert.AreEqual("This machine has no tag.", (await RunAsync("set")).Output, "set alone removes them all");
+        // The former name writes the same file.
+        Assert.AreEqual($"gpu", (await RunNamedAsync("labels", "add", "gpu")).Output);
+        Assert.AreEqual($"gpu", (await RunAsync()).Output);
     }
 
     [TestMethod]

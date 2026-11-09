@@ -3,19 +3,19 @@ using CodeAlta.Fleet.Server;
 
 namespace CodeAlta.Node;
 
-/// <summary>The options of <c>altanode labels</c>.</summary>
+/// <summary>The options of <c>altanode tags</c> (and of <c>altanode labels</c>, its former name).</summary>
 internal sealed class NodeLabelCommandOptions
 {
     /// <summary>Gets the profile options.</summary>
     public NodeProfileOptions Profile { get; } = new();
 
-    /// <summary>Gets the words: the subcommand and its labels.</summary>
+    /// <summary>Gets the words: the subcommand and its tags.</summary>
     public List<string> Words { get; } = [];
 }
 
 /// <summary>
-/// The labels of the machine of a profile (<see cref="FleetMachineLabels"/>), for its owner on that machine:
-/// <c>altanode labels list</c>, <c>add</c>, <c>remove</c> and <c>set</c>. A node that runs publishes them at its next
+/// The tags of the machine of a profile (<see cref="FleetMachineLabels"/>, which keeps them under their former name), for its
+/// owner on that machine: <c>altanode tags list</c>, <c>add</c>, <c>remove</c> and <c>set</c>. A node that runs publishes them at its next
 /// publication, and the rules of environments read them at the next run.
 /// </summary>
 /// <param name="output">Standard output.</param>
@@ -47,12 +47,12 @@ internal sealed class NodeLabelCommands(TextWriter output, TextWriter error)
                     kept = FleetMachineLabels.Write(fleetRoot, labels);
                     break;
                 case "list" or "add" or "remove":
-                    return await UsageAsync(command == "list" ? "labels list takes no argument." : $"labels {command} takes one label or more.").ConfigureAwait(false);
+                    return await UsageAsync(command == "list" ? "tags list takes no argument." : $"tags {command} takes one tag or more.").ConfigureAwait(false);
                 default:
-                    return await UsageAsync($"'{command}' is not a command of labels: list, add, remove or set.").ConfigureAwait(false);
+                    return await UsageAsync($"'{command}' is not a command of tags: list, add, remove or set.").ConfigureAwait(false);
             }
 
-            await output.WriteLineAsync(kept.Count == 0 ? "This machine has no label." : string.Join(Environment.NewLine, kept)).ConfigureAwait(false);
+            await output.WriteLineAsync(kept.Count == 0 ? "This machine has no tag." : string.Join(Environment.NewLine, kept)).ConfigureAwait(false);
             return NodeExitCodes.Success;
         }
         catch (ArgumentException exception)

@@ -149,7 +149,7 @@ public sealed record AltaFleetMachine(string Id, string Name, string State, stri
     /// <summary>Gets what it offers (<c>sandbox</c>, <c>moves</c>), as it publishes it to a server; empty when unknown.</summary>
     public IReadOnlyList<string> Capabilities { get; init; } = [];
 
-    /// <summary>Gets the labels its owner gave it, as it publishes them to a server; empty when unknown.</summary>
+    /// <summary>Gets the tags its owner gave it (named labels before 4.2), as it publishes them to a server; empty when unknown.</summary>
     public IReadOnlyList<string> Labels { get; init; } = [];
 
     /// <summary>Gets the names of its ready providers.</summary>

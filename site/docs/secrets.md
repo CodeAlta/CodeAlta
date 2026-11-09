@@ -72,9 +72,9 @@ Your computer seals each value for the machines you choose and for your other co
 
 ### Environments
 
-An environment is a set of values with rules, such as `production`. Under **Environments**, give it a name, the labels of the machines it runs on (none for all your machines) and the people who approve its runs (none for no approval). Then set values **Where it applies** is that environment.
+An environment is a set of values with rules, such as `production`. Under **Environments**, give it a name, the tags of the machines it runs on (none for all your machines) and the people who approve its runs (none for no approval). Then set values **Where it applies** is that environment.
 
-An automation uses an environment with `environment = "production"` in its table. Its run starts only on a machine with one of the labels, and, when the environment needs an approval, waits for it: **Runs that wait for you** lists it at the top of the page, under the name your computer verified, and **Approve…** confirms it beside its row; a person you name as approver finds it on their own page. An approval is for that run only. A name two environments share, such as two people's `production`, starts no run. Its session keeps the values of the environment when the machine restarts, until the rules of the environment change. The labels of a machine are set on its page in **Settings > Fleet > Machines**, or with `altanode labels` on it (see [Label your machines](fleet/machines.md#label-your-machines)).
+An automation uses an environment with `environment = "production"` in its table. Its run starts only on a machine with one of the tags, and, when the environment needs an approval, waits for it: **Runs that wait for you** lists it at the top of the page, under the name your computer verified, and **Approve…** confirms it beside its row; a person you name as approver finds it on their own page. An approval is for that run only. A name two environments share, such as two people's `production`, starts no run. Its session keeps the values of the environment when the machine restarts, until the rules of the environment change. The tags of a machine are set on its page in **Settings > Fleet > Machines**, or with `altanode tags` on it (see [Tag your machines](fleet/machines.md#tag-your-machines)).
 
 ## Agents
 

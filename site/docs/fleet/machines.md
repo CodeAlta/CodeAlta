@@ -177,11 +177,13 @@ On the machine of the node:
 
 `--space <space>` with `add` or `clone` puts the project in a space too. While the node runs, it makes the change, and keeps a project that still has sessions; otherwise the commands change the catalog of the profile directly.
 
-## Label your machines
+## Tag your machines
 
-Labels such as `gpu`, `prod` or `always-on` say what a machine is for. Its page in CodeAlta Desktop shows them under **Labels**: type one or more, separated by commas or spaces, and **Add**; the cross of a label removes it. On the machine itself, `altanode labels` lists them, `altanode labels add gpu prod` and `altanode labels remove gpu` change them, and `altanode labels set` replaces them all.
+Tags such as `gpu`, `prod` or `always-on` say what a machine is for. Its page in CodeAlta Desktop shows them under **Machine tags**: type one or more, separated by commas or spaces, and **Add**; the cross of a tag removes it. On the machine itself, `altanode tags` lists them, `altanode tags add gpu prod` and `altanode tags remove gpu` change them, and `altanode tags set` replaces them all.
 
-A machine linked to a CodeAlta Server publishes its labels there: the **Fleet** canvas shows them on its card, agents find the machines with `alta fleet machine list --label gpu`, and an [environment](../secrets.md#environments) that names labels runs only on the machines with one of them. A label is letters, digits, `-`, `_`, `.` and `:`.
+A machine linked to a CodeAlta Server publishes its tags there: the **Fleet** canvas shows them on its card, agents find the machines with `alta fleet machine list --tag gpu`, and an [environment](../secrets.md#environments) that names tags runs only on the machines with one of them. A tag is letters, digits, `-`, `_`, `.` and `:`.
+
+Tags were named labels before CodeAlta 4.2: `altanode labels` and `--label` still work.
 
 ## Pair it with CodeAlta Desktop
 
@@ -214,7 +216,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | **Permissions** | What a session of the machine without a mode of its own does before it runs a command or changes a file: **Bypass permissions** (the default) or **Ask first**; the sandbox its sessions run in, or why it cannot run there and what to install (see [What its sessions may do](sessions.md#what-its-sessions-may-do)) |
 | **Agents of other machines** | The spaces where agents of other computers may start sessions there and send prompts to its sessions, the sandbox their sessions run in at least, and whether they may bypass permissions ([Let agents start sessions on it](sessions.md#let-agents-start-sessions-on-it)) |
 | **People** | The people of your organization who may use it, each on their own sessions, and who asked to ([People and Access](people-and-access.md#people-on-your-own-machines)) |
-| **Labels** | Its [labels](#label-your-machines), which it publishes to its servers: add them, or remove one with its cross |
+| **Machine tags** | Its [tags](#tag-your-machines), which it publishes to its servers: add them, or remove one with its cross |
 | **Projects** | Clone a repository there, add a folder, remove a project; how many [worktrees](sessions.md#start-a-session-on-it) its sessions work in, and what they take on its disk |
 | **Providers** | Each provider of the machine and whether it is ready; when it is not, why: no key, the secret of the machine it waits for, not signed in. **Add a provider…** and **Add its key…** take its key here: it goes to the machine encrypted from end to end and is kept in its secrets (`PROVIDER_<KEY>_API_KEY`), never in its configuration. **Sign in…** signs in a provider such as GitHub Copilot or xAI on the machine: its code shows here with **Copy**; enter it on the provider's page in your browser |
 | **Sign-ins** | What the machine signs in to by itself, and as whom: Codex and the other providers that sign in with an account, ACP agents, MCP servers with OAuth, and the tools of its spaces. **Sign in…** does it from here ([Sign in on a machine](#sign-in-on-a-machine)) |

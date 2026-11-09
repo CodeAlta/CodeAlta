@@ -10,7 +10,7 @@ How Fleet keeps your machines and your conversations safe. The [overview](readme
 
 | A server sees | A server never sees |
 | --- | --- |
-| Your machines, their names, labels, versions and whether they are online | The prompts, answers and tool calls of a session |
+| Your machines, their names, tags, versions and whether they are online | The prompts, answers and tool calls of a session |
 | The sessions of a linked space: their state, provider, model, times and counts (turns, tool calls, tokens) | The title of a session: it travels encrypted with a key of your computers |
 | The statistics of your machines: numbers, providers, models and tools | The names of your projects and files: projects travel as keys only your computers can name |
 | Who reached which machine, when, and how much data went through | What a relayed connection carries: it is encrypted from one computer to the other |

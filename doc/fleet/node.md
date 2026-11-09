@@ -107,7 +107,7 @@ for everyone. A dedicated machine gets its own OS user (`codealta`) with its own
 | Identity | Node id, name (editable), owner or team, OS, architecture, CodeAlta version | The fleet |
 | State | Online, busy (sessions at work), always-on, last seen | The fleet |
 | Capabilities | Sandbox backend available, tools found on `PATH` (git, gh, dotnet, node, python, xcodebuild, docker...), CPU and memory class, free disk | The fleet |
-| Labels | Set by the owner (`always-on`, `ios`, `gpu`...) | The fleet |
+| Tags (stored as `labels`: `fleet/labels.json`, the inventory) | Set by the owner (`always-on`, `ios`, `gpu`...) | The fleet |
 | Providers | Keys, types, readiness, models (never a credential) | The owner's devices; the fleet sees readiness only |
 | Projects | Repository keys, branches checked out | The fleet sees the keys (for matching); paths and branches go to the owner's devices only |
 | Spaces | The linked spaces whose sessions it publishes | The server of each space sees only its own |
@@ -170,7 +170,7 @@ providers of the space that are ready there, with **Set up…** beside what is m
 a household asks: **Will this still run after a restart or a logout?** (the kind of service, automatic login,
 lingering; the node answers it in `control.status`, from what `ServiceManager` reads of its own service, and the page
 shows **Start at boot** with the command that fixes it) and, for an automation, **Why can't this machine run it?** (credential kind, tools, sandbox, project,
-labels, its local policy).
+tags, its local policy).
 
 ## Automations and statistics
 

@@ -1,6 +1,6 @@
 ---
 title: Run automations on a machine or a pool, and queue work beyond what a machine or a model endpoint can take
-status: approved
+status: in-progress
 created: 2026-11-09
 summary: An automation targets one machine or the machines that carry some tags; a machine runs at most N sessions at once and queues the others; a provider takes at most N requests at once. Each limit is enforced by the one process the work already passes through, so no distributed lock is needed.
 ---
@@ -158,7 +158,7 @@ Each phase ships alone, in this order.
 
 **First: machine tags**
 
-- [ ] 0. Say **tag** for a machine wherever a person reads or types it: the section of `MachinePage.tsx` and its messages in every language, the card of the Fleet canvas, the environment form, `altanode tags` (`altanode labels` kept as a hidden alias, in `NodeCommandLine.cs` and `NodeLabelCommands.cs`), `--tag` and the field `tags` of `alta fleet machine list` (`--label` and `labels` kept), the `codealta-fleet` skill, and the user guide (`site/docs/fleet/machines.md`, whose section becomes **Tag your machines** with the links to it, `site/docs/secrets.md`, `site/docs/fleet/sessions.md`). Stored and exchanged names stay; the existing C# types keep theirs.
+- [x] 0. Say **tag** for a machine wherever a person reads or types it: the section of `MachinePage.tsx` and its messages in every language, the card of the Fleet canvas, the environment form, `altanode tags` (`altanode labels` kept as a hidden alias, in `NodeCommandLine.cs` and `NodeLabelCommands.cs`), `--tag` and the field `tags` of `alta fleet machine list` (`--label` and `labels` kept), the `codealta-fleet` skill, and the user guide (`site/docs/fleet/machines.md`, whose section becomes **Tag your machines** with the links to it, `site/docs/secrets.md`, `site/docs/fleet/sessions.md`). Stored and exchanged names stay; the existing C# types keep theirs.
 
 **Phase 1: sessions at work on a machine**
 

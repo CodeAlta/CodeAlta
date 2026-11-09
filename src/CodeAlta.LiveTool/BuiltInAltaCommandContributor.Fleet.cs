@@ -45,7 +45,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static Command CreateFleetCommand(AltaCommandContext context)
     {
         var group = Group("fleet", "Use the fleet of CodeAlta: the machines this computer reaches, their sessions, the moves, where automations run, statistics, updates and health.");
-        var machine = Group("machine", "Read the machines of the fleet: their state, version, capabilities, labels, readiness and load, their sessions, and the devices of those this computer manages.");
+        var machine = Group("machine", "Read the machines of the fleet: their state, version, capabilities, tags, readiness and load, their sessions, and the devices of those this computer manages.");
         machine.Add(CreateFleetMachineListCommand(context));
         machine.Add(CreateFleetMachineShowCommand(context));
         machine.Add(CreateFleetMachineSessionsCommand(context));
@@ -95,21 +95,23 @@ internal sealed partial class BuiltInAltaCommandContributor
     {
         var online = false;
         var ready = false;
-        var labels = new List<string>();
+        var tags = new List<string>();
         var capabilities = new List<string>();
         string? provider = null;
-        var command = Leaf("list", "List the machines: this computer first, then each machine with its state, version, capabilities, labels, readiness and load.");
+        var command = Leaf("list", "List the machines: this computer first, then each machine with its state, version, capabilities, tags, readiness and load.");
         command.Add("online", "Only the machines online now.", value => online = value is not null);
         command.Add("ready", "Only the machines that take a new session from this computer now (`readiness` is `ready`).", value => ready = value is not null);
-        command.Add("label=", "Only the machines with this label; repeat it for several.", value => { if (value is not null) labels.Add(value); });
+        command.Add("tag=", "Only the machines with this tag; repeat it for several.", value => { if (value is not null) tags.Add(value); });
+        // The name of 4.0 and 4.1, kept for the scripts that use it.
+        command.Add("label=", "Only the machines with this tag (the former name of --tag).", value => { if (value is not null) tags.Add(value); }, hidden: true);
         command.Add("capability=", "Only the machines that offer this capability, such as `sandbox` or `moves`; repeat it for several.", value => { if (value is not null) capabilities.Add(value); });
         command.Add("provider=", "Only the machines with a ready provider of this name.", value => provider = value);
-        command.Add(async (_, _) => await WithFleetFloorAsync(context, () => ValueTask.FromResult(HandleFleetMachineList(context, online, ready, labels, capabilities, provider))).ConfigureAwait(false));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, () => ValueTask.FromResult(HandleFleetMachineList(context, online, ready, tags, capabilities, provider))).ConfigureAwait(false));
         AddHelpText(
             command,
             "`readiness` says whether a machine takes a session now: `ready`, `not_allowed` (this computer may not start sessions there), `no_provider`, `updating`, or its state when it is not online. `working` is how many of its sessions work now, its load.",
-            "`capabilities` and `labels` come from what the machine publishes to a server: empty for a machine reached directly only.",
-            "Examples: `alta fleet machine list`; `alta fleet machine list --ready --label gpu`; `alta fleet machine list --capability sandbox`.");
+            "`tags` say what its owner gives it to do, such as `gpu`; `labels` repeats them under their former name. `capabilities` come from what the machine publishes to a server: empty for a machine reached directly only.",
+            "Examples: `alta fleet machine list`; `alta fleet machine list --ready --tag gpu`; `alta fleet machine list --capability sandbox`.");
         return command;
     }
 
@@ -381,14 +383,14 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
-    private static int HandleFleetMachineList(AltaCommandContext context, bool online, bool ready, IReadOnlyList<string> labels, IReadOnlyList<string> capabilities, string? provider)
+    private static int HandleFleetMachineList(AltaCommandContext context, bool online, bool ready, IReadOnlyList<string> tags, IReadOnlyList<string> capabilities, string? provider)
     {
         if (!context.TryGetRequired<IAltaFleet>(nameof(IAltaFleet), out var fleet)) return AltaExitCodes.ServiceUnavailable;
         var providerName = NormalizeOptionalText(provider);
         var machines = fleet.ListMachines().Where(machine =>
             (!online || machine.State == "online")
             && (!ready || machine.Readiness == "ready")
-            && labels.All(label => machine.Labels.Contains(label.Trim(), StringComparer.OrdinalIgnoreCase))
+            && tags.All(tag => machine.Labels.Contains(tag.Trim(), StringComparer.OrdinalIgnoreCase))
             && capabilities.All(capability => machine.Capabilities.Contains(capability.Trim(), StringComparer.OrdinalIgnoreCase))
             && (providerName is null || machine.Providers.Contains(providerName, StringComparer.OrdinalIgnoreCase))).ToArray();
         foreach (var machine in machines) AltaJsonlWriter.WriteRecord(context.Stdout, FleetMachineRecord(context, machine));
@@ -802,6 +804,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         os = machine.Os,
         appVersion = machine.Version,
         capabilities = machine.Capabilities,
+        tags = machine.Labels,
+        // The former name of the tags, kept for the scripts that read it.
         labels = machine.Labels,
         providers = machine.Providers,
         permissions = machine.Permissions,
