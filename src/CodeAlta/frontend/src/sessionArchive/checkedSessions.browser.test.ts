@@ -16,6 +16,7 @@ test("sessions checked in the saved sessions are archived, restored and deleted 
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./checkedSessions.mount.tsx", import.meta.url))], outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife" });
     await writeFile(join(root, "style.css"), await readFile(new URL("../../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8")
+      + await readFile(new URL("../../node_modules/@blueprintjs/table/lib/css/table.css", import.meta.url), "utf8")
       + await readFile(new URL("../style.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body class="bp6-dark"><div id="root"></div><script src="fixture.js"></script></body></html>');
@@ -45,7 +46,7 @@ test("sessions checked in the saved sessions are archived, restored and deleted 
     const wait = (expression: string, milliseconds = 8_000) => evaluate<boolean>(
       `new Promise(resolve=>{const end=Date.now()+${milliseconds};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`);
     const dialog = "document.querySelector('dialog.session-browser[open]')";
-    const titles = `[...${dialog}.querySelectorAll('tbody td[data-column="title"] strong')].map(cell=>cell.textContent)`;
+    const titles = `[...${dialog}.querySelectorAll('.session-browser-name')].map(cell=>cell.textContent)`;
     const archivedButton = `${dialog}.querySelector('.session-browser-archived')`;
     const footerButton = (text: string) => `[...${dialog}.querySelectorAll('.session-browser-footer button')].find(button=>button.textContent===${JSON.stringify(text)})`;
     const confirm = "document.querySelector('.confirm-form')";
@@ -55,7 +56,7 @@ test("sessions checked in the saved sessions are archived, restored and deleted 
     const box = (title: string) => `${dialog}.querySelector('input[aria-label="Select ${title}"]')`;
     const all = `${dialog}.querySelector('input[aria-label="Select every session shown"]')`;
     const shiftClick = (title: string) => `${box(title)}.dispatchEvent(new MouseEvent('click',{bubbles:true,shiftKey:true}))`;
-    const checkedTitles = `[...${dialog}.querySelectorAll('tbody tr')].filter(row=>row.querySelector('input[type=checkbox]').checked).map(row=>row.querySelector('strong').textContent)`;
+    const checkedTitles = `[...${dialog}.querySelectorAll('.session-browser-results input[aria-label^="Select "]:not([aria-label="Select every session shown"])')].filter(input=>input.checked).map(input=>input.getAttribute('aria-label').slice(7))`;
     const status = `${dialog}.querySelector('.checked-footer [role=status]')?.textContent`;
 
     // The sessions of the project, the newest first, each with a box; nothing checked, the usual footer.
@@ -132,6 +133,12 @@ test("sessions checked in the saved sessions are archived, restored and deleted 
     assert.equal(await wait(`!${status}`), true);
     assert.deepEqual(await state("restored"), [["old", "older"]]);
     assert.equal(await evaluate(`[...${dialog}.querySelectorAll('.app-window-body, .session-browser-results, .session-browser-footer, .session-browser-toolbar')].every(part=>part.scrollWidth<=part.clientWidth+1)`), true);
+
+    // Twelve sessions: every row and every column of the table is drawn, the messages too, not only the first ones.
+    await evaluate("checkedFixture.show(8)");
+    assert.equal(await wait(`${dialog} && ${titles}.length===12`), true, await evaluate<string>(`String(${titles}.length)`));
+    assert.equal(await wait(`${dialog}.querySelectorAll('.session-browser-results .bp6-table-cell.session-browser-messages').length===12`), true);
+    assert.equal(await evaluate(`!!${dialog}.querySelector('button[data-column="messages"]')`), true);
   } finally {
     socket?.close();
     await endBrowser(browser);

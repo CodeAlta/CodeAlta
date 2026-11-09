@@ -26,6 +26,9 @@ const archived = [
 ];
 const snapshot: WorkspaceSnapshot = { configured: true, projects: [{ id: "p1", name: "Parser", path: "/parser", archived: false }, { id: "p2", name: "Docs", path: "/docs", archived: false }],
   sessions: [...sessions, elsewhere], projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false } as WorkspaceSnapshot;
+// More sessions, older ones, for a table that has to draw more rows than the first ones.
+const older = (count: number) => Array.from({ length: count }, (_, index) => session(`older-${index}`, `Older session ${index + 1}`, `2026-10-${String(20 - index).padStart(2, "0")}T10:00:00Z`));
+let extra = 0;
 const state = { archived: [] as string[][], restored: [] as string[][], removed: [] as string[][], worktrees: [] as string[][], checked: [] as string[][], opened: [] as string[] };
 
 let show: ((value: number | null) => void) | undefined;
@@ -33,7 +36,7 @@ function Fixture() {
   const [shown, setShown] = useState<number | null>(null);
   show = setShown;
   return <div className="ide-shell" style={{ display: "block", padding: 16 }}>
-    {shown !== null && <SessionBrowser key={shown} snapshot={snapshot} projectId="p1" stale={false}
+    {shown !== null && <SessionBrowser key={shown} snapshot={{ ...snapshot, sessions: [...snapshot.sessions, ...older(extra)] }} projectId="p1" stale={false}
       open={tab => { state.opened.push(tab.sessionId); setShown(null); return true; }} close={() => setShown(null)}
       archived={{ sessions: archived, busy: false, deleteAsks: true, restore: () => { }, info: () => { }, remove: async () => null }}
       checking={{ catalog: [...sessions, elsewhere, ...archived], busy: false, projectName: id => id === "p1" ? "Parser" : "Docs",
@@ -48,7 +51,7 @@ function Fixture() {
 }
 
 let revision = 0;
-Object.assign(window, { checkedFixture: { state, show() { flushSync(() => show!(++revision)); } } });
+Object.assign(window, { checkedFixture: { state, show(more = 0) { extra = more; flushSync(() => show!(++revision)); } } });
 createRoot(document.getElementById("root")!).render(<StrictMode>
   <ShellLanguageContext.Provider value={{ locale: "en", choice: "en", setLanguage: () => { } }}><Fixture /></ShellLanguageContext.Provider>
 </StrictMode>);

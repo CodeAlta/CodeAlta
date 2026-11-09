@@ -1,5 +1,7 @@
 import { AppWindowSurface } from "./AppWindow";
 import { Button, HTMLSelect, InputGroup, PortalProvider } from "@blueprintjs/core";
+import { Cell, Column, ColumnHeaderCell, Regions, RenderMode, SelectionModes, Table2 } from "@blueprintjs/table";
+import "@blueprintjs/table/lib/css/table.css";
 import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import type { WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { ConfirmPopover } from "./ConfirmPopover";
@@ -95,6 +97,10 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   // The sessions checked, by id: they stay checked while the search or the order change, not when the scope or the view do.
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
   const anchor = useRef<string | null>(null);
+  // The table of the sessions: its columns fill the width of the window, the title taking what the others leave.
+  const table = useRef<Table2>(null);
+  const results = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
   // The question of the deletion of the checked sessions, with the worktrees as the host checked them.
   const [deletingChecked, setDeletingChecked] = useState<Readonly<{ error: string | null }> | null>(null);
   const [removingWorktrees, setRemovingWorktrees] = useState(false);
@@ -163,10 +169,36 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
     const done = await (archive ? checking.restore(checkedRows) : checking.archive(checkedRows));
     setChecked(current => withChecked(current, done, false));
   }
+  const titleOf = (row: WorkspaceSession) => plainTitle(row.fullTitle || row.title) || t("Untitled session");
+  // The check column, then the provider, the time and the messages at their width; the title takes the rest.
+  const fixed = (checking ? 40 : 0) + 150 + 130 + 96;
+  const columnWidths = [...(checking ? [40] : []), Math.max(220, width - fixed - 2), 150, 130, 96];
+  const cellClass = (index: number, name: string) => [name, index === selected ? "session-browser-selected" : "",
+    stale || !rows[index].valid ? "session-browser-unavailable" : ""].filter(Boolean).join(" ");
+  function cellContent(index: number, column: SortColumn) {
+    const { row, valid, tab } = rows[index];
+    if (column === "title") return <span className="session-browser-title-cell">
+      {runningIn(tab) ? <ActivitySpinner size={12} label={t("Running")} /> : <AppIcon name={archive ? "archive" : "assistant"} size={13} />}
+      <strong className="session-browser-name">{titleOf(row)}</strong>
+      {!valid && <small>{t("Ambiguous or unverified identity — unavailable")}</small>}</span>;
+    if (column === "provider") return row.providerKey ? <span className="with-logo"><ProviderIcon providerKey={row.providerKey} size={13} />{row.providerKey}</span> : "—";
+    if (column === "messages") return row.messageCount ?? "—";
+    // A time after the browser opened (an archive since) is said as now, not as to come.
+    const shownTime = sessionTime(time(row), locale, Math.max(now, Date.parse(time(row)) || 0));
+    return <time dateTime={shownTime.dateTime} title={shownTime.title}>{shownTime.label || t("unknown")}</time>;
+  }
   const project = snapshot.projects.filter(row => row.id === projectId);
   const scopeName = scope === null ? t("Chats") : project.length === 1 ? project[0].name : t("ambiguous or missing");
   useEffect(() => { const element = dialog.current!; element.showModal(); search.current?.focus(); return () => element.close(); }, []);
-  useEffect(() => { dialog.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" }); }, [selected, query, scope]);
+  useEffect(() => { if (rows[selected]) table.current?.scrollToRegion(Regions.row(selected)); }, [selected, query, scope]);
+  useEffect(() => {
+    const element = results.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => setWidth(element.clientWidth));
+    observer.observe(element);
+    setWidth(element.clientWidth);
+    return () => observer.disconnect();
+  }, []);
   function activate(index: number) {
     const item = rows[index];
     if (archive) { if (item && !stale && !archive.busy) archive.restore(item.row); return; }
@@ -202,8 +234,7 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
     <div className="session-browser-toolbar">
       <InputGroup inputRef={search} className="session-browser-filter" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />}
         placeholder={t("Title or ID")} aria-label={t("Find saved sessions")} maxLength={256} value={query}
-        onChange={event => { setQuery(event.target.value); setSelectedKey(null); }} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="session-browser-results"
-        aria-activedescendant={rows[selected] ? `session-browser-row-${selected}` : undefined} />
+        onChange={event => { setQuery(event.target.value); setSelectedKey(null); }} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="session-browser-results" />
       <HTMLSelect aria-label={t("Session browser scope")} value={scope === null ? "global" : "project"}
         onChange={event => { setScope(event.target.value === "global" ? null : projectId); setSelectedKey(null); clearChecked(); }}>
         {projectId !== null && <option value="project">{project.length === 1 ? project[0].name : t("ambiguous or missing")}{project[0]?.archived ? t(" (archived, read-only)") : ""}</option>}
@@ -217,36 +248,32 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
       <span className="bp6-text-muted" role="status">{t("{shown} of {matching} sessions", { shown: rows.length, matching: page.matched })}{page.hidden > 0 && <>{" · "}{t("{count} matches omitted by the 200-row display limit.", { count: page.hidden })}</>}</span>
     </div>
     {(stale || refused) && <p role="alert">{t("Catalog, host or selection changed, or identity is ambiguous. Close and reopen the browser; nothing was opened.")}</p>}
-    <div className="session-browser-results">
-      <table id="session-browser-results" aria-label={t(archive ? "Archived sessions" : "Saved sessions")}>
-        <thead><tr>{checking && <th scope="col" data-column="check">
+    <div ref={results} id="session-browser-results" className="session-browser-results" role="region" aria-label={t(archive ? "Archived sessions" : "Saved sessions")}>
+      {/* Drawn once the window is open and measured: the table sees its own resizes only when it starts visible. */}
+      {rows.length > 0 && width > 0 && <Table2 ref={table} numRows={rows.length} enableRowHeader={false} enableMultipleSelection={false} enableColumnInteractionBar={false}
+        enableGhostCells={false} defaultRowHeight={30} columnWidths={columnWidths} selectionModes={SelectionModes.ROWS_AND_CELLS}
+        // At most 200 rows: drawn at once. Drawn in batches, the table starts again with each change of what it shows.
+        renderMode={RenderMode.NONE}
+        selectedRegionTransform={region => region.rows ? Regions.row(region.rows[0]) : region} selectedRegions={[Regions.row(selected)]}
+        onSelection={regions => { const index = regions[0]?.rows?.[0]; if (index !== undefined && rows[index]) setSelected(index); }}
+        // What the cells show, as values that stay the same while it does: a new list of the same rows draws nothing again.
+        cellRendererDependencies={[rows.map(item => tabKey(item.tab)).join("\n"), [...checked].join("\n"), selected, stale, observed, !!archive, locale, sort.column, sort.descending]}>
+        {[...(checking ? [<Column key="check" columnHeaderCellRenderer={() => <ColumnHeaderCell className="session-browser-check" nameRenderer={() =>
           <input type="checkbox" aria-label={t("Select every session shown")} disabled={shownCheckable.length === 0}
             checked={shownCheckable.length > 0 && shownCheckable.every(id => checked.has(id))}
             ref={element => { if (element) element.indeterminate = shownCheckable.some(id => checked.has(id)) && !shownCheckable.every(id => checked.has(id)); }}
-            onChange={() => { const all = shownCheckable.every(id => checked.has(id)); anchor.current = null; setChecked(current => withChecked(current, shownCheckable, !all)); }} /></th>}
-          {(archive ? archivedColumns : columns).map(([column, label]) => <th key={column} scope="col" data-column={column}
-          aria-sort={sort.column === column ? sort.descending ? "descending" : "ascending" : "none"}>
-          <button type="button" onClick={() => setSort(current => ({ column, descending: current.column === column ? !current.descending : column === "updated" || column === "messages" }))}>
-            {t(label)}{sort.column === column && <AppIcon name="chevronDown" size={12} className={sort.descending ? undefined : "sort-ascending"} />}</button></th>)}</tr></thead>
-        <tbody>{rows.map(({ row, valid, tab }, index) => {
-          // A time after the browser opened (an archive since) is said as now, not as to come.
-          const shownTime = sessionTime(time(row), locale, Math.max(now, Date.parse(time(row)) || 0));
-          const running = runningIn(tab);
-          return <tr id={`session-browser-row-${index}`} key={valid ? tabKey(tab) : `${tabKey(tab)}:${index}`} aria-selected={index === selected}
-            aria-disabled={stale || !valid || undefined} title={`${row.fullTitle || row.title}\n${row.id}`}
-            onClick={() => setSelected(index)} onDoubleClick={() => activate(index)}>
-            {checking && <td data-column="check" onDoubleClick={event => event.stopPropagation()}>
-              <input type="checkbox" aria-label={t("Select {title}", { title: plainTitle(row.fullTitle || row.title) || t("Untitled session") })}
-                checked={checked.has(row.id)} disabled={!checkable(rows[index])} onClick={event => check(row.id, event)} onChange={() => { }} /></td>}
-            <td data-column="title"><span>{running ? <ActivitySpinner size={12} label={t("Running")} /> : <AppIcon name={archive ? "archive" : "assistant"} size={13} />}
-              <strong>{plainTitle(row.fullTitle || row.title) || t("Untitled session")}</strong>
-              {!valid && <small>{t("Ambiguous or unverified identity — unavailable")}</small>}</span></td>
-            <td data-column="provider">{row.providerKey ? <span className="with-logo"><ProviderIcon providerKey={row.providerKey} size={13} />{row.providerKey}</span> : "—"}</td>
-            <td data-column="updated"><time dateTime={shownTime.dateTime} title={shownTime.title}>{shownTime.label || t("unknown")}</time></td>
-            <td data-column="messages">{row.messageCount ?? "—"}</td>
-          </tr>;
-        })}</tbody>
-      </table>
+            onChange={() => { const all = shownCheckable.every(id => checked.has(id)); anchor.current = null; setChecked(current => withChecked(current, shownCheckable, !all)); }} />} />}
+          cellRenderer={index => <Cell interactive className={cellClass(index, "session-browser-check")}>
+            <input type="checkbox" aria-label={t("Select {title}", { title: titleOf(rows[index].row) })}
+              checked={checked.has(rows[index].row.id)} disabled={!checkable(rows[index])} onClick={event => check(rows[index].row.id, event)} onChange={() => { }} /></Cell>} />] : []),
+          ...(archive ? archivedColumns : columns).map(([column, label]) => <Column key={column} columnHeaderCellRenderer={() => <ColumnHeaderCell
+            nameRenderer={() => <button type="button" className="session-browser-sort" data-column={column}
+              aria-sort={sort.column === column ? sort.descending ? "descending" : "ascending" : "none"}
+              onClick={() => setSort(current => ({ column, descending: current.column === column ? !current.descending : column === "updated" || column === "messages" }))}>
+              {t(label)}{sort.column === column && <AppIcon name="chevronDown" size={12} className={sort.descending ? undefined : "sort-ascending"} />}</button>} />}
+            cellRenderer={index => <Cell className={cellClass(index, `session-browser-${column}`)} tooltip={column === "title" ? `${rows[index].row.fullTitle || rows[index].row.title}\n${rows[index].row.id}` : undefined}>
+              <div className="session-browser-cell" onDoubleClick={() => activate(index)}>{cellContent(index, column)}</div></Cell>} />)]}
+      </Table2>}
       {!rows.length && <p className="bp6-text-muted">{t(archive && !query.trim() ? "No archived sessions in this scope." : "No matching saved sessions in the loaded scope.")}</p>}
     </div>
     {checking && checkedRows.length > 0 ? <footer className="session-browser-footer checked-footer">
