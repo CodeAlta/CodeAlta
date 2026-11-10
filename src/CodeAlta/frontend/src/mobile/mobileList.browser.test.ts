@@ -4,6 +4,7 @@ import { browserExecutable } from "../browserTarget";
 import type { ActivityFacts, Live } from "./contract";
 import { session } from "./fixtureServer";
 import { openPhone, tapMenuItem } from "./phoneBrowser";
+import { testLimit } from "../testTime";
 
 // Where the pictures of this test go, when a person wants to look at them.
 const shots = process.env.CODEALTA_SHOTS ?? "";
@@ -11,7 +12,7 @@ const minute = 60_000;
 const ago = (minutes: number) => new Date(Date.now() - minutes * minute).toISOString();
 const reading: ActivityFacts = { state: "running", headline: "Reading the grammar", thoughts: 2, tools: 5, succeeded: 4, failed: 0, running: 1, startedAt: ago(1.5) };
 
-test("the phone lists sub-agents under their parent, folded, and keeps its order still while it is looked at", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("the phone lists sub-agents under their parent, folded, and keeps its order still while it is looked at", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   const phone = await openPhone(server => {
     server.state.sessions = [
       session("root", "Refactor the parser into modules", "p1", 20, {}, { worktree: "fond-peak" }),
@@ -98,7 +99,7 @@ test("the phone lists sub-agents under their parent, folded, and keeps its order
     await pause(5500);
     assert.deepEqual(await rows(), before, "nothing moves under a finger");
     await evaluate("window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, isPrimary: true }))");
-    await waitFor(`document.querySelector("#sessions .row").dataset.id === "s4"`, "the new order once quiet", 8000);
+    await waitFor(`document.querySelector("#sessions .row").dataset.id === "s4"`, "the new order once quiet", testLimit(8000));
     assert.deepEqual(await rows(), ["s4", "root", "c2", "c1", "c3", "g1", "s3", "o1"]);
 
     // Back from a session, the list is in its latest order at once.

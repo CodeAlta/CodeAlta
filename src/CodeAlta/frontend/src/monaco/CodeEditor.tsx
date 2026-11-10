@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { Classes } from "@blueprintjs/core";
-import { followPageFont, followShellTheme, monaco, pageFontFamily } from "./monacoEnvironment";
+import { followPageFont, followShellTheme, monaco, pageFontOptions } from "./monacoEnvironment";
 import { ensureMonacoLanguage } from "./monacoLanguages";
 import type { EditorLanguage } from "./fileLanguage";
 
@@ -44,7 +44,7 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
     const model = monaco.editor.createModel(latest.current.value,
       monaco.languages.getLanguages().some(known => known.id === language) ? language : "plaintext");
     const instance = monaco.editor.create(node, { model, automaticLayout: true, ariaLabel: label, readOnly, glyphMargin: comments,
-      fontFamily: pageFontFamily("code"), fontSize: 13, lineHeight: 20, minimap: { enabled: false },
+      ...pageFontOptions("code"), minimap: { enabled: false },
       scrollBeyondLastLine: false, wordWrap: wrap ? "on" : "off", renderLineHighlight: "line", stickyScroll: { enabled: false },
       padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: false, tabSize: 2,
       folding: false, occurrencesHighlight: "off", matchBrackets: "never",

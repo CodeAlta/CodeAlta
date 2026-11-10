@@ -223,7 +223,7 @@ public sealed class SessionNotesRpcTests
             f._lifetime = f.RunCore(body, launch.Task);
             f._lifetimeObserver = Settle(f._lifetime);
             launch.TrySetResult();
-            try { await f._lifetime.WaitAsync(TimeSpan.FromSeconds(10)); await f._lifetimeObserver; f.Caller.Dispose(); }
+            try { await f._lifetime.WithinAsync(TestTime.Seconds(10)); await f._lifetimeObserver; f.Caller.Dispose(); }
             catch (Exception ex) { ex.Data["RetainedFixture"] = f; ex.Data["OriginalLifetime"] = f._lifetime; throw; }
             finally { f.Release.TrySetResult(""); f._stopLaunch.TrySetResult(); }
         }

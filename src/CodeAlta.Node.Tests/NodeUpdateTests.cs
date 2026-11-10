@@ -135,7 +135,7 @@ public sealed class NodeUpdateTests
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var runner = new RecordingRunner(exitCode: 0, gate: release.Task);
         var first = Application(root, out _, out var firstError, runner).RunAsync(["run", "--data-root", root.DataRoot, "--port", "0"]);
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(10);
         while (runner.Started.Count == 0 && DateTime.UtcNow < deadline) await Task.Delay(20, TestContext.CancellationToken);
         Assert.AreEqual(1, runner.Started.Count, firstError.ToString());
 
@@ -145,7 +145,7 @@ public sealed class NodeUpdateTests
         var startedBySecond = runner.Started.Count - 1;
         store.Confirm(target);
         release.TrySetResult();
-        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+        await Task.WhenAll(first, second).WithinAsync(TestTime.Seconds(30), TestContext.CancellationToken);
 
         Assert.IsTrue(ended, "the second run is refused at once");
         Assert.AreEqual(0, startedBySecond, "the second run starts no other version");
@@ -191,7 +191,7 @@ public sealed class NodeUpdateTests
         var confirmed = false;
         var app = Application(root, out _, out var error, new RecordingRunner(0), directory: store.VersionPath(running), started: (_, stop) =>
         {
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            var deadline = DateTime.UtcNow + TestTime.Seconds(30);
             while (store.Read().Trial is not null && DateTime.UtcNow < deadline) Thread.Sleep(20);
             confirmed = store.Read().Trial is null;
             stop();

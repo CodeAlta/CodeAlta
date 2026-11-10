@@ -309,6 +309,21 @@ public sealed class ChromiumToolsTests : BrowserToolsTests
     private protected override BrowserEngine Engine => BrowserEngine.Chromium;
 
     [TestMethod]
+    public async Task AScriptRunInADocumentJustReplaced_RunsInTheNewOne()
+    {
+        await using var session = Host.NewSession();
+        await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/form")}}"}""");
+        var page = (CodeAlta.Browser.Drivers.Cdp.CdpPage)session.Pages[0].Page;
+        var main = page.MainFrame;
+        var world = page.KnownMainWorld(main) ?? throw new AssertFailedException("The page knows no world for its document.");
+        // The world of the document before: the browser no longer has it, and tells of the new one a moment later.
+        page.KnowMainWorld(main, world + 1_000_000);
+        var told = Task.Delay(200).ContinueWith(_ => page.KnowMainWorld(main, world), TaskScheduler.Default);
+        StringAssert.Contains(await session.OkAsync("evaluate_script", """{"function":"() => document.title"}"""), "Sign in · Demo");
+        await told;
+    }
+
+    [TestMethod]
     [DataRow(true, DisplayName = "Isolated")]
     [DataRow(false, DisplayName = "Persistent")]
     public async Task TheBrowserOfCodeAlta_StartsWithoutATabOfItsOwn_AndKeepsRunningWhenTheTabsOfASessionClose(bool isolated)

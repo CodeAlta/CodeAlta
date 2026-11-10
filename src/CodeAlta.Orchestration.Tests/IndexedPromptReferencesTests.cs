@@ -69,7 +69,7 @@ public sealed class IndexedPromptReferencesTests
                 new ProjectFileSnapshotCache(), new InMemoryProjectFileUsageStore(), traversal, new ProjectFileSearchScorer()));
             using var canceled = new CancellationTokenSource();
             var first = references.SearchAsync(root, "one", canceled.Token);
-            Assert.IsTrue(traversal.Entered.Wait(TimeSpan.FromSeconds(10)), "the first search starts reading the folder");
+            Assert.IsTrue(traversal.Entered.Wait(TestTime.Seconds(10)), "the first search starts reading the folder");
             // The picker cancels its request when the query changes or the popup closes.
             canceled.Cancel();
             try { await first; } catch (OperationCanceledException) { }
@@ -88,7 +88,7 @@ public sealed class IndexedPromptReferencesTests
     private static async Task<OwnedReferenceSearchResult> Settled(IndexedPromptReferences references, string root, string query)
     {
         var waited = System.Diagnostics.Stopwatch.StartNew();
-        while (waited.Elapsed < TimeSpan.FromSeconds(30))
+        while (waited.Elapsed < TestTime.Seconds(30))
         {
             var result = await references.SearchAsync(root, query, CancellationToken.None);
             if (result.Status != "indexing") return result;

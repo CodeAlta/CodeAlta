@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { testLimit } from "./testTime";
 
 const frontend = fileURLToPath(new URL("../", import.meta.url));
 const scripts = JSON.parse(readFileSync(join(frontend, "package.json"), "utf8")).scripts;
@@ -19,7 +20,7 @@ function report(source: string) {
     const configured = /--test-reporter=(\S+)/.exec(scripts.test)?.[1];
     const reporter = configured ?? "spec";
     const result = spawnSync(process.execPath, ["--test", `--test-reporter=${reporter}`, file],
-      { cwd: frontend, encoding: "utf8", env, timeout: 15_000 });
+      { cwd: frontend, encoding: "utf8", env, timeout: testLimit(15_000) });
     assert.ifError(result.error);
     return { status: result.status, output: result.stdout + result.stderr };
   } finally { rmSync(folder, { recursive: true, force: true }); }

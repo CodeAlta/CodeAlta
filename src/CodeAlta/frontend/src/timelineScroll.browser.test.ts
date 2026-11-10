@@ -8,12 +8,13 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
 
 // Headless Edge + test-owned profile/fixture when installed. This is a mounted browser layout test,
 // not a native WebView2 acceptance test or a launch of the real desktop/catalog.
-test("mounted timeline follows the final page across later layout growth", { skip: !edge, timeout: 25_000 }, async () => {
+test("mounted timeline follows the final page across later layout growth", { skip: !edge, timeout: testLimit(25_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-timeline-mounted-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -27,7 +28,7 @@ test("mounted timeline follows the final page across later layout growth", { ski
       `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(profile, browser);
     const pages: { type?: string; url?: string; webSocketDebuggerUrl?: string }[] =
-      await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+      await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     const tab = pages.find(value => value.type === "page" && value.url === "about:blank");
     assert.ok(tab?.webSocketDebuggerUrl, "test-owned browser tab unavailable");
     socket = new WebSocket(tab.webSocketDebuggerUrl);
@@ -38,7 +39,7 @@ test("mounted timeline follows the final page across later layout growth", { ski
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: string } }>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => reject(new Error(`test browser ${method} timed out`)), 12_000);
+      const timer = setTimeout(() => reject(new Error(testLimitRanOut(testLimit(12_000), `the answer of the test browser to ${method}`))), testLimit(12_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)) as { id?: number; result?: { result?: { value?: string } }; error?: object };
         if (message.id !== id) return;
@@ -52,7 +53,7 @@ test("mounted timeline follows the final page across later layout growth", { ski
     });
     await command("Page.enable");
     const loaded = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => { socket!.removeEventListener("message", listener); reject(new Error("test page did not load")); }, 10_000);
+      const timer = setTimeout(() => { socket!.removeEventListener("message", listener); reject(new Error(testLimitRanOut(testLimit(10_000), "the test page loaded"))); }, testLimit(10_000));
       const listener = (event: MessageEvent) => {
         if ((JSON.parse(String(event.data)) as { method?: string }).method !== "Page.loadEventFired") return;
         socket!.removeEventListener("message", listener);
@@ -69,7 +70,7 @@ test("mounted timeline follows the final page across later layout growth", { ski
       const observer = new MutationObserver(check);
       observer.observe(document.body, { childList: true, subtree: true, characterData: true });
       check();
-      setTimeout(() => { observer.disconnect(); resolve('timeout'); }, 6000);
+      setTimeout(() => { observer.disconnect(); resolve('timeout'); }, ${testLimit(6000)});
     })` });
     const raw = response.result?.value;
     if (!raw || raw === "timeout") {

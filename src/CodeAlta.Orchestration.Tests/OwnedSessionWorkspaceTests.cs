@@ -252,7 +252,7 @@ public sealed class OwnedSessionWorkspaceTests
         }
         internal Task Wait(Task task)
         {
-            lock (_gate) return Keep(task.WaitAsync(TimeSpan.FromSeconds(5)), _expected.GetValueOrDefault(task));
+            lock (_gate) return Keep(task.WithinAsync(TestTime.Seconds(5)), _expected.GetValueOrDefault(task));
         }
         internal CancellationTokenSource CreateCaller()
         {
@@ -289,7 +289,7 @@ public sealed class OwnedSessionWorkspaceTests
         }
         internal async Task<bool> DrainAsync(Task[] snapshot, List<Exception> failures)
         {
-            var drains = snapshot.Select(task => (Original: task, Wait: task.WaitAsync(TimeSpan.FromSeconds(5)))).ToArray();
+            var drains = snapshot.Select(task => (Original: task, Wait: task.WithinAsync(TestTime.Seconds(5)))).ToArray();
             lock (_gate) _cleanup.AddRange(drains.Select(drain => drain.Wait));
             var confirmed = true;
             foreach (var drain in drains)

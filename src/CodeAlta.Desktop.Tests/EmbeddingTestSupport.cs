@@ -50,7 +50,7 @@ internal sealed class FakeEngines(int dimensions = 4, bool words = false) : IEmb
     public IEmbeddingEngine Load(EmbeddingWorkerLoad load)
     {
         if (load.ModelId == "broken") throw new InvalidOperationException("The model did not load.");
-        LoadGate.Wait(TimeSpan.FromSeconds(10));
+        LoadGate.Wait(TestTime.Seconds(10));
         Interlocked.Increment(ref _loads);
         LoadedThreads.Enqueue(load.Threads);
         return new Engine(this);
@@ -67,7 +67,7 @@ internal sealed class FakeEngines(int dimensions = 4, bool words = false) : IEmb
             try
             {
                 owner.Started.Release();
-                owner.Gate.Wait(TimeSpan.FromSeconds(10));
+                owner.Gate.Wait(TestTime.Seconds(10));
             }
             finally
             {

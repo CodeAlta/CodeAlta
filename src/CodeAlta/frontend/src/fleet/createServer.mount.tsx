@@ -1,4 +1,5 @@
-// Disposable page: Create my server over SSH (the first try does not answer from here, the second goes through), Join
+// Disposable page: Create my server over SSH (the first try does not answer from here, the second goes through; behind a
+// name of a tailnet, Tailscale Serve publishes nothing until the person asks, with the password sudo asks for it), Join
 // an organization, and the Fleet button with a device that waits. Driven by createServer.browser.test.ts through
 // `serverFixture`: what the page asks is recorded.
 import { StrictMode, useState } from "react";
@@ -23,8 +24,11 @@ let tries = 0;
 const api: CreateServerApi = {
   status: async () => ({ status: "ok", servers: [], deviceId: "me", words: null, personName: "Alex Example" }),
   createServer: async request => {
-    calls.push(JSON.stringify({ ssh: request.target, address: request.address, port: request.port, ownCertificate: request.ownCertificate }));
+    calls.push(JSON.stringify({ ssh: request.target, address: request.address, port: request.port, ownCertificate: request.ownCertificate,
+      ...(request.tailscaleServe ? { tailscaleServe: true, sudo: !!request.sudoPassword } : {}) }));
     const first = ++tries === 1;
+    const tailnet = request.address?.includes(".ts.net") ?? false;
+    const shown = request.address ?? "http://box:2586";
     return (async function* () {
       for (const [step, detail] of [["connect", "me@box"], ["check", "Linux x86_64 · .NET SDK 10.0.114"], ["install", "CodeAlta Server 4.0.0 · ~/.dotnet/tools"],
         ["service", "systemd --user unit, port 2586, every network of the machine"]]) {
@@ -32,9 +36,10 @@ const api: CreateServerApi = {
         await wait(20);
         yield event(step, "done", detail);
       }
-      yield event("reach", "running", "http://box:2586");
-      if (first) { yield event("reach", "failed", "http://box:2586 · port 2586", "server_blocked_ufw"); return; }
-      yield event("reach", "done", "http://box:2586");
+      yield event("reach", "running", shown);
+      if (tailnet && !request.tailscaleServe) { yield event("reach", "failed", "sudo tailscale serve --bg --https=2586 http://127.0.0.1:2586", "tailscale_serve_missing_sudo"); return; }
+      if (!tailnet && first) { yield event("reach", "failed", "http://box:2586 · port 2586", "server_blocked_ufw"); return; }
+      yield event("reach", "done", shown);
       yield event("claim", "running");
       yield event("claim", "done");
       yield { ...event("finished", "done"), machineId: "link-1", recoveryWords };

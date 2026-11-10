@@ -544,7 +544,7 @@ public sealed class RuntimeEventPumpLifetimeTests
         {
             try
             {
-                await task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                await task.WithinAsync(TestTime.Seconds(5)).ConfigureAwait(false);
                 return null;
             }
             catch (TimeoutException ex)

@@ -7,10 +7,11 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 
-test("a canvas tab draws what its plugin writes, sends the actions back, follows its pushes, and pauses while hidden", { skip: !edge, timeout: 180_000 }, async () => {
+test("a canvas tab draws what its plugin writes, sends the actions back, follows its pushes, and pauses while hidden", { skip: !edge, timeout: testLimit(180_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-canvas-panel-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -21,13 +22,13 @@ test("a canvas tab draws what its plugin writes, sends the actions back, follows
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root" style="height:400px"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     socket = new WebSocket(pages.find(value => value.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("Browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<any>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => reject(Error(`${method} timed out`)), 30_000);
+      const timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))), testLimit(30_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data));
         if (message.id !== id) return;
@@ -41,7 +42,7 @@ test("a canvas tab draws what its plugin writes, sends the actions back, follows
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result?.value as T;
     };
-    const wait = (expression: string, milliseconds = 8_000) => evaluate<boolean>(
+    const wait = (expression: string, milliseconds = testLimit(8_000)) => evaluate<boolean>(
       `new Promise(resolve=>{const end=Date.now()+${milliseconds};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`);
     const content = "document.querySelector('.canvas-html > p')?.textContent";
     await command("Page.navigate", { url: pathToFileURL(page).href });
@@ -170,7 +171,7 @@ test("a canvas tab draws what its plugin writes, sends the actions back, follows
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();
-    if (browser && browser.exitCode === null) { const closed = new Promise<void>(resolve => browser!.once("exit", () => resolve())); browser.kill(); await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 5000))]); }
+    if (browser && browser.exitCode === null) { const closed = new Promise<void>(resolve => browser!.once("exit", () => resolve())); browser.kill(); await Promise.race([closed, new Promise(resolve => setTimeout(resolve, testLimit(5000)))]); }
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

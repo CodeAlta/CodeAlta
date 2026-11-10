@@ -5,11 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
+import { testLimit } from "./testTime";
 
 // The app follows the languages of the browser when none is chosen, and the tests look for its English labels:
 // the browser they drive speaks English whatever the language of the system. Pages that follow the theme of the system
 // are dark there whatever the theme of the system.
-test("the browser of the tests speaks English and prefers dark, whatever the language and the theme of the system", { skip: !browserExecutable, timeout: 60_000 }, async () => {
+test("the browser of the tests speaks English and prefers dark, whatever the language and the theme of the system", { skip: !browserExecutable, timeout: testLimit(60_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-browser-language-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {

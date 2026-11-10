@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 // The Issues tab in headless Edge, under the production content security policy and React StrictMode: a project
 // whose issues are in several Jira projects lists them together, or one project alone.
@@ -11,7 +12,7 @@ const part = `document.querySelector('.issues-part select')`;
 const choose = (selector: string, value: string) => `(() => { const select = document.querySelector(${JSON.stringify(selector)}); select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`;
 const lastList = `(() => { const asked = issuesFixture.state.lists.at(-1); return [asked.service, asked.part]; })()`;
 
-test("the issues of several Jira projects are listed together, and one project is listed alone when it is chosen", { skip: !edge, timeout: 120_000 }, async () => {
+test("the issues of several Jira projects are listed together, and one project is listed alone when it is chosen", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     // GitHub is one place: it has no choice of a part.
     await page.until(`${rows}.join() === '#128'`, "the issues of the repository");
@@ -62,7 +63,7 @@ test("the issues of several Jira projects are listed together, and one project i
   }, options);
 });
 
-test("several issues start at once, each marked, and a session opens only while its issue is still read", { skip: !edge, timeout: 120_000 }, async () => {
+test("several issues start at once, each marked, and a session opens only while its issue is still read", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.clickText('.issues-toolbar .bp6-segmented-control button', "Jira");
     await page.until(`${rows}.length === 5`, "the issues of the Jira projects");
@@ -94,7 +95,7 @@ test("several issues start at once, each marked, and a session opens only while 
   }, options);
 });
 
-test("the choice of a Jira project is drawn in both themes and fits a narrow tab", { skip: !edge, timeout: 120_000 }, async () => {
+test("the choice of a Jira project is drawn in both themes and fits a narrow tab", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.clickText('.issues-toolbar .bp6-segmented-control button', "Jira");
     await page.until(`${rows}.length === 5`, "the issues of the Jira projects");
@@ -125,7 +126,7 @@ test("the choice of a Jira project is drawn in both themes and fits a narrow tab
   }, options);
 });
 
-test("the toolbar switches between the views of a project, the line under it changes what a view lets change, and a window of the tab manages them", { skip: !edge, timeout: 120_000 }, async () => {
+test("the toolbar switches between the views of a project, the line under it changes what a view lets change, and a window of the tab manages them", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     const asked = `JSON.stringify(issuesFixture.state.lists.at(-1).filters)`;
     // The line under the toolbar: the filters the tab may change with their value, then the count of the others, which its label names.
@@ -271,7 +272,7 @@ test("the toolbar switches between the views of a project, the line under it cha
   }, options);
 });
 
-test("a project without a view lists every item, and the gear in the toolbar makes its first view", { skip: !edge, timeout: 120_000 }, async () => {
+test("a project without a view lists every item, and the gear in the toolbar makes its first view", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     // The project has no view yet: nothing in its files.
     await page.evaluate(`issuesFixture.state.views = []; issuesFixture.state.current = null`);
@@ -304,7 +305,7 @@ test("a project without a view lists every item, and the gear in the toolbar mak
   }, options);
 });
 
-test("the window of the views keeps what is edited while the tab renders again", { skip: !edge, timeout: 120_000 }, async () => {
+test("the window of the views keeps what is edited while the tab renders again", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`${rows}.join() === '#128'`, "the issues of the repository");
     await page.evaluate(choose('.issues-toolbar select[aria-label="Project"]', "ado"));
@@ -325,7 +326,7 @@ test("the window of the views keeps what is edited while the tab renders again",
   }, options);
 });
 
-test("on a wide screen, the window of the views opens centered and can be moved over the whole tab", { skip: !edge, timeout: 120_000 }, async () => {
+test("on a wide screen, the window of the views opens centered and can be moved over the whole tab", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`${rows}.join() === '#128'`, "the issues of the repository");
     await page.evaluate(choose('.issues-toolbar select[aria-label="Project"]', "ado"));
@@ -364,7 +365,7 @@ test("on a wide screen, the window of the views opens centered and can be moved 
   }, { ...options, width: 1900, height: 900 });
 });
 
-test("values the host refuses or fails on are not asked again and again, and refused ones are forgotten", { skip: !edge, timeout: 120_000 }, async () => {
+test("values the host refuses or fails on are not asked again and again, and refused ones are forgotten", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     const key = "ado\\nazure_devops\\nteam\\nSprint board";
     const stored = `JSON.parse(localStorage.getItem("codealta.desktop.issue-picks.v1") ?? "{}")["${key}"] ?? null`;
@@ -403,7 +404,7 @@ test("values the host refuses or fails on are not asked again and again, and ref
   }, options);
 });
 
-test("quick clicks in a filter of several values keep each value, and a text filter takes what the host takes", { skip: !edge, timeout: 120_000 }, async () => {
+test("quick clicks in a filter of several values keep each value, and a text filter takes what the host takes", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     // A view of the user lets the tab change the states and the customer.
     await page.evaluate(`issuesFixture.state.views.push({ name: "Triage", source: "personal", path: ".alta/local/issues.toml", filters: [
@@ -430,7 +431,7 @@ test("quick clicks in a filter of several values keep each value, and a text fil
   }, options);
 });
 
-test("a tracker that fails on the filters leaves the tab listing by those it shows, and says why", { skip: !edge, timeout: 120_000 }, async () => {
+test("a tracker that fails on the filters leaves the tab listing by those it shows, and says why", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     const listed = `JSON.stringify(issuesFixture.state.lists.at(-1).filters)`;
     const notice = `[...document.querySelectorAll('.issues-notice')].map(item => item.textContent)`;
@@ -465,7 +466,7 @@ test("a tracker that fails on the filters leaves the tab listing by those it sho
   }, options);
 });
 
-test("a view chosen, made, renamed or removed starts anew: nothing of the view before is shown or asked with when its filters fail", { skip: !edge, timeout: 120_000 }, async () => {
+test("a view chosen, made, renamed or removed starts anew: nothing of the view before is shown or asked with when its filters fail", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     const tabAsks = `issuesFixture.state.filterAsks.filter(ask => ask.projectId === 'ado' && !ask.withoutView)`;
     const notice = `[...document.querySelectorAll('.issues-notice')].map(item => item.textContent)`;
@@ -560,7 +561,7 @@ test("a view chosen, made, renamed or removed starts anew: nothing of the view b
   }, options);
 });
 
-test("the window of the views says why a file of views cannot be read, also when no view is left", { skip: !edge, timeout: 120_000 }, async () => {
+test("the window of the views says why a file of views cannot be read, also when no view is left", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     const problem = ".alta/issues.toml does not parse: line 3, a key without a value.";
     const callouts = `[...document.querySelectorAll('.issue-views-window .bp6-callout')].map(item => item.textContent)`;
@@ -587,7 +588,7 @@ test("the window of the views says why a file of views cannot be read, also when
   }, options);
 });
 
-test("the tab says how old the list and the item are, and reads them again on demand", { skip: !edge, timeout: 120_000 }, async () => {
+test("the tab says how old the list and the item are, and reads them again on demand", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     const ages = `[...document.querySelectorAll('.issues-read-at time')].map(time => time.textContent)`;
     await page.until(`${rows}.join() === '#128' && document.querySelectorAll('.issues-read-at').length === 2`, "the list and the item with their age");
@@ -608,7 +609,20 @@ test("the tab says how old the list and the item are, and reads them again on de
   }, options);
 });
 
-test("the images of a description and of its comments are read through the host and drawn; one that cannot be read stays a link", { skip: !edge, timeout: 120_000 }, async () => {
+test("the age of a list that comes late counts from when it came", { skip: !edge, timeout: testLimit(120_000) }, async () => {
+  await withCanvas(async page => {
+    const listAge = `document.querySelector('.issues-stages .issues-read-at time')?.textContent`;
+    await page.until(`${rows}.join() === '#128' && ${listAge} === 'Read 3 min. ago'`, "the list with its age");
+    // The minutes the tab follows were last counted before the list was asked: the list read 3 minutes before it came is not younger.
+    await page.evaluate(`issuesFixture.state.late = 1500`);
+    await page.evaluate(choose('.issues-toolbar select[aria-label="Project"]', "ado"));
+    await page.until(`${rows}.join() === '#41'`, "the work items of the view of the team");
+    assert.equal(await page.evaluate(listAge), "Read 3 min. ago");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("the images of a description and of its comments are read through the host and drawn; one that cannot be read stays a link", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     const pictures = `[...document.querySelectorAll('.work-detail .markdown-content a[href]')].filter(a => a.querySelector('img')).map(a => [a.textContent, a.querySelector('img').getAttribute('src')?.slice(0, 22) ?? null])`;
     await page.evaluate(choose('.issues-toolbar select[aria-label="Project"]', "ado"));
@@ -637,7 +651,7 @@ test("the images of a description and of its comments are read through the host 
     assert.deepEqual(page.problems, []);
   }, { ...options, styles: [...options.styles, "../style.css"] });
 });
-test("a list longer than a page shows more on demand, a page at a time, up to what the tracker gives", { skip: !edge, timeout: 120_000 }, async () => {
+test("a list longer than a page shows more on demand, a page at a time, up to what the tracker gives", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`${rows}.join() === '#128'`, "the list");
     assert.equal(await page.evaluate(`document.querySelector('.issues-more')`), null, "a whole list says nothing more");

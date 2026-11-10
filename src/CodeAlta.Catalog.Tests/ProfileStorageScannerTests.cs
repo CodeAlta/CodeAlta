@@ -25,10 +25,10 @@ public sealed class ProfileStorageScannerTests
                 reports.Add(value);
                 if (value.ProcessedFiles != 1) return;
                 paused.SetResult();
-                if (!release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Test did not release scan.");
+                if (!release.Wait(TestTime.Seconds(10))) throw new TimeoutException("Test did not release scan.");
             });
             worker = new ProfileStorageScanner(new CatalogOptions { GlobalRoot = root }).ScanAsync(progress, cancellation.Token);
-            await paused.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await paused.Task.WithinAsync(TestTime.Seconds(10));
             Assert.IsFalse(worker.IsCompleted);
             await using (var writer = new FileStream(journal, FileMode.Append, FileAccess.Write, FileShare.None))
                 await writer.WriteAsync(new byte[8]);

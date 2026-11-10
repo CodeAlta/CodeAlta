@@ -65,11 +65,11 @@ public sealed class ApplicationDatabaseTests
             writing.SetResult();
             await release.Task;
         }).AsTask();
-        await writing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await writing.Task.WithinAsync(TestTime.Seconds(10));
 
         // The writer holds the write lock of the file; the reader goes through it.
         var count = await database.ReadAsync("test", (connection, token) => ScalarAsync<long>(connection, "SELECT COUNT(*) FROM t_data;", token))
-            .AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+            .AsTask().WithinAsync(TestTime.Seconds(2));
         Assert.AreEqual(1L, count, "A reader sees the data committed before the long write, and does not wait for it.");
 
         release.SetResult();
@@ -98,8 +98,8 @@ public sealed class ApplicationDatabaseTests
         Task<string?>? backup = null;
         try
         {
-            await reading.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            Assert.AreEqual(0, await database.GetVersionAsync("concurrent-reader").AsTask().WaitAsync(TimeSpan.FromSeconds(2)),
+            await reading.Task.WithinAsync(TestTime.Seconds(10));
+            Assert.AreEqual(0, await database.GetVersionAsync("concurrent-reader").AsTask().WithinAsync(TestTime.Seconds(2)),
                 "Ordinary readers remain concurrent.");
 
             // Another operation has reported damage, but this connection has not closed yet. Unix permits the
@@ -117,12 +117,12 @@ public sealed class ApplicationDatabaseTests
         finally
         {
             release.TrySetResult();
-            await reader.WaitAsync(TimeSpan.FromSeconds(10));
-            if (recovery is not null) await recovery.WaitAsync(TimeSpan.FromSeconds(10));
-            if (next is not null) await next.WaitAsync(TimeSpan.FromSeconds(10));
-            if (sameDamage is not null) await sameDamage.WaitAsync(TimeSpan.FromSeconds(10));
-            if (write is not null) await write.WaitAsync(TimeSpan.FromSeconds(10));
-            if (backup is not null) await backup.WaitAsync(TimeSpan.FromSeconds(10));
+            await reader.WithinAsync(TestTime.Seconds(10));
+            if (recovery is not null) await recovery.WithinAsync(TestTime.Seconds(10));
+            if (next is not null) await next.WithinAsync(TestTime.Seconds(10));
+            if (sameDamage is not null) await sameDamage.WithinAsync(TestTime.Seconds(10));
+            if (write is not null) await write.WithinAsync(TestTime.Seconds(10));
+            if (backup is not null) await backup.WithinAsync(TestTime.Seconds(10));
         }
 
         Assert.AreEqual(1, database.Generation);
@@ -157,30 +157,30 @@ public sealed class ApplicationDatabaseTests
             if (cancel)
             {
                 await cancellation.CancelAsync();
-                await Assert.ThrowsAsync<OperationCanceledException>(() => recovery.WaitAsync(TimeSpan.FromSeconds(10)));
+                await Assert.ThrowsAsync<OperationCanceledException>(() => recovery.WithinAsync(TestTime.Seconds(10)));
             }
             else
             {
-                var failure = await Assert.ThrowsExactlyAsync<SqliteException>(() => recovery.WaitAsync(TimeSpan.FromSeconds(10)));
+                var failure = await Assert.ThrowsExactlyAsync<SqliteException>(() => recovery.WithinAsync(TestTime.Seconds(10)));
                 Assert.AreEqual(5, failure.SqliteErrorCode);
             }
 
             Assert.AreEqual(0, database.Generation);
             Assert.IsNull(database.LastRecovery);
-            Assert.AreEqual(1, (await database.ListTablesAsync("t_kept").AsTask().WaitAsync(TimeSpan.FromSeconds(2))).Count);
+            Assert.AreEqual(1, (await database.ListTablesAsync("t_kept").AsTask().WithinAsync(TestTime.Seconds(2))).Count);
             await database.WriteAsync("after", (connection, token) => ExecuteAsync(connection, "INSERT INTO t_kept VALUES (1);", token))
-                .AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+                .AsTask().WithinAsync(TestTime.Seconds(2));
         }
         finally
         {
             release.TrySetResult();
-            await reader.WaitAsync(TimeSpan.FromSeconds(10));
+            await reader.WithinAsync(TestTime.Seconds(10));
         }
 
         // Neither a failed callback nor a canceled recovery leaves a connection counted as active.
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
             await database.ReadAsync<int>("failed", (connection, token) => throw new InvalidOperationException("stop")));
-        await database.RecoverDamagedFileAsync(new SqliteException("damaged", 11), database.Generation).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        await database.RecoverDamagedFileAsync(new SqliteException("damaged", 11), database.Generation).AsTask().WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(1, database.Generation);
     }
 
@@ -200,21 +200,21 @@ public sealed class ApplicationDatabaseTests
         clock.OnUtcNow = () =>
         {
             copying.SetResult();
-            release.Task.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+            release.Task.WithinAsync(TestTime.Seconds(10)).GetAwaiter().GetResult();
         };
         var backup = Task.Run(async () => await database.BackupAsync());
         Task? recovery = null;
         try
         {
-            await copying.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await copying.Task.WithinAsync(TestTime.Seconds(10));
             recovery = database.RecoverDamagedFileAsync(new SqliteException("damaged", 11), database.Generation).AsTask();
             Assert.IsFalse(recovery.IsCompleted, "An admitted backup must finish with its original source, not a replacement.");
         }
         finally
         {
             release.TrySetResult();
-            await backup.WaitAsync(TimeSpan.FromSeconds(10));
-            if (recovery is not null) await recovery.WaitAsync(TimeSpan.FromSeconds(10));
+            await backup.WithinAsync(TestTime.Seconds(10));
+            if (recovery is not null) await recovery.WithinAsync(TestTime.Seconds(10));
         }
 
         Assert.IsNotNull(backup.Result);
@@ -249,11 +249,11 @@ public sealed class ApplicationDatabaseTests
         }
 
         var first = database.WriteAsync("one", (connection, token) => Write(1, connection, token)).AsTask();
-        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await firstStarted.Task.WithinAsync(TestTime.Seconds(10));
         var second = database.WriteAsync("two", (connection, token) => Write(2, connection, token)).AsTask();
         var third = database.WriteAsync("three", (connection, token) => Write(3, connection, token)).AsTask();
         releaseFirst.SetResult();
-        await Task.WhenAll(first, second, third).WaitAsync(TimeSpan.FromSeconds(20));
+        await Task.WhenAll(first, second, third).WithinAsync(TestTime.Seconds(20));
 
         Assert.AreEqual(1, maximum);
         CollectionAssert.AreEqual(new[] { 1, 2, 3 }, order);
@@ -272,7 +272,7 @@ public sealed class ApplicationDatabaseTests
             firstStarted.SetResult();
             await releaseFirst.Task;
         }).AsTask();
-        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await firstStarted.Task.WithinAsync(TestTime.Seconds(10));
 
         using var cancellation = new CancellationTokenSource();
         var queued = database.WriteAsync("two", (connection, token) =>
@@ -310,12 +310,12 @@ public sealed class ApplicationDatabaseTests
 
         foreach (var nested in new[] { nestedWrite, nestedMigration, nestedDrop })
         {
-            var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => nested.WaitAsync(TimeSpan.FromSeconds(10)));
+            var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => nested.WithinAsync(TestTime.Seconds(10)));
             StringAssert.Contains(failure.Message, "outer");
         }
 
         // The outer writes were rolled back, and the queue is free.
-        await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "INSERT INTO t_data VALUES (3);", token)).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "INSERT INTO t_data VALUES (3);", token)).AsTask().WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(3L, await database.ReadAsync("test", (connection, token) => ScalarAsync<long>(connection, "SELECT SUM(id) FROM t_data;", token)));
         Assert.AreEqual(0, await database.GetVersionAsync("plugin:stats"));
     }
@@ -345,7 +345,7 @@ public sealed class ApplicationDatabaseTests
             }, token);
         });
         outerEnded.SetResult();
-        await later!.WaitAsync(TimeSpan.FromSeconds(10));
+        await later!.WithinAsync(TestTime.Seconds(10));
 
         Assert.AreEqual(1L, seen);
         Assert.AreEqual(3L, await database.ReadAsync("test", (connection, token) => ScalarAsync<long>(connection, "SELECT COUNT(*) FROM t_data;", token)));
@@ -367,7 +367,7 @@ public sealed class ApplicationDatabaseTests
                 await ExecuteAsync(connection, $"INSERT INTO t_data (who) VALUES ('{index}');", token);
                 await Task.Delay(5, token);
             }).AsTask()).ToArray();
-        await Task.WhenAll(writes).WaitAsync(TimeSpan.FromSeconds(30));
+        await Task.WhenAll(writes).WithinAsync(TestTime.Seconds(30));
 
         Assert.AreEqual(20L, await first.ReadAsync("test", (connection, token) => ScalarAsync<long>(connection, "SELECT COUNT(*) FROM t_data;", token)));
     }
@@ -973,14 +973,14 @@ public sealed class ApplicationDatabaseTests
             await release.Task;
             completed = true;
         }).AsTask();
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await started.Task.WithinAsync(TestTime.Seconds(10));
 
         var disposing = database.DisposeAsync().AsTask();
         await Task.Delay(100);
         Assert.IsFalse(disposing.IsCompleted, "The shutdown waits for the write that holds the queue.");
         await Assert.ThrowsExactlyAsync<ObjectDisposedException>(async () => await database.WriteAsync("test", (connection, token) => ValueTask.CompletedTask));
         release.SetResult();
-        await disposing.WaitAsync(TimeSpan.FromSeconds(10));
+        await disposing.WithinAsync(TestTime.Seconds(10));
         await write;
 
         Assert.IsTrue(completed);
@@ -1098,7 +1098,7 @@ public sealed class ApplicationDatabaseTests
         {
             await Assert.ThrowsAsync<IOException>(async () =>
                     await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_data (id INTEGER);", token)))
-                .WaitAsync(TimeSpan.FromSeconds(30));
+                .WithinAsync(TestTime.Seconds(30));
         }
 
         await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_data (id INTEGER);", token));

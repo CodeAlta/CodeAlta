@@ -420,8 +420,8 @@ public static partial class WorkItemFiles
     {
         try
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            if (!plan && stream.Length > MaximumTaskFile)
+            using var stream = SharedTextFile.OpenRead(path);
+            if (stream is null || !plan && stream.Length > MaximumTaskFile)
             {
                 return null;
             }

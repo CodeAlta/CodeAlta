@@ -141,7 +141,7 @@ public sealed class AltaSessionSelectionTests
         var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Busy");
         var gate = provider.Hold();
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, "long work")).Receipt!;
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+        using (var timeout = new CancellationTokenSource(TestTime.Seconds(20)))
         {
             while (!await host.RuntimeService.HasActiveRunAsync(session, timeout.Token)) await Task.Delay(20, timeout.Token);
         }
@@ -158,7 +158,7 @@ public sealed class AltaSessionSelectionTests
         Assert.AreEqual("large", (await host.Commands.GetSelectionChoicesAsync(session.SessionId))!.Current.ModelId);
 
         gate.SetResult();
-        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(20))).Outcome);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WithinAsync(TestTime.Seconds(20))).Outcome);
         await WaitIdleAsync(host, session, provider, turns: 2);
         Assert.AreEqual("small", provider.Turns[0].Model);
         Assert.AreEqual(("large", AgentReasoningEffort.XHigh), provider.Turns[1]);
@@ -273,7 +273,7 @@ public sealed class AltaSessionSelectionTests
         {
             provider.Hold();
             var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), run.SessionId, "Look again.")).Receipt!;
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(20));
             while (!await host.RuntimeService.HasActiveRunAsync(run, timeout.Token)) await Task.Delay(20, timeout.Token);
             return receipt;
         }
@@ -283,7 +283,7 @@ public sealed class AltaSessionSelectionTests
         // It runs a command that waits for its approval.
         var approval = host.RuntimeService.Permissions.RequestForSessionAsync(run.SessionId, new AgentCommandPermissionRequest(new ModelProviderId("gated"), run.SessionId,
             DateTimeOffset.UtcNow, null, "approval-1", null, "deploy --all", temp.Path, null, null, null, null, null), CancellationToken.None);
-        using (var visible = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+        using (var visible = new CancellationTokenSource(TestTime.Seconds(20)))
         {
             while ((await host.RuntimeService.Permissions.ListOwnedCommandsAsync(run.SessionId, visible.Token)).Entries.Count == 0)
             {
@@ -293,12 +293,12 @@ public sealed class AltaSessionSelectionTests
         }
 
         Assert.IsNull((await later.BeforeToolCallAsync(Call(run.SessionId, "shell_command"), default)).BlockMessage, "a command keeps the guards of the host");
-        using (var watched = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+        using (var watched = new CancellationTokenSource(TestTime.Seconds(20)))
             while (!later.Waiting) await Task.Delay(20, watched.Token);
         clock.Advance(TimeSpan.FromMinutes(31));
-        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await approval.WaitAsync(TimeSpan.FromSeconds(20))).Kind, "the approval that waited too long is denied");
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await approval.WithinAsync(TestTime.Seconds(20))).Kind, "the approval that waited too long is denied");
         // Stopped (aborted), never completed: the provider holds the turn until then.
-        Assert.AreNotEqual(OwnedSessionCommandOutcome.Completed, (await turn.Completion.WaitAsync(TimeSpan.FromSeconds(20))).Outcome, "the turn that waited is stopped");
+        Assert.AreNotEqual(OwnedSessionCommandOutcome.Completed, (await turn.Completion.WithinAsync(TestTime.Seconds(20))).Outcome, "the turn that waited is stopped");
 
         static CodeAlta.Agent.Runtime.Tools.AgentToolHookCall Call(string sessionId, string tool)
             => CodeAlta.Agent.Runtime.Tools.AgentToolHookCall.Create(new AgentToolInvocation(new ModelProviderId("gated"), sessionId, "call-" + tool, tool,
@@ -333,7 +333,7 @@ public sealed class AltaSessionSelectionTests
         // A session at work keeps its provider.
         var gate = provider.Hold();
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, "long work")).Receipt!;
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+        using (var timeout = new CancellationTokenSource(TestTime.Seconds(20)))
         {
             while (!await host.RuntimeService.HasActiveRunAsync(session, timeout.Token)) await Task.Delay(20, timeout.Token);
         }
@@ -342,7 +342,7 @@ public sealed class AltaSessionSelectionTests
         Assert.AreEqual(AltaExitCodes.Unsupported, busy.ExitCode, busy.Transcript);
         StringAssert.Contains(busy.Transcript, "session.running");
         gate.SetResult();
-        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(20))).Outcome);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WithinAsync(TestTime.Seconds(20))).Outcome);
         await WaitIdleAsync(host, session, provider, turns: 1);
 
         var moved = await commands.InvokeAsync(["session", "set_provider", session.SessionId, "--provider", "other"], caller: AltaCallerIdentity.Cli);
@@ -394,7 +394,7 @@ public sealed class AltaSessionSelectionTests
     // Until the provider ran that many turns and the session is idle again.
     private static async Task WaitIdleAsync(CodeAltaHost host, SessionViewDescriptor session, GatedProvider provider, int turns)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(20));
         while (provider.Turns.Count < turns || await host.RuntimeService.HasActiveRunAsync(session, timeout.Token)) await Task.Delay(20, timeout.Token);
     }
 

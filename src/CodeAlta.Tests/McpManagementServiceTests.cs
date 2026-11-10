@@ -711,7 +711,7 @@ public sealed class McpManagementServiceTests
             Assert.AreEqual("Config", GetHeaderText(tabBeforeTest.Tabs[0].Header));
             StringAssert.StartsWith(GetHeaderText(tabBeforeTest.Tabs[1].Header), "Tools");
             Assert.AreEqual("Details", GetHeaderText(tabBeforeTest.Tabs[2].Header));
-            PumpTerminalUntil(app, () => GetDialogRowEntry(row).LastTestStatus != McpManagementTestStatus.NotRun, TimeSpan.FromSeconds(10));
+            PumpTerminalUntil(app, () => GetDialogRowEntry(row).LastTestStatus != McpManagementTestStatus.NotRun, TestTime.Seconds(10));
 
             var rows = GetDialogRows(dialog);
             Assert.IsTrue(rows.Count > 0);
@@ -773,7 +773,7 @@ public sealed class McpManagementServiceTests
 
             var testTask = InvokeTestServerAsync(dialog, row);
             InvokeDialogClose(dialog);
-            PumpTerminalUntilCompleted(app, testTask, TimeSpan.FromSeconds(30));
+            PumpTerminalUntilCompleted(app, testTask, TestTime.Seconds(30));
 
             Assert.IsNull(GetDialogVisual(dialog).App, "Closing the dialog should detach it while the in-flight Test Server operation is canceled.");
         }
@@ -823,7 +823,7 @@ public sealed class McpManagementServiceTests
             InvokeTerminalApp(app, "EndRun");
             ended = true;
 
-            Assert.IsTrue(testTask.Wait(TimeSpan.FromSeconds(3)), "App shutdown should cancel the in-flight MCP Test Server operation promptly.");
+            Assert.IsTrue(testTask.Wait(TestTime.Seconds(3)), "App shutdown should cancel the in-flight MCP Test Server operation promptly.");
             testTask.GetAwaiter().GetResult();
         }
         finally
@@ -868,7 +868,7 @@ public sealed class McpManagementServiceTests
             var testServerButton = FindDialogButton(dialog, "Test");
             app.Focus(testServerButton);
             ((InMemoryTerminalBackend)session.Instance.Backend).PushEvent(new TerminalKeyEvent { Key = TerminalKey.Enter });
-            PumpTerminalUntil(app, () => GetDialogRowEntry(row).LastTestStatus == McpManagementTestStatus.Succeeded, TimeSpan.FromSeconds(10));
+            PumpTerminalUntil(app, () => GetDialogRowEntry(row).LastTestStatus == McpManagementTestStatus.Succeeded, TestTime.Seconds(10));
 
             var detailPane = FindDetailTabControl(dialog);
             for (var i = 0; i < 5; i++)

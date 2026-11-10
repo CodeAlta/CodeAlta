@@ -17,7 +17,7 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class DesktopRelayTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
     private static readonly RemoteSessionHostOptions Quick = new() { MinimumBackoff = TimeSpan.FromMilliseconds(50), MaximumBackoff = TimeSpan.FromMilliseconds(200), ListInterval = TimeSpan.FromMilliseconds(100) };
 
     public TestContext TestContext { get; set; } = null!;

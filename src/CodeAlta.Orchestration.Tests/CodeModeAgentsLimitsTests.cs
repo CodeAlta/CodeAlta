@@ -31,7 +31,7 @@ public sealed class CodeModeAgentsLimitsTests
         Assert.AreEqual(HeadlessOpenStatus.Created, opened.Status, opened.Message);
         var parent = opened.Session!;
         provider.Script(parent.SessionId, ScriptedTurnProvider.Reply("Parent ready."));
-        Assert.AreEqual(HeadlessRunStatus.Completed, (await driver.RunAsync(parent, new HeadlessPrompt("start")).WaitAsync(Hang)).Status);
+        Assert.AreEqual(HeadlessRunStatus.Completed, (await driver.RunAsync(parent, new HeadlessPrompt("start")).WithinAsync(Hang)).Status);
         return (root, provider, host, driver, parent);
     }
 
@@ -66,10 +66,10 @@ public sealed class CodeModeAgentsLimitsTests
         Assert.AreEqual("ok", (await host.Commands.SetSandboxAsync(parent.SessionId, "strict")).Status);
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Child answer."));
 
-        var agent = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-narrow" }, CancellationToken.None).WaitAsync(Hang);
-        var kept = await host.CodeModeAgents.OpenAsync(parent.SessionId, new CodeModeAgentRequest(string.Empty) { RunId = "run-narrow" }, CancellationToken.None).WaitAsync(Hang);
-        var unsandboxed = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-narrow", Sandbox = "off" }, CancellationToken.None).WaitAsync(Hang);
-        var another = await host.CodeModeAgents.OpenAsync(parent.SessionId, new CodeModeAgentRequest(string.Empty) { RunId = "run-narrow", Sandbox = "workspace" }, CancellationToken.None).WaitAsync(Hang);
+        var agent = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-narrow" }, CancellationToken.None).WithinAsync(Hang);
+        var kept = await host.CodeModeAgents.OpenAsync(parent.SessionId, new CodeModeAgentRequest(string.Empty) { RunId = "run-narrow" }, CancellationToken.None).WithinAsync(Hang);
+        var unsandboxed = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-narrow", Sandbox = "off" }, CancellationToken.None).WithinAsync(Hang);
+        var another = await host.CodeModeAgents.OpenAsync(parent.SessionId, new CodeModeAgentRequest(string.Empty) { RunId = "run-narrow", Sandbox = "workspace" }, CancellationToken.None).WithinAsync(Hang);
 
         Assert.IsTrue(agent.Succeeded, agent.Failure);
         Assert.AreEqual("opened", kept.Status, kept.Failure);
@@ -99,7 +99,7 @@ public sealed class CodeModeAgentsLimitsTests
         // Research over many topics: a run is not cut at a count of sessions (it was 50); its budget bounds what they cost.
         for (var index = 0; index < 60; index++)
         {
-            var opened = await agents.OpenAsync(parent.SessionId, new CodeModeAgentRequest(string.Empty) { RunId = "run-many" }, CancellationToken.None).WaitAsync(Hang);
+            var opened = await agents.OpenAsync(parent.SessionId, new CodeModeAgentRequest(string.Empty) { RunId = "run-many" }, CancellationToken.None).WithinAsync(Hang);
             Assert.AreEqual("opened", opened.Status, $"session {index + 1}: {opened.Failure}");
         }
 
@@ -109,12 +109,12 @@ public sealed class CodeModeAgentsLimitsTests
         var level = parent.SessionId;
         for (var depth = 1; depth <= CodeModeAgents.MaxDepth; depth++)
         {
-            var opened = await agents.OpenAsync(level, new CodeModeAgentRequest(string.Empty) { RunId = $"run-depth-{depth}" }, CancellationToken.None).WaitAsync(Hang);
+            var opened = await agents.OpenAsync(level, new CodeModeAgentRequest(string.Empty) { RunId = $"run-depth-{depth}" }, CancellationToken.None).WithinAsync(Hang);
             Assert.AreEqual("opened", opened.Status, $"level {depth}: {opened.Failure}");
             level = opened.SessionId!;
         }
 
-        var fourth = await agents.OpenAsync(level, new CodeModeAgentRequest(string.Empty) { RunId = "run-depth-4" }, CancellationToken.None).WaitAsync(Hang);
+        var fourth = await agents.OpenAsync(level, new CodeModeAgentRequest(string.Empty) { RunId = "run-depth-4" }, CancellationToken.None).WithinAsync(Hang);
         Assert.AreEqual("refused", fourth.Status);
         StringAssert.Contains(fourth.Failure, "3 levels deep");
         for (var depth = 1; depth <= CodeModeAgents.MaxDepth; depth++) await agents.ForgetRunAsync($"run-depth-{depth}");
@@ -128,7 +128,7 @@ public sealed class CodeModeAgentsLimitsTests
         await Task.Delay(1500);
         Assert.AreEqual(CodeModeAgents.MaxAtWork, Volatile.Read(ref started), "the ninth waits while eight work");
         release.SetResult();
-        var results = await Task.WhenAll(nine).WaitAsync(Hang);
+        var results = await Task.WhenAll(nine).WithinAsync(Hang);
 
         Assert.IsTrue(results.All(static result => result.Succeeded), string.Join("; ", results.Select(static result => result.Failure)));
         Assert.AreEqual(9, started);
@@ -156,9 +156,9 @@ public sealed class CodeModeAgentsLimitsTests
             Assert.IsNotNull(run, refusal);
             // It went on in the background: an end that is not stopped would come back to the parent as a prompt.
             run.Background();
-            await childStarted.Task.WaitAsync(Hang);
+            await childStarted.Task.WithinAsync(Hang);
             await stop(run);
-            var result = await run.Completion.WaitAsync(Hang);
+            var result = await run.Completion.WithinAsync(Hang);
             return (result, child, run);
         }
 
@@ -171,7 +171,7 @@ public sealed class CodeModeAgentsLimitsTests
             Assert.IsTrue(ended);
             Assert.AreEqual(CodeModeRunStatus.Cancelled, result?.Status);
         });
-        await host.RuntimeService.WhenSettledAsync(parent.SessionId).WaitAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(parent.SessionId).WithinAsync(Hang);
         await Task.Delay(1000);
 
         Assert.IsTrue(aborted.Run.TryCollect(), "no prompt took the result of the aborted run: it was never delivered");
@@ -210,8 +210,8 @@ public sealed class CodeModeAgentsLimitsTests
         Assert.IsNotNull(run, refusal);
         await WaitForAsync(() => Volatile.Read(ref started) == 3, "the three children did not work at once");
         release.SetResult();
-        var result = await run.Completion.WaitAsync(Hang);
-        await host.RuntimeService.WhenSettledAsync(parent.SessionId).WaitAsync(Hang);
+        var result = await run.Completion.WithinAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(parent.SessionId).WithinAsync(Hang);
 
         Assert.AreEqual(CodeModeRunStatus.Completed, result.Status);
         Assert.AreEqual("""["answer","answer","answer"]""", result.ValueJson);

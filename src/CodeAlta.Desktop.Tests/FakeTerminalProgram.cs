@@ -12,11 +12,17 @@ internal sealed class FakeTerminalProgram : PseudoTerminal
     private readonly TaskCompletionSource<int> _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly StringBuilder _typed = new();
     private byte[] _rest = [];
+    private volatile bool _gathersLines;
 
     public ConcurrentQueue<(int Columns, int Rows)> Sizes { get; } = new();
     public bool Killed { get; private set; }
     public override int ProcessId => 4242;
     public override Task<int> Exited => _exited.Task;
+
+    /// <summary>Whether its terminal is in line mode, as a pty is before a line editor reads the keys.</summary>
+    public void GatherLines(bool gathers) => _gathersLines = gathers;
+
+    public override bool GathersLines => _gathersLines;
 
     public string Typed
     {

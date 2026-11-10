@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
+import { testLimit } from "./testTime";
 
 /** The variable that names the browser to drive, in the place of the Edge the system has. */
 export const browserVariable = "CODEALTA_TEST_BROWSER";
@@ -35,7 +36,7 @@ export const browserExecutable: string | undefined = findBrowser(process.env, ho
  * left is ended here: the whole process tree on Windows, where a kill of the launcher leaves its children, and
  * the process elsewhere.
  */
-export async function endBrowser(browser: ChildProcess | undefined, timeoutMs = 5000): Promise<void> {
+export async function endBrowser(browser: ChildProcess | undefined, timeoutMs = testLimit(5000)): Promise<void> {
   if (!browser?.pid) return;
   if (process.platform === "win32") {
     const killer = spawn("taskkill", ["/F", "/T", "/PID", String(browser.pid)], { stdio: "ignore", windowsHide: true });
@@ -87,7 +88,7 @@ export const browserBaseArgs: readonly string[] = Object.freeze([
 ]);
 
 /** Waits through missing/partial port files, with a real deadline and bounded launch diagnostics. */
-export async function waitForBrowserPort(profile: string, browser: ChildProcess, timeoutMs = 5000): Promise<string> {
+export async function waitForBrowserPort(profile: string, browser: ChildProcess, timeoutMs = testLimit(5000)): Promise<string> {
   let stderr = "", probe = "not read", launchError: Error | undefined;
   let exitCode = browser.exitCode, signal = browser.signalCode;
   const capture = (chunk: Buffer | string) => { stderr = (stderr + chunk.toString()).slice(-4096); };

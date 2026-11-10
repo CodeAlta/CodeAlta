@@ -20,7 +20,7 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class FleetSignInEndToEndTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan Patience = TestTime.Seconds(60);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -202,7 +202,7 @@ public sealed class FleetSignInEndToEndTests
             var abandoned = (await laptop.StartSignInCodeAsync(new FleetSignInCodeRequest(laptopEpoch, "github", address, null), token)).Code!;
             using (var giveUp = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
-                giveUp.CancelAfter(TimeSpan.FromSeconds(1.5));
+                giveUp.CancelAfter(TimeSpan.FromSeconds(1.5)); // not a limit: when the person gives up
                 Assert.AreEqual("sign_in.cancelled", (await laptop.JoinWithSignInAsync(new FleetSignInJoinRequest(laptopEpoch, address, "github", abandoned.Handle), giveUp.Token)).Status);
             }
 

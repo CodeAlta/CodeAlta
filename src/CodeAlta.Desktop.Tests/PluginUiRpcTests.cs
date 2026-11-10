@@ -230,7 +230,7 @@ public sealed class PluginUiRpcTests
             await fixture.Service.InvokeCommandAsync(new(Epoch, commands.Single(static command => command.Name == "ask").Id, fixture.Project.Id, null, false, null), default);
             await fixture.NextAsync("ask");
 
-            await fixture.Service.CloseAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            await fixture.Service.CloseAsync().WithinAsync(TestTime.Seconds(30));
 
             Assert.AreEqual("closed", (await fixture.Service.InvokeCommandAsync(new(Epoch, commands[0].Id, fixture.Project.Id, null, false, null), default)).Status);
         }
@@ -342,7 +342,7 @@ public sealed class PluginUiRpcTests
         /// <summary>The next event of a kind, skipping the others.</summary>
         public async Task<PluginUiEvent> NextAsync(string kind)
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
             while (true)
             {
                 var value = await _events.Reader.ReadAsync(timeout.Token);

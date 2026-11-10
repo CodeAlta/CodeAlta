@@ -1224,7 +1224,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         using var listener = new HttpListener();
         listener.Prefixes.Add($"http://127.0.0.1:{port}/");
         listener.Start();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(10));
         using var httpClient = new HttpClient(new RecordingHttpMessageHandler());
         var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
         var authManager = new OpenAICodexSubscriptionAuthManager(store, new(httpClient), "codex");
@@ -2011,7 +2011,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.IsFalse(sameSession.IsCompleted);
 
         await first.DisposeAsync().ConfigureAwait(false);
-        var second = await sameSession.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        var second = await sameSession.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         await second.DisposeAsync().ConfigureAwait(false);
 
         var accountLeases = new List<IAsyncDisposable>();
@@ -2038,7 +2038,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
 
             await accountLeases[0].DisposeAsync().ConfigureAwait(false);
             accountLeases.RemoveAt(0);
-            var third = await sameAccount.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+            var third = await sameAccount.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
             await third.DisposeAsync().ConfigureAwait(false);
         }
         finally
@@ -2082,7 +2082,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.AreEqual(1, waitNotifications[0].MaxConcurrentRequests);
 
         await first.DisposeAsync().ConfigureAwait(false);
-        var second = await waiting.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        var second = await waiting.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         await second.DisposeAsync().ConfigureAwait(false);
     }
 
@@ -2108,7 +2108,7 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.IsFalse(sameAccountDifferentProvider.IsCompleted);
 
         await first.DisposeAsync().ConfigureAwait(false);
-        var second = await sameAccountDifferentProvider.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        var second = await sameAccountDifferentProvider.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
         await second.DisposeAsync().ConfigureAwait(false);
     }
 

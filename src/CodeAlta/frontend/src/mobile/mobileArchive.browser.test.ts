@@ -3,6 +3,7 @@ import test from "node:test";
 import { browserExecutable } from "../browserTarget";
 import { session } from "./fixtureServer";
 import { openPhone, tapMenuItem } from "./phoneBrowser";
+import { testLimit } from "../testTime";
 
 // Drags the card of a session to the right past the threshold and releases it; gives the card's transform after the release.
 const swipeAway = (id: string) => `(() => {
@@ -12,7 +13,7 @@ const swipeAway = (id: string) => `(() => {
   return card.style.transform;
 })()`;
 
-test("archiving asks about descendants even outside the loaded page and restores only what changed", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("archiving asks about descendants even outside the loaded page and restores only what changed", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   const phone = await openPhone(server => {
     server.state.sessions = [session("parent", "Parent", "p1", 1), ...Array.from({ length: 7 }, (_, i) => session(`other${i}`, "Other", "p1", 2 + i)),
       { ...session("child", "Child", "p1", 30), parentId: "parent" },

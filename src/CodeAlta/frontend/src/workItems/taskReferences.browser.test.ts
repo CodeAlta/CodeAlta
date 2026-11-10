@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../workItems/taskReferences.mount.tsx", fixture: "taskFixture", rpcFixture: "../demo-api.ts", width: 900, height: 650 } as const;
 const chip = (shortId: string) => `Array.from(document.querySelectorAll('.markdown-content code[data-task-ref]')).find(code => code.textContent === '${shortId}')`;
 const card = `document.querySelector('.task-reference-card')`;
 
-test("a code span that names a task of the project is a chip that describes the task and opens it", { skip: !edge, timeout: 90_000 }, async () => {
+test("a code span that names a task of the project is a chip that describes the task and opens it", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.markdown-content code[data-task-ref]').length === 2`, "the chips of the two tasks");
     // A task that is done is struck through; an unknown id, a code block and a code span in a link stay what they are.

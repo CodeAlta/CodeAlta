@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "./browserTarget";
 import { withSessionWindow } from "./sessionWindowHarness";
+import { testLimit } from "./testTime";
 
 // The window itself (main.tsx) over an isolated host, in a web view without the CSS `app-region` (WebKitGTK): the
 // desktop shell then moves the window on the mouse press of a title-bar drag region and cancels that press, and the
 // compositor keeps the release. A press on the close button of a tab, or on the tab in front, must not reach it, or
 // the tab is never closed nor shown.
-test("a press on a tab of the title bar is not a press of the window's drag region", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("a press on a tab of the title bar is not a press of the window's drag region", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true" }, async ({ evaluate, until, shown, press, session, title, exceptions }) => {
     await until(`!!${session("two")} && ${session("one")}.getAttribute('aria-pressed')==='true'`, "the selected project with session one open");
     await press(session("two"), 2);

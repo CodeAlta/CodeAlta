@@ -150,7 +150,7 @@ public sealed class RuntimePluginAgentEventObserverTests
             });
             var envelope = new RuntimePluginAgentEventEnvelope(Event(), "session", null, null);
             var call = f.Observe(observer, envelope);
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WithinAsync(TestTime.Seconds(10));
             Assert.IsFalse(call.Operation.Original.Work.IsCompleted);
             Assert.AreSame(envelope, policyEnvelope);
             Assert.AreSame(failure, policyFailure);
@@ -211,7 +211,7 @@ public sealed class RuntimePluginAgentEventObserverTests
             });
             var observer = new RuntimePluginAgentEventObserver(f.Manager, static (_, error) => ValueTask.FromException(error));
             var call = f.Observe(observer, new RuntimePluginAgentEventEnvelope(Event(), "session", null, null));
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual(1, active.AgentEventAdmission.Outstanding);
             Assert.IsFalse(call.Operation.Original.Work.IsCompleted);
             release.Set();
@@ -333,7 +333,7 @@ public sealed class RuntimePluginAgentEventObserverTests
 
         internal async Task<Exception?> Outcome(Operation operation)
         {
-            try { return await operation.Original.Outcome.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false); }
+            try { return await operation.Original.Outcome.WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false); }
             catch (TimeoutException failure) { RecordDeadline(failure); throw; }
         }
 
@@ -378,7 +378,7 @@ public sealed class RuntimePluginAgentEventObserverTests
             f._cleanup = new PluginOwnedOperation(() => f.CleanupAsync(original, primary));
             f._cleanup.Launch();
             Exception? cleanup;
-            try { cleanup = await f._cleanup.Outcome.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false); }
+            try { cleanup = await f._cleanup.Outcome.WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false); }
             catch (Exception failure)
             {
                 cleanup = failure;
@@ -417,7 +417,7 @@ public sealed class RuntimePluginAgentEventObserverTests
         private async Task CleanupAsync(Operation body, Exception? primary)
         {
             BeginDrain();
-            await body.Original.Outcome.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+            await body.Original.Outcome.WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false);
             Acquisition[] acquisitions;
             var failures = new List<Exception>();
             var controlFailed = false;
@@ -426,7 +426,7 @@ public sealed class RuntimePluginAgentEventObserverTests
                 Operation[] operations;
                 lock (_gate) operations = [.. _operations];
                 var outcomes = await Task.WhenAll(operations.Select(operation => operation.Original.Outcome))
-                    .WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                    .WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false);
                 Acquisition[] finalControls;
                 lock (_gate)
                 {
@@ -491,7 +491,7 @@ public sealed class RuntimePluginAgentEventObserverTests
             if (_disposals.Count != 0)
             {
                 var outcomes = await Task.WhenAll(_disposals.Select(disposal => disposal.Outcome))
-                    .WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                    .WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false);
                 failures.AddRange(outcomes.OfType<Exception>());
                 lock (_gate)
                     if (failures.Count == 0 && !_deadlineFailed)

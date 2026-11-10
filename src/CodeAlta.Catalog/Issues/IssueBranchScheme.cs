@@ -209,11 +209,11 @@ public static class IssueBranchSchemes
     {
         own = false;
         var path = IssueViewStore.Locate(source, projectRoot);
-        if (!File.Exists(path)) return scheme;
         TomlTable root;
         try
         {
-            root = TomlSerializer.Deserialize<TomlTable>(SharedTextFile.ReadAllText(path)) ?? new TomlTable();
+            if (SharedTextFile.TryReadAllText(path) is not { } text) return scheme;
+            root = TomlSerializer.Deserialize<TomlTable>(text) ?? new TomlTable();
         }
         catch (Exception exception) when (exception is TomlException or InvalidOperationException or FormatException)
         {

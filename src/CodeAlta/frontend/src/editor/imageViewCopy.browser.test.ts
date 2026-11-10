@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 // A picture of the project editor in headless Edge, under the production content security policy and React StrictMode.
 
@@ -15,7 +16,7 @@ async function rightClick(page: Page, element: string) {
   await page.command("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "right", buttons: 0, clickCount: 1 });
 }
 
-test("a picture of the project editor is copied from its context menu, its tools and Ctrl+C", { skip: !edge, timeout: 120_000 }, async () => {
+test("a picture of the project editor is copied from its context menu, its tools and Ctrl+C", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fixture-picture img')?.naturalWidth > 0`, "the picture");
 

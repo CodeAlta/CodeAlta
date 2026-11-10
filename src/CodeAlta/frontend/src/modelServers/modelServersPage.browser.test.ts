@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../modelServers/modelServersPage.mount.tsx", fixture: "modelServersFixture", rpcFixture: "../demo-api.ts",
   styles: ["../fleet/console/fleetConsole.css", "../machines/machines.css", "../modelServers/modelServers.css"], width: 1300, height: 900, reducedMotion: true } as const;
@@ -12,7 +13,7 @@ const calls = async (page: { evaluate: (script: string) => Promise<unknown> }) =
 const clickRow = (table: string, text: string) => `(() => { const row = [...document.querySelectorAll('table[aria-label=${JSON.stringify(table)}] tbody tr[data-row-key]')]
   .find(item => item.textContent.includes(${JSON.stringify(text)})); row.querySelector('td[data-column="machine"]').click(); return true; })()`;
 
-test("the model servers act on several rows at once, copy a server to another machine, and update the machines to one build", { skip: !edge, timeout: 120_000 }, async () => {
+test("the model servers act on several rows at once, copy a server to another machine, and update the machines to one build", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('table[aria-label="Model servers"] tbody tr[data-row-key]').length === 2`, "a server on each machine");
 

@@ -559,7 +559,7 @@ public sealed class CodeModeToolTests
         try
         {
             invoker.Gate!.SetResult();
-            await ended.Task.WaitAsync(TimeSpan.FromSeconds(20));
+            await ended.Task.WithinAsync(TestTime.Seconds(20));
         }
         finally
         {
@@ -586,7 +586,7 @@ public sealed class CodeModeToolTests
         await Task.Delay(TimeSpan.FromSeconds(1));
         Assert.IsFalse(waiting.IsCompleted, "the wait is not over after 100 ms");
         invoker.Gate.SetResult();
-        var waited = await waiting.WaitAsync(TimeSpan.FromSeconds(30));
+        var waited = await waiting.WithinAsync(TestTime.Seconds(30));
 
         Assert.IsTrue(waited.Success, Text(waited));
         StringAssert.Contains(Text(waited), "hello");
@@ -627,7 +627,7 @@ public sealed class CodeModeToolTests
         var other = await dispatcher.InvokeAsync(["workflow", "cancel", run.Id], caller: new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-2" });
         var early = await dispatcher.InvokeAsync(["workflow", "result", run.Id]);
         var cancelled = await dispatcher.InvokeAsync(["workflow", "cancel", run.Id], caller: new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1" });
-        await run.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        await run.Completion.WithinAsync(TestTime.Seconds(10));
         var result = await dispatcher.InvokeAsync(["workflow", "result", run.Id]);
         var shown = await dispatcher.InvokeAsync(["workflow", "show", run.Id, "--profile"]);
         var missing = await dispatcher.InvokeAsync(["workflow", "show", "run-nope"]);
@@ -662,7 +662,7 @@ public sealed class CodeModeToolTests
             return (await tools.read_file({ path: "a.txt" })).content;
             """, invoker);
         invoker.Gate.SetResult();
-        var (session, prompt) = await delivered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var (session, prompt) = await delivered.Task.WithinAsync(TestTime.Seconds(10));
 
         Assert.AreEqual("session-1", session);
         StringAssert.StartsWith(prompt, "Script run-");
@@ -686,7 +686,7 @@ public sealed class CodeModeToolTests
             return (await tools.read_file({ path: "a.txt" })).content;
             """, invoker);
         invoker.Gate.SetResult();
-        var (prompt, images) = await delivered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var (prompt, images) = await delivered.Task.WithinAsync(TestTime.Seconds(10));
 
         StringAssert.Contains(prompt, "Images: 1 attached (Chart)\n");
         var image = images.Single();
@@ -1079,7 +1079,7 @@ public sealed class CodeModeToolTests
         var second = runs.List("session-1").Single(run => run.Id != runId);
         Assert.AreEqual("Two reads", second.Title, "the kept script runs with its own options");
         // The store writes off the run's thread: what it keeps is read once written.
-        await runs.WhenKeptAsync(second.Id).WaitAsync(TimeSpan.FromSeconds(10));
+        await runs.WhenKeptAsync(second.Id).WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(runId, runs.Store!.TryLoad(second.Id)?.ResumesRunId);
     }
 
@@ -1127,7 +1127,7 @@ public sealed class CodeModeToolTests
             """;
         await InvokeAsync(execBefore, code, hanging);
         var runId = before.List("session-1").Single().Id;
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(10);
         while (before.Store!.TryLoad(runId)?.InFlightCalls.Count is not 1)
         {
             Assert.IsLessThan(deadline, DateTime.UtcNow, "the call in flight was not recorded");
@@ -1212,7 +1212,7 @@ public sealed class CodeModeToolTests
             return await workflow("slow-steps", {});
             """, hanging);
         var runId = before.List("session-1").Single().Id;
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        var deadline = DateTime.UtcNow + TestTime.Seconds(10);
         while (before.Store!.TryLoad(runId) is not { Steps.Count: 1, InFlightCalls.Count: 1 })
         {
             Assert.IsLessThan(deadline, DateTime.UtcNow, "the step and the call in flight were not recorded");

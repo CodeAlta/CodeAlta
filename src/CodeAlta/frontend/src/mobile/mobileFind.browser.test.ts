@@ -4,11 +4,12 @@ import { browserExecutable } from "../browserTarget";
 import type { TimelineEvent } from "./contract";
 import { session } from "./fixtureServer";
 import { openPhone } from "./phoneBrowser";
+import { testLimit } from "../testTime";
 
 // Where the pictures of this test go, when a person wants to look at them.
 const shots = process.env.CODEALTA_SHOTS ?? "";
 
-test("the phone finds in the timeline of a session and in a file it shows, with the folds that hold the text opened while it looks", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("the phone finds in the timeline of a session and in a file it shows, with the folds that hold the text opened while it looks", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   const now = new Date().toISOString();
   const events: TimelineEvent[] = [];
   let seq = 0;
@@ -113,7 +114,7 @@ test("the phone finds in the timeline of a session and in a file it shows, with 
     const before = await shownBlock();
     assert.equal(await evaluate(`document.querySelector("${bar} .find-bar-more").textContent`), "Search older messages");
     await click(`${bar} .find-bar-more`);
-    await waitFor(`document.querySelector("${bar} .find-bar-count").textContent.endsWith("of 4")`, "the whole session searched", 20_000);
+    await waitFor(`document.querySelector("${bar} .find-bar-count").textContent.endsWith("of 4")`, "the whole session searched", testLimit(20_000));
     assert.equal(await evaluate('document.querySelector("#older").hidden'), true, "every page read");
     assert.equal(await evaluate(`document.querySelector("${bar} .find-bar-more").hidden`), true);
     assert.equal(await shownBlock(), before, "the place shown stays");

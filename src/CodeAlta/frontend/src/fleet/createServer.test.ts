@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { FleetDeviceView, FleetServerView } from "#neoastra";
 import { waitingApprovals } from "./approvals";
-import { localServerSteps, organizationUrlOf, serverSetupProblem, serverStepTitle, sshServerSteps } from "./createServer";
+import { localServerSteps, offersTailscaleServe, organizationUrlOf, serverAsksSudoPassword, serverSetupProblem, serverStepTitle, sshServerSteps } from "./createServer";
 import { joinSteps, organizationAddressOf } from "./joinOrganization";
 
 const server = (id: string): FleetServerView => ({ id, url: `https://${id}.example`, organization: id, link: "approved", connection: "online", problem: null, controller: true, spaces: [], recoveryKey: null, shareUrl: null, stop: null });
@@ -19,6 +19,24 @@ test("A server that does not answer from here says what to open, and where", () 
   assert.match(serverSetupProblem("server_blocked_ufw"), /sudo ufw allow \{port\}\/tcp/u);
   assert.match(serverSetupProblem("server_proxy_unreachable"), /forwards to port \{port\} of \{host\}/u);
   assert.match(serverSetupProblem("auth_failed"), /ssh-add/u, "the failures of SSH say what they say for a machine");
+});
+
+test("A name of a tailnet that Tailscale Serve does not publish yet says so, and CodeAlta offers to publish it", () => {
+  assert.match(serverSetupProblem("tailscale_serve_missing"), /Tailscale Serve does not publish its address on \{host\} yet/u);
+  assert.equal(offersTailscaleServe("tailscale_serve_missing"), true);
+  // Where sudo asks a password for it, the password comes with the offer: one try publishes.
+  assert.equal(offersTailscaleServe("tailscale_serve_missing_sudo"), true);
+  assert.equal(serverAsksSudoPassword("tailscale_serve_missing_sudo"), true);
+  assert.match(serverSetupProblem("tailscale_serve_missing_sudo"), /give your password on the machine for CodeAlta to publish it with sudo \(it is not kept\)/u);
+  assert.equal(offersTailscaleServe("server_proxy_unreachable"), false, "another proxy is the person's to set up");
+  assert.equal(offersTailscaleServe("tailscale_serve_failed"), false, "what CodeAlta could not do is not offered again");
+  // The change of Tailscale Serve asks the password of sudo as Always on does, in its own words.
+  assert.equal(serverAsksSudoPassword("tailscale_sudo_password_needed"), true);
+  assert.equal(serverAsksSudoPassword("sudo_refused"), true);
+  assert.equal(serverAsksSudoPassword("tailscale_serve_missing"), false);
+  assert.match(serverSetupProblem("tailscale_sudo_password_needed"), /for sudo\. It is not kept\./u);
+  assert.match(serverSetupProblem("tailscale_serve_disabled"), /not turned on for your tailnet/u);
+  assert.match(serverSetupProblem("tailscale_serve_failed"), /run its command there yourself/u);
 });
 
 test("An address is a server's with its scheme, https by default", () => {

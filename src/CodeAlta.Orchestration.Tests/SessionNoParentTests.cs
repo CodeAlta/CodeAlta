@@ -23,7 +23,7 @@ public sealed class SessionNoParentTests
         var creator = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Creator");
         provider.Script(creator.SessionId, ScriptedTurnProvider.Reply("Creator ready."));
         await host.RuntimeService.SendAsync(creator, options, new AgentSendOptions { Input = AgentInput.Text("start") });
-        await host.RuntimeService.WhenSettledAsync(creator.SessionId).WaitAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(creator.SessionId).WithinAsync(Hang);
         var creatorRequests = provider.RequestsOf(creator.SessionId).Length;
 
         // What `alta session create --no-parent` does from a turn of the creator: no parent, the creator recorded.
@@ -40,8 +40,8 @@ public sealed class SessionNoParentTests
         Assert.IsTrue(independent.CreatedBy?.NoParent);
         provider.Script(independent.SessionId, ScriptedTurnProvider.Reply("Independent answer."));
         await host.RuntimeService.SendAsync(independent, options, new AgentSendOptions { Input = AgentInput.Text("work") });
-        await host.RuntimeService.WhenSettledAsync(independent.SessionId).WaitAsync(Hang);
-        await host.RuntimeService.WhenSettledAsync(creator.SessionId).WaitAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(independent.SessionId).WithinAsync(Hang);
+        await host.RuntimeService.WhenSettledAsync(creator.SessionId).WithinAsync(Hang);
 
         Assert.AreEqual(creatorRequests, provider.RequestsOf(creator.SessionId).Length, "The answer of the session is not sent to its creator.");
         SessionViewDescriptor? listed = null;

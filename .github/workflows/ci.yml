@@ -1,8 +1,12 @@
 name: ci
 
+# A push to a branch and a pull request run the daily checks, in parallel jobs: the .NET tests on Linux, Windows and
+# macOS, and the frontend tests. A push to main also builds the NuGet packages of each tool, as dotnet-releaser builds
+# them but not published. A tag runs dotnet-releaser alone: it builds, tests, packs and publishes the release.
 on:
   push:
     paths-ignore:
+    - '.alta/**'
     - 'doc/**'
     - 'site/**'
     - 'img/**'
@@ -10,8 +14,172 @@ on:
     - '*.txt'
   pull_request:
 
+# A newer push to a pull request replaces its run still going; the runs of a branch or a tag all go to their end.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
 jobs:
-  build:
+  # Linux runs every test of the solution. Windows and macOS run them several times slower, and macOS runners are scarce:
+  # each builds everything and runs the test classes that do something else on one system or another (their files test
+  # `OperatingSystem.IsWindows()`, `IsMacOS()` or `IsLinux()`). The whole suite runs on Windows before each change.
+  test:
+    name: "Tests (${{ matrix.os }}${{ matrix.platform && ', platform-specific' || '' }})"
+    if: github.ref_type != 'tag'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - { os: windows-latest, platform: true }
+          - { os: macos-latest, platform: true }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # Ubuntu 24.04 denies unprivileged user namespaces, which the sandbox of Chromium browsers needs: Edge then falls
+      # back to a setuid helper the image leaves unconfigured, and aborts. The tests of the browser tools keep the sandbox.
+      - name: "Allow the sandbox of Chromium browsers"
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # Defender scans every file the build and the tests write, which slows both.
+      - name: "Stop the real-time scan of Windows"
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: "Choose the tests"
+        if: matrix.platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The classes of the test files that test the system they run on, each matched by its name.
+          classes=$(grep -rlE 'OperatingSystem\.Is(Windows|MacOS|Linux)\(\)' --include='*.cs' src/CodeAlta*.Tests \
+            | xargs grep -ohE '^\s*(public |internal )?(sealed |static |abstract )*(partial )?class [A-Za-z0-9_]+' | grep -oE '[A-Za-z0-9_]+$' | sort -u)
+          # paste reads its standard input from "-": the paste of macOS needs it.
+          filter=$(sed 's/.*/FullyQualifiedName~.&./' <<< "$classes" | paste -sd '|' -)
+          [ -n "$filter" ] || { echo "::error::No test class to filter on"; exit 1; }
+          echo "$(wc -l <<< "$classes") classes"
+          echo "TEST_FILTER=$filter" >> "$GITHUB_ENV"
+      - name: "Build"
+        run: dotnet build src/CodeAlta.slnx -c Release
+      - name: "Test"
+        shell: bash
+        # A test that hangs is named and its run stopped, instead of the job running out of time. The limits of the tests
+        # are 4 times longer on CI (src/TestSupport/TestTime.cs): a stuck test can take minutes to fail by itself.
+        run: dotnet test src/CodeAlta.slnx -c Release --no-build --blame-hang-timeout 25m --blame-hang-dump-type none ${TEST_FILTER:+--filter "$TEST_FILTER"}
+
+  # The frontend tests import the RPC client that the build of CodeAlta generates (obj/neoastra): one build makes it
+  # for every shard of the tests.
+  frontend-client:
+    name: "Frontend RPC client"
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: "Build"
+        run: dotnet build src/CodeAlta/CodeAlta.csproj -c Release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: frontend-rpc-client
+          path: src/CodeAlta/obj/neoastra
+          retention-days: 1
+          if-no-files-found: error
+
+  frontend:
+    name: "Frontend tests (${{ matrix.shard }}/6)"
+    if: github.ref_type != 'tag'
+    needs: frontend-client
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: "Allow the sandbox of Chromium browsers"
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/CodeAlta/frontend/package-lock.json
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-rpc-client
+          path: src/CodeAlta/obj/neoastra
+      - name: "Install"
+        working-directory: src/CodeAlta/frontend
+        run: npm ci --no-audit --no-fund
+      # The first start of Edge on a new machine builds its caches and outlasts the start that the browser tests allow
+      # (browserTarget.ts): it is done once here, and the tests start a warm Edge.
+      - name: "Start Edge once"
+        run: timeout 120 microsoft-edge --headless=new --disable-gpu --no-first-run --guest --user-data-dir="$(mktemp -d)" --dump-dom about:blank > /dev/null
+      # `npm test` with a shard of the files, one at a time: two headless Edge at once on the cores of a runner drew their
+      # pages late enough to fail tests that read them. More shards keep the time.
+      - name: "Test"
+        working-directory: src/CodeAlta/frontend
+        run: npx tsx --test --test-concurrency=1 --test-shard=${{ matrix.shard }}/6 --test-reporter=./scripts/failures-reporter.mjs "src/**/*.test.ts" "src/**/*.test.tsx"
+
+  # The packs are five more long jobs: they run for main only, not for a pull request or another branch.
+  pack:
+    name: "Pack (${{ matrix.project }})"
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [CodeAlta, CodeAlta.Tui, CodeAlta.Cli, CodeAlta.Node, CodeAlta.Server]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # MinVer versions the packages from the tags, as for a release.
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      # What dotnet-releaser runs for each packable project of the release: its pack, with a package for each runtime.
+      - name: "Pack"
+        run: dotnet pack src/${{ matrix.project }}/${{ matrix.project }}.csproj -c Release -o artifacts/nuget
+      - name: "Check the packages"
+        shell: bash
+        run: |
+          project=src/${{ matrix.project }}/${{ matrix.project }}.csproj
+          rids=$(dotnet msbuild "$project" -getProperty:RuntimeIdentifiers -p:Configuration=Release)
+          expected=$(( $(tr ';' '\n' <<< "$rids" | grep -c .) + 1 ))
+          ls -l artifacts/nuget
+          actual=$(find artifacts/nuget -name '*.nupkg' | wc -l)
+          if [ "$actual" -ne "$expected" ]; then
+            echo "::error::$actual packages for $expected expected: the tool package and one for each of $rids"
+            exit 1
+          fi
+          # nuget.org refuses a package over 250 MB.
+          large=$(find artifacts/nuget -name '*.nupkg' -size +250M)
+          if [ -n "$large" ]; then
+            echo "::error::Packages over the 250 MB that nuget.org accepts: $large"
+            exit 1
+          fi
+
+  release:
+    name: "Release"
+    if: github.ref_type == 'tag'
     permissions:
       id-token: write
       actions: write
@@ -26,6 +194,5 @@ jobs:
         uses: xoofx/.github/.github/actions/dotnet-releaser-action@main
         env:
           # The Google client of CodeAlta sign-in, built into CodeAlta Server (CodeAlta.Server.csproj): never in the source.
-          # Pull requests from forks get no secret and build without it.
           CODEALTA_SIGNIN_GOOGLE_CLIENT_ID: ${{ secrets.CODEALTA_SIGNIN_GOOGLE_CLIENT_ID }}
           CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET: ${{ secrets.CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET }}

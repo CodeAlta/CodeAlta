@@ -104,18 +104,18 @@ public sealed class WorkspaceCreateSessionTests
             Task original = archiveFirst ? rpc.ArchiveProjectAsync(archive, cancel.Token) : rpc.CreateSessionAsync(create, cancel.Token);
             try
             {
-                await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                await entered.Task.WithinAsync(TestTime.Seconds(10));
                 cancel.Cancel();
                 try { await original; Assert.Fail("Canceled wait must stop waiting."); } catch (OperationCanceledException) { }
-                Assert.AreEqual("busy", (await rpc.ArchiveProjectAsync(archive, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(3))).Status);
-                Assert.AreEqual("busy", (await rpc.CreateSessionAsync(create, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(3))).Status);
+                Assert.AreEqual("busy", (await rpc.ArchiveProjectAsync(archive, CancellationToken.None).WithinAsync(TestTime.Seconds(3))).Status);
+                Assert.AreEqual("busy", (await rpc.CreateSessionAsync(create, CancellationToken.None).WithinAsync(TestTime.Seconds(3))).Status);
                 Assert.AreEqual("busy", (await rpc.OpenProjectAsync(new(Epoch, root, true), CancellationToken.None)).Status);
                 Assert.AreEqual("busy", (await rpc.RenameProjectAsync(new(Epoch, project.Id, root, evidence.SourcePath,
                     evidence.Revision.ContentHash!, "Renamed"), CancellationToken.None)).Status);
                 var drain = Task.WhenAll(rpc.CloseImportsAsync(), rpc.CloseSessionsAsync());
                 Assert.IsFalse(drain.IsCompleted);
                 release.TrySetResult();
-                await drain.WaitAsync(TimeSpan.FromSeconds(10));
+                await drain.WithinAsync(TestTime.Seconds(10));
                 Assert.AreEqual(archiveFirst, (await catalog.GetByIdAsync(project.Id))!.Archived);
                 Assert.AreEqual(archiveFirst ? 0 : 1, calls);
                 if (archiveFirst)
@@ -376,7 +376,7 @@ public sealed class WorkspaceCreateSessionTests
             CollectionAssert.AreEqual(new[] { Provider.ProviderId.Value }, read.SpaceProviders!.ToArray());
             var refused = host.Commands.AdmitSend(new OwnedTextSendRequest(Guid.NewGuid().ToString("N"), inBusiness.SessionId!, "hello"));
             Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, refused.Kind);
-            var outcome = await refused.Receipt!.Completion.WaitAsync(TimeSpan.FromSeconds(30));
+            var outcome = await refused.Receipt!.Completion.WithinAsync(TestTime.Seconds(30));
             Assert.AreEqual((OwnedSessionCommandOutcome.Failed, SessionRuntimeService.ProviderOutsideSpace), (outcome.Outcome, outcome.Code),
                 "The session sends nothing until it switches to a provider of its space.");
             await service.CloseSessionsAsync();
@@ -493,7 +493,7 @@ public sealed class WorkspaceCreateSessionTests
             try
             {
                 var original = service.CreateSessionAsync(request, CancellationToken.None);
-                await activity.CreateEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                await activity.CreateEntered.Task.WithinAsync(TestTime.Seconds(30));
                 Assert.IsFalse(original.IsCompleted);
                 Assert.AreEqual(startsBefore + 1, Volatile.Read(ref activity.Starts));
                 Assert.AreEqual(1, Volatile.Read(ref activity.Creates));
@@ -503,7 +503,7 @@ public sealed class WorkspaceCreateSessionTests
                 Assert.AreEqual(1, Volatile.Read(ref activity.Creates));
 
                 activity.ReleaseCreate.TrySetResult();
-                var first = await original.WaitAsync(TimeSpan.FromSeconds(30));
+                var first = await original.WithinAsync(TestTime.Seconds(30));
                 Assert.AreEqual("ok", first.Status);
                 Assert.IsNotNull(first.SessionId);
                 var firstState = await host.RuntimeService.GetCurrentStateAsync(first.SessionId);
@@ -511,7 +511,7 @@ public sealed class WorkspaceCreateSessionTests
                 Assert.AreEqual(Provider.ProviderId.Value, firstState.Entry.ProviderId);
 
                 // No receipt key exists: the identical settled request starts a new original.
-                var second = await service.CreateSessionAsync(request, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+                var second = await service.CreateSessionAsync(request, CancellationToken.None).WithinAsync(TestTime.Seconds(30));
                 Assert.AreEqual("ok", second.Status);
                 Assert.IsNotNull(second.SessionId);
                 Assert.AreNotEqual(first.SessionId, second.SessionId);
@@ -619,7 +619,7 @@ public sealed class WorkspaceCreateSessionTests
             cancel.Cancel();
             await Assert.ThrowsAsync<OperationCanceledException>(async () => await original);
             // The creation runs on the thread pool, admitted before the wait was canceled.
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await entered.Task.WithinAsync(TestTime.Seconds(30));
             providers.RegisterOrReplace(Provider with { IsEnabled = false }, () => throw new AssertFailedException("Replacement must not run."));
             Assert.AreEqual("busy", (await rpc.CreateSessionAsync(request, CancellationToken.None)).Status);
             var close = rpc.CloseSessionsAsync();
@@ -674,15 +674,15 @@ public sealed class WorkspaceCreateSessionTests
                 SynchronizationContext.SetSynchronizationContext(window);
                 _ = session.ReceiveAsync($$$"""{"neoastra":1,"kind":"invoke","id":"r1","command":"workspace.createSession","args":{"expectedHostEpoch":"{{{Epoch}}}","scope":"global"}}""");
                 dispatched.TrySetResult(Environment.CurrentManagedThreadId);
-                ran.Task.Wait(TimeSpan.FromSeconds(30));
+                ran.Task.Wait(TestTime.Seconds(30));
             }) { IsBackground = true, Name = "window" };
             windowThread.Start();
-            var caller = await dispatched.Task.WaitAsync(TimeSpan.FromSeconds(30));
-            var (thread, context) = await ran.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            var caller = await dispatched.Task.WithinAsync(TestTime.Seconds(30));
+            var (thread, context) = await ran.Task.WithinAsync(TestTime.Seconds(30));
             windowThread.Join(TimeSpan.FromSeconds(30));
             Assert.AreNotEqual(caller, thread, "The session is not created on the thread of the window.");
             Assert.AreNotSame(window, context);
-            using var answer = JsonDocument.Parse(await answers.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30)));
+            using var answer = JsonDocument.Parse(await answers.Reader.ReadAsync().AsTask().WithinAsync(TestTime.Seconds(30)));
             Assert.AreEqual("ok", answer.RootElement.GetProperty("value").GetProperty("status").GetString(), answer.RootElement.GetRawText());
             await service.CloseSessionsAsync(); await service.CloseImportsAsync();
         }
@@ -722,11 +722,11 @@ public sealed class WorkspaceCreateSessionTests
             var again = service.CreateSessionAsync(request, CancellationToken.None);
             Assert.IsFalse(outcome.IsCompleted);
             pending.SetResult(new SessionViewDescriptor { SessionId = "created", Kind = SessionViewKind.GlobalSession, WorkingDirectory = root });
-            var answer = await outcome.WaitAsync(TimeSpan.FromSeconds(30));
+            var answer = await outcome.WithinAsync(TestTime.Seconds(30));
             Assert.AreEqual("ok", answer.Status);
             Assert.AreEqual("created", answer.SessionId);
             Assert.AreEqual("global", answer.Scope);
-            Assert.AreEqual(answer, await again.WaitAsync(TimeSpan.FromSeconds(30)));
+            Assert.AreEqual(answer, await again.WithinAsync(TestTime.Seconds(30)));
             Assert.AreEqual(1, count);
 
             // A request the host never admitted made no session; another host knows nothing of it.

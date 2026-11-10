@@ -66,7 +66,7 @@ public sealed class NodeSignInHealthTests
         };
 
         health.Read();
-        await read.Task.WaitAsync(TimeSpan.FromSeconds(10), token);
+        await read.Task.WithinAsync(TestTime.Seconds(10), token);
     }
 
     [TestMethod]

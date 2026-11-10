@@ -28,6 +28,12 @@ internal static class WindowsScratchpadRemoval
     private const uint BackupSemantics = 0x02000000;
     private const uint DirectoryAttribute = 0x10;
     private const uint ReparseAttribute = 0x400;
+    private const int SharingViolation = 32;
+    // A process that moves an entry into a directory holds that directory open for writing for that instant (MoveFileEx
+    // opens the directory of the destination so), and a pin cannot share it: a pin is tried again for about a second
+    // before the pass gives up. A shared ancestor such as the temp directory sees such moves all the time.
+    private const int PinAttempts = 20;
+    private static readonly TimeSpan PinRetryDelay = TimeSpan.FromMilliseconds(50);
 
     internal static ScratchpadCleanupState Clear(CodeAltaInstanceProfile profile, SafeFileHandle ownership, DateTimeOffset cutoff,
         ScratchpadRemovalResult result, Action<string>? beforeOpen, Action<string>? beforeDelete, CancellationToken cancellationToken)
@@ -36,7 +42,7 @@ internal static class WindowsScratchpadRemoval
         FileStream? compatibilityGate = null;
         try
         {
-            var stateRoot = PinAncestors(profile.StateRoot, pins);
+            var stateRoot = PinAncestors(profile.StateRoot, pins, cancellationToken);
             if (!string.Equals(FinalVolumePath(ownership), Path.Combine(stateRoot, "alta.lock"), StringComparison.OrdinalIgnoreCase))
             {
                 result.Reason("instance-ownership-path-changed");
@@ -50,7 +56,7 @@ internal static class WindowsScratchpadRemoval
                 {
                     var devRoot = Path.Combine(stateRoot, "dev");
                     Directory.CreateDirectory(devRoot);
-                    pins.Add(OpenDirectory(devRoot, delete: false));
+                    pins.Add(OpenDirectory(devRoot, cancellationToken));
                     compatibilityGate = ReserveLegacyLock(Path.Combine(devRoot, "alta.lock"));
                 }
                 catch (Exception ex) when (IsFilesystemFailure(ex))
@@ -63,7 +69,7 @@ internal static class WindowsScratchpadRemoval
             cancellationToken.ThrowIfCancellationRequested();
             var scratchpad = Path.Combine(stateRoot, "scratchpad");
             SafeFileHandle root;
-            try { root = OpenDirectory(scratchpad, delete: false); }
+            try { root = OpenDirectory(scratchpad, cancellationToken); }
             catch (Win32Exception ex) when (ex.NativeErrorCode is 2 or 3)
             {
                 return ScratchpadCleanupState.Completed;
@@ -81,13 +87,13 @@ internal static class WindowsScratchpadRemoval
         }
     }
 
-    private static string PinAncestors(string directory, List<SafeFileHandle> pins)
+    private static string PinAncestors(string directory, List<SafeFileHandle> pins, CancellationToken cancellationToken)
     {
         var fullPath = Path.GetFullPath(directory);
         // Network/extended-device paths have not been qualified for the local sharing contract.
         if (fullPath.StartsWith("\\\\", StringComparison.Ordinal)) throw new ScratchpadSafetyException("volume-path-safety-unavailable");
         var driveRoot = Path.GetPathRoot(fullPath)!;
-        var volume = OpenDirectory(driveRoot, delete: false);
+        var volume = OpenDirectory(driveRoot, cancellationToken);
         pins.Add(volume);
         var stablePath = FinalVolumePath(volume);
         // A drive-letter pin does not pin its DOS-device mapping. Use the opened volume's GUID
@@ -103,7 +109,7 @@ internal static class WindowsScratchpadRemoval
         foreach (var component in fullPath[driveRoot.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
             stablePath = Path.Combine(stablePath, component);
-            pins.Add(OpenDirectory(stablePath, delete: false));
+            pins.Add(OpenDirectory(stablePath, cancellationToken));
         }
         return Path.TrimEndingDirectorySeparator(FinalVolumePath(pins[^1]));
     }
@@ -247,9 +253,22 @@ internal static class WindowsScratchpadRemoval
 
     private readonly record struct ScratchpadEntry(string Path, bool IsDirectory);
 
-    private static SafeFileHandle OpenDirectory(string path, bool delete)
+    private static SafeFileHandle OpenDirectory(string path, CancellationToken cancellationToken)
     {
-        var handle = Open(path, delete);
+        for (var attempt = 1; ; attempt++)
+        {
+            try { return OpenDirectory(path); }
+            catch (Win32Exception ex) when (ex.NativeErrorCode == SharingViolation && attempt < PinAttempts)
+            {
+                cancellationToken.WaitHandle.WaitOne(PinRetryDelay);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+        }
+    }
+
+    private static SafeFileHandle OpenDirectory(string path)
+    {
+        var handle = Open(path, delete: false);
         try
         {
             var attributes = Attributes(handle);

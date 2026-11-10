@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "./browserTarget";
 import { withSessionWindow } from "./sessionWindowHarness";
+import { testLimit } from "./testTime";
 
 // Headless Edge can draw the page late after a resize: until it does, the narrow media query has not changed and the
 // rail has not folded its buttons. Two frames have the window as a person sees it, before it is measured or clicked.
@@ -10,7 +11,7 @@ const names = ["Explorer", "Search", "Automations", "Workflows", "Work items", "
 
 // The window itself (main.tsx) over an isolated host: every button of the title bar's navigation can be seen and clicked,
 // at the narrowest Explorer and without the Explorer. What has no room is in the "…" menu; the Explorer and Settings always show.
-test("the buttons of the title bar stay reachable at the narrowest Explorer and without it", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("the buttons of the title bar stay reachable at the narrowest Explorer and without it", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true", "codealta.desktop.ide-width.v1": JSON.stringify({ width: 220 }) }, async ({ command, evaluate, until, press, exceptions }) => {
     // Each button of the rail as the pointer finds it: the element at its center must be the button itself.
     const rail = () => evaluate(`[...document.querySelectorAll('.activity-rail > .bp6-button, .activity-rail > .bp6-popover-target > .bp6-button, .activity-rail > .activity-more')].map(button => {
@@ -82,7 +83,7 @@ test("the buttons of the title bar stay reachable at the narrowest Explorer and 
 
 // The dot of work items to do is drawn on the Work items button, or on the "…" button when Work items is folded into its menu,
 // with the Explorer shown or hidden and in a narrow window: never on another button or elsewhere in the title bar.
-test("the dot of a button of the title bar is on that button", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("the dot of a button of the title bar is on that button", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureWorkTodo: "true", "codealta.desktop.ide-width.v1": JSON.stringify({ width: 220 }) }, async ({ command, evaluate, until, exceptions }) => {
     const toggle = `document.querySelector('.activity-rail button[aria-controls="project-rail"]')`;
     const dots = () => evaluate(`[...document.querySelectorAll('.window-brand .activity-rail-dot')].map(dot => {

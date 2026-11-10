@@ -21,6 +21,20 @@ export const fontMessages = {
     "Die Eingabe wird in der Schriftart für Code oder in der des übrigen Fensters geschrieben.",
     "プロンプトはコードのフォント、またはウィンドウのほかの部分と同じフォントで表示されます。",
     "提示词使用代码字体，或使用窗口其余部分的字体。"],
+  "Code text size": ["Tamaño del texto del código", "Taille du texte du code", "Textgröße für Code", "コードの文字サイズ", "代码文字大小"],
+  "Interface text size": ["Tamaño del texto de la interfaz", "Taille du texte de l’interface", "Textgröße der Oberfläche", "インターフェイスの文字サイズ", "界面文字大小"],
+  "The size of the text of the code editor, the diffs of changes and reviews, and the prompt, in pixels.": [
+    "El tamaño del texto del editor de código, de las diferencias de los cambios y las revisiones, y del mensaje, en píxeles.",
+    "La taille du texte de l’éditeur de code, des différences des modifications et des revues, et de la saisie, en pixels.",
+    "Die Textgröße des Code-Editors, der Diffs von Änderungen und Reviews sowie der Eingabe, in Pixeln.",
+    "コード エディター、変更とレビューの差分、プロンプトの文字サイズ (ピクセル単位)。",
+    "代码编辑器、更改和审阅的差异以及提示词的文字大小，以像素为单位。"],
+  "The size of the rest of the text of the window, conversations, lists, menus and dialogs, in percent. The zoom of the window enlarges the text and everything around it.": [
+    "El tamaño del resto del texto de la ventana, conversaciones, listas, menús y cuadros de diálogo, en porcentaje. El zoom de la ventana amplía el texto y todo lo que lo rodea.",
+    "La taille du reste du texte de la fenêtre, conversations, listes, menus et boîtes de dialogue, en pourcentage. Le zoom de la fenêtre agrandit le texte et tout ce qui l’entoure.",
+    "Die Größe des übrigen Textes des Fensters, Unterhaltungen, Listen, Menüs und Dialoge, in Prozent. Der Zoom des Fensters vergrößert den Text und alles um ihn herum.",
+    "ウィンドウのその他の文字 (会話、一覧、メニュー、ダイアログ) のサイズ (パーセント単位)。ウィンドウのズームは、文字とその周りのすべてを拡大します。",
+    "窗口其余文字（对话、列表、菜单和对话框）的大小，以百分比为单位。窗口缩放会放大文字及其周围的一切。"],
   "The installed fonts could not be listed: type their names.": [
     "No se pudieron enumerar las fuentes instaladas: escribe sus nombres.",
     "Les polices installées n’ont pas pu être listées : saisissez leurs noms.",

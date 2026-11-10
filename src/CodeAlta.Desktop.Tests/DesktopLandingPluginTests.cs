@@ -193,7 +193,7 @@ public sealed class DesktopLandingPluginTests
 
         public async Task<CanvasEvent> NextCanvasEventAsync(string kind)
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
             while (true)
             {
                 var value = await _events.Reader.ReadAsync(timeout.Token);

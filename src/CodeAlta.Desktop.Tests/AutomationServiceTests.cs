@@ -191,7 +191,7 @@ public sealed class AutomationServiceTests
 
         fixture.Service.Changed += OnEnded;
         start.Complete(new(AutomationRun.Failed, "The session did not complete."));
-        await ended.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await ended.Task.WithinAsync(TestTime.Seconds(30));
         fixture.Service.Changed -= OnEnded;
         Assert.AreEqual((AutomationRun.Failed, "The session did not complete."), (fixture.Service.Runs(null, 5)[0].Status, fixture.Service.Runs(null, 5)[0].Message));
 
@@ -972,11 +972,11 @@ public sealed class AutomationServiceTests
             {
                 var read = File.ReadAllBytes(path);
                 changed = Task.Run(change);
-                Assert.IsFalse(changed.Wait(500), "The automation is written after the save that holds the file.");
+                Assert.IsFalse(changed.Wait(TestTime.MillisecondsInt(500)), "The automation is written after the save that holds the file.");
                 File.WriteAllBytes(path, [.. read, .. System.Text.Encoding.UTF8.GetBytes(addition)]);
             }
 
-            return await changed.WaitAsync(TimeSpan.FromSeconds(10));
+            return await changed.WithinAsync(TestTime.Seconds(10));
         }
 
         Assert.IsNull(await Crossing(fixture.GlobalPath, () => fixture.Service.SaveAsync(definition, null, CancellationToken.None), "\n[sessions]\ntitle = \"first_prompt\"\n"));

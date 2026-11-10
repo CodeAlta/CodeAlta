@@ -42,11 +42,11 @@ public sealed class CodeAltaConfigStoreConcurrencyTests
             using (store.LockGlobalConfig())
             {
                 saved = Task.Run(() => new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = root }).SaveGlobalWorktreeSettings("custom", root));
-                Assert.IsFalse(saved.Wait(200), "a save waits while the file is held");
+                Assert.IsFalse(saved.Wait(TestTime.MillisecondsInt(200)), "a save waits while the file is held");
                 Assert.IsFalse(File.Exists(store.ConfigPath));
             }
 
-            await saved.WaitAsync(TimeSpan.FromSeconds(10));
+            await saved.WithinAsync(TestTime.Seconds(10));
             Assert.AreEqual("custom", store.LoadGlobal().Worktrees?.Location);
         }
         finally

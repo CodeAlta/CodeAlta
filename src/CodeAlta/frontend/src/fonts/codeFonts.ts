@@ -1,7 +1,10 @@
-// The fonts of the window: the code font (code blocks, editors, file views, tool output) and the font of the prompt.
-// The page styles them through two CSS variables of the root element, `--code-font` and `--prompt-font`
-// (style.css); the user's choice, a preference of the window kept in its local storage, puts its fonts before
-// the built-in one.
+// The fonts of the window: the code font (code blocks, editors, file views, tool output), the font of the prompt,
+// the size of the text of the code editors and that of the rest of the window. The page styles them through CSS
+// variables of the root element, `--code-font`, `--prompt-font`, `--code-font-size` (style.css) and
+// `--ui-text-scale` (textScale.ts); the user's choice, a preference of the window kept in its local storage, puts
+// its fonts before the built-in one.
+
+import { textScaleVariable } from "./textScale";
 
 /** Which font the prompt is written in. */
 export type PromptFont = "code" | "interface";
@@ -9,13 +12,41 @@ export type FontPreferences = Readonly<{
   /** The families of the code font, first choice first; empty for the built-in font alone. */
   code: readonly string[];
   prompt: PromptFont;
+  /** The size of the text of the code editors, the diffs and the prompt, in CSS pixels. */
+  codeSize: number;
+  /** The size of the rest of the text of the window, in percent of the sizes of its stylesheets. */
+  interfaceSize: number;
 }>;
 
 export const fontPreferencesKey = "codealta.desktop.fonts.v1";
 export const promptFonts: readonly PromptFont[] = ["code", "interface"];
 /** The family of the font the application brings: Cascadia Code with the icons of the Nerd Fonts. */
 export const builtinCodeFont = "CaskaydiaCove Nerd Font";
-export const defaultFontPreferences: FontPreferences = { code: [], prompt: "code" };
+export const defaultFontPreferences: FontPreferences = { code: [], prompt: "code", codeSize: 13, interfaceSize: 100 };
+/** The sizes the code editors may have, and those Settings offers. */
+export const minimumCodeFontSize = 9, maximumCodeFontSize = 24;
+export const codeFontSizes: readonly number[] = [10, 11, 12, 13, 14, 15, 16, 18, 20];
+/**
+ * The interface text sizes the window may have, and those Settings offers. Larger, the text would outgrow the boxes
+ * of fixed height around it: the zoom of the window enlarges the text and its boxes together.
+ */
+export const minimumInterfaceTextSize = 80, maximumInterfaceTextSize = 130;
+export const interfaceTextSizes: readonly number[] = [80, 85, 90, 95, 100, 105, 110, 115, 120, 125, 130];
+
+/** Whether a value is a size the code editors may have. */
+export function validCodeFontSize(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= minimumCodeFontSize && value <= maximumCodeFontSize;
+}
+
+/** Whether a value is an interface text size the window may have. */
+export function validInterfaceTextSize(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= minimumInterfaceTextSize && value <= maximumInterfaceTextSize;
+}
+
+/** The height of a line of the code editors for a size of their text: 20 pixels for the 13 of the default, in the same proportion. */
+export function codeLineHeight(size: number): number {
+  return Math.round(size * 20 / 13);
+}
 /** How many families a list keeps, and how long a name may be. */
 export const maximumFontFamilies = 8, maximumFontFamilyLength = 64;
 
@@ -58,6 +89,8 @@ export function restoreFontPreferences(read: () => string | null): FontPreferenc
     return {
       code: Array.isArray(value.code) ? fontFamilies(value.code.filter(name => typeof name === "string").join(",")) : defaultFontPreferences.code,
       prompt: promptFonts.includes(value.prompt as PromptFont) ? value.prompt as PromptFont : defaultFontPreferences.prompt,
+      codeSize: validCodeFontSize(value.codeSize) ? value.codeSize : defaultFontPreferences.codeSize,
+      interfaceSize: validInterfaceTextSize(value.interfaceSize) ? value.interfaceSize : defaultFontPreferences.interfaceSize,
     };
   } catch { return defaultFontPreferences; }
 }
@@ -67,15 +100,20 @@ export function persistFontPreferences(write: (value: string) => void, preferenc
   catch { return false; }
 }
 
+/** The variables of the root element the preferences set. */
+export type FontVariable = "--code-font" | "--prompt-font" | "--code-font-size" | typeof textScaleVariable;
+
 /**
  * The values of the font variables for the preferences; null leaves the variable to the stylesheet, which
- * gives the built-in code font and writes the prompt in it. The built-in font follows the user's fonts: it
- * draws what they lack, the icons of the Nerd Fonts among them.
+ * gives the built-in code font, writes the prompt in it, and has the default sizes. The built-in font follows
+ * the user's fonts: it draws what they lack, the icons of the Nerd Fonts among them.
  */
-export function fontVariables(preferences: FontPreferences): Readonly<Record<"--code-font" | "--prompt-font", string | null>> {
+export function fontVariables(preferences: FontPreferences): Readonly<Record<FontVariable, string | null>> {
   return {
     "--code-font": preferences.code.length ? `${fontFamilyList(preferences.code)}, var(--code-font-builtin)` : null,
     "--prompt-font": preferences.prompt === "interface" ? "var(--bp-typography-family-default)" : null,
+    "--code-font-size": preferences.codeSize !== defaultFontPreferences.codeSize ? `${preferences.codeSize}px` : null,
+    [textScaleVariable]: preferences.interfaceSize !== defaultFontPreferences.interfaceSize ? String(preferences.interfaceSize / 100) : null,
   };
 }
 

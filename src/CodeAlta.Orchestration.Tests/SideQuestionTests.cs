@@ -87,7 +87,7 @@ public sealed class SideQuestionTests
         using var stop = new CancellationTokenSource();
         var work = hub.AskSideQuestionAsync("streaming", "chosen", null, Environment.CurrentDirectory, [], "question",
             static (_, _) => ValueTask.CompletedTask, stop.Token);
-        await runtime.Started.Task.WaitAsync(TestDeadlines.Hang);
+        await runtime.Started.Task.WithinAsync(TestDeadlines.Hang);
         await stop.CancelAsync();
         await Assert.ThrowsExactlyAsync<TaskCanceledException>(async () => await work);
     }
@@ -106,7 +106,7 @@ public sealed class SideQuestionTests
         var send = host.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("original context") });
         try
         {
-            await started.Task.WaitAsync(TestDeadlines.Hang);
+            await started.Task.WithinAsync(TestDeadlines.Hang);
             var descriptor = await host.RuntimeService.TryGetResumableSessionAsync(session.SessionId);
             Assert.IsNotNull(descriptor);
             var before = await host.RuntimeService.TryReadStoredHistoryAsync(descriptor);
@@ -114,7 +114,7 @@ public sealed class SideQuestionTests
             provider.Turns.Enqueue(ScriptedTurnProvider.Reply("side answer"));
 
             var answer = await host.RuntimeService.AskSideQuestionAsync(session.SessionId, "side question", static (_, _) => ValueTask.CompletedTask)
-                .WaitAsync(TestDeadlines.Hang);
+                .WithinAsync(TestDeadlines.Hang);
             Assert.AreEqual("side answer", answer);
             var request = provider.Requests.Single(static item => item.IsStandalone);
             Assert.AreEqual(provider.ProviderId, request.ProviderId);
@@ -135,7 +135,7 @@ public sealed class SideQuestionTests
         finally
         {
             release.TrySetResult();
-            await send.WaitAsync(TestDeadlines.Hang);
+            await send.WithinAsync(TestDeadlines.Hang);
         }
     }
 

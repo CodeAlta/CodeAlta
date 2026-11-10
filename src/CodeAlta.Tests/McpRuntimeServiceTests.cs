@@ -344,7 +344,7 @@ public sealed partial class McpRuntimeServiceTests
         var redirectUri = new Uri($"http://127.0.0.1:{port}/mcp/oauth/callback", UriKind.Absolute);
         var messages = new List<string>();
         var authorization = new McpOAuthBrowserAuthorization(messages.Add, openBrowser: false);
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cancellation = new CancellationTokenSource(TestTime.Seconds(10));
         var authorizeTask = authorization.AuthorizeAsync(
             new AuthorizationCallbackContext
             {
@@ -1173,7 +1173,7 @@ public sealed partial class McpRuntimeServiceTests
                 callbacks = authorizationCallbacks.ToArray();
             }
 
-            await Task.WhenAll(callbacks).WaitAsync(TimeSpan.FromSeconds(10));
+            await Task.WhenAll(callbacks).WithinAsync(TestTime.Seconds(10));
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
@@ -1227,7 +1227,7 @@ public sealed partial class McpRuntimeServiceTests
                 CancellationToken.None);
         }
 
-        await browser!.WaitAsync(TimeSpan.FromSeconds(10));
+        await browser!.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(0, result.Diagnostics.Count, string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.Message)) + server.ErrorSummary);
         Assert.AreEqual("echo", result.Tools.Single().Name);
         var reported = prompts.Single();

@@ -14,7 +14,7 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class ClaudeCodeOpenElsewhereTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Timeout = TestTime.Seconds(20);
 
     [TestMethod]
     public async Task Conversation_IsNamedFromTheRecordedState_AndReleaseClosesTheIdleProcess_WhichTheNextPromptResumes()
@@ -35,7 +35,7 @@ public sealed class ClaudeCodeOpenElsewhereTests
         // program that holds the conversation, although the registry is read by another runtime than the session's.
         cli.HoldConversation(process.ProcessId!.Value, conversation, entrypoint: "sdk-cli");
 
-        var described = await host.Commands.GetSharedConversationAsync(session.SessionId).WaitAsync(Timeout);
+        var described = await host.Commands.GetSharedConversationAsync(session.SessionId).WithinAsync(Timeout);
         Assert.AreEqual("ok", described.Status);
         var shared = described.Conversation!;
         Assert.AreEqual(conversation, shared.ConversationId);
@@ -47,12 +47,12 @@ public sealed class ClaudeCodeOpenElsewhereTests
 
         // VS Code opened it meanwhile: it is named as the holder.
         cli.HoldConversation(9001, conversation);
-        var held = (await host.Commands.GetSharedConversationAsync(session.SessionId).WaitAsync(Timeout)).Conversation!.Holder;
+        var held = (await host.Commands.GetSharedConversationAsync(session.SessionId).WithinAsync(Timeout)).Conversation!.Holder;
         Assert.AreEqual((AgentConversationHolderOrigin.VsCode, 9001), (held!.Origin, held.ProcessId));
         cli.ReleaseConversation(9001);
 
         Assert.IsFalse(process.IsDisposed);
-        var released = await host.Commands.ReleaseSharedConversationAsync(session.SessionId).WaitAsync(Timeout);
+        var released = await host.Commands.ReleaseSharedConversationAsync(session.SessionId).WithinAsync(Timeout);
         Assert.AreEqual("ok", released.Status);
         Assert.AreEqual(conversation, released.Conversation!.ConversationId);
         Assert.IsTrue(process.IsDisposed, "The idle process of the session is closed: VS Code does not find the conversation held by CodeAlta.");
@@ -61,7 +61,7 @@ public sealed class ClaudeCodeOpenElsewhereTests
         cli.ReleaseConversation(process.ProcessId!.Value);
 
         // Released again: nothing is attached, nothing to close.
-        Assert.AreEqual("ok", (await host.Commands.ReleaseSharedConversationAsync(session.SessionId).WaitAsync(Timeout)).Status);
+        Assert.AreEqual("ok", (await host.Commands.ReleaseSharedConversationAsync(session.SessionId).WithinAsync(Timeout)).Status);
 
         // The next prompt attaches the session again and resumes the conversation as the other program left it.
         cli.WriteTranscript(conversation);
@@ -109,14 +109,14 @@ public sealed class ClaudeCodeOpenElsewhereTests
         Assert.AreEqual(9002, question.Holder.ProcessId);
         Assert.AreEqual(1, process.UserMessages.Count, "The prompt did not reach that process before the answer.");
         Assert.IsTrue(await host.RuntimeService.ConversationHolds.ResolveAsync(question.Handle, AgentConversationHeldChoice.Cancel, CancellationToken.None));
-        await cancelled.Completion.WaitAsync(Timeout);
+        await cancelled.Completion.WithinAsync(Timeout);
         Assert.AreEqual(1, process.UserMessages.Count, "Cancel sends nothing.");
         Assert.IsFalse(process.IsDisposed, "The process of CodeAlta stays for the next prompt.");
 
         // Open here anyway: the prompt goes to that same process, which is not started again.
         var (opened, again) = await AskedAsync("three");
         Assert.IsTrue(await host.RuntimeService.ConversationHolds.ResolveAsync(again.Handle, AgentConversationHeldChoice.OpenAnyway, CancellationToken.None));
-        var result = await opened.Completion.WaitAsync(Timeout);
+        var result = await opened.Completion.WithinAsync(Timeout);
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
         Assert.AreSame(process, SessionProcess(cli), "No other process was started.");
         Assert.IsFalse(process.IsDisposed);
@@ -134,11 +134,11 @@ public sealed class ClaudeCodeOpenElsewhereTests
         var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, ClaudeCodeModelProviderRuntime.CreateDescriptor(options), "Account");
         await SendAsync(host, session.SessionId, "one");
 
-        var described = await host.Commands.GetSharedConversationAsync(session.SessionId).WaitAsync(Timeout);
+        var described = await host.Commands.GetSharedConversationAsync(session.SessionId).WithinAsync(Timeout);
         Assert.AreEqual("ok", described.Status);
         Assert.AreEqual(cli.ConfigRoot, described.Conversation!.ConfigDirectory, "The CLI runs with CLAUDE_CONFIG_DIR set to it: the conversation is there.");
         Assert.AreEqual($"claude --resume {SessionProcess(cli).SessionId}", described.Conversation.ResumeCommand);
-        var released = await host.Commands.ReleaseSharedConversationAsync(session.SessionId).WaitAsync(Timeout);
+        var released = await host.Commands.ReleaseSharedConversationAsync(session.SessionId).WithinAsync(Timeout);
         Assert.AreEqual(cli.ConfigRoot, released.Conversation!.ConfigDirectory);
     }
 
@@ -164,16 +164,16 @@ public sealed class ClaudeCodeOpenElsewhereTests
         Assert.IsNotNull(receipt);
         try
         {
-            await answering.Task.WaitAsync(Timeout);
+            await answering.Task.WithinAsync(Timeout);
             var process = SessionProcess(cli);
-            Assert.AreEqual("running", (await host.Commands.ReleaseSharedConversationAsync(session.SessionId).WaitAsync(Timeout)).Status);
-            Assert.AreEqual("running", await host.RuntimeService.ReleaseSharedConversationAsync(session.SessionId).WaitAsync(Timeout), "The runtime refuses it too.");
+            Assert.AreEqual("running", (await host.Commands.ReleaseSharedConversationAsync(session.SessionId).WithinAsync(Timeout)).Status);
+            Assert.AreEqual("running", await host.RuntimeService.ReleaseSharedConversationAsync(session.SessionId).WithinAsync(Timeout), "The runtime refuses it too.");
             Assert.IsFalse(process.IsDisposed);
-            Assert.AreEqual("ok", (await host.Commands.GetSharedConversationAsync(session.SessionId).WaitAsync(Timeout)).Status, "Described all the same.");
+            Assert.AreEqual("ok", (await host.Commands.GetSharedConversationAsync(session.SessionId).WithinAsync(Timeout)).Status, "Described all the same.");
         }
         finally { answer.TrySetResult(); }
 
-        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(Timeout)).Outcome);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WithinAsync(Timeout)).Outcome);
     }
 
     [TestMethod]
@@ -185,14 +185,14 @@ public sealed class ClaudeCodeOpenElsewhereTests
         await using var host = await CreateHostAsync(directory, options, projectRoot);
         var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, ClaudeCodeModelProviderRuntime.CreateDescriptor(options), "Remote");
         await SendAsync(host, session.SessionId, "one");
-        Assert.AreEqual(AgentRemoteControlStatus.Connected, (await host.Commands.SetRemoteControlAsync(session.SessionId, true).WaitAsync(Timeout)).RemoteControl!.Status);
+        Assert.AreEqual(AgentRemoteControlStatus.Connected, (await host.Commands.SetRemoteControlAsync(session.SessionId, true).WithinAsync(Timeout)).RemoteControl!.Status);
         using (var limit = new CancellationTokenSource(Timeout))
         {
             while ((await host.RuntimeService.GetCurrentStateAsync(session.SessionId, limit.Token)).Entry?.RemoteControl.Status != AgentRemoteControlStatus.Connected)
                 await Task.Delay(20, limit.Token);
         }
 
-        Assert.AreEqual("remote_control", (await host.Commands.ReleaseSharedConversationAsync(session.SessionId).WaitAsync(Timeout)).Status,
+        Assert.AreEqual("remote_control", (await host.Commands.ReleaseSharedConversationAsync(session.SessionId).WithinAsync(Timeout)).Status,
             "Closing the process would end Remote Control.");
         Assert.IsFalse(SessionProcess(cli).IsDisposed);
         Assert.IsTrue(SessionProcess(cli).RemoteControlOn);
@@ -250,7 +250,7 @@ public sealed class ClaudeCodeOpenElsewhereTests
     {
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, prompt)).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(Timeout);
+        var result = await receipt.Completion.WithinAsync(Timeout);
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
     }
 

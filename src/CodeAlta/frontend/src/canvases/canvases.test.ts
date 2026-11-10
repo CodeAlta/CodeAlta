@@ -7,7 +7,7 @@ import { createCanvasPluginControl, readPluginFolder, type CanvasPluginApi } fro
 
 const event = (kind: string, fields: Partial<CanvasEvent> = {}): CanvasEvent => ({ kind, actions: null, canvasId: null, focus: false, html: null, icon: null, instanceId: null, key: null,
   package: null, pluginKey: null, projectId: null, revision: null, connection: null, frames: null, reason: null, script: null, scriptProblem: null, sessionId: null, spaceId: null, state: null, statusText: null, title: null, placement: null, ...fields });
-const wait = (milliseconds = 10) => new Promise(resolve => setTimeout(resolve, milliseconds));
+const wait = (milliseconds = 10) => new Promise(resolve => setTimeout(resolve, milliseconds)); // not a limit: a pause
 
 /** A host the test plays: the events it sends on its channel, and what the page asked of it. */
 function host() {

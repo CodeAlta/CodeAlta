@@ -8,7 +8,7 @@ namespace CodeAlta.Sandbox.Tests;
 [TestClass]
 public sealed class SandboxNetworkProxyTests
 {
-    private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Deadline = TestTime.Seconds(20);
 
     [TestMethod]
     public async Task TheProxy_TunnelsALocalPortOfTheProfile_AndRefusesTheOthersWithA403()
@@ -38,7 +38,7 @@ public sealed class SandboxNetworkProxyTests
         for (var index = 0; index < 500; index++)
         {
             var proxy = SandboxNetworkProxy.Start([], [], []);
-            await proxy.DisposeAsync().AsTask().WaitAsync(Deadline);
+            await proxy.DisposeAsync().AsTask().WithinAsync(Deadline);
         }
     }
 
@@ -79,7 +79,7 @@ public sealed class SandboxNetworkProxyTests
             new SandboxSessionFolders { WorkingDirectory = Path.GetTempPath() },
             new SandboxHost { DataRoot = Path.Combine(Path.GetTempPath(), "codealta-proxy-tests"), HomeDirectory = Path.GetTempPath(), Environment = new Dictionary<string, string>() }, [], "s");
         using var allowed = SandboxHttp.Create(policy, new HashSet<int>());
-        Assert.AreEqual("ok", await allowed.GetStringAsync($"http://localhost:{upstream.Port}/").WaitAsync(Deadline));
+        Assert.AreEqual("ok", await allowed.GetStringAsync($"http://localhost:{upstream.Port}/").WithinAsync(Deadline));
 
         using var reserved = SandboxHttp.Create(policy, new HashSet<int> { upstream.Port });
         await Assert.ThrowsExactlyAsync<HttpRequestException>(() => reserved.GetStringAsync($"http://localhost:{upstream.Port}/"));
@@ -91,7 +91,7 @@ public sealed class SandboxNetworkProxyTests
     {
         var endpoint = new Uri(proxy.Endpoint);
         using var client = new TcpClient();
-        await client.ConnectAsync(endpoint.Host, endpoint.Port).WaitAsync(Deadline);
+        await client.ConnectAsync(endpoint.Host, endpoint.Port).WithinAsync(Deadline);
         var stream = client.GetStream();
         await stream.WriteAsync(Encoding.ASCII.GetBytes(request));
         var text = new StringBuilder();
@@ -99,16 +99,16 @@ public sealed class SandboxNetworkProxyTests
         int read;
         if (then is not null)
         {
-            read = await stream.ReadAsync(buffer).AsTask().WaitAsync(Deadline);
+            read = await stream.ReadAsync(buffer).AsTask().WithinAsync(Deadline);
             text.Append(Encoding.ASCII.GetString(buffer, 0, read));
             await stream.WriteAsync(Encoding.ASCII.GetBytes(then));
-            read = await stream.ReadAsync(buffer).AsTask().WaitAsync(Deadline);
+            read = await stream.ReadAsync(buffer).AsTask().WithinAsync(Deadline);
             text.Append(Encoding.ASCII.GetString(buffer, 0, read));
             return text.ToString();
         }
 
         // A refusal and an echoed request: read until the other side closes, or until the echo has its blank line.
-        while ((read = await stream.ReadAsync(buffer).AsTask().WaitAsync(Deadline)) > 0)
+        while ((read = await stream.ReadAsync(buffer).AsTask().WithinAsync(Deadline)) > 0)
         {
             text.Append(Encoding.ASCII.GetString(buffer, 0, read));
             if (!text.ToString().StartsWith("HTTP/", StringComparison.Ordinal) && text.ToString().Contains("\r\n\r\n", StringComparison.Ordinal))

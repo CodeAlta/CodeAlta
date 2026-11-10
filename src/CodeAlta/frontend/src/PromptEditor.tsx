@@ -2,7 +2,7 @@ import { useImperativeHandle, useLayoutEffect, useRef, type ClipboardEventHandle
 import "monaco-editor/languages/definitions/markdown/register.js";
 import { promptEditorMinimum } from "./composerHeight";
 import { equationKey, equationKeybinding, useEquationEditing } from "./equationEditing";
-import { followPageFont, followShellTheme, monaco, pageFontFamily } from "./monaco/monacoEnvironment";
+import { followPageFont, followShellTheme, monaco, pageFontOptions } from "./monaco/monacoEnvironment";
 import { attachPromptMath } from "./promptMath";
 import { promptTypeEvent } from "./promptTyping";
 import { useShellLanguage } from "./shellLanguage";
@@ -61,7 +61,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
     const node = host.current!;
     const model = monaco.editor.createModel(latest.current.value, "markdown");
     const instance = monaco.editor.create(node.firstElementChild as HTMLElement, { model, automaticLayout: true, ariaLabel: label,
-      readOnly: latest.current.disabled, fontFamily: pageFontFamily("prompt"), fontSize: 13, lineHeight: 20,
+      readOnly: latest.current.disabled, ...pageFontOptions("prompt"),
       minimap: { enabled: false }, lineNumbers: "off", glyphMargin: false, folding: false,
       lineDecorationsWidth: 0, lineNumbersMinChars: 0, scrollBeyondLastLine: false, wordWrap: "on",
       overviewRulerLanes: 0, renderLineHighlight: "none", stickyScroll: { enabled: false },

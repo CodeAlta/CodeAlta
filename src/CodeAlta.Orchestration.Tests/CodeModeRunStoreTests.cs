@@ -37,7 +37,7 @@ public sealed class CodeModeRunStoreTests
                 return Task.FromResult(new CodeModeRunResult(CodeModeRunStatus.Failed, TimeSpan.Zero));
             }, out var refusal);
         Assert.IsNotNull(run, refusal);
-        Assert.AreEqual(run.Id, await ended.Task.WaitAsync(Hang));
+        Assert.AreEqual(run.Id, await ended.Task.WithinAsync(Hang));
 
         var kept = new CodeModeRunStore(folder.Path).TryLoad(run.Id);
 
@@ -73,13 +73,13 @@ public sealed class CodeModeRunStoreTests
             await Task.Delay(Timeout.Infinite, token);
             return new CodeModeRunResult(CodeModeRunStatus.Completed, TimeSpan.Zero);
         }, out _)!;
-        await started.Task.WaitAsync(Hang);
+        await started.Task.WithinAsync(Hang);
         await WaitForAsync(() => new CodeModeRunStore(folder.Path).TryLoad(run.Id) is not null);
 
         // CodeAlta starts again while the run had no end.
         var told = new List<AgentWorkflowEvent>();
         await using var after = new CodeModeRunRegistry(null) { Journal = (session, record) => { lock (told) told.Add(record); return Task.CompletedTask; } };
-        await after.UseStoreAsync(new CodeModeRunStore(folder.Path)).WaitAsync(Hang);
+        await after.UseStoreAsync(new CodeModeRunStore(folder.Path)).WithinAsync(Hang);
 
         var kept = after.Store!.TryLoad(run.Id)!;
         Assert.AreEqual("interrupted", kept.Status);
@@ -197,11 +197,11 @@ public sealed class CodeModeRunStoreTests
         await using (var after = new CodeModeRunRegistry((session, prompt, _) => { resumed.TrySetResult((session, prompt)); return Task.CompletedTask; })
                      { Journal = (_, record) => { lock (told) told.Add(record); return Task.CompletedTask; } })
         {
-            await after.UseStoreAsync(new CodeModeRunStore(folder.Path)).WaitAsync(Hang);
+            await after.UseStoreAsync(new CodeModeRunStore(folder.Path)).WithinAsync(Hang);
             var ended = told.Single();
             Assert.AreEqual(("interrupted", kept.SleepingUntil), (ended.Status, ended.WakeAt), "its card says when it resumes by itself");
 
-            var (session, prompt) = await resumed.Task.WaitAsync(Hang);
+            var (session, prompt) = await resumed.Task.WithinAsync(Hang);
 
             Assert.AreEqual("session-1", session);
             StringAssert.Contains(prompt, $"\"resume\": \"{runId}\"");
@@ -210,7 +210,7 @@ public sealed class CodeModeRunStoreTests
 
         // A later start resumes it no more.
         await using var third = new CodeModeRunRegistry((_, _, _) => throw new InvalidOperationException("resumed twice"));
-        await third.UseStoreAsync(new CodeModeRunStore(folder.Path)).WaitAsync(Hang);
+        await third.UseStoreAsync(new CodeModeRunStore(folder.Path)).WithinAsync(Hang);
         Assert.IsEmpty(third.Store!.ListSleepingInterrupted());
     }
 

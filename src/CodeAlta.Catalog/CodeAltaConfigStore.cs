@@ -351,9 +351,7 @@ public sealed partial class CodeAltaConfigStore
             return layers.Count == 0 ? string.Empty : ComposeText(layers, layers.Count);
         }
 
-        return File.Exists(_options.ConfigPath)
-            ? SharedTextFile.ReadAllText(_options.ConfigPath)
-            : GetDefaultGlobalConfigContent();
+        return SharedTextFile.TryReadAllText(_options.ConfigPath) ?? GetDefaultGlobalConfigContent();
     }
 
     /// <summary>
@@ -377,7 +375,7 @@ public sealed partial class CodeAltaConfigStore
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         try
         {
-            File.WriteAllText(_options.ConfigPath, content ?? string.Empty);
+            SharedTextFile.WriteAllText(_options.ConfigPath, content ?? string.Empty);
         }
         finally
         {
@@ -1097,7 +1095,7 @@ public sealed partial class CodeAltaConfigStore
         ArgumentNullException.ThrowIfNull(edit);
         path = Path.GetFullPath(path);
         using var writing = ConfigFileLock.Acquire(path);
-        var content = File.Exists(path) ? SharedTextFile.ReadAllText(path) : string.Empty;
+        var content = SharedTextFile.TryReadAllText(path) ?? string.Empty;
         var updated = edit(content) ?? throw new InvalidOperationException("The edit of the configuration returned no text.");
         if (string.Equals(updated, content, StringComparison.Ordinal)) return false;
         // The edited text must still be a configuration this version reads before it replaces the file.
@@ -1111,7 +1109,7 @@ public sealed partial class CodeAltaConfigStore
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, updated);
+        SharedTextFile.WriteAllText(path, updated);
         return true;
     }
 
@@ -1838,12 +1836,7 @@ public sealed partial class CodeAltaConfigStore
     // changes it, so that it never works from what another writer replaced.
     private static CodeAltaConfigDocument LoadDocument(string path)
     {
-        if (!File.Exists(path))
-        {
-            return new CodeAltaConfigDocument();
-        }
-
-        return ParseLoadedContent(path, SharedTextFile.ReadAllText(path));
+        return SharedTextFile.TryReadAllText(path) is { } content ? ParseLoadedContent(path, content) : new CodeAltaConfigDocument();
     }
 
     // A document the caller owns: a copy of the one this store keeps for the file.
@@ -1974,12 +1967,12 @@ public sealed partial class CodeAltaConfigStore
     private static void SaveDocument(string path, CodeAltaConfigDocument document)
     {
         NormalizeDocument(document);
-        var existing = File.Exists(path) ? SharedTextFile.ReadAllText(path) : string.Empty;
+        var existing = SharedTextFile.TryReadAllText(path) ?? string.Empty;
         var content = string.IsNullOrWhiteSpace(existing)
             ? TomlSerializer.Serialize(document)
             : MergeIntoExistingContent(existing, document, path);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content);
+        SharedTextFile.WriteAllText(path, content);
     }
 
     // The typed document models only part of the file. Everything else (settings a plugin reads itself, such as
@@ -2165,7 +2158,7 @@ public sealed partial class CodeAltaConfigStore
         ArgumentNullException.ThrowIfNull(skillNames);
         var disabled = NormalizeSkillConfigNameList(skillNames);
         using var writing = ConfigFileLock.Acquire(path);
-        var content = File.Exists(path) ? SharedTextFile.ReadAllText(path) : string.Empty;
+        var content = SharedTextFile.TryReadAllText(path) ?? string.Empty;
         try
         {
             _ = ParseDocument(content, path);
@@ -2179,7 +2172,7 @@ public sealed partial class CodeAltaConfigStore
         // not a multi-file transaction or external-writer compare-and-swap.
         _ = ParseDocument(updated, path);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, updated);
+        SharedTextFile.WriteAllText(path, updated);
     }
 
     // The disabled names of a document as the store keeps it: it was normalized when it was parsed, which a second

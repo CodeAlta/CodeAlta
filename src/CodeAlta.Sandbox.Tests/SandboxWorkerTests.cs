@@ -11,7 +11,7 @@ namespace CodeAlta.Sandbox.Tests;
 [TestClass]
 public sealed class SandboxWorkerTests
 {
-    private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan Deadline = TestTime.Seconds(60);
 
     [TestMethod]
     public async Task TheFileTools_RunInTheWorker_AndAskTheirPermissionsToCodeAlta()
@@ -23,21 +23,21 @@ public sealed class SandboxWorkerTests
         var asked = new List<AgentPermissionRequest>();
         var allow = Host((request, _) => { lock (asked) asked.Add(request); return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)); });
 
-        var read = await worker.Client.InvokeAsync(Call("read_file", new { path = "a.txt" }), allow, CancellationToken.None).WaitAsync(Deadline);
+        var read = await worker.Client.InvokeAsync(Call("read_file", new { path = "a.txt" }), allow, CancellationToken.None).WithinAsync(Deadline);
         Assert.IsTrue(read.Success, read.Error);
         Assert.Contains("world", Text(read));
 
-        var written = await worker.Client.InvokeAsync(Call("write_file", new { path = "b.txt", content = "from the sandbox" }, "call-write"), allow, CancellationToken.None).WaitAsync(Deadline);
+        var written = await worker.Client.InvokeAsync(Call("write_file", new { path = "b.txt", content = "from the sandbox" }, "call-write"), allow, CancellationToken.None).WithinAsync(Deadline);
         Assert.IsTrue(written.Success, written.Error);
         Assert.AreEqual("from the sandbox", File.ReadAllText(Path.Combine(project, "b.txt")));
         Assert.IsTrue(asked.Any(static request => request is AgentFileChangePermissionRequest { SessionId: "session-1" }), "the change was asked, for the session");
 
         var deny = Host((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)));
-        var refused = await worker.Client.InvokeAsync(Call("write_file", new { path = "c.txt", content = "no" }), deny, CancellationToken.None).WaitAsync(Deadline);
+        var refused = await worker.Client.InvokeAsync(Call("write_file", new { path = "c.txt", content = "no" }), deny, CancellationToken.None).WithinAsync(Deadline);
         Assert.IsFalse(refused.Success);
         Assert.IsFalse(File.Exists(Path.Combine(project, "c.txt")));
 
-        var guarded = await worker.Client.InvokeAsync(Call("write_file", new { path = ".git/hooks/pre-commit", content = "evil" }), allow, CancellationToken.None).WaitAsync(Deadline);
+        var guarded = await worker.Client.InvokeAsync(Call("write_file", new { path = ".git/hooks/pre-commit", content = "evil" }), allow, CancellationToken.None).WithinAsync(Deadline);
         Assert.IsFalse(guarded.Success, "the file tools of the worker keep the rules of a session without shell");
         Assert.DoesNotContain("shell_command", Text(guarded), "a sandboxed session has its shell: the sandbox refuses");
         Assert.Contains("sandbox", Text(guarded));
@@ -57,12 +57,12 @@ public sealed class SandboxWorkerTests
         {
             Progress = (update, _) => { lock (progress) progress.Append(update.Delta); return ValueTask.CompletedTask; },
         };
-        var result = await worker.Client.InvokeAsync(invocation, host, CancellationToken.None).WaitAsync(Deadline);
+        var result = await worker.Client.InvokeAsync(invocation, host, CancellationToken.None).WithinAsync(Deadline);
         Assert.IsTrue(result.Success, result.Error);
         Assert.Contains("from-the-worker", Text(result));
         Assert.Contains("from-the-worker", progress.ToString(), "what the command writes is streamed while it runs");
 
-        var refused = await worker.Client.InvokeAsync(Call("shell_command", new { command = "echo refused" }), host, CancellationToken.None).WaitAsync(Deadline);
+        var refused = await worker.Client.InvokeAsync(Call("shell_command", new { command = "echo refused" }), host, CancellationToken.None).WithinAsync(Deadline);
         Assert.IsFalse(refused.Success);
         Assert.Contains("refused by the host", refused.Error + Text(refused));
     }
@@ -74,10 +74,10 @@ public sealed class SandboxWorkerTests
         var project = temp.Folder("project");
         var worker = await WorkerOnPipes.StartAsync(project);
         var allow = Host((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)));
-        using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var cancel = new CancellationTokenSource(TestTime.Seconds(2));
         var watch = Stopwatch.StartNew();
 
-        var canceled = await worker.Client.InvokeAsync(Call("shell_command", new { command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 60" : "sleep 60" }), allow, cancel.Token).WaitAsync(Deadline);
+        var canceled = await worker.Client.InvokeAsync(Call("shell_command", new { command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 60" : "sleep 60" }), allow, cancel.Token).WithinAsync(Deadline);
 
         Assert.IsFalse(canceled.Success);
         Assert.IsLessThan(TimeSpan.FromSeconds(30), watch.Elapsed, "the command was stopped, not waited for");
@@ -85,14 +85,14 @@ public sealed class SandboxWorkerTests
         var pending = worker.Client.InvokeAsync(Call("shell_command", new { command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 60" : "sleep 60" }), allow, CancellationToken.None);
         await Task.Delay(500);
         await worker.StopWorkerAsync();
-        var failed = await pending.WaitAsync(Deadline);
+        var failed = await pending.WithinAsync(Deadline);
         Assert.IsFalse(failed.Success);
         // A worker whose input ends cancels its calls and answers them before its output ends: the call can fail on that
         // answer before the client reads the end of the output. The client knows the worker ended once it has read it.
         var ended = Stopwatch.StartNew();
         while (!worker.Client.HasEnded && ended.Elapsed < Deadline) await Task.Delay(20);
         Assert.IsTrue(worker.Client.HasEnded);
-        Assert.IsFalse((await worker.Client.InvokeAsync(Call("read_file", new { path = "x" }), allow, CancellationToken.None).WaitAsync(Deadline)).Success);
+        Assert.IsFalse((await worker.Client.InvokeAsync(Call("read_file", new { path = "x" }), allow, CancellationToken.None).WithinAsync(Deadline)).Success);
         await worker.DisposeAsync();
     }
 
@@ -113,21 +113,21 @@ public sealed class SandboxWorkerTests
             }
         });
         var client = await SandboxWorkerClient.ConnectAsync(hostInput, toWorker, new SandboxWorkerInit("session-1", "test", Path.GetTempPath(), [], null, null, false), CancellationToken.None)
-            .WaitAsync(Deadline);
+            .WithinAsync(Deadline);
         client.CancelGrace = TimeSpan.FromMilliseconds(200);
-        using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        using var cancel = new CancellationTokenSource(TestTime.Milliseconds(200));
 
         var result = await client.InvokeAsync(Call("read_file", new { path = "x" }), Host((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce))),
-            cancel.Token).WaitAsync(Deadline);
+            cancel.Token).WithinAsync(Deadline);
 
         Assert.IsFalse(result.Success);
         Assert.IsTrue(client.HasEnded, "a worker that does not stop is ended: what it runs does not hold the session");
         // As the end of the worker's process: its input ends, then its output, which the reader of the client sees end
         // (on Linux a read that waits on a pipe is not woken by closing the handle it reads).
         toWorker.Dispose();
-        await silent.WaitAsync(Deadline);
+        await silent.WithinAsync(Deadline);
         fromWorker.Dispose();
-        await client.DisposeAsync().AsTask().WaitAsync(Deadline);
+        await client.DisposeAsync().AsTask().WithinAsync(Deadline);
     }
 
     [TestMethod]
@@ -139,13 +139,13 @@ public sealed class SandboxWorkerTests
         var output = new StringBuilder();
 
         var job = worker.Client.StartProcess("echo job-output", project, text => { lock (output) output.Append(text); });
-        Assert.AreEqual(0, await job.Completion.WaitAsync(Deadline));
+        Assert.AreEqual(0, await job.Completion.WithinAsync(Deadline));
         Assert.Contains("job-output", output.ToString());
 
         var endless = worker.Client.StartProcess(OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 60" : "sleep 60", project, static _ => { });
         await Task.Delay(1000);
         endless.Kill();
-        Assert.AreNotEqual(0, await endless.Completion.WaitAsync(Deadline));
+        Assert.AreNotEqual(0, await endless.Completion.WithinAsync(Deadline));
     }
 
     [TestMethod]
@@ -179,8 +179,8 @@ public sealed class SandboxWorkerTests
 
         // The pipe holds less than one frame: the reader takes the parts while the writer sends them.
         var read = Task.Run(() => reader.ReadAsync());
-        await writer.WriteAsync(new SandboxWorkerMessage { Type = SandboxWorkerMessageTypes.Result, Id = 7, Tool = big }, CancellationToken.None).WaitAsync(Deadline);
-        var message = await read.WaitAsync(Deadline);
+        await writer.WriteAsync(new SandboxWorkerMessage { Type = SandboxWorkerMessageTypes.Result, Id = 7, Tool = big }, CancellationToken.None).WithinAsync(Deadline);
+        var message = await read.WithinAsync(Deadline);
 
         Assert.IsNotNull(message);
         Assert.AreEqual(7, message.Id);
@@ -197,7 +197,7 @@ public sealed class SandboxWorkerTests
         await using var worker = await WorkerOnPipes.StartAsync(project);
 
         var result = await worker.Client.InvokeAsync(Call("read_file", new { path = "big.txt", limit = 2000 }),
-            Host((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce))), CancellationToken.None).WaitAsync(Deadline);
+            Host((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce))), CancellationToken.None).WithinAsync(Deadline);
 
         // The file tools of a sandbox keep the limits of the host: 6 MB of lines do not reach the model.
         Assert.IsTrue(result.Success, result.Error);
@@ -250,7 +250,7 @@ public sealed class SandboxWorkerTests
         public async Task StopWorkerAsync()
         {
             _toWorker.Dispose();
-            await _worker.WaitAsync(Deadline);
+            await _worker.WithinAsync(Deadline);
             _fromWorker.Dispose();
         }
 
@@ -259,7 +259,7 @@ public sealed class SandboxWorkerTests
             _toWorker.Dispose();
             try
             {
-                await _worker.WaitAsync(Deadline);
+                await _worker.WithinAsync(Deadline);
             }
             catch (Exception exception) when (exception is IOException or ObjectDisposedException)
             {

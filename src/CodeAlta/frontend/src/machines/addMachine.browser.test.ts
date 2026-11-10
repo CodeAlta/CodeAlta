@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../machines/addMachine.mount.tsx", fixture: "addMachineFixture", rpcFixture: "../demo-api.ts", styles: ["../machines/machines.css"], width: 1100,
   height: 860, reducedMotion: true } as const;
@@ -9,7 +10,7 @@ const type = (selector: string, value: string) => `(() => { const input = docume
   input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`;
 const calls = async (page: { evaluate: (script: string) => Promise<unknown> }) => (await page.evaluate(`[...window.addMachineFixture.calls]`) as string[]).map(call => JSON.parse(call));
 
-test("over SSH, the assistant shows each step, says what to do when ssh does not know the computer, and ends on the paired machine", { skip: !edge, timeout: 90_000 }, async () => {
+test("over SSH, the assistant shows each step, says what to do when ssh does not know the computer, and ends on the paired machine", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.add-machine-choice').length === 3`, "the three ways");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.add-machine-choice strong')].map(item => item.textContent)`),
@@ -53,7 +54,7 @@ test("over SSH, the assistant shows each step, says what to do when ssh does not
   }, options);
 });
 
-test("through the server, only the node whose words the person confirms is approved, as a node: a node the server planted is not", { skip: !edge, timeout: 90_000 }, async () => {
+test("through the server, only the node whose words the person confirms is approved, as a node: a node the server planted is not", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`[...document.querySelectorAll('.add-machine-choice')][2]?.disabled === false`, "the server choice");
     await page.evaluate(`[...document.querySelectorAll('.add-machine-choice')][2].click()`);

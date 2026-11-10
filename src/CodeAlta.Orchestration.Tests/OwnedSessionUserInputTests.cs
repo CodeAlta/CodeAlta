@@ -286,7 +286,7 @@ public sealed class OwnedSessionUserInputTests
             f._lifetime = f.Core(body, launch.Task); f._observer = Settle(f._lifetime); launch.SetResult();
             try
             {
-                await f._lifetime.WaitAsync(TimeSpan.FromSeconds(15)); await f._observer;
+                await f._lifetime.WithinAsync(TestTime.Seconds(15)); await f._observer;
                 foreach (var gate in f._gates) { await gate.Registration.DisposeAsync(); gate.Release.Dispose(); }
                 f.RunCancellation.Dispose(); f.OperationCancellation.Dispose(); f.RequestCancellation.Dispose();
             }

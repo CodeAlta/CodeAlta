@@ -106,7 +106,7 @@ public sealed class DesktopUiWatchdogTests
         var beats = 0;
         using var ran = new ManualResetEventSlim();
         using (new DesktopUiWatchdog(callback => { Interlocked.Increment(ref beats); callback(); ran.Set(); }))
-            Assert.IsTrue(ran.Wait(TimeSpan.FromSeconds(10)));
+            Assert.IsTrue(ran.Wait(TestTime.Seconds(10)));
         Assert.IsGreaterThan(0, beats);
     }
 

@@ -257,7 +257,7 @@ public sealed class SessionRuntimeFileSearchInvalidationTests
             {
                 // Only there to end a test that hangs. The matrix of appends writes the journal about a hundred times: 4 s
                 // alone, more than 30 s in a full validation, where the other suites hold the disk (2026-11-06).
-                await f._core.WaitAsync(TimeSpan.FromMinutes(2));
+                await f._core.WithinAsync(TestTime.Minutes(2));
                 await f._coreOutcome;
                 f._cancel.Dispose();
             }

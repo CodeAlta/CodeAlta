@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "./browserHarness";
+import { testLimit } from "../testTime";
 
 // The module of the Statistics plugin (canvas.tsx) in headless Edge, under the production content security policy, drawn under StrictMode with an `alta` object
 // whose calls go to a plugin played by the fixture, through JSON. Every test ends by checking that the page raised no exception and no console error.
@@ -12,9 +13,9 @@ const options = { entry: "./canvas.mount.tsx", fixture: "canvasFixture", rpcFixt
 const calls = (page: Page) => page.evaluate<Call[]>(`canvasFixture.calls()`);
 const names = (list: Call[]) => list.map(call => call.name);
 const render = (page: Page, parameters: object = {}) => page.evaluate(`canvasFixture.render(${JSON.stringify(parameters)})`);
-const idle = (milliseconds = 300) => new Promise(resolve => setTimeout(resolve, milliseconds));
+const idle = (milliseconds = 300) => new Promise(resolve => setTimeout(resolve, milliseconds)); // not a limit: a pause
 
-test("the module asks the plugin for the spaces first, draws the pages over what it answers, and asks nothing twice under StrictMode", { skip: !edge, timeout: 300_000 }, async () => {
+test("the module asks the plugin for the spaces first, draws the pages over what it answers, and asks nothing twice under StrictMode", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready", spaceId: "work" });
     await page.until(settled, "the overview");
@@ -38,7 +39,7 @@ test("the module asks the plugin for the spaces first, draws the pages over what
   }, options);
 });
 
-test("the space that holds every project is no filter, and a canvas opened with the key of a project starts on that project", { skip: !edge, timeout: 300_000 }, async () => {
+test("the space that holds every project is no filter, and a canvas opened with the key of a project starts on that project", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready", spaceId: "default" });
     await page.until(settled, "the overview");
@@ -53,7 +54,7 @@ test("the space that holds every project is no filter, and a canvas opened with 
   }, options);
 });
 
-test("the choice of the first time is one call of the plugin, and the status the plugin tells moves the bar", { skip: !edge, timeout: 300_000 }, async () => {
+test("the choice of the first time is one call of the plugin, and the status the plugin tells moves the bar", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "first-time" });
     await page.until(`document.querySelector('.stats-first')`, "the card of the first time");
@@ -74,7 +75,7 @@ test("the choice of the first time is one call of the plugin, and the status the
   }, options);
 });
 
-test("a tab that is hidden asks for nothing and one that is shown again catches up; a plugin that was reloaded makes the canvas listen again and ask again", { skip: !edge, timeout: 300_000 }, async () => {
+test("a tab that is hidden asks for nothing and one that is shown again catches up; a plugin that was reloaded makes the canvas listen again and ask again", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready" });
     await page.until(settled, "the overview");
@@ -98,7 +99,7 @@ test("a tab that is hidden asks for nothing and one that is shown again catches 
   }, options);
 });
 
-test("a tab that is restored hidden asks the plugin nothing at all until it is shown", { skip: !edge, timeout: 300_000 }, async () => {
+test("a tab that is restored hidden asks the plugin nothing at all until it is shown", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready", visible: false });
     await idle(700);
@@ -119,7 +120,7 @@ test("a tab that is restored hidden asks the plugin nothing at all until it is s
   }, options);
 });
 
-test("a session of the Sessions page is opened through the window, and a failure of the plugin is told in the block, not thrown", { skip: !edge, timeout: 300_000 }, async () => {
+test("a session of the Sessions page is opened through the window, and a failure of the plugin is told in the block, not thrown", { skip: !edge, timeout: testLimit(300_000) }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "ready" });
     await page.until(settled, "the overview");

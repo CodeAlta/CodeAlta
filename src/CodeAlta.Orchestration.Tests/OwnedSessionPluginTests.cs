@@ -86,7 +86,7 @@ public sealed class OwnedSessionPluginTests
 
         var receipt = host.Commands.AdmitSend(new("cancelled", session.SessionId, "one")).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(TestDeadlines.Hang);
+        var result = await receipt.Completion.WithinAsync(TestDeadlines.Hang);
 
         Assert.AreEqual(OwnedSessionCommandOutcome.Failed, result.Outcome);
         Assert.AreEqual("preparation_failed", result.Code);
@@ -97,7 +97,7 @@ public sealed class OwnedSessionPluginTests
     {
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, text)).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(TestDeadlines.Hang);
+        var result = await receipt.Completion.WithinAsync(TestDeadlines.Hang);
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
         using var timeout = new CancellationTokenSource(TestDeadlines.Hang);
         var turn = await provider.Turns.Reader.ReadAsync(timeout.Token);

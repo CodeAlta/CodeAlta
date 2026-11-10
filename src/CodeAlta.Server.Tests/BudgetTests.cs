@@ -17,7 +17,7 @@ namespace CodeAlta.Server.Tests;
 [TestClass]
 public sealed class BudgetTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan Patience = TestTime.Seconds(20);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -197,7 +197,7 @@ public sealed class BudgetTests
         var gate = fleet.Gate(new FakeSpend());
         var held = new TaskCompletionSource();
         var admission = gate.AdmitAsync(new FleetBudgetRun("run-1", "Deploy", null, null), () => held.TrySetResult(), TestContext.CancellationToken);
-        await held.Task.WaitAsync(Patience, TestContext.CancellationToken);
+        await held.Task.WithinAsync(Patience, TestContext.CancellationToken);
         var hold = await WaitForAsync(async () => (await fleet.Manager.ListHoldsAsync(CancellationToken.None)).Holds.FirstOrDefault(), TestContext.CancellationToken);
         // The hold names the run, never what it is about: the server does not read the titles of sessions.
         Assert.AreEqual((FleetBudgetHoldStates.Waiting, "run-1", (string?)null, fleet.NodeKey.DeviceId), (hold.Status, hold.RunId, hold.Title, hold.MachineId));
@@ -214,7 +214,7 @@ public sealed class BudgetTests
         var continued = await fleet.Manager.ContinueAsync(hold.Id, CancellationToken.None);
         Assert.AreEqual(FleetBudgetHoldStates.Continued, continued.Status);
         gate.Changed();
-        var result = await admission.WaitAsync(Patience, TestContext.CancellationToken);
+        var result = await admission.WithinAsync(Patience, TestContext.CancellationToken);
         Assert.IsNull(result.Problem, result.Problem);
         CollectionAssert.AreEqual(new[] { budget.Id }, result.Continued.ToArray());
         await Assert.ThrowsExactlyAsync<FleetServerException>(() => fleet.Manager.ContinueAsync(hold.Id, CancellationToken.None), "a hold is decided once");
@@ -224,7 +224,7 @@ public sealed class BudgetTests
         var second = await WaitForAsync(async () => (await fleet.Manager.ListHoldsAsync(CancellationToken.None)).Holds.FirstOrDefault(h => h.RunId == "run-2"), TestContext.CancellationToken);
         await fleet.Manager.StopAsync(second.Id, CancellationToken.None);
         gate.Changed();
-        StringAssert.Contains((await stopped.WaitAsync(Patience, TestContext.CancellationToken)).Problem, "stopped");
+        StringAssert.Contains((await stopped.WithinAsync(Patience, TestContext.CancellationToken)).Problem, "stopped");
         CollectionAssert.IsSubsetOf(new[] { "budget.hold", "budget.continue", "budget.stop" }, (await fleet.AuditAsync("budget.")).Select(static record => record.Action).ToArray());
     }
 
@@ -246,7 +246,7 @@ public sealed class BudgetTests
         // A higher limit releases it: the budget is no longer reached.
         await fleet.Manager.PutAsync(advisory.Id, Settings(5000) with { Mode = FleetBudgetModes.Advisory }, CancellationToken.None);
         gate.Changed();
-        Assert.IsNull((await waiting.WaitAsync(Patience, TestContext.CancellationToken)).Problem);
+        Assert.IsNull((await waiting.WithinAsync(Patience, TestContext.CancellationToken)).Problem);
 
         // A budget that stops: this machine's own count reaches it, without the server.
         await fleet.Manager.PutAsync(null, Settings(100) with { Name = "Machine", ScopeKind = FleetBudgetScopeKinds.Machine, ScopeId = fleet.NodeKey.DeviceId,
@@ -506,7 +506,7 @@ public sealed class BudgetTests
         var tamper = new Tamper { HoldNotFound = true };
         var gate = fleet.Gate(new FakeSpend(), null, tamper);
         gate.HoldWait = TimeSpan.FromSeconds(1);
-        var admission = await gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), TestContext.CancellationToken).WaitAsync(Patience, TestContext.CancellationToken);
+        var admission = await gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), TestContext.CancellationToken).WithinAsync(Patience, TestContext.CancellationToken);
         StringAssert.Contains(admission.Problem, "nobody continued the run in time");
     }
 
@@ -522,7 +522,7 @@ public sealed class BudgetTests
         var gate = fleet.Gate(new FakeSpend());
         var held = new TaskCompletionSource();
         var admission = gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), () => held.TrySetResult(), TestContext.CancellationToken);
-        await held.Task.WaitAsync(Patience, TestContext.CancellationToken);
+        await held.Task.WithinAsync(Patience, TestContext.CancellationToken);
 
         // Renamed, then given a lower limit: still reached, the run waits.
         await fleet.Manager.PutAsync(budget.Id, Settings(100) with { Name = "Renamed" }, CancellationToken.None);
@@ -535,7 +535,7 @@ public sealed class BudgetTests
         // A limit it is no longer reached under: the run starts.
         await fleet.Manager.PutAsync(budget.Id, Settings(10_000) with { Name = "Renamed" }, CancellationToken.None);
         gate.Changed();
-        Assert.IsNull((await admission.WaitAsync(Patience, TestContext.CancellationToken)).Problem);
+        Assert.IsNull((await admission.WithinAsync(Patience, TestContext.CancellationToken)).Problem);
 
         // A version that stops runs refuses a held one.
         var second = await fleet.Manager.PutAsync(null, Settings(100) with { Name = "Second" }, CancellationToken.None);
@@ -543,10 +543,10 @@ public sealed class BudgetTests
             await other.AskAllowanceAsync(second.Id, new FleetAllowanceRequest(1, 0, 100));
         var waiting = new TaskCompletionSource();
         var stopped = gate.AdmitAsync(new FleetBudgetRun("run-2", null, null, null), () => waiting.TrySetResult(), TestContext.CancellationToken);
-        await waiting.Task.WaitAsync(Patience, TestContext.CancellationToken);
+        await waiting.Task.WithinAsync(Patience, TestContext.CancellationToken);
         await fleet.Manager.PutAsync(second.Id, Settings(100) with { Name = "Second", Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
         gate.Changed();
-        StringAssert.Contains((await stopped.WaitAsync(Patience, TestContext.CancellationToken)).Problem, "is reached");
+        StringAssert.Contains((await stopped.WithinAsync(Patience, TestContext.CancellationToken)).Problem, "is reached");
     }
 
     // A run held by one budget is checked against every budget again before it starts: one that stops runs, which the machine
@@ -560,7 +560,7 @@ public sealed class BudgetTests
         var gate = fleet.Gate(spend);
         var held = new TaskCompletionSource();
         var admission = gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), () => held.TrySetResult(), TestContext.CancellationToken);
-        await held.Task.WaitAsync(Patience, TestContext.CancellationToken);
+        await held.Task.WithinAsync(Patience, TestContext.CancellationToken);
         var hold = await WaitForAsync(async () => (await fleet.Manager.ListHoldsAsync(CancellationToken.None)).Holds.FirstOrDefault(), TestContext.CancellationToken);
 
         // A budget of the machine that stops its runs, reached too; then the first is continued anyway.
@@ -570,7 +570,7 @@ public sealed class BudgetTests
         await Task.Delay(TimeSpan.FromMilliseconds(300), TestContext.CancellationToken);
         await fleet.Manager.ContinueAsync(hold.Id, CancellationToken.None);
         gate.Changed();
-        StringAssert.Contains((await admission.WaitAsync(Patience, TestContext.CancellationToken)).Problem, "'Machine' is reached");
+        StringAssert.Contains((await admission.WithinAsync(Patience, TestContext.CancellationToken)).Problem, "'Machine' is reached");
     }
 
     // A Continue anyway is for the version of the budget the run started to wait under: once the machine verified a newer version
@@ -585,14 +585,14 @@ public sealed class BudgetTests
         var gate = fleet.Gate(new FakeSpend());
         var held = new TaskCompletionSource();
         var admission = gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), () => held.TrySetResult(), TestContext.CancellationToken);
-        await held.Task.WaitAsync(Patience, TestContext.CancellationToken);
+        await held.Task.WithinAsync(Patience, TestContext.CancellationToken);
         var hold = await WaitForAsync(async () => (await fleet.Manager.ListHoldsAsync(CancellationToken.None)).Holds.FirstOrDefault(), TestContext.CancellationToken);
 
         // A lower limit, then the hold of the first version is continued anyway.
         await fleet.Manager.PutAsync(budget.Id, Settings(50), CancellationToken.None);
         Assert.AreEqual(FleetBudgetHoldStates.Continued, (await fleet.Manager.ContinueAsync(hold.Id, CancellationToken.None)).Status);
         gate.Changed();
-        var result = await admission.WaitAsync(Patience, TestContext.CancellationToken);
+        var result = await admission.WithinAsync(Patience, TestContext.CancellationToken);
         StringAssert.Contains(result.Problem, "earlier version or period", "the run does not start on a decision about another version");
         Assert.IsEmpty(result.Continued);
     }
@@ -608,7 +608,7 @@ public sealed class BudgetTests
         var tamper = new Tamper { Allowance = 1_000_000 };
         var gate = fleet.Gate(spend, null, tamper);
         gate.HoldWait = TimeSpan.FromSeconds(1);
-        var reached = await gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), TestContext.CancellationToken).WaitAsync(Patience, TestContext.CancellationToken);
+        var reached = await gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), TestContext.CancellationToken).WithinAsync(Patience, TestContext.CancellationToken);
         StringAssert.Contains(reached.Problem, "nobody continued the run in time", "its own spending reached the signed limit");
         // Below the limit, the run starts on what is left of it, not on the allowance the server made up.
         spend.Spent = 60;

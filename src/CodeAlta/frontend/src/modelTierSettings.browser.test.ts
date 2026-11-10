@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "./statistics/browserHarness";
+import { testLimit } from "./testTime";
 
 const rows = (scope: string, tier: string) =>
   `[...document.querySelectorAll('#${scope} section.model-tier[aria-label="${tier}"] .model-tier-target')].map(row => row.querySelector('.model-tier-model').title.split('\\n')[1] + ' ' + [...row.querySelectorAll('.model-tier-effort')].map(chip => chip.textContent).join(','))`;
 const item = (name: string) => `[...document.querySelectorAll('.model-tier-add .bp6-menu-item')].find(entry => entry.querySelector('.bp6-text-overflow-ellipsis')?.textContent === ${JSON.stringify(name)})`;
 
-test("a row of the tiers changes its model in its place, keeping the efforts the new model offers", { skip: !edge, timeout: 90_000 }, async () => {
+test("a row of the tiers changes its model in its place, keeping the efforts the new model offers", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#space .model-tier-target')`, "the tiers of the space");
     assert.deepEqual(await page.evaluate(rows("global", "Complex")), ["claude-code:opus High,XHigh", "codex:gpt-6.1 XHigh", "gone:m "]);
@@ -59,7 +60,7 @@ test("a row of the tiers changes its model in its place, keeping the efforts the
   }, { entry: "../modelTierSettings.mount.tsx", fixture: "tiersFixture", rpcFixture: "../demo-api.ts", width: 1400, height: 900 });
 });
 
-test("the tiers of a space offer its providers and have their own fallback; the global ones name the spaces of a provider", { skip: !edge, timeout: 90_000 }, async () => {
+test("the tiers of a space offer its providers and have their own fallback; the global ones name the spaces of a provider", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#space .model-tier-target')`, "the tiers of the space");
     const heading = (name: string) => `[...document.querySelectorAll('.model-tier-add .bp6-menu-header')].find(entry => entry.textContent.includes(${JSON.stringify(name)}))?.querySelector('.model-tier-provider-note')?.textContent ?? null`;

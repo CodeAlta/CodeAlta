@@ -25,7 +25,7 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class FleetStatisticsEndToEndTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan Patience = TestTime.Seconds(90);
     private static readonly ModelProviderId Provider = new("fleet-fixture");
 
     public TestContext TestContext { get; set; } = null!;

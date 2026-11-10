@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number };
 type Layout = { pane: Box; area: Box; notes: Box; window: Box; timestamp: Box; tasks: Box | null; collapsed: string; stored: string | null };
@@ -29,7 +30,7 @@ function readable(layout: Layout) {
   }
 }
 
-test("mounted production Notes and proposal overlays cooperate without replacing their owners", { skip: !browserExecutable, timeout: 90_000 }, async t => {
+test("mounted production Notes and proposal overlays cooperate without replacing their owners", { skip: !browserExecutable, timeout: testLimit(90_000) }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-session-overlays-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
@@ -39,12 +40,12 @@ test("mounted production Notes and proposal overlays cooperate without replacing
     await writeFile(join(root, "fixture.html"), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(browserExecutable!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     socket = new WebSocket(pages.find(page => page.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown }; exceptionDetails?: unknown }>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => reject(Error(`${method} timed out`)), 12_000);
+      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))), testLimit(12_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)); if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
@@ -56,11 +57,11 @@ test("mounted production Notes and proposal overlays cooperate without replacing
       const result = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails)); return result.result?.value;
     };
-    const wait = async (condition: string) => assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+7000;function check(){if(${condition})resolve(true);else if(Date.now()>end)resolve(document.body.innerText.slice(-1200));else setTimeout(check,20)}check()})`), true, condition);
+    const wait = async (condition: string) => assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(7000)};function check(){if(${condition})resolve(true);else if(Date.now()>end)resolve(document.body.innerText.slice(-1200));else setTimeout(check,20)}check()})`), true, condition);
     // ResizeObserver and react-rnd both commit geometry on animation frames. Wait for stable measured
     // rectangles, rather than sleeping or providing the desired geometry in the fixture.
     const layout = async () => {
-      await evaluate(`new Promise((resolve,reject)=>{let previous='',stable=0;const end=Date.now()+7000;function check(){const value=JSON.stringify(${inspect});if(value===previous)stable++;else stable=0;previous=value;if(stable===4)resolve();else if(Date.now()>end)reject(Error('layout did not settle'));else requestAnimationFrame(check)}requestAnimationFrame(check)})`);
+      await evaluate(`new Promise((resolve,reject)=>{let previous='',stable=0;const end=Date.now()+${testLimit(7000)};function check(){const value=JSON.stringify(${inspect});if(value===previous)stable++;else stable=0;previous=value;if(stable===4)resolve();else if(Date.now()>end)reject(Error('layout did not settle'));else requestAnimationFrame(check)}requestAnimationFrame(check)})`);
       return await evaluate(inspect) as Layout;
     };
     const reset = async (options: object) => {
@@ -141,6 +142,9 @@ test("mounted production Notes and proposal overlays cooperate without replacing
       for (let step = 1; step <= 8; step++)
         await command("Input.dispatchMouseEvent", { type: "mouseMoved", button: "left", buttons: 1,
           x: from.x + (to.x - from.x) * step / 8, y: from.y + (to.y - from.y) * step / 8 });
+      // Chromium delivers the moves of a frame together: a release sent before the next frame can come before the last
+      // move on a busy machine, and the tab stops one step short.
+      await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
       await command("Input.dispatchMouseEvent", { type: "mouseReleased", x: to.x, y: to.y, button: "left", buttons: 0, clickCount: 1 });
       return layout();
     };

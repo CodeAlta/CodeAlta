@@ -6,7 +6,7 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class SafeFileTests
 {
-    private static readonly TimeSpan Hang = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Hang = TestTime.Seconds(30);
 
     [TestMethod]
     public async Task AWholeFile_IsWrittenAndRead_AndNoStagedFileIsLeft()
@@ -84,14 +84,14 @@ public sealed class SafeFileTests
         start.Set();
         try
         {
-            await Task.WhenAll(writers).WaitAsync(Hang);
+            await Task.WhenAll(writers).WithinAsync(Hang);
         }
         finally
         {
             await stop.CancelAsync();
         }
 
-        await Task.WhenAll(readers).WaitAsync(Hang);
+        await Task.WhenAll(readers).WithinAsync(Hang);
         Assert.AreEqual(1, Directory.GetFiles(temp.Path).Length, "No staged file is left behind.");
 
         static byte[] Content(int index)
@@ -116,7 +116,7 @@ public sealed class SafeFileTests
         var read = Task.Run(() => SafeFile.ReadAllText(path));
         await Task.Delay(100);
         File.Move(staged, path);
-        Assert.AreEqual("after", await read.WaitAsync(Hang));
+        Assert.AreEqual("after", await read.WithinAsync(Hang));
     }
 
     [TestMethod]
@@ -132,7 +132,7 @@ public sealed class SafeFileTests
         var write = Task.Run(() => SafeFile.WriteAllText(path, "after"));
         await Task.Delay(100);
         await reader.DisposeAsync();
-        await write.WaitAsync(Hang);
+        await write.WithinAsync(Hang);
         Assert.AreEqual("after", File.ReadAllText(path));
         Assert.AreEqual(1, Directory.GetFiles(temp.Path).Length, "No staged file is left behind.");
     }
@@ -148,9 +148,9 @@ public sealed class SafeFileTests
 
         using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Write))
         {
-            await Task.Run(() => SafeFile.WriteAllText(path, "after")).WaitAsync(Hang);
+            await Task.Run(() => SafeFile.WriteAllText(path, "after")).WithinAsync(Hang);
             Assert.AreEqual("after", ReadShared(path));
-            await SafeFile.WriteAllTextAsync(path, "after again", CancellationToken.None).AsTask().WaitAsync(Hang);
+            await SafeFile.WriteAllTextAsync(path, "after again", CancellationToken.None).AsTask().WithinAsync(Hang);
             Assert.AreEqual("after again", ReadShared(path));
         }
 
@@ -167,7 +167,7 @@ public sealed class SafeFileTests
 
         using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
-            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Task.Run(() => SafeFile.WriteAllText(path, "after")).WaitAsync(Hang));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Task.Run(() => SafeFile.WriteAllText(path, "after")).WithinAsync(Hang));
         }
 
         Assert.AreEqual("before", File.ReadAllText(path));

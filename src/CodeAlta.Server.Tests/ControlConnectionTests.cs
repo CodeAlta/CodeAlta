@@ -72,8 +72,8 @@ public sealed class ControlConnectionTests
             // Revoked while connected: the server says so, then closes its connection.
             var remove = await server.NextEntryAsync(owner, FleetDeviceListOperations.Remove, mac.DeviceId, null, null, null, setup.Organization.Id);
             Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{mac.DeviceId}/revoke", new DeviceListChangeRequest(remove))).Status);
-            Assert.AreEqual(FleetErrorCodes.Revoked, (await closing.Task.WaitAsync(Waits.Hang)).Code);
-            await connection.Completion.WaitAsync(Waits.Hang);
+            Assert.AreEqual(FleetErrorCodes.Revoked, (await closing.Task.WithinAsync(Waits.Hang)).Code);
+            await connection.Completion.WithinAsync(Waits.Hang);
         }
 
         var revoked = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => server.ConnectAsync(mac));
@@ -211,7 +211,7 @@ public sealed class ControlConnectionTests
             JsonSerializer.SerializeToElement(new FleetPresenceUpdate("busy", 1), FleetServerJsonContext.Default.FleetPresenceUpdate));
         while (true)
         {
-            var next = await events.Reader.ReadAsync().AsTask().WaitAsync(Waits.Hang);
+            var next = await events.Reader.ReadAsync().AsTask().WithinAsync(Waits.Hang);
             Assert.IsFalse(next.Kind is FleetServerMethods.ChangeKinds.Machine or FleetServerMethods.ChangeKinds.Session && (next.Machine?.DeviceId ?? next.Session?.MachineId) == mac.DeviceId,
                 $"a late {next.Kind} of the revoked machine");
             if (next.Kind == FleetServerMethods.ChangeKinds.Presence && next.Id == owner.DeviceId && next.Presence?.State == "busy") break;
@@ -346,11 +346,11 @@ public sealed class ControlConnectionTests
             // A stop (a switch of versions, a service manager's) does not wait for the shutdown timeout of the host (30 s)
             // to abort the connection: the node is told at once, and reconnects to the next version.
             var stopping = System.Diagnostics.Stopwatch.StartNew();
-            await server.Server.DisposeAsync().AsTask().WaitAsync(Waits.Hang);
+            await server.Server.DisposeAsync().AsTask().WithinAsync(Waits.Hang);
             Assert.IsLessThan(TimeSpan.FromSeconds(15), stopping.Elapsed, $"The stop took {stopping.Elapsed}.");
-            var error = await closing.Task.WaitAsync(Waits.Hang);
+            var error = await closing.Task.WithinAsync(Waits.Hang);
             Assert.AreEqual((FleetErrorCodes.ConnectionClosed, FleetErrorHints.Reconnect), (error.Code, error.Hint));
-            await connection.Completion.WaitAsync(Waits.Hang);
+            await connection.Completion.WithinAsync(Waits.Hang);
         }
     }
 
@@ -364,7 +364,7 @@ public sealed class ControlConnectionTests
         await using var _1 = first;
         var (second, _) = await server.ConnectAsync(owner);
         await using var _2 = second;
-        await first.Completion.WaitAsync(Waits.Hang);
+        await first.Completion.WithinAsync(Waits.Hang);
         Assert.AreEqual(FleetConnectionState.Open, second.State);
         Assert.IsTrue((await server.SendAsync(owner, HttpMethod.Get, $"/api/v1/devices/{owner.DeviceId}")).Read<DeviceDto>().Online);
     }
@@ -402,7 +402,7 @@ public sealed class ControlConnectionTests
     {
         while (true)
         {
-            var change = await events.Reader.ReadAsync().AsTask().WaitAsync(Waits.Hang);
+            var change = await events.Reader.ReadAsync().AsTask().WithinAsync(Waits.Hang);
             if (change.Kind == kind) return change;
         }
     }

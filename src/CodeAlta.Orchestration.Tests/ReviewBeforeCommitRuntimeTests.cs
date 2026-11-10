@@ -116,7 +116,7 @@ public sealed class ReviewBeforeCommitRuntimeTests
     {
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, prompt)).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(TestDeadlines.Hang);
+        var result = await receipt.Completion.WithinAsync(TestDeadlines.Hang);
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
     }
 

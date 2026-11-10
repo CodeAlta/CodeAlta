@@ -462,6 +462,9 @@ internal sealed partial class CdpPage : IChromiumPage
         return world.ExecutionContextId;
     }
 
+    private static bool IsContextUnknown(CdpException exception)
+        => exception.Message.Contains("Cannot find context", StringComparison.OrdinalIgnoreCase);
+
     private static bool IsContextGone(CdpException exception)
         => exception.Message.Contains("context", StringComparison.OrdinalIgnoreCase) || exception.Message.Contains("Cannot find", StringComparison.OrdinalIgnoreCase);
 
@@ -548,48 +551,70 @@ internal sealed partial class CdpPage : IChromiumPage
         var frame = arguments.Count != 0 ? arguments[0].Frame : MainFrame;
         if (arguments.Any(argument => argument.Frame != frame)) throw new BrowserToolException("invalid-arguments", "Elements from different frames can't be evaluated together.");
         var session = SessionOf(frame);
-        if (!_mainWorlds.TryGetValue(frame.Key, out var context))
+        for (var attempt = 0; ; attempt++)
         {
-            // The main world is created with the document; ask for it once more when the event was missed.
-            await WaitUntilAsync(() => _mainWorlds.ContainsKey(frame.Key), TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
-            if (!_mainWorlds.TryGetValue(frame.Key, out context)) throw new BrowserToolException("no-context", "The page has no document to run the script in yet.");
-        }
-
-        try
-        {
-            if (!isFunction)
+            if (!_mainWorlds.TryGetValue(frame.Key, out var context))
             {
-                var evaluated = await session.Runtime.EvaluateAsync(new RuntimeEvaluateParams { Expression = source, ContextId = context, AwaitPromise = true, ReturnByValue = true, UserGesture = true }, cancellationToken).ConfigureAwait(false);
-                if (evaluated.ExceptionDetails is { } failure) throw new BrowserToolException("script-error", BrowserAgent.ErrorText(failure.Exception?.Description, failure.Text));
-                return evaluated.Result.Type == "undefined" ? null : evaluated.Result.Value is { } raw ? raw.GetRawText() : "null";
+                // The main world is created with the document; ask for it once more when the event was missed.
+                await WaitUntilAsync(() => _mainWorlds.ContainsKey(frame.Key), TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+                if (!_mainWorlds.TryGetValue(frame.Key, out context)) throw new BrowserToolException("no-context", "The page has no document to run the script in yet.");
             }
 
-            var handles = new List<RuntimeCallArgument>();
-            foreach (var (argumentFrame, uid) in arguments)
+            try
             {
-                var (_, isolated) = await ElementAsync(argumentFrame, uid, BrowserAgent.ElementFunction, cancellationToken).ConfigureAwait(false);
-                var node = await session.DOM.DescribeNodeAsync(new DOMDescribeNodeParams { ObjectId = isolated }, cancellationToken).ConfigureAwait(false);
-                var resolved = await session.DOM.ResolveNodeAsync(new DOMResolveNodeParams { BackendNodeId = node.Node.BackendNodeId, ExecutionContextId = context }, cancellationToken).ConfigureAwait(false);
-                handles.Add(new RuntimeCallArgument { ObjectId = resolved.Object.ObjectId });
+                return await EvaluateInAsync(session, context, source, isFunction, arguments, cancellationToken).ConfigureAwait(false);
             }
-
-            var result = await session.Runtime.CallFunctionOnAsync(new RuntimeCallFunctionOnParams
+            catch (CdpException exception) when (attempt < 2 && IsContextUnknown(exception))
             {
-                FunctionDeclaration = BrowserAgent.WrapFunction(source),
-                ExecutionContextId = context,
-                Arguments = [.. handles],
-                AwaitPromise = true,
-                ReturnByValue = true,
-                UserGesture = true,
-            }, cancellationToken).ConfigureAwait(false);
-            if (result.ExceptionDetails is { } details) throw new BrowserToolException("script-error", BrowserAgent.ErrorText(details.Exception?.Description, details.Text));
-            return ReadWrapped(result.Result.Value);
-        }
-        catch (CdpException exception)
-        {
-            throw new BrowserToolException("script-error", exception.Message, exception);
+                // A new document took the place of the one whose world was known, before the browser said so: the script
+                // did not run, and runs in the world of the new document. One that ran and navigated ends otherwise
+                // ("Execution context was destroyed"), and is not run again.
+                _mainWorlds.TryRemove(new KeyValuePair<string, int>(frame.Key, context));
+                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            }
+            catch (CdpException exception)
+            {
+                throw new BrowserToolException("script-error", exception.Message, exception);
+            }
         }
     }
+
+    private async Task<string?> EvaluateInAsync(CdpSession session, int context, string source, bool isFunction, IReadOnlyList<(BrowserFrame Frame, string Uid)> arguments, CancellationToken cancellationToken)
+    {
+        if (!isFunction)
+        {
+            var evaluated = await session.Runtime.EvaluateAsync(new RuntimeEvaluateParams { Expression = source, ContextId = context, AwaitPromise = true, ReturnByValue = true, UserGesture = true }, cancellationToken).ConfigureAwait(false);
+            if (evaluated.ExceptionDetails is { } failure) throw new BrowserToolException("script-error", BrowserAgent.ErrorText(failure.Exception?.Description, failure.Text));
+            return evaluated.Result.Type == "undefined" ? null : evaluated.Result.Value is { } raw ? raw.GetRawText() : "null";
+        }
+
+        var handles = new List<RuntimeCallArgument>();
+        foreach (var (argumentFrame, uid) in arguments)
+        {
+            var (_, isolated) = await ElementAsync(argumentFrame, uid, BrowserAgent.ElementFunction, cancellationToken).ConfigureAwait(false);
+            var node = await session.DOM.DescribeNodeAsync(new DOMDescribeNodeParams { ObjectId = isolated }, cancellationToken).ConfigureAwait(false);
+            var resolved = await session.DOM.ResolveNodeAsync(new DOMResolveNodeParams { BackendNodeId = node.Node.BackendNodeId, ExecutionContextId = context }, cancellationToken).ConfigureAwait(false);
+            handles.Add(new RuntimeCallArgument { ObjectId = resolved.Object.ObjectId });
+        }
+
+        var result = await session.Runtime.CallFunctionOnAsync(new RuntimeCallFunctionOnParams
+        {
+            FunctionDeclaration = BrowserAgent.WrapFunction(source),
+            ExecutionContextId = context,
+            Arguments = [.. handles],
+            AwaitPromise = true,
+            ReturnByValue = true,
+            UserGesture = true,
+        }, cancellationToken).ConfigureAwait(false);
+        if (result.ExceptionDetails is { } details) throw new BrowserToolException("script-error", BrowserAgent.ErrorText(details.Exception?.Description, details.Text));
+        return ReadWrapped(result.Result.Value);
+    }
+
+    /// <summary>The world of the document of a frame as the page knows it, or null: for the tests of a document replaced before the browser says so.</summary>
+    internal int? KnownMainWorld(BrowserFrame frame) => _mainWorlds.TryGetValue(frame.Key, out var id) ? id : null;
+
+    /// <summary>Makes the page take another world for the document of a frame, as it does until the browser says that a new document replaced it.</summary>
+    internal void KnowMainWorld(BrowserFrame frame, int id) => _mainWorlds[frame.Key] = id;
 
     internal static string? ReadWrapped(JsonElement? value)
     {

@@ -25,7 +25,7 @@ import "monaco-editor/features/suggest/register.js";
 // The icon font of the editor's own widgets: the marks of a diff, the arrows of the find box.
 import "monaco-editor/features/codicon/register.js";
 import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
-import { builtinCodeFont } from "../fonts/codeFonts";
+import { builtinCodeFont, codeLineHeight, defaultFontPreferences, validCodeFontSize } from "../fonts/codeFonts";
 import { fontPreferencesEvent } from "../fonts/fontPreferences";
 import { shellColor } from "../shellColors";
 import { installEditorFocus } from "./editorFocus";
@@ -48,9 +48,21 @@ export function pageFontFamily(font: "code" | "prompt"): string {
   return getComputedStyle(document.documentElement).getPropertyValue(font === "code" ? "--code-font" : "--prompt-font").trim() || "monospace";
 }
 
+/** The size of the text of the code editors, the diffs and the prompt: the size variable of the page (style.css). */
+export function pageFontSize(): number {
+  const size = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--code-font-size"));
+  return validCodeFontSize(size) ? size : defaultFontPreferences.codeSize;
+}
+
+/** The font options of a code editor or of the prompt: the family, the size of the text and the height of a line. */
+export function pageFontOptions(font: "code" | "prompt"): Required<Pick<monaco.editor.IEditorOptions, "fontFamily" | "fontSize" | "lineHeight">> {
+  const fontSize = pageFontSize();
+  return { fontFamily: pageFontFamily(font), fontSize, lineHeight: codeLineHeight(fontSize) };
+}
+
 /** Keeps the font of an editor in step with the fonts Settings → Appearance gives the page; returns the disposer. */
 export function followPageFont(editor: Pick<monaco.editor.IEditor, "updateOptions">, font: "code" | "prompt"): () => void {
-  const changed = () => editor.updateOptions({ fontFamily: pageFontFamily(font) });
+  const changed = () => editor.updateOptions(pageFontOptions(font));
   window.addEventListener(fontPreferencesEvent, changed);
   return () => window.removeEventListener(fontPreferencesEvent, changed);
 }

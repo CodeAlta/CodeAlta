@@ -24,7 +24,7 @@ public sealed class CodeModeAgentsTierTests
         Assert.AreEqual(HeadlessOpenStatus.Created, opened.Status, opened.Message);
         var parent = opened.Session!;
         provider.Script(parent.SessionId, ScriptedTurnProvider.Reply("Parent ready."));
-        Assert.AreEqual(HeadlessRunStatus.Completed, (await driver.RunAsync(parent, new HeadlessPrompt("start")).WaitAsync(Hang)).Status);
+        Assert.AreEqual(HeadlessRunStatus.Completed, (await driver.RunAsync(parent, new HeadlessPrompt("start")).WithinAsync(Hang)).Status);
         return (root, provider, host, driver, parent);
     }
 
@@ -37,9 +37,9 @@ public sealed class CodeModeAgentsTierTests
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("First."));
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Second."));
 
-        var first = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-tiers", Tier = "quick" }, CancellationToken.None).WaitAsync(Hang);
-        var second = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look again.") { RunId = "run-tiers", Tier = "quick" }, CancellationToken.None).WaitAsync(Hang);
-        var kept = await host.CodeModeAgents.OpenAsync(parent.SessionId, new CodeModeAgentRequest(string.Empty) { RunId = "run-tiers", Tier = "complex" }, CancellationToken.None).WaitAsync(Hang);
+        var first = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-tiers", Tier = "quick" }, CancellationToken.None).WithinAsync(Hang);
+        var second = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look again.") { RunId = "run-tiers", Tier = "quick" }, CancellationToken.None).WithinAsync(Hang);
+        var kept = await host.CodeModeAgents.OpenAsync(parent.SessionId, new CodeModeAgentRequest(string.Empty) { RunId = "run-tiers", Tier = "complex" }, CancellationToken.None).WithinAsync(Hang);
 
         Assert.IsTrue(first.Succeeded, first.Failure);
         Assert.IsTrue(second.Succeeded, second.Failure);
@@ -72,8 +72,8 @@ public sealed class CodeModeAgentsTierTests
         await using var closing = driver;
         provider.Turns.Enqueue(ScriptedTurnProvider.Reply("Quick."));
 
-        var quick = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-set-up", Tier = "quick" }, CancellationToken.None).WaitAsync(Hang);
-        var unknown = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-set-up", ModelRef = "nowhere:no-model" }, CancellationToken.None).WaitAsync(Hang);
+        var quick = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-set-up", Tier = "quick" }, CancellationToken.None).WithinAsync(Hang);
+        var unknown = await host.CodeModeAgents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Look.") { RunId = "run-set-up", ModelRef = "nowhere:no-model" }, CancellationToken.None).WithinAsync(Hang);
 
         Assert.IsTrue(quick.Succeeded, quick.Failure);
         Assert.IsNull(quick.Warning);

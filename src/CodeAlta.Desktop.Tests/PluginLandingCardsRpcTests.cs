@@ -81,7 +81,7 @@ public sealed class PluginLandingCardsRpcTests
         fixture.Plugin.Stuck = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
-            var response = await fixture.Service.LandingCardsAsync(new(Epoch, null), default).WaitAsync(TimeSpan.FromSeconds(30));
+            var response = await fixture.Service.LandingCardsAsync(new(Epoch, null), default).WithinAsync(TestTime.Seconds(30));
 
             Assert.AreEqual("failed", response.Cards.Single(static card => card.CardId == "first").State);
             Assert.AreEqual("ok", response.Cards.Single(static card => card.CardId == "numbers").State);
@@ -159,7 +159,7 @@ public sealed class PluginLandingCardsRpcTests
         var started = await fixture.Service.InvokeCommandAsync(new(Epoch, card.Actions[0].CommandId, null, null, false, null, "space-3"), default);
 
         Assert.AreEqual("started", started.Status);
-        Assert.AreEqual("||space-3", await fixture.Plugin.Ran.Task.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.AreEqual("||space-3", await fixture.Plugin.Ran.Task.WithinAsync(TestTime.Seconds(30)));
         // A command of a plugin that ends tells the page to read what plugins show again: the cards among it.
         Assert.AreEqual("refresh", (await fixture.NextAsync("refresh")).Kind);
     }
@@ -392,7 +392,7 @@ public sealed class PluginLandingCardsRpcTests
 
         public async Task<PluginUiEvent> NextAsync(string kind)
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
             while (true)
             {
                 var value = await _events.Reader.ReadAsync(timeout.Token);

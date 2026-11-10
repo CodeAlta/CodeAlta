@@ -27,7 +27,7 @@ internal sealed class FakeAnnotatablePage(string url) : IBrowserPage, IAnnotatab
     /// <summary>Reports a message of the toolbar, as the toolbar of the page sends it, once the toolbar was started.</summary>
     public async Task ReportAsync(string json)
     {
-        var onMessage = await _toolbar.Task.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        var onMessage = await _toolbar.Task.WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false);
         onMessage(ToolbarMessage.TryParse(json, Context) ?? throw new ArgumentException("The toolbar never sends this message: " + json, nameof(json)));
     }
 

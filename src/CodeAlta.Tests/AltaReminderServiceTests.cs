@@ -46,7 +46,7 @@ public sealed partial class AltaReminderServiceTests
             _called.Writer.TryWrite(reminder);
             return Task.FromResult(new AltaReminderDeliveryResult(0, null, string.Empty));
         }
-        internal Task<AltaReminderDescriptor> NextAsync() => _called.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        internal Task<AltaReminderDescriptor> NextAsync() => _called.Reader.ReadAsync().AsTask().WithinAsync(TestTime.Seconds(10));
     }
 
     [TestMethod]
@@ -109,7 +109,7 @@ public sealed partial class AltaReminderServiceTests
         fixture.Subscribe((_, _) => throw new OperationCanceledException("projection cancellation"));
         fixture.Clock.Advance(TimeSpan.FromMinutes(1));
         await fixture.NextDeliveryAsync();
-        await firstFinished.WaitAsync(TimeSpan.FromSeconds(10));
+        await firstFinished.WithinAsync(TestTime.Seconds(10));
 
         Assert.AreEqual(1, fixture.Snapshot().FiredCount);
         Assert.AreEqual(AltaExitCodes.Success, fixture.Snapshot().LastExitCode);
@@ -118,7 +118,7 @@ public sealed partial class AltaReminderServiceTests
         var completed = fixture.WatchFiredCount(2);
         fixture.Clock.Advance(TimeSpan.FromMinutes(1));
         await fixture.NextDeliveryAsync();
-        await completed.WaitAsync(TimeSpan.FromSeconds(10));
+        await completed.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(2, fixture.DeliveryCount);
     }
 
@@ -221,7 +221,7 @@ public sealed partial class AltaReminderServiceTests
                 {
                     Assert.AreEqual("outer edit", fixture.Snapshot().ContentPreview);
                     fixture.Service.TryUpdateContent(reminder.ReminderId, "inner edit", out _, out inner);
-                }).WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+                }).WithinAsync(TestTime.Seconds(10)).GetAwaiter().GetResult();
                 error = "outer";
             }
         });
@@ -251,7 +251,7 @@ public sealed partial class AltaReminderServiceTests
             if (Interlocked.Increment(ref calls) == 1)
             {
                 entered.TrySetResult();
-                release.Task.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+                release.Task.WithinAsync(TestTime.Seconds(10)).GetAwaiter().GetResult();
                 throw new InvalidOperationException("older mutation finished later");
             }
 
@@ -264,7 +264,7 @@ public sealed partial class AltaReminderServiceTests
         });
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WithinAsync(TestTime.Seconds(10));
             Assert.IsTrue(fixture.Service.TryDelete(reminder.ReminderId, out _, out var deletion));
             Assert.AreSame(deletion, fixture.Service.GetLastNotificationFailure());
             Assert.AreEqual(AltaReminderChangeKind.Deleted, deletion!.ChangeKind);
@@ -272,7 +272,7 @@ public sealed partial class AltaReminderServiceTests
         finally
         {
             release.TrySetResult();
-            await editing.WaitAsync(TimeSpan.FromSeconds(10));
+            await editing.WithinAsync(TestTime.Seconds(10));
         }
 
         var edit = await editing;
@@ -292,7 +292,7 @@ public sealed partial class AltaReminderServiceTests
         fixture.Subscribe((_, _) => throw new OperationCanceledException("observer only"));
         fixture.Clock.Advance(TimeSpan.FromMinutes(1));
         await fixture.NextDeliveryAsync();
-        await firstFinished.WaitAsync(TimeSpan.FromSeconds(10));
+        await firstFinished.WithinAsync(TestTime.Seconds(10));
         await fixture.Clock.NextTimerAsync(); // Scheduling resumes only after diagnostic publication.
 
         var descriptor = fixture.Snapshot();
@@ -323,7 +323,7 @@ public sealed partial class AltaReminderServiceTests
 
         fixture.Clock.Advance(TimeSpan.FromMinutes(1));
         var delivery = await fixture.NextDeliveryAsync();
-        await completed.WaitAsync(TimeSpan.FromSeconds(10));
+        await completed.WithinAsync(TestTime.Seconds(10));
 
         Assert.AreEqual("original text", delivery.Content);
         Assert.AreEqual("later text", fixture.Snapshot().ContentPreview);
@@ -342,7 +342,7 @@ public sealed partial class AltaReminderServiceTests
 
         fixture.Clock.Advance(TimeSpan.FromMinutes(1));
         var delivery = await fixture.NextDeliveryAsync();
-        await completed.WaitAsync(TimeSpan.FromSeconds(10));
+        await completed.WithinAsync(TestTime.Seconds(10));
 
         Assert.AreEqual(content, delivery.Content);
         Assert.AreEqual("original text", reminder.ContentPreview, "Previously returned descriptors remain immutable.");
@@ -362,7 +362,7 @@ public sealed partial class AltaReminderServiceTests
         var firstFinished = fixture.WatchFiredCount(1);
         fixture.Clock.Advance(TimeSpan.FromMinutes(1));
         var first = await fixture.NextDeliveryAsync();
-        await firstFinished.WaitAsync(TimeSpan.FromSeconds(10));
+        await firstFinished.WithinAsync(TestTime.Seconds(10));
         await fixture.Clock.NextTimerAsync();
 
         Assert.AreEqual("original text", first.Content);
@@ -372,7 +372,7 @@ public sealed partial class AltaReminderServiceTests
         var completed = fixture.WatchFiredCount(2);
         fixture.Clock.Advance(TimeSpan.FromMinutes(1));
         var second = await fixture.NextDeliveryAsync();
-        await completed.WaitAsync(TimeSpan.FromSeconds(10));
+        await completed.WithinAsync(TestTime.Seconds(10));
 
         Assert.AreEqual("next firing", second.Content);
         Assert.AreEqual(AltaReminderStates.Completed, fixture.Snapshot().State);
@@ -387,7 +387,7 @@ public sealed partial class AltaReminderServiceTests
         var timer = await fixture.Clock.NextTimerAsync();
 
         Assert.IsTrue(fixture.Service.TryDelete(reminder.ReminderId.ToUpperInvariant(), out var deleted));
-        await timer.Disposed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await timer.Disposed.Task.WithinAsync(TestTime.Seconds(10));
         fixture.Clock.Advance(TimeSpan.FromDays(2));
 
         Assert.AreEqual(AltaReminderStates.Deleted, deleted!.State);
@@ -430,12 +430,12 @@ public sealed partial class AltaReminderServiceTests
         // Same-thread edits alone would not detect accidentally holding a reentrant lock.
         fixture.ResolvingDispatcher = () => Task.Run(() =>
             Assert.IsTrue(fixture.Service.TryUpdateContent(reminder.ReminderId, "later edit", out _)))
-            .WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+            .WithinAsync(TestTime.Seconds(10)).GetAwaiter().GetResult();
         var completed = fixture.WatchFiredCount(1);
 
         fixture.Clock.Advance(TimeSpan.FromMinutes(1));
         var delivery = await fixture.NextDeliveryAsync();
-        await completed.WaitAsync(TimeSpan.FromSeconds(10));
+        await completed.WithinAsync(TestTime.Seconds(10));
 
         // Only session/send with this target, --stdin and --queue-if-busy is accepted by the fixture.
         Assert.AreEqual("Target-Session", delivery.Target);
@@ -475,7 +475,7 @@ public sealed partial class AltaReminderServiceTests
         finally
         {
             release.TrySetResult(AltaExitCodes.Success);
-            await firstFinished.WaitAsync(TimeSpan.FromSeconds(10));
+            await firstFinished.WithinAsync(TestTime.Seconds(10));
         }
 
         var nextTimer = await fixture.Clock.NextTimerAsync();
@@ -487,7 +487,7 @@ public sealed partial class AltaReminderServiceTests
         var completed = fixture.WatchFiredCount(2);
         fixture.Clock.Advance(TimeSpan.FromSeconds(1));
         await fixture.NextDeliveryAsync();
-        await completed.WaitAsync(TimeSpan.FromSeconds(10));
+        await completed.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(2, fixture.DeliveryCount);
         Assert.IsNull(fixture.Snapshot().DueAt);
     }
@@ -502,14 +502,14 @@ public sealed partial class AltaReminderServiceTests
         var firstFinished = fixture.WatchFiredCount(1);
         fixture.Clock.Advance(TimeSpan.FromMinutes(1));
         await fixture.NextDeliveryAsync();
-        await firstFinished.WaitAsync(TimeSpan.FromSeconds(10));
+        await firstFinished.WithinAsync(TestTime.Seconds(10));
         await fixture.Clock.NextTimerAsync();
         Assert.AreEqual(AltaReminderStates.Active, fixture.Snapshot().State);
         Assert.AreEqual(AltaExitCodes.Failure, fixture.Snapshot().LastExitCode);
         var completed = fixture.WatchFiredCount(2);
         fixture.Clock.Advance(TimeSpan.FromMinutes(1));
         await fixture.NextDeliveryAsync();
-        await completed.WaitAsync(TimeSpan.FromSeconds(10));
+        await completed.WithinAsync(TestTime.Seconds(10));
 
         var retained = fixture.Snapshot();
         Assert.AreEqual(AltaReminderStates.Completed, retained.State);
@@ -587,7 +587,7 @@ public sealed partial class AltaReminderServiceTests
         }
 
         public async Task<Delivery> NextDeliveryAsync()
-            => await _deliveries.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+            => await _deliveries.Reader.ReadAsync().AsTask().WithinAsync(TestTime.Seconds(10));
 
         public object? GetService(Type serviceType)
         {
@@ -727,7 +727,7 @@ public sealed partial class AltaReminderServiceTests
         }
 
         public async Task<ManualTimer> NextTimerAsync()
-            => await _created.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+            => await _created.Reader.ReadAsync().AsTask().WithinAsync(TestTime.Seconds(10));
 
         public void Advance(TimeSpan duration)
         {

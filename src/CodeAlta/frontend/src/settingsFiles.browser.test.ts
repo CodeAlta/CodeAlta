@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { translate } from "./localization";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
 const fixture = "window.settingsFilesFixture";
@@ -17,7 +18,7 @@ const calls = (method: string) => `${fixture}.state.calls.filter(call => call.me
 const rows = "[...document.querySelectorAll('.settings-file-locations > .settings-file-location')]";
 const button = (scope: string, title: string) => `${scope}.querySelector('button[title=${JSON.stringify(title)}]')`;
 
-test("a settings page says where its files are, and opens, copies and shows them", { skip: !edge, timeout: 120_000 }, async () => {
+test("a settings page says where its files are, and opens, copies and shows them", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-settings-files-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -32,12 +33,12 @@ test("a settings page says where its files are, and opens, copies and shows them
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     socket = new WebSocket(pages.find(value => value.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown }; exceptionDetails?: unknown }>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => reject(Error(`${method} timed out`)), 12_000);
+      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))), testLimit(12_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)); if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
@@ -52,7 +53,7 @@ test("a settings page says where its files are, and opens, copies and shows them
     };
     // An action, then the answers of the host and what React shows of them.
     const act = (script: string) => evaluate(`(async () => { ${script}; for (let turn = 0; turn < 4; turn++) await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0))); return true; })()`);
-    const until = async (expression: string, label = expression) => assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + 7000; (function check() {
+    const until = async (expression: string, label = expression) => assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + ${testLimit(7000)}; (function check() {
       if (${expression}) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 20); })(); })`), true, label);
     await command("Page.enable");
     await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -402,7 +403,7 @@ test("a settings page says where its files are, and opens, copies and shows them
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();
-    if (browser && browser.exitCode === null) { const closed = new Promise<void>(resolve => browser!.once("exit", () => resolve())); browser.kill(); await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 5000))]); }
+    if (browser && browser.exitCode === null) { const closed = new Promise<void>(resolve => browser!.once("exit", () => resolve())); browser.kill(); await Promise.race([closed, new Promise(resolve => setTimeout(resolve, testLimit(5000)))]); }
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

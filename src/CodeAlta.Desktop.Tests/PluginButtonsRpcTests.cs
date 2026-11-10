@@ -99,7 +99,7 @@ public sealed class PluginButtonsRpcTests
         var started = await fixture.Service.InvokeCommandAsync(new(Epoch, run.CommandId, fixture.Project.Id, "session-4", false, null, "space-3"), default);
 
         Assert.AreEqual("started", started.Status);
-        Assert.AreEqual($"{fixture.Project.Id}|session-4|space-3", await fixture.Plugin.Ran.Task.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.AreEqual($"{fixture.Project.Id}|session-4|space-3", await fixture.Plugin.Ran.Task.WithinAsync(TestTime.Seconds(30)));
         Assert.AreEqual("invalid_request", (await fixture.Service.InvokeCommandAsync(new(Epoch, run.CommandId, null, null, false, null, "bad\nspace"), default)).Status);
     }
 
@@ -253,7 +253,7 @@ public sealed class PluginButtonsRpcTests
 
         public async Task<PluginUiEvent> NextAsync(string kind)
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
             while (true)
             {
                 var value = await _events.Reader.ReadAsync(timeout.Token);

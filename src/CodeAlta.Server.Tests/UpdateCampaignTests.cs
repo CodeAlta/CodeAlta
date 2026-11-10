@@ -252,7 +252,7 @@ public sealed class UpdateCampaignTests
             return Task.FromResult<StagedUpdate?>(null);
         }
 
-        public Task<UpdateRequest> WaitAppliedAsync() => _applied.Task.WaitAsync(Waits.Hang);
+        public Task<UpdateRequest> WaitAppliedAsync() => _applied.Task.WithinAsync(Waits.Hang);
     }
 
     /// <summary>A server set up by a desktop, with nodes enrolled and approved.</summary>
@@ -376,7 +376,7 @@ public sealed class UpdateCampaignTests
             await WaitForAsync(() => Task.FromResult(connector.State == FleetConnectorState.Online));
         }
 
-        public Task<UpdateRequest> WaitAppliedAsync() => _applied.Task.WaitAsync(Waits.Hang);
+        public Task<UpdateRequest> WaitAppliedAsync() => _applied.Task.WithinAsync(Waits.Hang);
 
         public async Task RestartAsync(string running)
         {

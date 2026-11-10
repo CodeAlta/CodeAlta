@@ -44,7 +44,7 @@ public sealed partial class AltaLiveToolTests
 
         var stopped = await dispatcher.InvokeAsync(["workflow", "cancel", run!.Id],
             caller: new AltaCallerIdentity { Kind = "agent", SourceSessionId = other.SessionId }).ConfigureAwait(false);
-        var result = await run.Completion.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        var result = await run.Completion.WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false);
 
         Assert.AreEqual(AltaExitCodes.Success, stopped.ExitCode, stopped.Transcript);
         Assert.AreEqual(CodeModeRunStatus.Cancelled, result.Status);
@@ -70,7 +70,7 @@ public sealed partial class AltaLiveToolTests
         // The list above the prompt names a script by its run id: its Stop reaches the script, not the provider.
         Assert.IsFalse(await runtime.StopBackgroundTaskAsync("session-2", run!.Id).ConfigureAwait(false), "a script is stopped as a task of its own session only");
         Assert.IsTrue(await runtime.StopBackgroundTaskAsync("session-1", run.Id).ConfigureAwait(false));
-        var result = await run.Completion.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        var result = await run.Completion.WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false);
 
         Assert.AreEqual(CodeModeRunStatus.Cancelled, result.Status);
         StringAssert.Contains(result.Error?.Message, "stopped by the user");

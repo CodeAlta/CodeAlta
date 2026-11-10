@@ -13,7 +13,7 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class DesktopPluginAsksTests
 {
     private const string Plan = ".alta/plans/plan.md";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     [TestMethod]
     public async Task AQuestion_IsReadAndAnsweredOnce_InTheRevisionTheUserSaw()
@@ -165,7 +165,7 @@ public sealed class DesktopPluginAsksTests
         Assert.IsTrue(ask.Immediate, "shown while the turn of its session runs");
         Assert.IsTrue((await asks.ListAskingAsync()).Single().Immediate);
         Assert.AreEqual("admitted", (await asks.AnswerAsync(new(Guid.NewGuid(), "session-1", ask.AskId, ask.Revision), [new() { QuestionIndex = 0, SelectedChoiceIndexes = [0] }], null)).Status);
-        Assert.AreEqual(0, (await script.WaitAsync(Patience))!.Single().SelectedChoiceIndexes.Single());
+        Assert.AreEqual(0, (await script.WithinAsync(Patience))!.Single().SelectedChoiceIndexes.Single());
         Assert.IsEmpty(fixture.Answered, "no prompt is sent");
     }
 
@@ -272,7 +272,7 @@ public sealed class DesktopPluginAsksTests
             _receipt.Complete(new(OwnedSessionCommandOutcome.Completed, new AgentRunId("run-answer")));
             _send?.Close();
             Owner.CloseAdmission();
-            await Owner.DrainAsync().WaitAsync(Patience);
+            await Owner.DrainAsync().WithinAsync(Patience);
             try { Directory.Delete(_root, recursive: true); }
             catch (IOException) { /* A file the system still holds stays in the temporary folder. */ }
         }

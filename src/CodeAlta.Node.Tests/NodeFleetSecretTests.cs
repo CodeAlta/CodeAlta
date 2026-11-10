@@ -20,7 +20,7 @@ public sealed class NodeFleetSecretTests
     private const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1f07";
     private const string OtherId = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1f08";
     private const string DeployToken = "deploy-token-0123456789";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan Patience = TestTime.Seconds(45);
 
     public TestContext TestContext { get; set; } = null!;
 
