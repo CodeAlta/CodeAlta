@@ -24,7 +24,10 @@ public sealed class FleetConnectionOptions
     /// <summary>Gets the number of frames waiting to be sent before a sender waits.</summary>
     public int SendQueueCapacity { get; init; } = 256;
 
-    /// <summary>Gets the number of incoming requests handled at once before the reader waits.</summary>
+    /// <summary>
+    /// Gets the number of incoming requests handled at once. Those beyond wait for a slot, up to four times this number, without
+    /// stopping the reader; one more is refused as <see cref="FleetErrorCodes.ServerBusy"/> with the hint to retry.
+    /// </summary>
     public int MaxConcurrentIncomingRequests { get; init; } = 64;
 
     /// <summary>Gets the clock of the heartbeat and the timeouts.</summary>

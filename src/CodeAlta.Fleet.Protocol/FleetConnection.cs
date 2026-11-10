@@ -73,7 +73,8 @@ public enum FleetConnectionState
 /// <para>
 /// One reader loop reads every frame; one writer loop sends every frame from a bounded queue, so a sender waits when
 /// the peer reads slowly. Incoming requests run on the thread pool, at most
-/// <see cref="FleetConnectionOptions.MaxConcurrentIncomingRequests"/> at once (the reader waits for a slot); events
+/// <see cref="FleetConnectionOptions.MaxConcurrentIncomingRequests"/> at once; those beyond wait for a slot off the reader, which
+/// goes on reading (pings, responses, cancels), and a few times more than the slots are refused as busy; events
 /// are handled in order by the reader. No lock is held across an await.
 /// </para>
 /// <para>
@@ -96,6 +97,12 @@ public sealed class FleetConnection : IAsyncDisposable
     private readonly ConcurrentDictionary<string, TaskCompletionSource<FleetResponse>> _pending = new(StringComparer.Ordinal);
     private readonly Channel<byte[]> _sendQueue;
     private readonly SemaphoreSlim _handlerSlots;
+
+    // How many times the slots of the handlers wait for one at most; the requests beyond are refused as busy.
+    private const int QueuedRequestsPerSlot = 4;
+
+    // The incoming requests started and not ended: those that run and those that wait for a slot.
+    private int _incomingRequests;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly TaskCompletionSource<FleetConnectionCloseInfo> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private FrozenDictionary<string, FleetRequestHandler> _handlers = FrozenDictionary<string, FleetRequestHandler>.Empty;
@@ -422,17 +429,29 @@ public sealed class FleetConnection : IAsyncDisposable
             return true;
         }
 
-        await _handlerSlots.WaitAsync(token).ConfigureAwait(false);
+        // The reader never waits for a handler: a request beyond the slots waits for one in its own task, so the heartbeats,
+        // the responses and the cancels of the peer are still read; one beyond what may wait is refused, and retried by the peer.
+        if (Interlocked.Increment(ref _incomingRequests) > _options.MaxConcurrentIncomingRequests * (QueuedRequestsPerSlot + 1))
+        {
+            Interlocked.Decrement(ref _incomingRequests);
+            await EnqueueResponseAsync(FleetResponse.Failure(request.Id, new FleetError(FleetErrorCodes.ServerBusy, FleetErrorHints.Retry,
+                "The peer handles as many requests of this connection as it takes: try again in a moment.")), token).ConfigureAwait(false);
+            return true;
+        }
+
         _ = RunHandlerAsync(request, handler, token);
         return true;
     }
 
     private async Task RunHandlerAsync(FleetRequest request, FleetRequestHandler handler, CancellationToken token)
     {
+        var slot = false;
         try
         {
-            // Off the reader loop, which goes on reading while the handler runs.
+            // Off the reader loop, which goes on reading while the handler waits for its slot and runs.
             await Task.Yield();
+            await _handlerSlots.WaitAsync(token).ConfigureAwait(false);
+            slot = true;
             FleetResponse response;
             try
             {
@@ -455,7 +474,8 @@ public sealed class FleetConnection : IAsyncDisposable
         }
         finally
         {
-            _handlerSlots.Release();
+            if (slot) _handlerSlots.Release();
+            Interlocked.Decrement(ref _incomingRequests);
         }
     }
 

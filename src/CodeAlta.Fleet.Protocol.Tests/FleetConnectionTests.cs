@@ -99,6 +99,42 @@ public sealed class FleetConnectionTests
     }
 
     [TestMethod]
+    public async Task HandlersAllBusy_TheReaderStillReads_AndARequestBeyondWhatMayWaitIsRefusedAsBusy()
+    {
+        // One handler at a time: one request runs, four wait for its slot, and the sixth is refused.
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = 0;
+        await using var pair = ConnectionPair.Start(
+            server => server.RegisterRequestHandler("block", async (_, token) =>
+            {
+                Interlocked.Increment(ref started);
+                await release.Task.WaitAsync(token);
+                return null;
+            }),
+            client => client.RegisterRequestHandler("client.info", (_, _) => ValueTask.FromResult<JsonElement?>(Json.Parse("""{"side":"client"}"""))),
+            clientOptions: Quiet, serverOptions: new FleetConnectionOptions
+            {
+                HeartbeatInterval = Timeout.InfiniteTimeSpan, DeadPeerTimeout = Timeout.InfiniteTimeSpan, RequestTimeout = Json.Hang, MaxConcurrentIncomingRequests = 1,
+            });
+
+        var waiting = Enumerable.Range(0, 5).Select(_ => pair.Client.SendRequestAsync("block", null)).ToArray();
+        var deadline = DateTime.UtcNow + Json.Hang;
+        while (Volatile.Read(ref started) == 0 && DateTime.UtcNow < deadline) await Task.Delay(10);
+        Assert.AreEqual(1, Volatile.Read(ref started));
+
+        // The reader of the server is not held by the requests that wait: it reads the answer of its own request.
+        var answer = await pair.Server.SendRequestAsync("client.info", null).WaitAsync(Json.Hang);
+        Assert.AreEqual("client", answer!.Value.GetProperty("side").GetString());
+        var refused = await Assert.ThrowsExactlyAsync<FleetException>(() => pair.Client.SendRequestAsync("block", null).WaitAsync(Json.Hang));
+        Assert.AreEqual((FleetErrorCodes.ServerBusy, FleetErrorHints.Retry), (refused.Error.Code, refused.Error.Hint));
+
+        // Once the handler is free, those that waited run, each in turn.
+        release.SetResult();
+        await Task.WhenAll(waiting).WaitAsync(Json.Hang);
+        Assert.AreEqual(5, Volatile.Read(ref started));
+    }
+
+    [TestMethod]
     public async Task ARequestWithoutAnswerTimesOutAndOneCancelledStopsWaiting()
     {
         await using var pair = ConnectionPair.Start(server => server.RegisterRequestHandler("slow", async (_, token) =>
