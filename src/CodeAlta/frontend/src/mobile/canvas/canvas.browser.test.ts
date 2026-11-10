@@ -105,15 +105,20 @@ test("the Mobile tab shows the code of the phone page, and what keeps a phone ou
       if (!dark) await shot("mobile-tab-light.png");
     }
 
-    // Tailscale is not installed: the page that fixes it opens in the browser; no Try again for a state that does not change by itself.
+    // Tailscale is installed after CodeAlta starts: download it, then retry without restarting the app.
     await publish(status(unreachable, { state: "not-installed", detail: "tailscale was not found on this computer.", fixUrl: "https://tailscale.com/download" }));
     await wait("document.querySelector('.mobile-problem[data-problem=provider]')", "the Tailscale problem");
     assert.equal(await evaluate("document.querySelectorAll('.mobile-qr').length"), 0);
     assert.deepEqual(await text(".mobile-problem .bp6-heading"), ["Tailscale is not installed on this computer."]);
     assert.deepEqual(await text(".mobile-problem p"), ["tailscale was not found on this computer."]);
-    assert.deepEqual(await text(".mobile-problem-actions button"), ["Download Tailscale"]);
+    assert.deepEqual(await text(".mobile-problem-actions button"), ["Download Tailscale", "Try again"]);
+    await shot("mobile-tab-not-installed.png");
     assert.equal(await press(".mobile-problem-actions button", "Download Tailscale"), true);
     assert.deepEqual(await evaluate("mobileFixture.state.opened"), ["https://tailscale.com/download"]);
+    await evaluate(`mobileFixture.state.afterRetry = ${JSON.stringify(status())}`);
+    assert.equal(await press(".mobile-problem-actions button", "Try again"), true);
+    await wait("document.querySelector('.mobile-qr')", "the code after installing Tailscale and trying again");
+    assert.equal(await evaluate("mobileFixture.state.calls.filter(c => c === 'mobile.retry').length"), 1);
 
     // Serve not enabled: the admin console, and Try again, which asks Tailscale again and shows the code once it serves.
     await publish(status(unreachable, { state: "serve-disabled", detail: "Serve is not enabled on your tailnet.", fixUrl: "https://login.tailscale.com/f/serve" }));
@@ -123,7 +128,7 @@ test("the Mobile tab shows the code of the phone page, and what keeps a phone ou
     await evaluate(`mobileFixture.state.afterRetry = ${JSON.stringify(status())}`);
     assert.equal(await press(".mobile-problem-actions button", "Try again"), true);
     await wait("document.querySelector('.mobile-qr')", "the code after Try again");
-    assert.equal(await evaluate("mobileFixture.state.calls.filter(c => c === 'mobile.retry').length"), 1);
+    assert.equal(await evaluate("mobileFixture.state.calls.filter(c => c === 'mobile.retry').length"), 2);
 
     // The port is taken by another program: which, and the likely reason when the plugin says none.
     await publish(status({ ...unreachable, server: "port-in-use" }, { state: "stopped", detail: "" }));

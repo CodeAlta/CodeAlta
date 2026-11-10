@@ -229,21 +229,35 @@ internal sealed class TailscaleServe(ITailscaleCli cli)
 internal sealed class TailscaleCli : ITailscaleCli
 {
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(15);
-    private readonly string? _path = PrivateNetworkCommandLine.Find("tailscale", OperatingSystem.IsWindows()
+    private readonly Func<string?> _find;
+
+    /// <summary>Finds the Tailscale command line of this computer.</summary>
+    public TailscaleCli() : this(Find)
+    {
+    }
+
+    internal TailscaleCli(Func<string?> find)
+    {
+        ArgumentNullException.ThrowIfNull(find);
+        _find = find;
+    }
+
+    // Looked for at each call: an install is seen without a restart, even when this process has the old PATH.
+    private static string? Find() => PrivateNetworkCommandLine.Find("tailscale", OperatingSystem.IsWindows()
         ? [Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Tailscale", "tailscale.exe")]
         : OperatingSystem.IsMacOS()
             ? ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "/usr/local/bin/tailscale", "/opt/homebrew/bin/tailscale"]
             : ["/usr/bin/tailscale", "/usr/local/bin/tailscale"]);
 
     /// <inheritdoc />
-    public bool IsInstalled => _path is not null;
+    public bool IsInstalled => _find() is not null;
 
     /// <inheritdoc />
     /// <remarks>A command that waits (Serve not enabled on the tailnet waits for the admin) is stopped after a while.</remarks>
     public Task<CommandLineResult> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(args);
-        return _path is null ? Task.FromResult(new CommandLineResult(-1, "Tailscale is not installed.")) : PrivateNetworkCommandLine.RunAsync(_path, args, Patience, cancellationToken);
+        return _find() is { } path ? PrivateNetworkCommandLine.RunAsync(path, args, Patience, cancellationToken) : Task.FromResult(new CommandLineResult(-1, "Tailscale is not installed."));
     }
 }
 
