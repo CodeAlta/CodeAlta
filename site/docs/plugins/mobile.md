@@ -32,7 +32,7 @@ The plugin is off until you turn it on: it publishes your computer on your tailn
 
 The phone opens the page of the sessions and stays signed in. Add it to the home screen to open it as an app.
 
-When something keeps a phone from connecting, the Mobile tab says what it is and how to fix it: Tailscale is not installed, not signed in, Serve is not enabled on the tailnet, or the port is used by something else. **Try again** asks Tailscale again once it is fixed.
+When something keeps a phone from connecting, the Mobile tab says what it is and how to fix it: Tailscale is not installed, not signed in, Serve is not enabled on the tailnet, or the port is used by something else. **Try again** asks Tailscale again once it is fixed. If you install Tailscale while CodeAlta is open, choose **Try again** without restarting CodeAlta.
 
 ## Notifications
 
