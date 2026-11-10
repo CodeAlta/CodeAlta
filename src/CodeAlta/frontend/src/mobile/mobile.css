@@ -801,6 +801,8 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .toast:has(~ .output-viewer) { z-index: 51; }
 .output-viewer-mark { display: block; margin-inline: -.375rem; padding-inline: .375rem; color: inherit; background: color-mix(in srgb, var(--yellow) 22%, transparent); box-shadow: inset 2px 0 var(--yellow); }
 .output-viewer-drawn { margin: .5rem 0; overflow-wrap: anywhere; }
+/* A drawn block keeps its own spacing: its tint and its bar are drawn around it, not in it. */
+.output-viewer-block-mark { --block-mark: color-mix(in srgb, var(--yellow) 22%, var(--bg)); background-color: var(--block-mark); box-shadow: .25rem 0 var(--block-mark), -.25rem 0 var(--block-mark), -.375rem 0 var(--yellow); }
 .output-viewer-note { margin: .5rem 0; color: var(--muted); font-size: .8125rem; }
 .output-viewer-note:empty { display: none; }
 /* A table scrolls sideways in its message: its cells keep their words whole, as the rest of the message does not. */

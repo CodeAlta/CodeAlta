@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDiagramPages, diagramPageSvg, linkedFileName, linksMarkdown, linkTarget } from "./markdownView";
+import { createDiagramPages, diagramPageSvg, linkedFileName, linksLine, linksMarkdown, linkTarget } from "./markdownView";
 
 const look = { dark: true, variables: { "--pele-bg": "#2f343c", "--pele-fg": "#f6f7f9" } };
 
@@ -47,12 +47,23 @@ test("a link of a message opens a page of the web or reads a file of the compute
   assert.equal(linkTarget(null), "none");
 });
 
-test("a Markdown file is drawn, unless its link goes to a line of its source", () => {
+test("a Markdown file is known by its name, a link to its line too", () => {
   assert.equal(linksMarkdown("docs/a.md"), true);
   assert.equal(linksMarkdown("C:%5Cdocs%5CA.MD#getting-started"), true);
-  assert.equal(linksMarkdown("docs/a.md#L12"), false);
-  assert.equal(linksMarkdown("docs/a.md:12"), false);
+  assert.equal(linksMarkdown("docs/a.md#L12"), true);
+  assert.equal(linksMarkdown("docs/a.md:12"), true);
+  assert.equal(linksMarkdown("docs/a.md:12-20"), true);
   assert.equal(linksMarkdown("src/a.cs"), false);
+  assert.equal(linksMarkdown("src/a.cs:12"), false);
+});
+
+test("a link to a line opens its file as text", () => {
+  assert.equal(linksLine("docs/a.md"), false);
+  assert.equal(linksLine("docs/a.md#getting-started"), false);
+  assert.equal(linksLine("docs/a.md#L12"), true);
+  assert.equal(linksLine("docs/a.md#L12-L20"), true);
+  assert.equal(linksLine("docs/a.md:12"), true);
+  assert.equal(linksLine("C:/docs/a.md"), false, "the colon of a drive is no line");
 });
 
 test("a linked file is named by the end of its path", () => {

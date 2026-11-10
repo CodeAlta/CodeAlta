@@ -27,13 +27,16 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
   const event = (kind: string, text: string, extra: Partial<TimelineEvent> = {}): TimelineEvent => ({ seq: ++seq, at: now, kind, text, activityId: null, ...extra });
   const running = { id: "s1", projectId: "p1", live: "running", kind: "activity", line: null, at: now, activity: null, canSteer: true } as const;
   server.state.sessions = [session("s1", "A running session", "p1", 0, { live: "running", kind: "activity", line: null, canSteer: true })];
-  const answer = event("assistant.message", "See [code](src/a.cs#L1250), [the guide](docs/guide.md), [gone](gone.txt), [elsewhere](//server/share/a.txt) and [the web](https://example.com/).");
+  const answer = event("assistant.message", "See [code](src/a.cs#L1250), [the guide](docs/guide.md), [the plan](docs/plan.md#L41), [gone](gone.txt), [elsewhere](//server/share/a.txt) and [the web](https://example.com/).");
   const ownPrompt = event("user.message", "Build it [my prompt](docs/own.md)");
   const linkedFile = (seq: number, link: string) => `s1/${seq}/${link}`;
   const longCode = numberedLines("code", 2500);
   server.state.linkedFiles.set(linkedFile(answer.seq, "src/a.cs#L1250"), longCode);
   server.state.linkedFiles.set(linkedFile(answer.seq, "docs/guide.md"), "# The guide\n\nIts **first** paragraph, and [the next](next.md).");
   server.state.linkedFiles.set(linkedFile(ownPrompt.seq, "docs/own.md"), "# My own notes");
+  // Line 41 is the paragraph of step 10, line 59 the heading of step 15.
+  const plan = ["# The plan", "", ...Array.from({ length: 30 }, (_, index) => [`## Step ${index + 1}`, "", `Step ${index + 1} does its part.`, ""]).flat()].join("\n");
+  server.state.linkedFiles.set(linkedFile(answer.seq, "docs/plan.md#L41"), plan);
   server.state.events.set("s1", [
     answer,
     ownPrompt,
@@ -264,12 +267,14 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     assert.equal(new URLSearchParams(fileReads().at(-1)!.query).get("offset"), String(pageStart + 16_000));
     assert.equal(await evaluate('document.querySelector(".output-viewer-text").textContent'), longCode, "the pages are in their order around the mark");
     assert.equal(await evaluate('document.querySelectorAll(".output-viewer-mark").length'), 1);
+    assert.equal(await evaluate('document.querySelector(".output-viewer-switch")'), null, "a file that is not Markdown has only its text");
     await evaluate('document.querySelector(".output-viewer-close").click()');
     await waitFor('!document.querySelector(".output-viewer")');
     await evaluate(`${fileLink("the guide")}.click()`);
     await waitFor('document.querySelector(".output-viewer-drawn h1")');
     assert.equal(await evaluate('document.querySelector(".output-viewer-drawn h1").textContent'), "The guide");
     assert.equal(await evaluate('document.querySelector(".output-viewer-drawn strong").textContent'), "first");
+    assert.equal(await evaluate('document.querySelector(".output-viewer-switch").getAttribute("aria-label")'), "Show as text");
     await shot("linked-markdown");
     // A link inside a file opens nothing, and says so above the viewer.
     const toast = 'document.querySelector("#toast:not([hidden]) .toast-text")?.textContent';
@@ -279,6 +284,51 @@ test("the phone takes back a prompt that waits, and opens a tool call on what it
     assert.equal(fileReads().length, readsSoFar);
     assert.equal(await evaluate('(() => { const box = document.querySelector("#toast").getBoundingClientRect(); return document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.closest("#toast")?.id; })()'), "toast", "the note is above the viewer");
     await evaluate('document.querySelector(".output-viewer-close").click()');
+    await waitFor('!document.querySelector(".output-viewer")');
+
+    // A Markdown file a link opens at a line is text, with the line marked. Its button draws it and shows it as text again,
+    // at the same place, reading nothing again and adding no step to Back.
+    await evaluate(`${fileLink("the plan")}.click()`);
+    await waitFor('document.querySelector(".output-viewer-text .output-viewer-mark")');
+    assert.equal(await evaluate('document.querySelector(".output-viewer-mark").textContent'), "Step 10 does its part.\n");
+    const switchLabel = () => evaluate<string>('document.querySelector(".output-viewer-switch").getAttribute("aria-label")');
+    assert.equal(await switchLabel(), "Show as Markdown");
+    await shot("linked-markdown-line");
+    const planReads = fileReads().length, entries = await evaluate<number>("history.length");
+    const fromStageTop = (element: string) => evaluate<number>(`${element}.getBoundingClientRect().top - document.querySelector(".output-viewer-stage").getBoundingClientRect().top`);
+    await evaluate('document.querySelector(".output-viewer-switch").click()');
+    await waitFor('document.querySelector(".output-viewer-drawn .output-viewer-block-mark")');
+    assert.equal(await evaluate('document.querySelector(".output-viewer-text")'), null, "one view at a time");
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".output-viewer-block-mark")].map(e => `${e.tagName} ${e.textContent}`)'), ["P Step 10 does its part."]);
+    const third = await evaluate<number>('document.querySelector(".output-viewer-stage").clientHeight / 3');
+    assert.ok(Math.abs(await fromStageTop('document.querySelector(".output-viewer-block-mark")') - third) < 2, "the marked block is a third of the way down");
+    assert.equal(await switchLabel(), "Show as text");
+    await shot("linked-markdown-line-drawn");
+    // Drawn, the block at the top is step 15: as text, its first line is at the top.
+    const step15 = 'document.querySelectorAll(".output-viewer-drawn h2")[14]';
+    await evaluate(`(() => { const stage = document.querySelector(".output-viewer-stage"); stage.scrollTop += ${step15}.getBoundingClientRect().top - stage.getBoundingClientRect().top; })()`);
+    assert.ok(Math.abs(await fromStageTop(step15)) < 2, "the drawn file scrolls that far");
+    await evaluate('document.querySelector(".output-viewer-switch").click()');
+    await waitFor('document.querySelector(".output-viewer-text")');
+    const step15LineTop = await evaluate<number>(`(() => {
+      const walker = document.createTreeWalker(document.querySelector(".output-viewer-text"), NodeFilter.SHOW_TEXT);
+      for (let node; (node = walker.nextNode());) {
+        const at = node.data.indexOf("## Step 15\\n");
+        if (at < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, at); range.setEnd(node, at + 1);
+        return range.getClientRects()[0].top - document.querySelector(".output-viewer-stage").getBoundingClientRect().top;
+      }
+    })()`);
+    assert.ok(Math.abs(step15LineTop) < 2, `the first line of that block is at the top: ${step15LineTop}`);
+    assert.equal(await evaluate('document.querySelectorAll(".output-viewer-mark").length'), 1, "the line stays marked");
+    // The marked line is out of sight: drawn again, the top stays on step 15.
+    await evaluate('document.querySelector(".output-viewer-switch").click()');
+    await waitFor('document.querySelector(".output-viewer-drawn")');
+    assert.ok(Math.abs(await fromStageTop(step15)) < 2, "the block of the line at the top is at the top");
+    assert.equal(fileReads().length, planReads, "nothing is read again");
+    assert.equal(await evaluate<number>("history.length"), entries, "no step is added to Back");
+    await evaluate("history.back()");
     await waitFor('!document.querySelector(".output-viewer")');
 
     // The link of a prompt the user sent reads the file by that prompt.
