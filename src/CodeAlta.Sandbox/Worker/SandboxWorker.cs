@@ -168,6 +168,9 @@ public static class SandboxWorker
             }, CancellationToken.None).ConfigureAwait(false);
         }
 
+        // What the host gave no decision answers: a request the user was not asked about.
+        private static AgentPermissionDecision NoAnswer => AgentPermissionDecision.DeniedUnattended("the sandbox of this session got no answer from CodeAlta");
+
         // A permission the handler asks is the host's to give.
         private async Task<AgentPermissionDecision> AskPermissionAsync(AgentPermissionRequest request, CancellationToken cancellationToken)
         {
@@ -177,8 +180,8 @@ public static class SandboxWorker
                 Payload = JsonSerializer.SerializeToElement(request, AgentJsonSerializerContext.Default.AgentPermissionRequest),
             }, cancellationToken).ConfigureAwait(false);
             return answer.Payload is { } payload
-                ? payload.Deserialize(AgentJsonSerializerContext.Default.AgentPermissionDecision) ?? new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)
-                : new AgentPermissionDecision(AgentPermissionDecisionKind.Deny);
+                ? payload.Deserialize(AgentJsonSerializerContext.Default.AgentPermissionDecision) ?? NoAnswer
+                : NoAnswer;
         }
 
         private async ValueTask<string?> CheckCommandAsync(string command, string workdir, CancellationToken cancellationToken)

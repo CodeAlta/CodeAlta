@@ -293,12 +293,12 @@ public sealed class SandboxWorkerClient : IAsyncDisposable
                 ?? throw new InvalidDataException("The sandbox asked a permission without a request.");
             var call = FindCall(request.InteractionId);
             decision = call is null
-                ? new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)
+                ? AgentPermissionDecision.DeniedUnattended("no call of the sandbox of this session waits for this request")
                 : await call.Host.Permission(request with { ProviderId = call.Invocation.ProviderId, SessionId = call.Invocation.SessionId }, _closing.Token).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is InvalidDataException or JsonException or OperationCanceledException)
         {
-            decision = new AgentPermissionDecision(AgentPermissionDecisionKind.Deny);
+            decision = AgentPermissionDecision.DeniedUnattended("the sandbox of this session could not put the request to the user");
         }
 
         await WriteQuietlyAsync(new SandboxWorkerMessage

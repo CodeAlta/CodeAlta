@@ -500,7 +500,9 @@ public sealed partial class SessionRuntimeService
                 ProposedNetworkPolicyAmendments: null) { OutsideSandbox = true };
             var decision = await options.OnPermissionRequest(request, cancellationToken).ConfigureAwait(false);
             if (decision.Kind is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.AllowForSession))
-                return Refused(tool, "the user did not allow it to run outside the sandbox.");
+                return Refused(tool, decision is { Kind: AgentPermissionDecisionKind.Deny, Source: AgentPermissionDecisionSource.Policy or AgentPermissionDecisionSource.Unattended }
+                    ? $"it may not run outside the sandbox. {decision.DescribeDenial()}"
+                    : "the user did not allow it to run outside the sandbox.");
             // Allowed once, for this command: the shell of the host does not ask it again. The whole of a long output goes
             // where the sandbox of the session reads it, not in the temporary folder of CodeAlta.
             var allowed = Copy(options, null, static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),

@@ -827,7 +827,9 @@ public sealed class BrowserPlugin : PluginBase
                 var decision = await askUser!(BrowserAgentSession.Request(sessionId, target, null), cancellationToken).ConfigureAwait(false);
                 if (decision.Kind is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.AllowAlways))
                 {
-                    return Activation.Refusal($"The user did not let this session use their own {choice.Browser.Name}. Browse in the isolated profile instead, or ask the user.");
+                    return Activation.Refusal(decision is { Kind: AgentPermissionDecisionKind.Deny, Source: AgentPermissionDecisionSource.Policy or AgentPermissionDecisionSource.Unattended }
+                        ? $"This session may not use the user's own {choice.Browser.Name}. {decision.DescribeDenial()} Browse in the isolated profile instead."
+                        : $"The user did not let this session use their own {choice.Browser.Name}. Browse in the isolated profile instead, or ask the user.");
                 }
             }
 

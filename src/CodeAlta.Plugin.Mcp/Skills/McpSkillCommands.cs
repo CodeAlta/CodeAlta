@@ -211,6 +211,9 @@ internal static class McpSkillCommands
                     case AgentPermissionDecisionKind.AllowAlways or AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.AllowForSession:
                         approval = "once";
                         break;
+                    case AgentPermissionDecisionKind.Deny when decision.Source is AgentPermissionDecisionSource.Policy or AgentPermissionDecisionSource.Unattended:
+                        return McpCommandFactory.WriteError(context, "skill_not_approved",
+                            $"The skill `{uri}` of MCP server '{serverKey}' is not loaded. {decision.DescribeDenial()} Do without it, or ask the user.");
                     default:
                         return McpCommandFactory.WriteError(context, "skill_not_approved",
                             $"The user did not allow the skill `{uri}` of MCP server '{serverKey}': it is not loaded. Do without it, or ask the user.");

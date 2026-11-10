@@ -1329,6 +1329,43 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    [DataRow("user", "shell_command was not run. The user denied this action in CodeAlta.")]
+    [DataRow("policy", "shell_command was not run. CodeAlta's permission rules denied this action: no rule approves it.")]
+    [DataRow("unattended", "shell_command was not run. CodeAlta denied this action without asking the user: this run has no user.")]
+    public async Task ShellCommandTool_SaysWhoDeniedIt(string source, string expected)
+    {
+        using var temp = TestTempDirectory.Create();
+        var denial = source switch
+        {
+            "user" => AgentPermissionDecision.DeniedByUser(),
+            "policy" => AgentPermissionDecision.DeniedByPolicy("no rule approves it"),
+            _ => AgentPermissionDecision.DeniedUnattended("this run has no user"),
+        };
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path, onPermissionRequest: (_, _) => Task.FromResult(denial)))
+            .Single(static tool => tool.Spec.Name == "shell_command");
+        using var args = JsonDocument.Parse("""{"command":"Write-Output 'should not run'"}""");
+
+        var result = await tool.Handler(
+                new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsFalse(result.Success);
+        Assert.AreEqual(expected, result.Error);
+    }
+
+    [TestMethod]
+    public void PermissionDecision_KeepsWhoDecidedThroughJson()
+    {
+        // The sandbox worker passes decisions to the session as JSON.
+        var decision = AgentPermissionDecision.DeniedByPolicy("no rule approves it");
+        var json = JsonSerializer.Serialize(decision, AgentJsonSerializerContext.Default.AgentPermissionDecision);
+        Assert.AreEqual(decision, JsonSerializer.Deserialize(json, AgentJsonSerializerContext.Default.AgentPermissionDecision));
+        Assert.AreEqual(AgentPermissionDecisionSource.Unspecified,
+            JsonSerializer.Deserialize("""{"kind":"deny"}""", AgentJsonSerializerContext.Default.AgentPermissionDecision)!.Source);
+    }
+
+    [TestMethod]
     public void ShellCommandProcessSpec_UsesPredictableProfileBehaviorPerPlatform()
     {
         using var temp = TestTempDirectory.Create();

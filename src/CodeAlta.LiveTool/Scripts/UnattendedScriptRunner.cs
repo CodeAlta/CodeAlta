@@ -135,8 +135,10 @@ public sealed class UnattendedScriptRunner
             WorkingDirectory = cwd,
             Environment = request.Environment,
             // Nobody is there to approve: what may write writes, and nothing leaves its sandbox.
-            OnPermissionRequest = (permission, _) => Task.FromResult(new AgentPermissionDecision(
-                request.Write && permission is not AgentCommandPermissionRequest { OutsideSandbox: true } ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny)),
+            OnPermissionRequest = (permission, _) => Task.FromResult(
+                permission is AgentCommandPermissionRequest { OutsideSandbox: true } ? AgentPermissionDecision.DeniedUnattended("nothing of an unattended script runs outside its sandbox")
+                : request.Write ? new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)
+                : AgentPermissionDecision.DeniedByPolicy("this unattended script may not write")),
             EnableUserInputTool = false,
             DisabledTools = request.Write ? null : WritingTools,
         };

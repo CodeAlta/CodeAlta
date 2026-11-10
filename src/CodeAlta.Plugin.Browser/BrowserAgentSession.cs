@@ -470,9 +470,11 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
                 case AgentPermissionDecisionKind.AllowOnce:
                     lock (_gate) _allowedSites.Add(site);
                     return null;
-                case AgentPermissionDecisionKind.Deny:
+                case AgentPermissionDecisionKind.Deny when decision.Source is AgentPermissionDecisionSource.User or AgentPermissionDecisionSource.Unspecified:
                     lock (_gate) _deniedSites.Add(site);
                     return $"The user did not allow this session to act on {site} in their own browser.";
+                case AgentPermissionDecisionKind.Deny:
+                    return $"This session may not act on {site} in the user's own browser. {decision.DescribeDenial()}";
                 default:
                     return $"The user was not asked about {site}: the request was canceled.";
             }
@@ -488,7 +490,8 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
     /// </summary>
     public async Task<AgentPermissionDecision> AskAsync(string? site, CancellationToken cancellationToken)
     {
-        if (_host.RequestPermission is not { } ask || !_host.HasUser) return new(AgentPermissionDecisionKind.Deny);
+        if (_host.RequestPermission is not { } ask || !_host.HasUser)
+            return AgentPermissionDecision.DeniedUnattended("only the user can let a session use their own browser, and this run has no user");
         return await ask(SessionId, Request(SessionId, Target, site), cancellationToken).ConfigureAwait(false);
     }
 

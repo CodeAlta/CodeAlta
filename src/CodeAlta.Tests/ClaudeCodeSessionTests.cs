@@ -325,6 +325,42 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    [DataRow("user", "The user denied this action in CodeAlta.")]
+    [DataRow("policy", "CodeAlta's permission rules denied this action: the permission mode of this session does not approve it.")]
+    [DataRow("unattended", "CodeAlta denied this action without asking the user: this run has no user.")]
+    [DataRow("unspecified", "This action was denied in CodeAlta.")]
+    public async Task DeniedPermission_TellsTheAgentWhoDeniedIt(string source, string expected)
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        JsonElement? decision = null;
+        cli.OnUserMessage = async (process, user) =>
+        {
+            var input = new JsonObject { ["command"] = "git push" };
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Bash", input)));
+            decision = await process.AskPermissionAsync("Bash", input, "toolu_1");
+            process.EmitToolResult("toolu_1", "Permission denied.", isError: true);
+            process.EmitResult("I did not push.", user);
+        };
+        var denial = source switch
+        {
+            "user" => AgentPermissionDecision.DeniedByUser(),
+            "policy" => AgentPermissionDecision.DeniedByPolicy("the permission mode of this session does not approve it"),
+            "unattended" => AgentPermissionDecision.DeniedUnattended("this run has no user."),
+            _ => new AgentPermissionDecision(AgentPermissionDecisionKind.Deny),
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory, onPermission: (_, _) => Task.FromResult(denial));
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("push it") }).WaitAsync(Timeout);
+
+        Assert.AreEqual("deny", decision!.Value.GetProperty("behavior").GetString());
+        Assert.AreEqual(expected, decision.Value.GetProperty("message").GetString());
+        Assert.IsFalse(decision.Value.TryGetProperty("interrupt", out var interrupt) && interrupt.GetBoolean(), "A denial does not stop the turn.");
+    }
+
+    [TestMethod]
     public async Task PromptSuggestion_IsTheTagOfTheAnswer_NeverTheOneTheCliMakes()
     {
         // CodeAlta asks the model itself, through its instructions: the CLI is not asked for suggestions of its own,

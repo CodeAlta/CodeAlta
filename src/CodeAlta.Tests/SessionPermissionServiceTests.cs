@@ -45,6 +45,37 @@ public sealed class SessionPermissionServiceTests
     }
 
     [TestMethod]
+    public async Task Denials_SayWhetherTheUserARuleOrARunWithoutUserDeniedThem()
+    {
+        await using (var service = new SessionPermissionService())
+        {
+            var registration = await service.RegisterAsync("session", Request(), false, CancellationToken.None);
+            Assert.IsTrue(await service.ResolveAsync(registration.Snapshot.Handle, AgentPermissionDecisionKind.Deny));
+            var byUser = await registration.Completion;
+            Assert.AreEqual((AgentPermissionDecisionKind.Deny, AgentPermissionDecisionSource.User), (byUser.Kind, byUser.Source));
+            Assert.AreEqual("The user denied this action in CodeAlta.", byUser.DescribeDenial());
+
+            // A host that neither approves nor asks: its permission mode denies what it does not approve.
+            var byPolicy = await service.OwnedDefaultPermissionHandler(Request(), CancellationToken.None);
+            Assert.AreEqual((AgentPermissionDecisionKind.Deny, AgentPermissionDecisionSource.Policy), (byPolicy.Kind, byPolicy.Source));
+            Assert.AreEqual("CodeAlta's permission rules denied this action: the permission mode of this session does not approve it, and this run does not ask the user.",
+                byPolicy.DescribeDenial());
+
+            // A request put to the user, for a session that is not open anywhere the user could be asked.
+            var notOpen = await service.RequestForSessionAsync("session", Request(), CancellationToken.None);
+            Assert.AreEqual((AgentPermissionDecisionKind.Deny, AgentPermissionDecisionSource.Unattended), (notOpen.Kind, notOpen.Source));
+            Assert.AreEqual("CodeAlta denied this action without asking the user: the session is not open where the user could be asked.", notOpen.DescribeDenial());
+        }
+
+        await using (var service = new SessionPermissionService { FullTrust = true })
+        {
+            var outside = await service.OwnedDefaultPermissionHandler(Request() with { OutsideSandbox = true }, CancellationToken.None);
+            Assert.AreEqual((AgentPermissionDecisionKind.Deny, AgentPermissionDecisionSource.Unattended), (outside.Kind, outside.Source));
+            StringAssert.Contains(outside.DescribeDenial(), "only the user can let a command run outside the sandbox");
+        }
+    }
+
+    [TestMethod]
     public async Task PendingSnapshot_IsIndependentImmutableScalarData()
     {
         await using var service = new SessionPermissionService();

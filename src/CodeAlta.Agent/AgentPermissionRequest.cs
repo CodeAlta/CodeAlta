@@ -251,7 +251,88 @@ public sealed record AgentNetworkPolicyAmendment(
 public sealed record AgentPermissionDecision(
     AgentPermissionDecisionKind Kind,
     IReadOnlyList<string>? ExecPolicyAmendment = null,
-    AgentNetworkPolicyAmendment? NetworkPolicyAmendment = null);
+    AgentNetworkPolicyAmendment? NetworkPolicyAmendment = null)
+{
+    /// <summary>Gets who made the decision; <see cref="AgentPermissionDecisionSource.Unspecified"/> when nothing says so.</summary>
+    public AgentPermissionDecisionSource Source { get; init; }
+
+    /// <summary>
+    /// Gets why a rule of CodeAlta, or a run without a user, made the decision: a short clause such as
+    /// <c>the permission mode of this session does not approve it</c>, or null.
+    /// </summary>
+    public string? Reason { get; init; }
+
+    /// <summary>Creates the denial of the user, who answered the request.</summary>
+    /// <returns>The decision.</returns>
+    public static AgentPermissionDecision DeniedByUser() => new(AgentPermissionDecisionKind.Deny) { Source = AgentPermissionDecisionSource.User };
+
+    /// <summary>Creates the denial of a rule or a permission mode of CodeAlta, which nobody was asked about.</summary>
+    /// <param name="reason">Why the rule denies the request: a short clause.</param>
+    /// <returns>The decision.</returns>
+    /// <exception cref="ArgumentException"><paramref name="reason"/> is null or blank.</exception>
+    public static AgentPermissionDecision DeniedByPolicy(string reason)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        return new(AgentPermissionDecisionKind.Deny) { Source = AgentPermissionDecisionSource.Policy, Reason = reason };
+    }
+
+    /// <summary>Creates the denial of a request that waits for the user, where no user can be asked.</summary>
+    /// <param name="reason">Why no user can be asked: a short clause.</param>
+    /// <returns>The decision.</returns>
+    /// <exception cref="ArgumentException"><paramref name="reason"/> is null or blank.</exception>
+    public static AgentPermissionDecision DeniedUnattended(string reason)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        return new(AgentPermissionDecisionKind.Deny) { Source = AgentPermissionDecisionSource.Unattended, Reason = reason };
+    }
+
+    /// <summary>
+    /// Gets the sentence that tells an agent who denied its action and why, such as
+    /// <c>The user denied this action in CodeAlta.</c>
+    /// </summary>
+    /// <returns>The sentence, ending with a period.</returns>
+    public string DescribeDenial()
+    {
+        var reason = Reason?.Trim().TrimEnd('.');
+        return Source switch
+        {
+            AgentPermissionDecisionSource.User => "The user denied this action in CodeAlta.",
+            AgentPermissionDecisionSource.Policy => string.IsNullOrEmpty(reason)
+                ? "CodeAlta's permission rules denied this action."
+                : $"CodeAlta's permission rules denied this action: {reason}.",
+            AgentPermissionDecisionSource.Unattended => string.IsNullOrEmpty(reason)
+                ? "CodeAlta denied this action without asking the user: no user can be asked here."
+                : $"CodeAlta denied this action without asking the user: {reason}.",
+            _ => "This action was denied in CodeAlta.",
+        };
+    }
+}
+
+/// <summary>
+/// Who made a permission decision.
+/// </summary>
+public enum AgentPermissionDecisionSource
+{
+    /// <summary>
+    /// Nothing says who decided.
+    /// </summary>
+    Unspecified,
+
+    /// <summary>
+    /// The user answered the request.
+    /// </summary>
+    User,
+
+    /// <summary>
+    /// A rule or a permission mode of CodeAlta answered the request, without asking anybody.
+    /// </summary>
+    Policy,
+
+    /// <summary>
+    /// The request waits for the user, and no user can be asked: a run without a user, a session that is not open.
+    /// </summary>
+    Unattended,
+}
 
 /// <summary>
 /// The kind of permission decision.
