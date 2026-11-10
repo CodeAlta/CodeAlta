@@ -117,8 +117,6 @@ A completed or dismissed task is deleted, and a completed plan is kept. **Settin
 
 Agents use the same work items with `alta task`, `alta tag` and `alta plan`, also in CodeAlta TUI, which has no cards and no tab:
 
-In a worktree, `alta plan list` includes plans written there, even if Git ignores them. The worktree's copy of a plan takes precedence; plans found only in the project folder remain available too.
-
 ```text
 Show me the open tasks of this project and do the one about the model list.
 ```
@@ -134,3 +132,5 @@ Mark the plan 2026-10-07-task-cards as done.
 ```text
 Tag p53b and 7c9w with mobile.
 ```
+
+In a worktree, `alta plan list` includes plans written there, even if Git ignores them. The worktree's copy of a plan takes precedence; plans found only in the project folder remain available too.
