@@ -27,19 +27,22 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
-  # Linux runs every test of the solution. Windows and macOS run them several times slower, and macOS runners are scarce:
-  # they build everything and run the test classes that do something else on one system or another (their files test
-  # `OperatingSystem.IsWindows()`, `IsMacOS()` or `IsLinux()`). The whole suite runs on Windows before each change.
+  # Linux runs every test of the solution in one job. Windows runs them all too, several times slower: its test projects are
+  # split in groups, each job building and testing its own, and the last group takes every test project the others do not.
+  # macOS runners are scarce and slow: one job builds everything and runs the test classes that do something else on one
+  # system or another (their files test `OperatingSystem.IsWindows()`, `IsMacOS()` or `IsLinux()`).
   test:
-    name: "Tests (${{ matrix.os }}${{ matrix.scope && format(', {0}', matrix.scope) || '' }})"
+    name: "Tests (${{ matrix.os }}${{ matrix.group && format(', {0}', matrix.group) || '' }})"
     if: github.ref_type != 'tag'
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-          - { os: windows-latest, scope: platform-specific }
-          - { os: macos-latest, scope: platform-specific }
+          - { os: windows-latest, group: desktop, projects: CodeAlta.Desktop.Tests }
+          - { os: windows-latest, group: core, projects: CodeAlta.Tests CodeAlta.Plugin.Statistics.Tests }
+          - { os: windows-latest, group: others, others: CodeAlta.Desktop.Tests CodeAlta.Tests CodeAlta.Plugin.Statistics.Tests }
+          - { os: macos-latest, group: platform-specific, platform: true }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -60,21 +63,45 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: "Choose the tests"
-        if: matrix.scope == 'platform-specific'
         shell: bash
+        env:
+          PROJECTS: ${{ matrix.projects }}
+          OTHERS: ${{ matrix.others }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
-          # The classes of the test files that test the system they run on, each matched by its name.
-          classes=$(grep -rlE 'OperatingSystem\.Is(Windows|MacOS|Linux)\(\)' --include='*.cs' src/CodeAlta*.Tests \
-            | xargs grep -ohE '^\s*(public |internal )?(sealed |static |abstract )*(partial )?class [A-Za-z0-9_]+' | grep -oE '[A-Za-z0-9_]+$' | sort -u)
-          echo "$(wc -l <<< "$classes") classes"
-          echo "TEST_FILTER=$(sed 's/.*/FullyQualifiedName~.&./' <<< "$classes" | paste -sd'|')" >> "$GITHUB_ENV"
+          tests=src/CodeAlta.slnx
+          if [ -n "$PROJECTS$OTHERS" ]; then
+            chosen=()
+            for path in $(grep -oE 'Path="[^"]+Tests\.csproj"' src/CodeAlta.slnx | sed -E 's/Path="([^"]+)"/\1/'); do
+              name=$(basename "$path" .csproj)
+              if [ -n "$PROJECTS" ]; then [[ " $PROJECTS " == *" $name "* ]] || continue
+              else [[ " $OTHERS " == *" $name "* ]] && continue; fi
+              chosen+=("src/$path")
+            done
+            [ ${#chosen[@]} -gt 0 ] || { echo "::error::No test project in this group"; exit 1; }
+            printf '%s\n' "${chosen[@]}"
+            dotnet new sln --format slnx --name ci-tests --output src
+            dotnet sln src/ci-tests.slnx add --in-root "${chosen[@]}"
+            tests=src/ci-tests.slnx
+          fi
+          echo "TESTS=$tests" >> "$GITHUB_ENV"
+          if [ "$PLATFORM" = "true" ]; then
+            # The classes of the test files that test the system they run on, each matched by its name.
+            classes=$(grep -rlE 'OperatingSystem\.Is(Windows|MacOS|Linux)\(\)' --include='*.cs' src/CodeAlta*.Tests \
+              | xargs grep -ohE '^\s*(public |internal )?(sealed |static |abstract )*(partial )?class [A-Za-z0-9_]+' | grep -oE '[A-Za-z0-9_]+$' | sort -u)
+            # paste reads its standard input from "-": the paste of macOS needs it.
+            filter=$(sed 's/.*/FullyQualifiedName~.&./' <<< "$classes" | paste -sd '|' -)
+            [ -n "$filter" ] || { echo "::error::No test class to filter on"; exit 1; }
+            echo "$(wc -l <<< "$classes") classes"
+            echo "TEST_FILTER=$filter" >> "$GITHUB_ENV"
+          fi
       - name: "Build"
-        run: dotnet build src/CodeAlta.slnx -c Release
+        run: dotnet build ${{ env.TESTS }} -c Release
       - name: "Test"
         shell: bash
         # A test that hangs is named and its run stopped, instead of the job running out of time.
-        run: dotnet test src/CodeAlta.slnx -c Release --no-build --blame-hang-timeout 10m --blame-hang-dump-type none ${TEST_FILTER:+--filter "$TEST_FILTER"}
+        run: dotnet test "$TESTS" -c Release --no-build --blame-hang-timeout 10m --blame-hang-dump-type none ${TEST_FILTER:+--filter "$TEST_FILTER"}
 
   # The frontend tests import the RPC client that the build of CodeAlta generates (obj/neoastra): one build makes it
   # for every shard of the tests.
