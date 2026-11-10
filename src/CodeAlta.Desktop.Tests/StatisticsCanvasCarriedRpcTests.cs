@@ -28,7 +28,12 @@ public sealed class StatisticsCanvasCarriedRpcTests
     [TestMethod]
     public async Task TheCanvas_IsServedToItsScript_WithTheModuleOfTheApplication_EveryCallAnswersTheQueryJson_AndTheStatusIsPushed()
     {
-        await using var fixture = await Fixture.CreateAsync();
+        // The sessions are there before the plugin starts: the engine counts them once as it starts, and the card keeps that count.
+        await using var fixture = await Fixture.CreateAsync(journals: journals =>
+        {
+            journals.Add("old", EngineSession("old", 40));
+            journals.Add("recent", EngineSession("recent", 3));
+        });
 
         var opened = await fixture.OpenAsync();
 
@@ -43,8 +48,6 @@ public sealed class StatisticsCanvasCarriedRpcTests
         var id = connection.Connection!;
 
         // The first time: the card is told what exists, without reading it.
-        fixture.Journals.Add("old", EngineSession("old", 40));
-        fixture.Journals.Add("recent", EngineSession("recent", 3));
         fixture.Send(opened.InstanceId!, id, Invoke("c0", "statistics.status", "{}"));
         var status = (await fixture.FrameAsync(id, frame => Id(frame) == "c0")).GetProperty("value");
         Assert.AreEqual(("needsChoice", 2), (status.GetProperty("state").GetString(), status.GetProperty("sessionsTotal").GetInt32()));
@@ -337,12 +340,13 @@ public sealed class StatisticsCanvasCarriedRpcTests
 
         public DesktopPluginUi Ui { get; }
 
-        public static async Task<Fixture> CreateAsync(bool watch = true)
+        public static async Task<Fixture> CreateAsync(bool watch = true, Action<MemoryJournals>? journals = null)
         {
             var root = Path.Combine(Path.GetTempPath(), "CodeAlta-statistics-canvas-" + Guid.NewGuid().ToString("N"));
             var global = Directory.CreateDirectory(Path.Combine(root, "home", ".alta")).FullName;
-            var journals = new MemoryJournals();
-            var plugin = new StatisticsPlugin(journals, TimeSpan.Zero, TimeSpan.Zero);
+            var store = new MemoryJournals();
+            journals?.Invoke(store);
+            var plugin = new StatisticsPlugin(store, TimeSpan.Zero, TimeSpan.Zero);
             var ui = new DesktopPluginUi();
             var broker = new DesktopCanvases(ui);
             ui.Modules = broker.Modules;
@@ -357,7 +361,7 @@ public sealed class StatisticsCanvasCarriedRpcTests
                 BuiltIns = [new BuiltInPluginDefinition { Id = "statistics", DisplayName = "Statistics", PluginType = typeof(StatisticsPlugin), Factory = () => plugin }],
             });
             broker.Attach(runtime, () => "work");
-            var fixture = new Fixture(root, broker, runtime, plugin, journals, ui);
+            var fixture = new Fixture(root, broker, runtime, plugin, store, ui);
             if (watch) fixture.StartWatching();
             return fixture;
         }
