@@ -45,6 +45,11 @@ jobs:
       - name: "Allow the sandbox of Chromium browsers"
         if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # Defender scans every file the build and the tests write: the tests ran several times slower, and their timings failed.
+      - name: "Stop the real-time scan of Windows"
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
