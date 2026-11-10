@@ -13,7 +13,7 @@ import { createDrafts, newSessionDraft } from "./drafts";
 import { installedApp, setUpInstall } from "./install";
 import { setUpNotifications } from "./notifications";
 import { createLiveStream, type LinkState } from "./liveStream";
-import { createMarkdownView, linkedFileName, linksMarkdown } from "./markdownView";
+import { createMarkdownView, linkedFileName, linksLine, linksMarkdown } from "./markdownView";
 import {
   choiceLabel, choiceRequest, entryName, findModel, forgetMode, groupVariants, initialChoice, lastProjectKey, modelsOf, pickEffort, pickModel, preferencesKey,
   providerName, providers, rememberChoice, tierChoice, tierLabel, tierReady, tierText, variantLabels, type Choice, type ProjectPreferences,
@@ -356,12 +356,13 @@ export function startMobile(window: Window & typeof globalThis) {
   const outputViewer = createOutputViewer({ window });
 
   // A Markdown file, drawn again as more of it is read; a diagram or a formula that comes later draws the text as it is then.
+  // Its blocks say which lines they come from, and `after` is called after each drawing.
   function drawnMarkdown() {
-    let target: HTMLElement | null = null, shown = "";
-    const fill = () => { if (target) markdown.fill(target, shown, fill); };
+    let target: HTMLElement | null = null, shown = "", afterDrawing = () => { /* Nothing drawn yet. */ };
+    const fill = () => { if (target) { markdown.fill(target, shown, fill, { sourceLines: true }); afterDrawing(); } };
     return {
       prepare: (element: HTMLElement) => markdown.handle(element, text => showToast(text)),
-      draw: (element: HTMLElement, text: string) => { target = element; shown = text; fill(); },
+      draw: (element: HTMLElement, text: string, after: () => void) => { target = element; shown = text; afterDrawing = after; fill(); },
     };
   }
 
@@ -387,7 +388,7 @@ export function startMobile(window: Window & typeof globalThis) {
         subject.replaceChildren(folders, file);
       }
       return page;
-    }, false, { label: `File ${linkedFileName(href)}`, file: true, drawn: linksMarkdown(href) ? drawnMarkdown() : undefined });
+    }, false, { label: `File ${linkedFileName(href)}`, file: true, drawn: linksMarkdown(href) ? drawnMarkdown() : undefined, asText: linksLine(href) });
   }
 
   markdown.handle(timeline, text => showToast(text), openLinkedFile);

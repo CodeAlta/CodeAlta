@@ -1,6 +1,6 @@
 import { diagramAppearance, diagramColors, diagrams, type DiagramColors } from "../diagrams";
-import { createMarkdownRenderer, equationCopy, followFootnote, markdownPending, toggleRenderedSource } from "../markdownBoundary";
-import { fileMarkdownHref } from "../markdownLinks";
+import { createMarkdownRenderer, equationCopy, followFootnote, markdownPending, toggleRenderedSource, type MarkdownRenderOptions } from "../markdownBoundary";
+import { fileMarkdownHref, placeAfterPath } from "../markdownLinks";
 import { loadMath } from "../math";
 import { el, iconSvg } from "./dom";
 
@@ -60,10 +60,16 @@ export function linkTarget(href: string | null): "web" | "file" | "none" {
   return fileMarkdownHref(href) ? "file" : "none";
 }
 
-/** Whether a file a link names is read as Markdown: by its name, unless the link goes to a line, which only its source has. */
+/** Whether a file a link names is a Markdown file, by its name: it can be drawn as Markdown. */
 export function linksMarkdown(href: string): boolean {
   const [path, fragment] = href.split("#", 2);
-  return /\.(md|markdown)$/iu.test(path) && !/^L?\d/iu.test(fragment ?? "");
+  return /\.(md|markdown)$/iu.test(fragment === undefined ? path.replace(placeAfterPath, "") : path);
+}
+
+/** Whether a link goes to a line of its file: the file opens as text, where its lines are. */
+export function linksLine(href: string): boolean {
+  const [path, fragment] = href.split("#", 2);
+  return fragment === undefined ? placeAfterPath.test(path) : /^L?\d/iu.test(fragment);
 }
 
 /** The name of the file a link names, for its title until the server gives its path. */
@@ -89,11 +95,12 @@ export function createMarkdownView(options: Readonly<{ window: Window & typeof g
 
   /**
    * Renders a text into an element; `redraw` is called once a diagram of it is drawn, or once KaTeX is loaded for its
-   * formulas. Says whether it has a diagram (drawn again when the theme changes).
+   * formulas. Says whether it has a diagram (drawn again when the theme changes). `how` is how it is rendered, such as
+   * with the lines of its blocks.
    */
-  function fill(container: HTMLElement, text: string, redraw: () => void): boolean {
+  function fill(container: HTMLElement, text: string, redraw: () => void, how?: MarkdownRenderOptions): boolean {
     const pending = markdownPending();
-    container.innerHTML = render(text, true, pending);
+    container.innerHTML = render(text, true, pending, how);
     for (const figure of Array.from(container.querySelectorAll<HTMLElement>(".markdown-diagram"))) dressDiagram(figure);
     const appearance = look(), undrawn = pending.diagrams;
     if (undrawn.length) void Promise.all(undrawn.map(source => diagrams.draw(source, appearance))).then(() => { if (container.isConnected) redraw(); });

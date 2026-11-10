@@ -18,8 +18,8 @@ export function safeMarkdownHref(value: string): boolean {
   return length !== null && length <= maximumMarkdownHrefLength;
 }
 
-// The place written after a path: ":10", ":10:5", ":10-20".
-const placeAfterPath = /:\d{1,7}(?::\d{1,7})?(?:-\d{1,7}(?::\d{1,7})?)?$/;
+/** The place written after a path: ":10", ":10:5", ":10-20". */
+export const placeAfterPath =/:\d{1,7}(?::\d{1,7})?(?:-\d{1,7}(?::\d{1,7})?)?$/;
 
 /**
  * Whether a target is written as a file of this computer: a relative or a full path, with the place in the
