@@ -143,9 +143,14 @@ public sealed class ProviderRequestGateTests
         var d = TakeAsync(gate, "d", order);
         await WaitUntilAsync(() => gate.WaitingCount == 3);
 
-        gate.SetLimit(3);
-
+        // One more slot at a time: the waiters admitted together by one limit record their names in whatever order
+        // their continuations run, which says nothing of the order of the gate.
+        gate.SetLimit(2);
         using var slotOfB = await b.WaitAsync(Timeout);
+        Assert.IsFalse(c.IsCompleted);
+        Assert.IsFalse(d.IsCompleted);
+
+        gate.SetLimit(3);
         using var slotOfC = await c.WaitAsync(Timeout);
         Assert.IsFalse(d.IsCompleted);
         Assert.AreEqual(3, gate.ActiveCount);

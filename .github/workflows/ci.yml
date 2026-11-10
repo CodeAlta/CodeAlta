@@ -53,26 +53,57 @@ jobs:
       - name: "Test"
         run: dotnet test src/CodeAlta.slnx -c Release --no-build
 
-  frontend:
-    name: "Frontend tests"
+  # The frontend tests import the RPC client that the build of CodeAlta generates (obj/neoastra): one build makes it
+  # for every shard of the tests.
+  frontend-client:
+    name: "Frontend RPC client"
     if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: "Build"
+        run: dotnet build src/CodeAlta/CodeAlta.csproj -c Release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: frontend-rpc-client
+          path: src/CodeAlta/obj/neoastra
+          retention-days: 1
+          if-no-files-found: error
+
+  frontend:
+    name: "Frontend tests (${{ matrix.shard }}/6)"
+    if: github.ref_type != 'tag'
+    needs: frontend-client
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - name: "Allow the sandbox of Chromium browsers"
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-node@v7
         with:
-          dotnet-version: 10.0.x
-      # The build restores the npm packages and generates the RPC client that the frontend tests import.
-      - name: "Build"
-        run: dotnet build src/CodeAlta/CodeAlta.csproj -c Release
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/CodeAlta/frontend/package-lock.json
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-rpc-client
+          path: src/CodeAlta/obj/neoastra
+      - name: "Install"
+        working-directory: src/CodeAlta/frontend
+        run: npm ci --no-audit --no-fund
+      # `npm test` with a shard of the files: each runs in this job, two at a time as in `npm test`.
       - name: "Test"
         working-directory: src/CodeAlta/frontend
-        run: npm test
+        run: npx tsx --test --test-concurrency=2 --test-shard=${{ matrix.shard }}/6 --test-reporter=./scripts/failures-reporter.mjs "src/**/*.test.ts" "src/**/*.test.tsx"
 
   pack:
     name: "Pack (${{ matrix.project }})"
