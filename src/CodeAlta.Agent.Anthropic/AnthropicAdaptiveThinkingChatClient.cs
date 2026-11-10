@@ -41,8 +41,9 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
     internal const string AdaptiveThinkingKey = "codealta.anthropic.adaptive_thinking";
 
     /// <summary>
-    /// The key of <see cref="ChatOptions.AdditionalProperties"/> that holds <c>true</c> when the session asks for fast mode:
-    /// the request is sent <c>speed: "fast"</c>, on the Claude API only.
+    /// The key of <see cref="ChatOptions.AdditionalProperties"/> that holds, when the session asks for the fast mode of a
+    /// model that has one, the betas its request names, separated by commas (empty for a model that needs none): the
+    /// request is sent <c>speed: "fast"</c> with them, on the Claude API only.
     /// </summary>
     internal const string FastModeKey = "codealta.anthropic.fast_mode";
 
@@ -148,26 +149,20 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
         return options;
     }
 
-    // A session that asks for fast mode is sent speed "fast", on the Claude API only (dropMismatchedThinking says it is
-    // that endpoint): another endpoint of the protocol may refuse the field. Opus 5.5 takes it without a beta header.
+    // A session that asks for the fast mode of a model that has one is sent speed "fast", with the betas the model needs
+    // for it, on the Claude API only (dropMismatchedThinking says it is that endpoint): another endpoint of the protocol
+    // may refuse the field.
     private ChatOptions? WithFastMode(ChatOptions? options)
     {
-        if (options is null || !dropMismatchedThinking || !TakesFastMode(options.ModelId) ||
-            options.AdditionalProperties?.TryGetValue(FastModeKey, out var fastMode) != true || fastMode is not true)
+        if (options is null || !dropMismatchedThinking ||
+            options.AdditionalProperties?.TryGetValue(FastModeKey, out var fastMode) != true || fastMode is not string named)
         {
             return options;
         }
 
-        return WithCreateParams(options, static createParams => createParams with { Speed = Speed.Fast });
+        var betas = named.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return WithCreateParams(options, createParams => betas.Aggregate(createParams with { Speed = Speed.Fast }, AddBeta));
     }
-
-    // The models the Claude API runs in fast mode without a beta header: Claude Opus 5.5. Opus 5 needs access the account
-    // asks for, and the fast mode of Opus 4.8 ends on 2026-11-30.
-    internal static bool TakesFastMode(string? modelId)
-        => TryGetClaudeModelId(modelId, out var normalizedClaudeModelId) &&
-            normalizedClaudeModelId.StartsWith("claude-opus-", StringComparison.Ordinal) &&
-            TryReadClaudeVersion(normalizedClaudeModelId, out var major, out var minor) &&
-            major == 5 && minor == 5;
 
     private ChatOptions WithThinking(ChatOptions options, Func<MessageCreateParams, MessageCreateParams> addThinking)
     {

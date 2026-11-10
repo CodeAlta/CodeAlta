@@ -254,7 +254,9 @@ public sealed class ModelsDevCatalogService : IAsyncDisposable
         try
         {
             using var stream = File.OpenRead(_cacheFilePath);
-            return ModelsDevDatabaseJson.Deserialize(stream);
+            var database = ModelsDevDatabaseJson.Deserialize(stream);
+            WarnWhenWithoutFastMode(database);
+            return database;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {
@@ -291,6 +293,7 @@ public sealed class ModelsDevCatalogService : IAsyncDisposable
             memory.Position = 0;
 
             var database = ModelsDevDatabaseJson.Deserialize(memory);
+            WarnWhenWithoutFastMode(database);
             _currentDatabase = database;
             await PersistCacheAsync(database, cancellationToken).ConfigureAwait(false);
         }
@@ -301,6 +304,16 @@ public sealed class ModelsDevCatalogService : IAsyncDisposable
         catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {
             Logger.Warn($"Failed to refresh models.dev catalog from '{_refreshUri.ToString()}': {ex.Message}");
+        }
+    }
+
+    // A downloaded catalog that gives no model a fast mode says it another way than the one read here: the providers that
+    // take the fast mode of their models from it (the Anthropic API) then offer none, which nothing else tells.
+    private static void WarnWhenWithoutFastMode(ModelsDevDatabase database)
+    {
+        if (!ModelsDevFastMode.IsIn(database))
+        {
+            Logger.Warn("The models.dev catalog gives no model a fast mode (experimental.modes.fast): the way it describes modes may have changed, and no model is offered the fast mode read from it.");
         }
     }
 

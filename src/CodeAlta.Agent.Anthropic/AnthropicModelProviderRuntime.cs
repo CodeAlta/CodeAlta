@@ -22,6 +22,12 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
     // The capability of a model that the endpoint says takes adaptive thinking and its effort, whatever its name.
     private const string AdaptiveThinkingCapabilityKey = "anthropicAdaptiveThinking";
 
+    // The capability of a model of the Claude API that needs betas to run in fast mode: their names, separated by commas.
+    private const string FastModeBetasCapabilityKey = "anthropicFastModeBetas";
+
+    // The provider models.dev lists the Claude API as.
+    private const string ClaudeApiModelsDevProviderId = "anthropic";
+
     // The standard context window of the Claude models, which a session of a model that accepts more can keep to.
     private const long StandardContextSize = 200_000;
 
@@ -454,10 +460,11 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             (options.AdditionalProperties ??= [])[AnthropicAdaptiveThinkingChatClient.AdaptiveThinkingKey] = true;
         }
 
-        // The fast mode the session chose; standard speed is what a request without one runs at.
-        if (request.FastMode == true)
+        // The fast mode the session chose, for a model that has one, with the betas its request names; standard speed is
+        // what a request without one runs at.
+        if (request.FastMode == true && request.ModelInfo?.FastMode is not null)
         {
-            (options.AdditionalProperties ??= [])[AnthropicAdaptiveThinkingChatClient.FastModeKey] = true;
+            (options.AdditionalProperties ??= [])[AnthropicAdaptiveThinkingChatClient.FastModeKey] = ReadFastModeBetas(request.ModelInfo);
         }
 
         if (options.MaxOutputTokens is not null)
@@ -578,8 +585,8 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
     // What models.dev and the user say of the models, and the sizes of context a session can use them with: each price
     // models.dev gives a model past a size of prompt and, on the Claude API, the standard window of a model that accepts
     // more, as Claude Code offers it (ClaudeCodeModelCatalog). A smaller size is the input a session keeps to: it
-    // compacts before it, and the requests do not change. On the Claude API, the models that run in fast mode have it,
-    // off until a session asks for it.
+    // compacts before it, and the requests do not change. On the Claude API, the models models.dev gives a fast mode
+    // have it, off until a session asks for it.
     internal static IReadOnlyList<AgentModelInfo> EnrichModels(
         AnthropicProviderOptions provider,
         ModelProviderRuntimeDescriptor providerDescriptor,
@@ -595,8 +602,62 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             contextPriceTiers: true,
             contextSizes: claudeApi ? [StandardContextSize] : null);
         return claudeApi
-            ? [.. enriched.Select(static model => AnthropicAdaptiveThinkingChatClient.TakesFastMode(model.Id) ? model with { FastMode = false } : model)]
+            ? [.. enriched.Select(model => WithFastMode(model, ModelsDevFastMode.Find(provider.ModelCatalog, ClaudeApiModelsDevProviderId, model.Id)))]
             : enriched;
+    }
+
+    // A model has the fast mode models.dev gives it when its request is one this provider sends: see ToFastModeBetas.
+    private static AgentModelInfo WithFastMode(AgentModelInfo model, ModelsDevFastMode? fastMode)
+    {
+        if (fastMode is null || ToFastModeBetas(fastMode) is not { } betas)
+        {
+            return model;
+        }
+
+        if (betas.Length == 0)
+        {
+            return model with { FastMode = false };
+        }
+
+        var capabilities = model.Capabilities is null
+            ? new Dictionary<string, object?>(StringComparer.Ordinal)
+            : new Dictionary<string, object?>(model.Capabilities, StringComparer.Ordinal);
+        capabilities[FastModeBetasCapabilityKey] = betas;
+        return model with { FastMode = false, Capabilities = capabilities };
+    }
+
+    // The betas the request of a fast mode names, separated by commas, empty for none; null for a mode this provider does
+    // not send. The Claude API runs a request fast with speed "fast", for some models under a beta of fast mode: a mode
+    // that asks for another field or header is not sent. models.dev says which models have the mode and which beta they
+    // need, not what else a request carries: it is downloaded.
+    private static string? ToFastModeBetas(ModelsDevFastMode fastMode)
+    {
+        if (fastMode.Body.Count != 1 || !fastMode.Body.TryGetValue("speed", out var speed) ||
+            speed.ValueKind != JsonValueKind.String || speed.GetString() != "fast")
+        {
+            return null;
+        }
+
+        var betas = new List<string>();
+        foreach (var (name, value) in fastMode.Headers)
+        {
+            if (!string.Equals(name, "anthropic-beta", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            foreach (var beta in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (!beta.StartsWith("fast-mode-", StringComparison.Ordinal) || !beta.All(static c => char.IsAsciiLetterOrDigit(c) || c == '-'))
+                {
+                    return null;
+                }
+
+                betas.Add(beta);
+            }
+        }
+
+        return string.Join(',', betas);
     }
 
     private static AnthropicClient CreateSdkClient(
@@ -958,6 +1019,18 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         };
         return effort is "xhigh" or "max" ? effort : null;
     }
+
+    // The betas of fast mode a listed model recorded, empty for none; a capability read back from a saved list may be a
+    // JSON string.
+    private static string ReadFastModeBetas(AgentModelInfo model)
+        => model.Capabilities?.TryGetValue(FastModeBetasCapabilityKey, out var value) == true
+            ? value switch
+            {
+                string text => text,
+                JsonElement { ValueKind: JsonValueKind.String } element => element.GetString() ?? string.Empty,
+                _ => string.Empty,
+            }
+            : string.Empty;
 
     private static bool? ReadFlag(IReadOnlyDictionary<string, JsonElement> rawData, string name)
         => rawData.TryGetValue(name, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
