@@ -9,9 +9,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { locales, translate } from "./localization";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
-test("provider presentation preserves literal decisions and input owners across languages and scope ABA", { skip: !edge, timeout: 60_000 }, async t => {
+test("provider presentation preserves literal decisions and input owners across languages and scope ABA", { skip: !edge, timeout: testLimit(60_000) }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-provider-language-"));
   let browser: ReturnType<typeof spawn> | undefined; let socket: WebSocket | undefined;
   try {
@@ -21,13 +22,13 @@ test("provider presentation preserves literal decisions and input owners across 
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="app"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     const tab = pages.find(value => value.type === "page"); assert.ok(tab?.webSocketDebuggerUrl);
     socket = new WebSocket(tab.webSocketDebuggerUrl);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown }; exceptionDetails?: unknown }>((resolve, reject) => {
-      const id = ++sequence; const timer = setTimeout(() => reject(Error(`browser ${method} timed out`)), 12_000);
+      const id = ++sequence; const timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(12_000), `the answer of the browser to ${method}`))), testLimit(12_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)); if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
@@ -39,7 +40,7 @@ test("provider presentation preserves literal decisions and input owners across 
       try { return (await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })).result?.value; }
       catch (cause) { throw new Error(`Provider modal expression=${expression}; failure=${cause instanceof Error ? cause.message : String(cause)}`, { cause }); }
     };
-    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+4000;const check=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(check,20)};check()})`);
+    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(4000)};const check=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(check,20)};check()})`);
     const paint = () => evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
     const click = (text: string) => evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(text)}).click()`);
     const armed = () => wait("!!document.querySelector('[data-permission-decision=allow_once]') && !document.querySelector('[data-permission-decision=allow_once]').disabled");

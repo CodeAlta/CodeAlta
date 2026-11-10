@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { build, type Plugin } from "esbuild";
 import { pressElement } from "../browserPointer";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 // Runs the Statistics canvas in headless Edge, under the page's production content security policy, over the fixture API, and
 // hands the test a page to drive: evaluate, wait until, click and type with real input events, take screenshots.
@@ -66,7 +67,7 @@ export async function withCanvas(body: (page: Page) => Promise<void>, options: H
     const problems: string[] = [];
     const command = (method: string, params: object = {}) => new Promise<Record<string, any>>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method} timed out`)); }, 30_000);
+      const timer = setTimeout(() => { waiting.delete(id); reject(new Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))); }, testLimit(30_000));
       waiting.set(id, reply => { clearTimeout(timer); reply.error ? reject(new Error(JSON.stringify(reply.error))) : resolve(reply.result ?? {}); });
       socket!.send(JSON.stringify({ id, method, params }));
     });
@@ -88,10 +89,10 @@ export async function withCanvas(body: (page: Page) => Promise<void>, options: H
       assert.equal(reply.exceptionDetails, undefined, JSON.stringify(reply.exceptionDetails)); return reply.result?.value as T;
     };
     const until = async (expression: string, what: string) => {
-      const found = await evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + 15000; (function check() { let ok = false; try { ok = !!(${expression}); } catch {} if (ok) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 30); })(); })`);
+      const limit = testLimit(15000), found = await evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + ${limit}; (function check() { let ok = false; try { ok = !!(${expression}); } catch {} if (ok) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 30); })(); })`);
       if (!found) {
         const text = await evaluate<string>(`(document.querySelector('.statistics-canvas')?.innerText ?? 'no canvas').slice(0, 600)`).catch(() => "");
-        assert.fail(`waited for ${what}; ${problems.join(" | ")}\n${text}`);
+        assert.fail(`waited for ${what} (limit ${limit} ms); ${problems.join(" | ")}\n${text}`);
       }
     };
     const shot = async (name: string) => {
@@ -107,11 +108,15 @@ export async function withCanvas(body: (page: Page) => Promise<void>, options: H
       await until(find, `${selector} with the text "${text}"`);
       await pressElement(command, find, `${selector} with the text "${text}"`);
     };
+    // The page handles the keys it was sent on its next frames, which a busy machine can draw after the call that sent
+    // them returned: two frames, and every key sent is handled before the test reads the page.
+    const handled = () => evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
     const key = async (name: string, code: number, text?: string) => {
       await command("Input.dispatchKeyEvent", { type: "keyDown", key: name, code: name, windowsVirtualKeyCode: code, ...(text ? { text } : {}) });
       await command("Input.dispatchKeyEvent", { type: "keyUp", key: name, code: name, windowsVirtualKeyCode: code });
+      await handled();
     };
-    const type = async (text: string) => { for (const char of text) await command("Input.dispatchKeyEvent", { type: "char", text: char }); };
+    const type = async (text: string) => { for (const char of text) await command("Input.dispatchKeyEvent", { type: "char", text: char }); await handled(); };
     const resize = (width: number, height: number, ratio = 1) => command("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: ratio, mobile: false }).then(async () => { await evaluate(`window.dispatchEvent(new Event('resize'))`); });
     await command("Page.enable"); await command("Runtime.enable"); await command("Log.enable");
     await command("Emulation.setDeviceMetricsOverride", { width: options.width ?? 1280, height: options.height ?? 800, deviceScaleFactor: options.ratio ?? 1, mobile: false });

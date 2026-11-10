@@ -104,7 +104,7 @@ public sealed class OwnedSessionUserInputRuntimeTests
             else Assert.AreSame(startFailure == 1 ? first.StartError : second.StartError, await Assert.ThrowsAsync<InvalidOperationException>(() => start));
             Assert.AreEqual(1, first.Starts); Assert.AreEqual(startFailure == 1 ? 0 : 1, second.Starts);
             closing = Keep(() => combined.ClosingAsync(new("run")));
-            await Keep(() => Task.WhenAll(first.Entered.Task, second.Entered.Task)).WaitAsync(TimeSpan.FromSeconds(5));
+            await Keep(() => Task.WhenAll(first.Entered.Task, second.Entered.Task)).WithinAsync(TestTime.Seconds(5));
             if (!synchronous || closeFailures != 3) Assert.IsFalse(closing.IsCompleted);
             first.Release.TrySetResult(); second.Release.TrySetResult();
             await Settle(closing);
@@ -120,7 +120,7 @@ public sealed class OwnedSessionUserInputRuntimeTests
             closing ??= Keep(() => combined.ClosingAsync(new("run")));
             try
             {
-                await Task.WhenAll(work.Select(Settle)).WaitAsync(TimeSpan.FromSeconds(5));
+                await Task.WhenAll(work.Select(Settle)).WithinAsync(TestTime.Seconds(5));
                 var failures = work.Where(t => t.Exception is not null).SelectMany(t => t.Exception!.Flatten().InnerExceptions).Where(e => !expected.Contains(e)).Distinct().ToList();
                 if (primary is not null && !failures.Contains(primary)) failures.Insert(0, primary);
                 if (failures.Count > 0) throw new AggregateException(failures);
@@ -213,7 +213,7 @@ public sealed class OwnedSessionUserInputRuntimeTests
             f._stop = f.Stop(); f._stopObserver = Settle(f._stop); f._body = f.Core(launch.Task); f._observer = Settle(f._body); launch.SetResult();
             try
             {
-                await f._body.WaitAsync(TimeSpan.FromSeconds(30)); await f._observer;
+                await f._body.WithinAsync(TestTime.Seconds(30)); await f._observer;
                 foreach (var run in f._runs) run.Dispose();
                 f._cancel.Dispose();
             }

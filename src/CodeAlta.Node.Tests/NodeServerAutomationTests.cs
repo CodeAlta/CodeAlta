@@ -18,7 +18,7 @@ namespace CodeAlta.Node.Tests;
 public sealed class NodeServerAutomationTests
 {
     private const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1f02";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
     private static readonly DateTimeOffset Noon = new(2026, 10, 6, 12, 0, 0, TimeSpan.Zero);
     private static readonly string Definition = $$"""
         [automations.{{Id}}]
@@ -139,7 +139,7 @@ public sealed class NodeServerAutomationTests
             var heldRunId = Guid.CreateVersion7().ToString("N");
             var heldRequest = FleetAutomationSigning.SignRun(desktopKey, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, setup.Organization.Id, Id, nodeId,
                 heldRunId, string.Empty, string.Empty, clock.Now));
-            var heldRun = await automations.RunFromServerAsync(link, list, setup.Organization.Id, heldRequest, token).WaitAsync(TimeSpan.FromSeconds(20), token);
+            var heldRun = await automations.RunFromServerAsync(link, list, setup.Organization.Id, heldRequest, token).WithinAsync(TestTime.Seconds(20), token);
             Assert.AreEqual((heldRunId, "held"), (heldRun.Run?.Id, heldRun.Run?.Status));
             await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs.FirstOrDefault(run => run.RunId == heldRunId && run.Status == "held"), token);
             decision.SetResult(CodeAlta.Fleet.Server.FleetBudgetAdmission.Admitted);
@@ -154,7 +154,7 @@ public sealed class NodeServerAutomationTests
             var longOccurrence = AutomationService.Occurrence(entry.Definition.Triggers[0], Noon.AddHours(1).AddMinutes(30));
             clock.Now = Noon.AddHours(1).AddMinutes(30).AddSeconds(5);
             automations.Engine.Tick(clock.Now);
-            await working.Task.WaitAsync(Patience, token);
+            await working.Task.WithinAsync(Patience, token);
             var claimed = await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs.FirstOrDefault(run => run.Occurrence == longOccurrence), token);
             await Task.Delay(50, token);
             clock.Now = clock.Now.AddMinutes(2);

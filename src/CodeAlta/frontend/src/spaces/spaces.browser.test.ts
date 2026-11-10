@@ -8,9 +8,10 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
-test("the window shows one space at a time: its projects, its sessions and its own tabs, which come back with it", { skip: !edge, timeout: 90_000 }, async t => {
+test("the window shows one space at a time: its projects, its sessions and its own tabs, which come back with it", { skip: !edge, timeout: testLimit(90_000) }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-spaces-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -56,14 +57,14 @@ test("the window shows one space at a time: its projects, its sessions and its o
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(`${method} timed out`)); }, 12_000);
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
       const value = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
-    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(document.body.innerText.slice(0,600));else setTimeout(tick,25);};tick();})`);
+    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(7000)};const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(document.body.innerText.slice(0,600));else setTimeout(tick,25);};tick();})`);
     // What the window shows: the space of the switch, the projects of the Explorer, the tabs of the dock.
     const projects = () => evaluate("[...document.querySelectorAll('#project-list .project-action-row > button:first-child')].map(row=>row.textContent.trim())");
     const tabs = () => evaluate("[...document.querySelectorAll('.flexlayout__tab_button')].map(tab=>tab.textContent.trim())");

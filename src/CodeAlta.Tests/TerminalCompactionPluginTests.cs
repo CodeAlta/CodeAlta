@@ -19,7 +19,7 @@ public sealed class TerminalCompactionPluginTests
 {
     private const string SummaryText = "## Objective\nKeep going.\n## Active User Request\nOne.\n## Constraints\nNone.\n## Progress\n### Done\nOne.\n### In Progress\nNone.\n### Blocked\nNone.\n## Decisions\nNone.\n## Next Steps\nNone.\n## Critical Context\nKEEP-THE-TODO-LIST\n## Relevant Files\nNone.";
 
-    private static readonly TimeSpan Hang = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Hang = TestTime.Seconds(30);
 
     [TestMethod]
     public async Task Compact_PluginInstructionsReachTheSummaryRequest_AndTheAfterHookSeesTheSummary()

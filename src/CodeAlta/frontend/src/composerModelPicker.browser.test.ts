@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "./statistics/browserHarness";
+import { testLimit } from "./testTime";
 
 const options = { entry: "../composerModelPicker.mount.tsx", fixture: "pickerFixture", rpcFixture: "../demo-api.ts", width: 1200, height: 900 } as const;
 const listed = `[...document.querySelectorAll('.composer-model-picker [role="option"]')].map(option => option.textContent)`;
@@ -8,7 +9,7 @@ const listed = `[...document.querySelectorAll('.composer-model-picker [role="opt
 const opened = `document.querySelector('.composer-model-picker')?.closest('.bp6-popover-enter-done, .bp6-popover-appear-done')`;
 const active =`document.querySelector('.composer-model-picker .bp6-active')?.closest('[data-model-id]')?.dataset.modelId`;
 
-test("the model list of the composer searches, shows the chosen number of models and is driven from its search box", { skip: !edge, timeout: 90_000 }, async () => {
+test("the model list of the composer searches, shows the chosen number of models and is driven from its search box", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.click('[aria-label="Session configuration"]');
     await page.until(`document.querySelector('#composer-model-test')`, "the form of the chip");
@@ -66,7 +67,7 @@ test("the model list of the composer searches, shows the chosen number of models
   }, options);
 });
 
-test("the setting of the model list changes how many models it shows, and a short list does not scroll", { skip: !edge, timeout: 90_000 }, async () => {
+test("the setting of the model list changes how many models it shows, and a short list does not scroll", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     const rows = `(() => { const list = document.querySelector('.composer-model-picker [role="listbox"]'); return Math.round(list.getBoundingClientRect().height / list.querySelector('[role="option"]').getBoundingClientRect().height); })()`;
     await page.click('#settings-model-picker-rows');

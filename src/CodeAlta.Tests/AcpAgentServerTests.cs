@@ -9,7 +9,7 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class AcpAgentServerTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Timeout = TestTime.Seconds(10);
 
     [TestMethod]
     public async Task Initialize_AnswersWithTheAgentAndGivesItTheClientCapabilities()
@@ -30,7 +30,7 @@ public sealed class AcpAgentServerTests
     {
         await using var harness = await Harness.StartAsync();
 
-        var session = await harness.Client.SessionNewAsync(new NewSessionRequest { Cwd = "/work" }).WaitAsync(Timeout);
+        var session = await harness.Client.SessionNewAsync(new NewSessionRequest { Cwd = "/work" }).WithinAsync(Timeout);
 
         Assert.AreEqual("session-1", session.SessionId.Value);
         Assert.AreEqual("/work", harness.Agent.LastCwd);
@@ -76,7 +76,7 @@ public sealed class AcpAgentServerTests
         {
             SessionId = "session-1",
             Prompt = [ContentBlock.FromText("Hello")],
-        }).WaitAsync(Timeout);
+        }).WithinAsync(Timeout);
 
         Assert.AreEqual("end_turn", response.StopReason.Value.GetString());
         Assert.AreEqual(15UL, response.Usage?.TotalTokens);
@@ -114,10 +114,10 @@ public sealed class AcpAgentServerTests
         };
 
         var prompt = harness.Client.SessionPromptAsync(new PromptRequest { SessionId = "session-1", Prompt = [ContentBlock.FromText("Wait")] });
-        await started.Task.WaitAsync(Timeout);
+        await started.Task.WithinAsync(Timeout);
         await harness.Client.CancelSessionAsync("session-1");
 
-        var response = await prompt.WaitAsync(Timeout);
+        var response = await prompt.WithinAsync(Timeout);
         Assert.AreEqual("cancelled", response.StopReason.Value.GetString());
     }
 
@@ -130,7 +130,7 @@ public sealed class AcpAgentServerTests
         raw.Agent.OnPrompt = async (request, connection, cancellationToken) =>
         {
             // A cancel handled before the prompt is taken finds no turn: the server must not let it run first.
-            cancelHandled.Wait(TimeSpan.FromSeconds(1));
+            cancelHandled.Wait(TestTime.Seconds(1));
             using var turn = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             raw.Agent.Turns[request.SessionId.Value] = turn;
             await Task.Yield();
@@ -177,11 +177,11 @@ public sealed class AcpAgentServerTests
 
         using var cancellation = new CancellationTokenSource();
         var list = harness.Client.SessionListAsync(new ListSessionsRequest(), cancellation.Token);
-        await started.Task.WaitAsync(Timeout);
+        await started.Task.WithinAsync(Timeout);
         await cancellation.CancelAsync();
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => list);
-        await cancelled.Task.WaitAsync(Timeout);
+        await cancelled.Task.WithinAsync(Timeout);
     }
 
     [TestMethod]
@@ -197,7 +197,7 @@ public sealed class AcpAgentServerTests
         };
 
         await raw.WriteAsync("""{"jsonrpc":"2.0","id":"list-1","method":"session/list","params":{}}""");
-        await started.Task.WaitAsync(Timeout);
+        await started.Task.WithinAsync(Timeout);
         await raw.WriteAsync("""{"jsonrpc":"2.0","method":"$/cancel_request","params":{"requestId":"list-1"}}""");
 
         var response = await raw.ReadAsync();
@@ -234,7 +234,7 @@ public sealed class AcpAgentServerTests
 
         // The server goes on serving.
         harness.Agent.NewSessionError = null;
-        var session = await harness.Client.SessionNewAsync(new NewSessionRequest { Cwd = "/work" }).WaitAsync(Timeout);
+        var session = await harness.Client.SessionNewAsync(new NewSessionRequest { Cwd = "/work" }).WithinAsync(Timeout);
         Assert.AreEqual("session-2", session.SessionId.Value);
     }
 
@@ -304,11 +304,11 @@ public sealed class AcpAgentServerTests
         };
 
         await raw.WriteAsync("""{"jsonrpc":"2.0","id":1,"method":"session/list"}""");
-        await started.Task.WaitAsync(Timeout);
+        await started.Task.WithinAsync(Timeout);
         await raw.CompleteInputAsync();
 
-        await raw.Server.Completion.WaitAsync(Timeout);
-        await cancelled.Task.WaitAsync(Timeout);
+        await raw.Server.Completion.WithinAsync(Timeout);
+        await cancelled.Task.WithinAsync(Timeout);
     }
 
     private static InitializeRequest CreateInitializeRequest()
@@ -348,7 +348,7 @@ public sealed class AcpAgentServerTests
             var server = new AcpAgentServer(toServer.Reader.AsStream(), fromServer.Writer.AsStream(), connection => agent = new TestAgent(connection));
             var messages = new ConcurrentQueue<AcpServerMessage>();
             var client = await AcpClient.ConnectAsync(fromServer.Reader.AsStream(), toServer.Writer.AsStream(), CreateInitializeRequest(), messages.Enqueue)
-                .WaitAsync(Timeout);
+                .WithinAsync(Timeout);
             return new Harness(toServer, server, agent!, client, messages);
         }
 
@@ -356,7 +356,7 @@ public sealed class AcpAgentServerTests
         {
             await Client.DisposeAsync();
             await _toServer.Writer.CompleteAsync();
-            await Server.Completion.WaitAsync(Timeout);
+            await Server.Completion.WithinAsync(Timeout);
             await Server.DisposeAsync();
         }
     }
@@ -390,7 +390,7 @@ public sealed class AcpAgentServerTests
 
         public async Task<JsonElement> ReadAsync()
         {
-            var line = await _reader.ReadLineAsync().WaitAsync(Timeout);
+            var line = await _reader.ReadLineAsync().WithinAsync(Timeout);
             Assert.IsNotNull(line);
             return AcpJson.Parse(line);
         }

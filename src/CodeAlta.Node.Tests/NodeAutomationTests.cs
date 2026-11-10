@@ -16,7 +16,7 @@ namespace CodeAlta.Node.Tests;
 public sealed class NodeAutomationTests
 {
     private const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1f01";
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
     private static readonly DateTimeOffset Noon = new(2026, 10, 6, 12, 0, 0, TimeSpan.Zero);
 
     public TestContext TestContext { get; set; } = null!;
@@ -109,7 +109,7 @@ public sealed class NodeAutomationTests
         await client.PutAutomationAsync(fixture.Signed(Definition("Held", "Say hello."), 1), cancellationToken: token);
 
         // Run now answers at once, not when the person decides: the run waits, bound to the hold that Continue anyway names.
-        var run = await client.RunAutomationAsync(Id, cancellationToken: token).WaitAsync(TimeSpan.FromSeconds(20), token);
+        var run = await client.RunAutomationAsync(Id, cancellationToken: token).WithinAsync(TestTime.Seconds(20), token);
         Assert.AreEqual(("held", held), (run.Status, run.Id), run.Message);
         StringAssert.Contains(run.Message, "Continue anyway");
         Assert.AreEqual("held", (await client.ListAutomationRunsAsync(Id, cancellationToken: token)).Runs.Single(candidate => candidate.Id == run.Id).Status);
@@ -141,7 +141,7 @@ public sealed class NodeAutomationTests
         await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
         await client.PutAutomationAsync(fixture.Signed(Definition("Queued", "Say hello."), 1), cancellationToken: token);
 
-        var run = await client.RunAutomationAsync(Id, cancellationToken: token).WaitAsync(TimeSpan.FromSeconds(20), token);
+        var run = await client.RunAutomationAsync(Id, cancellationToken: token).WithinAsync(TestTime.Seconds(20), token);
         Assert.AreEqual(AutomationRun.Queued, run.Status, run.Message);
         StringAssert.Contains(run.Message, "waits for its turn");
         Assert.AreEqual(run.Id, seats.Snapshot().Queue.Single().Id);
@@ -420,7 +420,7 @@ public sealed class NodeAutomationTests
             var started = new TaskCompletionSource();
             provider.Turns.Enqueue(ScriptedNodeProvider.WaitThenReply(new TaskCompletionSource().Task, "Never.", started));
             var run = await client.RunAutomationAsync(Id, cancellationToken: token);
-            await started.Task.WaitAsync(Patience, token);
+            await started.Task.WithinAsync(Patience, token);
             return (await WaitForAsync(() => Task.FromResult(automations.Engine.Runs(Id, 10).FirstOrDefault(candidate => candidate.Id == run.Id && candidate.SessionId is not null)),
                 token)).SessionId!;
         }
@@ -450,7 +450,7 @@ public sealed class NodeAutomationTests
         var started = new TaskCompletionSource();
         provider.Turns.Enqueue(ScriptedNodeProvider.WaitThenReply(new TaskCompletionSource().Task, "Never.", started));
         var run = await client.RunAutomationAsync(Id, cancellationToken: token);
-        await started.Task.WaitAsync(Patience, token);
+        await started.Task.WithinAsync(Patience, token);
         var sessionId = (await WaitForAsync(() => Task.FromResult(automations.Engine.Runs(Id, 10).FirstOrDefault(candidate => candidate.Id == run.Id && candidate.SessionId is not null)),
             token)).SessionId!;
 

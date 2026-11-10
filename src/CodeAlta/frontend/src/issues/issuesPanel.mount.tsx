@@ -101,11 +101,14 @@ const state = { images: [] as { address: string; projectId: string; service: str
   // The starts the test ends itself, by the id of their item, and the sessions opened or offered when they end.
   starts: [] as string[], finish: {} as Record<string, (sessionId: string) => void>, opened: [] as string[], offered: [] as string[],
   // How many issues the tracker of GitHub has, more than a page; and the most it gives, as a tracker that gives fewer than asked.
-  many: 0, most: 0 };
+  many: 0, most: 0,
+  // How long, in milliseconds, a list takes to come: its age is still the one the host gives when it comes.
+  late: 0 };
 const api = {
   sources: async (request: { projectId: string }) => ({ status: "ok", sources: sources[request.projectId] ?? [] }),
   list: async (request: IssueListRequest) => {
     state.lists.push(request);
+    if (state.late) await new Promise(resolve => setTimeout(resolve, state.late));
     if (state.many && request.service === "github") {
       const given = Math.min(request.limit ?? 50, state.most || Infinity, state.many);
       return { status: "ok", items: Array.from({ length: given }, (_, index) => item(String(1000 - index), `Issue ${1000 - index}`, { url: `https://github.com/o/r/issues/${1000 - index}`, stateText: null, type: null })),

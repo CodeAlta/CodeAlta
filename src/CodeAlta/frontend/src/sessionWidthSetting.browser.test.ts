@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
 
@@ -23,7 +24,7 @@ const inspect = `(() => {
     value: Number(handle.getAttribute("aria-valuenow")) };
 })()`;
 
-test("the width of the conversation is set with the slider of the settings, by a press on its track and by a drag", { skip: !edge, timeout: 60_000 }, async () => {
+test("the width of the conversation is set with the slider of the settings, by a press on its track and by a drag", { skip: !edge, timeout: testLimit(60_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-session-width-setting-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -39,12 +40,12 @@ test("the width of the conversation is set with the slider of the settings, by a
       `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="${mode}.js"></script></body></html>`);
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     socket = new WebSocket(pages.find(value => value.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown }; exceptionDetails?: unknown }>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => reject(Error(`${method} timed out`)), 12_000);
+      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))), testLimit(12_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)); if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
@@ -73,7 +74,7 @@ test("the width of the conversation is set with the slider of the settings, by a
     for (const mode of modes) {
     await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(join(root, `${mode}.html`)).href });
-    assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + 7000; (function check() {
+    assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + ${testLimit(7000)}; (function check() {
       if (window.sessionWidthSetting && document.querySelector("dialog[open] .settings-session-width .bp6-slider-handle")) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 20); })(); })`), true);
 
     // The setting starts at the whole width: the handle is at the end of the track.

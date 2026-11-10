@@ -48,7 +48,7 @@ public sealed class AltaPromptMutationTests
         if (change != "create") await File.WriteAllTextAsync(path, "original");
         using var input = new ControlledReader();
         var pending = fixture.InvokeWithReaderAsync(["prompt", "edit", "sample", "--scope", "global", "--stdin"], input);
-        await input.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await input.Entered.Task.WithinAsync(TestTime.Seconds(10));
         if (change == "delete") File.Delete(path);
         else await File.WriteAllTextAsync(path, "external");
         input.Content.SetResult("stale replacement");
@@ -193,7 +193,7 @@ public sealed class AltaPromptMutationTests
         using var fixture = new Fixture();
         using var input = new ControlledReader();
         var pending = fixture.InvokeWithReaderAsync(["prompt", "create", "sample", "--scope", "global", "--stdin"], input);
-        await input.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await input.Entered.Task.WithinAsync(TestTime.Seconds(10));
         var path = fixture.PathFor("global", false);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, "external");
@@ -273,7 +273,7 @@ public sealed class AltaPromptMutationTests
         using var input = new ControlledReader();
         using var cancellation = new CancellationTokenSource();
         var pending = fixture.InvokeWithReaderAsync(["prompt", command, "sample", "--scope", "global", "--stdin"], input, cancellation.Token);
-        await input.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await input.Entered.Task.WithinAsync(TestTime.Seconds(10));
         cancellation.Cancel();
         var result = await pending;
         Assert.AreEqual(AltaExitCodes.TimeoutOrCancellation, result.ExitCode, result.Stdout + result.Stderr);
@@ -311,7 +311,7 @@ public sealed class AltaPromptMutationTests
         var pending = fixture.InvokeWithReaderAsync(["prompt", "edit", "sample", "--scope", "global", "--stdin"], input, cancellation.Token);
         try
         {
-            await input.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await input.Entered.Task.WithinAsync(TestTime.Seconds(10));
             // Keep the lock of the file held as the handler leaves controlled stdin.
             input.Content.SetResult("replacement");
             Assert.IsFalse(pending.IsCompleted);

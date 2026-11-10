@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 // The categories of the search window in headless Edge: one that the host was not asked about says so, not 0.
 
@@ -8,7 +9,7 @@ const options = { entry: "../search/searchCounts.mount.tsx", fixture: "searchCou
 const tab = (name: string) => `[...document.querySelectorAll('.global-search-categories button')].find(button => button.textContent.startsWith('${name}'))`;
 const count = (name: string) => `${tab(name)}?.querySelector('.global-search-count')?.textContent`;
 
-test("a category not searched yet says ? until it is chosen, and keeps its number after", { skip: !edge, timeout: 120_000 }, async () => {
+test("a category not searched yet says ? until it is chosen, and keeps its number after", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await page.until("document.activeElement?.id === 'search-input'", "the search opened");
     assert.equal(await page.evaluate(count("Sessions")), undefined, "Nothing typed, no counts.");

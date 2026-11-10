@@ -815,7 +815,7 @@ public sealed class AgentToolsTests
         Process? child = null;
         try
         {
-            await started.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+            await started.Task.WithinAsync(TestTime.Seconds(30)).ConfigureAwait(false);
             var ids = (await File.ReadAllTextAsync(Path.Combine(temp.Path, "process-ids.txt")).ConfigureAwait(false))
                 .Split(',').Select(int.Parse).ToArray();
             child = Process.GetProcessById(ids[1]);
@@ -835,7 +835,7 @@ public sealed class AgentToolsTests
             {
                 using (shell)
                 {
-                    await shell.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                    await shell.WaitForExitAsync().WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false);
                 }
             }
 
@@ -845,7 +845,7 @@ public sealed class AgentToolsTests
                 cancellation.Cancel();
             }
 
-            var result = await execution.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+            var result = await execution.WithinAsync(TestTime.Seconds(30)).ConfigureAwait(false);
             Assert.IsFalse(result.Success);
             Assert.AreEqual(cancel ? "shell_command was canceled." : $"shell_command timed out after {timeoutMs} ms.", result.Error);
         }
@@ -862,7 +862,7 @@ public sealed class AgentToolsTests
                     try
                     {
                         child.Kill(entireProcessTree: true);
-                        await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                        await child.WaitForExitAsync().WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false);
                     }
                     catch (InvalidOperationException)
                     {
@@ -872,7 +872,7 @@ public sealed class AgentToolsTests
 
             try
             {
-                await execution.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                await execution.WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -905,16 +905,16 @@ public sealed class AgentToolsTests
         Process? grandchild = null;
         try
         {
-            await exited.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+            await exited.Task.WithinAsync(TestTime.Seconds(30)).ConfigureAwait(false);
             grandchild = Process.GetProcessById(int.Parse(await File.ReadAllTextAsync(Path.Combine(temp.Path, "grandchild.txt")).ConfigureAwait(false), CultureInfo.InvariantCulture));
             _ = grandchild.SafeHandle;
             Assert.IsFalse(grandchild.HasExited, "The regression requires a grandchild that outlives its parent.");
 
             cancellation.Cancel();
-            var result = await execution.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+            var result = await execution.WithinAsync(TestTime.Seconds(30)).ConfigureAwait(false);
 
             Assert.AreEqual("shell_command was canceled.", result.Error);
-            await grandchild.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+            await grandchild.WaitForExitAsync().WithinAsync(TestTime.Seconds(10)).ConfigureAwait(false);
         }
         finally
         {
@@ -952,7 +952,7 @@ public sealed class AgentToolsTests
     public async Task ShellCommandTool_TimesOutWhileShellIsStillRunning()
     {
         using var temp = TestTempDirectory.Create();
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cancellation = new CancellationTokenSource(TestTime.Seconds(15));
         var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path))
             .Single(static tool => tool.Spec.Name == "shell_command");
         var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 60" : "sleep 60";
@@ -960,7 +960,7 @@ public sealed class AgentToolsTests
 
         var result = await tool.Handler(
             new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
-            cancellation.Token).WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+            cancellation.Token).WithinAsync(TestTime.Seconds(20)).ConfigureAwait(false);
 
         Assert.IsFalse(result.Success);
         Assert.AreEqual("shell_command timed out after 500 ms.", result.Error);
@@ -994,9 +994,9 @@ public sealed class AgentToolsTests
             cancellation.Token);
 
         // The shell is held from here, so its id cannot name another process once it ends.
-        using var shell = Process.GetProcessById(await shellId.Task.WaitAsync(TimeSpan.FromSeconds(60)).ConfigureAwait(false));
+        using var shell = Process.GetProcessById(await shellId.Task.WithinAsync(TestTime.Seconds(60)).ConfigureAwait(false));
         cancellation.Cancel();
-        var result = await execution.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+        var result = await execution.WithinAsync(TestTime.Seconds(30)).ConfigureAwait(false);
 
         Assert.AreEqual("shell_command was canceled.", result.Error);
         // A shell still ending would hold its folder: the caller could not delete or reuse it yet.
@@ -1017,7 +1017,7 @@ public sealed class AgentToolsTests
 
         var result = await tool.Handler(
             new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
-            CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(90)).ConfigureAwait(false);
+            CancellationToken.None).WithinAsync(TestTime.Seconds(90)).ConfigureAwait(false);
 
         Assert.IsTrue(result.Success);
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
@@ -1048,7 +1048,7 @@ public sealed class AgentToolsTests
 
         var result = await tool.Handler(
             new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "call/1", tool.Spec.Name, args.RootElement.Clone()),
-            CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(90)).ConfigureAwait(false);
+            CancellationToken.None).WithinAsync(TestTime.Seconds(90)).ConfigureAwait(false);
 
         Assert.IsTrue(result.Success);
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
@@ -1105,7 +1105,7 @@ public sealed class AgentToolsTests
             using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}},"timeoutMs":60000{{(maxOutputTokens is { } tokens ? $",\"max_output_tokens\":{tokens}" : "")}}}""");
             return await tool.Handler(
                 new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", $"call-{maxOutputTokens}", tool.Spec.Name, args.RootElement.Clone()),
-                CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(90)).ConfigureAwait(false);
+                CancellationToken.None).WithinAsync(TestTime.Seconds(90)).ConfigureAwait(false);
         }
 
         var lowered = Assert.IsInstanceOfType<AgentToolResultItem.Text>((await RunAsync(500)).Items.Single()).Value;
@@ -1136,7 +1136,7 @@ public sealed class AgentToolsTests
 
         var result = await tool.Handler(
             new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
-            CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(90)).ConfigureAwait(false);
+            CancellationToken.None).WithinAsync(TestTime.Seconds(90)).ConfigureAwait(false);
 
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
         StringAssert.Contains(output, "line-50");

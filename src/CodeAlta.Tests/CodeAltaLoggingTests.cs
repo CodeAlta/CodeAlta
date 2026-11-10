@@ -105,7 +105,7 @@ public sealed class CodeAltaLoggingTests
             CodeAltaTaskMonitor.Observe(task.Task, "Background worker");
             task.SetException(exception);
 
-            var result = await terminated.Task.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+            var result = await terminated.Task.WithinAsync(TestTime.Seconds(1)).ConfigureAwait(false);
             Assert.AreEqual("Background worker", result.Source);
             var aggregate = Assert.IsInstanceOfType<AggregateException>(result.Exception);
             Assert.AreSame(exception, aggregate.InnerExceptions.Single());

@@ -84,7 +84,7 @@ internal sealed class FakeAutomationRunner : IAutomationRunner
 
     internal async Task<FakeAutomationStart> NextAsync()
     {
-        Assert.IsTrue(await _signal.WaitAsync(TimeSpan.FromSeconds(10)), "No run was started.");
+        Assert.IsTrue(await _signal.WaitAsync(TestTime.Seconds(10)), "No run was started."); // not a Task
         Assert.IsTrue(_pending.TryDequeue(out var start));
         return start!;
     }

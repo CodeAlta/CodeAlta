@@ -113,7 +113,7 @@ public sealed class DesktopSearchTests
 
         // A deleted session takes its messages with it.
         Assert.AreEqual("ok", await host.Commands.DeleteCatalogSessionAsync(session.SessionId, host.CurrentProject.Id, project, session.Title));
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(20));
         while ((await search.Store.CountAsync(timeout.Token)).Items.GetValueOrDefault(SearchKind.Message) > 0) await Task.Delay(20, timeout.Token);
     }
 
@@ -171,7 +171,7 @@ public sealed class DesktopSearchTests
         var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Flaky tests");
         provider.Script(DesktopUiToolsTests.Say("The retry test waits for the port before it connects."));
         await DesktopUiToolsTests.SendAsync(host, session, "Why does the retry test fail on macOS?");
-        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+        using (var timeout = new CancellationTokenSource(TestTime.Seconds(20)))
         {
             while ((await search.Store.CountAsync(timeout.Token)).Days.Count == 0) await Task.Delay(20, timeout.Token);
         }
@@ -193,7 +193,7 @@ public sealed class DesktopSearchTests
         // "Learn more" asks the window, which hears it with the next event of `localSearch.watch`.
         var rpc = new LocalSearchService(search, async (space, token) => await host.RuntimeService.GetSpaceFilterAsync(space, null, token),
             (_, _) => Task.FromResult<IReadOnlySet<string>?>(null), new SessionJournalBookmarks(host.SessionViewCatalog.JournalStore.CreateSessionStore()), "epoch");
-        using var watching = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var watching = new CancellationTokenSource(TestTime.Seconds(20));
         await using var events = rpc.WatchAsync(new("epoch"), watching.Token).GetAsyncEnumerator(watching.Token);
         Assert.IsTrue(await events.MoveNextAsync());
         Assert.IsNull(events.Current.Open);
@@ -309,7 +309,7 @@ public sealed class DesktopSearchTests
 
     private static async Task UntilAsync(Func<Task<bool>> condition)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(20));
         while (!await condition()) await Task.Delay(50, timeout.Token);
     }
 
@@ -318,7 +318,7 @@ public sealed class DesktopSearchTests
 
     private static async Task<JsonElement> FirstHitAsync(AltaCommandDispatcher commands, string[] args, Func<JsonElement, bool> accept)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(20));
         while (true)
         {
             var result = await commands.InvokeAsync(args, caller: Mcp, cancellationToken: timeout.Token);

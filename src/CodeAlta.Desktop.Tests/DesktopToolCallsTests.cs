@@ -14,7 +14,7 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class DesktopToolCallsTests
 {
     private const string Epoch = "epoch-1";
-    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Wait = TestTime.Seconds(10);
 
     [TestMethod]
     public async Task Read_GivesTheWholeRecordOfACall_AsTheRuntimeWritesIt()
@@ -137,23 +137,23 @@ public sealed class DesktopToolCallsTests
 
         await using var channel = service.Observe(new(Epoch, "session", "activity"), CancellationToken.None);
         await using var items = channel.Items.GetAsyncEnumerator();
-        Assert.IsTrue(await items.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await items.MoveNextAsync().AsTask().WithinAsync(Wait));
         var head = items.Current;
         Assert.AreEqual(("ok", "0", true, false), (head.Status, head.Start, head.IsReset, head.IsComplete));
         Assert.AreEqual(ToolCallsService.ItemCharacters - 1, head.Text.Length, "An item never ends between the two halves of a pair.");
-        Assert.IsTrue(await items.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await items.MoveNextAsync().AsTask().WithinAsync(Wait));
         var tail = items.Current;
         Assert.AreEqual((head.Text.Length.ToString(), first.Length.ToString(), false, false), (tail.Start, tail.Total, tail.IsReset, tail.IsComplete));
         Assert.AreEqual(first, head.Text + tail.Text);
         Assert.IsTrue(JsonSerializer.Serialize(head, DesktopJsonContext.Default.ToolCallOutputItem).Length < 6 * ToolCallsService.ItemCharacters + 512);
 
         runtime.TryPublish(Delta("more\n"));
-        Assert.IsTrue(await items.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await items.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.AreEqual(("more\n", first.Length.ToString(), false), (items.Current.Text, items.Current.Start, items.Current.IsComplete));
         runtime.TryPublish(new SessionAgentEvent("session", Activity(AgentActivityPhase.Completed, "shell_command", null)));
-        Assert.IsTrue(await items.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await items.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.AreEqual((string.Empty, true), (items.Current.Text, items.Current.IsComplete));
-        Assert.IsFalse(await items.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsFalse(await items.MoveNextAsync().AsTask().WithinAsync(Wait));
     }
 
     [TestMethod]
@@ -165,7 +165,7 @@ public sealed class DesktopToolCallsTests
         {
             var items = new List<ToolCallOutputItem>();
             await using var channel = target.Observe(request, CancellationToken.None);
-            await foreach (var item in channel.Items.WaitAsync(Wait)) items.Add(item);
+            await foreach (var item in channel.Items.WaitAsync(Wait)) items.Add(item); // not a Task
             return items.Single();
         }
 
@@ -191,19 +191,19 @@ public sealed class DesktopToolCallsTests
 
         await using var channel = service.Observe(new(Epoch, "session", job.Id), CancellationToken.None);
         await using var items = channel.Items.GetAsyncEnumerator();
-        Assert.IsTrue(await items.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await items.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.AreEqual(("ok", "12 passing\n", "0", true, false), (items.Current.Status, items.Current.Text, items.Current.Start, items.Current.IsReset, items.Current.IsComplete));
         write("done\n");
-        Assert.IsTrue(await items.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await items.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.AreEqual(("done\n", "11", false), (items.Current.Text, items.Current.Start, items.Current.IsComplete));
         exit.SetResult(0);
-        Assert.IsTrue(await items.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(await items.MoveNextAsync().AsTask().WithinAsync(Wait));
         Assert.IsTrue(items.Current.IsComplete);
 
         // The job of another session is not served: it reads as a call that does not run.
         await using var other = service.Observe(new(Epoch, "another", job.Id), CancellationToken.None);
         var foreign = new List<ToolCallOutputItem>();
-        await foreach (var item in other.Items.WaitAsync(Wait)) foreign.Add(item);
+        await foreach (var item in other.Items.WaitAsync(Wait)) foreign.Add(item); // not a Task
         Assert.AreEqual(new ToolCallOutputItem("ok", string.Empty, "0", "0", true, true), foreign.Single());
     }
 
@@ -319,6 +319,6 @@ internal static class ToolCallTestWaits
     internal static async IAsyncEnumerable<T> WaitAsync<T>(this IAsyncEnumerable<T> source, TimeSpan timeout)
     {
         await using var enumerator = source.GetAsyncEnumerator();
-        while (await enumerator.MoveNextAsync().AsTask().WaitAsync(timeout)) yield return enumerator.Current;
+        while (await enumerator.MoveNextAsync().AsTask().WithinAsync(timeout)) yield return enumerator.Current;
     }
 }

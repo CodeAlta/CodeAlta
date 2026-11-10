@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../releaseNotes/releaseNotes.mount.tsx", fixture: "releaseNotesFixture", rpcFixture: "../demo-api.ts",
   styles: ["../style.css", "../releaseNotes/releaseNotes.css", "../timelineEmphasis/timelineEmphasis.css"], width: 1600, height: 1000, ratio: 1.5, reducedMotion: true } as const;
 const title = `document.querySelector('.release-notes-title h1')?.textContent`;
 
-test("the release notes say a newer version is out, show its notes, and update to it", { skip: !edge, timeout: 90_000 }, async () => {
+test("the release notes say a newer version is out, show its notes, and update to it", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`${title} === '4.0.0'`, "the notes of the running version");
     assert.equal(await page.evaluate(`document.activeElement?.classList.contains('app-window-close')`), true, "the window opens with its close button focused, not its size");
@@ -29,7 +30,7 @@ test("the release notes say a newer version is out, show its notes, and update t
   }, options);
 });
 
-test("a version is found by typing it, and the notes can stay closed at startup", { skip: !edge, timeout: 90_000 }, async () => {
+test("a version is found by typing it, and the notes can stay closed at startup", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`${title} === '4.0.0'`, "the notes");
     await page.click(".release-notes-version");

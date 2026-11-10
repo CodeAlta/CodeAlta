@@ -155,7 +155,7 @@ public sealed class CodeModeRunGraphTests
             Assert.IsTrue(result.Success, Text(result));
             runId = before.List("session-1").Single().Id;
             // The end of the run is written after its result is given: wait for it, as a run that ended before CodeAlta closed.
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            var deadline = DateTime.UtcNow + TestTime.Seconds(30);
             while (before.Store!.TryLoad(runId) is not { EndedAt: not null })
             {
                 Assert.IsLessThan(deadline, DateTime.UtcNow, "the end of the run was not written");

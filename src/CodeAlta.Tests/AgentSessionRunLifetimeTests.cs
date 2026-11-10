@@ -180,8 +180,8 @@ public sealed class AgentSessionRunLifetimeTests
         internal Executor Executor { get; } = new();
         internal Task Keep(Task task) { lock (_gate) _work.Add(task); return task; }
         internal Task<T> Keep<T>(Task<T> task) { Keep((Task)task); return task; }
-        internal Task Wait(Task task) => Keep(Keep(task).WaitAsync(TimeSpan.FromSeconds(5)));
-        internal Task<T> Wait<T>(Task<T> task) => Keep(Keep(task).WaitAsync(TimeSpan.FromSeconds(5)));
+        internal Task Wait(Task task) => Keep(Keep(task).WithinAsync(TestTime.Seconds(5)));
+        internal Task<T> Wait<T>(Task<T> task) => Keep(Keep(task).WithinAsync(TestTime.Seconds(5)));
         internal async Task<T> Expect<T>(Task task) where T : Exception
         {
             _ = Keep(task);
@@ -229,12 +229,12 @@ public sealed class AgentSessionRunLifetimeTests
         {
             var f = new Fixture();
             f._lifetime = f.RunOwned(body);
-            try { await f._lifetime.WaitAsync(TimeSpan.FromSeconds(30)); }
+            try { await f._lifetime.WithinAsync(TestTime.Seconds(30)); }
             catch (Exception ex) { lock (f._gate) f._failures.Add(ex); }
             finally
             {
                 f.ReleaseAll();
-                try { await f._lifetime.WaitAsync(TimeSpan.FromSeconds(5)); }
+                try { await f._lifetime.WithinAsync(TestTime.Seconds(5)); }
                 catch (Exception ex) { lock (f._gate) f._failures.Add(ex); }
             }
             Exception[] failures;

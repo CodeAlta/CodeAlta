@@ -13,7 +13,7 @@ namespace CodeAlta.Node.Tests;
 [TestClass]
 public sealed class FleetNodePrivateSessionTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
 
     public TestContext TestContext { get; set; } = null!;
 

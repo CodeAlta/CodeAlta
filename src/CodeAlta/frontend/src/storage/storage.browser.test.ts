@@ -7,8 +7,9 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
-test("Storage edits valid durations only and measures independently without cleanup actions", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("Storage edits valid durations only and measures independently without cleanup actions", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-storage-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -23,12 +24,12 @@ test("Storage edits valid durations only and measures independently without clea
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="fixture.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(browserExecutable!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     socket = new WebSocket(pages.find(value => value.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown }; exceptionDetails?: unknown }>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => reject(Error(`${method} timed out`)), 12_000);
+      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))), testLimit(12_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)); if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
@@ -42,7 +43,7 @@ test("Storage edits valid durations only and measures independently without clea
       return result.result?.value;
     };
     const act = (script: string) => evaluate(`(async () => { ${script}; for (let turn = 0; turn < 4; turn++) await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0))); return true; })()`);
-    const until = async (expression: string) => assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + 7000; (function check() {
+    const until = async (expression: string) => assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + ${testLimit(7000)}; (function check() {
       if (${expression}) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 20); })(); })`), true, expression);
     const f = "window.storageFixture", state = `${f}.state`, amount = "document.querySelector('#storage-retention-amount')";
     const mode = "document.querySelector('#storage-retention-mode')", unit = "document.querySelector('select[aria-label=\"Retention unit\"]')";

@@ -12,7 +12,7 @@ namespace CodeAlta.Fleet.Tests;
 [TestClass]
 public sealed class FleetConnectorTelemetryTests
 {
-    private static readonly TimeSpan Hang = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Hang = TestTime.Seconds(30);
 
     [TestMethod]
     public async Task PushedSettingsAreTakenOneAtATimeInTheOrderTheyCame()
@@ -69,12 +69,12 @@ public sealed class FleetConnectorTelemetryTests
             },
         });
         connector.Start();
-        await serving.WaitAsync(Hang);
-        await first.Task.WaitAsync(Hang);
+        await serving.WithinAsync(Hang);
+        await first.Task.WithinAsync(Hang);
         // Long enough for the other pushes to reach the connector.
         await Task.Delay(300);
         release.SetResult();
-        await allTaken.Task.WaitAsync(Hang);
+        await allTaken.Task.WithinAsync(Hang);
 
         Assert.AreEqual(0, Volatile.Read(ref overlapped), "A pushed setting is never taken while another one is.");
         CollectionAssert.AreEqual(new[] { "setting-1", "setting-2", "setting-3" }, order, "The settings are taken in the order the server sent them.");

@@ -52,7 +52,7 @@ public sealed class SessionWorktreeTests
         provider.Hold = hold;
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, "one")).Receipt;
         Assert.IsNotNull(receipt);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(10));
         var turn = await provider.Turns.Reader.ReadAsync(timeout.Token);
 
         // The provider runs in the worktree, and the session is told that this is where it works.
@@ -66,7 +66,7 @@ public sealed class SessionWorktreeTests
         var running = host.RuntimeService.ListOverview().Single(overview => overview.SessionId == session.SessionId);
         Assert.AreEqual((host.CurrentProject.Id, true, 0, false), (running.ProjectId, running.Running, running.BackgroundTasks, running.Failed));
         hold.SetResult();
-        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WithinAsync(TestTime.Seconds(10))).Outcome);
         while (host.RuntimeService.ListBusySessionFolders().Count > 0) await Task.Delay(20, timeout.Token);
         Assert.IsFalse(host.RuntimeService.ListOverview().Single(overview => overview.SessionId == session.SessionId).Running);
 
@@ -143,7 +143,7 @@ public sealed class SessionWorktreeTests
         // The work of the session landed and its worktree is removed, while the child still works.
         Directory.Delete(temp.Worktree, recursive: true);
         await host.RuntimeService.SendAsync(child, childOptions, new AgentSendOptions { Input = AgentInput.Text("work") }, CancellationToken.None);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(10));
         Assert.AreEqual(temp.ProjectRoot, (await provider.Turns.Reader.ReadAsync(timeout.Token)).WorkingDirectory);
 
         // The answer of the child starts a run of the session: it is read, in the folder of the project.
@@ -206,11 +206,11 @@ public sealed class SessionWorktreeTests
         provider.Hold = hold;
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), plain.SessionId, "one")).Receipt;
         Assert.IsNotNull(receipt);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(10));
         await provider.Turns.Reader.ReadAsync(timeout.Token);
         CollectionAssert.AreEqual(new[] { new SessionWorkFolder(plain.SessionId, temp.ProjectRoot, false) }, host.RuntimeService.ListBusySessionFolders().ToArray());
         hold.SetResult();
-        await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        await receipt.Completion.WithinAsync(TestTime.Seconds(10));
 
         // A run that ends with an error leaves the session marked as failed, for a summary of every session,
         // until its next run starts.
@@ -220,7 +220,7 @@ public sealed class SessionWorktreeTests
         provider.Failure = new InvalidOperationException("The provider refused the turn.");
         var failed = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), plain.SessionId, "two")).Receipt;
         Assert.IsNotNull(failed);
-        await failed.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        await failed.Completion.WithinAsync(TestTime.Seconds(10));
         while (!Overview().Failed || Overview().Running) await Task.Delay(20, timeout.Token);
         Assert.AreEqual((host.CurrentProject.Id, false, true), (Overview().ProjectId, Overview().Running, Overview().Failed));
         var again = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -231,7 +231,7 @@ public sealed class SessionWorktreeTests
         while (!Overview().Running) await Task.Delay(20, timeout.Token);
         Assert.IsFalse(Overview().Failed, "A run that goes on makes the failure a thing of the past.");
         again.SetResult();
-        await third.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        await third.Completion.WithinAsync(TestTime.Seconds(10));
     }
 
     private static Task<CodeAltaHost> CreateHostAsync(TempDirectory temp, RecordingProvider provider)
@@ -252,9 +252,9 @@ public sealed class SessionWorktreeTests
     {
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, text)).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await receipt.Completion.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(10));
         var turn = await provider.Turns.Reader.ReadAsync(timeout.Token);
         // The next send may move the session, which the runtime only does for an idle session.
         while (await host.RuntimeService.HasActiveRunAsync(session, timeout.Token)) await Task.Delay(20, timeout.Token);

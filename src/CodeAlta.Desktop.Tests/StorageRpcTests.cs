@@ -90,7 +90,7 @@ public sealed class StorageRpcTests
         {
             for (var i = 0; i < 256; i++) await File.WriteAllTextAsync(Path.Combine(sessions, $"{i}.jsonl"), "fixture");
             var service = new StorageService(new CatalogOptions { GlobalRoot = root }, "host");
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(10));
             await using var scan = service.ScanAsync(new("host"), timeout.Token).GetAsyncEnumerator();
             Assert.IsTrue(await scan.MoveNextAsync());
             Assert.AreEqual("running", scan.Current.Status);
@@ -185,7 +185,7 @@ public sealed class StorageRpcTests
             });
             var retention = new SessionRetentionService(host.Commands, host.RuntimeService, new SessionRetentionProtection(), null);
             var service = new StorageService(new CatalogOptions { GlobalRoot = root }, "host", null, retention);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var timeout = new CancellationTokenSource(TestTime.Seconds(10));
             await using (var reader = service.WatchRetentionAsync(new("host"), timeout.Token).GetAsyncEnumerator())
             {
                 Assert.IsTrue(await reader.MoveNextAsync());

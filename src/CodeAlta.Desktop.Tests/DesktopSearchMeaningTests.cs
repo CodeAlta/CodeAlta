@@ -291,11 +291,11 @@ public sealed class DesktopSearchMeaningTests
         return (model, installer);
     }
 
-    private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(20)).Token;
+    private static CancellationToken Timeout() => new CancellationTokenSource(TestTime.Seconds(20)).Token;
 
     private static async Task UntilAsync(Func<bool> condition)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(20));
         while (!condition()) await Task.Delay(20, timeout.Token);
     }
 

@@ -108,5 +108,5 @@ internal static class Json
     public static byte[] Utf8(this string text) => Encoding.UTF8.GetBytes(text);
 
     /// <summary>A deadline that only tells a hang: the tests never rely on it for their result.</summary>
-    public static readonly TimeSpan Hang = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan Hang = TestTime.Seconds(30);
 }

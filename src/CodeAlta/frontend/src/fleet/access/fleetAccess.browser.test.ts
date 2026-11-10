@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../../statistics/browserHarness";
+import { testLimit } from "../../testTime";
 
 const options = { entry: "../fleet/access/fleetAccess.mount.tsx", fixture: "fleetAccessFixture", rpcFixture: "../demo-api.ts",
   styles: ["../secrets/secrets.css", "../fleet/fleet.css", "../fleet/fleetSecrets.css", "../fleet/access/fleetAccess.css", "../fleet/console/fleetConsole.css"], width: 1300, height: 1000, reducedMotion: true } as const;
@@ -15,7 +16,7 @@ const choose = (selector: string, value: string) => `(() => { const select = doc
 const calls = `[...window.fleetAccessFixture.calls].map(call => JSON.parse(call))`;
 const overflow = `[...document.querySelectorAll('.secret-row')].filter(row => row.scrollWidth > row.clientWidth + 1).length`;
 
-test("at home the page shows people and machines, invites a person with a code, and keeps teams under Advanced", { skip: !edge, timeout: 90_000 }, async () => {
+test("at home the page shows people and machines, invites a person with a code, and keeps teams under Advanced", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.fleet-access-person').length === 3`, "the people");
     await page.shot("fleet-access-home");
@@ -35,7 +36,7 @@ test("at home the page shows people and machines, invites a person with a code, 
     await page.shot("fleet-access-invitation");
     assert.deepEqual((await page.evaluate(calls) as unknown[])[0], { invite: { name: "Dana", role: "member" } });
     // The person invited is listed at once, not at the next read of the page (15 seconds) or after Reload.
-    assert.equal(await page.evaluate(`new Promise(resolve => { const end = Date.now() + 3000; (function check() {
+    assert.equal(await page.evaluate(`new Promise(resolve => { const end = Date.now() + ${testLimit(3000)}; (function check() {
       if (document.querySelector('[data-person=Dana]')) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 30); })(); })`), true,
       "the person invited is listed without a reload");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('[data-person=Dana] .fleet-secret-tags .bp6-tag')].map(tag => tag.textContent)`), ["Invited"]);
@@ -46,7 +47,7 @@ test("at home the page shows people and machines, invites a person with a code, 
   }, options);
 });
 
-test("in an organization what waits is reviewed and signed, a transfer taken, a proposal applied, and a person who leaves deprovisioned", { skip: !edge, timeout: 90_000 }, async () => {
+test("in an organization what waits is reviewed and signed, a transfer taken, a proposal applied, and a person who leaves deprovisioned", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.fleet-access-person').length === 3`, "the page");
     await page.evaluate(`window.fleetAccessFixture.company()`);

@@ -3,7 +3,7 @@ import test from "node:test";
 import { AltaError } from "../pluginScript/alta";
 import { createCanvasRpc, createCarrierConnection, toAltaError, type CanvasRpcCarrier, type CanvasRpcListener } from "./canvasRpc";
 
-const wait = (milliseconds = 5) => new Promise(resolve => setTimeout(resolve, milliseconds));
+const wait = (milliseconds = 5) => new Promise(resolve => setTimeout(resolve, milliseconds)); // not a limit: a pause
 const until = async (condition: () => boolean, what: string) => {
   for (let index = 0; index < 400; index++) { if (condition()) return; await wait(5); }
   assert.fail(`never happened: ${what}`);

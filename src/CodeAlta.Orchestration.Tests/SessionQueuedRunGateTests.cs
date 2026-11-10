@@ -36,19 +36,19 @@ public sealed class SessionQueuedRunGateTests
         };
 
         var first = host.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("first") });
-        await started.Task.WaitAsync(Hang);
+        await started.Task.WithinAsync(Hang);
         var queued = await host.RuntimeService.QueuePromptAsync(session, "queued follow-up", "queue", submittedBy: null);
         Assert.AreEqual(0, asked.Count, "a prompt is admitted when its turn starts, not when it is queued");
 
         // The first turn ends: the queued prompt is asked for, and waits.
         running.SetResult();
-        await asking.Task.WaitAsync(Hang);
+        await asking.Task.WithinAsync(Hang);
         Assert.AreEqual((session.SessionId, queued.QueueItemId), (asked[0].SessionId, asked[0].QueueItemId));
         await Task.Delay(TimeSpan.FromMilliseconds(300));
         Assert.AreEqual(1, provider.RequestsOf(session.SessionId).Length, "nothing of the queued prompt runs while it waits");
 
         letIt.SetResult(null);
-        await first.WaitAsync(Hang);
+        await first.WithinAsync(Hang);
         await WaitUntilAsync(() => provider.RequestsOf(session.SessionId).Length == 2);
         Assert.AreEqual(1, asked.Count, "a queued prompt is admitted once");
     }
@@ -68,12 +68,12 @@ public sealed class SessionQueuedRunGateTests
         host.RuntimeService.QueuedRunGate = (admission, _) => Task.FromResult(admission.QueueItemId == refusedId ? "The budget 'Home' is reached: the run does not start." : null);
 
         var first = host.RuntimeService.SendAsync(session, options, new AgentSendOptions { Input = AgentInput.Text("first") });
-        await started.Task.WaitAsync(Hang);
+        await started.Task.WithinAsync(Hang);
         var refused = await host.RuntimeService.QueuePromptAsync(session, "refused follow-up", "queue", submittedBy: null);
         refusedId = refused.QueueItemId;
         await host.RuntimeService.QueuePromptAsync(session, "admitted follow-up", "queue", submittedBy: null);
         running.SetResult();
-        await first.WaitAsync(Hang);
+        await first.WithinAsync(Hang);
 
         await WaitUntilAsync(() => provider.RequestsOf(session.SessionId).Length == 2);
         await Task.Delay(TimeSpan.FromMilliseconds(300));

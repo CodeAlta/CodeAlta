@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 // The menu of a session row of the Explorer whose scope is open and not selected (a chat, a session of another project), in
 // headless Edge under the production content security policy and React StrictMode: the lines that plugins add are those of the
@@ -18,7 +19,7 @@ const openMenu = async (page: Page, scope: string, session: string) => {
 const sessionMenuReads = (page: Page) => page.evaluate<{ projectId: string | null; sessionId: string | null }[]>(
   `explorerFixture.state.reads.filter(read => read.place === 'SessionMenu').map(read => ({ projectId: read.projectId, sessionId: read.sessionId }))`);
 
-test("the menu of a session row outside the selected scope has the lines of plugins, for the row that was clicked", { skip: !edge, timeout: 240_000 }, async () => {
+test("the menu of a session row outside the selected scope has the lines of plugins, for the row that was clicked", { skip: !edge, timeout: testLimit(240_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`explorerFixture.setButtons([${statistics}]); explorerFixture.render()`);
     await page.until(`document.querySelectorAll('.session-row').length === 4`, "the rows of the chats and of the other project");
@@ -63,7 +64,7 @@ test("the menu of a session row outside the selected scope has the lines of plug
   }, options);
 });
 
-test("the menu of a session row outside the selected scope opens the session canvases for that row and its own project", { skip: !edge, timeout: 240_000 }, async () => {
+test("the menu of a session row outside the selected scope opens the session canvases for that row and its own project", { skip: !edge, timeout: testLimit(240_000) }, async () => {
   await withCanvas(async page => {
     const lineOf = (label: string) => `[...document.querySelectorAll('.session-tab-popup [role="menuitem"]')].some(item => item.textContent.trim() === ${JSON.stringify(label)})`;
     // Two canvases about a session, beside canvases of other scopes that a session menu does not list.
@@ -115,7 +116,7 @@ test("the menu of a session row outside the selected scope opens the session can
   }, options);
 });
 
-test("the keys of a session row outside the selected scope do what the lines of its menu do, when the row allows them", { skip: !edge, timeout: 240_000 }, async () => {
+test("the keys of a session row outside the selected scope do what the lines of its menu do, when the row allows them", { skip: !edge, timeout: testLimit(240_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`explorerFixture.setButtons([]); explorerFixture.render()`);
     await page.until(`document.querySelectorAll('.session-row').length === 4`, "the rows");
@@ -143,7 +144,7 @@ test("the keys of a session row outside the selected scope do what the lines of 
   }, options);
 });
 
-test("the button of the actions of a session row draws its three dots at their size, on the row under the pointer and while its menu is open", { skip: !edge, timeout: 240_000 }, async () => {
+test("the button of the actions of a session row draws its three dots at their size, on the row under the pointer and while its menu is open", { skip: !edge, timeout: testLimit(240_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`explorerFixture.setButtons([]); explorerFixture.render()`);
     await page.until(`document.querySelectorAll('.session-row').length === 4`, "the rows");
@@ -176,7 +177,7 @@ test("the button of the actions of a session row draws its three dots at their s
   }, options);
 });
 
-test("a menu with no line of a plugin is as it was, and a line a plugin cannot use is shown as such", { skip: !edge, timeout: 240_000 }, async () => {
+test("a menu with no line of a plugin is as it was, and a line a plugin cannot use is shown as such", { skip: !edge, timeout: testLimit(240_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`explorerFixture.setButtons([]); explorerFixture.render()`);
     await page.until(`document.querySelectorAll('.session-row').length === 4`, "the rows");
@@ -197,7 +198,7 @@ test("a menu with no line of a plugin is as it was, and a line a plugin cannot u
   }, options);
 });
 
-test("the menu of a Claude Code session that has a conversation of the CLI opens it in VS Code or a terminal, or copies its resume command", { skip: !edge, timeout: 240_000 }, async () => {
+test("the menu of a Claude Code session that has a conversation of the CLI opens it in VS Code or a terminal, or copies its resume command", { skip: !edge, timeout: testLimit(240_000) }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`explorerFixture.setClaudeCode(true, { "open-vs-code": true, "run-in-terminal": false, "copy-resume-command": true }); explorerFixture.render()`);
     await page.until(`document.querySelectorAll('.session-row').length === 6`, "the rows with the Claude Code sessions");

@@ -109,7 +109,7 @@ public sealed class CodexAppServerProtocolTests
         await using var client = await peer.ConnectAsync(message => received.TrySetResult(message));
 
         await peer.WriteAsync("""{"id":"r-1","method":"item/fileChange/requestApproval","params":{"itemId":"p","threadId":"t","turnId":"u","startedAtMs":1,"reason":"edit"}}""");
-        var message = await received.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var message = await received.Task.WithinAsync(TestTime.Seconds(10));
         var approval = (FileChangeRequestApprovalParams)CodexMethods.ParseServerRequest(message.Method, message.Params)!;
         Assert.AreEqual("edit", approval.Reason);
         await client.RespondAsync(message.RequestId!.Value, new FileChangeRequestApprovalResponse { Decision = FileChangeApprovalDecision.Decline },
@@ -200,7 +200,7 @@ public sealed class CodexAppServerProtocolTests
 
         public async Task<JsonNode> ReadAsync()
         {
-            var line = await _reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            var line = await _reader.ReadLineAsync().WithinAsync(TestTime.Seconds(10));
             return JsonNode.Parse(line!)!;
         }
 

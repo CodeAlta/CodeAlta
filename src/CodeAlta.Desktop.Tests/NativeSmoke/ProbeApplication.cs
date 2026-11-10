@@ -13,7 +13,7 @@ internal sealed class ProbeApplication(string root, bool smoke, Action<string> l
     public async ValueTask RunAsync(NeoApplication application)
     {
         using var deadline = new CancellationTokenSource();
-        if (smoke) deadline.CancelAfter(TimeSpan.FromSeconds(60));
+        if (smoke) deadline.CancelAfter(TestTime.Seconds(60));
         var token = deadline.Token;
         try
         {
@@ -121,7 +121,7 @@ internal sealed class ProbeApplication(string root, bool smoke, Action<string> l
         foreach (var role in new[] { NeoDialogButtonRole.Cancel, NeoDialogButtonRole.Accept })
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(8));
+            timeout.CancelAfter(TestTime.Seconds(8));
             var title = $"CodeAlta Probe {Environment.ProcessId} {role}";
             var owner = window.GetNativeHandle(NeoNativeHandleKind.Win32Hwnd).Value;
             // Driver sees and clicks only this process's owned native TaskDialog, without global input.

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Threading.Channels;
 using CodeAlta.Core.Terminals;
@@ -81,6 +82,8 @@ internal sealed class DesktopTerminal : IDisposable
     internal const int MaximumPendingInput = 8 * 1024 * 1024;
     /// <summary>The longest title a terminal is given.</summary>
     internal const int MaximumTitleLength = 256;
+    /// <summary>How long what is typed at the prompt of PowerShell waits at most for its line editor to read the keys.</summary>
+    internal static readonly TimeSpan LineEditorPatience = TimeSpan.FromSeconds(2);
 
     private readonly Lock _gate = new();
     private readonly TerminalDescription _description;
@@ -530,6 +533,7 @@ internal sealed class DesktopTerminal : IDisposable
             {
                 while (_input.Reader.TryRead(out var data))
                 {
+                    AwaitTheLineEditor();
                     _program.Write(data);
                     lock (_gate) _pendingInput = Math.Max(0, _pendingInput - data.Length);
                 }
@@ -538,6 +542,24 @@ internal sealed class DesktopTerminal : IDisposable
         catch (Exception exception) when (exception is IOException or ObjectDisposedException)
         {
             // The program is gone.
+        }
+    }
+
+    // PowerShell says its prompt before its line editor (PSReadLine) reads the keys. What is typed in between goes through
+    // the line mode of the pty, which shows it once more and turns Enter into a line feed: PSReadLine then adds a line to
+    // the command instead of running it. What is typed at its prompt waits for the editor, a moment at most.
+    private void AwaitTheLineEditor()
+    {
+        if (_description.Profile.Kind != TerminalShellKind.PowerShell) return;
+        var waited = Stopwatch.StartNew();
+        while (true)
+        {
+            lock (_gate)
+            {
+                if (!_running || !_screen.AtPrompt || _screen.Busy) return;
+            }
+            if (!_program.GathersLines || waited.Elapsed >= LineEditorPatience) return;
+            Thread.Sleep(10);
         }
     }
 

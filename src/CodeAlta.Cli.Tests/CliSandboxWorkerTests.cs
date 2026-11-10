@@ -12,7 +12,7 @@ namespace CodeAlta.Cli.Tests;
 [TestClass]
 public sealed class CliSandboxWorkerTests
 {
-    private static readonly TimeSpan Deadline = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan Deadline = TestTime.Minutes(2);
 
     [TestMethod]
     public async Task TheWorkerInAContainer_WritesItsProject_AndNeitherItsToolsNorItsCommandsReadTheHomeFolder()
@@ -34,34 +34,34 @@ public sealed class CliSandboxWorkerTests
             var watch = Stopwatch.StartNew();
             await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{executable}\" {SandboxWorker.Option}", null,
                 new SandboxWorkerInit("session-1", "test", project, [project], null, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false), CancellationToken.None)
-                .WaitAsync(Deadline);
+                .WithinAsync(Deadline);
             var started = watch.Elapsed;
             var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
 
-            var written = await worker.InvokeAsync(Call("write_file", new { path = "from-the-sandbox.txt", content = "written" }), host, CancellationToken.None).WaitAsync(Deadline);
+            var written = await worker.InvokeAsync(Call("write_file", new { path = "from-the-sandbox.txt", content = "written" }), host, CancellationToken.None).WithinAsync(Deadline);
             Assert.IsTrue(written.Success, written.Error);
             Assert.AreEqual("written", File.ReadAllText(Path.Combine(project, "from-the-sandbox.txt")));
 
-            var read = await worker.InvokeAsync(Call("read_file", new { path = secret }), host, CancellationToken.None).WaitAsync(Deadline);
+            var read = await worker.InvokeAsync(Call("read_file", new { path = secret }), host, CancellationToken.None).WithinAsync(Deadline);
             Assert.DoesNotContain("the-secret-of-the-user", Text(read), "the file tools run in the container");
 
             var command = OperatingSystem.IsWindows() ? $"Get-Content '{secret}'; echo done; $env:CODEALTA_TEST_SANDBOX_SECRET" : $"cat '{secret}'; echo done; echo $CODEALTA_TEST_SANDBOX_SECRET";
-            var shell = await worker.InvokeAsync(Call("shell_command", new { command }), host, CancellationToken.None).WaitAsync(Deadline);
+            var shell = await worker.InvokeAsync(Call("shell_command", new { command }), host, CancellationToken.None).WithinAsync(Deadline);
             Assert.Contains("done", Text(shell));
             Assert.DoesNotContain("the-secret-of-the-user", Text(shell), "commands run in the container");
             Assert.DoesNotContain("must-not-reach-the-sandbox", Text(shell), "the environment of the application does not reach the sandbox");
 
             // A command, and a background command, run in the folder of the session.
             var where = OperatingSystem.IsWindows() ? "'shell: ' + (Get-Location).Path" : "echo \"shell: $(pwd)\"";
-            var located = await worker.InvokeAsync(Call("shell_command", new { command = where }), host, CancellationToken.None).WaitAsync(Deadline);
+            var located = await worker.InvokeAsync(Call("shell_command", new { command = where }), host, CancellationToken.None).WithinAsync(Deadline);
             Assert.Contains("shell: " + project, Text(located), StringComparison.OrdinalIgnoreCase);
             // The input of a command is the null device, never the protocol of the worker: reading it ends at once.
             var drain = OperatingSystem.IsWindows() ? "[Console]::In.ReadToEnd().Length; 'input-ended'" : "cat > /dev/null; echo input-ended";
-            var input = await worker.InvokeAsync(Call("shell_command", new { command = drain }), host, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
+            var input = await worker.InvokeAsync(Call("shell_command", new { command = drain }), host, CancellationToken.None).WithinAsync(TestTime.Seconds(30));
             Assert.Contains("input-ended", Text(input));
             var output = new System.Text.StringBuilder();
             var job = worker.StartProcess(where, project, text => { lock (output) output.Append(text); });
-            Assert.AreEqual(0, await job.Completion.WaitAsync(Deadline));
+            Assert.AreEqual(0, await job.Completion.WithinAsync(Deadline));
             lock (output) Assert.Contains(project, output.ToString(), StringComparison.OrdinalIgnoreCase);
             Console.WriteLine($"The worker was ready in {started.TotalMilliseconds:N0} ms.");
         }
@@ -103,7 +103,7 @@ public sealed class CliSandboxWorkerTests
             var executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "altacli.exe" : "altacli");
             await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{executable}\" {SandboxWorker.Option}", null,
                 new SandboxWorkerInit("s1", "test", project, [project], null, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false), CancellationToken.None)
-                .WaitAsync(Deadline);
+                .WithinAsync(Deadline);
             var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
 
             // Saved by CodeAlta after the worker started, as the result of exec is, with a part of it in a file of its own.
@@ -111,22 +111,22 @@ public sealed class CliSandboxWorkerTests
             File.WriteAllText(result, "{\"the-whole-result\": true}");
             var part = Path.Combine(own, "script-run-1-result.report.txt");
             File.WriteAllText(part, "line 1\nthe-part-of-the-result\n");
-            var read = await worker.InvokeAsync(Call("read_file", new { path = result }), host, CancellationToken.None).WaitAsync(Deadline);
+            var read = await worker.InvokeAsync(Call("read_file", new { path = result }), host, CancellationToken.None).WithinAsync(Deadline);
             Assert.IsTrue(read.Success, Text(read));
             Assert.Contains("the-whole-result", Text(read));
-            var readPart = await worker.InvokeAsync(Call("read_file", new { path = part, offset = 2, limit = 1 }), host, CancellationToken.None).WaitAsync(Deadline);
+            var readPart = await worker.InvokeAsync(Call("read_file", new { path = part, offset = 2, limit = 1 }), host, CancellationToken.None).WithinAsync(Deadline);
             Assert.Contains("the-part-of-the-result", Text(readPart));
 
             foreach (var (path, secret) in new[] { (other, "the-output-of-another-session"), (journal, "the-journal-of-the-session"), (settings, "the-settings-of-codealta") })
             {
-                var refused = await worker.InvokeAsync(Call("read_file", new { path }), host, CancellationToken.None).WaitAsync(Deadline);
+                var refused = await worker.InvokeAsync(Call("read_file", new { path }), host, CancellationToken.None).WithinAsync(Deadline);
                 Assert.DoesNotContain(secret, Text(refused), path);
             }
 
             var write = OperatingSystem.IsWindows()
                 ? $"Set-Content -Path '{Path.Combine(own, "written.txt")}' -Value written; Get-Content '{result}'"
                 : $"echo written > '{Path.Combine(own, "written.txt")}'; cat '{result}'";
-            var shell = await worker.InvokeAsync(Call("shell_command", new { command = write }), host, CancellationToken.None).WaitAsync(Deadline);
+            var shell = await worker.InvokeAsync(Call("shell_command", new { command = write }), host, CancellationToken.None).WithinAsync(Deadline);
             Assert.Contains("the-whole-result", Text(shell), "commands read it too");
             Assert.IsFalse(File.Exists(Path.Combine(own, "written.txt")), "the session reads its output, it does not write there");
         }
@@ -163,21 +163,21 @@ public sealed class CliSandboxWorkerTests
                 SandboxHostDiscovery.Current(Path.Combine(root, "data"), []), [], "tools");
             await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{Path.Combine(AppContext.BaseDirectory, "altacli")}\" {SandboxWorker.Option}", null,
                 new SandboxWorkerInit("session-1", "test", project, [project], null, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false), CancellationToken.None)
-                .WaitAsync(Deadline);
+                .WithinAsync(Deadline);
             var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
             // Not there rather than there and unreadable, which fails a build (CS1504).
-            var above = await worker.InvokeAsync(Call("shell_command", new { command = "[ -e ../.editorconfig ] && echo visible || echo absent" }), host, CancellationToken.None).WaitAsync(Deadline);
+            var above = await worker.InvokeAsync(Call("shell_command", new { command = "[ -e ../.editorconfig ] && echo visible || echo absent" }), host, CancellationToken.None).WithinAsync(Deadline);
             Assert.Contains("absent", Text(above));
             foreach (var command in tools)
             {
-                var result = await worker.InvokeAsync(Call("shell_command", new { command }), host, CancellationToken.None).WaitAsync(Deadline);
+                var result = await worker.InvokeAsync(Call("shell_command", new { command }), host, CancellationToken.None).WithinAsync(Deadline);
                 Assert.IsTrue(result.Success, $"{command}: {Text(result)}");
             }
 
             if (tools.Contains("git --version"))
             {
                 var commit = await worker.InvokeAsync(Call("shell_command", new { command = "git init -q && echo a > a.txt && git add a.txt && git -c user.name=t -c user.email=t@t commit -qm a && git log --oneline" }),
-                    host, CancellationToken.None).WaitAsync(Deadline);
+                    host, CancellationToken.None).WithinAsync(Deadline);
                 Assert.IsTrue(commit.Success, Text(commit));
             }
         }
@@ -210,18 +210,18 @@ public sealed class CliSandboxWorkerTests
                 SandboxHostDiscovery.Current(Path.Combine(root, "data"), []), [], "tools");
             await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{Path.Combine(AppContext.BaseDirectory, "altacli.exe")}\" {SandboxWorker.Option}", null,
                 new SandboxWorkerInit("session-1", "test", project, [project], null, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false), CancellationToken.None)
-                .WaitAsync(Deadline);
+                .WithinAsync(Deadline);
             var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
             foreach (var tool in tools)
             {
-                var result = await worker.InvokeAsync(Call("shell_command", new { command = tool + " --version" }), host, CancellationToken.None).WaitAsync(Deadline);
+                var result = await worker.InvokeAsync(Call("shell_command", new { command = tool + " --version" }), host, CancellationToken.None).WithinAsync(Deadline);
                 Assert.IsTrue(result.Success, $"{tool}: {Text(result)}");
             }
 
             if (tools.Contains("git"))
             {
                 var commit = await worker.InvokeAsync(Call("shell_command", new { command = "git init -q; Set-Content a.txt a; git add a.txt; git -c user.name=t -c user.email=t@t commit -qm the-commit; git log --oneline" }),
-                    host, CancellationToken.None).WaitAsync(Deadline);
+                    host, CancellationToken.None).WithinAsync(Deadline);
                 Assert.IsTrue(commit.Success, Text(commit));
                 Assert.Contains("the-commit", Text(commit));
                 Assert.IsTrue(Directory.Exists(Path.Combine(project, ".git")), "the repository is in the project");

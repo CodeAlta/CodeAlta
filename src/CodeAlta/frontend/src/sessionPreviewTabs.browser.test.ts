@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { browserExecutable } from "./browserTarget";
 import { withSessionWindow } from "./sessionWindowHarness";
+import { testLimit } from "./testTime";
 
 // The window itself (main.tsx) over an isolated host, driven with the pointer: a session that is looked at from the
 // Explorer takes the one transient tab, a double click keeps it, and the row of a project selects it without opening
 // or closing it and shows the prompt of a new session of it.
-test("sessions are looked at in one transient tab, kept by a double click, and a project row shows its new-session prompt without folding", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("sessions are looked at in one transient tab, kept by a double click, and a project row shows its new-session prompt without folding", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureSecondProject: "true" }, async ({ command, evaluate, until, tabs, shown, press, session, scope, title, exceptions }) => {
     const state = (id: string) => evaluate(`({ open: ${scope(id)}.getAttribute('aria-expanded'), selected: ${scope(id)}.getAttribute('aria-pressed') })`);
 
@@ -94,7 +95,7 @@ test("sessions are looked at in one transient tab, kept by a double click, and a
 // A prompt that waits above the composer of a session keeps the pane of that session when its tab closes: the pane is
 // what sends it once the session is idle. It is out of sight, and leaves with the prompt or when the session has a tab
 // again.
-test("a session whose tab leaves while a prompt waits above its composer keeps its pane out of sight", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("a session whose tab leaves while a prompt waits above its composer keeps its pane out of sight", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureSecondProject: "true" }, async ({ command, evaluate, until, shown, press, session, title, exceptions }) => {
     const pane = `[...document.querySelectorAll('.session-workspace')].find(node => node.getBoundingClientRect().width > 0)`;
     const waiting = `[...document.querySelectorAll('.session-background-panes .session-workspace')].map(node => node.querySelectorAll('.composer-queue-row').length)`;
@@ -145,7 +146,7 @@ test("a session whose tab leaves while a prompt waits above its composer keeps i
 
 // What is typed in the prompt of a new session keeps its tab: the prompt of another scope, or a session, does not
 // take its place. An empty prompt leaves its place as before.
-test("a prompt of a new session that has a text keeps its tab when another prompt or a session takes its place", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("a prompt of a new session that has a text keeps its tab when another prompt or a session takes its place", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureSecondProject: "true" }, async ({ command, evaluate, until, tabs, shown, press, session, scope, title, exceptions }) => {
     const prompt = `[...document.querySelectorAll('#catalog-prompt')].find(node => node.getBoundingClientRect().width > 0)`;
     const type = async (text: string) => {

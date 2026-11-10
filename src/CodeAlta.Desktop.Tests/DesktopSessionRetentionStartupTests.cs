@@ -28,7 +28,7 @@ public sealed class DesktopSessionRetentionStartupTests
         Assert.IsTrue(protection.Publish("external-work", [], true));
         Assert.IsFalse(completed.Task.IsCompleted, "External registration alone cannot certify browser restoration.");
         Assert.IsTrue(protection.Publish("desktop-open-drafts", ["protected"], true));
-        var result = await completed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await completed.Task.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual("completed", result.State);
         Assert.AreEqual(0, result.Examined);
         Assert.IsNull(protection.TryReserveRetirement("protected"));
@@ -85,7 +85,7 @@ public sealed class DesktopSessionRetentionStartupTests
         await using var host = await fixture.CreateHostAsync(protection);
         var retention = new DesktopSessionRetention(host.Commands, host.RuntimeService,
             new CodeAltaConfigStore(host.CatalogOptions), new NoCandidatesArchive(), "epoch", protection);
-        await retention.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        await retention.DisposeAsync().AsTask().WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual("canceled", retention.Service.Status.Reason);
         Assert.AreEqual(0, retention.Service.Status.Examined);
         await retention.DisposeAsync();
@@ -130,7 +130,7 @@ public sealed class DesktopSessionRetentionStartupTests
         {
             if (status.State == "skipped") completed.TrySetResult(status);
         });
-        var result = await completed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await completed.Task.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual(0, result.Examined);
         Assert.IsNull(protection.TryReserveRetirement("unprotected"));
         Assert.IsTrue(protection.Publish("external-work", [], true));
@@ -154,7 +154,7 @@ public sealed class DesktopSessionRetentionStartupTests
         // Saved Statistics are best effort: without them, expired sessions are still deleted.
         Assert.IsTrue(protection.Publish("external-work", [], true));
         Assert.IsTrue(protection.Publish("desktop-open-drafts", [], true));
-        var result = await completed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await completed.Task.WithinAsync(TestTime.Seconds(10));
         Assert.AreEqual("completed", result.State, result.Reason);
     }
 

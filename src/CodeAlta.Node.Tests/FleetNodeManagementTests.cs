@@ -92,7 +92,7 @@ public sealed class FleetNodeManagementTests
         var revoked = await manager.RevokeDeviceAsync(fixture.Other.DeviceId, token);
         Assert.IsTrue(revoked.Changed);
         Assert.IsNotNull(revoked.Device.RevokedAt);
-        var closed = await other.Completion.WaitAsync(TimeSpan.FromSeconds(30), token);
+        var closed = await other.Completion.WithinAsync(TestTime.Seconds(30), token);
         Assert.IsFalse(closed.ClosedLocally);
     }
 
@@ -295,7 +295,7 @@ public sealed class FleetNodeManagementTests
             await manager.SetProviderAsync(new FleetProviderSetParams("anthropic", "anthropic", "Claude API", null,
                 $"http://127.0.0.1:{((System.Net.IPEndPoint)gateway.LocalEndpoint).Port}", "sk-ant-leaked-key-123456"), token);
             FleetProviderStatus? failed = null;
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+            var deadline = DateTime.UtcNow + TestTime.Seconds(60);
             while (DateTime.UtcNow < deadline)
             {
                 failed = (await manager.ListProvidersAsync(token)).Providers.Single(static provider => provider.Key == "anthropic");

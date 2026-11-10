@@ -28,7 +28,7 @@ public sealed class MxcContainerTests
             await using var process = await backend.StartAsync(policy, command, null, CancellationToken.None);
             var output = new StreamReader(process.StandardOutput, Encoding.UTF8).ReadToEndAsync();
             var errors = new StreamReader(process.StandardError, Encoding.UTF8).ReadToEndAsync();
-            await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromMinutes(1));
+            await process.WaitForExitAsync(CancellationToken.None).WithinAsync(TestTime.Minutes(1));
 
             Assert.Contains("in", await output, await errors);
             Assert.DoesNotContain("secret", await output, "the home folder is outside the sandbox");
@@ -67,7 +67,7 @@ public sealed class MxcContainerTests
         await using var process = await backend.StartAsync(policy, $"\"{git}\" config --worktree --list --show-origin", null, CancellationToken.None);
         var output = new StreamReader(process.StandardOutput, Encoding.UTF8).ReadToEndAsync();
         var errors = new StreamReader(process.StandardError, Encoding.UTF8).ReadToEndAsync();
-        var exitCode = await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromMinutes(1));
+        var exitCode = await process.WaitForExitAsync(CancellationToken.None).WithinAsync(TestTime.Minutes(1));
 
         Assert.AreEqual(0, exitCode, await errors);
         Assert.AreEqual(string.Empty, (await output).Trim(), "an empty configuration of the worktree");
@@ -157,7 +157,7 @@ public sealed class MxcContainerTests
         {
             var output = new StreamReader(process.StandardOutput, Encoding.UTF8).ReadToEndAsync();
             var errors = new StreamReader(process.StandardError, Encoding.UTF8).ReadToEndAsync();
-            await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromMinutes(1));
+            await process.WaitForExitAsync(CancellationToken.None).WithinAsync(TestTime.Minutes(1));
             outputs.Add(await output);
             outputs.Add(await errors);
         }

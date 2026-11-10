@@ -156,7 +156,7 @@ test("a session in a new worktree names its base, waits for git, and a refusal o
   const created = await create(epoch, project, null, capability, null, { worktree: true, base: "main" });
   assert.deepEqual(created, { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: worktree, warning: null });
   assert.deepEqual(calls, [{ request: { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null,
-    providerId: null, worktree: true, baseBranch: "main", spaceId: null, requestId: "worktree-request", permissionMode: null, preparedWorktreeId: null, options: null }, timeout: 600_000 }]);
+    providerId: null, worktree: true, baseBranch: "main", spaceId: null, requestId: "worktree-request", permissionMode: null, preparedWorktreeId: null, options: null }, timeout: 600_000 }]); // not a limit: the timeout of the request
   // Submodules git could not check out: the session is created in its worktree, with what git said.
   answer = { ...reply("ok"), worktreePath: worktree, warning: " fatal: clone of 'lib' failed " };
   assert.deepEqual(await create(epoch, project, null, capability, null, { worktree: true, base: null }),

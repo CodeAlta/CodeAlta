@@ -86,7 +86,7 @@ public sealed class TelemetryTests
         Assert.AreEqual("fleet-key", exported.Headers["x-api-key"]);
 
         // The machines get it as signed, to check it themselves; one that connects later gets it at once.
-        Assert.AreEqual(signed, await pushed.Reader.ReadAsync().AsTask().WaitAsync(Waits.Hang));
+        Assert.AreEqual(signed, await pushed.Reader.ReadAsync().AsTask().WithinAsync(Waits.Hang));
         var later = Channel.CreateUnbounded<FleetSignedTelemetrySettings>();
         var (controller, _) = await fixture.ConnectAsync(owner, connection => connection.SetEventHandler((fleetEvent, _) =>
         {
@@ -95,7 +95,7 @@ public sealed class TelemetryTests
             return ValueTask.CompletedTask;
         }));
         await using var __ = controller;
-        Assert.AreEqual(signed, await later.Reader.ReadAsync().AsTask().WaitAsync(Waits.Hang));
+        Assert.AreEqual(signed, await later.Reader.ReadAsync().AsTask().WithinAsync(Waits.Hang));
 
         var read = await fixture.SendAsync(owner, HttpMethod.Get, "/api/v1/telemetry");
         Assert.AreEqual(HttpStatusCode.OK, read.Status);
@@ -191,7 +191,7 @@ public sealed class TelemetryTests
         var set = await fixture.SendAsync(owner, HttpMethod.Put, "/api/v1/telemetry",
             new SetTelemetrySettingsRequest(signed, new Dictionary<string, string> { ["x-api-key"] = "server-secret" }));
         Assert.AreEqual(HttpStatusCode.OK, set.Status, set.Body.ToString());
-        var received = await pushed.Reader.ReadAsync().AsTask().WaitAsync(Waits.Hang);
+        var received = await pushed.Reader.ReadAsync().AsTask().WithinAsync(Waits.Hang);
         Assert.IsFalse(received.Payload.Contains("server-secret", StringComparison.Ordinal), "the headers of the server route never go to the machines");
         Assert.IsFalse(fixture.DatabaseHolds("server-secret"), "the headers of the server route are sealed in the database");
         var read = await fixture.SendAsync(owner, HttpMethod.Get, "/api/v1/telemetry");
@@ -205,7 +205,7 @@ public sealed class TelemetryTests
         Assert.AreEqual((HttpStatusCode.BadRequest, CoordinatorErrorCodes.TelemetryInvalid), (unknown.Status, unknown.Code), "only a header held is kept");
         var kept = await fixture.SendAsync(owner, HttpMethod.Put, "/api/v1/telemetry", new SetTelemetrySettingsRequest(signed, null, ["X-Api-Key"]));
         Assert.AreEqual(HttpStatusCode.OK, kept.Status, kept.Body.ToString());
-        await pushed.Reader.ReadAsync().AsTask().WaitAsync(Waits.Hang);
+        await pushed.Reader.ReadAsync().AsTask().WithinAsync(Waits.Hang);
 
         byte[] body = [0x0A, 0x03, 0x01, 0x02, 0x03, 0x42];
         Assert.AreEqual(HttpStatusCode.Unauthorized, await fixture.PostBytesAsync(null, "/otlp/v1/traces", body), "an unsigned request is refused");
@@ -241,7 +241,7 @@ public sealed class TelemetryTests
         {
             var (context, aborted) = SignedOtlpContext(fixture, node, [0x0A, 0x01]);
             using var _ = aborted;
-            await forwarder.HandleAsync(context, FleetTelemetrySignals.Traces).WaitAsync(Waits.Hang);
+            await forwarder.HandleAsync(context, FleetTelemetrySignals.Traces).WithinAsync(Waits.Hang);
             Assert.AreEqual(StatusCodes.Status200OK, context.Response.StatusCode);
             Assert.AreEqual(0L, context.Response.Body.Length, "an answer past the limit is not relayed");
             Assert.IsTrue(endless.BytesRead <= 128 * 1024, $"the server read {endless.BytesRead} bytes of an answer limited to 64 KiB");
@@ -256,7 +256,7 @@ public sealed class TelemetryTests
             using var _ = aborted;
             try
             {
-                await forwarder.HandleAsync(context, FleetTelemetrySignals.Traces).WaitAsync(TimeSpan.FromSeconds(10));
+                await forwarder.HandleAsync(context, FleetTelemetrySignals.Traces).WithinAsync(TestTime.Seconds(10));
             }
             finally
             {
@@ -285,12 +285,12 @@ public sealed class TelemetryTests
 
         // The first setting is stored, then held before the server applies it; the second one is set meanwhile.
         var first = service.SetAsync(actor, Request(1), origin, CancellationToken.None);
-        await hold.Stored.Task.WaitAsync(Waits.Hang);
+        await hold.Stored.Task.WithinAsync(Waits.Hang);
         var second = service.SetAsync(actor, Request(2), origin, CancellationToken.None);
         await Task.WhenAny(second, Task.Delay(300));
         hold.Release();
-        await first.WaitAsync(Waits.Hang);
-        await second.WaitAsync(Waits.Hang);
+        await first.WithinAsync(Waits.Hang);
+        await second.WithinAsync(Waits.Hang);
 
         Assert.AreEqual(2L, (await fixture.Server.Store.GetTelemetrySettingsAsync(setup.Organization.Id))?.Sequence);
         Assert.AreEqual(10_002, fixture.Server.Telemetry.Forward?.Endpoint.Port, "the server applies the setting it stored last, not an older one that applied late");

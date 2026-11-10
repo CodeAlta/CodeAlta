@@ -23,7 +23,7 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class ProviderHttpClientSharingTests
 {
-    private static readonly TimeSpan Hang = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Hang = TestTime.Seconds(30);
 
     [TestMethod]
     [DataRow("mistral")]
@@ -253,7 +253,7 @@ public sealed class ProviderHttpClientSharingTests
         var second = new XaiDirectAuthManager(new XaiProviderOptions { ProviderKey = "xai", StateRootPath = temp.Path }, new HttpClient(handler));
         var credentials = await Task.WhenAll(
             first.GetCredentialAsync(CancellationToken.None).AsTask(),
-            second.GetCredentialAsync(CancellationToken.None).AsTask()).WaitAsync(Hang);
+            second.GetCredentialAsync(CancellationToken.None).AsTask()).WithinAsync(Hang);
 
         Assert.AreEqual(1, refreshes);
         Assert.AreEqual(credentials[0].Token, credentials[1].Token);
@@ -289,7 +289,7 @@ public sealed class ProviderHttpClientSharingTests
             };
             var services = new CopilotDirectProviderServices(provider, new HttpClient(handler));
             var credentials = await Task.WhenAll(Enumerable.Range(0, 8)
-                .Select(_ => services.AuthManager.GetCredentialAsync(CancellationToken.None).AsTask())).WaitAsync(Hang);
+                .Select(_ => services.AuthManager.GetCredentialAsync(CancellationToken.None).AsTask())).WithinAsync(Hang);
 
             Assert.AreEqual(1, exchanges);
             Assert.IsTrue(credentials.All(static credential => credential.Token == "copilot-token"));
@@ -322,14 +322,14 @@ public sealed class ProviderHttpClientSharingTests
 
         try
         {
-            await Task.WhenAll(writers).WaitAsync(Hang);
+            await Task.WhenAll(writers).WithinAsync(Hang);
         }
         finally
         {
             await stop.CancelAsync();
         }
 
-        await Task.WhenAll(readers).WaitAsync(Hang);
+        await Task.WhenAll(readers).WithinAsync(Hang);
     }
 
     // On Windows a reader that does not share the deletion of the cache (an antivirus, a backup tool, an editor) makes
@@ -343,7 +343,7 @@ public sealed class ProviderHttpClientSharingTests
 
         await using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
-            var failure = await Assert.ThrowsAsync<Exception>(() => writeAgain().AsTask().WaitAsync(Hang));
+            var failure = await Assert.ThrowsAsync<Exception>(() => writeAgain().AsTask().WithinAsync(Hang));
             Assert.IsTrue(failure is IOException or UnauthorizedAccessException, failure.ToString());
         }
 

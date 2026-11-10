@@ -8,13 +8,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { blueprintPaletteVariables } from "../blueprintPalette";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 // Where the pictures of this test go, when a person wants to look at them.
 const shots = process.env.CODEALTA_SHOTS ?? "";
 const pause = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
 
-test("the landing page welcomes, lists what was used last, draws the cards of plugins and keeps what the user chose", { skip: !edge, timeout: 240_000 }, async context => {
+test("the landing page welcomes, lists what was used last, draws the cards of plugins and keeps what the user chose", { skip: !edge, timeout: testLimit(240_000) }, async context => {
   const root = await mkdtemp(join(tmpdir(), "codealta-landing-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -35,7 +36,7 @@ test("the landing page welcomes, lists what was used last, draws the cards of pl
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     socket = new WebSocket(pages.find(value => value.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("Browser unavailable")), { once: true }); });
     let sequence = 0;
@@ -47,7 +48,7 @@ test("the landing page welcomes, lists what was used last, draws the cards of pl
     });
     const command = (method: string, params: object = {}) => new Promise<any>((resolve, reject) => {
       const id = ++sequence;
-      const timer = setTimeout(() => reject(Error(`${method} timed out`)), 30_000);
+      const timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(30_000), `the answer to ${method}`))), testLimit(30_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data));
         if (message.id !== id) return;
@@ -61,7 +62,7 @@ test("the landing page welcomes, lists what was used last, draws the cards of pl
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result?.value as T;
     };
-    const wait = (expression: string, milliseconds = 8_000) => evaluate<boolean>(
+    const wait = (expression: string, milliseconds = testLimit(8_000)) => evaluate<boolean>(
       `new Promise(resolve=>{const end=Date.now()+${milliseconds};const tick=()=>{let ok=false;try{ok=!!(${expression})}catch{}ok?resolve(true):Date.now()>end?resolve(false):setTimeout(tick,25)};tick()})`);
     const shot = async (name: string) => {
       if (!shots) return;
@@ -315,7 +316,7 @@ test("the landing page welcomes, lists what was used last, draws the cards of pl
       type Frame = { width: number; height: number; lit: number; sum: number };
       const moving = await evaluate<Frame>(frame);
       assert.ok(moving.width > 10 && moving.width <= 96 && moving.height > 4 && moving.height <= 40 && moving.lit > 0, JSON.stringify(moving));
-      assert.equal(await wait(`${frame}.sum !== ${moving.sum}`, 5_000), true, "the field moves");
+      assert.equal(await wait(`${frame}.sum !== ${moving.sum}`, testLimit(5_000)), true, "the field moves");
 
       // Animation off: one still frame, and nothing changes it.
       assert.deepEqual(await text(".landing-footer .landing-switch"), ["Show at startup", "Animation"]);

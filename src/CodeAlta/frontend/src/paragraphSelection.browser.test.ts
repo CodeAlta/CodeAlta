@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas, type Page } from "./statistics/browserHarness";
+import { testLimit } from "./testTime";
 
 // A triple click in a card of the timeline, in headless Edge, with the selection of Chromium and with the one of WebKit.
 
@@ -17,7 +18,7 @@ async function tripleClick(page: Page, selector: string) {
   }
 }
 
-test("a triple click on the last paragraph of a card selects that paragraph only", { skip: !edge, timeout: 120_000 }, async () => {
+test("a triple click on the last paragraph of a card selects that paragraph only", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     await tripleClick(page, "#last");
     assert.deepEqual(await page.evaluate(selection), { text: "The last paragraph of the card.", sameCard: true, inParagraph: true }, "Chromium");
@@ -30,7 +31,7 @@ test("a triple click on the last paragraph of a card selects that paragraph only
   }, options);
 });
 
-test("a range that runs past the paragraph it starts in ends with it", { skip: !edge, timeout: 120_000 }, async () => {
+test("a range that runs past the paragraph it starts in ends with it", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   await withCanvas(async page => {
     const keep = (start: string, end: string) => page.evaluate(`paragraphFixture.keep(${start}, ${end})`);
     const next = `[document.querySelector('#next strong').firstChild, 0]`;

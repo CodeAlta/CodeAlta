@@ -300,7 +300,7 @@ public sealed partial class AgentSessionTests
             _listener.Close();
             try
             {
-                _serving.Wait(TimeSpan.FromSeconds(5));
+                _serving.Wait(TestTime.Seconds(5));
             }
             catch (AggregateException)
             {

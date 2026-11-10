@@ -100,11 +100,11 @@ public sealed class ReminderRpcTests
         var pending = service.Save(request, default);
         try
         {
-            await enteredRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await enteredRead.Task.WithinAsync(TestTime.Seconds(5));
             service.CloseAdmission();
         }
         finally { releaseRead.TrySetResult(true); }
-        Assert.AreEqual("closed", (await pending.WaitAsync(TimeSpan.FromSeconds(5))).Status);
+        Assert.AreEqual("closed", (await pending.WithinAsync(TestTime.Seconds(5))).Status);
     }
 
     [TestMethod]
@@ -312,7 +312,7 @@ public sealed class ReminderRpcTests
         clock.Advance(TimeSpan.FromSeconds(60));
         await clock.TimerCreated();
         // No clock tick: only the closing of the service ends the wait.
-        await service.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        await service.DisposeAsync().AsTask().WithinAsync(TestTime.Seconds(10));
     }
 
     private static async Task<ReminderListResponse> Completed(ReminderService service, string sessionId)
@@ -390,7 +390,7 @@ public sealed class ReminderRpcTests
             _created.Writer.TryWrite(timer);
             return timer;
         }
-        public async Task TimerCreated() => _ = await _created.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        public async Task TimerCreated() => _ = await _created.Reader.ReadAsync().AsTask().WithinAsync(TestTime.Seconds(10));
         public void Advance(TimeSpan amount)
         {
             LiteralTimer? timer;

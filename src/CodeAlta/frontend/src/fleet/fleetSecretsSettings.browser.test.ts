@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
+import { testLimit } from "../testTime";
 
 const options = { entry: "../fleet/fleetSecretsSettings.mount.tsx", fixture: "fleetSecretsFixture", rpcFixture: "../demo-api.ts",
   styles: ["../secrets/secrets.css", "../fleet/fleet.css", "../fleet/fleetSecrets.css"], width: 1300, height: 900, reducedMotion: true } as const;
@@ -15,7 +16,7 @@ const choose = (selector: string, value: string) => `(() => { const select = doc
 const calls = `[...window.fleetSecretsFixture.calls].map(call => JSON.parse(call))`;
 
 test("the values of a server show their scope, machines and rotation, and a value is set, rotated and given from popovers beside its row",
-  { skip: !edge, timeout: 90_000 }, async () => {
+  { skip: !edge, timeout: testLimit(90_000) }, async () => {
     await withCanvas(async page => {
       await page.until(`document.querySelectorAll('.fleet-secret-row').length === 3`, "the values");
       await page.shot("fleet-secrets-large");
@@ -69,7 +70,7 @@ test("the values of a server show their scope, machines and rotation, and a valu
     }, options);
   });
 
-test("a run that waits for an environment is approved in a popover, and the page stays whole in a narrow window", { skip: !edge, timeout: 90_000 }, async () => {
+test("a run that waits for an environment is approved in a popover, and the page stays whole in a narrow window", { skip: !edge, timeout: testLimit(90_000) }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-approval-row')`, "the run that waits");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-approval-row .secret-reference').textContent`), "Deploy the API");

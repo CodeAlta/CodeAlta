@@ -158,7 +158,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         Assert.IsFalse(forwarded.TryComplete(new Uri($"http://127.0.0.1:50123/elsewhere?code=auth-code&state={login.State}")), "another path is not the callback");
         Assert.IsTrue(forwarded.TryComplete(new Uri($"http://127.0.0.1:50123/auth/callback?code=auth-code&state={login.State}&client_id={IssuedClientId}")));
         handler.Enqueue(TokenResponse(signer.Sign(login.Nonce)), JsonResponse(signer.Jwks));
-        var credential = await manager.CompleteBrowserLoginAsync(login, await forwarded.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None));
+        var credential = await manager.CompleteBrowserLoginAsync(login, await forwarded.WaitAsync(TestTime.Seconds(5), CancellationToken.None)); // not a Task
         Assert.AreEqual("subject", credential.Subject);
         var form = ParseQuery(handler.Requests[0].Body);
         Assert.AreEqual("http://127.0.0.1:50123/auth/callback", form["redirect_uri"]);

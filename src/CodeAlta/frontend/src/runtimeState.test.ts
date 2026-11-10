@@ -3,6 +3,7 @@ import test from "node:test";
 import { createRuntimeStateReader, type RuntimeState } from "./runtimeState";
 import { createMutationCapability } from "./sessionOperations";
 import type { SessionRuntimeStateResponse } from "#neoastra";
+import { testLimit } from "./testTime";
 
 const request = { expectedHostEpoch: "host", sessionId: "selected" };
 function response(overrides: Partial<SessionRuntimeStateResponse> = {}): SessionRuntimeStateResponse {
@@ -77,9 +78,9 @@ class Fixture {
       finish = resolve;
       timer = setTimeout(() => {
         fixture.expired = true;
-        fixture.deadlineFailure = new Error("Runtime-state deadline; uncertain frontend waiters/dependents retained, host termination unknown", { cause: fixture });
+        fixture.deadlineFailure = new Error(`Runtime-state deadline of ${testLimit(5_000)} ms; uncertain frontend waiters/dependents retained, host termination unknown`, { cause: fixture });
         fixture.stop(); reject(fixture.deadlineFailure);
-      }, 5_000);
+      }, testLimit(5_000));
     });
     const observer = deadline.then(() => {}, () => {});
     const setup = fixture.launch("setup", () => Promise.resolve());

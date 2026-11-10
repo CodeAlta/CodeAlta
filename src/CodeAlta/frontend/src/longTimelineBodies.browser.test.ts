@@ -9,9 +9,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { locales, translate } from "./localization";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { testLimit, testLimitRanOut } from "./testTime";
 
 const edge = browserExecutable;
-test("production long diagnostic bodies preserve literal preview, full Copy, notices and exact disclosure lifetime", { skip: !edge, timeout: 60_000 }, async t => {
+test("production long diagnostic bodies preserve literal preview, full Copy, notices and exact disclosure lifetime", { skip: !edge, timeout: testLimit(60_000) }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-long-bodies-"));
   t.diagnostic(`Literal mounted evidence: ${root}`);
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
@@ -22,12 +23,12 @@ test("production long diagnostic bodies preserve literal preview, full Copy, not
     const profile = join(root, "profile");
     browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(profile, browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     socket = new WebSocket(pages.find(page => page.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("browser unavailable")), { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<{ result?: { value?: unknown }; exceptionDetails?: unknown }>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => reject(Error(`${method} timed out`)), 12_000);
+      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))), testLimit(12_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)); if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
@@ -40,7 +41,7 @@ test("production long diagnostic bodies preserve literal preview, full Copy, not
         assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails)); return result.result?.value;
       } catch (cause) { throw Error(`expression=${expression}; failure=${cause instanceof Error ? cause.message : String(cause)}`, { cause }); }
     };
-    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+7000;function check(){if(${condition})resolve(true);else if(Date.now()>end)resolve(document.body.innerText.slice(-1200));else setTimeout(check,20)}check()})`);
+    const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(7000)};function check(){if(${condition})resolve(true);else if(Date.now()>end)resolve(document.body.innerText.slice(-1200));else setTimeout(check,20)}check()})`);
     const frames = () => evaluate("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
     const toggle = async () => { await evaluate("document.querySelector('.long-message-toggle').click()"); await frames(); };
     await command("Page.enable"); await command("Emulation.setFocusEmulationEnabled", { enabled: true });

@@ -17,7 +17,7 @@ namespace CodeAlta.Node.Tests;
 [TestClass]
 public sealed class RelayedChannelTests
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Patience = TestTime.Seconds(30);
     private const string Marker = "RELAY-PLAINTEXT-MARKER-7f3c";
 
     public TestContext TestContext { get; set; } = null!;
@@ -51,7 +51,7 @@ public sealed class RelayedChannelTests
         {
             var sent = await client.SendAsync(created.SessionId, Marker + " prompt", retryKey: "send-relayed", cancellationToken: token);
             Assert.AreEqual("accepted", sent.Status);
-            await started.Task.WaitAsync(Patience, token);
+            await started.Task.WithinAsync(Patience, token);
             gate.SetResult();
             await ReadUntilAsync(watch, display => display.Text.Any(text => text.Kind == "Assistant" && text.IsComplete && text.Text.Contains(Marker + " answer", StringComparison.Ordinal)),
                 token);
@@ -80,7 +80,7 @@ public sealed class RelayedChannelTests
         var created = await first.CreateSessionAsync(new FleetCreateSessionParams(Title: "Kept"), "create-kept", token);
 
         tap.Cut();
-        var closed = await first.Completion.WaitAsync(Patience, token);
+        var closed = await first.Completion.WithinAsync(Patience, token);
         Assert.IsFalse(closed.IsClean && closed.ClosedLocally, "The channel ended with its relay.");
 
         await using var again = await FleetNodeClient.ConnectRelayedAsync(viewer, rig.NodeIdentity.DeviceId, rig.DesktopIdentity, null, token);
@@ -121,7 +121,7 @@ public sealed class RelayedChannelTests
         Assert.AreEqual(FleetErrorCodes.Forbidden, forbidden.Error.Code, "A member that is not one of the owner's controller devices may do nothing yet.");
 
         await rig.Desktop.RevokeAsync(otherIdentity.DeviceId, token);
-        await client.Completion.WaitAsync(Patience, token);
+        await client.Completion.WithinAsync(Patience, token);
         await WaitForAsync(() => other.State == FleetConnectorState.Revoked, token);
         var refused = await Assert.ThrowsExactlyAsync<FleetServerException>(() => FleetNodeClient.ConnectRelayedAsync(other, rig.NodeIdentity.DeviceId, otherIdentity, null, token));
         Assert.AreEqual(FleetErrorCodes.Revoked, refused.Code, "A revoked device opens no relay.");

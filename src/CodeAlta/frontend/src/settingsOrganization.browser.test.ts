@@ -15,8 +15,9 @@ import { landingAnimationKey, landingStartupKey } from "./landing/landingPrefere
 import { languageStorageKey } from "./localization";
 import { recentSessionCountKey, subAgentCountKey } from "./recentSessions";
 import { confirmationStorageKey, darkerStorageKey, themeStorageKey } from "./windowPreferences";
+import { testLimit, testLimitRanOut } from "./testTime";
 
-test("Settings navigation preserves preferences, shell capabilities and manual confirmation synchronization", { skip: !browserExecutable, timeout: 90_000 }, async () => {
+test("Settings navigation preserves preferences, shell capabilities and manual confirmation synchronization", { skip: !browserExecutable, timeout: testLimit(90_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-settings-organization-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
@@ -47,7 +48,7 @@ test("Settings navigation preserves preferences, shell capabilities and manual c
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", reject, { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<Record<string, any>>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => reject(Error(`${method} timed out`)), 12_000);
+      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))), testLimit(12_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)); if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
@@ -59,7 +60,7 @@ test("Settings navigation preserves preferences, shell capabilities and manual c
       const value = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
-    const until = async (condition: string) => assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{
+    const until = async (condition: string) => assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(7000)};const tick=()=>{
       if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`), true, condition);
     const frames = () => evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
     const open = async () => {

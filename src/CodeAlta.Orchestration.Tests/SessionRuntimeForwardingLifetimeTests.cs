@@ -1381,9 +1381,9 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
             return task;
         }
         internal Task<T> Track<T>(Task<T> task) { Track((Task)task); return task; }
-        internal Task Wait(Task task) => Track(Track(task).WaitAsync(TestDeadlines.Hang));
-        internal Task<T> Wait<T>(Task<T> task) => Track(Track(task).WaitAsync(TestDeadlines.Hang));
-        internal Task Ready(Task readiness) => Track(readiness.WaitAsync(TestDeadlines.Hang));
+        internal Task Wait(Task task) => Track(Track(task).WithinAsync(TestDeadlines.Hang));
+        internal Task<T> Wait<T>(Task<T> task) => Track(Track(task).WithinAsync(TestDeadlines.Hang));
+        internal Task Ready(Task readiness) => Track(readiness.WithinAsync(TestDeadlines.Hang));
         private async Task Observe(Task task)
         {
             try { await task.ConfigureAwait(false); }
@@ -1407,7 +1407,7 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
         }
         private async Task Drain(IEnumerable<Task> work)
         {
-            var waits = work.Select(task => task.WaitAsync(TestDeadlines.Hang)).ToArray();
+            var waits = work.Select(task => task.WithinAsync(TestDeadlines.Hang)).ToArray();
             var observers = waits.Select(ObserveCleanup).ToArray();
             foreach (var observer in observers) await observer.ConfigureAwait(false);
         }

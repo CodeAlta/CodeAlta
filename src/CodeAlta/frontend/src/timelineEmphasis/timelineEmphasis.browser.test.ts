@@ -10,10 +10,11 @@ import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../brows
 import { blueprintPaletteVariables } from "../blueprintPalette";
 import { defaultTimelineEmphasis, timelineEmphasisKey, timelineEntryTypeLabel, timelineEntryTypes } from "./timelineEmphasis";
 import { translate } from "../localization";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 const shots = process.env.CODEALTA_SHOTS ?? "";
 
-test("the window customizes actual timelines, follows hover and focus, and keeps failed writes for later consumers", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("the window customizes actual timelines, follows hover and focus, and keeps failed writes for later consumers", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-timeline-emphasis-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -33,7 +34,7 @@ test("the window customizes actual timelines, follows hover and focus, and keeps
     browser = spawn(browserExecutable!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"],
       { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
-    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
+    const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(testLimit(10_000)) })).json();
     socket = new WebSocket(pages.find(value => value.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("browser unavailable")), { once: true }); });
     let sequence = 0;
@@ -50,7 +51,7 @@ test("the window customizes actual timelines, follows hover and focus, and keeps
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         if (message.error) reject(Error(`${method}: ${JSON.stringify(message.error)}`)); else resolve(message.result ?? {});
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(Error(`${method} timed out`)); }, 12_000);
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async <T,>(expression: string): Promise<T> => {
@@ -58,7 +59,7 @@ test("the window customizes actual timelines, follows hover and focus, and keeps
       assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
       return result.result?.value as T;
     };
-    const wait = (condition: string) => evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + 7000; (function check() {
+    const wait = (condition: string) => evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + ${testLimit(7000)}; (function check() {
       if (${condition}) resolve(true); else if (Date.now() > end) resolve(false); else requestAnimationFrame(check); })(); })`);
     const frames = () => evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
     const screenshot = async (name: string) => {

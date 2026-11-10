@@ -8,12 +8,13 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 
 // The menu of a right-click in an editor whose widgets are fixed to the window (the prompt, a file) is drawn beside the
 // editor, outside of it: it had no surface and black entries, unreadable over the dark shell.
-test("the menu of a right-click in the prompt and in a file has a surface and readable entries in both themes", { skip: !edge, timeout: 120_000 }, async () => {
+test("the menu of a right-click in the prompt and in a file has a surface and readable entries in both themes", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-context-menu-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -51,14 +52,14 @@ test("the menu of a right-click in the prompt and in a file has a surface and re
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(`${method} timed out`)); }, 12_000);
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
       const value = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
-    const until = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+8000;const tick=()=>{
+    const until = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(8000)};const tick=()=>{
       const value=${condition};if(value||Date.now()>end)resolve(value);else setTimeout(tick,20)};tick()})`);
     const key = async (name: string, code: number) => {
       for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: name, code: name, windowsVirtualKeyCode: code });

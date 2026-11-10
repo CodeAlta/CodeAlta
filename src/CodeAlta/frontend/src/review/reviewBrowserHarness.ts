@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 export type Point = Readonly<{ x: number; y: number }>;
 /** CDP modifier bits: Alt 1, Ctrl 2, Meta 4, Shift 8. */
@@ -74,7 +75,7 @@ export async function openReviewPage(entry: URL, ready: string, neoastra?: URL) 
         opened.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { opened.removeEventListener("message", reply); reject(new Error(`${method} timed out`)); }, 12_000);
+      const timer = setTimeout(() => { opened.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
       opened.addEventListener("message", reply); opened.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
@@ -83,10 +84,10 @@ export async function openReviewPage(entry: URL, ready: string, neoastra?: URL) 
     };
     const value = async <T>(expression: string) => JSON.parse(await evaluate(`JSON.stringify(${expression}) ?? "null"`)) as T;
     // An expression of the page once it is true, or a failure that says what it was and what `show` shows then.
-    const until = async (expression: string, show = "null", timeout = 8000) => {
+    const until = async (expression: string, show = "null", timeout = testLimit(8000)) => {
       const done = await evaluate(`new Promise(resolve => { const end = Date.now() + ${timeout}; (function check() {
         if (${expression}) resolve(true); else if (Date.now() > end) resolve(JSON.stringify(${show})); else setTimeout(check, 20); })(); })`);
-      assert.equal(done, true, `waited for ${expression}; ${show}: ${done}`);
+      assert.equal(done, true, `waited for ${expression} (limit ${timeout} ms); ${show}: ${done}`);
     };
     // A few frames, for Monaco and React to draw what they were told.
     const frames = () => evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 50))))");
@@ -105,7 +106,7 @@ export async function openReviewPage(entry: URL, ready: string, neoastra?: URL) 
     const clickOn = async (element: string, modifiers = 0) => {
       const point = await evaluate(`new Promise(resolve => {
         let last = null, still = 0;
-        const end = Date.now() + 2000;
+        const end = Date.now() + ${testLimit(2000)};
         const look = () => {
           const element = ${element};
           if (!element) return resolve(null);
@@ -131,7 +132,7 @@ export async function openReviewPage(entry: URL, ready: string, neoastra?: URL) 
     await command("Page.enable");
     await command("Emulation.setDeviceMetricsOverride", { width: 1200, height: 1100, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
-    await until(ready, "null", 20_000);
+    await until(ready, "null", testLimit(20_000));
     await frames();
     return { command, evaluate, value, until, frames, mouse, click, clickOn, key, type, errors, close };
   } catch (error) {

@@ -132,7 +132,7 @@ public sealed class SpeechRpcTests
         Assert.AreEqual("ok", fixture.Service.Append(new("host", started.Id, 2, Convert.ToBase64String(Audio(4, loud: true)))).Status);
 
         Assert.AreEqual(new SpeechStopResponse("ok", "10 windows 4 windows", null), await fixture.Service.StopAsync(new("host", started.Id, false), default));
-        await listening.WaitAsync(TimeSpan.FromSeconds(10));
+        await listening.WithinAsync(TestTime.Seconds(10));
         lock (transcripts) Assert.AreEqual(new SpeechTranscript("done", "10 windows 4 windows", "", null), transcripts[^1], "the stream ends with the dictation, on its whole text");
         Assert.AreEqual("unknown", (await fixture.Service.StopAsync(new("host", "another", false), default)).Status);
         Assert.AreEqual(0, await CountAsync(fixture.Service.ListenAsync(new("host", "another"), default)));

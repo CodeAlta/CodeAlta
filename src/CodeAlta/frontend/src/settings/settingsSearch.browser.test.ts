@@ -9,10 +9,11 @@ import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
 import { darkerStorageKey, themeStorageKey } from "../windowPreferences";
 import { builtInSettings } from "./settingsCatalog";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 // The real window, with the Settings shell of the organization test: no host, so the settings the page keeps are the ones
 // a search changes in place, and the pages show what they show without a host.
-test("Settings search shows editable results, opens a setting with a glow, and Ctrl+P finds settings", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+test("Settings search shows editable results, opens a setting with a glow, and Ctrl+P finds settings", { skip: !browserExecutable, timeout: testLimit(120_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-settings-search-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
@@ -36,7 +37,7 @@ test("Settings search shows editable results, opens a setting with a glow, and C
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", reject, { once: true }); });
     let sequence = 0;
     const command = (method: string, params: object = {}) => new Promise<Record<string, any>>((resolve, reject) => {
-      const id = ++sequence, timer = setTimeout(() => reject(Error(`${method} timed out`)), 12_000);
+      const id = ++sequence, timer = setTimeout(() => reject(Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))), testLimit(12_000));
       const reply = (event: MessageEvent) => {
         const message = JSON.parse(String(event.data)); if (message.id !== id) return;
         socket!.removeEventListener("message", reply); clearTimeout(timer);
@@ -48,11 +49,13 @@ test("Settings search shows editable results, opens a setting with a glow, and C
       const value = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
     };
-    const until = async (condition: string) => assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{
+    const until = async (condition: string) => assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+${testLimit(7000)};const tick=()=>{
       if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`), true, condition);
-    const type = async (text: string) => { for (const character of text) await command("Input.dispatchKeyEvent", { type: "char", text: character }); };
+    // The page handles the keys it was sent on its next frames, which a busy machine can draw after the call returned.
+    const handled = () => evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+    const type = async (text: string) => { for (const character of text) await command("Input.dispatchKeyEvent", { type: "char", text: character }); await handled(); };
     const key = (name: string, code: string, keyCode: number, modifiers = 0) => command("Input.dispatchKeyEvent", { type: "rawKeyDown", key: name, code, windowsVirtualKeyCode: keyCode, modifiers })
-      .then(() => command("Input.dispatchKeyEvent", { type: "keyUp", key: name, code, windowsVirtualKeyCode: keyCode, modifiers }));
+      .then(() => command("Input.dispatchKeyEvent", { type: "keyUp", key: name, code, windowsVirtualKeyCode: keyCode, modifiers })).then(handled);
 
     await command("Page.enable"); await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Emulation.setDeviceMetricsOverride", { width: 1400, height: 950, deviceScaleFactor: 1, mobile: false });

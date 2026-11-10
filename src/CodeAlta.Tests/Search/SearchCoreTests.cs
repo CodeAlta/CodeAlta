@@ -344,6 +344,31 @@ public sealed class SearchIndexerTests
     private static readonly DateTimeOffset Start = DateTimeOffset.UtcNow.AddDays(-1);
 
     [TestMethod]
+    public async Task AnErrorOfASource_IsForgotten_OnceTheSourceReadsWell()
+    {
+        var failing = true;
+        var tools = new ListSearchSource("tools", [SearchKind.Tool], _ => failing
+            ? throw new InvalidDataException("Markdown metadata must start with YAML frontmatter.")
+            : ValueTask.FromResult<IReadOnlyList<SearchDocument>>([]));
+        await using var fixture = new SearchFixture(tools);
+        fixture.Indexer.Start();
+        using var timeout = new CancellationTokenSource(TestTime.Seconds(30));
+
+        // A file read while it was written: the read fails, and the status says so.
+        fixture.Indexer.Signal("tools");
+        await Task.Delay(20, timeout.Token);
+        await fixture.Indexer.WaitIdleAsync(timeout.Token);
+        Assert.AreEqual("Markdown metadata must start with YAML frontmatter.", fixture.Indexer.Status.LastError);
+
+        // Read again once the file is whole: the error is no longer the state of the index.
+        failing = false;
+        fixture.Indexer.Signal("tools");
+        await Task.Delay(20, timeout.Token);
+        await fixture.Indexer.WaitIdleAsync(timeout.Token);
+        Assert.IsNull(fixture.Indexer.Status.LastError);
+    }
+
+    [TestMethod]
     public async Task Pass_IndexesJournals_ThenOnlyWhatIsNew()
     {
         await using var fixture = new SearchFixture();

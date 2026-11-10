@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionPermissionCommand, SessionPermissionResolution, SessionPermissionsPage } from "#neoastra";
 import { createPermissionReviewer, offersAllowAlways, type PermissionReviewState } from "./sessionPermissions";
+import { testLimit } from "./testTime";
 
 const epoch = "abcdefab-1234-5678-9abc-abcdefabcdef";
 const runtime = "00000000-0000-0000-0000-000000000001";
@@ -76,10 +77,10 @@ class Fixture {
     return this.keep(new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         clearTimeout(timer);
-        const error = Error("Fixture deadline; original work is not confirmed terminated");
+        const error = Error(`Fixture deadline of ${testLimit(5_000)} ms; original work is not confirmed terminated`);
         this.failures.push(error); // A caught timeout still permanently fails this fixture.
         reject(error);
-      }, 5_000);
+      }, testLimit(5_000));
       this.keep(task.then(value => { clearTimeout(timer); resolve(value); },
         error => { clearTimeout(timer); reject(error); }));
     }));

@@ -12,7 +12,7 @@ namespace CodeAlta.Tests;
 [TestClass]
 public sealed class ProcessOutputLineReaderTests
 {
-    private static readonly TimeSpan Hang = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Hang = TestTime.Seconds(30);
 
     [TestMethod]
     [DataRow("")]
@@ -46,8 +46,8 @@ public sealed class ProcessOutputLineReaderTests
         stream.End();
 
         Assert.IsTrue(reader.UsesDedicatedThread);
-        Assert.AreEqual("line", await reader.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang));
-        Assert.IsNull(await reader.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang));
+        Assert.AreEqual("line", await reader.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang));
+        Assert.IsNull(await reader.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang));
         var (isBackground, isThreadPoolThread, name) = stream.ReadingThread!.Value;
         Assert.IsTrue(isBackground);
         Assert.IsFalse(isThreadPoolThread);
@@ -64,12 +64,12 @@ public sealed class ProcessOutputLineReaderTests
         var waiting = reader.ReadLineAsync(cancellation.Token).AsTask();
 
         await cancellation.CancelAsync();
-        await Assert.ThrowsAsync<OperationCanceledException>(async () => await waiting.WaitAsync(Hang));
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await waiting.WithinAsync(Hang));
 
         stream.Push("after\n");
-        Assert.AreEqual("after", await reader.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang));
+        Assert.AreEqual("after", await reader.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang));
         stream.End();
-        Assert.IsNull(await reader.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang));
+        Assert.IsNull(await reader.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang));
     }
 
     [TestMethod]
@@ -80,9 +80,9 @@ public sealed class ProcessOutputLineReaderTests
         stream.Push("one\ntwo\n");
         stream.Fail(new IOException("The pipe broke."));
 
-        Assert.AreEqual("one", await reader.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang));
-        Assert.AreEqual("two", await reader.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang));
-        var error = await Assert.ThrowsAsync<IOException>(async () => await reader.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang));
+        Assert.AreEqual("one", await reader.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang));
+        Assert.AreEqual("two", await reader.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang));
+        var error = await Assert.ThrowsAsync<IOException>(async () => await reader.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang));
         Assert.AreEqual("The pipe broke.", error.Message);
     }
 
@@ -92,11 +92,11 @@ public sealed class ProcessOutputLineReaderTests
         var stream = new GatedStream();
         var reader = ProcessOutputLineReader.Start(new StreamReader(stream), "test output", dedicatedThread: true);
         stream.Push("kept\n");
-        await stream.WaitForReadsAsync(2).WaitAsync(Hang);
+        await stream.WaitForReadsAsync(2).WithinAsync(Hang);
 
         reader.Dispose();
-        Assert.AreEqual("kept", await reader.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang));
-        Assert.IsNull(await reader.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang));
+        Assert.AreEqual("kept", await reader.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang));
+        Assert.IsNull(await reader.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang));
         stream.End();
     }
 
@@ -111,17 +111,17 @@ public sealed class ProcessOutputLineReaderTests
         }
 
         // One chunk is one line: the thread holds ReadAheadLines lines, and one more it waits to hand over.
-        await stream.WaitForReadsAsync(ProcessOutputLineReader.ReadAheadLines + 1).WaitAsync(Hang);
+        await stream.WaitForReadsAsync(ProcessOutputLineReader.ReadAheadLines + 1).WithinAsync(Hang);
         await Task.Delay(100);
         Assert.AreEqual(ProcessOutputLineReader.ReadAheadLines + 1, stream.ReadCount);
 
         for (var index = 0; index < 100; index++)
         {
-            Assert.AreEqual(index.ToString(System.Globalization.CultureInfo.InvariantCulture), await reader.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang));
+            Assert.AreEqual(index.ToString(System.Globalization.CultureInfo.InvariantCulture), await reader.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang));
         }
 
         stream.End();
-        Assert.IsNull(await reader.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang));
+        Assert.IsNull(await reader.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang));
     }
 
     [TestMethod]
@@ -148,15 +148,15 @@ public sealed class ProcessOutputLineReaderTests
         var transport = new ClaudeCodeProcessTransport(process, dedicatedReaderThreads);
         try
         {
-            await transport.WriteLineAsync(Encoding.UTF8.GetBytes("{\"a\":1}"), CancellationToken.None).AsTask().WaitAsync(Hang);
-            Assert.AreEqual("got {\"a\":1}", await transport.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang));
+            await transport.WriteLineAsync(Encoding.UTF8.GetBytes("{\"a\":1}"), CancellationToken.None).AsTask().WithinAsync(Hang);
+            Assert.AreEqual("got {\"a\":1}", await transport.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang));
         }
         finally
         {
-            await transport.DisposeAsync().AsTask().WaitAsync(Hang);
+            await transport.DisposeAsync().AsTask().WithinAsync(Hang);
         }
 
-        Assert.IsNull(await transport.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang));
+        Assert.IsNull(await transport.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang));
         Assert.AreEqual("started" + Environment.NewLine + "ended", transport.StandardErrorTail);
     }
 
@@ -180,7 +180,7 @@ public sealed class ProcessOutputLineReaderTests
         stream.End();
         using var reader = ProcessOutputLineReader.Start(new StreamReader(stream, Encoding.UTF8), "test output", dedicatedThread);
         var lines = new List<string>();
-        while (await reader.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(Hang) is { } line)
+        while (await reader.ReadLineAsync(CancellationToken.None).AsTask().WithinAsync(Hang) is { } line)
         {
             lines.Add(line);
         }

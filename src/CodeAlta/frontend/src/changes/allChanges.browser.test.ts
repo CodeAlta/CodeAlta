@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
+import { testLimit, testLimitRanOut } from "../testTime";
 
 const edge = browserExecutable;
 
@@ -26,7 +27,7 @@ const inspect = `(() => {
 })()`;
 
 // Real diff editors in a real page that scrolls: what is built, how tall it is and where the view stands are the browser's own.
-test("the view of all changed files builds the diffs near it, gives each the height of its content and keeps its place", { skip: !edge, timeout: 120_000 }, async () => {
+test("the view of all changed files builds the diffs near it, gives each the height of its content and keeps its place", { skip: !edge, timeout: testLimit(120_000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-all-changes-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -64,7 +65,7 @@ test("the view of all changed files builds the diffs near it, gives each the hei
         socket!.removeEventListener("message", reply); clearTimeout(timer);
         value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
       };
-      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(`${method} timed out`)); }, 12_000);
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(testLimitRanOut(testLimit(12_000), `the answer to ${method}`))); }, testLimit(12_000));
       socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
     });
     const evaluate = async (expression: string) => {
@@ -74,7 +75,7 @@ test("the view of all changed files builds the diffs near it, gives each the hei
     type Section = { top: number; height: number; body: number; shows: string; header: number };
     type State = { top: number; height: number; scrollHeight: number; current: string | null; reads: Record<string, number>; sections: Record<string, Section> };
     // The view once it shows what is expected and has kept the same sizes for a moment, or what it shows instead.
-    const settled = async (expected: string) => JSON.parse(await evaluate(`new Promise(resolve => { const end = Date.now() + 8000; let last = "", since = 0; (function check() {
+    const settled = async (expected: string) => JSON.parse(await evaluate(`new Promise(resolve => { const end = Date.now() + ${testLimit(8000)}; let last = "", since = 0; (function check() {
       const state = ${inspect}, text = JSON.stringify(state);
       if (text !== last) { last = text; since = Date.now(); }
       if (((${expected})(state) && Date.now() - since > 250) || Date.now() > end) resolve(text); else setTimeout(check, 25); })(); })`)) as State;
@@ -82,7 +83,7 @@ test("the view of all changed files builds the diffs near it, gives each the hei
     await command("Page.enable");
     await command("Emulation.setDeviceMetricsOverride", { width: 1000, height: 700, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
-    assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + 15000; (function check() {
+    assert.equal(await evaluate(`new Promise(resolve => { const end = Date.now() + ${testLimit(15000)}; (function check() {
       if (window.allChangesFixture && document.querySelector(".changes-all .changes-section")) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 20); })(); })`), true);
 
     // The first files are built; the ones far below are not read at all.

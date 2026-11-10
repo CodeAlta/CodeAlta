@@ -480,10 +480,10 @@ public sealed class AgentHubRetentionTests
             Session.Work.Release(); Session.Disposal.Release(); Session.Unsubscribe.Release(); Session.Registration.Release();
             foreach (var task in _tasks)
             {
-                try { await task.WaitAsync(TimeSpan.FromSeconds(10)); }
+                try { await task.WithinAsync(TestTime.Seconds(10)); }
                 catch (Exception) when (task.IsCompleted) { /* Assertions observe the expected failures. */ }
             }
-            try { await Hub.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)); }
+            try { await Hub.DisposeAsync().AsTask().WithinAsync(TestTime.Seconds(10)); }
             catch (AgentDependencyRetentionException) when (ExpectDisposalFailure) { }
             Directory.Delete(Root, true);
         }
@@ -495,7 +495,7 @@ public sealed class AgentHubRetentionTests
         internal int Calls;
         private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal Task WaitEntered() => _entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        internal Task WaitEntered() => _entered.Task.WithinAsync(TestTime.Seconds(10));
         internal void Release() => _release.TrySetResult();
         internal async Task Invoke()
         {
