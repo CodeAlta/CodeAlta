@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { blueprintPaletteVariables } from "./src/blueprintPalette";
+import { scaledTextSizes } from "./src/fonts/textScale";
 import { appModuleFile, appModules } from "./src/lent/appModules";
 import { importMapText, lentLibraries } from "./src/lent/libraries";
 import { splashDocument, splashMarkup, splashScript } from "./src/splashMarkup";
@@ -15,6 +16,16 @@ const blueprintPalette = (): Plugin => ({
   enforce: "pre",
   transform(code, id) {
     return /[\\/]@blueprintjs[\\/][^?]*\.css(\?|$)/.test(id) ? { code: blueprintPaletteVariables(code), map: null } : null;
+  },
+});
+
+// The sizes of the text of every stylesheet follow the interface text size of Settings → Appearance (src/fonts/textScale.ts).
+// The code editors (Monaco) and the terminals (xterm) size their text from settings of their own, so their stylesheets keep their sizes.
+const interfaceTextScale = (): Plugin => ({
+  name: "codealta:interface-text-scale",
+  enforce: "pre",
+  transform(code, id) {
+    return /\.css(\?|$)/.test(id) && !/[\\/](monaco-editor|@xterm)[\\/]/.test(id) ? { code: scaledTextSizes(code), map: null } : null;
   },
 });
 
@@ -101,7 +112,7 @@ export default defineConfig(({ mode }) => ({
     "import.meta.env.VITE_DEMO_MODE": JSON.stringify(mode === "demo" ? "true" : "false"),
   },
   base: "./",
-  plugins: [blueprintPalette(), react(), startupScreen(), terminalFontLicense(), speechWorklet(), lentModules()],
+  plugins: [blueprintPalette(), interfaceTextScale(), react(), startupScreen(), terminalFontLicense(), speechWorklet(), lentModules()],
   server: { fs: { allow: ["..", fileURLToPath(new URL("../../CodeAlta.Tui/Assets/3d.flf", import.meta.url))] }, host: "127.0.0.1", strictPort: true, port: 5173 },
   // The phone page is a second document, built to dist/mobile.html; its files (manifest, icons, service worker, the script
   // that applies its theme before it paints) are in public/mobile and land in dist/mobile.

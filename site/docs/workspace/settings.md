@@ -66,7 +66,7 @@ Opening `~/.alta/skills` or `~/.alta/plugins` lets you work on all of them at on
 ## Appearance
 
 - **Theme and colors**: **Dark**, **Light** or **Auto** (follows the system), **Darker dark theme**, and one of 13 color schemes (each with dark, darker and light variants) or [your own](#your-own-color-scheme).
-- **Fonts**: the code font and the prompt font. See [Fonts](#fonts).
+- **Fonts**: the code font, the prompt font, and the size of the text of the code and of the rest of the window. See [Fonts](#fonts).
 - **Explorer**: project sorting, the number of recent sessions and sub-agents, and whether the project rail is collapsed.
 - **Conversation and changes**: the [conversation width](prompt.md#conversation-width), [Focused timeline](prompt.md#focused-timeline), **Images under folded lines**, [Entry appearance](prompt.md#entry-appearance), and whether [changes](code.md#all-files-in-one-view) show one file at a time or all at once.
 
@@ -96,6 +96,8 @@ CodeAlta Desktop brings its own code font, **CaskaydiaCove Nerd Font** (Cascadia
 
 - **Code font** takes installed font names separated by commas, such as `JetBrains Mono, Sarasa Mono SC`; a missing character comes from the next font. On Windows, **Installed fonts** lists the system fonts. **Reset** goes back to the built-in font.
 - **Prompt font** writes the prompt in the code font (the default) or the **Interface font**.
+- **Code text size** sets the size of the text of the editor, of the diffs of **Changes** and of reviews, and of the prompt: 13 px by default.
+- **Interface text size** sets the size of the rest of the text, the conversation, lists, menus and dialogs, from 80% to 130% of the default. The zoom of the window, beside the theme switch of the title bar, enlarges the text and everything around it.
 
 Chinese or Japanese text uses the sans-serif font of the system. If a prompt that mixes it with code looks too wide, choose the **Interface font** for the prompt, or name a monospace font made for your language first.
 
