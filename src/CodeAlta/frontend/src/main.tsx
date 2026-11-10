@@ -164,7 +164,7 @@ import { createCoalescedRead } from "./coalescedRead";
 import { useSessionRowDrag, type ClaudeCodeConversationDrag, type SessionMoveDrag, type SessionRowDrag } from "./explorer/sessionDrag";
 import type { ProjectRowDrop } from "./explorer/ProjectRowActions";
 import { MoveSessionDialog } from "./MoveSessionDialog";
-import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
+import { confirmDeletedSession, createSessionDeletion, deleteSelectionCurrent, hostSessionPresence, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
 import { ConfirmPopover } from "./ConfirmPopover";
 import { OverflowTip } from "./OverflowTip";
 import { RenamePopover } from "./RenamePopover";
@@ -5754,7 +5754,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (result.kind === "deleted") {
         const fresh = await refreshProjects(creationRefresh.current.signal);
         if (!creationAlive.current) return;
-        const recovered = fresh && deletedSessionRecovery(fresh, result);
+        const recovered = fresh && await confirmDeletedSession(fresh, result, hostSessionPresence(workspace.sessionChildren, status?.hostEpoch));
+        if (!creationAlive.current) return;
         if (recovered && capability.canMutate()) {
           if (deleteSelectionCurrent(result, selectedScope.current, selectedSessionId.current)) {
             setSessionId(recovered.sessionId);
@@ -5785,7 +5786,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const captured = uncertainDelete.current;
     const fresh = await refreshProjects(creationRefresh.current.signal);
     if (!creationAlive.current || !captured) return;
-    const recovered = fresh && deletedSessionRecovery(fresh, captured);
+    const recovered = fresh && await confirmDeletedSession(fresh, captured, hostSessionPresence(workspace.sessionChildren, status?.hostEpoch));
+    if (!creationAlive.current || uncertainDelete.current !== captured) return;
     if (recovered) {
       uncertainDelete.current = null;
       setDeleteLocked(false);
