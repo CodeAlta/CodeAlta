@@ -177,7 +177,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   const asked = useProviderUsage(target.epoch, provider ?? null, open && allowed, subscription);
   const reading = asked.response?.status === "ok" && asked.response.limits.length > 0 ? asked.response : null;
   const shownLimits = useMemo(() => reading ? withLiveWindows(providerLimits(reading.limits), live) : live, [reading, live]);
-  const plan = reading ? reading.plan ?? limits?.planType ?? null : limits?.planType ?? null;
+  const plan = reading?.plan ?? limits?.planType ?? null;
   const subscriptionNote = !shownLimits.length && asked.response?.supported ? usageNote(asked.response) : null;
   async function copy() {
     const markdown = [usageMarkdown({ provider: provider ?? null, model: modelName, usage, messages, window: observation?.window ?? null,

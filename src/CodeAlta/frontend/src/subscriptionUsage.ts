@@ -84,8 +84,8 @@ export function planLabel(plan: string | null | undefined): string | null {
 export const unitCount = (value: number, locale?: string) => Math.round(value).toLocaleString(locale);
 
 /** An amount of a limit: money as the reader's language writes its currency when the limit has one, else a count. */
-export const limitAmount = (value: number, currency: string | null, locale?: string) => currency && /^[A-Za-z]{3}$/.test(currency)
-  ? new Intl.NumberFormat(locale, { style: "currency", currency }).format(value) : unitCount(value, locale);
+export const limitAmount = (value: number, currency: string | null, locale?: string) =>
+  currency ? value.toLocaleString(locale, { style: "currency", currency }) : unitCount(value, locale);
 
 /** The limits of a provider answer, as the views show them. */
 export const providerLimits = (limits: readonly ProviderUsageLimit[]): UsageLimit[] => limits.map(limit => ({ ...limit }));
@@ -115,7 +115,8 @@ export function withLiveWindows(asked: readonly UsageLimit[], live: readonly Usa
     if (limit.name || !limit.windowMinutes || limit.usedPercent === null) return limit;
     const window = live.find(value => value.usedPercent !== null && !!value.windowMinutes && near(value.windowMinutes, limit.windowMinutes!));
     if (!window) return limit;
-    const later = (window.resetsAt ? new Date(window.resetsAt).getTime() : Number.NaN) - (limit.resetsAt ? new Date(limit.resetsAt).getTime() : Number.NaN);
+    // How much later the reported window ends; not a number when one end is not known, which compares as one period.
+    const later = Date.parse(window.resetsAt ?? "") - Date.parse(limit.resetsAt ?? "");
     if (later > 5 * minute) return { ...limit, usedPercent: window.usedPercent, resetsAt: window.resetsAt };
     return later < -5 * minute || window.usedPercent! <= limit.usedPercent ? limit : { ...limit, usedPercent: window.usedPercent };
   });

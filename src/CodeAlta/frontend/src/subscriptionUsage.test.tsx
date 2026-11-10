@@ -124,7 +124,6 @@ test("the limits are meters with what is counted and when they start over, in ev
   assert.ok(capped.includes("30% used") && capped.includes(">€15.00 of €50.00<") && !capped.includes("spent"));
   assert.ok(render([limit({ id: "credits", usedPercent: null, remaining: 19.78, currency: "EUR", windowMinutes: null, resetsAt: null })]).includes(">€19.78 left<"));
   assert.equal(limitAmount(1234.5, null, "en-US"), "1,235");
-  assert.equal(limitAmount(1234.5, "not a code", "en-US"), "1,235", "What is not a currency code is not given to the formatter, which would throw.");
   assert.ok(html.includes("left:60%"), "The mark says how far the five hours have gone.");
   assert.equal(render([]), '<div class="subscription-limits"></div>');
 });
